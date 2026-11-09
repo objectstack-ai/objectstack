@@ -95,7 +95,10 @@ const mockClient = {
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async (type: string) => {
     if (type === 'app') return { effective: { name: 'showcase_app', label: 'Showcase', navigation: NAV } };
-    if (type === 'dashboard') return { effective: JSON.parse(JSON.stringify(CODE)) };
+    // As the server serves an admitted author: the pending draft as stored (objectstack#30859).
+    if (type === 'dashboard') {
+      return { effective: JSON.parse(JSON.stringify(CODE)), draft: state.draft ? JSON.parse(JSON.stringify(state.draft)) : null };
+    }
     return { code: null, overlay: null, overlayScope: null, effective: null };
   }),
   getDraft: vi.fn(async (type: string) =>

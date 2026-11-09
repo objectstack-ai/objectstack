@@ -34,17 +34,17 @@ const HIDE_FIELDS = [
 ];
 const SECTIONS = [
   {
-    label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad' },
+    label: { en: 'Identity', 'zh-CN': '身份', 'ja-JP': 'アイデンティティ', 'es-ES': 'Identidad', 'zh-Hant': '身分', ar: 'الهوية', fr: 'Identité', 'pt-BR': 'Identidade', ru: 'Идентификация', de: 'Identität', ko: 'ID 정보' },
     // #27859: a saved Locale is shown; the renderer draws only authored sections.
     fields: ['name', 'image', 'locale'],
   },
   {
     // #27859: a banned user reads as banned, with the reason, not as active.
-    label: { en: 'Account Status', 'zh-CN': '账号状态', 'ja-JP': 'アカウントの状態', 'es-ES': 'Estado de la cuenta' },
+    label: { en: 'Account Status', 'zh-CN': '账号状态', 'ja-JP': 'アカウントの状態', 'es-ES': 'Estado de la cuenta', 'zh-Hant': '帳號狀態', ar: 'حالة الحساب', fr: 'État du compte', 'pt-BR': 'Status da conta', ru: 'Статус учётной записи', de: 'Kontostatus', ko: '계정 상태' },
     fields: ['banned', 'ban_reason', 'ban_expires'],
   },
   {
-    label: { en: 'Audit', 'zh-CN': '审计', 'ja-JP': '監査', 'es-ES': 'Auditoría' },
+    label: { en: 'Audit', 'zh-CN': '审计', 'ja-JP': '監査', 'es-ES': 'Auditoría', 'zh-Hant': '稽核', ar: 'التدقيق', fr: 'Audit', 'pt-BR': 'Auditoria', ru: 'Аудит', de: 'Audit', ko: '감사' },
     fields: ['created_at', 'updated_at'],
   },
 ];

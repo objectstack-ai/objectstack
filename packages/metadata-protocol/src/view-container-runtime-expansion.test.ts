@@ -27,6 +27,8 @@
  * at one leaves the other empty. `hydrateOverlayIntoRegistry` is the single
  * choke point all three runtime hydration callers share.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { expandViewContainer, isAggregatedViewContainer, ViewSchema } from '@objectstack/spec/ui';

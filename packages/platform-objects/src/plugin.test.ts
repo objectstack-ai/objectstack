@@ -9,8 +9,9 @@ import { describe, it, expect } from 'vitest';
 // why this file's `update` entry sat in the gate's DEBT ledger until #5619 sank
 // the predicate into a package that depends on neither side.
 import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { ObjectSchema, RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT } from '@objectstack/spec/data';
 import { PlatformObjectsPlugin } from './plugin.js';
-import { SysExchangeRate, SysMetadataActivation, SysMigration, SysMigrationJournal, SysSecret, SysTrustedKey } from './system/index.js';
+import { SysExchangeRate, SysLifecycleState, SysMetadataActivation, SysMigration, SysMigrationJournal, SysRecycleBin, SysSecret, SysSeedLandedKey, SysTrustedKey } from './system/index.js';
 
 /**
  * Hand-rolled fake PluginContext (mirrors the service-plugin tests) — this
@@ -46,7 +47,7 @@ function makeCtx() {
 }
 
 describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4243, #4270)', () => {
-  it('registers SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate and SysTrustedKey through the manifest service', async () => {
+  it('registers SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState, SysRecycleBin and SysSeedLandedKey through the manifest service', async () => {
     const ctx = makeCtx();
     const manifests: any[] = [];
     ctx.registerService('manifest', { register: (m: any) => manifests.push(m) });
@@ -56,7 +57,7 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
     const infra = manifests.find((m) => m.id === 'com.objectstack.platform-objects');
     expect(infra).toBeDefined();
     expect(infra.scope).toBe('system');
-    expect(infra.objects).toEqual([SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey]);
+    expect(infra.objects).toEqual([SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysTrustedKey, SysLifecycleState, SysRecycleBin, SysSeedLandedKey]);
     expect(infra.objects.map((o: any) => o.name)).toEqual([
       'sys_migration',
       // ADR-0119 D2 (#4617). Registered UNCONDITIONALLY, alongside the flag
@@ -73,10 +74,44 @@ describe('PlatformObjectsPlugin: platform-infrastructure object registration (#4
       // keys, read by `os plugin install` from a one-shot boot that composes
       // this plugin and nothing that would register it otherwise.
       'sys_trusted_key',
+      // [ADR-0057] The lifecycle sweeper's clock state, read and written only
+      // by the engine's `LifecycleService`, which reads the store it sweeps.
+      'sys_lifecycle_state',
+      // [ADR-0148, #30237] The recycle bin. Written by the engine's by-id
+      // delete for any business object, so it registers with the engine's
+      // infrastructure rather than with any one capability plugin.
+      'sys_recycle_bin',
+      // [#31021] Which declared seed rows landed in each organization, read
+      // and written only by the seed loader, beside the rows it describes.
+      'sys_seed_landed_key',
     ]);
-    // ⛔ The five above must NOT acquire the ledger's routing triple. They
+    // ⛔ The eight above must NOT acquire the ledger's routing triple. They
     // ride the project database today; moving them is a different question.
     expect(infra.defaultDatasource).toBeUndefined();
+  });
+
+  // [ADR-0148, #30237] The table and `RecycleBinEntrySchema` share one field
+  // list. The object file spells each entry through its builder (a spread is
+  // unreadable to the source scans), so this is what keeps it the spec's.
+  it("sys_recycle_bin declares exactly the spec's entry fields, plus its tenant column", () => {
+    const { organization_id, ...entryFields } = SysRecycleBin.fields as Record<string, unknown>;
+    // Through the same factory, so both sides carry the parse's defaults.
+    const spec = ObjectSchema.create({ name: RECYCLE_BIN_OBJECT, label: 'Recycle Bin Entry', fields: { ...RECYCLE_BIN_ENTRY_FIELDS } });
+    expect(entryFields).toEqual(spec.fields);
+    expect(organization_id).toMatchObject({ type: 'lookup', reference: 'sys_organization', deleteBehavior: 'cascade' });
+    expect(SysRecycleBin.name).toBe(RECYCLE_BIN_OBJECT);
+  });
+
+  // [#31021] The record of landed seed rows: the seed loader writes
+  // `sys_seed_landed_key` by this name (it cannot import this package), keeps
+  // it per organization, and a row reaped or served over a data API would let
+  // a removed seed row come back or be edited into one.
+  it('sys_seed_landed_key is organization-owned, durable and has no data API', () => {
+    expect(SysSeedLandedKey.name).toBe('sys_seed_landed_key');
+    expect(Object.keys(SysSeedLandedKey.fields).sort()).toEqual(['created_at', 'id', 'object_name', 'organization_id', 'seed_key']);
+    expect(SysSeedLandedKey.fields.organization_id).toMatchObject({ type: 'lookup', reference: 'sys_organization', deleteBehavior: 'cascade' });
+    expect((SysSeedLandedKey as { lifecycle?: unknown }).lifecycle).toBeUndefined();
+    expect(SysSeedLandedKey.enable).toMatchObject({ apiEnabled: false, apiMethods: [] });
   });
 
   /**

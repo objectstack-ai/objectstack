@@ -183,6 +183,22 @@ export function createRegistryModuleMock(
     // a refused registration is put back. The double runs the body as given:
     // it records nothing, so it has nothing to put back.
     restoringOnRefusal: vi.fn((register: () => unknown) => register()),
+    // [#31564] …and records, for a run another caller opened, the engine's
+    // own entries a body writes. The double opens no run, so it records nothing.
+    recordRestoreOnRefusal: vi.fn(),
+    // [#30215] Every engine subscribes in its constructor, so its manifest map
+    // forgets a package the registry uninstalls. The double never uninstalls,
+    // so it never announces: it records the subscription and answers the
+    // unsubscribe the real member answers.
+    onPackageUninstalled: vi.fn(() => () => {}),
+    // [#30377] The engine's constructor subscribes the roll-up recompute an
+    // enable owes. The double never enables a disabled package, so it never
+    // announces either.
+    onPackageEnabled: vi.fn(() => () => {}),
+    // [#30581] Every `registerApp` of a body with an id hands its package's
+    // navigation contributions to this member (replace, never append). The
+    // double folds no navigation, so it records the call and nothing else.
+    setPackageNavContributions: vi.fn(),
     reset: vi.fn(),
     metadata: { get: vi.fn(() => new Map()) },
     ...instanceOverrides,

@@ -36,11 +36,13 @@
 //   - a create-only principal on `showcase_contact` (no read at all) — every
 //     row is one it cannot read;
 //   - the edit-without-read class on `showcase_semantic_zoo`: a principal
-//     holding edit and no read, once without and once with create. The object
-//     declares `public_read_write`, so the platform's `update` ownership floor
-//     does not bind it, and no baseline set grants anything on it; an edit
-//     grant makes no row readable, so every row is one the principal cannot
-//     read;
+//     whose STORED set grants edit and no read, once without and once with
+//     create. The save door refuses that shape (an object permission that
+//     edits a record also reads it), so the set is a stored `permission` body
+//     as a store written before the refusal carries it, and its edit grant
+//     grants nothing. The object declares `public_read_write`, so the
+//     platform's `update` ownership floor does not bind it, and no baseline
+//     set grants anything on it; every row is one the principal cannot read;
 //   - control: member, `showcase_account` (read only) — one refusal for a row
 //     that exists and for one that does not, unchanged.
 //
@@ -138,12 +140,15 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
     [OPEN_WRITE]: () => ({ name: 'Upsert Probe' }),
   };
 
-  /** Save a permission set granting `grant` on one object, and bind it to a fresh user. */
-  const principalWith = async (set: string, object: string, grant: Record<string, boolean>, email: string): Promise<string> => {
-    const saved = await stack.apiAs(adminTok, 'PUT', `/meta/permission/${set}`, {
-      name: set, label: set, systemPermissions: [], objects: { [object]: grant },
-    });
-    expect(saved.status, await saved.clone().text()).toBe(200);
+  /**
+   * A permission set granting `grant` on one object, stored as one written
+   * before the save door judged its shape, bound to a fresh user.
+   */
+  const storedPrincipalWith = async (set: string, object: string, grant: Record<string, boolean>, email: string): Promise<string> => {
+    // Registered through the metadata service in-process: the registry and
+    // store write the save door's parse sits in front of.
+    const metadata = await stack.kernel.getServiceAsync<any>('metadata');
+    await metadata.register('permission', set, { name: set, label: set, systemPermissions: [], objects: { [object]: grant } });
     const token = await stack.signUp(email, PASS);
     const userId = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
     expect(userId, `${email} provisioned`).toBeTruthy();
@@ -176,9 +181,10 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
     expect(creatorId, 'creator provisioned').toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: creatorId, permission_set: CREATE_ONLY }, { context: SYS });
 
-    // The edit-without-read class: edit and no read, without and with create.
-    editorTok = await principalWith(EDIT_ONLY, OPEN_WRITE, { allowRead: false, allowCreate: false, allowEdit: true, allowDelete: false }, EDITOR);
-    editCreatorTok = await principalWith(EDIT_CREATE, OPEN_WRITE, { allowRead: false, allowCreate: true, allowEdit: true, allowDelete: false }, EDIT_CREATOR);
+    // The edit-without-read class: edit and no read, without and with create,
+    // as stored rows — the save door refuses this shape.
+    editorTok = await storedPrincipalWith(EDIT_ONLY, OPEN_WRITE, { allowRead: false, allowCreate: false, allowEdit: true, allowDelete: false }, EDITOR);
+    editCreatorTok = await storedPrincipalWith(EDIT_CREATE, OPEN_WRITE, { allowRead: false, allowCreate: true, allowEdit: true, allowDelete: false }, EDIT_CREATOR);
 
     projectId = String((await ql.find('showcase_project', { limit: 1, context: SYS }))?.[0]?.id ?? '');
     expect(projectId, 'the showcase seed provides a project').toBeTruthy();
@@ -215,12 +221,12 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
     expect((await d.call(creatorTok, 'GET', `/data/showcase_contact/${rows['hidden:showcase_contact']}`)).status, 'the creator reads no contact').toBe(403);
     expect((await d.create(creatorTok, 'showcase_contact', unknownId(), PAYLOAD.showcase_contact())).status, 'the creator creates contacts').toBe(201);
 
-    // The edit-without-read class: the edit grant is real, the read grant is
-    // absent, and the create grant is exactly where the table says.
+    // The edit-without-read class: the stored edit grant has no read half, so
+    // it grants nothing; the create grant is exactly where the table says.
     const zooRow = rows[`hidden:${OPEN_WRITE}`];
     expect((await d.call(adminTok, 'GET', `/data/${OPEN_WRITE}/${zooRow}`)).status).toBe(200);
     for (const [who, tok, mayCreate] of [['edit only', editorTok, false], ['edit+create', editCreatorTok, true]] as const) {
-      expect(await crudVerdict(tok, OPEN_WRITE, 'update'), `${who}: holds edit`).toBe('grants');
+      expect(await crudVerdict(tok, OPEN_WRITE, 'update'), `${who}: an edit grant without read grants no edit`).toBe('denies');
       expect(await crudVerdict(tok, OPEN_WRITE, 'read'), `${who}: holds no read`).toBe('denies');
       expect((await d.call(tok, 'GET', `/data/${OPEN_WRITE}/${zooRow}`)).status, `${who}: reads no row`).toBe(403);
       expect((await d.create(tok, OPEN_WRITE, unknownId(), PAYLOAD[OPEN_WRITE]())).status, `${who}: the create grant`).toBe(mayCreate ? 201 : 403);

@@ -44,6 +44,8 @@
  *
  * `@objectstack/objectql` cannot be imported here: it depends on this package.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MetadataLockSchema } from '@objectstack/spec/kernel';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';

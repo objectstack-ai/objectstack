@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-list",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "type": "module",
   "license": "MIT",
   "description": "ListView plugin for ObjectUI - unified view component with view type switching",
@@ -48,6 +48,7 @@
     "@object-ui/mobile": "workspace:^",
     "@object-ui/permissions": "workspace:^",
     "@object-ui/plugin-detail": "workspace:^",
+    "@object-ui/plugin-grid": "workspace:^",
     "@object-ui/react": "workspace:^",
     "@object-ui/types": "workspace:^",
     "@objectstack/spec": "workspace:^",
@@ -62,6 +63,7 @@
     "@object-ui/mobile": "workspace:*",
     "@object-ui/permissions": "workspace:*",
     "@object-ui/plugin-detail": "workspace:*",
+    "@object-ui/plugin-grid": "workspace:*",
     "@object-ui/react": "workspace:*",
     "@object-ui/test-support": "workspace:*",
     "@object-ui/types": "workspace:*",

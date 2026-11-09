@@ -11,10 +11,11 @@
  * dismisses each suggestion ONCE for the whole deployment, and an accept takes
  * effect — the server re-derives `everyone`'s definition with the set
  * (objectstack#22801 → A, built by objectstack#22854). A caller without that
- * authority gets `403 PERMISSION_DENIED` on all three routes, the list
- * included. These calls are ordinary same-origin admin API calls (not object
- * CRUD), so they follow the marketplaceApi raw-fetch pattern: Bearer token +
- * `credentials: 'include'`.
+ * authority gets `403 PERMISSION_DENIED` on every route, the list included.
+ * A dismissed (or revoked) suggestion can be re-opened, which makes it
+ * pending again and grants nothing until it is accepted. These calls are
+ * ordinary same-origin admin API calls (not object CRUD), so they follow the
+ * marketplaceApi raw-fetch pattern: Bearer token + `credentials: 'include'`.
  */
 
 import { TokenStorage } from '@object-ui/auth';
@@ -122,6 +123,25 @@ export async function confirmSuggestedBinding(id: string): Promise<SuggestedBind
  */
 export async function dismissSuggestedBinding(id: string): Promise<SuggestedBinding> {
   const res = await fetch(`${API_BASE}/${encodeURIComponent(id)}/dismiss`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+  });
+  const data = await parseOrThrow(res);
+  return data?.suggestion as SuggestedBinding;
+}
+
+/**
+ * Re-open a dismissed suggestion — a declined one or a revoked acceptance —
+ * so the deployment can decide it again. The server puts the row back to
+ * `pending` and grants nothing: the set reaches `everyone` only through a
+ * later accept, under the same gates. A row that is not `dismissed`, or whose
+ * set its package no longer suggests, is refused with a 409; an unknown id
+ * with a 404; a security service without the door with a 501. Each is
+ * thrown with the server's message, as the other calls do.
+ */
+export async function reopenSuggestedBinding(id: string): Promise<SuggestedBinding> {
+  const res = await fetch(`${API_BASE}/${encodeURIComponent(id)}/reopen`, {
     method: 'POST',
     credentials: 'include',
     headers: authHeaders({ 'Content-Type': 'application/json' }),

@@ -1,6 +1,58 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field, SYS_ACTIVITY_BUILTIN_TYPES } from '@objectstack/spec/data';
+import { SysMigration, SysMigrationJournal } from '@objectstack/platform-objects/system';
+import * as IdentityObjects from '@objectstack/platform-objects/identity';
+import { SystemObjectName } from '@objectstack/spec/system';
+
+/** Every object the identity domain declares (users, members, organizations, sessions, keys, SCIM, …). */
+const IDENTITY_OBJECT_NAMES: readonly string[] = (Object.values(IdentityObjects) as unknown[])
+  .filter((value): value is { name: string; fields: object } =>
+    !!value && typeof value === 'object' && typeof (value as { name?: unknown }).name === 'string'
+    && typeof (value as { fields?: unknown }).fields === 'object')
+  .map((object) => object.name)
+  .sort();
+
+/**
+ * The platform objects whose rows the default `recent` view leaves out, even
+ * when a person's session wrote them:
+ *
+ *  - the metadata store (published items, drafts, history, commits, the
+ *    store's own audit): publishing in Studio writes these under the
+ *    publisher's name;
+ *  - the data-migration ledger;
+ *  - the identity domain, every object `@objectstack/platform-objects/identity`
+ *    declares. Measured on a fresh boot, all under a person's own id: every
+ *    sign-in stamps `last_login_at` / `last_login_ip` on `sys_user`; the
+ *    token-signing key in `sys_jwks` is minted under the first sign-in's
+ *    session; adding a person writes a `sys_user` and a `sys_member` row, which
+ *    that person can then read. The only column that tells a sign-in stamp from
+ *    a profile edit is `changed_fields`, which a filter may not name for every
+ *    reader (`parent-field-query-guard.ts`), so the cut is by object.
+ *
+ * Their writes are mirrored like any other object's, and those rows stay
+ * stored and readable: the `all` view below lists them, and each one has its
+ * compliance row in `sys_audit_log`.
+ *
+ * Read from the definitions and the protocol's name constants where this file
+ * may import them. The three metadata-store names are spelled out: an object
+ * file is loaded from source on its own by `check:platform-object-tenancy-census`,
+ * and `@objectstack/metadata-core` publishes its definitions only from its root
+ * entry, whose graph that loader cannot evaluate.
+ * `sys-activity-default-view.integration.test.ts` holds the list equal to the
+ * definitions' own names, so a rename reds there. Deliberately not a name
+ * prefix: `sys_*` also names objects whose rows are people's work (a file
+ * someone uploads).
+ */
+export const ACTIVITY_FEED_EXCLUDED_OBJECTS: readonly string[] = Object.freeze([
+  SystemObjectName.METADATA,
+  'sys_metadata_history',
+  'sys_metadata_commit',
+  'sys_metadata_audit',
+  SysMigration.name,
+  SysMigrationJournal.name,
+  ...IDENTITY_OBJECT_NAMES,
+]);
 
 /**
  * sys_activity — Lightweight Activity Stream
@@ -18,8 +70,10 @@ import { ObjectSchema, Field, SYS_ACTIVITY_BUILTIN_TYPES } from '@objectstack/sp
  */
 export const SysActivity = ObjectSchema.create({
   name: 'sys_activity',
-  label: 'Activity',
-  pluralLabel: 'Activities',
+  // Not "Activity": an app's own object is often called that (a CRM's calls
+  // and meetings), and this page sat beside it under the same word.
+  label: 'Activity Feed',
+  pluralLabel: 'Activity Feed',
   icon: 'activity',
   isSystem: true,
   managedBy: 'append-only',
@@ -32,10 +86,53 @@ export const SysActivity = ObjectSchema.create({
     storage: { strategy: 'rotation', shards: 14, unit: 'day' },
     reclaim: true,
   },
-  description: 'Recent activity stream entries (lightweight, denormalized)',
+  description: 'What people did to records recently, newest first: who created, changed or deleted what. Entries are kept for 14 days.',
   displayNameField: 'summary',
   nameField: 'summary', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   highlightFields: ['timestamp', 'type', 'actor_name', 'summary'],
+
+  // The list a reader lands on with no view named (Home's "view all activity"
+  // and the bell's Activity tab both open the bare object route) is the FIRST
+  // view declared here, so `recent` stays first.
+  //
+  // `recent` is the cut Home's activity card makes, as far as a query column
+  // can say it: a person acted (`actor_id` set; a system write leaves it null,
+  // ADR-0118 D1: a migration, a seed, a platform setting written at boot), and
+  // the row is not about one of the platform objects
+  // `ACTIVITY_FEED_EXCLUDED_OBJECTS` names. It names no value-bearing column
+  // (`parent-field-query-guard.ts`), so every reader may run it.
+  //
+  // `all` is every row the reader may read, platform rows included: where an
+  // administrator still finds what `recent` leaves out. Nothing is removed from
+  // storage and nothing changes in what is written.
+  listViews: {
+    recent: {
+      type: 'grid',
+      name: 'recent',
+      label: 'Recent activity',
+      data: { provider: 'object', object: 'sys_activity' },
+      columns: ['timestamp', 'actor_name', 'type', 'summary'],
+      filter: [
+        { field: 'actor_id', operator: 'is_not_null' },
+        { field: 'object_name', operator: 'not_in', value: [...ACTIVITY_FEED_EXCLUDED_OBJECTS] },
+      ],
+      sort: [{ field: 'timestamp', order: 'desc' }],
+      pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No recent activity',
+        message: 'Changes people make to records appear here, newest first.',
+      },
+    },
+    all: {
+      type: 'grid',
+      name: 'all',
+      label: 'All entries',
+      data: { provider: 'object', object: 'sys_activity' },
+      columns: ['timestamp', 'actor_name', 'type', 'summary'],
+      sort: [{ field: 'timestamp', order: 'desc' }],
+      pagination: { pageSize: 100 },
+    },
+  },
 
   fields: {
     id: Field.text({

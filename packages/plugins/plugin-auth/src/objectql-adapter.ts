@@ -4,8 +4,7 @@ import type { IDataEngine } from '@objectstack/core';
 import { createAdapterFactory } from 'better-auth/adapters';
 import type { CleanedWhere, WhereOperator } from 'better-auth/adapters';
 import { SystemObjectName } from '@objectstack/spec/system';
-import { resolveAttributedUserId } from './auth-actor-attribution.js';
-import { agentForwardPerformedBy } from './agent-forward-identity-view.js';
+import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { inScimRequestScope } from './scim-connection-service.js';
 import { adoptExistingMembership } from './adopt-membership.js';
 import { refuseIssuerRepointWithLiveBindings } from './account-identity-preflight.js';
@@ -19,6 +18,10 @@ import {
   liftClientSecretForWrite,
   type SecretResolvingEngine,
 } from './sso-client-secret.js';
+import {
+  applyIdpInitiatedToOidcConfigOnRead,
+  stripIdpInitiatedFromOidcConfigOnWrite,
+} from './sso-sign-in-options.js';
 import {
   reattachInternalFieldsOnRead,
   type InternalFieldResolvingEngine,
@@ -751,22 +754,17 @@ export function withSystemContext(engine: IDataEngine): IDataEngine {
   const asSystem = (q: any) => ({ ...(q ?? {}), context: { isSystem: true, ...(q?.context ?? {}) } });
   // The attributed human is spread FIRST so an explicit caller-supplied context
   // still wins on every key — the same precedence `isSystem` already had.
-  const asAttributedSystem = async (q: any) => {
-    const attributedUserId = await resolveAttributedUserId();
-    // [ADR-0090 D10 rule 5, #28367] A forwarded AI agent's write also names the
-    // agent's client (`performedBy`), so the audit row records both sides.
-    const performedBy = agentForwardPerformedBy();
-    if (!attributedUserId && !performedBy) return asSystem(q);
-    return {
-      ...(q ?? {}),
-      context: {
-        ...(attributedUserId ? { attributedUserId } : {}),
-        ...(performedBy ? { performedBy } : {}),
-        isSystem: true,
-        ...(q?.context ?? {}),
-      },
-    };
-  };
+  // The context is the one `authSystemWriteContext()` builds for every
+  // better-auth-owned write: the attributed human, the administrator
+  // impersonating them on an impersonation session, and a forwarded AI agent's
+  // client ([ADR-0090 D10 rule 5, #28367]), so the audit row records each side.
+  // Inside a SCIM protocol request it is the verified connection instead, as
+  // the service principal `actor: 'svc:scim:CONNECTION_ID'` with no human
+  // ([#30960]; `ScimRequestScope.connectionId` says how it reaches here).
+  const asAttributedSystem = async (q: any) => ({
+    ...(q ?? {}),
+    context: { ...(await authSystemWriteContext()), ...(q?.context ?? {}) },
+  });
   return {
     insert: async (m: string, d: any, o?: any) => e.insert(m, d, await asAttributedSystem(o)),
     update: async (m: string, d: any, o?: any) => e.update(m, d, await asAttributedSystem(o)),
@@ -936,6 +934,9 @@ export function createObjectQLAdapterFactory(
         // of the cleartext JSON blob into the `secret`-typed column so the
         // ENGINE encrypts it; `oidc_config` keeps everything else.
         liftClientSecretForWrite(objectName, row);
+        // The provider's IdP-initiated toggle lives on its own column, never
+        // in the blob (`sso-sign-in-options.ts`).
+        stripIdpInitiatedFromOidcConfigOnWrite(objectName, row);
         // [#7725] `sys_member` declares `{organization_id, user_id}` unique, and
         // the platform auto-binds every user at sign-up (ADR-0093 D1/D2), so
         // better-auth's accept-invitation `createMember` collides on a pair that
@@ -1007,6 +1008,8 @@ export function createObjectQLAdapterFactory(
         // and authenticates to the IdP with the plaintext; encrypt-on-write
         // without this breaks every federated login.
         await injectClientSecretOnRead(secretEngine, objectName, result);
+        // The vendor reads `oidcConfig.allowIdpInitiated`; the column answers it.
+        applyIdpInitiatedToOidcConfigOnRead(objectName, result);
         // [#18728] Ruling C's producer half: `sys_organization.metadata` is a
         // text column holding JSON, and better-auth decodes it on its two
         // write echoes only. Decode it here so all four READ routes
@@ -1054,7 +1057,10 @@ export function createObjectQLAdapterFactory(
         await reattachInternalFieldsOnRead(internalFieldEngine, objectName, results);
         // [#8009] Same read half, per row — better-auth reaches the provider
         // through findMany as well as findOne.
-        for (const r of results) await injectClientSecretOnRead(secretEngine, objectName, r);
+        for (const r of results) {
+          await injectClientSecretOnRead(secretEngine, objectName, r);
+          applyIdpInitiatedToOidcConfigOnRead(objectName, r);
+        }
 
         return results.map((r) => {
           // [#18728] Same producer half as `findOne` above — an organization
@@ -1091,6 +1097,7 @@ export function createObjectQLAdapterFactory(
         // would encrypt at registration and then write cleartext back on the
         // first config edit, leaving a column that only LOOKS protected.
         liftClientSecretForWrite(objectName, patch);
+        stripIdpInitiatedFromOidcConfigOnWrite(objectName, patch);
         // [#17440] Write door #2 again, for a different column. Account
         // identity is `(provider_id, account_id)` since better-auth 1.7.3, and
         // no column records which IdP vouched for a row — so re-pointing a
@@ -1110,6 +1117,15 @@ export function createObjectQLAdapterFactory(
         // count, unreachable from here — refused rather than coerced, so this
         // adapter never hands `normaliseLegacyDates` a count shaped as a row.
         if (!result || typeof result === 'number') return null;
+        // [#8009] Read half on the write echo too. `/sso/update-provider` takes
+        // the provider it merges into from THIS answer (`lockSSOProviderRow`
+        // is an `update`), not from a `findOne`: with the secret lifted to its
+        // encrypted column, an echo without the read half hands the vendor a
+        // blob with no `clientSecret`, and every update carrying an
+        // `oidcConfig` — a mapping-only edit included — is refused "clientSecret
+        // is required". Same two read halves as `findOne`, same order.
+        await injectClientSecretOnRead(secretEngine, objectName, result);
+        applyIdpInitiatedToOidcConfigOnRead(objectName, result);
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -1128,6 +1144,7 @@ export function createObjectQLAdapterFactory(
         // [#8009] Write door #3. Same column, same rule — a bulk edit must not
         // be the one path that writes the secret back in cleartext.
         liftClientSecretForWrite(objectName, patch);
+        stripIdpInitiatedFromOidcConfigOnWrite(objectName, patch);
         for (const record of records) {
           // [#17440] Same rule on the bulk door — a re-point smuggled through
           // `updateMany` is the same re-point.

@@ -77,6 +77,7 @@ export interface AuthoringGateHost {
     externalBindingSaveRefusal: ObjectStackProtocolImplementation['externalBindingSaveRefusal'];
     foldStoredCollection: ObjectStackProtocolImplementation['foldStoredCollection'];
     getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
+    objectNamespaceObjectNameClash: ObjectStackProtocolImplementation['objectNamespaceObjectNameClash'];
     objectNamespacePrefixViolation: ObjectStackProtocolImplementation['objectNamespacePrefixViolation'];
     hierarchyResolverMounted: ObjectStackProtocolImplementation['hierarchyResolverMounted'];
     isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
@@ -92,6 +93,7 @@ export interface AuthoringGateHost {
     tenancyPostureInForce: ObjectStackProtocolImplementation['tenancyPostureInForce'];
     unknownDatasourceSaveRefusal: ObjectStackProtocolImplementation['unknownDatasourceSaveRefusal'];
     unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];
+    unknownPicklistBindingSaveRefusal: ObjectStackProtocolImplementation['unknownPicklistBindingSaveRefusal'];
     seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
 }
 
@@ -126,7 +128,7 @@ export function restoredBodyWriter(
 
 /** The body of `ObjectStackProtocolImplementation#refuseRestoredBodyTheSaveDoorRefuses`; the method's docblock there is its contract. */
 export async function refuseRestoredBodyTheSaveDoorRefuses(
-    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'seedExternalIdSaveRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal'>,
+    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'seedExternalIdSaveRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>,
     type: string,
     name: string,
     body: unknown,
@@ -145,6 +147,8 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
     if (datasourceRefusal) throw datasourceRefusal;
     const grantRefusal = await this.unknownGrantObjectSaveRefusal(type, body, name);
     if (grantRefusal) throw grantRefusal;
+    const picklistRefusal = await this.unknownPicklistBindingSaveRefusal(type, body, name);
+    if (picklistRefusal) throw picklistRefusal;
     const seedKeyRefusal = await this.seedExternalIdSaveRefusal(type, body, name);
     if (seedKeyRefusal) throw seedKeyRefusal;
     const repo = this.getOverlayRepo();
@@ -160,7 +164,11 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
         type,
         name,
         state: 'active',
-        body,
+        // [#29696] A flow version is judged in its D2-converted spelling, as
+        // both publish doors judge a stored flow draft (#29557): a history
+        // body is a row at rest. Restored as stored; the credential read below
+        // reads the stored version.
+        body: storedFlowVerdictBody(type, body),
         source,
         packageId: binding,
         ...(channel
@@ -523,7 +531,7 @@ function packagedRuleCopyRefusalOf(
 
 /** The body of `ObjectStackProtocolImplementation#draftPublishVerdict`; the method's docblock there is its contract. */
 export async function draftPublishVerdict(
-    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespacePrefixViolation'>,
+    this: RuntimeRulesHost & Pick<AuthoringGateHost, 'collectBatchPendingDeclarations' | 'credentialChannelFor' | 'getOverlayRepo' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation'>,
     draft: { type: string; name: string; body: unknown; packageId: string | null },
 ): Promise<RuntimeAuthoringIssue[]> {
     const singular = PLURAL_TO_SINGULAR[draft.type] ?? draft.type;
@@ -563,13 +571,31 @@ export async function draftPublishVerdict(
     const prefixViolation = singular === 'object'
         ? this.objectNamespacePrefixViolation(draft.name, draft.packageId)
         : null;
-    if (!prefixViolation) return issues;
-    return [{
-        rule: 'NAMESPACE_PREFIX',
-        path: 'name',
-        where: `object "${draft.name}"`,
-        message: prefixViolation,
-        hint: prefixViolation,
-        severity: 'error',
-    }, ...issues];
+    // [ADR-0150 D6, child K] …and the namespace/object-name verdict the same
+    // promotion doors refuse on, told the same way.
+    const nameClash = singular === 'object'
+        ? this.objectNamespaceObjectNameClash(draft.name, draft.packageId)
+        : null;
+    const told: RuntimeAuthoringIssue[] = [];
+    if (prefixViolation) {
+        told.push({
+            rule: 'NAMESPACE_PREFIX',
+            path: 'name',
+            where: `object "${draft.name}"`,
+            message: prefixViolation,
+            hint: prefixViolation,
+            severity: 'error',
+        });
+    }
+    if (nameClash) {
+        told.push({
+            rule: 'NAMESPACE_CONFLICT',
+            path: 'name',
+            where: `object "${draft.name}"`,
+            message: nameClash,
+            hint: nameClash,
+            severity: 'error',
+        });
+    }
+    return told.length > 0 ? [...told, ...issues] : issues;
 }

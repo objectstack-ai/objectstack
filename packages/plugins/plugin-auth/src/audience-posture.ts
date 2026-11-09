@@ -33,16 +33,20 @@
  * - `operator` (never gated): `admin` (create-user / bulk import) and `scim`
  *   (IdP-driven provisioning) — these ARE the invite/provisioning mechanisms
  *   the closed postures point operators at.
- * - `provider` (never gated): JIT provisioning through an OPERATOR-REGISTERED
- *   identity authority — `sso-oidc` / `sso-saml` (@better-auth/sso providers;
+ * - `provider`: JIT provisioning through an OPERATOR-REGISTERED identity
+ *   authority — `sso-oidc` / `sso-saml` (@better-auth/sso providers;
  *   registration is platform-admin-only, #10009) and `oauth` whose providerId
  *   is a configured `oidcProviders` entry (enterprise SSO incl. the cloud
  *   platform IdP, whose OP side additionally enforces app-assignment, D5.1).
- *   Registering an IdP is the operator declaring "this directory is my
- *   audience"; and the closed vocabulary could not express the standard
- *   enterprise combo (self-registration closed + IdP JIT on) any other way —
- *   gating these under `invite_only` would hard-brick every SSO-enforced
- *   deployment whose entire user base arrives via the IdP.
+ *   Never gated under `email_domain` or `open`, and an `oidcProviders` entry is
+ *   never gated at all. Under `invite_only` an `@better-auth/sso` provider
+ *   (`AudienceAdmissionInput.ssoProvider`) admits a person with no account and
+ *   no invitation ONLY when that provider's `allowJit` toggle is on (maintainer
+ *   ruling A, record 6718355623): `invite_only` means by invitation, and the
+ *   enterprise combo "self-registration closed + IdP JIT on" is stated per
+ *   provider instead of implied by registering one. Off by default, so an
+ *   unknown SSO user is refused `SELF_REGISTRATION_CLOSED` like any
+ *   uninvited sign-up; the invitation and bootstrap carve-outs below apply.
  *
  * Only `action: 'create-user'` is judged: `link-account` and provider
  * `sign-in` concern an EXISTING user's identity, not audience admission.
@@ -52,12 +56,21 @@
  * `invite_only` means BY INVITATION — not "no new users". better-auth's
  * organization invitation flow requires the invitee to hold an account before
  * `accept-invitation`, and for a brand-new invitee that account comes from the
- * self-serve sign-up route. So a self-serve creation whose email holds a
- * PENDING, unexpired `sys_invitation` row is admitted under every posture
- * (under `email_domain` an explicit invitation also trumps the domain list —
- * an operator inviting an external contractor must not dead-end them).
- * Without this carve-out the posture would be "admin-create only" and the
- * invitation surface would be dead for new users — the invite dead-end class.
+ * self-serve sign-up route. So a self-serve creation holding a PENDING,
+ * unexpired `sys_invitation` row is admitted under every posture (under
+ * `email_domain` an explicit invitation also trumps the domain list — an
+ * operator inviting an external contractor must not dead-end them). Without
+ * this carve-out the posture would be "admin-create only" and the invitation
+ * surface would be dead for new users — the invite dead-end class.
+ *
+ * What "holding" means is {@link invitationProofFor}'s answer. Under
+ * `invite_only` a self-serve sign-up is admitted only by the invitation it
+ * presents: an email-and-password sign-up presents the invitation's id (the
+ * one its accept link carries, `presented-invitation.ts`), and an address
+ * alone is refused like any uninvited sign-up. A creation whose own flow
+ * proved the mailbox (magic link, email OTP), or whose identity provider
+ * verified the address, is matched by address. `open` and `email_domain`
+ * match every creation by address.
  *
  * ## Pinned domain-matching rules (`email_domain`)
  *
@@ -90,6 +103,7 @@
  */
 
 import { isCloudManaged } from '@objectstack/core';
+import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import {
   AUDIENCE_POSTURES,
   SystemUserId,
@@ -217,8 +231,11 @@ export const OPEN_POSTURE_VERIFICATION_OFF_WARNING =
  * Entry validation — REFUSES an unusable audience declaration at the point it
  * enters the manager (constructor and `applyConfigPatch`), loudly, with the
  * remedy in the message. Mirrors `AudienceConfigSchema`'s predicates (the
- * schema guards the authoring surface; the runtime receives plain objects) and
- * adds the one cross-field invariant the schema cannot see, on
+ * schema guards the authoring surface; the runtime receives plain objects),
+ * refuses one value the schema does not — an MCP agent ceiling set as the
+ * self-registration set ([ADR-0090 D10]: a self-registrant is a person, and an
+ * agent ceiling is not a person's set) — and adds the one cross-field invariant
+ * the schema cannot see, on
  * `emailAndPassword.requireEmailVerification` (verification is FORCED on by
  * the wiring under both self-registration postures unless noted):
  *
@@ -306,6 +323,15 @@ export function assertAudienceConfig(
       fail(
         "selfRegistrationPermissionSet must not be 'admin_full_access' — a platform-admin grant to every " +
         'self-registrant is never a declarable audience.',
+      );
+    }
+    // [ADR-0090 D10] A self-registrant is a person, and an agent ceiling is not
+    // a person's set: the declaration that names the set refuses one.
+    if (typeof set === 'string' && (MCP_AGENT_PERMISSION_SETS as readonly string[]).includes(set)) {
+      fail(
+        `selfRegistrationPermissionSet must not be '${set}' — it is the permission ceiling of an AI assistant ` +
+        'connected over MCP, which the assistant receives from the access its user consented to, never from an ' +
+        'assignment, and a self-registrant is a person. Declare a permission set meant for people.',
       );
     }
     if (emailAndPassword?.requireEmailVerification === false) {
@@ -444,7 +470,10 @@ export interface AudienceAdmissionInput {
   creationClass: AudienceCreationClass;
   /** The would-be user's email, as the creation path carries it. */
   email: string | undefined;
-  /** A pending, unexpired `sys_invitation` row exists for this email. */
+  /**
+   * The creation holds a pending, unexpired `sys_invitation` row, by the proof
+   * {@link invitationProofFor} asks of it.
+   */
   hasPendingInvitation: boolean;
   /**
    * No user exists yet — the first-run owner wizard / seeded admin creating
@@ -452,7 +481,55 @@ export interface AudienceAdmissionInput {
    * fresh install must never lock its operator out.
    */
   isBootstrap: boolean;
+  /**
+   * Present when a `provider`-class creation came through a registered
+   * `@better-auth/sso` provider (`sso-oidc` / `sso-saml`): that provider's
+   * `allowJit` toggle (`sso-sign-in-options.ts`). Absent for every other
+   * creation, an `oidcProviders` entry included.
+   */
+  ssoProvider?: { allowJit: boolean };
 }
+
+/**
+ * What a creation must show for the invitation carve-out to answer for it:
+ *
+ * - `presented` — the request presents the invitation itself, its id, and
+ *   that row is pending, unexpired and addressed to the creation's email
+ *   (`isPresentedInvitationPending`);
+ * - `address` — a pending, unexpired invitation is addressed to the
+ *   creation's email (`AuthManager#hasPendingInvitationFor`);
+ * - `none` — no invitation admits it.
+ */
+export type InvitationProof = 'presented' | 'address' | 'none';
+
+/**
+ * Which {@link InvitationProof} the carve-out asks of a creation. Under a
+ * valid `invite_only` posture a self-serve email-and-password sign-up must
+ * present the invitation, and a self-serve OAuth creation is matched by
+ * address only when the identity provider verified it (`emailVerified`
+ * `true`). Magic link and email OTP create an account only after the mailbox
+ * answered, so they keep the address match, as does every other method (a
+ * phone or anonymous creation carries no invited address to match), the
+ * `provider` class, and every creation under `open` and `email_domain`.
+ */
+export function invitationProofFor(input: {
+  audience: ResolvedAudience;
+  creationClass: AudienceCreationClass;
+  method: unknown;
+  emailVerified: unknown;
+}): InvitationProof {
+  const { audience, creationClass, method, emailVerified } = input;
+  if (audience.invalid || audience.posture !== 'invite_only' || creationClass !== 'self-serve') return 'address';
+  if (method === 'email-password') return 'presented';
+  if (method === 'oauth') return emailVerified === true ? 'address' : 'none';
+  return 'address';
+}
+
+/** The refusal message for an unknown user arriving through an SSO provider under `invite_only`. */
+const SSO_JIT_CLOSED_MESSAGE =
+  'This single sign-on provider does not create accounts for people who were not invited ' +
+  '(audience posture invite_only). Ask an administrator for an invitation, or ask them to turn on ' +
+  'just-in-time provisioning (allowJit) for this provider.';
 
 /**
  * THE admission decision — pure, so the posture × method matrix is a table of
@@ -460,9 +537,18 @@ export interface AudienceAdmissionInput {
  * guard (fail closed) → posture semantics.
  */
 export function decideAudienceAdmission(input: AudienceAdmissionInput): AudienceAdmission {
-  const { audience, creationClass, email, hasPendingInvitation, isBootstrap } = input;
-  if (creationClass === 'operator' || creationClass === 'provider') {
+  const { audience, creationClass, email, hasPendingInvitation, isBootstrap, ssoProvider } = input;
+  if (creationClass === 'operator') {
     return { admit: true, grantPermissionSet: false };
+  }
+  if (creationClass === 'provider') {
+    // An SSO provider under a VALID `invite_only` posture admits an unknown
+    // user only by its `allowJit` toggle, an invitation, or the bootstrap
+    // carve-out (module doc, `provider`). Every other provider creation, and
+    // every other posture, admits as before.
+    const gated = ssoProvider !== undefined && !ssoProvider.allowJit && !audience.invalid && audience.posture === 'invite_only';
+    if (!gated || isBootstrap || hasPendingInvitation) return { admit: true, grantPermissionSet: false };
+    return { admit: false, code: SELF_REGISTRATION_CLOSED, message: SSO_JIT_CLOSED_MESSAGE };
   }
   if (isBootstrap) {
     return { admit: true, grantPermissionSet: false };

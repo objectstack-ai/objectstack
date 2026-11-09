@@ -171,6 +171,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           admin: "Admin"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "Customized",
         help: "Set once you edit a rule that came with an app, so your changes are kept when the app is updated."
@@ -288,6 +292,129 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       all_links: {
         label: "All"
+      }
+    }
+  },
+  sys_queue: {
+    label: "Queue",
+    pluralLabel: "Queues",
+    description: "A named group of people that unassigned records can wait in until one of them takes the record.",
+    fields: {
+      name: {
+        label: "Name",
+        help: "Identifies the queue everywhere it is used — on records, in assignment rules, approvals and sharing rules. Lowercase letters, digits and underscores only."
+      },
+      label: {
+        label: "Display Label"
+      },
+      description: {
+        label: "Description"
+      }
+    },
+    _views: {
+      all_queues: {
+        label: "All"
+      }
+    }
+  },
+  sys_queue_member: {
+    label: "Queue Member",
+    pluralLabel: "Queue Members",
+    description: "Who belongs to a queue: a user, a team, a position or a business unit.",
+    fields: {
+      queue: {
+        label: "Queue",
+        help: "The name of the queue this member belongs to."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
+      },
+      recipient_type: {
+        label: "Member Type",
+        help: "What kind of member this is. A team, position or business unit makes everyone in it a member. \"Business unit and subordinates\" also covers every unit below the one you pick.",
+        options: {
+          user: "User",
+          team: "Team",
+          position: "Position",
+          business_unit: "Business unit",
+          unit_and_subordinates: "Business unit and subordinates"
+        }
+      },
+      recipient_id: {
+        label: "Member",
+        help: "The specific user, team, position or business unit."
+      }
+    },
+    _views: {
+      by_queue: {
+        label: "By Queue"
+      }
+    }
+  },
+  sys_assignment_rule: {
+    label: "Assignment Rule",
+    pluralLabel: "Assignment Rules",
+    description: "Sends each new record that matches a condition to a queue or a person.",
+    fields: {
+      organization_id: {
+        label: "Organization",
+        help: "The organization this rule belongs to."
+      },
+      name: {
+        label: "Name",
+        help: "Identifies the rule. Lowercase letters, digits and underscores only, and not the name of a rule an installed app provides."
+      },
+      label: {
+        label: "Display Label"
+      },
+      description: {
+        label: "Description"
+      },
+      object_name: {
+        label: "Object",
+        help: "The object whose new records this rule sends somewhere. Only objects whose records have an owner can be assigned."
+      },
+      criteria: {
+        label: "Condition",
+        help: "Which new records this rule takes; leave it empty to take every new record that no earlier rule took. Written as an expression over the record — for example record.priority == \"high\"."
+      },
+      sort_order: {
+        label: "Order",
+        help: "When several of your rules could take the same record, the one with the lowest order is tried first. Your rules are always tried before the rules installed apps provide."
+      },
+      recipient_type: {
+        label: "Assign To",
+        help: "Send the record to a queue, where its members can take it, or straight to one person.",
+        options: {
+          queue: "Queue",
+          user: "User"
+        }
+      },
+      recipient_id: {
+        label: "Queue or User",
+        help: "The queue, or the person, the record goes to. A person must be an active member of this organization."
+      },
+      strategy: {
+        label: "Pick a Member",
+        help: "For a queue: give the record straight to one member, taking turns or choosing whoever has the least open work. Leave it empty to leave the record in the queue until a member takes it.",
+        options: {
+          round_robin: "Round robin",
+          least_loaded: "Least loaded"
+        }
+      },
+      load: {
+        label: "Open Work",
+        help: "Required for \"Least loaded\": which records count as a member's open work, written as an expression over the record — for example record.status != \"closed\"."
+      },
+      active: {
+        label: "Active",
+        help: "Turn off to stop this rule from assigning new records, without deleting it."
+      }
+    },
+    _views: {
+      by_object: {
+        label: "By Object"
       }
     }
   }

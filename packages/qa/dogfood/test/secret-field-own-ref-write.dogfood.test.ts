@@ -1,7 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [#27582] A non-system write may only seal a new value or keep its own
-// record's ref — pinned at the REST data door of a booted stack with a crypto
+// record's ref, and its own is the value its caller reads in that column — a
+// `secret` column reads masked, so no ref is one it keeps. Pinned at the REST
+// data door of a booted stack with a crypto
 // provider wired (`bootStack` wires one LocalCryptoProvider, as
 // `objectstack dev` / `serve` do). Every HTTP request is assembled as a
 // non-system caller. `packages/objectql/src/secret-field-own-ref-write.test.ts`
@@ -10,10 +12,11 @@
 //
 //  - a create whose `secret` field holds a ref is refused (`VALIDATION_ERROR` /
 //    400), on the single-record door, the bulk door and the import door;
-//  - an update that keeps the record's own value is accepted and changes
-//    nothing — the read mask the form echoes, and the record's own ref;
-//  - an update naming any other ref is refused with one answer, whatever that
-//    ref names, and the stored value stays;
+//  - an update that echoes the read mask the form shows is accepted and
+//    changes nothing;
+//  - an update naming any ref is refused with one answer, whatever that ref
+//    names and whatever the column holds (the record's own ref included), and
+//    the stored value stays;
 //  - the system principal keeps the pass-through.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -42,7 +45,7 @@ const sorStack = defineStack({
 
 type Answer = { status: number; json: any; text: string };
 
-describe('[#27582] secret field: a non-system write may only seal a new value or keep its own record\'s ref — over REST', () => {
+describe('[#27582] secret field: a non-system write may only seal a new value, never send a ref — over REST', () => {
   let stack: VerifyStack;
   let ql: any;
   let token = '';
@@ -109,7 +112,7 @@ describe('[#27582] secret field: a non-system write may only seal a new value or
     expect(await stack.rows(VAULT, { name: 'sor-import' })).toHaveLength(0);
   });
 
-  it('an update that echoes the read mask, or the record\'s own ref, is accepted and changes nothing', async () => {
+  it('an update that echoes the read mask is accepted and changes nothing', async () => {
     const id = await create('sor-own', 'sor-own-value');
     const own = String(await storedRef(id));
     const before = await secretRowCount();
@@ -120,16 +123,13 @@ describe('[#27582] secret field: a non-system write may only seal a new value or
     const masked = await call('PATCH', `/data/${VAULT}/${id}`, { name: 'sor-own-renamed', token: echoed });
     expect(masked.status, masked.text).toBe(200);
 
-    const kept = await call('PATCH', `/data/${VAULT}/${id}`, { name: 'sor-own-again', token: own });
-    expect(kept.status, kept.text).toBe(200);
-
     expect(await storedRef(id)).toBe(own);
     expect(await secretRowCount()).toBe(before);
     expect(await ql.resolveSecretField(VAULT, id, 'token')).toBe('sor-own-value');
-    expect((await stack.rows(VAULT, { id }))[0].name).toBe('sor-own-again');
+    expect((await stack.rows(VAULT, { id }))[0].name).toBe('sor-own-renamed');
   });
 
-  it('an update naming any other ref is refused with one answer, and the stored value stays', async () => {
+  it('an update naming any ref — the record\'s own included — is refused with one answer, and the stored value stays', async () => {
     const id = await create('sor-keep', 'sor-keep-value');
     const own = String(await storedRef(id));
     const before = await secretRowCount();
@@ -141,6 +141,9 @@ describe('[#27582] secret field: a non-system write may only seal a new value or
 
     const unknown = await call('PATCH', `/data/${VAULT}/${id}`, { name: 'sor-keep-renamed', token: unknownRef });
     expect(answerOf(unknown)).toEqual(answerOf(named));
+
+    const kept = await call('PATCH', `/data/${VAULT}/${id}`, { name: 'sor-keep-renamed', token: own });
+    expect(answerOf(kept)).toEqual(answerOf(named));
 
     expect(await storedRef(id)).toBe(own);
     expect(await secretRowCount()).toBe(before);

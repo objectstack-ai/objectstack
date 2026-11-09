@@ -213,8 +213,10 @@ export interface AIToolDefinition {
  * `invokeBusinessAction` (`objectName` / `recordId` / `params`,
  * `packages/runtime/src/action-execution.ts`), which the MCP bridge builds
  * that object from. Each grows the member in the change that enforces it, so
- * neither ever accepts-and-ignores it. Two placements were rejected, and the
- * reasons are the contract:
+ * neither ever accepts-and-ignores it. A third door carries the same member
+ * at the top level of its input: the MCP `delete_record` tool (see
+ * {@link AIActionConfirmation}, "The second gate"). Two placements were
+ * rejected, and the reasons are the contract:
  *
  * - NOT inside `params`. That bag is not a free surface: it is CLOSED against
  *   the action author's own declared input vocabulary. `enforceActionParams`
@@ -298,6 +300,37 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * names the action and the exact member to set. Nothing dispatches: the
  * action body does not run, no record is read or written, and the refusal
  * carries no `status`.
+ *
+ * ## The second gate: the MCP `delete_record` tool
+ *
+ * A record delete over MCP is permanent, so the same member gates it, by the
+ * maintainer's decision, for every object and with no declared flag to
+ * consult: `delete_record` (`packages/mcp/src/mcp-http-tools.ts`) refuses
+ * EVERY call that does not carry the member as the boolean `true`, before
+ * its data bridge is reached, so nothing is read or deleted. A non-boolean
+ * member (the string `"true"`, `1`) is refused first by the tool's closed
+ * input schema, with no code and no details, exactly as on `run_action`; an
+ * absent or `false` member reaches the gate, and its refusal is the one above:
+ * the same code and HTTP status, and `error.details` shaped as
+ * {@link ActionConfirmationRequiredDetails}, whose `actionName` is the tool's
+ * name, `delete_record`. A client that handles the action refusal confirms
+ * with its human and retries the same call with the member set.
+ *
+ * The gate's bounds are part of the decision: REST `DELETE /api/v1/data/...`
+ * (the human path) and the `update_record` tool stay outside it, no object is
+ * exempt, and any future bulk-delete tool takes the same gate.
+ *
+ * ## The third gate: the MCP `delete_records` tool
+ *
+ * The bulk delete (#30891) takes that gate, with the same member, code, HTTP
+ * status and `details` shape, whose `actionName` is `delete_records`. One
+ * difference, and it is the tool's reason to exist: its unconfirmed call READS
+ * the selection (a filter or an id list), as the caller, and answers the
+ * refusal with a `preview` member beside `error` (how many records match, how
+ * many a confirmed call attempts, sample ids), so the human approves a count
+ * rather than a filter. Nothing is deleted. A confirmed call deletes each
+ * selected record as `delete_record` does, under the caller's permissions and
+ * the object's delete rules, which no caller bypasses.
  */
 export interface AIActionConfirmation {
     /**
@@ -317,7 +350,10 @@ export interface AIActionConfirmation {
  * client never has to hard-code the member's spelling from documentation.
  */
 export interface ActionConfirmationRequiredDetails {
-    /** The declarative action name the refused call addressed. */
+    /**
+     * The declarative action name the refused call addressed; on the MCP
+     * `delete_record` and `delete_records` doors, the tool's own name.
+     */
     actionName: string;
     /** The object the action operates on; omitted for object-less actions. */
     objectName?: string;
@@ -431,11 +467,19 @@ export interface IAIService {
      * via the same handler that would have run had approval not been
      * required. Updates the row to `executed` (or `failed`) and returns
      * the outcome.
+     *
+     * `held` is the third outcome: the confirmation was accepted, and the
+     * write waits on an approval outside the conversation, because a host
+     * policy held it for a human approver. Nothing has been written yet,
+     * so the row is `held`, never `executed`; `result` carries whatever the
+     * host returned about the hold. The host that held the action moves it
+     * on: when that approval resolves, it writes the row's final state
+     * (`executed`, `rejected` or `failed`). This service does not.
      */
     approvePendingAction?(
         id: string,
         actorId: string,
-    ): Promise<{ status: 'executed' | 'failed'; result?: unknown; error?: string }>;
+    ): Promise<{ status: 'executed' | 'held' | 'failed'; result?: unknown; error?: string }>;
 
     /**
      * Reject a pending action. The row transitions to `rejected` and the
@@ -472,8 +516,15 @@ export interface IAIService {
     ): Promise<PendingActionRow[]>;
 }
 
-/** Lifecycle of a pending action proposal. */
-export type PendingActionStatus = 'pending' | 'approved' | 'executed' | 'failed' | 'rejected';
+/**
+ * Lifecycle of a pending action proposal.
+ *
+ * `held`: the confirmation was accepted, and the write waits on an approval
+ * outside the conversation. It is not a final state; the host that held it
+ * writes `executed`, `rejected` or `failed` when that approval resolves
+ * (see {@link IAIService.approvePendingAction}).
+ */
+export type PendingActionStatus = 'pending' | 'approved' | 'held' | 'executed' | 'failed' | 'rejected';
 
 /** Input for {@link IAIService.proposePendingAction}. */
 export interface ProposePendingActionInput {

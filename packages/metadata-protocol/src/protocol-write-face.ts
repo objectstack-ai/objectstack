@@ -236,13 +236,13 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
         // table holds any is not this gate's to judge, and a finding over an
         // empty table costs one `force`. Judged by what the STORED side holds,
         // so a previously unstored field (a formula) raises nothing.
+        const objectName = typeof next.name === 'string' && next.name ? next.name : prev.name;
         if (
             nextField?.type === 'currency'
             && nextField.currencyConfig?.currencyMode === 'record'
             && prevField.currencyConfig?.currencyMode !== 'record'
             && isStored(prevField)
         ) {
-            const objectName = typeof next.name === 'string' && next.name ? next.name : prev.name;
             const codeField = typeof nextField.currencyConfig.currencyField === 'string'
                 ? `'${nextField.currencyConfig.currencyField}'`
                 : 'its currency code field';
@@ -252,12 +252,99 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
                 message: `Field '${fname}' switched to currencyMode 'record' — rows already stored with an amount and a blank ${codeField} `
                     + 'display as a plain number, fall into the null group of a grouped aggregate, and sit outside every '
                     + 'currency-paired filter until they hold a code; once saved, write it with '
-                    + `\`os migrate record-currency-codes --object ${objectName} --field ${fname} --code <ISO 4217 code>\``
-                    + ' (a dry run; add --apply to write).',
+                    + recordCurrencyCodeBackfillRemedy(objectName, fname),
             });
+        }
+        // [ADR-0144 D2, D5] A stored `record`-mode amount whose `currencyField`
+        // is re-pointed at another field — the sibling of
+        // `currency_mode_to_record`, raised on the same face, lifted by the same
+        // `force`, and reading no row either. The amount is a bare number whose
+        // currency is whatever its code field says (ADR-0104 D1), so the save
+        // converts nothing: every stored row keeps its number and is read in
+        // the currency the NEW pointer holds. Each form the spec admits is a
+        // re-point — a sibling field, or a `MASTER_DETAIL.CODE` path a child
+        // follows its parent's currency through — in all four directions.
+        // Pointers compare as written, as `recordCurrencyFieldOf` reads them:
+        // an identical pointer raises nothing, and one differing only in white
+        // space names another field. Judged by the STORED side, so a field that
+        // was a formula raises nothing. The remedies named are the ones that
+        // exist: the code backfill writes a sibling column only (a path's code
+        // lives on the parent), and the home-amount recompute is a shell command
+        // with no REST door.
+        const prevPointer = recordCurrencyPointerOf(prevField);
+        const nextPointer = recordCurrencyPointerOf(nextField);
+        if (
+            prevPointer !== undefined
+            && nextPointer !== undefined
+            && prevPointer !== nextPointer
+            && isStored(prevField)
+        ) {
+            const nextParent = recordCurrencyPathParentOf(nextPointer);
+            const target = nextParent === undefined
+                ? `the code '${nextPointer}' holds`
+                : `its parent's code, '${nextPointer}' (the record '${nextParent}' references)`;
+            let message = `Field '${fname}' re-pointed its currencyField from '${prevPointer}' to '${nextPointer}' — every row `
+                + `already stored keeps its amount, and is now read in ${target} instead of the one '${prevPointer}' gave it. `
+                + 'No stored amount is converted: a row whose two codes differ now displays, filters and groups under a '
+                + 'currency it was not entered in.';
+            message += nextParent === undefined
+                ? ` A row whose '${nextPointer}' is blank displays as a plain number, falls into the null group of a grouped `
+                    + 'aggregate, and sits outside every currency-paired filter until it holds a code; once saved, write it with '
+                    + recordCurrencyCodeBackfillRemedy(objectName, fname)
+                : ' No code is stored on this object to backfill: each row follows its parent record.';
+            const prevHome = homeAmountPointersOf(prevField);
+            if (prevHome !== undefined) {
+                message += ` Its stored home amounts in '${prevHome.field}' and rates in '${prevHome.rateField}' were converted `
+                    + `from the code '${prevPointer}' gave, and this save does not re-rate them; `
+                    + (homeAmountPointersOf(nextField) !== undefined
+                        ? `re-derive them from the new code with \`os migrate recompute-home-amounts --object ${objectName} --field ${fname}\``
+                            + ' (a dry run; add --apply to write — a shell command, with no REST door).'
+                        : 'nothing re-rates them, since the amount no longer declares homeAmount, which is what '
+                            + '`os migrate recompute-home-amounts` reads.');
+            }
+            issues.push({ code: 'currency_field_repointed', field: fname, message });
         }
     }
     return issues;
+}
+
+/**
+ * [ADR-0144, ruling 6492000994] The explicit code backfill a record-mode
+ * amount's blank code is written with: the CLI command, then the tenant-admin
+ * REST door beside it. One text, shared by `currency_mode_to_record` and
+ * `currency_field_repointed`, so the two findings cannot drift apart on it.
+ */
+function recordCurrencyCodeBackfillRemedy(objectName: string, fieldName: string): string {
+    return `\`os migrate record-currency-codes --object ${objectName} --field ${fieldName} --code <ISO 4217 code>\``
+        + ' (a dry run; add --apply to write), or, with no shell, as an organization admin with '
+        + `\`POST /api/v1/meta/_migrate-record-currency-codes\` and the body \`{ "object": "${objectName}", "field": "${fieldName}", "code": "<ISO 4217 code>" }\``
+        + ' (a preview of your current organization\'s rows; add "apply": true to write).';
+}
+
+/** A `record`-mode currency field's `currencyField` pointer, exactly as written; else undefined. */
+function recordCurrencyPointerOf(field: any): string | undefined {
+    if (field?.type !== 'currency') return undefined;
+    const config = field.currencyConfig;
+    return config?.currencyMode === 'record' && typeof config.currencyField === 'string' && config.currencyField !== ''
+        ? config.currencyField
+        : undefined;
+}
+
+/**
+ * [ADR-0144 D2, amended] The `master_detail` field a two-segment
+ * `PARENT_FIELD.CODE_FIELD` pointer follows, or undefined for a sibling name.
+ */
+function recordCurrencyPathParentOf(pointer: string): string | undefined {
+    const dot = pointer.indexOf('.');
+    return dot > 0 ? pointer.slice(0, dot) : undefined;
+}
+
+/** The stored `homeAmount` columns a currency field declares (ADR-0144 D5), or undefined. */
+function homeAmountPointersOf(field: any): { field: string; rateField: string } | undefined {
+    const home = field?.currencyConfig?.homeAmount;
+    return home && typeof home === 'object' && typeof home.field === 'string' && typeof home.rateField === 'string'
+        ? { field: home.field, rateField: home.rateField }
+        : undefined;
 }
 
 /**

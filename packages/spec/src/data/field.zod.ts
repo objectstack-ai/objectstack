@@ -489,7 +489,7 @@ export const LocationCoordinatesSchema = lazySchema(() => z.object({
  * tombstone for the removed key and the answers for its two natural spellings.
  */
 const CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS =
-  'a currency amount\'s decimal places are its currency\'s ISO 4217 minor unit (2 for USD, '
+  'a currency amount\'s decimal places are its currency\'s CLDR fraction digits (2 for USD, '
   + '0 for JPY, 3 for KWD), which every display face derives from the currency itself, so '
   + 'there is no decimal-places setting to declare. Do not move the number to the '
   + 'field-level `precision`: that key is the amount\'s TOTAL digit count (a DECIMAL(18,2) '
@@ -501,8 +501,8 @@ const CURRENCY_DECIMAL_PLACES_ARE_THE_CURRENCYS =
  * #19992 (ADR-0049 enforce-or-remove, triage direction REMOVE under ruling 乙 on
  * #19910 — 「a currency's decimal places are the currency's, not a setting」):
  * `precision` was a declared, validated key that no renderer or runtime ever
- * read. objectui's `CurrencyField` derives the width from the currency's ISO
- * 4217 minor unit (read points recorded in `liveness/field.json`, row
+ * read. objectui's `CurrencyField` derives the width from the currency's CLDR
+ * fraction digits (read points recorded in `liveness/field.json`, row
  * `currencyConfig`), and no code read the key at all — measured with a lit
  * control (`currencyConfig.currencyMode` IS read) over objectstack
  * `packages/**` + `examples/**`, objectui (the console's tree and `main`) and
@@ -581,7 +581,8 @@ function refuseRecordModeKeyMismatch(
       message:
         '`currencyMode: \'record\'` needs `currencyField`: name the field on this object that holds each '
         + 'record\'s ISO 4217 code — a `text` field with `valueDomain: \'iso_4217_currency\'`, conventionally '
-        + '`currency_code` — or use `currencyMode: \'fixed\'` (one currency) or `\'dynamic\'` (the tenant default).',
+        + '`currency_code`; on a `master_detail` child, `PARENT_FIELD.CODE_FIELD` follows the parent\'s code — '
+        + 'or use `currencyMode: \'fixed\'` (one currency) or `\'dynamic\'` (the tenant default).',
     });
   } else if (config.currencyMode !== 'record' && config.currencyField !== undefined) {
     ctx.addIssue({
@@ -702,14 +703,30 @@ function refuseSummaryWithoutField(
  * Configuration for currency field type supporting multi-currency — and, in the
  * same shape, for a `formula` field whose `returnType` is `currency` (#22727).
  *
+ * A `summary` field spells its currency in the same shape (ADR-0144 D6,
+ * amended 2026-11-09 by #31743, ruling A: "A `summary` rolled up through that
+ * same master_detail is single-currency by construction, and is admitted in
+ * the parent's currency."). The roll-up lives on the parent, and the parent's
+ * code field is its sibling, so it declares `currencyMode: 'record'` with a
+ * one-segment `currencyField` naming that code field: the declaration a
+ * sibling-code amount already makes, so a reader that resolves a record-mode
+ * amount resolves the roll-up the same way and no key is added. Whether the
+ * child amount it rolls up follows that very code through that very
+ * `master_detail` is a question about two objects, answered where both are
+ * held, never by this one-config shape. Outside that roll-up a `summary` may
+ * declare only `fixed` (read by the analytics layer); a `count` roll-up, any
+ * `dynamic` config and every other `record` roll-up are refused at the object
+ * door (`refuseUnadmittedSummaryCurrency`) and in `defineStack`'s
+ * cross-reference pass (`collectRecordCurrencyPathErrors`).
+ *
  * Note: Currency codes are validated by length only (3 characters) to support:
  * - Standard ISO 4217 codes (USD, EUR, CNY, etc.)
  * - Cryptocurrency codes (BTC, ETH, etc.)
  * - Custom business-specific codes
  * Stricter validation can be implemented at the application layer based on business requirements.
  *
- * There is no decimal-places key: a currency's decimal places are its ISO 4217
- * minor unit (see {@link CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE} for the
+ * There is no decimal-places key: a currency's decimal places are its CLDR
+ * fraction digits (see {@link CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE} for the
  * removed `precision`).
  *
  * `defaultCurrency` has no default (#27157, ruling 6464202770 on #27119, Q2 =
@@ -732,15 +749,19 @@ export const CurrencyConfigSchema = lazySchema(() => strictObject({
   aliases: { mode: 'currencyMode', currency: 'defaultCurrency', code: 'defaultCurrency', isoCode: 'defaultCurrency' },
   guidance: CURRENCY_CONFIG_DECIMAL_PLACES_GUIDANCE,
 }, {
-  currencyMode: z.enum(['dynamic', 'fixed', 'record']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the sibling field `currencyField` names; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1).'),
+  currencyMode: z.enum(['dynamic', 'fixed', 'record']).default('dynamic').describe('Currency mode. `fixed`: the field has one currency, `defaultCurrency`. `dynamic` (the default): the field has no currency of its own — amounts display in the tenant default currency (the `localization.currency` setting; a plain number when none is set) and `defaultCurrency` is not read. `record`: each record has its own currency, the ISO 4217 code stored in the field `currencyField` names — a sibling field, or on a `master_detail` child the parent\'s code field, which the child then follows; `defaultCurrency` is refused. The value is a bare number in every mode (ADR-0104 D1).'),
   defaultCurrency: z.string().length(3).optional().describe('The currency code (ISO 4217, e.g. USD, CNY, EUR) of a `fixed`-mode field: its one currency, required under `fixed`. Not read under `dynamic` (the default), where amounts display in the tenant default currency, and refused under `record`, where each record names its own.'),
   // ADR-0144 D2 — the pointer of a `record`-mode amount. Optional at the key
   // level and never empty; `refuseRecordModeKeyMismatch` below makes it
   // required under `record` and refuses it under the other two modes, and the
   // object's `superRefine` (`refuseDishonestRecordCurrencyField`,
   // object.zod.ts) checks what it names, because only the object holds the
-  // sibling field map.
-  currencyField: z.string().min(1, '`currencyField` names a field: an empty name points at nothing — name the field on this object that holds each record\'s ISO 4217 code, conventionally `currency_code`.').optional().describe('`record` mode only, and required there: the name of the field on the same object that holds each record\'s currency — a `text` field declaring `valueDomain: \'iso_4217_currency\'` (conventionally `currency_code`). Refused under `dynamic` and `fixed`, and never empty.'),
+  // sibling field map. Amended 2026-11-09 (#31743, ruling A): a two-segment
+  // path `PARENT_FIELD.CODE_FIELD` follows the parent's code; the object door
+  // judges its spelling too (`refuseDishonestRecordCurrencyPath`), so this
+  // one-config shape, a standalone field and an extension's field parse a
+  // dotted pointer exactly as they did before the amendment.
+  currencyField: z.string().min(1, '`currencyField` names a field: an empty name points at nothing — name the field on this object that holds each record\'s ISO 4217 code, conventionally `currency_code`.').optional().describe('`record` mode only, and required there: the name of the field on the same object that holds each record\'s currency — a `text` field declaring `valueDomain: \'iso_4217_currency\'` (conventionally `currency_code`). On a `master_detail` child it may instead be a two-segment path, `PARENT_FIELD.CODE_FIELD`: a `master_detail` field of this object (never a `lookup`), one dot, and that code field on the parent it references, so the child follows its parent\'s currency and stores no code of its own (ADR-0144 D2, amended). Refused under `dynamic` and `fixed`, and never empty.'),
   // ADR-0144 D5 — the stored home-currency projection, declared by pointer.
   // Optional; `refuseRecordModeKeyMismatch` below refuses it outside `record`,
   // and the object's `superRefine` (`refuseDishonestHomeAmount`,
@@ -1078,13 +1099,13 @@ const INLINE_GRID_COLUMN_HISTORY =
  * as `FieldSchema`'s currency refusal with the subject swapped, same remedy:
  * delete the key, nothing replaces it.
  * `inline-grid-column-currency-scale-refused.test.ts` holds the two refusals
- * to the same first sentence and the same minor-unit clause, so a rewording of
- * one that leaves the other behind goes red.
+ * to the same first sentence and the same fraction-digits clause, so a rewording
+ * of one that leaves the other behind goes red.
  */
 const INLINE_GRID_CURRENCY_SCALE_REFUSAL =
   '`scale` is not valid on a `currency` inline grid column — delete the key. A currency '
-  + 'amount\'s decimal places are its currency\'s, not a column setting: the currency\'s ISO 4217 '
-  + 'minor unit (2 for USD, 0 for JPY, 3 for KWD) decides how the cell displays the amount and the '
+  + 'amount\'s decimal places are its currency\'s, not a column setting: the currency\'s CLDR '
+  + 'fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how the cell displays the amount and the '
   + 'width a computed amount is rounded to. `scale` stays valid on a `number` column.';
 
 /**
@@ -1156,7 +1177,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   // `type: 'currency'` by the `.superRefine` below (ruling B carried to this
   // mirror); the describe names the one type set it still applies to.
   scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s ISO 4217 minor unit decides. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.').meta({ title: 'Scale' }),
+    .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s CLDR fraction digits decide. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.').meta({ title: 'Scale' }),
   autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable.").meta({ title: 'Autofill' }),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`).").meta({ title: 'Read-only When' }),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.').meta({ title: 'Required When' }),
@@ -1313,11 +1334,12 @@ export const FieldSchema = lazySchema(() => {
    *
    * On a multi-value lookup (`multiple: true`), `required` means NON-EMPTY
    * array: an emptied required set fails validation loudly — `[]` does not
-   * satisfy `required` (#9447, maintainer ruling 2026-08-18). The empty set is
-   * always representable (it reads back as `[]`, never `null` — see
-   * `multiple`), so the required check judges emptiness, not absence. The
-   * describe is form help in Studio and carries the rule, not the ruling date
-   * (#22093).
+   * satisfy `required` (#9447, maintainer ruling 2026-08-18; this half stands
+   * under ruling A on #29343, record 6591577985). An emptied OPTIONAL
+   * multi-value field is stored as `null`, the same as one never set (see
+   * `multiple`), so the required check judges emptiness: `null` and `[]` both
+   * fail it. The describe is form help in Studio and carries the rule, not the
+   * ruling date (#22093).
    */
   required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
@@ -1354,21 +1376,29 @@ export const FieldSchema = lazySchema(() => {
     + 'is the whole search set and this flag is not read (ADR-0061).',
   ),
   /**
-   * Multi-value empty representation (#9447, maintainer ruling 2026-08-18):
-   * an emptied multi-value lookup reads back as `[]`, never `null`. This
-   * binds the field's empty representation for EVERY writer — cascade repair
-   * (`set_null` member removal), form clears, API writes — not as a
-   * cascade-only convention: an array field always reads as an array, so
-   * readers (generated code, formula/filter predicates) never need a null
-   * branch. Same ruling: `required` on a multi-value lookup means non-empty
-   * array (see `required` above).
+   * Multi-value empty representation (ruling A on #29343, record 6591577985,
+   * amending #9447, maintainer ruling 2026-08-18): a cleared OPTIONAL
+   * multi-value field — every type `isMultiValueField` answers true for:
+   * multiselect, checkboxes, tags, and select / lookup / user / file / image
+   * with `multiple: true` — is stored as `null` by the write door, the same as
+   * one never set, unique-covered or not: `[]` and `''` written to it store
+   * `null`. This binds the field's empty representation for EVERY writer —
+   * cascade repair (`set_null` member removal), form clears, API writes — not
+   * as a cascade-only convention. It reverses #9447's "an emptied multi-value
+   * lookup reads back as `[]`, never `null`" for optional columns: readers
+   * (generated code, formula/filter predicates) meet `null` for an empty set,
+   * and read `null` and `[]` alike as empty, since a row stored before the
+   * rule can still hold `[]`. The `$empty` table's `multi_value` row
+   * (`filter-empty-operator.ts`) is unchanged: `null` and `[]` both read as
+   * empty. #9447's other half stands: `required` on a multi-value field means
+   * non-empty list (see `required` above).
    *
    * Declarability: `multiple: true` outside the multi-capable types is refused
    * at parse (maintainer ruling 2026-09-13), and on `radio` by the narrower
    * 2026-08-22 ruling. The rulings and their dates live in these comments; the
    * describe is form help in Studio and carries only the rule (#22093).
    */
-  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. An emptied multi-value lookup reads back as `[]`, never `null` — the rule binds every writer (cascade repair, form clears, API writes), not just cascade repair.'),
+  multiple: z.boolean().default(false).describe('Allow multiple values (Stores as Array/JSON). Declarable ONLY on the multi-capable types — select, lookup, user, file, image — and redundantly on the inherently-multi option types (multiselect, checkboxes, tags); `multiple: true` on any other type, `radio` included, is REFUSED at parse. A cleared optional multi-value field is stored as `null`, the same as one never set: an empty list `[]` or an empty string written to it stores `null`, and the rule binds every writer (cascade repair, form clears, API writes). Read `null` and `[]` alike as empty, as the `is_empty` filter (`$empty`) does, since a row stored before this rule can still hold `[]`. On a `required` multi-value field the empty list is refused: `required` means a non-empty list.'),
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
@@ -1451,7 +1481,7 @@ export const FieldSchema = lazySchema(() => {
   // stays the fixed exact decimal of NUMERIC_COLUMN_REPRESENTATION. The
   // describe states the counting rule because the field reference page is
   // generated from it, and that page is what an author reads.
-  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer) — the `p` of a DECIMAL(p, s): the digits of the value, integer and fraction together, counted at the field\'s decimal places, so `precision: 5, scale: 2` holds up to 999.99 and refuses 1234.5 (1234.50 is 6 digits). Enforced on writes of `number`, `currency`, `percent`, `rating` and `slider` fields: a value that needs more digits is refused with field code `max_precision`, never rounded. Counted on the STORED value: at the declared `scale` when one applies, else at the value\'s own decimal places (leading zeros never count) — so on a `currency` field, where `scale` is refused, an amount\'s written decimals count toward the total; a fraction-stored `percent` is counted two places further right (`scale + 2`, or 2 with no `scale`), which makes the count that of the percentage-point value as displayed. Not decimal places (that is `scale`; a currency\'s are its ISO 4217 minor unit) and not a column size: every numeric column keeps the platform\'s fixed exact decimal whatever this declares. Not read on any other field type.'),
+  precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer) — the `p` of a DECIMAL(p, s): the digits of the value, integer and fraction together, counted at the field\'s decimal places, so `precision: 5, scale: 2` holds up to 999.99 and refuses 1234.5 (1234.50 is 6 digits). Enforced on writes of `number`, `currency`, `percent`, `rating` and `slider` fields: a value that needs more digits is refused with field code `max_precision`, never rounded. Counted on the STORED value: at the declared `scale` when one applies, else at the value\'s own decimal places (leading zeros never count) — so on a `currency` field, where `scale` is refused, an amount\'s written decimals count toward the total; a fraction-stored `percent` is counted two places further right (`scale + 2`, or 2 with no `scale`), which makes the count that of the percentage-point value as displayed. Not decimal places (that is `scale`; a currency\'s are its CLDR fraction digits) and not a column size: every numeric column keeps the platform\'s fixed exact decimal whatever this declares. Not read on any other field type.'),
   // #18972 — and an UPPER bound, for the same declared=enforced reason one
   // axis over: `scale` is unrenderable above 100 at every consumer, so a
   // larger declaration could only ever crash a reader. See
@@ -1476,7 +1506,7 @@ export const FieldSchema = lazySchema(() => {
   // (batch #218 item 2, letter 乙) words. The describe names the type set the
   // key still applies to, for the same reason as above.
   scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s ISO 4217 minor unit decides how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
+    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
@@ -1845,9 +1875,12 @@ export const FieldSchema = lazySchema(() => {
    * it per the #9689 idempotent-materialization ruling). On every other type
    * the key was inert by construction — the engine's referential delete walk
    * reads it only on a `master_detail`, `lookup` or `tree` field that carries a
-   * `reference` (the family predicate `statesDeleteSemantics` in
+   * `reference`, and on a `user` field that declares a `deleteBehavior` (the
+   * family predicate `statesDeleteSemantics` in
    * `packages/objectql/src/engine.ts`; a `tree`'s `reference` is its own
-   * object, written by the object's parse when the author leaves it out) — yet
+   * object, written by the object's parse when the author leaves it out; a
+   * `user` field's target is `sys_user`, fixed by the type, and #29253 made its
+   * authored value take effect) — yet
    * the materialized value shipped in every built artifact as an apparent
    * explicit declaration (the #4447 shadowing mechanism). A bare `text` /
    * `datetime` / `number` field now parses to output WITHOUT the key; an
@@ -1905,25 +1938,24 @@ export const FieldSchema = lazySchema(() => {
    * Tri-state (ADR-0085 semantic-role style — a statement about the
    * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
-   *   - `true` / absent  → shown as a supporting list: a side card in the
-   *                       record's related column (under the tabbed page, the
-   *                       shared "Related" tab). There is no count-based
-   *                       auto-split.
-   *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): drawn in
-   *                       the record's body — the details column, after its
-   *                       first field section — as a full-width table, not as
-   *                       a side card (under the tabbed page, inside the
-   *                       Details tab: a primary list gets no tab of its
-   *                       own). A field group's `relatedList` can place it
-   *                       among the field sections instead. `'primary'` no
-   *                       longer ORDERS lists: the parent's
-   *                       `ObjectSchema.relatedLists` does, among the body
-   *                       tables and among the side cards alike.
+   *   - `true` / absent  → shown as an auxiliary panel on the parent's record
+   *                       page. There is no count-based auto-split.
+   *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): shown as
+   *                       a full-width table in the record's detail body, not
+   *                       as an auxiliary panel. A field group's `relatedList`
+   *                       can place it among the field sections instead.
+   *                       `'primary'` no longer ORDERS lists: the parent's
+   *                       `ObjectSchema.relatedLists` does, among the
+   *                       full-width tables and among the auxiliary panels
+   *                       alike.
+   *
+   * How the record page lays these out is ADR-0085's to define; this key states
+   * the relationship's role, not the page's chrome.
    *
    * Absent on a `master_detail` field that sets `inlineEdit`, the list is
    * `'primary'` by default: line items edited inside the parent's form are part
    * of its main content (a quote's lines belong under the quote, not beside
-   * it). Write `relatedList: true` to keep such a list a side card.
+   * it). Write `relatedList: true` to keep such a list an auxiliary panel.
    *
    * SORT INHERITANCE (#13294, following #11345's browser-verified acceptance
    * run): a derived related list (`relatedList: 'primary'`) inherits its row
@@ -1936,7 +1968,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = suppress; true/absent = shown as a supporting list, a side card in the record\'s related column (the shared "Related" tab on the tabbed page); \'primary\' = part of the record\'s main content, drawn in the record\'s body (the details column, after its first field section) as a full-width table (inside the Details tab on the tabbed page, with no tab of its own). Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it a side card. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the body tables and the side cards (ADR-0085). A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = the child object is not shown on the parent record page; true/absent = shown as an auxiliary panel on the record page; \'primary\' = part of the record\'s main content, shown as a full-width table in the record\'s detail body. Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it an auxiliary panel. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
@@ -2209,7 +2241,7 @@ export const FieldSchema = lazySchema(() => {
 
   // Currency config — read for a `currency` field and for a `formula` whose
   // `returnType` is `currency` (#22727): one shape for both, never a second one.
-  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, and for a formula field whose returnType is currency. Absent: dynamic mode.'),
+  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). A summary may otherwise declare only `currencyMode: \'fixed\'`, when every amount it reads is in that one currency; a `count` summary, `dynamic` on a summary and any other `record` roll-up are refused. Absent: dynamic mode, and no currency on a summary.'),
 
   // Vector field — flat dimensionality (the live authoring path).
   // The renderer reads this flat sibling (read point recorded in
@@ -2573,6 +2605,46 @@ export const FieldSchema = lazySchema(() => {
   // `index: true` created no index. Declare the index in object `indexes[]`.
   externalId: z.boolean().default(false).describe('Not read: no upsert, import or seed matches on this flag. A seed dataset names its match field in its own `externalId`; an import names it in the mapping\'s `upsertKey`.'),
 
+  /**
+   * Package-author rename declaration (epic cloud#3652, ruling D3, verbatim
+   * 「写进清单 renamedFrom」, under Q3 「默认拒绝，需显式映射（推荐）」 — this
+   * supersedes item 5 of objectstack#24443's ruling A, "No rename spelling is
+   * added to the spec"). The earlier key or keys of THIS field, so an upgrade
+   * from a version that still has the old key carries that column's data to
+   * this field instead of dropping the old column out of the declaration and
+   * adding an empty one.
+   *
+   * Judged at parse, minimally: each entry is a field key (this grammar, here,
+   * where one field is all there is to see). The rest — not the field's own
+   * key, not a key another field of the same object still declares, not an
+   * old key two fields both claim, each entry once — needs the field's key in
+   * its object's `fields` map (`name` is optional) or the whole map, and lives
+   * in `ObjectSchema`'s superRefine (`refuseDishonestRenamedFrom`), whose
+   * refusals name the object, the field and the old key. Type
+   * compatibility between the old and the new field is NOT judged here: it
+   * depends on the installed version, so the upgrade plan judges it.
+   *
+   * Read only by the schema sync and the install-local door; no record read,
+   * write or query reads it. The SQL driver's sync renames the old column to
+   * this key (`carryDeclaredRenames`, before the additive `ADD COLUMN`), so
+   * every path that syncs a schema carries it: a boot on the new artifact,
+   * `os migrate apply`, and `/marketplace/install-local`, which carries before
+   * it registers the new version and puts the column back if that fails. A
+   * rename it cannot carry is refused before any write, naming the field, the
+   * old key and the reason. `live` in `liveness/field.json`.
+   */
+  renamedFrom: z.array(
+    z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+      message: 'Each `renamedFrom` entry is an earlier key of this field, so it must be a field key: lowercase snake_case (e.g. "account_name").',
+    }),
+  ).optional().describe(
+    'Earlier keys of THIS field, written in the field-key grammar (lowercase snake_case), e.g. `renamedFrom: [\'company\']` on a field now keyed `account_name`. '
+    + 'On a package upgrade from a version that has one of these keys and not this one, the platform carries that column\'s data to this field instead of adding an empty column. '
+    + 'A field renamed twice lists both earlier keys. Each entry once; never this field\'s own key; never a key another field of the same object still declares (that name is still in use); never an old key another field of the same object also claims. '
+    + 'Read only by the schema sync and the package upgrade: no record read, write or query reads it, and the type of the old column is judged when the column is carried, not here. '
+    + 'The schema sync (boot, `os migrate apply`, `/marketplace/install-local`) renames the old column to this key before it adds any column, and refuses before any write, naming the field, the old key and the reason, when the old key is a platform column, still a live field or claimed by two fields, when both columns or several old columns exist, when the old column would narrow under this type or this field stores no column (a formula), when an index cannot follow, when an object extension names a key its own package never added to the object (install-local), or when the driver renames no column.',
+  ),
+
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `field` is a registered metadata type, so `MetadataPlugin`'s loader stamps
   // `_packageId` / `_provenance` on it. Undeclared, they were dropped on every
@@ -2760,8 +2832,10 @@ export const FieldSchema = lazySchema(() => {
   // No ADR-0087 conversion carries it (the D3 entry
   // `user-field-foreign-reference-refused` says why): rewriting the field to a
   // `lookup` would add it to the referential delete walk with
-  // `deleteBehavior: 'set_null'`, which a `user` field never joined, and
-  // `deleteBehavior` has no value meaning "leave it", so the author decides.
+  // `deleteBehavior: 'set_null'`, while a `user` field that declares no
+  // `deleteBehavior` stays out of that walk (#29253: one that declares a value
+  // joins it), and `deleteBehavior` has no value meaning "leave it", so the
+  // author decides.
   if (
     field.type === 'user'
     && field.reference !== undefined
@@ -2776,7 +2850,8 @@ export const FieldSchema = lazySchema(() => {
         `\`reference: '${field.reference}'\`. To link records of \`${field.reference}\`, declare a ` +
         `\`lookup\`: \`{ type: 'lookup', reference: '${field.reference}' }\` (\`Field.lookup('${field.reference}', …)\`), ` +
         "and choose its `deleteBehavior` (a `lookup` defaults to `'set_null'` when the target record is " +
-        'deleted; a `user` field never did). If a person was meant, drop `reference`.',
+        'deleted; a `user` field has no default and keeps the id unless it declares one). If a person was ' +
+        'meant, drop `reference`.',
     });
   }
 
@@ -3122,13 +3197,13 @@ export const FieldSchema = lazySchema(() => {
   // 「215 同意」): `scale` is RETIRED from the `currency` type and refused at
   // this seam. On a currency field the key was three-faced: the field
   // designer offered it, the amount's cell never read it (the cell's fraction
-  // digits are the currency's own ISO 4217 minor-unit count), and
+  // digits are the currency's own CLDR fraction-digit count), and
   // `packages/objectql`'s `max_scale` branch still refused writes carrying
   // more decimals — so an author who set it bought a narrower write contract
   // and no visible change. The ruling retires the key rather than aligning the
   // money faces to it. The remedy is worded by ruling 5805782503 (batch #218
   // item 2, letter 乙 — a currency's decimal places are the currency's, not a
-  // setting): delete the key; the currency's ISO 4217 minor unit decides its
+  // setting): delete the key; the currency's CLDR fraction digits decide its
   // display, and its write allowance stays unconstrained (today's contract
   // for a currency field that declares no `scale`). ⛔ The remedy names no
   // other key to carry the value: nothing replaces it. ⛔ No alias and no
@@ -3145,8 +3220,8 @@ export const FieldSchema = lazySchema(() => {
       path: ['scale'],
       message:
         '`scale` is not valid on a `currency` field — delete the key. A currency amount\'s decimal ' +
-        'places are its currency\'s, not a field setting: the currency\'s ISO 4217 minor unit (2 for ' +
-        'USD, 0 for JPY, 3 for KWD) decides how the amount displays, and the field\'s write allowance ' +
+        'places are its currency\'s, not a field setting: the currency\'s CLDR fraction digits (2 for ' +
+        'USD, 0 for JPY, 3 for KWD) decide how the amount displays, and the field\'s write allowance ' +
         'stays unconstrained — a currency write is accepted with the decimals it carries, as it always ' +
         'was on a currency field that declared no `scale`. The key\'s one enforced effect was refusing ' +
         'writes with more decimals, which this field type no longer does.',
@@ -3154,7 +3229,7 @@ export const FieldSchema = lazySchema(() => {
   }
 
   // #20011 — the FIELD-level `precision` on a `currency` field is NOT compared
-  // against the currency's ISO 4217 fraction digits, on purpose. The key is
+  // against the currency's CLDR fraction digits, on purpose. The key is
   // declared "Total digits" — the `p` of a DECIMAL(p, s) amount, so
   // `precision: 18` on a fixed-USD field is DECIMAL(18,2) — and a currency's
   // decimal places are the currency's, not a setting (ruling 5805782503,
@@ -3324,9 +3399,12 @@ export const FieldSchema = lazySchema(() => {
     // stay legal. `tree` (hierarchical reference) keeps materializing with
     // `lookup`: it is in the relational family, where the key states delete
     // semantics, and the delete walk reads it there (#22957). `user` is
-    // stored identically to `lookup` but sits outside the delete walk's family
-    // (`master_detail`, `lookup`, `tree`) exactly like `text` does, so it takes
-    // the non-reference side; an authored value there still round-trips.
+    // stored identically to `lookup` but takes the non-reference side: it
+    // joins the delete walk only when its author DECLARES a `deleteBehavior`
+    // (#29253, `statesDeleteSemantics`), so a materialized value here would be
+    // a delete outcome nobody chose. A bare `user` field therefore parses with
+    // no key and keeps the deleted user's id; an authored value round-trips
+    // and takes effect.
     if (field.deleteBehavior === undefined && (field.type === 'lookup' || field.type === 'tree')) {
       patch.deleteBehavior = 'set_null';
     }

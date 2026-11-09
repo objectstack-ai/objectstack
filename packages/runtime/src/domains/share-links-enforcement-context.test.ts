@@ -1146,11 +1146,14 @@ describe('[#21329] mint authority on an owner-private object, at both doors (rul
      * a principal `canManageShares` admits (ADR-0111 D1 DEPTH) on a record the
      * data door will not let them read.
      */
-    const UNIT_WRITER: PermissionSet = PermissionSetSchema.parse({
+    // Built raw: the authoring schema refuses an edit grant without read (an
+    // object permission that edits a record also reads it); a set stored
+    // before that refusal still carries this shape.
+    const UNIT_WRITER = {
         name: 'conv_unit_writer',
         label: 'Unit-depth writer, no read',
         objects: { [CONV]: { allowEdit: true, writeScope: 'unit' } },
-    });
+    } as unknown as PermissionSet;
 
     /** The object a capability gates, on top of being owner-private. */
     const VAULT_SCHEMA = {

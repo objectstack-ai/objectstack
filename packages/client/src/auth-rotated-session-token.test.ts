@@ -214,8 +214,10 @@ const arrangeServer = async () => {
 };
 
 /**
- * [#23181] The file's ONE server, built by the first case that signs in and
- * shared by every later one. Each case still signs a user of its own up on it,
+ * [#23181] The file's ONE server, shared by every case. It is built at module
+ * scope right after the warm-up (below), so no case's clock carries its
+ * engine, schema sync and better-auth instance: before, the first case to
+ * sign in built it inside its own window. Each case still signs a user of its own up on it,
  * through a client of its own, and every assertion here is about that user's
  * credential: a rotation revokes only the rotating user's sessions, and a
  * case reads its own user by address. So no case reads another case's writes,
@@ -241,11 +243,13 @@ const signedIn = async () => {
   const email = nextEmail();
   // The default audience posture is invite_only, and the shared server's first
   // sign-up is its only uninvited one: every user enters through a pending
-  // invitation, the lane `@objectstack/verify`'s signUp takes.
+  // invitation, which the sign-up presents, the lane `@objectstack/verify`'s
+  // signUp takes.
+  const invitationId = `inv_${emailSeq}`;
   await engine.insert(
     'sys_invitation',
     {
-      id: `inv_${emailSeq}`,
+      id: invitationId,
       email,
       status: 'pending',
       organization_id: 'org_rotation_audience_gate',
@@ -255,7 +259,7 @@ const signedIn = async () => {
     },
     { context: { isSystem: true } } as never,
   );
-  await client.auth.register({ email, password: PASSWORD, name: 'Rotating User' });
+  await client.auth.register({ email, password: PASSWORD, name: 'Rotating User', invitationId });
   const token = storedToken(client);
   expect(token, 'register stored no bearer token — the premise of this suite is gone').toBeTruthy();
   return { engine, manager, client, email, token: String(token) };
@@ -357,6 +361,10 @@ const closeEngines = async (): Promise<void> => {
 // and `④` below pins that.
 await signedIn();
 await closeEngines();
+// The cases' shared server, built here for the same reason: it is
+// arrangement, not behaviour, and the first case used to pay it. Its
+// better-auth instance is built on first use, so that is asked for here too.
+await (await fileServer()).manager.getAuthInstance();
 
 beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});

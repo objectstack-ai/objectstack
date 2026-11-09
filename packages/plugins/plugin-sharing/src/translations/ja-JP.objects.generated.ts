@@ -171,6 +171,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           admin: "管理者"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "カスタマイズ済み",
         help: "アプリ付属のルールを編集すると設定され、アプリ更新時も変更内容が保持されます。"
@@ -288,6 +292,129 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       all_links: {
         label: "すべて"
+      }
+    }
+  },
+  sys_queue: {
+    label: "Queue",
+    pluralLabel: "Queues",
+    description: "A named group of people that unassigned records can wait in until one of them takes the record.",
+    fields: {
+      name: {
+        label: "Name",
+        help: "Identifies the queue everywhere it is used — on records, in assignment rules, approvals and sharing rules. Lowercase letters, digits and underscores only."
+      },
+      label: {
+        label: "Display Label"
+      },
+      description: {
+        label: "Description"
+      }
+    },
+    _views: {
+      all_queues: {
+        label: "All"
+      }
+    }
+  },
+  sys_queue_member: {
+    label: "Queue Member",
+    pluralLabel: "Queue Members",
+    description: "Who belongs to a queue: a user, a team, a position or a business unit.",
+    fields: {
+      queue: {
+        label: "Queue",
+        help: "The name of the queue this member belongs to."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
+      },
+      recipient_type: {
+        label: "Member Type",
+        help: "What kind of member this is. A team, position or business unit makes everyone in it a member. \"Business unit and subordinates\" also covers every unit below the one you pick.",
+        options: {
+          user: "ユーザー",
+          team: "チーム",
+          position: "ポジション",
+          business_unit: "ビジネスユニット",
+          unit_and_subordinates: "ビジネスユニットと下位階層"
+        }
+      },
+      recipient_id: {
+        label: "Member",
+        help: "The specific user, team, position or business unit."
+      }
+    },
+    _views: {
+      by_queue: {
+        label: "By Queue"
+      }
+    }
+  },
+  sys_assignment_rule: {
+    label: "割り当てルール",
+    pluralLabel: "割り当てルール",
+    description: "条件に一致する新しいレコードを、キューまたは特定の人に送ります。",
+    fields: {
+      organization_id: {
+        label: "組織",
+        help: "このルールが属する組織。"
+      },
+      name: {
+        label: "名前",
+        help: "ルールを識別します。小文字、数字、アンダースコアのみ使用でき、インストール済みアプリが提供するルールと同じ名前は使えません。"
+      },
+      label: {
+        label: "表示名"
+      },
+      description: {
+        label: "説明"
+      },
+      object_name: {
+        label: "オブジェクト",
+        help: "このルールが新しいレコードを送る対象のオブジェクト。所有者を持つレコードのオブジェクトだけが割り当ての対象になります。"
+      },
+      criteria: {
+        label: "条件",
+        help: "このルールが受け取る新しいレコード。空欄にすると、それより前のルールが受け取らなかった新しいレコードをすべて受け取ります。レコードに対する式で記述します（例: record.priority == \"high\"）。"
+      },
+      sort_order: {
+        label: "順序",
+        help: "同じレコードを複数のルールが受け取りうる場合、順序の値が最も小さいルールから試されます。この組織のルールは、インストール済みアプリが提供するルールより常に先に試されます。"
+      },
+      recipient_type: {
+        label: "割り当て先",
+        help: "レコードをキュー（メンバーが引き受けられます）に送るか、1 人に直接送ります。",
+        options: {
+          queue: "キュー",
+          user: "ユーザー"
+        }
+      },
+      recipient_id: {
+        label: "キューまたはユーザー",
+        help: "レコードの送り先となるキューまたは人。人はこの組織の有効なメンバーである必要があります。"
+      },
+      strategy: {
+        label: "メンバーの選び方",
+        help: "キューの場合: レコードを 1 人のメンバーに直接渡します。順番に回すか、未完了の作業が最も少ないメンバーを選びます。空欄にすると、メンバーが引き受けるまでレコードはキューに残ります。",
+        options: {
+          round_robin: "ラウンドロビン",
+          least_loaded: "負荷が最も少ない"
+        }
+      },
+      load: {
+        label: "未完了の作業",
+        help: "「負荷が最も少ない」では必須: どのレコードをメンバーの未完了の作業として数えるか。レコードに対する式で記述します（例: record.status != \"closed\"）。"
+      },
+      active: {
+        label: "有効",
+        help: "オフにすると、ルールを削除せずに新しいレコードの割り当てを止めます。"
+      }
+    },
+    _views: {
+      by_object: {
+        label: "オブジェクト別"
       }
     }
   }

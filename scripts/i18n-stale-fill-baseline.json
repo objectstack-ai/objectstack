@@ -1,1 +1,3 @@
-{}
+{
+  "packages/plugins/plugin-webhooks/src/translations/objects.generated.ts#sys_webhook.pluralLabel": "benign coincidence, not drift (#30512): Chinese has no plural, so zh-CN and zh-Hant both keep the product term 'Webhook' for the plural label; the source plural 'Webhooks' was never their text."
+}

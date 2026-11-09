@@ -111,6 +111,12 @@ export const NotificationTemplate = ObjectSchema.create({
             // topics are matched against the event's `sys_notification.topic`
             // (maxLength: 200 there).
             maxLength: 200,
+            // [#30208 row 6, ruling E on #30527] The console's pick-or-type
+            // input over the served topic list (`preference-options.ts`), the
+            // same one the preference's `topic` declares; the field stays
+            // `text`. The template's `channel` keeps its own refusal
+            // (`channel_renders_template`) and declares no widget.
+            widget: 'notification-topic',
         }),
 
         channel: Field.text({

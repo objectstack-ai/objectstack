@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { publishPlanApprovalPending } from '../assistant/assistantBus.js';
+import { isHitlContinuation } from '@object-ui/plugin-chatbot/core';
 
 /**
  * One row of the conversation-history list.
@@ -76,15 +77,19 @@ function extractPreview(row: ServerConversation): string | undefined {
   const messages = row.messages;
   if (!messages || messages.length === 0) return undefined;
   // Prefer the most recent user message, fall back to last message.
+  // objectstack#30223 — a HITL continuation (the turn the chat sends the model
+  // after 确认 / 取消) is stored as a user message but is not the person's
+  // words, so the preview reads past it to what they actually asked.
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role === 'user') {
       const text = stringifyContent(m.content);
-      if (text) return text;
+      if (text && !isHitlContinuation(text)) return text;
     }
   }
   const last = messages[messages.length - 1];
-  return stringifyContent(last?.content);
+  const fallback = stringifyContent(last?.content);
+  return isHitlContinuation(fallback) ? undefined : fallback;
 }
 
 function stringifyContent(content: unknown): string | undefined {
@@ -122,7 +127,8 @@ function stringifyContent(content: unknown): string | undefined {
 
 function normalize(row: ServerConversation): ConversationListItem {
   const title = row.title?.trim();
-  const preview = extractPreview(row) ?? stringifyContent(row.preview);
+  const served = stringifyContent(row.preview);
+  const preview = extractPreview(row) ?? (isHitlContinuation(served) ? undefined : served);
   return {
     id: row.id,
     title: isPlaceholderTitle(title) ? undefined : title,

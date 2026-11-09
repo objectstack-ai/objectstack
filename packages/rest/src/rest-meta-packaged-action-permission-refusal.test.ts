@@ -13,7 +13,8 @@
  *
  *  - an ACTION has the activation switch (§8 item 2,
  *    `POST /api/v1/actions/_activation/:object/:action`) and no clone — the
- *    action-clone half is not chartered;
+ *    action-clone half is not chartered; [#30065] its save names the declared
+ *    override from the base's paired `.custom` first (ADR-0146 D9 `action`);
  *  - a PERMISSION SET has its clone (§8 item 3, the "Clone" action, which posts
  *    to `POST /api/v1/data/sys_permission_set`) and no switch named here.
  *
@@ -113,7 +114,9 @@ const expectRegimeC = (message: unknown, type: string, name: string, operation: 
     return text;
 };
 
-const ACTION_SWITCH = 'Switch it off (POST /api/v1/actions/_activation/:object/:action, body {enabled: false}';
+// [#30065] The save names the declared override first, so the switch follows
+// in lower case there; the removal opens with it.
+const ACTION_SWITCH = 'it off (POST /api/v1/actions/_activation/:object_or_global/:action, body {enabled: false}';
 // The route's spelling moved with C3 stage 8 (the retired object's data route
 // → the catalog's clone door), so the sentence is pinned up to it.
 const PERMISSION_CLONE = 'Clone it under a new name to customize it (the "Clone" action on the permission set, '
@@ -147,6 +150,10 @@ describe('PUT / DELETE /api/v1/meta/action/:name on a packaged action — the re
         const r = await call('DELETE', 'action', LONG_ACTION);
         expect(r.code).toBe('NOT_OVERRIDABLE');
         expectRegimeC(r.message, 'action', LONG_ACTION, 'delete');
+        // [#30065] …and the save, whose sentence names the declared override too.
+        const put = await call('PUT', 'action', LONG_ACTION, { ...ACTION_BODY, name: LONG_ACTION });
+        expect(put.code).toBe('NOT_OVERRIDABLE');
+        expect(expectRegimeC(put.message, 'action', LONG_ACTION, 'save')).toContain('Declare an override from ');
     });
 });
 

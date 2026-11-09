@@ -171,6 +171,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           admin: "Administrador"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "Personalizado",
         help: "Se marca al editar una regla que vino con una app, para conservar tus cambios cuando la app se actualice."
@@ -288,6 +292,129 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       all_links: {
         label: "Todos"
+      }
+    }
+  },
+  sys_queue: {
+    label: "Queue",
+    pluralLabel: "Queues",
+    description: "A named group of people that unassigned records can wait in until one of them takes the record.",
+    fields: {
+      name: {
+        label: "Name",
+        help: "Identifies the queue everywhere it is used — on records, in assignment rules, approvals and sharing rules. Lowercase letters, digits and underscores only."
+      },
+      label: {
+        label: "Display Label"
+      },
+      description: {
+        label: "Description"
+      }
+    },
+    _views: {
+      all_queues: {
+        label: "All"
+      }
+    }
+  },
+  sys_queue_member: {
+    label: "Queue Member",
+    pluralLabel: "Queue Members",
+    description: "Who belongs to a queue: a user, a team, a position or a business unit.",
+    fields: {
+      queue: {
+        label: "Queue",
+        help: "The name of the queue this member belongs to."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
+      },
+      recipient_type: {
+        label: "Member Type",
+        help: "What kind of member this is. A team, position or business unit makes everyone in it a member. \"Business unit and subordinates\" also covers every unit below the one you pick.",
+        options: {
+          user: "Usuario",
+          team: "Equipo",
+          position: "Puesto",
+          business_unit: "Unidad de negocio",
+          unit_and_subordinates: "Unidad de negocio y subordinados"
+        }
+      },
+      recipient_id: {
+        label: "Member",
+        help: "The specific user, team, position or business unit."
+      }
+    },
+    _views: {
+      by_queue: {
+        label: "By Queue"
+      }
+    }
+  },
+  sys_assignment_rule: {
+    label: "Regla de asignación",
+    pluralLabel: "Reglas de asignación",
+    description: "Envía cada registro nuevo que cumple una condición a una cola o a una persona.",
+    fields: {
+      organization_id: {
+        label: "Organización",
+        help: "La organización a la que pertenece esta regla."
+      },
+      name: {
+        label: "Nombre",
+        help: "Identifica la regla. Solo letras minúsculas, dígitos y guiones bajos, y no puede ser el nombre de una regla que proporcione una aplicación instalada."
+      },
+      label: {
+        label: "Nombre visible"
+      },
+      description: {
+        label: "Descripción"
+      },
+      object_name: {
+        label: "Objeto",
+        help: "El objeto cuyos registros nuevos envía esta regla. Solo se pueden asignar los objetos cuyos registros tienen propietario."
+      },
+      criteria: {
+        label: "Condición",
+        help: "Qué registros nuevos toma esta regla; déjela vacía para tomar todos los registros nuevos que ninguna regla anterior haya tomado. Se escribe como una expresión sobre el registro, por ejemplo record.priority == \"high\"."
+      },
+      sort_order: {
+        label: "Orden",
+        help: "Cuando varias de sus reglas pueden tomar el mismo registro, se prueba primero la de menor orden. Sus reglas siempre se prueban antes que las que proporcionan las aplicaciones instaladas."
+      },
+      recipient_type: {
+        label: "Asignar a",
+        help: "Envía el registro a una cola, donde sus miembros pueden tomarlo, o directamente a una persona.",
+        options: {
+          queue: "Cola",
+          user: "Usuario"
+        }
+      },
+      recipient_id: {
+        label: "Cola o usuario",
+        help: "La cola, o la persona, a la que va el registro. Una persona debe ser un miembro activo de esta organización."
+      },
+      strategy: {
+        label: "Elegir un miembro",
+        help: "Para una cola: entrega el registro directamente a un miembro, por turnos o eligiendo a quien tenga menos trabajo abierto. Déjelo vacío para que el registro permanezca en la cola hasta que un miembro lo tome.",
+        options: {
+          round_robin: "Por turnos",
+          least_loaded: "Menor carga"
+        }
+      },
+      load: {
+        label: "Trabajo abierto",
+        help: "Obligatorio con «Menor carga»: qué registros cuentan como trabajo abierto de un miembro, escrito como una expresión sobre el registro, por ejemplo record.status != \"closed\"."
+      },
+      active: {
+        label: "Activo",
+        help: "Desactívela para que esta regla deje de asignar registros nuevos, sin eliminarla."
+      }
+    },
+    _views: {
+      by_object: {
+        label: "Por objeto"
       }
     }
   }

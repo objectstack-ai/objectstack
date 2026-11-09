@@ -529,3 +529,44 @@ describe('[#22773] CONTROL — a kernel with an http.server gets no second mount
         expect(routes.some((r) => r.startsWith('POST ') && answers(r.slice(5), '/api/v1/automation/f/trigger'))).toBe(true);
     });
 });
+
+/**
+ * [#30009] A hook may declare its sender's own scheme (`config.signature`):
+ * the trigger then verifies the header that scheme names, which can be any
+ * header the vendor writes (DocuSign Connect's `X-DocuSign-Signature-1`). The
+ * dispatcher forwards the transport's own request, so that header reaches the
+ * member as received, a repeated field included, with no allow-list of header
+ * names in between. The double verifies DocuSign's base64 HMAC-SHA256 of the
+ * raw body off the forwarded request, as the trigger's declared verifier does.
+ */
+describe('[#30009] the forwarded request keeps a vendor\'s own signature header', () => {
+    it('a DocuSign-signed POST reaches the member with X-DocuSign-Signature-1 as sent, a repeated field as its one joined value, and verifies', async () => {
+        const { createHmac } = await import('node:crypto');
+        const KEY = 'pin-30009-docusign-connect-key';
+        const vendorBody = '{"envelopeId":"env_30009","status":"completed"}';
+        const digest = createHmac('sha256', KEY).update(vendorBody, 'utf8').digest('base64');
+        const seen: Array<string | null> = [];
+        const handleInboundHook = vi.fn(async (request: Request): Promise<Response> => {
+            const value = request.headers.get('x-docusign-signature-1');
+            seen.push(value);
+            const body = await request.text();
+            const expected = createHmac('sha256', KEY).update(body, 'utf8').digest('base64');
+            return value === expected ? json(202, { accepted: true, messageId: 'msg_vendor' }) : json(401, REFUSAL);
+        });
+        const { dispatcher } = makeDispatcher({ 'trigger-api': { handleInboundHook } });
+        const vendorPost = (values: string[]) => new Request(`${ORIGIN}/api/v1${ROUTE}`, {
+            method: 'POST',
+            headers: new Headers([['Content-Type', 'application/json'], ...values.map((v) => ['X-DocuSign-Signature-1', v] as [string, string])]),
+            body: vendorBody,
+        });
+
+        const once = vendorPost([digest]);
+        const ok = await dispatcher.dispatch('POST', ROUTE, undefined, {}, ctx(once));
+        expect(handleInboundHook.mock.calls[0]![0]).toBe(once);
+        expect((ok.result as Response).status).toBe(202);
+
+        const twice = await dispatcher.dispatch('POST', ROUTE, undefined, {}, ctx(vendorPost([digest, digest])));
+        expect((twice.result as Response).status).toBe(401);
+        expect(seen).toEqual([digest, `${digest}, ${digest}`]);
+    });
+});

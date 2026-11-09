@@ -74,7 +74,10 @@ const mockClient = vi.hoisted(() => {
     /** `GET …/layers`: `effective` is the ACTIVE row only — a draft never feeds it. */
     layered: vi.fn(async (type: string, name: string) => {
       const eff = server.active.get(k(type, name)) ?? null;
-      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, editable: true, deletable: true, resettable: false, lock: 'none' };
+      // The stored draft row, as the layered read serves it (objectstack#29793).
+      const stored = server.drafts.get(k(type, name));
+      const draft = stored ? JSON.parse(JSON.stringify(stored)) : null;
+      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, draft, editable: true, deletable: true, resettable: false, lock: 'none' };
     }),
     /** `GET …?state=draft`: the stored draft row raw (decorated like the real read), else `NO_DRAFT`. */
     getDraft: vi.fn(async (type: string, name: string) => {

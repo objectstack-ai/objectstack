@@ -40,15 +40,19 @@
  *            gives (ADR-0087 D1, #21762), and nothing is registered or written.
  *            The answer's `hotLoaded` says whether the running kernel's
  *            `manifest.register` resolved (#22695). An inline manifest whose
- *            register throws is refused (`PLUGIN_REGISTER_FAILED`, 422); a
- *            cloud-fetched one is still installed (the lenient path) and answers
- *            `200` with `hotLoaded: false` and the register error's message as
- *            `hotLoadError` — in the ledger, loaded at the next restart —
- *            unless the register was refused because an environment-authored
- *            item already holds a position, permission set or capability name
- *            the package ships (#25366): no restart clears that, so both
- *            branches refuse it (`PLUGIN_REGISTER_FAILED`, 422) and nothing is
- *            registered or written.
+ *            register throws is refused (`PLUGIN_REGISTER_FAILED`, 422), and
+ *            so is a cloud-fetched one whose register the engine REFUSED — a
+ *            throw declaring a 4xx status of its own (#31478): a name another
+ *            holder holds (its namespace, a position, permission set or
+ *            capability name, a bare name; #25366, #31296, #31392), a default
+ *            record page, an object another package owns, a picklist or a
+ *            bound action's object nobody declares, a body its schema refuses.
+ *            No restart heals a refusal, so nothing is registered or written.
+ *            A cloud-fetched register failure that declares no 4xx (the
+ *            runtime's own fault) takes the lenient path: still installed,
+ *            answering `200` with `hotLoaded: false` and the register error's
+ *            message as `hotLoadError` — in the ledger, loaded at the next
+ *            restart.
  *
  *          `installMode: 'managed' | 'unmanaged'` (ADR-0131 D6; absent means
  *          `managed`, the key parsed against `InstallModeSchema`) chooses
@@ -73,8 +77,43 @@
  *              payload check, step 1b (package id), the ADR-0131 D3
  *              walled-catalog refusal and step 1c (protocol handshake),
  *              none of which writes, and before any write.
+ *              [#30794] `targetNamespace` (optional) renames the copy into
+ *              a namespace of its own — the import's rename-on-install:
+ *              every copied object name takes it, every reference follows,
+ *              and the answer's `installedFrom.namespace` records the
+ *              source's. Absent, the copy keeps the package's namespace.
+ *              [#30808] `seedSampleData: true` (optional, off by default)
+ *              copies the package's sample data too: each seed dataset is
+ *              written into the new base as one `seed` item — the copy's seed
+ *              receipt in the environment ledger, its `object` following the
+ *              rename and its records verbatim — inside the import's
+ *              all-or-nothing copy, and the rows are then loaded from those
+ *              stored bodies, in load order, owned by the installer
+ *              (`owner_id` / `created_by`, ordinary permissions; #30324, #30680).
+ *              The answer's `seeded` reports the load. The purge door then
+ *              removes exactly those rows for the base's id; the reseed door
+ *              loads them again from the same receipt — also how a first load
+ *              that failed (`seed-receipt-unread`, `seed-error`) is retried —
+ *              and the count door counts them (#31425). Off, the copy loads
+ *              none and says so (`seeded.mode: 'skipped'`). Uninstalling the
+ *              copy is `DELETE /api/v1/packages/:baseId`, which drops the
+ *              copy's object tables with their rows unless `keepData: true`
+ *              keeps them all, sample rows included; this door does not purge
+ *              on uninstall.
+ *          `targetNamespace` beside a `managed` install (or no `installMode`)
+ *          answers `400 INVALID_REQUEST` before anything is fetched: a
+ *          managed install is never renamed, it keeps its upgrade channel.
+ *          So does `seedSampleData` beside one — a managed install always
+ *          loads its sample data — and a `seedSampleData` that is not a
+ *          boolean.
  *          A mode the package's `installModes` does not permit answers
  *          `422 INSTALL_MODE_NOT_PERMITTED`, before any write.
+ *          Either mode reads the body's `withheldMaps` — the connector header
+ *          and environment maps a package export withheld whole (#28640
+ *          ruling ③A) — accepts the package, and names each map in its
+ *          answer's `withheldMaps` and in one `warn` line; a list the export's
+ *          declaration refuses answers `PLUGIN_MANIFEST_INVALID` (400 inline,
+ *          502 cloud), before any write.
  *
  *          [ADR-0126 §6 wall 3] A managed RE-install over an installed package
  *          asks the security plugin's access upgrade check
@@ -88,6 +127,51 @@
  *          confirmation in the ledger entry. A check that could not read
  *          answers `503 SERVICE_UNAVAILABLE`. Under a wall only the operator
  *          reaches this step (ADR-0131 D12 items 7–8).
+ *
+ *          [epic cloud#3652 D3, #30885] After that check, a field rename the
+ *          package declares (`renamedFrom`) is read against the physical
+ *          table, before any write: each old column is carried to its new
+ *          key right before the new version registers (and put back if the
+ *          register fails), and the answer names each in `renamesCarried`. A
+ *          declaration the carry cannot honour — the old key a platform
+ *          column or still live, claimed twice, both columns present, two old
+ *          columns, a destructive type change, an index that cannot follow,
+ *          a transport that renames no column, or an extension naming a key
+ *          its own package never contributed — answers `422
+ *          VALIDATION_ERROR` with `details.refusals`, naming the field, the
+ *          old key and the reason. A rename this runtime cannot read the
+ *          table for answers `503 SERVICE_UNAVAILABLE`.
+ *
+ *          [epic cloud#3652 Q3, #30884] Then the same managed RE-install is
+ *          compared with the installed version (its ledger entry) by the
+ *          package upgrade plan, before any write. A stored field removed while
+ *          one is added with nothing linking them (a suspected rename), or a
+ *          type change the drift categories call `needs_confirm` or
+ *          `destructive`, answers `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`
+ *          with `details.findings` and the finding set's token; the same
+ *          request with `confirmSchemaUpgrade: <token>` installs and records
+ *          the confirmation in the ledger entry. An orphaned install (the
+ *          registry serves it, the ledger holds no record) is compared against
+ *          the body the registry serves. A record of the installed version
+ *          that will not parse, or no installed body anywhere (an entry or an
+ *          orphan's registry row carrying none), answers the same 409 with one
+ *          finding naming it (`installed_record_unreadable` /
+ *          `installed_record_missing`): no comparison ran, and its token admits
+ *          the re-install.
+ *          Removed fields, `safe` type changes and seed changes are refused by
+ *          nothing.
+ *
+ *          [epic cloud#3652 Q3, #30884] `dryRun: true` answers `200` with the
+ *          package upgrade plan — the installed version (its ledger entry)
+ *          against this one: objects, fields, type changes, declared and
+ *          suspected renames, seed datasets — and the `manifest` service's
+ *          readings of this environment (rows in each touched column, rows a
+ *          customer edited that the seed replay overwrites), after every
+ *          refusal that says the package cannot install at all and before
+ *          any confirmation ceremony or write. Nothing is installed or
+ *          written. A dry run of an `unmanaged` install or of a
+ *          customization pair answers `400 INVALID_REQUEST`, as does a
+ *          `dryRun` that is not a boolean.
  *
  *   GET   /api/v1/marketplace/install-local
  *          → lists currently installed marketplace packages. Requires an
@@ -163,6 +247,8 @@ import {
     orderHydrationBatch,
     artifactPackageId,
     declaredDependencyIds,
+    credentialUseClientFor,
+    transportPeerAddressOf,
 } from '@objectstack/core';
 import {
     resolveTenancyPosture,
@@ -185,8 +271,14 @@ import {
     resolveInstallModes,
     deriveNamespaceFromPackageId,
     unmanagedInstallValueCarries,
+    // [ADR-0146 D3, #30106] The one spelling of the pair suffix: which ids are a
+    // base's paired customization package.
+    customizationBasePackageId,
     type InstallMode,
 } from '@objectstack/spec/kernel';
+// [#28640 ruling ③A] The export's list of the connector maps it withheld whole,
+// read by both install modes through its one declaration.
+import { PackageExportManifestSchema, type PackageExportManifest } from '@objectstack/spec/api';
 // [#21762] ADR-0087 D1's protocol handshake, its brand predicate and the ONE
 // answer both package-install doors give its refusal. Imported from the
 // producer, never restated: `POST /api/v1/packages` answers through the same
@@ -195,6 +287,7 @@ import {
 import {
     assertProtocolCompat,
     checkProtocolCompat,
+    type ProtocolCompatAdmitted,
     // [ADR-0141 D2] The pre-install dependency check: the one predicate and
     // the one answer every package-install door gives its refusal.
     checkDeclaredDependencies,
@@ -212,6 +305,21 @@ import {
     fieldPatchTargetRefusals,
     fieldPatchTargetRefusalMessage,
     type FieldPatchTargetRefusal,
+    // [ADR-0146 D3 · ruling record 6691022506] The installed manifests the
+    // override gate's pair lookup reads.
+    installedManifestsOf,
+    type InstalledManifestLookup,
+    // [epic cloud#3652 Q3, #30884] The ONE comparison of two package versions —
+    // the one the dry run and `os diff` read — which step 2c′'s verdict reads.
+    comparePackageVersions,
+    // [epic cloud#3652 Q3, #30884] The ONE schema upgrade verdict and its
+    // token — the rule a host's install door applies too, so both doors refuse
+    // the same pair of versions with the same findings and the same token.
+    schemaUpgradeVerdict,
+    installedRecordUnavailableVerdict,
+    SCHEMA_UPGRADE_CONFIRMATION_REQUIRED,
+    SCHEMA_UPGRADE_CONFIRMATION_STATUS,
+    type SchemaUpgradeVerdict,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
@@ -221,17 +329,52 @@ import {
     LocalManifestSource,
     type InstalledManifestEntry,
     type InstalledManifestListing,
+    type LegacyLedgerAdoption,
     type SkippedManifestEntry,
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
-import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import { countSeedRows, matchSeedRows, purgeSeedRows, seedDatasetOfReceiptItem, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
+import {
+    INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent, refusalCodeOf, routeContextOf,
+    type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditEvent, type UnmanagedImportAuditSurface,
+} from './install-local-door-service.js';
+import {
+    UnmanagedCopyRecord,
+    readUnmanagedCopyInstance,
+    type UnmanagedCopyInstance,
+    type UnmanagedCopyPackageStore,
+} from './marketplace-install-local-unmanaged-copies.js';
+import {
+    isStampableOwner,
+    stampSeedOwner,
+    type SeedOwnerStampInput,
+    type SeedOwnerStampResult,
+} from './marketplace-install-local-seed-owner.js';
+import { planCustomizationPairInstall, type PairInstallItem } from './marketplace-install-local-customization-pair.js';
+import {
+    INSTALL_RENAME_PLANNER_SERVICE,
+    carryInstallDeclaredRenames,
+    reverseInstallDeclaredRenames,
+    type InstallRenameRefusal,
+    type InstallRenameTable,
+} from './marketplace-install-declared-renames.js';
+// [#31895] The planner's one implementation, shared with the door-less
+// MarketplaceInstallRenamePlannerPlugin. Each side of the schema upgrade
+// verdict is folded by `packageUpgradeSideOf`, as `planUpgrade` folds it.
+import {
+    convertPackageBodyForward,
+    packageUpgradeSideOf,
+    planDeclaredRenames,
+    registerInstallRenamePlanner,
+} from './marketplace-install-rename-planner.js';
 import type {
     AuthSessionApi, ConnectorCredentialRef, IAuthService, IAutomationService, IHttpServer, IMetadataService, IObjectQLEngine,
 } from '@objectstack/spec/contracts';
 import type {
     DeletePackageRequest,
+    UninstallCleanup,
     UninstallCleanupOutcome,
     UninstallDeclared,
     ObjectStackProtocolImplementation,
@@ -242,17 +385,25 @@ import type {
 // import verb raises (answered here after the payload, id and handshake checks,
 // before any write), the read-only-package rule (a namespace held by a WRITABLE base is
 // this environment's own metadata), and the client-facing sentence rule.
-import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
+import { unmanagedInstallPostureRefusal, isWritablePackage, READ_ONLY_PACKAGE_SCOPES, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
+// [ADR-0146 D3, #30106] What a pair-shaped package's manifest must declare —
+// the predicate every package install asks of such an id — asked by the pair
+// install before the pair's ensure door.
+import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol';
 // [ADR-0146 D2, #28410] The override write gate's one rule and its item walk,
 // asked at the managed install exactly as the publish doors ask them.
 import { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c''.
-import { judgeExtensionFieldSuffix } from '@objectstack/metadata-protocol';
-import { resolveThrownHttpError } from '@objectstack/types';
-// [#25366] The code the registry's security-catalog refusal carries, compared
-// rather than `instanceof`-tested: the engine keeps the class unexported so a
-// consumer holding the other build realm's copy cannot misread it.
-import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
+import {
+    judgeExtensionFieldSuffix,
+    judgeRedeclaredOwnerFields,
+    redeclaredOwnerFieldInstallMessage,
+    type ObjectOwnerDeclaration,
+    type RedeclaredOwnerFieldRefusal,
+} from '@objectstack/metadata-protocol';
+import { resolveThrownHttpError, type ThrownHttpError } from '@objectstack/types';
+import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
+import { composedClusterDriver, declaresMultiReplicaOnRedis, MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
 
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
@@ -260,27 +411,53 @@ type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
 /**
- * [#25366] Whether a `manifest.register` failure is the registry's security
- * catalog refusal (`SecurityCatalogNameConflictError`, ADR-0048 §3.4 narrowed;
- * `security-catalog-namespace.ts` in `@objectstack/objectql`) naming an
- * environment-authored holder for at least one of the names the package ships.
- *
- * That refusal is the ONE pre-write check for the rule: the registry's package
- * door raises it ahead of every mutation it makes, for every door that installs
- * a package, so this door asks it rather than keeping a second reading of who
- * holds a name. The error is recognised by its code plus its `conflicts` list —
- * the namespace gate shares the code and carries no list.
- *
- * An environment holder is the one a restart never clears: the environment's
- * item is loaded from `sys_metadata` at every boot, and a load of the package
- * — the next install, or this ledger entry at the next rehydrate — meets it
- * again. A holder that is another package or a built-in is not judged here.
+ * The closed query-parameter set of `GET …/:manifestId/sample-data` (AGENTS.md,
+ * route rule 5): it reads none. An unknown name is refused with a located
+ * `400`, never ignored — the door has no dry-run switch to mistype.
  */
-function refusesEnvironmentHeldCatalogName(err: unknown): boolean {
-    if ((err as { code?: unknown } | null)?.code !== NAMESPACE_CONFLICT_CODE) return false;
-    const conflicts = (err as { conflicts?: unknown }).conflicts;
-    return Array.isArray(conflicts)
-        && conflicts.some((c) => (c as { existingHolder?: { kind?: unknown } } | null)?.existingHolder?.kind === 'environment');
+export const SAMPLE_DATA_COUNT_QUERY_PARAMS: readonly string[] = Object.freeze([]);
+
+/**
+ * [#31478] Whether a `manifest.register` failure is the engine REFUSING this
+ * package — a throw that declares a 4xx status of its own
+ * (`resolveThrownHttpError(err).declaredStatus`), never one this door
+ * supplies. Every refusal the registry's package door and the manifest
+ * service's seals raise declares one (`422`, ADR-0112): the held names
+ * (#25366, #31296, #31392), the default record page, a misplaced default page,
+ * an object another package owns, an object name two packages of one
+ * artifact or one shared namespace define, a picklist or a bound action's
+ * object no loaded package declares, a body its schema refuses. Each is judged
+ * before the refused package's own writes stand, and each is a verdict on the
+ * body against this environment, so it is the inline branch's answer on this
+ * branch too. (A multi-package artifact registers its packages one by one: a
+ * member refused after another registered leaves that earlier member in the
+ * running kernel, unledgered, exactly as on the inline branch.) Read by the
+ * declaration, never by a list of classes or codes, so a refusal the engine
+ * gains later is refused here without a change.
+ *
+ * No restart heals any of them, so the lenient answer ("loads at the next
+ * restart") would be false. Measured on a real rehydrate (the `kernel:ready`
+ * seals run before it, so a ledger entry is judged as a late artifact):
+ *   - a refusal of the body itself (a misplaced default page, two objects of
+ *     one name in one artifact, a body its schema refuses) meets the same body
+ *     at every boot;
+ *   - a refusal naming a holder (an owned object, a default record page, a
+ *     held name) meets the same holder at every boot;
+ *   - a picklist or bound-action object nobody declares is healed only by
+ *     ANOTHER install that brings it — after which installing this package
+ *     again succeeds at once — and at a restart only when the ledger happens
+ *     to list the bringer first: the rehydrate sorts by declared
+ *     `dependencies`, and the reference this refusal names is one the package
+ *     did not declare. Declared, it is the pre-install dependency check's
+ *     `422` instead.
+ *
+ * What stays lenient is a failure that declares NO 4xx — an undeclared throw,
+ * or a declared 5xx: the runtime's own fault, not a verdict on the package,
+ * which the restart (of this build or a fixed one) can heal.
+ */
+function isDeclaredRegisterRefusal(err: unknown): boolean {
+    const declared = resolveThrownHttpError(err).declaredStatus;
+    return declared !== undefined && declared >= 400 && declared < 500;
 }
 
 /**
@@ -304,6 +481,17 @@ type UninstallCleanupRunner = {
     runUninstallCleanups?(
         request: Pick<DeletePackageRequest, 'packageId' | 'actor'> & { declared?: UninstallDeclared },
     ): Promise<UninstallCleanupOutcome[]>;
+    /**
+     * [#31283] The verb's pre-uninstall guards, asked through the protocol's
+     * one runner of them — the runner `deletePackage` asks at its first step.
+     */
+    runUninstallGuards?: ObjectStackProtocolImplementation['runUninstallGuards'];
+    /**
+     * [#31283] The verb's `package_uninstall` ledger row (#31186), written
+     * through the protocol's one writer of it — the writer `deletePackage`
+     * calls at its last step.
+     */
+    recordPackageUninstall?: ObjectStackProtocolImplementation['recordPackageUninstall'];
 };
 
 /** The outcome name this door reports when the runner itself could not run. */
@@ -424,6 +612,41 @@ const ACCESS_UPGRADE_CONFIRMATION_STATUS = 409;
  */
 const ACCESS_UPGRADE_CHECK_SERVICE = 'security.accessUpgradeCheck';
 
+/**
+ * [epic cloud#3652 Q3, #30884] The verdict when the ledger holds no installed
+ * side to compare: the ledger file would not parse, its entry carries no
+ * package body, or neither the ledger nor the registry (an orphaned install's
+ * row) holds one. The platform's rule ({@link installedRecordUnavailableVerdict},
+ * `@objectstack/metadata-core`) makes it one confirmable finding, never "no
+ * finding" (2a, 2b and 2c answer the same way); this door writes the finding's
+ * sentence, naming the ledger file it could not read.
+ *
+ * A rename the incoming version declares is judged before this verdict
+ * (step 2c″), on the physical table: with no installed record it is taken as
+ * pending, so a transport that cannot carry it refuses, and an extension's
+ * rename is refused, since whose earlier key it names cannot be told.
+ */
+function ledgerRecordUnavailableVerdict(
+    manifestId: string,
+    failure: { file: string; cause: unknown } | undefined,
+): SchemaUpgradeVerdict {
+    const consequence = 'so this upgrade cannot be checked for fields it renames or retypes: confirming installs it '
+        + 'unchecked, and the install rewrites the record.';
+    return installedRecordUnavailableVerdict(manifestId, failure
+        ? {
+            kind: 'installed_record_unreadable',
+            file: failure.file,
+            cause: describeLedgerCause(failure.cause),
+            describe: `The record of the installed "${manifestId}" (${failure.file}) could not be read `
+                + `(${describeLedgerCause(failure.cause)}), ${consequence}`,
+        }
+        : {
+            kind: 'installed_record_missing',
+            describe: `This runtime holds no package body of the installed "${manifestId}" (neither its install record `
+                + `nor the registry carries one), ${consequence}`,
+        });
+}
+
 /** A finding of the access upgrade check, as this door reads it (`access-upgrade-report.ts`). */
 type AccessFinding = Record<string, any>;
 
@@ -514,6 +737,49 @@ type UnmanagedImporter = {
 };
 
 /**
+ * [#30808] The protocol's by-name read, asked for each item of an unmanaged
+ * copy's seed receipt — typed from the producer's own method, asked as a
+ * capability question at the call site, as {@link UnmanagedImporter} is.
+ *
+ * Not the list read: a `seed` body declares no `name` (`SeedSchema` is
+ * closed and has none), and the list keys every stored item by its body's
+ * `name`, so `getMetaItems({ type: 'seed' })` serves no stored seed item at
+ * all. The by-name read serves each one.
+ */
+type UnmanagedCopySeedReader = {
+    getMetaItem?: ObjectStackProtocolImplementation['getMetaItem'];
+};
+
+/**
+ * [#30808] The store read that names the seed items an unmanaged copy's base
+ * holds, for a purge, which has no import answer to name them from.
+ */
+type UnmanagedCopySeedNameStore = Pick<IObjectQLEngine, 'find'>;
+
+/**
+ * [#30808] The metadata type an unmanaged copy's seed receipt is stored as:
+ * `seed`, the registry's seed-data type (`DEFAULT_METADATA_TYPE_REGISTRY`),
+ * which the import writes each dataset as.
+ */
+const UNMANAGED_COPY_SEED_TYPE = 'seed';
+
+/** [#30808] The uninstall cleanup that removes the door's record of a copy ({@link UnmanagedCopyRecord}). */
+const UNMANAGED_COPY_RECORD_UNINSTALL_CLEANUP = 'install-local:unmanaged-copy-record';
+
+/**
+ * [ADR-0146 D2 / D3, #30106] The three verbs a pair install composes, typed
+ * from the producer's own method signatures and asked as a capability
+ * question at the call site, as {@link UnmanagedImporter} is: the pair's
+ * ensure door (its one creation path), the save door each item is written
+ * through, and the package delete that undoes a pair this install created.
+ */
+type CustomizationPairInstaller = {
+    ensureCustomizationPackage?: ObjectStackProtocolImplementation['ensureCustomizationPackage'];
+    saveMetaItem?: ObjectStackProtocolImplementation['saveMetaItem'];
+    deletePackage?: ObjectStackProtocolImplementation['deletePackage'];
+};
+
+/**
  * [ADR-0131 D6] What the managed-after-unmanaged refusal reads off the
  * `objectql` slot: who holds a namespace, and — through ADR-0070's one
  * predicate, whose own structural contract this extends — whether a holder is
@@ -536,6 +802,8 @@ type NamespaceHoldingEngine = PackageWritabilityEngine & {
 type OverrideGateEngine = PackageWritabilityEngine & {
     registry?: PackageWritabilityEngine['registry'] & {
         getAllPackages?(): unknown;
+        /** [#30542] An installed package's code artifact (`SchemaRegistry#getArtifactItem`). */
+        getArtifactItem?(type: string, name: string, currentPackageId?: string): unknown;
     };
 };
 type OverrideGateLister = {
@@ -565,6 +833,46 @@ export interface OverrideUpgradeCollision {
     packageId: string;
     rule: OverrideWriteRule;
     message: string;
+}
+
+/**
+ * [ADR-0146 D3] The sentence a pair install answers for a refusal of the
+ * pair's ensure door or of the save door: the refusal's own text when it
+ * declared a client status, and `fallback` otherwise. `clientFacingFailureText`
+ * reads the declaration off `status`; the ensure door spells its refusals with
+ * `statusCode` (`protocol-customization-package.ts`), and its own route,
+ * `POST /packages/:id/ensure-customization`, answers them with their text —
+ * so this door says what that route says, never "see the log" for a refusal
+ * whose remedy is the caller's. A server-band status is withheld, as there.
+ */
+function pairDoorRefusalText(err: any, resolved: { status: number }, fallback: string): string {
+    const quoted = clientFacingFailureText(err, fallback);
+    if (quoted !== fallback) return quoted;
+    const declared = typeof err?.statusCode === 'number' && err.statusCode === resolved.status;
+    return declared && resolved.status >= 400 && resolved.status < 500 && typeof err?.message === 'string' && err.message !== ''
+        ? err.message
+        : fallback;
+}
+
+/**
+ * The answer of a managed or pair install the override write gate refused
+ * (status `403`): `NOT_OVERRIDABLE`, the publish doors' code, the first item's
+ * sentence, and every refusal in `details`. One builder, so both installs that
+ * ask the gate answer it alike.
+ */
+function overrideGateRefusalBody(manifestId: string, refusals: readonly OverrideInstallRefusal[]) {
+    const n = refusals.length;
+    return {
+        success: false,
+        error: {
+            code: 'NOT_OVERRIDABLE',
+            message: `Package '${manifestId}' cannot be installed: ${n} of its item${n > 1 ? 's are' : ' is'} refused by `
+                + `the override write gate (ADR-0146 D2). ${refusals[0].message}`
+                + (n > 1 ? ` (${n - 1} more in \`details.refusals\`.)` : '')
+                + ' Nothing was installed or written.',
+            details: { refusals },
+        },
+    };
 }
 
 function dependencyIdsOf(manifest: unknown): string[] {
@@ -600,6 +908,113 @@ function listedIdentity(type: string, item: Record<string, unknown>): string | u
 /** A `{ … }` object — not an array, not null. */
 function isPlainObject(value: unknown): value is Record<string, any> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** One entry of an export's `withheldMaps` ({@link PackageExportManifestSchema}). */
+type WithheldMap = NonNullable<PackageExportManifest['withheldMaps']>[number];
+
+/**
+ * [#28640 ruling ③A] The connector maps the export that produced this body
+ * withheld whole — its `withheldMaps`, parsed through the export's own
+ * declaration ({@link PackageExportManifestSchema}), by reference. Read by
+ * BOTH install modes before any write, so each answer names every map that
+ * arrives incomplete instead of letting it read as one the package never had.
+ *
+ * An absent list is `[]`: a body that is not an export, or an export that
+ * withheld nothing. A list the declaration refuses is refused here, the way
+ * an invalid `installModes` is ({@link judgeInstallMode}): it can only have
+ * been written by hand, and guessing which maps it meant is the silent answer
+ * the list exists to replace. The import never refuses a package FOR an
+ * incomplete map (the ruling: accept, and name each one).
+ */
+function judgeWithheldMaps(
+    manifest: Record<string, any>,
+    manifestId: string,
+    invalidManifestStatus: 400 | 502,
+): { ok: true; withheldMaps: WithheldMap[] } | { ok: false; status: number; error: { code: string; message: string } } {
+    const declared = PackageExportManifestSchema.shape.withheldMaps.safeParse(manifest.withheldMaps);
+    if (!declared.success) {
+        const [issue] = declared.error.issues;
+        return {
+            ok: false,
+            status: invalidManifestStatus,
+            error: {
+                code: 'PLUGIN_MANIFEST_INVALID',
+                message: `Package '${manifestId}' carries an invalid \`withheldMaps\`: ${issue?.message ?? 'refused by its declaration'}`
+                    + `${issue && issue.path.length > 0 ? ` (at \`withheldMaps.${issue.path.join('.')}\`)` : ''}. `
+                    + 'Send the list as the package export wrote it, or omit it.',
+            },
+        };
+    }
+    return { ok: true, withheldMaps: declared.data ?? [] };
+}
+
+/**
+ * [#28640 ruling ③A] The operator's line for an install that received
+ * withheld maps: each one named, once, at `warn` — the connector is installed
+ * and runs, without the headers or environment variables the export held back.
+ */
+function withheldMapsLogLine(
+    manifestId: string,
+    mode: InstallMode | 'into its writable pair',
+    withheldMaps: readonly WithheldMap[],
+): string {
+    const named = withheldMaps.map((m) => `${m.type} '${m.name}' ${m.path}`).join(', ');
+    return `[MarketplaceInstallLocal] installed ${manifestId} ${mode} with ${withheldMaps.length} connector map(s) the `
+        + `package export withheld whole, each now absent: ${named}. The connector sends none of those headers or `
+        + 'environment variables until each map is supplied again where the connector is authored.';
+}
+
+/**
+ * [#30326] What an install answer carries when ADR-0087 D1's handshake
+ * admitted the package WITHOUT checking it: the person who pressed Install is
+ * the one who needs to know, and the `warn` line alone reaches only whoever
+ * reads the server log. Present on a success answer only then; omitted, not
+ * nulled, for a package whose range was checked, so that answer's key set is
+ * unchanged.
+ *
+ * `reason` is the handshake's own verdict, never a second reading of the
+ * range: `no-range` (the package declares no `engines.protocol`, nor either
+ * legacy spelling) or `unparsed-range` (it declares a range the handshake's
+ * grammar does not read). `protocolVersion` is the protocol the package was
+ * loaded under unchecked.
+ */
+export type ProtocolCheckSkipped =
+    | { reason: 'no-range'; packageId: string; protocolVersion: string; message: string }
+    | {
+        reason: 'unparsed-range';
+        packageId: string;
+        protocolVersion: string;
+        requiredRange: string;
+        rangeSource: string;
+        message: string;
+    };
+
+/** [#30326] The notice for a verdict the handshake admitted unchecked; `undefined` for a checked one. */
+function protocolCheckSkippedOf(verdict: ProtocolCompatAdmitted, packageId: string): ProtocolCheckSkipped | undefined {
+    if (verdict.status === 'ok') return undefined;
+    const consequence = `so it was installed under platform protocol ${verdict.protocolVersion} without a compatibility `
+        + 'check and may not work on this platform version. A build of the package that declares the protocol it '
+        + 'supports (`engines.protocol`) is checked at install.';
+    switch (verdict.status) {
+        case 'no-range':
+            return {
+                reason: 'no-range',
+                packageId,
+                protocolVersion: verdict.protocolVersion,
+                message: `Package '${packageId}' does not state which platform protocol it supports, ${consequence}`,
+            };
+        case 'unparsed-range':
+            return {
+                reason: 'unparsed-range',
+                packageId,
+                protocolVersion: verdict.protocolVersion,
+                requiredRange: verdict.requiredRange,
+                rangeSource: verdict.source,
+                message: `Package '${packageId}' states its platform protocol as '${verdict.requiredRange}' `
+                    + `(${verdict.source}), which this runtime cannot read, ${consequence}`,
+            };
+    }
 }
 
 /**
@@ -772,6 +1187,20 @@ export function asMarketplaceRegistration<T>(artifact: T): T {
 }
 
 /**
+ * [#31425] The package body an unmanaged copy's reseed hands the seed-locale
+ * resolution: the copy base's own manifest, as the registry holds it — the
+ * copy keeps no ledger body of the source package. `undefined` when the
+ * registry cannot answer, and the locale then falls back without it.
+ */
+function unmanagedCopyBaseManifest(ctx: PluginContext, baseId: string): unknown {
+    try {
+        return ctx.getService<NamespaceHoldingEngine>('objectql')?.registry?.getPackage?.(baseId)?.manifest;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
  * The seed datasets a cached manifest bundles: its `data[]` entries that name
  * an object and carry records. One reading for the two doors that match seed
  * rows — the purge, and the listing's `withSampleData` (#21775).
@@ -783,19 +1212,34 @@ function seedDatasetsOf(manifest: any): PurgeSeedDataset[] {
 }
 
 /**
- * [#21822] The marker the GET listing puts on a ledger entry this boot's
- * `kernel:ready` rehydrate refused to load: the refusal's `code` and the range
- * the package declares.
+ * [#21822, #31566] The marker the GET listing puts on a ledger entry this
+ * boot's `kernel:ready` rehydrate refused to load. A CLOSED union, one arm per
+ * refusal the rehydrate records, each arm's members named one by one:
  *
- * CLOSED: exactly these two members, named one by one from the handshake's own
- * diagnostic, the way `protocolIncompatibleAnswer` names its `details`. ⛔ Not a
- * spread of the diagnostic: a member added to it later does not reach the
- * listing without a decision here.
+ *   - [#21822] ADR-0087 D1's handshake refused the entry's declared protocol
+ *     range: the refusal's `code` and the range the package declares, from the
+ *     handshake's own diagnostic, the way `protocolIncompatibleAnswer` names
+ *     its `details`;
+ *   - [#31566] the engine refused the entry's register
+ *     ({@link isDeclaredRegisterRefusal}): the refusal's `code` (the resolver's
+ *     ADR-0112 vocabulary member — the engine's own code when it is
+ *     registered, otherwise the code its declared status derives, never one
+ *     coined here) and its sentence. A refusal judges before any of the
+ *     artifact's writes stand, so nothing of the entry is loaded.
+ *
+ * ⛔ Not a spread of the diagnostic or the error: a member added to either
+ * later does not reach the listing without a decision here, and neither does a
+ * third arm.
  */
-interface NotLoadedMarker {
-    code: ProtocolIncompatibleDiagnostic['code'];
-    requiredRange: ProtocolIncompatibleDiagnostic['requiredRange'];
-}
+type NotLoadedMarker =
+    | {
+        code: ProtocolIncompatibleDiagnostic['code'];
+        requiredRange: ProtocolIncompatibleDiagnostic['requiredRange'];
+    }
+    | {
+        code: ThrownHttpError['code'];
+        message: ThrownHttpError['message'];
+    };
 
 /**
  * [ADR-0093 D4/D5, ADR-0105 D1 / #5262] Is an organization wall actually IN
@@ -924,6 +1368,40 @@ function refuseHeldSession(c: any, principal: InstallPrincipal): Response | null
 }
 
 /**
+ * [cloud#3814 R6] The refusal the install and uninstall doors give when this
+ * deployment declares several replicas over the Redis cluster driver
+ * (`declaresMultiReplicaOnRedis`, `@objectstack/service-cluster` — the one
+ * condition every multi-replica card keys on), right after the caller is
+ * admitted and before the body is read or anything is written.
+ *
+ * These doors change ONE replica: they write the install ledger under the
+ * serving process's own `OS_HOME` and load the package into (or withdraw it
+ * from) that process's kernel alone, and the other replicas never see it —
+ * a permanent divergence, since each replica rehydrates its own ledger at
+ * boot. So under declared replicas the change is refused, `409`, with
+ * `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` and the maintenance-window recipe;
+ * nothing is written, registered or withdrawn. The cluster service's driver
+ * is read here, per request, where the answer is used. `null` on a single
+ * node, the in-process driver or any other driver: the door proceeds exactly
+ * as before.
+ */
+function refuseMultiReplicaPackageChange(c: any, ctx: PluginContext, subject: 'Installing' | 'Uninstalling'): Response | null {
+    if (!declaresMultiReplicaOnRedis(process.env, composedClusterDriver(ctx))) return null;
+    const what = subject === 'Installing' ? 'the package' : 'the uninstall';
+    return c.json({
+        success: false,
+        error: {
+            code: MULTI_REPLICA_PACKAGE_CHANGE_REFUSED,
+            message: `${subject} a package through install-local was refused: this deployment declares several replicas `
+                + '(OS_CLUSTER_REPLICAS greater than 1, or OS_EXPECT_MULTI_NODE=true) on the Redis cluster driver, and '
+                + 'install-local changes only the replica that serves the request: its own install ledger and its own '
+                + `kernel. The other replicas would never see ${what}. Make the change in a maintenance window instead: `
+                + 'run the install script, then restart every replica. Nothing was installed, uninstalled or written.',
+        },
+    }, 409);
+}
+
+/**
  * [#15204 W2] What an admitted mutating request carries past
  * `requireInstallCapability`: the acting user, plus the two inputs ADR-0131
  * D3's refusal needs, both off the admission's single authorization read.
@@ -961,7 +1439,9 @@ export interface MarketplaceInstallLocalPluginConfig {
      *  OS_CLOUD_URL=off to disable (the install endpoint then returns 503). */
     controlPlaneUrl?: string;
     /** Override the on-disk cache directory. Defaults to
-     *  `<cwd>/.objectstack/installed-packages`. */
+     *  `<OS_HOME>/installed-packages` when `OS_HOME` is set, else
+     *  `<cwd>/.objectstack/installed-packages` (`resolveInstalledPackagesDir`).
+     *  An explicit directory adopts nothing from the working directory. */
     storageDir?: string;
 }
 
@@ -970,9 +1450,26 @@ export interface MarketplaceInstallLocalPluginConfig {
 // this plugin is its HTTP mutation surface).
 type InstalledEntry = InstalledManifestEntry;
 
+/**
+ * [#30324] The person a seeding door names as the owner of the rows its load
+ * creates, or `null` with the reason the door has none (logged, never
+ * invented).
+ */
+interface SeedOwnerOfLoad {
+    userId: string | null;
+    door: string;
+    none?: string;
+}
+
 export class MarketplaceInstallLocalPlugin implements Plugin {
     readonly name = 'com.objectstack.runtime.marketplace-install-local';
     readonly version = '1.0.0';
+
+    /**
+     * [#30964] Services init() registers on every path (ADR-0116): the in-process install door, and [#31801] the
+     * read-only declared-rename planner.
+     */
+    readonly providesServices = [INSTALL_LOCAL_DOOR_SERVICE, INSTALL_RENAME_PLANNER_SERVICE];
 
     private readonly cloudUrl: string;
     private readonly ledger: LocalManifestSource;
@@ -987,9 +1484,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private readonly bootUserCodeIds = new Set<string>();
     /**
-     * [#21822] What this boot's `kernel:ready` rehydrate refused to load under
-     * ADR-0087 D1's handshake, keyed by manifest id: the refused entry's
-     * `installedAt` and the marker the GET listing serves for it.
+     * [#21822, #31566] What this boot's `kernel:ready` rehydrate refused to
+     * load — under ADR-0087 D1's handshake, or because the engine refused its
+     * register — keyed by manifest id: the refused entry's `installedAt` and
+     * the marker the GET listing serves for it ({@link NotLoadedMarker}).
      *
      * The record of what the rehydrate DID, written by it alone, never a second
      * judgement of the ledger: the listing does not re-run the handshake.
@@ -1003,15 +1501,39 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private readonly refusedAtRehydrate = new Map<string, { installedAt: string; marker: NotLoadedMarker }>();
 
+    /**
+     * [#30808] The unmanaged copies this door made, beside the ledger
+     * ({@link UnmanagedCopyRecord}): the only bases its purge reaches without
+     * a ledger entry.
+     */
+    private readonly unmanagedCopies: UnmanagedCopyRecord;
+
     constructor(config: MarketplaceInstallLocalPluginConfig = {}) {
         this.cloudUrl = resolveCloudUrl(config.controlPlaneUrl);
         this.ledger = new LocalManifestSource(config.storageDir);
         this.storageDir = this.ledger.dir;
+        this.unmanagedCopies = new UnmanagedCopyRecord(this.storageDir);
         this.credentials = new ConnectionCredentialStore();
     }
 
-    init = async (_ctx: PluginContext): Promise<void> => {
-        // No services registered — pure HTTP wiring during start().
+    init = async (ctx: PluginContext): Promise<void> => {
+        // [#30964] The install door, in process ({@link INSTALL_LOCAL_DOOR_SERVICE}):
+        // the cloud-connection door hands it the copy an unmanaged grant asks
+        // for. The same handler `POST ${ROUTE_BASE}` mounts at kernel:ready.
+        const door: InstallLocalDoor = {
+            install: async (request: Request, options?: { grant?: InstallLocalDoorGrant }): Promise<Response> =>
+                this.installForGrant(routeContextOf(request), ctx, options?.grant),
+        };
+        ctx.registerService?.(INSTALL_LOCAL_DOOR_SERVICE, door);
+
+        // [#31801, cloud#3862] The declared-rename planner, read-only, as its
+        // own service: what step 2c″ of the door would carry and refuse for
+        // the same two versions ({@link planDeclaredRenames}, the one entry
+        // both call). A service apart from the door's, so a reader is never
+        // handed the install. [#31895] Registered by the shared module, which
+        // MarketplaceInstallRenamePlannerPlugin registers too: whichever of the
+        // two initializes first registers it, once.
+        registerInstallRenamePlanner(ctx);
     };
 
     start = async (ctx: PluginContext): Promise<void> => {
@@ -1032,6 +1554,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
             // 1. Rehydrate previously installed packages so they survive restart.
             await this.rehydrate(ctx);
+
+            // [#30808] An uninstalled copy leaves the door's record of it.
+            this.registerUnmanagedCopyCleanup(ctx);
 
             // 2. Mount HTTP endpoints.
             // [#4251] Read canonical-first with a REAL per-name fallback:
@@ -1059,9 +1584,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
 
             const reseedHandler = async (c: any) => this.handleReseed(c, ctx);
             const purgeHandler = async (c: any) => this.handlePurge(c, ctx);
+            const sampleDataCountHandler = async (c: any) => this.handleSampleDataCount(c, ctx);
 
             if (typeof rawApp.post === 'function') rawApp.post(ROUTE_BASE, postHandler);
             if (typeof rawApp.get === 'function') rawApp.get(ROUTE_BASE, getHandler);
+            if (typeof rawApp.get === 'function') rawApp.get(`${ROUTE_BASE}/:manifestId/sample-data`, sampleDataCountHandler);
             if (typeof rawApp.delete === 'function') rawApp.delete(`${ROUTE_BASE}/:manifestId`, deleteHandler);
             if (typeof rawApp.post === 'function') {
                 rawApp.post(`${ROUTE_BASE}/:manifestId/reseed-sample-data`, reseedHandler);
@@ -1082,6 +1609,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private rehydrate = async (ctx: PluginContext): Promise<void> => {
         // [#21822] The record describes THIS rehydrate, and nothing older.
         this.refusedAtRehydrate.clear();
+        // [#30217] Before the read: the installs an earlier release ledgered in
+        // the working directory are copied into the ledger that now follows
+        // OS_HOME, once, so they rehydrate here instead of silently vanishing.
+        this.adoptLegacyLedger(ctx);
         const { entries, skipped } = this.readAll();
 
         // #5413 — BEFORE the early return, not after. A ledger whose entries
@@ -1147,7 +1678,28 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // `packages[]` bundle included, whatever its entry states
                 // ([#28534], {@link asMarketplaceRegistration}), a ledger entry
                 // written before that rule included.
-                await manifestService!.register(asMarketplaceRegistration(converted), { source: 'marketplace' });
+                try {
+                    await manifestService!.register(asMarketplaceRegistration(converted), { source: 'marketplace' });
+                } catch (err: unknown) {
+                    // [#31566] A register the engine REFUSED (a declared 4xx,
+                    // {@link isDeclaredRegisterRefusal}) is a ledger entry an
+                    // earlier build wrote before the install door refused it
+                    // (#31478). It meets the same refusal at every boot, and
+                    // nothing of it is loaded — a refused artifact registers
+                    // none of its members — so it is recorded where #21822's
+                    // refusal is, and the listing marks it not loaded instead
+                    // of installed. A fault (no 4xx declared) is not recorded:
+                    // the next boot can load it. Either way the catch below
+                    // logs it, as before.
+                    if (isDeclaredRegisterRefusal(err)) {
+                        const refusal = resolveThrownHttpError(err);
+                        this.refusedAtRehydrate.set(entry.manifestId, {
+                            installedAt: entry.installedAt,
+                            marker: { code: refusal.code, message: refusal.message },
+                        });
+                    }
+                    throw err;
+                }
                 // Sync schemas so the driver creates tables for the newly-
                 // registered objects (idempotent — already-synced tables
                 // are no-ops).
@@ -1263,7 +1815,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
 
         try {
-            const summary = await this.runInlineSeed(ctx, datasets);
+            // [#30281] No user starts a boot heal: the setting, then this
+            // package's declared default locale.
+            const summary = await this.runInlineSeed(ctx, datasets, undefined, { app: converted }, await this.resolveRecordedInstaller(ctx, entry));
             const landed = (summary.inserted ?? 0) + (summary.updated ?? 0);
             if (landed > 0) {
                 entry.withSampleData = true;
@@ -1501,7 +2055,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private buildSeedReplayer = (ctx: PluginContext) => {
         const empty = () => ({ inserted: 0, updated: 0, skipped: 0, errors: [] as any[] });
-        return async (organizationId: string) => {
+        // [#30281] `options.userId` is the organization's founder when the
+        // org-scoping middleware knows one — the AppPlugin replayer's shape.
+        return async (organizationId: string, options?: { userId?: string }) => {
             if (!organizationId) return empty();
             const datasetsNow = this.readSharedSeedDatasets(ctx);
             if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) return empty();
@@ -1520,10 +2076,59 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 ctx.logger?.warn?.(`[MarketplaceInstallLocal] seed-replayer: objectql/metadata unavailable — org ${organizationId} not seeded`);
                 return empty();
             }
-            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId);
+            // [#30281] The locale is resolved per organization: its setting,
+            // then the founder's language. No app default rung — the shared
+            // list is every installed package's datasets, and no one package's
+            // declared default speaks for the union.
+            // [#30324] The founder owns the rows: the organization's first
+            // admin, the one person this door is handed. With none, the rows
+            // keep no owner, as before.
+            const s = await this.runInlineSeed(ctx, datasetsNow, organizationId, { userId: options?.userId }, {
+                userId: options?.userId ?? null,
+                door: 'per-organization seed replay',
+                none: `the replay of organization ${organizationId} names no founder`,
+            });
             return { inserted: s.inserted, updated: s.updated, skipped: s.skipped, errors: s.errorList };
         };
     };
+
+    /**
+     * [#31481, cloud#3624 ruling A「两边审计」] The in-process door's install.
+     * Without a `grant` it is {@link handleInstall}, exactly. With one (the
+     * cloud-connection door's copy of an unmanaged grant), a refusal the
+     * unmanaged copy did not already audit hands the `audit` slot one
+     * `package_unmanaged_import` failure event with the answer's code and
+     * status: a refusal before the import runs (the install capability, the
+     * body, the manifest fetch, the walled catalog, the handshake, the mode,
+     * and every other step) would otherwise leave the control plane's grant
+     * row with no outcome in the environment. A throw is audited the same
+     * way, with the status it resolves to, and then rethrown. The import's
+     * own success and failure events ({@link installUnmanaged}) are not
+     * written twice.
+     */
+    private installForGrant = async (c: any, ctx: PluginContext, grant: InstallLocalDoorGrant | undefined): Promise<Response> => {
+        if (!grant) return this.handleInstall(c, ctx);
+        const call = { audited: false };
+        this.grantCalls.set(c, call);
+        let answer: Response;
+        try {
+            answer = await this.handleInstall(c, ctx);
+        } catch (err) {
+            if (!call.audited) {
+                const resolved = resolveThrownHttpError(err, 500);
+                await this.recordUnmanagedImport(c, ctx, grantRefusalEvent(grant, resolved.code, resolved.status));
+            }
+            throw err;
+        }
+        if (!answer.ok && !call.audited) {
+            const errorCode = (await refusalCodeOf(answer)) ?? 'PLUGIN_INSTALL_FAILED';
+            await this.recordUnmanagedImport(c, ctx, grantRefusalEvent(grant, errorCode, answer.status));
+        }
+        return answer;
+    };
+
+    /** [#31481] The grant-path calls in flight, by route context: whether the call's audit event was handed. */
+    private readonly grantCalls = new WeakMap<object, { audited: boolean }>();
 
     private handleInstall = async (c: any, ctx: PluginContext): Promise<Response> => {
         // [#8976] The sharpest of the four: this door accepts an INLINE manifest
@@ -1537,6 +2142,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const admission = await this.requireInstallCapability(c, ctx, 'Installing a package');
         if (!admission.ok) return admission.response;
         const userId = admission.userId;
+
+        // [cloud#3814 R6] Declared replicas over the Redis driver: this door
+        // would install into one replica only. Refused before the body is read.
+        {
+            const refused = refuseMultiReplicaPackageChange(c, ctx, 'Installing');
+            if (refused) return refused;
+        }
 
         // [#23914] A declared JSON body that does not parse is refused 400,
         // never read as no body (`./request-json-body.ts`).
@@ -1564,6 +2176,80 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 400);
         }
         const installMode: InstallMode = requestedMode.data;
+
+        // 0'. [epic cloud#3652 Q3, #30884] ⭐ `dryRun: true` answers the
+        //     package upgrade plan and writes nothing (step 2a′ below). Read
+        //     here with the mode, before anything is fetched: a key this door
+        //     cannot read is refused, never read as "install for real", and a
+        //     dry run of an `unmanaged` install (a copy, which follows no
+        //     upgrade, and whose branch below writes) is refused rather than
+        //     run.
+        if (body?.dryRun !== undefined && typeof body.dryRun !== 'boolean') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: `\`dryRun\` must be true or false, received ${JSON.stringify(body.dryRun)}. Nothing was installed or written.`,
+                },
+            }, 400);
+        }
+        const dryRun = body?.dryRun === true;
+        if (dryRun && installMode === 'unmanaged') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: 'A dry run previews a managed install or upgrade; an `unmanaged` install is a copy that follows no '
+                        + 'upgrade, so there is no plan to preview. Omit `dryRun`, or omit `installMode`. Nothing was installed '
+                        + 'or written.',
+                },
+            }, 400);
+        }
+
+        // 0″. [#30794] ⭐ RENAME-ON-INSTALL IS UNMANAGED ONLY. A `targetNamespace`
+        //     renames the copy an `unmanaged` install writes; a MANAGED install
+        //     is the package itself, registered under the namespace it ships
+        //     and upgraded through it, so it is never renamed — refused here,
+        //     before the cloud round-trip, never ignored. The value itself is
+        //     judged by the import, against the manifest key's own declaration.
+        const targetNamespace: unknown = body?.targetNamespace;
+        if (targetNamespace !== undefined && installMode !== 'unmanaged') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: '`targetNamespace` renames an unmanaged copy, and this install is managed: a managed install '
+                        + 'is never renamed — it keeps the package\'s namespace and its upgrade channel. Install with '
+                        + '`installMode: \'unmanaged\'` to take a copy under a namespace of its own, or omit `targetNamespace`.',
+                },
+            }, 400);
+        }
+
+        // 0‴. [#30808] THE SAMPLE-DATA COPY IS UNMANAGED ONLY, and asked for.
+        //     A managed install loads the package's sample data on every
+        //     install, so a switch beside one would be a key that changes
+        //     nothing — refused, never ignored, as `targetNamespace` is.
+        const seedSampleData: unknown = body?.seedSampleData;
+        if (seedSampleData !== undefined && typeof seedSampleData !== 'boolean') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: `\`seedSampleData\` must be true or false, received ${JSON.stringify(seedSampleData)}. Nothing was installed or written.`,
+                },
+            }, 400);
+        }
+        if (seedSampleData !== undefined && installMode !== 'unmanaged') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'INVALID_REQUEST',
+                    message: '`seedSampleData` chooses whether an unmanaged copy takes the package\'s sample data, and this '
+                        + 'install is managed: a managed install always loads it. Install with `installMode: \'unmanaged\'` '
+                        + 'to take a copy, or omit `seedSampleData`. Nothing was installed or written.',
+                },
+            }, 400);
+        }
 
         // ── Offline path: an inline manifest was supplied (file import). ──
         // Bypass the cloud-fetch entirely; no OS_CLOUD_URL required.
@@ -1771,8 +2457,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     hooks with THIS runtime's binder: ADR-0087 D1 checks "before
         //     loading a package's metadata". An absent or unrecognised range is
         //     admitted with a warning, as at every seam the handshake guards.
+        //
+        //     [#30326] The log line is the operator's; the verdict it admitted
+        //     the package under is also the answer's: every success answer
+        //     below carries `protocolCheckSkipped` when the check did not run.
+        let protocolCheckSkipped: ProtocolCheckSkipped | undefined;
         try {
-            assertProtocolCompat(manifest, undefined, (m) => ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${m}`));
+            const admitted = assertProtocolCompat(manifest, undefined, (m) => ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${m}`));
+            protocolCheckSkipped = protocolCheckSkippedOf(admitted, manifestId);
         } catch (err) {
             if (!isProtocolIncompatibleError(err)) throw err;
             const refusal = protocolIncompatibleAnswer(err);
@@ -1925,6 +2617,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, UNRUNNABLE_REFUSAL_STATUS);
         }
 
+        // 1d'. [#28640 ruling ③A] THE MAPS THE EXPORT WITHHELD, read for both
+        //     modes before any write: each answer names every connector map
+        //     that arrives incomplete ({@link judgeWithheldMaps}). Accepted,
+        //     never refused for, as the ruling has it; only a list the export's
+        //     declaration refuses is.
+        const withheld = judgeWithheldMaps(manifest, manifestId, inlineManifest ? 400 : 502);
+        if (!withheld.ok) return c.json({ success: false, error: withheld.error }, withheld.status as any);
+        const { withheldMaps } = withheld;
+
         // ── [ADR-0131 D6] The `unmanaged` install: a copy, not a registration.
         //    The package's metadata is copied ONCE into a new writable base in
         //    the environment ledger by the import verb, and the steps below —
@@ -1940,6 +2641,69 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 version,
                 versionId: resolvedVersionId,
                 userId,
+                withheldMaps,
+                protocolCheckSkipped,
+                ...(targetNamespace !== undefined ? { targetNamespace } : {}),
+                seedSampleData: seedSampleData === true,
+            });
+        }
+
+        // ── [ADR-0146 D2 / D3, #30106] A base's PAIRED CUSTOMIZATION PACKAGE
+        //    is installed as what it is, never as code: the target's own
+        //    writable pair, created by its ensure door when absent, holding
+        //    every item of the body as a stored item written through the save
+        //    door ({@link installCustomizationPair}). Registered as code, a
+        //    pair served none of its overrides, listed none on the
+        //    customization read and left the pair read-only, while this door
+        //    answered success. Asked here, before the conflict check and every
+        //    later step of the managed install: those steps register, ledger
+        //    and sync the package as code, and none of them is a pair's.
+        //    ⛔ A multi-package artifact never carries a pair: each pair is
+        //    installed from its own export, after its base.
+        const pairBaseId = customizationBasePackageId(manifestId);
+        const bundledPairs: string[] = Array.isArray(manifest.packages)
+            ? manifest.packages
+                .map((entry: unknown) => (isPlainObject(entry) && isPlainObject((entry as any).manifest) ? manifestIdOf((entry as any).manifest) : undefined))
+                .filter((id: unknown): id is string => typeof id === 'string' && customizationBasePackageId(id) !== null)
+            : [];
+        if (Array.isArray(manifest.packages) && (pairBaseId !== null || bundledPairs.length > 0)) {
+            const named = pairBaseId !== null ? [manifestId, ...bundledPairs] : bundledPairs;
+            return c.json({
+                success: false,
+                error: {
+                    code: UNRUNNABLE_REFUSAL_CODE,
+                    message: `Package '${manifestId}' cannot be installed: it carries the paired customization `
+                        + `package${named.length > 1 ? 's' : ''} ${named.map((id) => `'${id}'`).join(', ')} inside a `
+                        + 'multi-package artifact. A pair is installed on its own, from its own export, after its base '
+                        + '(ADR-0146 D3), so that its items are written into the writable pair. Nothing was installed or '
+                        + 'written.',
+                    details: { pairs: named },
+                },
+            }, UNRUNNABLE_REFUSAL_STATUS);
+        }
+        if (pairBaseId !== null) {
+            // [#30884] The pair's branch registers and writes on its own path;
+            // the upgrade plan previews a package's own data schema, not a
+            // pair's, so a dry run of it is refused rather than run.
+            if (dryRun) {
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'INVALID_REQUEST',
+                        message: `Package '${manifestId}' is a customization pair over '${pairBaseId}': a dry run previews `
+                            + 'a package install or upgrade, not a pair. Omit `dryRun`. Nothing was installed or written.',
+                    },
+                }, 400);
+            }
+            return this.installCustomizationPair(c, ctx, {
+                manifest,
+                manifestId,
+                baseId: pairBaseId,
+                version,
+                versionId: resolvedVersionId,
+                userId,
+                withheldMaps,
+                protocolCheckSkipped,
             });
         }
 
@@ -1955,8 +2719,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     package's definitions win and the copied, customer-edited items
         //     stop being served. So the door refuses first, naming the base.
         //     ⛔ Only a WRITABLE holder: a namespace held by another code
-        //     package keeps the lenient branch's existing behaviour, whose fate
-        //     is a separate decision.
+        //     package is the registry's namespace gate's, which both branches
+        //     answer `422` at the register below (#31392).
         const copyBase = this.findEnvironmentBaseHoldingNamespace(ctx, manifest, manifestId);
         if (copyBase) {
             return c.json({
@@ -2027,6 +2791,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 409);
         }
 
+        // 2a′. [epic cloud#3652 Q3, #30884] ⭐ THE DRY RUN answers here,
+        //      after every refusal that says this package cannot install at
+        //      all (payload, id, wall, handshake, dependencies, mode, code it
+        //      cannot run, namespace, conflict, datasource holder) and before
+        //      the first confirmation ceremony (2b) and the first write (3):
+        //      the plan is what an installer reads before deciding, so it is
+        //      answered whether or not a ceremony would stop the install.
+        if (dryRun) return this.answerUpgradeDryRun(c, ctx, { manifest, manifestId, version });
+
         // 2b. [ADR-0120 D5e] `isolated`-posture gate on installation-wide
         //     uniques. Runs BEFORE hot-register and before anything is written
         //     to the ledger: a stopped install must leave the runtime exactly as
@@ -2042,7 +2815,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     Conflating the two nulls is the right call at THIS call site; it
         //     is now made here, in the open, instead of by the ledger for
         //     everyone.
-        const previousEntry = this.ledger.read(manifestId).entry;
+        const previousLookup = this.ledger.read(manifestId);
+        const previousEntry = previousLookup.entry;
         const gate = this.evaluateGlobalUniqueGate(manifest, previousEntry, body, userId);
         if (gate.blocked) {
             ctx.logger?.warn?.(
@@ -2104,6 +2878,44 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             accessUpgradeConfirmation = access.confirmation;
         }
 
+        // 2c″. [epic cloud#3652 D3 「写进清单 renamedFrom」, #30885] ⭐ A DECLARED
+        //      RENAME CARRIES ITS VALUES, OR IS REFUSED BEFORE ANY WRITE. Each
+        //      field this package declares `renamedFrom` on is read against
+        //      the physical table by the driver's own rule
+        //      ({@link evaluateDeclaredRenames}); a declaration it cannot
+        //      honour is refused `422 VALIDATION_ERROR`, naming the field, the
+        //      old key and the reason. Asked before 2c′, so a refusal no token
+        //      answers is never preceded by a 409 asking for one. The carry
+        //      itself runs right before step 3, the last moment the running
+        //      version still serves the old key.
+        const declaredRenames = await this.evaluateDeclaredRenames(
+            ctx,
+            manifestId,
+            converted,
+            conflict === 'marketplace' ? this.installedPackageSide(ctx, manifestId, previousLookup) : null,
+        );
+        if (declaredRenames.refusal) return c.json(declaredRenames.refusal.body, declaredRenames.refusal.status);
+
+        // 2c′. [epic cloud#3652 Q3 「默认拒绝，需显式映射（推荐）」, #30884;
+        //      ruling record 6709061297] ⭐ AN UPGRADE NEVER CHANGES A STORED
+        //      FIELD SILENTLY. On a managed re-install, the package upgrade
+        //      plan of the installed version (its ledger entry) against this
+        //      one decides, before any write: a declared rename (`renamedFrom`)
+        //      is step 2c″'s, above, and no finding here; an undeclared
+        //      suspected rename, a record of the installed version this step
+        //      cannot read, or a `needs_confirm`
+        //      / `destructive` type change is refused `409
+        //      SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` until the same call
+        //      carries the finding set's token. After the access gate (2c),
+        //      which answers its own token first; removed fields and seed
+        //      changes are the dry run's to report, never refused.
+        let schemaUpgradeConfirmation: InstalledEntry['schemaUpgradeConfirmation'];
+        if (conflict === 'marketplace') {
+            const schema = await this.evaluateSchemaUpgradeGate(ctx, manifestId, converted, previousLookup, body, userId);
+            if (schema.refusal) return c.json(schema.refusal.body, schema.refusal.status);
+            schemaUpgradeConfirmation = schema.confirmation;
+        }
+
         // 2d. [ADR-0146 D2, #28410] ⭐ THE OVERRIDE WRITE GATE. A managed
         //     install registers the package's items as code, past every publish
         //     door, so the gate those doors ask is asked here, on the converted
@@ -2116,20 +2928,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     this version now ships are listed on the answer
         //     (`overrideCollisions`), never refused.
         const overrideGate = await this.evaluateOverrideWriteGate(ctx, manifestId, converted);
-        if (overrideGate.refusals.length > 0) {
-            const n = overrideGate.refusals.length;
-            return c.json({
-                success: false,
-                error: {
-                    code: 'NOT_OVERRIDABLE',
-                    message: `Package '${manifestId}' cannot be installed: ${n} of its item${n > 1 ? 's are' : ' is'} refused by `
-                        + `the override write gate (ADR-0146 D2). ${overrideGate.refusals[0].message}`
-                        + (n > 1 ? ` (${n - 1} more in \`details.refusals\`.)` : '')
-                        + ' Nothing was installed or written.',
-                    details: { refusals: overrideGate.refusals },
-                },
-            }, 403);
-        }
+        if (overrideGate.refusals.length > 0) return c.json(overrideGateRefusalBody(manifestId, overrideGate.refusals), 403);
 
         // 2e. [ADR-0146 D10, second rule] ⭐ THE FIELD-PATCH TARGET CHECK,
         //     beside the override gate and before any write: a patch naming a
@@ -2152,6 +2951,75 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     details: { refusals: patchTargetRefusals },
                 },
             }, UNRUNNABLE_REFUSAL_STATUS);
+        }
+
+        // 2e'. [ADR-0146 D10, second rule] ⭐ THE DISPLAY-PROPERTY WHITELIST,
+        //     beside the target check and before any write: an
+        //     `objectExtensions[].fields` entry naming a field the extended
+        //     object's owner declares replaces that field whole, so it is
+        //     refused when it changes anything outside the whitelist, with the
+        //     prescription naming `fieldPatches`. The save doors' judge
+        //     (`judgeRedeclaredOwnerFields`), this door's body-refusal envelope
+        //     (`VALIDATION_ERROR` / 422), every refusal in `details.refusals`.
+        const redeclaredRefusals = this.redeclaredOwnerFieldRefusalsOf(ctx, converted, manifestId);
+        if (redeclaredRefusals.length > 0) {
+            return c.json({
+                success: false,
+                error: {
+                    code: UNRUNNABLE_REFUSAL_CODE,
+                    message: redeclaredOwnerFieldInstallMessage(manifestId, redeclaredRefusals),
+                    details: { refusals: redeclaredRefusals },
+                },
+            }, UNRUNNABLE_REFUSAL_STATUS);
+        }
+
+        // 2f. [cloud#3652 D3, #30885] Carry each declared rename step 2c″
+        //     planned: the old column renamed to the new key, values and all,
+        //     one call per table through the driver (one transaction, or one
+        //     atomic ALTER on MySQL). A table that fails puts back the tables
+        //     already carried, and nothing was installed: the version that
+        //     serves finds its columns where it left them. A register that
+        //     fails below puts them back too.
+        let carried: Awaited<ReturnType<typeof carryInstallDeclaredRenames>> = [];
+        const reverseFailed = (t: InstallRenameTable, err: unknown): void => {
+            ctx.logger?.error?.(
+                `[MarketplaceInstallLocal] could not put back the declared rename(s) carried on ${t.table} for ${manifestId}: `
+                + `${t.carries.map((r) => `${r.from} → ${r.to}`).join(', ')} stay carried — ${String((err as Error)?.message ?? err)}`,
+            );
+        };
+        if (declaredRenames.tables.length > 0) {
+            try {
+                carried = await carryInstallDeclaredRenames(declaredRenames.tables, reverseFailed);
+            } catch (err: any) {
+                const refusals = Array.isArray(err?.refusals) ? err.refusals as Array<Record<string, unknown>> : undefined;
+                if (refusals) {
+                    return c.json({
+                        success: false,
+                        error: {
+                            code: UNRUNNABLE_REFUSAL_CODE,
+                            message: `Upgrading "${manifestId}" is refused: ${String(err.message)}`,
+                            details: { manifestId, refusals },
+                        },
+                    }, UNRUNNABLE_REFUSAL_STATUS);
+                }
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'INTERNAL_ERROR',
+                        message: `Installing "${manifestId}" failed while carrying its declared rename(s): `
+                            + `${String(err?.message ?? err)}. Each table's carry is all or none, and the tables already `
+                            + 'carried were put back: nothing was installed, and the installed version serves as before.',
+                    },
+                }, 500);
+            }
+        }
+        const renamesCarried = carried.flatMap(({ table, carries }) =>
+            carries.map((r) => ({ object: table.object, table: r.table, from: r.from, to: r.to })));
+        for (const r of renamesCarried) {
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] ${manifestId}: carried the declared rename ${r.object}.${r.from} → ${r.object}.${r.to} `
+                + `(table ${r.table}): the values now serve '${r.to}'`,
+            );
         }
 
         // 3. Hot-register FIRST so a malformed inline manifest fails the
@@ -2180,37 +3048,42 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const registerError = String(err?.message ?? err);
             // For offline file imports we treat a register failure as a hard
             // failure (don't persist). Cloud installs historically tolerated
-            // this (the on-disk record survives a restart), so keep that path
-            // lenient for backwards compatibility.
+            // this (the on-disk record survives a restart), so that path stays
+            // lenient for a fault — never for a refusal (#31478, below).
+            // [#30885] Whatever the branch, the version that still serves is
+            // the installed one: the columns step 2f carried go back to it.
+            await reverseInstallDeclaredRenames(carried, reverseFailed);
+            renamesCarried.length = 0;
             if (inlineManifest) {
                 return c.json({
                     success: false,
                     error: { code: 'PLUGIN_REGISTER_FAILED', message: `Failed to register imported manifest: ${registerError}` },
                 }, 422);
             }
-            // [#25366] …EXCEPT the security catalog's one-name-one-holder refusal
-            // naming an ENVIRONMENT-authored item (a customer's clone of a vendor
-            // permission set or position, under a name this version now ships).
-            // No restart heals it: the next load of this ledger entry meets the
-            // same environment item and is refused the same way (see
-            // {@link refusesEnvironmentHeldCatalogName}), so the lenient answer
-            // ("loads at the next restart") would be false. Measured on a real
-            // restart: the boot runs, the rehydrate logs the refusal, and the
-            // package is not loaded at all — its earlier version neither, since
-            // the ledger entry that named it was overwritten. The registry's
-            // package door refused before any of its own writes, and nothing of
-            // this door's is written yet, so the cloud branch refuses exactly as
-            // the inline branch does — `422 PLUGIN_REGISTER_FAILED`, the
-            // registry's sentence naming each colliding name and its holder —
-            // and the installer renames one of the two items and retries.
-            if (refusesEnvironmentHeldCatalogName(err)) {
+            // [#25366, #31296, #31392, #31478] …EXCEPT a refusal: a register
+            // failure that declares a 4xx status of its own is the engine's
+            // verdict on this body against this environment (see
+            // {@link isDeclaredRegisterRefusal}), and no restart heals it, so
+            // the lenient answer ("loads at the next restart") would be false.
+            // Measured on a real restart (#25366, #31478): the rehydrate logs
+            // the same refusal and the package is not loaded at all — its
+            // earlier version neither, since the ledger entry that named it
+            // was overwritten.
+            // The engine refused before any of its own writes stood, and
+            // nothing of this door's is written yet, so the cloud branch
+            // refuses exactly as the inline branch does — `422
+            // PLUGIN_REGISTER_FAILED` with the engine's sentence — and the
+            // installer corrects the body or the environment and retries.
+            if (isDeclaredRegisterRefusal(err)) {
                 return c.json({
                     success: false,
                     error: { code: 'PLUGIN_REGISTER_FAILED', message: `Package '${manifestId}' cannot be installed: ${registerError}` },
                 }, 422);
             }
-            // [#22695] The lenient path stays lenient — whether it should is a
-            // separate decision, ⛔ not made here. What changes is that the
+            // [#22695, #31478] The lenient path is what remains: a register
+            // failure that declares no 4xx — an undeclared throw or a declared
+            // 5xx, the runtime's own fault rather than a verdict on the
+            // package — is ledgered and loads at the next restart, and the
             // caller is TOLD: the answer carries `hotLoaded: false` and this
             // message, so a reader can say "installed, loads at the next
             // restart" instead of a false success.
@@ -2234,6 +3107,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             ...(gate.attestation ? { globalUniqueAttestation: gate.attestation } : {}),
             // [ADR-0126 §6 wall 3] The confirmation step 2c admitted, recorded.
             ...(accessUpgradeConfirmation ? { accessUpgradeConfirmation } : {}),
+            // [#30884] The confirmation step 2c′ admitted, recorded.
+            ...(schemaUpgradeConfirmation ? { schemaUpgradeConfirmation } : {}),
         };
         try {
             this.ledger.write(entry);
@@ -2279,7 +3154,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //      • load translation bundles into the i18n service
         //      • stash seed datasets on the kernel + run them now so the
         //        installed app has demo data on first paint.
-        const seededSummary = await this.applySideEffects(ctx, converted, { seedNow: true, c });
+        const seededSummary = await this.applySideEffects(ctx, converted, { seedNow: true, c, userId });
         // `skipped` counts too: an all-skip run means the rows are ALREADY in
         // the database (e.g. a reinstall/upgrade over live sample data) — the
         // install carries sample data either way. Leaving the flag false here
@@ -2308,6 +3183,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // The door is named only when it can store one of them: a listing that
         // says none is writable (a walled posture) gets the other places.
         const door = described?.writable === undefined || unsetRefs.some((r) => described.writable!.has(r));
+        if (withheldMaps.length > 0) ctx.logger?.warn?.(withheldMapsLogLine(manifestId, 'managed', withheldMaps));
 
         return c.json({
             success: true,
@@ -2333,11 +3209,24 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // that declares none, so that answer's key set is unchanged.
                 ...(datasources !== undefined ? { datasources } : {}),
                 ...(unsetRefs.length > 0 ? { credentialNote: installedCredentialNote(unsetRefs, { door }) } : {}),
+                // [#28640 ruling ③A] Each connector map the package export
+                // withheld whole, so it arrived absent. Omitted when there are
+                // none, so that answer's key set is unchanged.
+                ...(withheldMaps.length > 0 ? { withheldMaps } : {}),
+                // [#30326] The handshake admitted the package without checking
+                // it (no `engines.protocol`, or a range it cannot read): the
+                // installer is told, not only the server log. Omitted when the
+                // range was checked, so that answer's key set is unchanged.
+                ...(protocolCheckSkipped !== undefined ? { protocolCheckSkipped } : {}),
                 upgradedFrom: conflict === 'marketplace' ? 'previous-marketplace-version' : null,
                 // [ADR-0146 D2, #28410] Names installed dependents already held,
                 // undeclared, that this version now ships (step 2d). Omitted when
                 // there are none, so that answer's key set is unchanged.
                 ...(overrideGate.collisions.length > 0 ? { overrideCollisions: overrideGate.collisions } : {}),
+                // [cloud#3652 D3, #30885] Each declared rename step 2f carried:
+                // the object, its table, the old key and the new. Omitted when
+                // none was, so that answer's key set is unchanged.
+                ...(renamesCarried.length > 0 ? { renamesCarried } : {}),
                 translationsLoaded: seededSummary.translationsLoaded,
                 seeded: seededSummary.seeded,
                 // #6721: the RESOLVED ledger directory on THIS host — the same
@@ -2424,6 +3313,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *   { …, "installedAt": "…", "notLoaded": { "code": "OS_PROTOCOL_INCOMPATIBLE", "requiredRange": "^16" } }
      *
      * read from what the rehydrate recorded ({@link refusedAtRehydrate}).
+     * [#31566] An entry whose register the engine refused at the rehydrate (an
+     * earlier build ledgered it) is marked the same way, with that refusal's
+     * code and sentence ({@link NotLoadedMarker}):
+     *
+     *   { …, "notLoaded": { "code": "INVALID_METADATA", "message": "Page \"…\" of package \"…\": …" } }
+     *
      * `notLoaded` stands in place of `withSampleData`: none of the package's
      * objects are registered, so no seed row is read for it and the listing
      * makes no claim about its rows — omitted, not `false`, for the reason
@@ -2594,6 +3489,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private handleUninstall = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Uninstalling a package');
         if (!admission.ok) return admission.response;
+        // [cloud#3814 R6] Declared replicas over the Redis driver: this door
+        // would withdraw the package from one replica only. Refused before
+        // the ledger is read.
+        {
+            const refused = refuseMultiReplicaPackageChange(c, ctx, 'Uninstalling');
+            if (refused) return refused;
+        }
         const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
         if (!manifestId) {
             return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
@@ -2607,6 +3509,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         {
             const walled = this.refuseWalledCatalogPackage(c, ctx, 'Uninstalling', manifestId, admission);
             if (walled) return walled;
+        }
+        // [#31283] THE UNINSTALL VERB'S PRE-UNINSTALL GUARDS, ASKED BEFORE
+        // ANYTHING MOVES. This door cannot delegate to `deletePackage` (it
+        // answers `success: false` for a package with no stored rows, and
+        // drops the tables of the objects it removes), so it asks the verb's
+        // guards through the protocol's one runner of them
+        // (`runUninstallGuards`) — the runtime's dependent-rule refusal (#31232:
+        // an active validation rule of another enabled package reads a field
+        // this package adds through `objectExtensions`) among them — and holds
+        // no copy of any verdict. A refusal is the request's, spelled as the
+        // guard spelled it (`code`, `status`, `message`), with nothing moved.
+        {
+            const refused = await this.askUninstallGuards(c, ctx, manifestId, admission.userId);
+            if (refused) return refused;
         }
         // [#28511, ADR-0146 D3] THE REGISTRY'S UNINSTALL REFUSAL, ASKED BEFORE
         // THE LEDGER WRITE. The withdrawal below asks the registry to
@@ -2648,6 +3564,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 }
             }
         }
+        // [#31283] The version this uninstall removes, for the package's ledger row.
+        const removedVersion = this.ledger.read(manifestId).entry?.version;
         try {
             this.ledger.remove(manifestId);
         } catch (err: any) {
@@ -2709,6 +3627,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // re-sync would only read it back.
         const resync = withdrawal ? undefined : await this.announceUninstall(ctx, manifestId);
         if (resync) cleanups.push(resync);
+        // [#31283] The package's own `package_uninstall` ledger row (#31186),
+        // written once the uninstall is durable — the ledger entry is gone —
+        // through the protocol's one writer of it (`recordPackageUninstall`),
+        // never on a refusal above. `itemsRemoved` / `itemsFailed` count the
+        // stored `sys_metadata` items an uninstall removes: an install-local
+        // package is registered from its ledger entry and has none.
+        await this.recordUninstall(ctx, manifestId, removedVersion, admission.userId);
         const withdrawals = (withdrawal ? 1 : 0) + (copies ? 1 : 0) + (resync ? 1 : 0);
         ctx.logger?.info?.(
             `[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; `
@@ -2962,6 +3887,65 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [#31283] Ask the uninstall verb's pre-uninstall guards about `manifestId`
+     * through the protocol's one runner of them (`runUninstallGuards`), and
+     * answer the first refusal as this request's: `{ success: false, error:
+     * { code, message } }` under the guard's `status`. `undefined` when no
+     * guard refuses.
+     *
+     * No `protocol` service, or a protocol from a build without the runner,
+     * holds no guard this door can ask, and the door behaves as before — the
+     * capability question {@link runUninstallCleanups} asks of its runner. A
+     * throw that is not a coded client refusal is the guard's failure to
+     * judge: it propagates, as it does out of `deletePackage`, and the
+     * uninstall does not proceed.
+     */
+    private askUninstallGuards = async (
+        c: any,
+        ctx: PluginContext,
+        manifestId: string,
+        actor: string,
+    ): Promise<Response | undefined> => {
+        let protocol: UninstallCleanupRunner | undefined;
+        try { protocol = ctx.getService<UninstallCleanupRunner>('protocol'); } catch { /* no protocol service */ }
+        if (typeof protocol?.runUninstallGuards !== 'function') return undefined;
+        try {
+            await protocol.runUninstallGuards({ packageId: manifestId, ...(actor ? { actor } : {}) });
+            return undefined;
+        } catch (err: any) {
+            const status = err?.status;
+            if (typeof err?.code === 'string' && typeof status === 'number' && status >= 400 && status < 500) {
+                return c.json({ success: false, error: { code: err.code, message: String(err.message) } }, status);
+            }
+            throw err;
+        }
+    };
+
+    /**
+     * [#31283] Write the package's `package_uninstall` ledger row through the
+     * protocol's one writer of it (`recordPackageUninstall`). No `protocol`
+     * service, or a protocol from a build without the writer, has no row to
+     * write; the writer itself never throws.
+     */
+    private recordUninstall = async (
+        ctx: PluginContext,
+        manifestId: string,
+        version: string | undefined,
+        actor: string,
+    ): Promise<void> => {
+        let protocol: UninstallCleanupRunner | undefined;
+        try { protocol = ctx.getService<UninstallCleanupRunner>('protocol'); } catch { /* no protocol service */ }
+        if (typeof protocol?.recordPackageUninstall !== 'function') return;
+        await protocol.recordPackageUninstall({
+            packageId: manifestId,
+            ...(version ? { version } : {}),
+            ...(actor ? { actor } : {}),
+            itemsRemoved: 0,
+            itemsFailed: 0,
+        });
+    };
+
+    /**
      * [#21490] Run the protocol's registered uninstall cleanups for a package
      * this door just removed from its ledger — ADR-0086 D3's data-plane
      * revocation, which ADR-0090 states as "(removing its sets by `packageId`,
@@ -3159,6 +4143,237 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [epic cloud#3652 Q3, #30884] The installed version's body, converted
+     * forward as the registry reads it: the ledger entry's; for an orphaned
+     * install (no ledger file, the registry still serves the package —
+     * findConflict step 3) the body the registry serves. `undefined` when
+     * neither holds one: a ledger file that will not parse, an entry or a
+     * registry row carrying no body.
+     */
+    private installedPackageSide = (
+        ctx: PluginContext,
+        manifestId: string,
+        previous: ReturnType<LocalManifestSource['read']>,
+    ): unknown => {
+        const installedBody = previous.entry?.manifest
+            ?? (previous.entry === null && previous.failure === undefined ? this.registeredPackageBody(ctx, manifestId) : undefined);
+        return installedBody ? this.convertPackageBodyForward(ctx, installedBody) : undefined;
+    };
+
+    /**
+     * [epic cloud#3652 D3, #30885] Step 2c″ of {@link handleInstall}: the
+     * declared renames this install carries, read before any write
+     * ({@link planInstallDeclaredRenames}: the driver's rule on the physical
+     * table, and the door's own on whose key it is). `installed` is the
+     * installed version's body (`null` on a fresh install, `undefined` when
+     * none can be read).
+     *
+     * - **A refusal**: `422 VALIDATION_ERROR` (this door's body refusal),
+     *   each in `details.refusals` with its object, field, old key(s) and
+     *   reason. No token answers it: the package must change.
+     * - **A reading that failed** (the table could not be read): `503
+     *   SERVICE_UNAVAILABLE`, never taken for "nothing to carry".
+     * - Otherwise the tables to carry, which step 2f carries.
+     */
+    private evaluateDeclaredRenames = async (
+        ctx: PluginContext,
+        manifestId: string,
+        converted: unknown,
+        installed: unknown,
+    ): Promise<{ refusal?: { body: Record<string, unknown>; status: 422 | 503 }; tables: InstallRenameTable[] }> => {
+        let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
+        try {
+            plan = await planDeclaredRenames(ctx, manifestId, converted, installed);
+        } catch (err: any) {
+            return {
+                tables: [],
+                refusal: {
+                    status: 503,
+                    body: {
+                        success: false,
+                        error: {
+                            code: 'SERVICE_UNAVAILABLE',
+                            message: `Installing "${manifestId}" is stopped: the tables its declared rename(s) carry could not `
+                                + `be read (${String(err?.message ?? err)}), so whether each old column is there to carry `
+                                + 'cannot be told. Nothing was installed or written. Retry once the database answers.',
+                        },
+                    },
+                },
+            };
+        }
+        if (plan.refusals.length === 0) return { tables: plan.tables };
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] install of ${manifestId} refused: ${plan.refusals.length} declared rename(s) `
+            + `cannot be carried (${plan.refusals.map((r) => `${r.object}.${r.field}: ${r.reason}`).join(', ')})`,
+        );
+        return {
+            tables: [],
+            refusal: {
+                status: UNRUNNABLE_REFUSAL_STATUS,
+                body: {
+                    success: false,
+                    error: {
+                        code: UNRUNNABLE_REFUSAL_CODE,
+                        message: `Installing "${manifestId}" is refused: ${plan.refusals.length} declared field rename(s) `
+                            + `cannot be carried. ${plan.refusals.map((r) => r.message).join(' ')} Nothing was installed or `
+                            + 'written: no column was renamed, added or dropped.',
+                        details: { manifestId, refusals: plan.refusals },
+                    },
+                },
+            },
+        };
+    };
+
+
+    /**
+     * [epic cloud#3652 Q3, #30884] Step 2c′ of {@link handleInstall}: the
+     * schema upgrade verdict ({@link schemaUpgradeVerdict}) of the installed
+     * version — its ledger entry, converted forward as the registry reads it —
+     * against `converted`, and what it decides.
+     *
+     * - **The installed side** is the ledger entry's body; for an orphaned
+     *   install (no ledger file, the registry still serves the package) it is
+     *   the body the registry serves ({@link registeredPackageBody}).
+     * - **No installed body** (the ledger file would not parse, its entry
+     *   carries no body, or neither the ledger nor the registry holds one): no
+     *   comparison can run, and one that did not run is never taken for "no
+     *   finding" — the 409 below with one finding, `installed_record_unreadable`
+     *   (its `file` and `cause`) or `installed_record_missing`. Its token admits
+     *   the re-install, which rewrites the record, confirmed and recorded.
+     * - **A declared rename** is no finding here: step 2c″
+     *   ({@link evaluateDeclaredRenames}), asked first, carries its column or
+     *   refuses it (#30885, lifting #30884's interim 501).
+     * - **No finding**: the upgrade proceeds unchanged.
+     * - **Findings**: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, naming each,
+     *   unless `body.confirmSchemaUpgrade` is the finding set's token. A token
+     *   that no longer matches (the findings changed since it was issued) is
+     *   refused again with the fresh set, and a bare `true` confirms nothing.
+     *
+     * Both refusals carry, per finding, the rows the installed column holds
+     * when this runtime's `manifest` service answers `planUpgrade` (C3); the
+     * verdict itself never reads them.
+     */
+    private evaluateSchemaUpgradeGate = async (
+        ctx: PluginContext,
+        manifestId: string,
+        converted: unknown,
+        previous: ReturnType<LocalManifestSource['read']>,
+        body: any,
+        userId: string,
+    ): Promise<{
+        refusal?: { body: Record<string, unknown>; status: 409 };
+        confirmation?: InstalledEntry['schemaUpgradeConfirmation'];
+    }> => {
+        // The installed side: the ledger entry's body; for an orphaned install
+        // (no ledger file, the registry still serves the package — findConflict
+        // step 3) the body the registry serves. With neither — a ledger file
+        // that will not parse, an entry or a registry row carrying no body —
+        // the verdict is the one finding that says so, confirmable like any
+        // other, never "no finding".
+        const installed = this.installedPackageSide(ctx, manifestId, previous);
+        const verdict = installed === undefined
+            ? ledgerRecordUnavailableVerdict(manifestId, previous.failure)
+            : schemaUpgradeVerdict(manifestId, comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)));
+        const { findingSet } = verdict;
+        if (verdict.findings.length === 0) return {};
+
+        const token = body?.confirmSchemaUpgrade;
+        if (typeof token === 'string' && token === findingSet) {
+            const confirmedAt = new Date().toISOString();
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] upgrade of ${manifestId} confirmed by ${userId} over its schema findings `
+                + `(${findingSet}): ${verdict.findings.length} finding(s) install as the additive schema sync leaves them`,
+            );
+            return { confirmation: { findingSet, confirmedBy: userId, confirmedAt } };
+        }
+
+        const rows = installed === undefined ? undefined : await this.readSchemaUpgradeRows(ctx, manifestId, installed, converted);
+        const findings = verdict.findings.map((f) => {
+            if (f.kind !== 'type_change' && f.kind !== 'suspected_rename') return f;
+            const installedKey = f.kind === 'type_change' ? (f.renamedFrom ?? f.field) : f.field;
+            const key = `${f.object}.${installedKey}`;
+            if (!rows?.has(key)) return f;
+            const held = rows.get(key) ?? null;
+            return {
+                ...f,
+                rows: held,
+                ...(held !== null ? { describe: `${f.describe} ${held} row(s) hold a value in ${key}.` } : {}),
+            };
+        });
+
+        const stale = token !== undefined
+            ? ' The confirmation sent does not confirm these findings: a confirmation is the finding set\'s token from '
+                + 'this refusal, it no longer matches once the findings change, and `true` confirms nothing.'
+            : '';
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] upgrade of ${manifestId} stopped: ${findings.length} schema finding(s) unconfirmed `
+            + `(${findingSet})`,
+        );
+        return {
+            refusal: {
+                status: SCHEMA_UPGRADE_CONFIRMATION_STATUS,
+                body: {
+                    success: false,
+                    error: {
+                        code: SCHEMA_UPGRADE_CONFIRMATION_REQUIRED,
+                        message: installed === undefined
+                            ? `Upgrading "${manifestId}" is refused: ${findings.map((f) => f.describe).join(' ')} Nothing was `
+                                + 'installed or written. To re-install anyway, send the same request with '
+                                + `"confirmSchemaUpgrade": "${findingSet}".${stale}`
+                            : `Upgrading "${manifestId}" would change stored fields in a way the schema sync does not `
+                                + `carry — ${findings.length} finding(s): ${findings.map((f) => f.describe).join(' ')} `
+                                + 'Nothing was installed or written. If a field was renamed, declare the old key in the new '
+                                + 'field\'s `renamedFrom` and rebuild the package; to upgrade anyway, accepting each finding as '
+                                + `listed, send the same request with "confirmSchemaUpgrade": "${findingSet}".${stale}`,
+                        details: {
+                            manifestId,
+                            findingSet,
+                            findings,
+                            confirmWith: {
+                                body: { confirmSchemaUpgrade: findingSet },
+                                cli: `os package install … --confirm-upgrade ${findingSet}`,
+                            },
+                        },
+                    },
+                },
+            },
+        };
+    };
+
+    /**
+     * [epic cloud#3652 Q3, #30884 · ruling record 6709061297, C3] The rows the
+     * installed columns a schema refusal names hold, by `object.field` (the
+     * INSTALLED key), from the `manifest` service's `planUpgrade` — the dry
+     * run's own reading. `undefined` when this runtime answers no
+     * `planUpgrade` or the reading threw: a refusal then names its findings
+     * without counts, and is the same refusal either way.
+     */
+    private readSchemaUpgradeRows = async (
+        ctx: PluginContext,
+        manifestId: string,
+        installed: unknown,
+        converted: unknown,
+    ): Promise<Map<string, number | null> | undefined> => {
+        let service: { planUpgrade?: (installed: unknown, incoming: unknown) => Promise<unknown> } | undefined;
+        try { service = ctx.getService('manifest') as typeof service; } catch { /* no manifest service */ }
+        if (typeof service?.planUpgrade !== 'function') return undefined;
+        try {
+            const reading = await service.planUpgrade(installed, converted) as {
+                environment?: { columns?: Array<{ object: string; field: string; rows: number | null }> };
+            };
+            const out = new Map<string, number | null>();
+            for (const column of reading?.environment?.columns ?? []) out.set(`${column.object}.${column.field}`, column.rows);
+            return out;
+        } catch (err: any) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] upgrade of ${manifestId}: the rows behind its schema findings could not be read `
+                + `(${String(err?.message ?? err)}); the refusal names its findings without row counts`,
+            );
+            return undefined;
+        }
+    };
+
+    /**
      * [ADR-0120 D5e] Decide whether this install must stop for the
      * `isolated`-posture confirmation, and what attestation the ledger entry
      * should carry afterwards.
@@ -3334,6 +4549,54 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [ADR-0146 D10, second rule] Step 2e' of {@link handleInstall}: every
+     * `objectExtensions[].fields` entry the converted body carries — each
+     * `packages[]` entry's under its own id, or the body's own under
+     * `manifestId` — judged by `@objectstack/metadata-protocol`'s
+     * `judgeRedeclaredOwnerFields` against the extended object's owner: a
+     * package of this artifact that declares it, otherwise the installed owner
+     * the registry holds (`getObjectOwner`: its own declaration and package,
+     * never the resolved object, which carries every installed extension's
+     * fields). An extension of an object its own package owns, and a target
+     * neither knows, are not judged.
+     */
+    private redeclaredOwnerFieldRefusalsOf = (
+        ctx: PluginContext,
+        converted: Record<string, any>,
+        manifestId: string,
+    ): RedeclaredOwnerFieldRefusal[] => {
+        const bodies: Array<{ id: string | undefined; body: Record<string, any>; prefix: string }> = Array.isArray(converted.packages)
+            ? converted.packages.flatMap((entry: unknown, index: number) => {
+                if (!isPlainObject(entry) || !isPlainObject(entry.manifest)) return [];
+                const id = manifestIdOf(entry.manifest);
+                return [{ id: typeof id === 'string' ? id : undefined, body: entry.manifest as Record<string, any>, prefix: `packages[${index}].manifest.` }];
+            })
+            : [{ id: manifestId, body: flattenPackageBody(converted), prefix: '' }];
+        if (!bodies.some(({ body }) => Array.isArray(body.objectExtensions))) return [];
+        const delivered = new Map<string, ObjectOwnerDeclaration>();
+        for (const { id, body } of bodies) {
+            const objects = body.objects;
+            const list = Array.isArray(objects) ? objects : isPlainObject(objects) ? Object.entries(objects).map(([name, o]) => (isPlainObject(o) ? { name, ...o } : o)) : [];
+            for (const object of list) {
+                if (isPlainObject(object) && typeof object.name === 'string' && !delivered.has(object.name)) {
+                    delivered.set(object.name, { packageId: id, definition: object });
+                }
+            }
+        }
+        let registry: { getObjectOwner?(fqn: string): { packageId?: string; definition?: unknown } | undefined } | undefined;
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — only delivered owners are known */ }
+        const ownerOf = (name: string): ObjectOwnerDeclaration | undefined => {
+            const own = delivered.get(name);
+            if (own) return own;
+            const installed = registry?.getObjectOwner?.(name);
+            return installed ? { packageId: installed.packageId, definition: installed.definition } : undefined;
+        };
+        return bodies.flatMap(({ id, body, prefix }) => judgeRedeclaredOwnerFields({
+            packageId: id, objectExtensions: body.objectExtensions, ownerOf, at: prefix,
+        }));
+    };
+
+    /**
      * [ADR-0146 D2, ruling A on #28390; #28410] THE OVERRIDE WRITE GATE at the
      * managed install — the door a package's items enter through as code
      * (`manifest.register`), so the publish doors never see them. The rule is
@@ -3377,7 +4640,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // each under its own id. A delivered package is in no registry yet: its
         // dependencies and its items are read off the body, and it registers
         // read-only, so it is a base a sibling's closure can hold.
-        const delivered = new Map<string, { dependencies: string[]; items: OverrideWriteItem[] }>();
+        const delivered = new Map<string, { manifest: unknown; dependencies: string[]; items: OverrideWriteItem[] }>();
         const entries: Record<string, any>[] = Array.isArray(converted.packages)
             ? converted.packages
                 .map((entry: unknown) => (isPlainObject(entry) && isPlainObject(entry.manifest) ? entry.manifest : undefined))
@@ -3386,8 +4649,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         for (const body of entries) {
             const id = entries.length === 1 && !Array.isArray(converted.packages) ? manifestId : manifestIdOf(body);
             if (typeof id !== 'string' || id === '') continue;
-            delivered.set(id, { dependencies: dependencyIdsOf(declaredPackageManifest(body)), items: overrideWriteItemsOf(body) });
+            const manifest = declaredPackageManifest(body);
+            delivered.set(id, { manifest, dependencies: dependencyIdsOf(manifest), items: overrideWriteItemsOf(body) });
         }
+        // The manifests the pair lookup reads: a delivered package's own,
+        // else the installed one — who may declare an override of a base is
+        // its App's pair (`pairOf`).
+        const installedRegistry = installedManifestsOf(registry);
+        const manifestOf: InstalledManifestLookup = (id) => {
+            const local = delivered.get(id)?.manifest;
+            return isPlainObject(local) ? local : installedRegistry(id);
+        };
         const dependenciesOf = (id: string): string[] => delivered.get(id)?.dependencies
             ?? dependencyIdsOf((registry.getPackage?.(id) as { manifest?: unknown } | undefined)?.manifest);
         const closureOf = (id: string): string[] => {
@@ -3428,6 +4700,20 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             return read;
         };
         const isBase = (id: string): boolean => delivered.has(id) || !isWritablePackage(ql, id);
+        // [#30542] An installed base's own item is its code artifact, the one
+        // the protocol door judges a declared action override against
+        // (`overrideWriteVerdict`'s `baseItemOf`). The listing is not: once
+        // the base's declared override is armed, it serves the override under
+        // the base's envelope, so a re-install of the pair was judged against
+        // its own previous version, and a v2 that relaxes a v1 tightening
+        // back to the base's own gates was refused. A registry that answers
+        // no artifact leaves the listed item.
+        const artifactOf = (item: OverrideWriteItem, base: string): unknown => {
+            const artifact = registry.getArtifactItem?.(item.type, item.name, base);
+            return isPlainObject(artifact) && artifact._packageId === base && listedIdentity(item.type, artifact) === item.identity
+                ? artifact
+                : undefined;
+        };
 
         const refusals: OverrideInstallRefusal[] = [];
         for (const [packageId, pkg] of delivered) {
@@ -3435,10 +4721,27 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             const bases = closure.filter(isBase);
             for (const item of pkg.items) {
                 const shippers: string[] = [];
-                for (const base of bases) if ((await heldBy(item.type, base)).has(item.identity)) shippers.push(base);
+                // [#30065] …and each shipper's own item, what a declared
+                // action override is judged against.
+                const shipped = new Map<string, unknown>();
+                // [#30623] …and each base's items of this type, what the
+                // ships-no-such-item refusal names an action's object from.
+                const listed = new Map<string, unknown[]>();
+                for (const base of bases) {
+                    const byIdentity = await heldBy(item.type, base);
+                    listed.set(base, [...byIdentity.values()]);
+                    const held = byIdentity.get(item.identity);
+                    if (held !== undefined) {
+                        shippers.push(base);
+                        shipped.set(base, (delivered.has(base) ? undefined : artifactOf(item, base)) ?? held);
+                    }
+                }
                 const verdict = judgeOverrideWrite(
                     { type: item.type, name: item.name, packageId, item: item.item },
-                    { dependencies: closure, shippers },
+                    {
+                        dependencies: closure, shippers, baseItemOf: (base) => shipped.get(base),
+                        baseItemsOf: (base) => listed.get(base) ?? [], installed: manifestOf,
+                    },
                 );
                 if (verdict.verdict === 'refuse') {
                     refusals.push({
@@ -3464,7 +4767,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     if (holding === undefined) continue;
                     const verdict = judgeOverrideWrite(
                         { type: item.type, name: item.name, packageId: dependent, item: holding },
-                        { dependencies: dependentClosure, shippers: [baseId] },
+                        { dependencies: dependentClosure, shippers: [baseId], installed: manifestOf },
                     );
                     if (verdict.verdict === 'refuse') {
                         collisions.push({ type: item.type, name: item.name, packageId: dependent, rule: verdict.rule, message: verdict.message });
@@ -3523,14 +4826,19 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *    (uncopyable content, collisions, an owned namespace, an existing
      *    target) and this door answers each with the verb's own code and
      *    status, the message when the verb declared it a refusal, and
-     *    `details`; a 5xx's message is withheld and logged;
+     *    `details`; any other message is withheld and logged, at any
+     *    status, so the log line the answer points at exists;
      *  - translation bundles are COPIED by the verb as `translation` items, so
      *    they reload at every boot with the environment's translations — this
      *    install writes no ledger entry for a rehydrate to replay;
-     *  - seed data is NOT loaded: it is data, not metadata, and the
-     *    reseed / purge doors act on ledger entries this install never
-     *    writes, so seeded rows would be rows nothing here could clear. The
-     *    answer says so (`seeded.mode: 'skipped'`) when the package declares any;
+     *  - seed data is loaded only when the request asks (`seedSampleData`,
+     *    #30808). Asked, the verb writes each dataset into the base as a
+     *    `seed` item — the seed receipt — and this door loads the rows from
+     *    those stored bodies ({@link loadUnmanagedCopySeeds}), owned by the
+     *    installer; the purge door removes exactly them by the same receipt,
+     *    since the reseed / purge doors' install-ledger entry is one this
+     *    install never writes. Not asked, nothing is loaded and the answer
+     *    says so (`seeded.mode: 'skipped'`) when the package declares any;
      *  - `installedFrom` — the source package id and version, for information
      *    only (ADR-0131 D6: "provenance recorded for information only") — is
      *    on the answer and on the operator log line, at `info`;
@@ -3538,14 +4846,27 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *    either spelling, and the copy does not keep, with the package's
      *    reason — is the verb's own
      *    list, relayed as the verb states it, so the installer reads why the
-     *    vendor locked an item before editing it.
+     *    vendor locked an item before editing it;
+     *  - `withheldMaps` — every connector map the package export withheld
+     *    whole, read by {@link handleInstall} before the verb runs — is on the
+     *    answer and on a `warn` line: the copy carries each map absent.
      */
     private installUnmanaged = async (
         c: any,
         ctx: PluginContext,
-        args: { manifest: Record<string, any>; manifestId: string; version: string; versionId: string; userId: string | null },
+        args: {
+            manifest: Record<string, any>; manifestId: string; version: string; versionId: string; userId: string | null;
+            /** [#28640 ruling ③A] The connector maps the export withheld ({@link judgeWithheldMaps}). */
+            withheldMaps: readonly WithheldMap[];
+            /** [#30326] The handshake admitted the package unchecked ({@link protocolCheckSkippedOf}). */
+            protocolCheckSkipped: ProtocolCheckSkipped | undefined;
+            /** [#30794] The namespace the copy is renamed into, as the request wrote it; the import judges it. */
+            targetNamespace?: unknown;
+            /** [#30808] The request asked for the package's sample data. */
+            seedSampleData: boolean;
+        },
     ): Promise<Response> => {
-        const { manifest, manifestId, version, versionId, userId } = args;
+        const { manifest, manifestId, version, versionId, userId, withheldMaps, protocolCheckSkipped, targetNamespace, seedSampleData } = args;
         let protocol: UnmanagedImporter | undefined;
         try { protocol = ctx.getService<UnmanagedImporter>('protocol'); } catch { /* no protocol service */ }
         if (!protocol || typeof protocol.importUnmanagedPackage !== 'function') {
@@ -3565,40 +4886,129 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         try {
             result = await protocol.importUnmanagedPackage({
                 manifest: packageBody,
+                ...(targetNamespace !== undefined ? { targetNamespace } : {}),
                 ...(userId ? { actor: userId } : {}),
+                // [#30808] Door-stated, like `actor`: the sample data, as `seed` items.
+                ...(seedSampleData ? { seedData: true } : {}),
             } as Parameters<NonNullable<UnmanagedImporter['importUnmanagedPackage']>>[0]);
         } catch (err: any) {
             const resolved = resolveThrownHttpError(err, 500);
-            if (resolved.status >= 500) {
+            // [#29822] One rule, whatever the status: the fallback sentence
+            // promises a log line, so whenever it IS the answer, the line is
+            // written. `clientFacingFailureText` quotes only a refusal that
+            // declared a 4xx `status`; a 4xx this door resolves from another
+            // declaration (`statusCode`, the validation shape) gets the
+            // fallback too, and used to get no log line. A quoted reason
+            // needs no log line: the caller already has it.
+            const fallback = `The unmanaged install of '${manifestId}' failed; the reason is in the server log.`;
+            const message = clientFacingFailureText(err, fallback);
+            if (message === fallback) {
                 ctx.logger?.warn?.(
-                    `[MarketplaceInstallLocal] the unmanaged install of ${manifestId} failed: ${err?.message ?? err}`,
+                    `[MarketplaceInstallLocal] the unmanaged install of ${manifestId} failed (${resolved.status} `
+                    + `${resolved.code}): ${err?.message ?? err}`,
                 );
             }
             const details = isPlainObject(err?.details) ? err.details : undefined;
+            // [#30964] The environment's half of "both sides audited": the copy failed.
+            await this.recordUnmanagedImport(c, ctx, {
+                action: 'package_unmanaged_import',
+                packageId: manifestId,
+                ...(version ? { version } : {}),
+                ...(userId ? { actor: userId } : {}),
+                ...(typeof details?.targetPackageId === 'string' ? { targetPackageId: details.targetPackageId } : {}),
+                outcome: 'failure',
+                errorCode: resolved.code,
+                status: resolved.status,
+            });
             return c.json({
                 success: false,
                 error: {
                     code: resolved.code,
-                    message: clientFacingFailureText(
-                        err,
-                        `The unmanaged install of '${manifestId}' failed; the reason is in the server log.`,
-                    ),
+                    message,
                     ...(details ? { details } : {}),
                 },
             }, resolved.status as any);
         }
 
+        // [#30964] The environment's half of "both sides audited": the copy
+        // landed — the new base, its namespace, what was copied.
+        await this.recordUnmanagedImport(c, ctx, {
+            action: 'package_unmanaged_import',
+            packageId: manifestId,
+            ...((result.sourceVersion ?? version) ? { version: result.sourceVersion ?? version } : {}),
+            ...(userId ? { actor: userId } : {}),
+            targetPackageId: result.targetPackageId,
+            namespace: result.namespace,
+            ...(result.sourceNamespace !== undefined ? { sourceNamespace: result.sourceNamespace } : {}),
+            copiedCount: result.copiedCount,
+            outcome: 'success',
+        });
+
+        // [#30794] A renamed copy's provenance carries the namespace its names
+        // came from beside the package and version: `installedFrom.namespace`
+        // → the answer's `namespace` is the mapping the rename applied.
+        // Omitted when the copy kept the source's namespace, so that answer's
+        // key set is unchanged.
         const installedFrom = {
             packageId: result.sourcePackageId,
             ...(result.sourceVersion !== undefined ? { version: result.sourceVersion } : {}),
+            ...(result.sourceNamespace !== undefined ? { namespace: result.sourceNamespace } : {}),
         };
         ctx.logger?.info?.(
             `[MarketplaceInstallLocal] installed ${manifestId} unmanaged: ${result.copiedCount} item(s) copied into the `
-            + `environment base '${result.targetPackageId}' (namespace '${result.namespace}'), installed from `
+            + `environment base '${result.targetPackageId}' (namespace '${result.namespace}'`
+            + `${result.sourceNamespace !== undefined ? `, renamed from '${result.sourceNamespace}'` : ''}), installed from `
             + `${installedFrom.packageId}${installedFrom.version ? `@${installedFrom.version}` : ''}`
             + `${userId ? ` by ${userId}` : ''}. Nothing is registered under '${manifestId}'; the copy follows no upgrade.`,
         );
+        if (withheldMaps.length > 0) ctx.logger?.warn?.(withheldMapsLogLine(manifestId, 'unmanaged', withheldMaps));
+        // [#30808] The door's record of this copy, in the same act — before
+        // any row is loaded, so a load that fails partway is still purgeable —
+        // tied to the base instance the package store now holds
+        // ({@link UnmanagedCopyRecord}). A record that cannot be written
+        // leaves the copy unreachable by the purge (its 404), never reachable
+        // by mistake; the installer is told in the answer (`copyRecord`), the
+        // operator in the log.
+        let copyRecordFailure: string | undefined;
+        let copyRecordSaid: string | undefined;
+        const tie = this.unmanagedCopyInstance(ctx, result.targetPackageId, result.baseInstance);
+        if ('failure' in tie) {
+            copyRecordFailure = tie.failure;
+            copyRecordSaid = 'the import did not answer with the new base\'s stored row';
+        } else {
+            try {
+                this.unmanagedCopies.write({
+                    baseId: result.targetPackageId,
+                    sourcePackageId: result.sourcePackageId,
+                    ...(result.sourceVersion !== undefined ? { sourceVersion: result.sourceVersion } : {}),
+                    seeded: seedSampleData,
+                    copiedAt: new Date().toISOString(),
+                    ...(userId ? { copiedBy: userId } : {}),
+                    ...(tie.instance !== undefined ? { instance: tie.instance } : {}),
+                });
+            } catch (err: any) {
+                copyRecordFailure = `it could not be written under ${this.unmanagedCopies.dir}: ${err?.message ?? err}`;
+                copyRecordSaid = `it could not be written under ${this.unmanagedCopies.dir}`;
+            }
+        }
+        if (copyRecordFailure !== undefined) {
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] the record of the unmanaged copy '${result.targetPackageId}' was not kept: `
+                + `${copyRecordFailure}. Its sample data cannot be purged through this door.`,
+            );
+        }
         const declaresSeeds = unmanagedInstallValueCarries(packageBody.data);
+        // [#30808] Asked for: the rows, from the receipt the verb just wrote.
+        const seeded = seedSampleData
+            ? await this.loadUnmanagedCopySeeds(c, ctx, {
+                manifest, targetPackageId: result.targetPackageId, copied: result.copied, userId,
+            })
+            : declaresSeeds
+                ? {
+                    mode: 'skipped' as const,
+                    reason: 'an unmanaged install copies metadata, not data: the package\'s sample data was not loaded',
+                }
+                : undefined;
         return c.json({
             success: true,
             data: {
@@ -3613,11 +5023,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 copiedCount: result.copiedCount,
                 copied: result.copied,
                 strippedLocks: result.strippedLocks,
-                ...(declaresSeeds
+                // [#28640 ruling ③A] Each connector map the package export
+                // withheld whole, so its copy carries it absent. Omitted when
+                // there are none, so that answer's key set is unchanged.
+                ...(withheldMaps.length > 0 ? { withheldMaps: [...withheldMaps] } : {}),
+                // [#30326] Omitted when the handshake checked the package's range.
+                ...(protocolCheckSkipped !== undefined ? { protocolCheckSkipped } : {}),
+                ...(seeded !== undefined ? { seeded } : {}),
+                // [#30808] Omitted when the door's record of the copy was
+                // kept, so that answer's key set is unchanged.
+                ...(copyRecordFailure !== undefined
                     ? {
-                        seeded: {
-                            mode: 'skipped',
-                            reason: 'an unmanaged install copies metadata, not data: the package\'s sample data was not loaded',
+                        copyRecord: {
+                            written: false,
+                            message: `This door's record of the copy '${result.targetPackageId}' was not kept (${copyRecordSaid}), `
+                                + 'so its sample data cannot be purged through `POST /marketplace/install-local/:id/purge-sample-data`. '
+                                + 'The copy itself is installed.',
                         },
                     }
                     : {}),
@@ -3625,6 +5046,479 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     + 'and it follows no upgrade. Refresh the console to see it.',
             },
         }, 200);
+    };
+
+    /**
+     * [#30808] The seed receipt of an unmanaged copy: the `seed` items its base
+     * holds in the environment ledger — what the import wrote when the install
+     * asked for the sample data ({@link installUnmanaged}) — each projected to
+     * the dataset it declares (the members `SeedSchema` declares, so the
+     * served envelope's keys never reach the loader).
+     *
+     * `names` are the receipt's item names: the import's own answer on an
+     * install, or {@link unmanagedCopySeedNames} on a purge. Each body is read
+     * through the protocol's by-name read, scoped to the base. `failure` says
+     * why the receipt could not be read whole — an item that is not served, or
+     * not a dataset, fails it — and is never folded into "no sample data".
+     */
+    private readUnmanagedCopySeedReceipt = async (
+        ctx: PluginContext,
+        packageId: string,
+        names: readonly string[],
+    ): Promise<{ datasets: PurgeSeedDataset[]; failure?: undefined } | { datasets?: undefined; failure: string }> => {
+        let protocol: UnmanagedCopySeedReader | undefined;
+        try { protocol = ctx.getService<UnmanagedCopySeedReader>('protocol'); } catch { /* no protocol service */ }
+        if (!protocol || typeof protocol.getMetaItem !== 'function') {
+            return { failure: 'the metadata protocol is not available on this runtime' };
+        }
+        const datasets: PurgeSeedDataset[] = [];
+        for (const name of names) {
+            let answer: unknown;
+            try {
+                answer = await protocol.getMetaItem({ type: UNMANAGED_COPY_SEED_TYPE, name, packageId });
+            } catch (err: any) {
+                return { failure: `the seed item '${name}' of the base '${packageId}' could not be read: ${err?.message ?? err}` };
+            }
+            const dataset = seedDatasetOfReceiptItem((answer as { item?: unknown } | null)?.item);
+            if (!dataset) return { failure: `the base '${packageId}' serves no dataset under the seed item '${name}'` };
+            datasets.push(dataset);
+        }
+        return { datasets };
+    };
+
+    /**
+     * [#30808] The names of the `seed` items an unmanaged copy's base holds —
+     * its active rows in the environment's metadata store, read as the system
+     * (the purge door already authorized the caller). Only the names: each
+     * body is read through the protocol ({@link readUnmanagedCopySeedReceipt}).
+     */
+    private unmanagedCopySeedNames = async (
+        ctx: PluginContext,
+        packageId: string,
+    ): Promise<{ names: string[]; failure?: undefined } | { names?: undefined; failure: string }> => {
+        let store: UnmanagedCopySeedNameStore | undefined;
+        try { store = ctx.getService<UnmanagedCopySeedNameStore>('objectql'); } catch { /* no data engine */ }
+        if (!store || typeof store.find !== 'function') return { failure: 'the data engine is not available on this runtime' };
+        try {
+            const rows = await store.find('sys_metadata', {
+                where: { type: UNMANAGED_COPY_SEED_TYPE, package_id: packageId, state: 'active' },
+                fields: ['name'],
+                context: { isSystem: true },
+            });
+            const list: unknown[] = Array.isArray(rows) ? rows : Array.isArray((rows as any)?.records) ? (rows as any).records : [];
+            return { names: [...new Set(list.map((row: any) => row?.name).filter((n): n is string => typeof n === 'string'))] };
+        } catch (err: any) {
+            return { failure: `the base's seed items could not be listed: ${err?.message ?? err}` };
+        }
+    };
+
+    /**
+     * [#30808 · #30324 option C · #30680 answer A] The rows of an unmanaged
+     * copy's sample data, loaded from the seed receipt the import just wrote
+     * ({@link readUnmanagedCopySeedReceipt}) — the stored bodies, so the rows
+     * are exactly what the purge later matches — through the one seed run the
+     * managed install takes ({@link runInlineSeed}): multi-pass, so a lookup
+     * between seeded rows resolves in load order, and the rows it creates
+     * owned by the installer (`owner_id` / `created_by`), ordinary
+     * permissions, no sample-data read rule. Rows the package wrote for
+     * different personas collapse to that one owner.
+     *
+     * Never throws: the copy already landed, so a load that could not run is
+     * reported in the answer's `seeded` (`mode: 'skipped'` with the reason, or
+     * `'refused'` for a walled session with no active organization), as the
+     * managed install reports its own.
+     */
+    private loadUnmanagedCopySeeds = async (
+        c: any,
+        ctx: PluginContext,
+        args: { manifest: Record<string, any>; targetPackageId: string; copied: ReadonlyArray<{ type: string; name: string }>; userId: string | null },
+    ): Promise<{ mode: 'inline' | 'skipped' | 'refused'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string }> => {
+        const { manifest, targetPackageId, copied, userId } = args;
+        const appId = String(manifest?.id ?? targetPackageId);
+        const receiptNames = copied.filter((item) => item.type === UNMANAGED_COPY_SEED_TYPE).map((item) => item.name);
+        if (receiptNames.length === 0) return { mode: 'skipped', reason: 'no-datasets' };
+        const receipt = await this.readUnmanagedCopySeedReceipt(ctx, targetPackageId, receiptNames);
+        if (receipt.failure !== undefined) {
+            const reason = receipt.failure;
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: the unmanaged copy's sample data was not loaded — ${reason}`);
+            return { mode: 'skipped', reason: `seed-receipt-unread: ${reason}` };
+        }
+        return this.seedUnmanagedCopy(c, ctx, {
+            app: manifest, appId, targetPackageId, datasets: receipt.datasets, userId, door: 'install',
+        });
+    };
+
+    /**
+     * [#30808, #31425] The one seed run of an unmanaged copy's sample data,
+     * from datasets read off its seed receipt: the install's first load
+     * ({@link loadUnmanagedCopySeeds}) and the reseed of a recorded copy
+     * ({@link handleReseed}), which is also how a first load that failed is
+     * retried. Under an organization wall the caller's active organization, a
+     * walled session with none `refused`; the rows it creates owned by
+     * `userId` ({@link runInlineSeed}). Never throws: a run that threw is
+     * `skipped` with its `seed-error` reason.
+     */
+    private seedUnmanagedCopy = async (
+        c: any,
+        ctx: PluginContext,
+        args: {
+            /** The package body whose `i18n.defaultLocale` the seed locale falls back to, when there is one. */
+            app: unknown;
+            appId: string;
+            targetPackageId: string;
+            datasets: PurgeSeedDataset[];
+            userId: string | null;
+            door: 'install' | 'reseed';
+        },
+    ): Promise<{ mode: 'inline' | 'skipped' | 'refused'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string }> => {
+        const { app, appId, targetPackageId, datasets, userId, door } = args;
+        let organizationId: string | undefined;
+        if (organizationWallActive(ctx)) {
+            const resolved = await this.resolveActiveOrgId(c, ctx);
+            if (!resolved) {
+                const reason = noActiveOrganizationRefusal(door);
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${appId}: ${reason}`);
+                return { mode: 'refused', reason };
+            }
+            organizationId = resolved;
+        }
+        try {
+            const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+                ...(userId ? { userId } : {}),
+                app,
+            }, {
+                userId,
+                door: door === 'install' ? 'unmanaged install' : 'reseed of an unmanaged copy',
+                none: 'the request names no person',
+            });
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] sample data of the unmanaged copy '${targetPackageId}'${door === 'reseed' ? ' (reseed)' : ''}`
+                + `${organizationId ? ` (org=${organizationId})` : ''}: `
+                + `inserted=${s.inserted} updated=${s.updated} skipped=${s.skipped} errors=${s.errors}`,
+            );
+            return {
+                mode: 'inline',
+                inserted: s.inserted,
+                updated: s.updated,
+                skipped: s.skipped,
+                errors: s.errors,
+                ...(s.errorSample !== undefined ? { errorSample: s.errorSample } : {}),
+            };
+        } catch (err: any) {
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] seed run failed for the unmanaged copy '${targetPackageId}': ${err?.message ?? err}`);
+            return { mode: 'skipped', reason: `seed-error: ${err?.message ?? err}` };
+        }
+    };
+
+    /**
+     * [ADR-0146 D2 / D3, #30106] The install of a base's paired customization
+     * package `<base>.custom` — what `GET /packages/<base>.custom/export`
+     * wrote on another environment — into THIS environment's own writable
+     * pair. The body's items become items of the pair exactly as Studio makes
+     * them: stored rows bound to the pair, each written through the save door,
+     * so every read that serves a declared override serves it, the
+     * customization read lists it, and an administrator here keeps
+     * customizing. The module header of
+     * `marketplace-install-local-customization-pair.ts` says why a pair is never
+     * registered as code.
+     *
+     * In order, nothing written before step 4 (a runtime whose protocol
+     * lacks the pair's ensure door, the save door or the package delete is
+     * answered `503` after the refusals below, before step 4):
+     *  1. the body is converted forward ({@link convertPackageBodyForward}, as a
+     *     managed install converts its artifact) and walked into its items
+     *     ({@link planCustomizationPairInstall}); a key with no item form, a
+     *     nameless item or two items claiming one name refuse it whole;
+     *  2. the override write gate and the field-patch target check — the
+     *     managed install's steps 2d and 2e, the same answers;
+     *  3. the pair here: its manifest must declare what the ensure door
+     *     writes (`customizationPairManifestRefusal`, the predicate every
+     *     package install asks of a pair-shaped id); a pair already installed
+     *     READ-ONLY — registered as code by an earlier install through this
+     *     door (until a restart, even once uninstalled), or provided by this
+     *     runtime's code — is refused before the ensure door is asked, naming
+     *     the uninstall and restart that clear it; otherwise the ensure door answers the
+     *     writable pair, creating it when absent (ADR-0146 D3: its one
+     *     creation path), and its refusals are answered as it states them;
+     *  4. every item, in load order, through `saveMetaItem` with `mode:
+     *     'publish'` and the pair as its package — the save door a Studio edit
+     *     takes, which judges each item as it judges that edit.
+     *
+     * A write the save door refuses answers failure, never success, naming the
+     * item, with the save's own code and status. A pair THIS install created
+     * is deleted again (its ensure and every write undone), so nothing of the
+     * package remains; a pair that existed before is kept, and the answer
+     * lists the items already written (they stay published) and the ones not
+     * written — the install is written to be run again: every item is saved
+     * again on the next run.
+     *
+     * Nothing is registered as code, ledgered under the pair's id or
+     * rehydrated at boot: the pair's rows and its `sys_packages` record are its
+     * persistence, as on the environment that authored it. An item the pair
+     * already holds that the body does not carry is left as it is — the install
+     * writes the package's items, it deletes none. Seed `data` is not loaded
+     * (it is data, not an item), and the answer says so.
+     */
+    private installCustomizationPair = async (
+        c: any,
+        ctx: PluginContext,
+        args: {
+            manifest: Record<string, any>; manifestId: string; baseId: string;
+            version: string; versionId: string; userId: string | null;
+            /** [#28640 ruling ③A] The connector maps the export withheld ({@link judgeWithheldMaps}). */
+            withheldMaps: readonly WithheldMap[];
+            /** [#30326] The handshake admitted the package unchecked ({@link protocolCheckSkippedOf}). */
+            protocolCheckSkipped: ProtocolCheckSkipped | undefined;
+        },
+    ): Promise<Response> => {
+        const { manifest, manifestId, baseId, version, versionId, userId, withheldMaps, protocolCheckSkipped } = args;
+        const refuse = (status: number, code: string, message: string, details?: Record<string, unknown>) =>
+            c.json({ success: false, error: { code, message, ...(details ? { details } : {}) } }, status as any);
+
+        // 1. The body, converted forward, walked into its items.
+        const converted = flattenPackageBody(this.convertPackageBodyForward(ctx, manifest));
+        const plan = planCustomizationPairInstall(converted);
+        if (!plan.ok) {
+            const shown = plan.problems.slice(0, 5).join('; ');
+            return refuse(UNRUNNABLE_REFUSAL_STATUS, UNRUNNABLE_REFUSAL_CODE,
+                `Package '${manifestId}' cannot be installed as the paired customization package of '${baseId}': `
+                + `${shown}${plan.problems.length > 5 ? ` (+${plan.problems.length - 5} more)` : ''}. Nothing was installed `
+                + 'or written.',
+                { problems: [...plan.problems] });
+        }
+
+        // 2. The managed install's 2d and 2e, before any write.
+        const overrideGate = await this.evaluateOverrideWriteGate(ctx, manifestId, converted);
+        if (overrideGate.refusals.length > 0) return c.json(overrideGateRefusalBody(manifestId, overrideGate.refusals), 403);
+        const patchTargetRefusals = this.fieldPatchTargetRefusalsOf(ctx, converted);
+        if (patchTargetRefusals.length > 0) {
+            return refuse(UNRUNNABLE_REFUSAL_STATUS, UNRUNNABLE_REFUSAL_CODE,
+                fieldPatchTargetRefusalMessage(manifestId, patchTargetRefusals), { refusals: patchTargetRefusals });
+        }
+        const redeclaredRefusals = this.redeclaredOwnerFieldRefusalsOf(ctx, converted, manifestId);
+        if (redeclaredRefusals.length > 0) {
+            return refuse(UNRUNNABLE_REFUSAL_STATUS, UNRUNNABLE_REFUSAL_CODE,
+                redeclaredOwnerFieldInstallMessage(manifestId, redeclaredRefusals), { refusals: redeclaredRefusals });
+        }
+
+        // 3. The pair here: declared as the ensure door writes it, writable.
+        let ql: PackageWritabilityEngine | undefined;
+        try { ql = ctx.getService<PackageWritabilityEngine>('objectql'); } catch { /* no data engine */ }
+        const getInstalled = (id: string) => ql?.registry?.getPackage?.(id);
+        const manifestRefusal = customizationPairManifestRefusal(declaredPackageManifest(converted), getInstalled);
+        if (manifestRefusal !== undefined) {
+            return refuse(400, 'PLUGIN_MANIFEST_INVALID', `${manifestRefusal} Nothing was installed or written.`);
+        }
+        if (!isWritablePackage(ql, manifestId)) {
+            // Asked BEFORE the ensure door, which would otherwise create a
+            // pair row here only to answer it read-only. An uninstall through
+            // this door withdraws a package from the registry, but the
+            // engine keeps its code registration until a restart — the
+            // signal `isWritablePackage` reads first — so a pair installed
+            // as code stays read-only until then.
+            // Read-only by its manifest scope is an installed app's posture;
+            // read-only with neither that scope, a ledger entry nor a boot
+            // registration is a code registration this door made and
+            // withdrew — even when the pair's ensure door has been asked
+            // since, which records the pair without lifting it.
+            const ledgered = this.ledger.has(manifestId);
+            const scope = (getInstalled(manifestId) as { manifest?: { scope?: unknown } } | undefined)?.manifest?.scope;
+            const readOnlyByScope = typeof scope === 'string' && READ_ONLY_PACKAGE_SCOPES.includes(scope);
+            const withdrawn = !ledgered && !this.bootUserCodeIds.has(manifestId) && !readOnlyByScope;
+            return refuse(409, 'RESOURCE_CONFLICT', ledgered
+                ? `Package '${manifestId}' is installed here as code, by an earlier install of it through this door, so `
+                    + 'its items are read-only and none of its overrides is served. Uninstall it '
+                    + `(\`DELETE ${ROUTE_BASE}/${manifestId}\`), restart this runtime (the uninstall withdraws the package, `
+                    + 'but its code registration stays until a restart), and install it again: a paired customization '
+                    + `package is installed into the writable pair of '${baseId}' (ADR-0146 D3). Nothing was installed or written.`
+                : withdrawn
+                    ? `Package '${manifestId}' was installed here as code earlier and has been uninstalled, but its code `
+                        + 'registration stays in this runtime until it restarts, so the pair is still read-only. Restart '
+                        + `this runtime and install it again: it is then installed into the writable pair of '${baseId}' `
+                        + '(ADR-0146 D3). Nothing was installed or written.'
+                    : `Package '${manifestId}' is provided read-only here — by this runtime's code or an installed app — so `
+                        + `its items cannot be written into it. The paired customization package of '${baseId}' is a `
+                        + 'writable package (ADR-0146 D3): remove the read-only one first. Nothing was installed or written.',
+                { packageId: manifestId });
+        }
+        // 3b. The doors the write takes — asked once every refusal the body
+        //     and this environment decide has been asked.
+        let protocol: CustomizationPairInstaller | undefined;
+        try { protocol = ctx.getService<CustomizationPairInstaller>('protocol'); } catch { /* no protocol service */ }
+        const ensure = protocol?.ensureCustomizationPackage;
+        const save = protocol?.saveMetaItem;
+        const remove = protocol?.deletePackage;
+        if (typeof ensure !== 'function' || typeof save !== 'function' || typeof remove !== 'function') {
+            return refuse(503, 'SERVICE_UNAVAILABLE',
+                `Package '${manifestId}' is the paired customization package of '${baseId}', and this runtime cannot `
+                + 'install it: its metadata protocol has no ensure door for the pair or no save door for its items. '
+                + 'Upgrade @objectstack/metadata-protocol alongside @objectstack/cloud-connection. Nothing was installed '
+                + 'or written.');
+        }
+
+        let created: boolean;
+        try {
+            const ensured = await ensure.call(protocol, { basePackageId: baseId });
+            created = ensured.created === true;
+            if (ensured.writable !== true) {
+                return refuse(409, 'RESOURCE_CONFLICT',
+                    `Package '${manifestId}' is installed here read-only, so its items cannot be written into it. The `
+                    + `paired customization package of '${baseId}' is a writable package (ADR-0146 D3): remove the `
+                    + 'read-only one first. Nothing was installed or written.',
+                    { packageId: manifestId });
+            }
+        } catch (err: any) {
+            const resolved = resolveThrownHttpError(err, 500);
+            const fallback = `The paired customization package '${manifestId}' could not be ensured; the reason is in the server log.`;
+            const message = pairDoorRefusalText(err, resolved, fallback);
+            if (message === fallback) {
+                ctx.logger?.warn?.(`[MarketplaceInstallLocal] ensuring ${manifestId} for its install failed (${resolved.status} `
+                    + `${resolved.code}): ${err?.message ?? err}`);
+            }
+            return refuse(resolved.status, resolved.code,
+                `Package '${manifestId}' cannot be installed: ${message} Nothing was installed or written.`);
+        }
+
+        // 4. Every item, through the save door.
+        const written: Array<{ type: string; name: string }> = [];
+        for (const [at, entry] of plan.items.entries()) {
+            try {
+                await save.call(protocol, {
+                    type: entry.type,
+                    name: entry.name,
+                    item: entry.item,
+                    mode: 'publish',
+                    packageId: manifestId,
+                    ...(userId ? { actor: userId } : {}),
+                });
+                written.push({ type: entry.type, name: entry.name });
+            } catch (err: any) {
+                const notWritten = plan.items.slice(at + 1).map((i) => ({ type: i.type, name: i.name }));
+                // Logged here, at `error`, with the save's own words: the
+                // install the operator asked for did not land, and the pair
+                // this environment holds is not what the export describes —
+                // removed again when this install created it, partly written
+                // when it existed before. The answer says the same, but its
+                // text withholds a reason the save door did not declare.
+                const status = resolveThrownHttpError(err, 500);
+                ctx.logger.error(
+                    `[MarketplaceInstallLocal] the install of ${manifestId} into the pair of '${baseId}' failed: `
+                    + `${entry.type} '${entry.name}' (${entry.path}) was refused by the save door (${status.status} `
+                    + `${status.code}): ${err?.message ?? err}. `
+                    + (created
+                        ? 'The pair this install created is removed again.'
+                        : `The pair existed before and is kept: ${written.length} item(s) written before it stay `
+                            + `published, ${notWritten.length} were not written.`)
+                    + ' Correct the item and install the package again.',
+                );
+                return this.pairInstallWriteFailure(c, ctx, remove.bind(protocol), {
+                    manifestId, baseId, created, userId, err, failed: entry, written, notWritten,
+                });
+            }
+        }
+
+        ctx.logger?.info?.(
+            `[MarketplaceInstallLocal] installed ${manifestId} into the writable pair of '${baseId}'`
+            + `${created ? ', created by its ensure door,' : ''}: ${written.length} item(s) written through the save door`
+            + `${userId ? ` by ${userId}` : ''}. Nothing is registered as code or ledgered under '${manifestId}'.`,
+        );
+        if (withheldMaps.length > 0) ctx.logger?.warn?.(withheldMapsLogLine(manifestId, 'into its writable pair', withheldMaps));
+        return c.json({
+            success: true,
+            data: {
+                manifestId,
+                version,
+                versionId,
+                installedAt: new Date().toISOString(),
+                // What a pair install did, in place of a managed install's
+                // `hotLoaded` / `storageDir`: the pair the items went into.
+                customizationPair: { basePackageId: baseId, packageId: manifestId, created, writable: true },
+                writtenCount: written.length,
+                written,
+                // [#28640 ruling ③A] Omitted when the export withheld none.
+                ...(withheldMaps.length > 0 ? { withheldMaps: [...withheldMaps] } : {}),
+                // [#30326] Omitted when the handshake checked the package's range.
+                ...(protocolCheckSkipped !== undefined ? { protocolCheckSkipped } : {}),
+                ...(plan.carriesSeedData
+                    ? {
+                        seeded: {
+                            mode: 'skipped',
+                            reason: 'a paired customization package installs its items, not data: its sample data was not loaded',
+                        },
+                    }
+                    : {}),
+                note: `The package's items are items of the writable pair '${manifestId}' of '${baseId}': served now, and `
+                    + 'editable here. Refresh the console to see them.',
+            },
+        }, 200);
+    };
+
+    /**
+     * [ADR-0146 D3, #30106] The answer of a pair install whose item `failed`
+     * the save door refused — failure, never success, with the save's own
+     * code and status, naming the item. A pair the install `created` is
+     * deleted again, so nothing of the package remains; a deletion that does
+     * not finish is logged at `error`, since the environment then holds a
+     * partial pair while the install answered failure. A pair that existed
+     * before is kept: the answer lists what was written and what was not.
+     */
+    private pairInstallWriteFailure = async (
+        c: any,
+        ctx: PluginContext,
+        deletePackage: NonNullable<CustomizationPairInstaller['deletePackage']>,
+        args: {
+            manifestId: string; baseId: string; created: boolean; userId: string | null; err: any;
+            failed: PairInstallItem;
+            written: ReadonlyArray<{ type: string; name: string }>;
+            notWritten: ReadonlyArray<{ type: string; name: string }>;
+        },
+    ): Promise<Response> => {
+        const { manifestId, baseId, created, userId, err, failed, written, notWritten } = args;
+        const resolved = resolveThrownHttpError(err, 500);
+        // The caller logged the save's own words at `error` before handing
+        // the failure here, so the fallback's promise of a log line holds.
+        const fallback = 'the reason is in the server log';
+        const reason = pairDoorRefusalText(err, resolved, fallback);
+        let outcome: string;
+        if (created) {
+            let residue: string | undefined;
+            try {
+                const undone = await deletePackage({ packageId: manifestId, ...(userId ? { actor: userId } : {}) });
+                if (undone.failedCount > 0) residue = `${undone.failedCount} of its items could not be removed`;
+            } catch (deleteError) {
+                residue = `its deletion failed: ${clientFacingFailureText(deleteError, 'deletion failed')}`;
+            }
+            if (residue !== undefined) {
+                ctx.logger?.error?.(
+                    `[MarketplaceInstallLocal] the install of ${manifestId} failed and the pair it created was NOT fully `
+                    + `removed (${residue}): this environment still holds a partial '${manifestId}' while the install `
+                    + `answered failure. Delete the package '${manifestId}' to remove it.`,
+                );
+            }
+            outcome = residue === undefined
+                ? 'The pair this install created was removed again, so nothing of the package remains.'
+                : `The pair this install created could NOT be fully removed (${residue}): delete the package `
+                    + `'${manifestId}' to finish.`;
+        } else {
+            outcome = `The pair '${manifestId}' existed before this install, so it is kept: the ${written.length} item(s) `
+                + 'written before this one stay published (`details.written`), and the rest were not written '
+                + '(`details.notWritten`). Correct the item and install again — every item is written again.';
+        }
+        const details = isPlainObject(err?.details) ? err.details : undefined;
+        return c.json({
+            success: false,
+            error: {
+                code: resolved.code,
+                message: `Package '${manifestId}' was not installed into the pair of '${baseId}': ${failed.type} `
+                    + `'${failed.name}' (\`${failed.path}\`) could not be written — ${reason.replace(/[.\s]+$/, '')}. ${outcome}`,
+                details: {
+                    failed: { type: failed.type, name: failed.name, path: failed.path },
+                    written: [...written],
+                    notWritten: [...notWritten],
+                    ...(details ? { cause: details } : {}),
+                },
+            },
+        }, resolved.status as any);
     };
 
     /**
@@ -3663,6 +5557,25 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [epic cloud#3652 Q3, #30884] The package body the engine registry serves
+     * under `manifestId` — the row {@link findConflict} step 3 finds for an
+     * orphaned install — or `undefined` when there is none, or it carries no
+     * body. Step 2c′ compares against it when the ledger holds no record.
+     *
+     * One row, the one {@link findConflict} matches: for an artifact that
+     * bundles several packages, the other packages' rows are not folded in,
+     * so their objects read as added (never refused) rather than compared.
+     */
+    private registeredPackageBody = (ctx: PluginContext, manifestId: string): unknown => {
+        try {
+            const ql = ctx.getService<OverrideGateEngine>('objectql');
+            const packages = ql?.registry?.getAllPackages?.();
+            const row = Array.isArray(packages) ? packages.find((p: unknown) => manifestIdOf(p) === manifestId) : undefined;
+            return row?.manifest && typeof row.manifest === 'object' ? row.manifest : undefined;
+        } catch { return undefined; }
+    };
+
+    /**
      * Record the manifest ids the engine registry already holds, called once at
      * `kernel:ready` before rehydrate. Best-effort: a missing/empty registry
      * just yields an empty snapshot (every later install is treated as fresh).
@@ -3688,11 +5601,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     /**
      * POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data
      *
-     * Re-runs SeedLoaderService against the cached manifest's `data` arrays.
-     * Idempotent (upsert by id). Useful when:
+     * Re-runs SeedLoaderService against the cached manifest's `data` arrays,
+     * each dataset in the mode the installed body carries ([#30081] the spec
+     * default `ignore`, create-only, when it declares none). Idempotent.
+     * Useful when:
      *   • The user installed an app and skipped sample data
-     *   • A purge was undone
-     *   • The user wants a clean baseline back after editing demo rows
+     *   • A purge was undone, or demo rows were deleted
+     * It puts back the rows that are missing and leaves an edited row as it
+     * is; to get the shipped values back over edits, purge first, then
+     * reseed. A ledger entry installed from an artifact built before #30081
+     * carries a written `mode: "upsert"` and still writes the shipped values
+     * back on every reseed until the rebuilt artifact is re-installed.
      *
      * A success answers the loader's four counts — `inserted`, `updated`,
      * `skipped`, `errors` — so the caller sees why nothing changed. A run over
@@ -3718,6 +5637,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * rehydrate convert it, so the side effects reload the same translations
      * and seed the same datasets the other two loads of that body do. A body
      * with no declared range comes back unchanged.
+     *
+     * [#31425] An UNMANAGED COPY (no ledger entry) is reseeded from its seed
+     * receipt through the purge's own read of it ({@link
+     * unmanagedCopySeedDatasets}): a base this door copied and no other (404
+     * otherwise), `400 RESEED_SKIPPED` for a copy made without the sample data,
+     * the purge's `503` for a receipt that was not read. The answer is the
+     * same four counts; a copy has no ledger flags to write.
      */
     private handleReseed = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Reseeding sample data');
@@ -3726,8 +5652,45 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!manifestId) {
             return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
         }
+        // [#31425] An unmanaged copy writes no install-ledger entry: its base
+        // holds the seed receipt, and the reseed loads from it — the purge's own
+        // read of it ({@link unmanagedCopySeedDatasets}), for a base this door
+        // copied and no other. It is also how a copy whose first load failed
+        // (`seed-receipt-unread`, `seed-error`) is loaded again.
         if (!this.ledger.has(manifestId)) {
-            return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+            const copy = await this.unmanagedCopySeedDatasets(ctx, manifestId);
+            if (copy === null) {
+                return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+            }
+            if ('notSeeded' in copy) {
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'RESEED_SKIPPED',
+                        message: `Reseed did not run: No sample data was copied into '${manifestId}': it was installed `
+                            + 'unmanaged without `seedSampleData`, so it holds no seed receipt to load from.',
+                    },
+                }, 400);
+            }
+            if ('failure' in copy) return this.unreadableCopyReceipt(c, ctx, manifestId, copy, 'reseed');
+            if (copy.datasets.length === 0) {
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'RESEED_SKIPPED',
+                        message: `Reseed did not run: the sample data receipt of '${manifestId}' holds no seed item any more.`,
+                    },
+                }, 400);
+            }
+            const seeded = await this.seedUnmanagedCopy(c, ctx, {
+                app: unmanagedCopyBaseManifest(ctx, manifestId),
+                appId: manifestId,
+                targetPackageId: manifestId,
+                datasets: copy.datasets,
+                userId: admission.userId,
+                door: 'reseed',
+            });
+            return this.reseedAnswer(c, manifestId, seeded, null);
         }
         // #5426 — `has()` above already answered "is it installed", so reaching
         // this with no entry means the file is THERE and unreadable. The reason
@@ -3749,7 +5712,22 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // The ledger keeps the body as installed: `entry` is written back below
         // with its `manifest` untouched.
         const converted = this.convertPackageBodyForward(ctx, entry.manifest);
-        const summary = await this.applySideEffects(ctx, converted, { seedNow: true, c, door: 'reseed' });
+        const summary = await this.applySideEffects(ctx, converted, { seedNow: true, c, door: 'reseed', userId: admission.userId });
+        return this.reseedAnswer(c, manifestId, summary.seeded, entry);
+    };
+
+    /**
+     * The reseed's answer to one seed run ({@link handleReseed}), for a ledger
+     * `entry` and for an unmanaged copy (`entry` null, #31425) alike; for an
+     * entry, the ledger's sample-data flags once the rows are there.
+     */
+    private reseedAnswer = (
+        c: any,
+        manifestId: string,
+        seeded: { mode: string; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string },
+        entry: InstalledEntry | null,
+    ): Response => {
+        const summary = { seeded };
         // [ADR-0123 D2 / D4] A walled session with no active organization: the
         // reseed is a tenant-scoped write with no organization to write under.
         if (summary.seeded.mode === 'refused') {
@@ -3802,12 +5780,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }
 
         // Only mark the install as carrying sample data once its rows are
-        // there: landed by this run, or found already present by it.
-        try {
-            entry.withSampleData = true;
-            entry.sampleDataPurged = false;
-            this.ledger.write(entry);
-        } catch { /* non-fatal */ }
+        // there: landed by this run, or found already present by it. An
+        // unmanaged copy has no ledger entry to flag.
+        if (entry) {
+            try {
+                entry.withSampleData = true;
+                entry.sampleDataPurged = false;
+                this.ledger.write(entry);
+            } catch { /* non-fatal */ }
+        }
 
         return c.json({
             success: true,
@@ -3832,7 +5813,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * {@link purgeSeedRows} carries the rules; this handler supplies the scope.
      *
      *   • A seed row is matched by the seed's own key — each dataset's
-     *     `externalId`, the key the install's upsert and the reseed match on.
+     *     `externalId`, the key the install and the reseed match on.
      *     A row whose key no seed record declares (user-authored data) is never
      *     touched; a key carried by more than one row in scope is not guessed.
      *   • Scope is the install's: under an organization wall, the caller's
@@ -3862,8 +5843,27 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!manifestId) {
             return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
         }
+        // [#30808] An unmanaged copy writes no install-ledger entry: its base
+        // holds the seed receipt instead, and the purge deletes by it — for a
+        // base this door copied ({@link UnmanagedCopyRecord}) and no other.
         if (!this.ledger.has(manifestId)) {
-            return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+            const copy = await this.unmanagedCopySeedDatasets(ctx, manifestId);
+            if (copy === null) {
+                return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+            }
+            if ('notSeeded' in copy) {
+                return c.json({
+                    success: false,
+                    error: {
+                        code: 'NOTHING_TO_PURGE',
+                        message: `No sample data was copied into '${manifestId}': it was installed unmanaged without `
+                            + '`seedSampleData`. Nothing was deleted.',
+                    },
+                }, 400);
+            }
+            if ('failure' in copy) return this.unreadableCopyReceipt(c, ctx, manifestId, copy, 'purge');
+            return this.purgeSeedDatasets(c, ctx, manifestId, copy.datasets, null,
+                `The sample data receipt of '${manifestId}' holds no seed item any more, so no row can be matched. Nothing was deleted.`);
         }
         // #5426 — same shape as reseed: `has()` said the file is there, so a
         // missing entry here is an unreadable one, and the operator gets the
@@ -3877,12 +5877,170 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
         if (incompatible) return incompatible;
 
-        const datasets = seedDatasetsOf(entry.manifest);
+        return this.purgeSeedDatasets(c, ctx, manifestId, seedDatasetsOf(entry.manifest), entry);
+    };
+
+    /**
+     * [#30808] Remove the door's record of a copy when its base is uninstalled
+     * (the protocol's uninstall cleanups, which `deletePackage` runs), so a
+     * later base under the same id is never taken for the copy. A protocol
+     * without the cleanup registry leaves the records as they are; the purge
+     * still answers 404 for a record whose base is gone.
+     */
+    private registerUnmanagedCopyCleanup = (ctx: PluginContext): void => {
+        let protocol: { registerUninstallCleanup?: (name: string, cleanup: UninstallCleanup) => void } | undefined;
+        try { protocol = ctx.getService<typeof protocol>('protocol'); } catch { return; /* no protocol service */ }
+        if (!protocol || typeof protocol.registerUninstallCleanup !== 'function') return;
+        protocol.registerUninstallCleanup(UNMANAGED_COPY_RECORD_UNINSTALL_CLEANUP, async ({ packageId }) => {
+            try {
+                return { success: true, removed: this.unmanagedCopies.remove(packageId) ? 1 : 0 };
+            } catch (err: any) {
+                return { success: false, removed: 0, error: String(err?.message ?? err) };
+            }
+        });
+    };
+
+    /**
+     * [#30808, #31425] The datasets the sample-data doors act on for an
+     * UNMANAGED COPY — the purge deletes by them, the reseed loads them, the
+     * count matches them: its base's seed receipt
+     * ({@link readUnmanagedCopySeedReceipt}), the ONE read of it these doors
+     * share. `null` — the doors' 404, as for no install at all — when `packageId` is no
+     * installed writable base (asked first, so a removed base never reaches
+     * its record), is no copy this door made ({@link UnmanagedCopyRecord}),
+     * or is a later base under the copy's id (the package store's row is gone
+     * or carries another `created_at`); `notSeeded` for a copy made without
+     * the sample data; `failure` when the record (`recordFile` set), the
+     * package store, or the receipt could not be read. The package store's
+     * `get` answers `null` for an ordinary driver error (it logs it and throws
+     * only its seam-unreadable refusal), so a passing store error is a 404
+     * here, not a 503: the purge fails closed and deletes nothing.
+     */
+    private unmanagedCopySeedDatasets = async (
+        ctx: PluginContext,
+        packageId: string,
+    ): Promise<{ datasets: PurgeSeedDataset[] } | { notSeeded: true } | { failure: string; recordFile?: string } | null> => {
+        let ql: NamespaceHoldingEngine | undefined;
+        try { ql = ctx.getService<NamespaceHoldingEngine>('objectql'); } catch { return null; /* no data engine — no base */ }
+        if (!ql?.registry?.getPackage?.(packageId) || !isWritablePackage(ql, packageId)) return null;
+        const record = this.unmanagedCopies.read(packageId);
+        if (record.failure !== undefined) return { failure: record.failure, recordFile: this.unmanagedCopies.fileOf(packageId) };
+        if (record.entry === null) return null;
+        const recorded = record.entry.instance;
+        if (recorded !== undefined) {
+            let store: Partial<UnmanagedCopyPackageStore> | undefined;
+            try { store = ctx.getService<Partial<UnmanagedCopyPackageStore>>('package'); } catch { return null; /* no package store — the instance cannot be shown */ }
+            if (typeof store?.get !== 'function') return null;
+            let held: UnmanagedCopyInstance | null | undefined;
+            try {
+                held = await readUnmanagedCopyInstance(store as UnmanagedCopyPackageStore, packageId, recorded.version);
+            } catch (err: any) {
+                return { failure: `the package store could not be read for '${packageId}' (${err?.message ?? err})` };
+            }
+            if (!held || held.createdAt !== recorded.createdAt) return null;
+        }
+        if (!record.entry.seeded) return { notSeeded: true };
+        const listed = await this.unmanagedCopySeedNames(ctx, packageId);
+        if (listed.failure !== undefined) return { failure: listed.failure };
+        const receipt = await this.readUnmanagedCopySeedReceipt(ctx, packageId, listed.names);
+        return receipt.failure !== undefined ? { failure: receipt.failure } : { datasets: receipt.datasets };
+    };
+
+    /**
+     * [#30808, #31425] The sample-data doors' answer for a copy whose record,
+     * base row or receipt could not be read ({@link unmanagedCopySeedDatasets}):
+     * `503 SERVICE_UNAVAILABLE`, never "no sample data". The door's own record
+     * names the local file to repair; a receipt or a base row the stores did
+     * not answer names no file, and a retry is the remedy. The store's text
+     * goes to the log only.
+     */
+    private unreadableCopyReceipt = (
+        c: any,
+        ctx: PluginContext,
+        manifestId: string,
+        copy: { failure: string; recordFile?: string },
+        door: 'purge' | 'reseed' | 'count',
+    ): Response => {
+        const act = door === 'purge' ? 'purged' : door === 'reseed' ? 'reseeded' : 'counted';
+        const nothing = door === 'purge' ? 'Nothing was deleted.' : door === 'reseed' ? 'Nothing was written.' : 'Nothing was counted.';
+        ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${door} of the unmanaged copy ${manifestId} refused: ${copy.failure}`);
+        const message = copy.recordFile !== undefined
+            ? `The sample data of '${manifestId}' cannot be ${act} now: this door's record of the copy could not be `
+                + `read (${copy.failure}). Repair ${copy.recordFile}; removing it leaves this copy out of the sample-data `
+                + `doors' reach. ${nothing}`
+            : `The sample data of '${manifestId}' cannot be ${act} now: its seed items or its base's row could not `
+                + `be read, and a receipt that was not read is never taken for "no sample data". ${nothing} `
+                + 'Retry once the metadata and package stores answer.';
+        return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message } }, 503);
+    };
+
+    /**
+     * [#30964, cloud#3624 ruling A「两边审计」] Hand the `audit` slot's
+     * package lifecycle writer one `package_unmanaged_import` event — the
+     * copy's result, which only the environment knows. The row's shape is
+     * `@objectstack/plugin-audit`'s (`package-lifecycle-audit.ts`); this door
+     * hands an event, never a row. A host with no audit plugin has no ledger,
+     * so the call is skipped; a slot that throws anyway is logged, never
+     * answered: the copy's answer is the copy's, whatever the ledger does.
+     * [#31481] On a grant-path call (`c`, {@link installForGrant}) the call is
+     * marked audited, so its refusal is not handed a second event.
+     */
+    private recordUnmanagedImport = async (c: any, ctx: PluginContext, event: UnmanagedImportAuditEvent): Promise<void> => {
+        const call = this.grantCalls.get(c);
+        if (call) call.audited = true;
+        let audit: UnmanagedImportAuditSurface | undefined;
+        try { audit = ctx.getService<UnmanagedImportAuditSurface>('audit'); } catch { return; /* no audit plugin */ }
+        await recordUnmanagedImportEvent(audit, ctx.logger, 'MarketplaceInstallLocal', event);
+    };
+
+    /**
+     * [#30808, #31530] The base instance a new copy's record is tied to: the
+     * base's `sys_packages` row (`version`, `created_at`) as the import's own
+     * write answered it (`baseInstance`), never a read of the store after
+     * the import. A read could meet a passing store fault, which the store's
+     * `get` answers as `null`, and leave the copy unrecorded for good (#31425).
+     * No `instance` on a runtime with no `package` service (the record's
+     * reach is then by id alone: the residual its module docblock states). A
+     * `failure`, and so no record, when there is a `package` service but the
+     * import named no stored row (a package service that states no stamp):
+     * the copy then stays unrecorded and `copyRecord` says so, failing closed
+     * as before. The purge, reseed and count doors read the row again and
+     * compare it with this instance ({@link readUnmanagedCopyInstance}).
+     */
+    private unmanagedCopyInstance = (
+        ctx: PluginContext,
+        baseId: string,
+        stored: { version?: unknown; createdAt?: unknown } | undefined,
+    ): { instance?: UnmanagedCopyInstance } | { failure: string } => {
+        if (typeof stored?.version === 'string' && stored.version !== ''
+            && typeof stored.createdAt === 'string' && stored.createdAt !== '') {
+            return { instance: { version: stored.version, createdAt: stored.createdAt } };
+        }
+        let store: Partial<UnmanagedCopyPackageStore> | undefined;
+        try { store = ctx.getService<Partial<UnmanagedCopyPackageStore>>('package'); } catch { return {}; /* no package store */ }
+        if (typeof store?.get !== 'function') return {};
+        return { failure: `the import named no stored row of '${baseId}' (its package store stated no version and created_at)` };
+    };
+
+    /**
+     * The purge of `datasets` in the install's scope ({@link handlePurge}):
+     * the matcher and the deletes of {@link purgeSeedRows}, then, for a
+     * ledger `entry`, the ledger's sample-data flags. An unmanaged copy
+     * (`entry` null) has no ledger entry to flag.
+     */
+    private purgeSeedDatasets = async (
+        c: any,
+        ctx: PluginContext,
+        manifestId: string,
+        datasets: PurgeSeedDataset[],
+        entry: InstalledEntry | null,
+        nothingToPurge = 'This package declares no seed datasets.',
+    ): Promise<Response> => {
 
         if (datasets.length === 0) {
             return c.json({
                 success: false,
-                error: { code: 'NOTHING_TO_PURGE', message: 'This package declares no seed datasets.' },
+                error: { code: 'NOTHING_TO_PURGE', message: nothingToPurge },
             }, 400);
         }
 
@@ -3929,17 +6087,138 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // Flip flag so UI reflects the empty baseline. `sampleDataPurged`
         // additionally tells the rehydrate-time healer this emptiness is
         // deliberate — demo rows must not come back on the next restart.
-        try {
-            entry.withSampleData = false;
-            entry.sampleDataPurged = true;
-            this.ledger.write(entry);
-        } catch { /* non-fatal */ }
+        if (entry) {
+            try {
+                entry.withSampleData = false;
+                entry.sampleDataPurged = true;
+                this.ledger.write(entry);
+            } catch { /* non-fatal */ }
+        }
 
         ctx.logger?.info?.(`[MarketplaceInstallLocal] purged ${manifestId}${organizationId ? ` (org=${organizationId})` : ''}: deleted=${deleted} skipped=${skipped} errors=${errors}`);
         return c.json({
             success: true,
             data: { manifestId, deleted, skipped, errors, withSampleData: false },
         }, 200);
+    };
+
+    /**
+     * GET /api/v1/marketplace/install-local/:manifestId/sample-data
+     *
+     * How many of the package's sample rows the caller's scope still holds:
+     * `{ manifestId, count, unidentified }`. `count` is the number of rows a
+     * purge run now would delete — {@link countSeedRows}, the purge's own
+     * {@link matchSeedRows} pass with nothing deleted — so the console can say
+     * "N records will go" after a reload, when the install answer's
+     * `data.seeded` is long gone. `unidentified` is the seed records the purge
+     * would report in `errors` and leave in place.
+     *
+     * A read of its own, not a switch on the purge: a GET can delete nothing,
+     * whatever the request carries, and it takes no query parameter at all
+     * ({@link SAMPLE_DATA_COUNT_QUERY_PARAMS}). Not a field on the listing
+     * either: the listing answers `withSampleData` for every installed package
+     * on every visit, from the FIRST seed row it finds; a count reads every
+     * seeded object's rows, so it is asked for one package, when it is needed.
+     *
+     * Every answer is the purge's for the same request, read-only:
+     *   • the purge's gate, `manage_metadata` ({@link requireInstallCapability}),
+     *     since the count exists to word the purge's confirm;
+     *   • `404` for no install, the unreadable-entry answer, and the protocol
+     *     handshake's `422 OS_PROTOCOL_INCOMPATIBLE` (#21834), in that order;
+     *   • the purge's scope: under an organization wall the caller's active
+     *     organization, table-wide without one. A walled session with NO active
+     *     organization reads nothing and answers `count: 0` — ADR-0123 D2's
+     *     answer for a tenant-scoped READ, the listing's `withSampleData: false`
+     *     for the same session; the purge it would word refuses that session;
+     *   • a package that declares no seed datasets answers `count: 0` (the
+     *     purge's `400 NOTHING_TO_PURGE` is about acting, and nothing is acted on);
+     *   • no data engine or metadata service: the purge's `500
+     *     DRIVER_UNAVAILABLE`, never a `0` that reads as "nothing left";
+     *   • [#31425] an UNMANAGED COPY (no ledger entry) is counted by its seed
+     *     receipt, through the purge's own read of it ({@link
+     *     unmanagedCopySeedDatasets}): 404 for a base this door did not copy,
+     *     `count: 0` for a copy made without the sample data, the purge's
+     *     `503` for a receipt that was not read.
+     */
+    private handleSampleDataCount = async (c: any, ctx: PluginContext): Promise<Response> => {
+        const admission = await this.requireInstallCapability(c, ctx, 'Counting sample data');
+        if (!admission.ok) return admission.response;
+        const query = typeof c.req?.query === 'function' ? c.req.query() : undefined;
+        const queryRefusal = unknownQueryParamRefusalMessage(query, SAMPLE_DATA_COUNT_QUERY_PARAMS);
+        if (queryRefusal) {
+            return c.json({ success: false, error: { code: 'VALIDATION_ERROR', message: queryRefusal } }, 400);
+        }
+        const manifestId = String(c.req.param?.('manifestId') ?? c.req.params?.manifestId ?? '').trim();
+        if (!manifestId) {
+            return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'manifestId path param required.' } }, 400);
+        }
+        const answer = (count: number, unidentified: number): Response => c.json({
+            success: true,
+            data: { manifestId, count, unidentified },
+        }, 200);
+
+        let datasets: PurgeSeedDataset[];
+        if (!this.ledger.has(manifestId)) {
+            // [#31425] An unmanaged copy: the purge's own read of its seed
+            // receipt ({@link unmanagedCopySeedDatasets}), so the count is the
+            // rows a purge of the copy would delete now. A copy made without
+            // the sample data has none (`count: 0`); a receipt that was not
+            // read is the purge's 503, never a 0.
+            const copy = await this.unmanagedCopySeedDatasets(ctx, manifestId);
+            if (copy === null) {
+                return c.json({ success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `No marketplace install for ${manifestId}.` } }, 404);
+            }
+            if ('notSeeded' in copy) return answer(0, 0);
+            if ('failure' in copy) return this.unreadableCopyReceipt(c, ctx, manifestId, copy, 'count');
+            datasets = copy.datasets;
+        } else {
+            const { entry, failure } = this.ledger.read(manifestId);
+            if (!entry) {
+                return this.unreadableLedgerEntry(c, ctx, manifestId, failure, 'count sample data');
+            }
+            const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
+            if (incompatible) return incompatible;
+            datasets = seedDatasetsOf(entry.manifest);
+        }
+        if (datasets.length === 0) return answer(0, 0);
+
+        let ql: IObjectQLEngine | undefined;
+        let metadata: IMetadataService | undefined;
+        try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+        try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service */ }
+        if (!ql || !metadata) {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'DRIVER_UNAVAILABLE',
+                    message: 'The data engine (objectql) or the metadata service is not available on this runtime — cannot count sample data.',
+                },
+            }, 500);
+        }
+
+        let organizationId: string | undefined;
+        if (organizationWallActive(ctx)) {
+            const resolved = await this.resolveActiveOrgId(c, ctx);
+            // [ADR-0123 D2] No organization, so no organization's rows to count.
+            if (!resolved) return answer(0, 0);
+            organizationId = resolved;
+        }
+
+        const { SeedLoaderService } = await import('@objectstack/runtime');
+        const loader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
+        const graph = await loader.buildDependencyGraph([...new Set(datasets.map((d: any) => String(d.object)))]);
+        const { count, unidentified } = await countSeedRows({
+            engine: ql,
+            datasets,
+            graph,
+            organizationId,
+            report: (problem) => ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${manifestId}: the sample-data count could not identify `
+                + `${problem.records} seed record(s) of ${problem.object} (${problem.kind}: ${problem.detail}); `
+                + 'a purge would leave them in place',
+            ),
+        });
+        return answer(count, unidentified);
     };
 
     /**
@@ -4001,11 +6280,71 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *
      * An engine without that door (not ObjectQL) is handed the body as before.
      */
-    private convertPackageBodyForward = (ctx: PluginContext, manifest: unknown): any => {
-        let ql: { convertPackageBodyForward?: (body: unknown) => unknown } | undefined;
-        try { ql = ctx.getService('objectql') as typeof ql; } catch { /* no data engine */ }
-        return typeof ql?.convertPackageBodyForward === 'function' ? ql.convertPackageBodyForward(manifest) : manifest;
+    /**
+     * [epic cloud#3652 Q3, #30884] The dry run (`dryRun: true`, step 2a′): the
+     * package upgrade plan of the installed version against this one, with
+     * what only this environment knows, and nothing installed or written.
+     *
+     * Both versions are compared as the registry reads them — each converted
+     * forward ({@link convertPackageBodyForward}), the installed one from its
+     * ledger entry — by the `manifest` service's `planUpgrade`
+     * (`@objectstack/objectql`): the comparison is
+     * `comparePackageVersions` (`@objectstack/metadata-core`), the one
+     * `os diff` reads, and the readings are rows in each column the upgrade
+     * touches and rows a customer edited that the seed replay overwrites.
+     *
+     * A runtime whose `manifest` service answers no `planUpgrade` answers 503:
+     * a preview that could not run is never answered as an empty one. A
+     * ledger entry that will not parse is said so, and the plan is then
+     * against no installed version.
+     */
+    private answerUpgradeDryRun = async (
+        c: any,
+        ctx: PluginContext,
+        args: { manifest: any; manifestId: string; version: string },
+    ): Promise<Response> => {
+        const { manifest, manifestId, version } = args;
+        let service: { planUpgrade?: (installed: unknown, incoming: unknown) => Promise<unknown> } | undefined;
+        try { service = ctx.getService('manifest') as typeof service; } catch { /* no manifest service */ }
+        if (typeof service?.planUpgrade !== 'function') {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'SERVICE_UNAVAILABLE',
+                    message: `A dry run of '${manifestId}' cannot be answered: this runtime's \`manifest\` service does not `
+                        + 'answer `planUpgrade`, which the plan is read from. Nothing was installed or written.',
+                },
+            }, 503);
+        }
+        const ledgerRead = this.ledger.read(manifestId);
+        const installedEntry = ledgerRead.entry;
+        const installed = installedEntry?.manifest ? this.convertPackageBodyForward(ctx, installedEntry.manifest) : undefined;
+        const reading = await service.planUpgrade(installed, this.convertPackageBodyForward(ctx, manifest)) as {
+            plan: unknown;
+            environment: unknown;
+        };
+        return c.json({
+            success: true,
+            data: {
+                dryRun: true,
+                manifestId,
+                version,
+                installedVersion: installedEntry?.version ?? null,
+                ...(ledgerRead.failure ? { installedRecordUnreadable: true } : {}),
+                plan: reading.plan,
+                environment: reading.environment,
+                message: installedEntry
+                    ? `Dry run: the plan of upgrading '${manifestId}' from ${installedEntry.version} to ${version}. Nothing was installed or written.`
+                    : ledgerRead.failure
+                        ? `Dry run: the record of the installed '${manifestId}' could not be read, so the plan lists everything `
+                            + `${version} adds, against no installed version. Nothing was installed or written.`
+                        : `Dry run: '${manifestId}' is not installed here, so the plan lists everything ${version} adds. Nothing was installed or written.`,
+            },
+        }, 200);
     };
+
+    /** [#31895] The shared conversion ({@link convertPackageBodyForward}), the one the planner converts with. */
+    private convertPackageBodyForward = (ctx: PluginContext, manifest: unknown): any => convertPackageBodyForward(ctx, manifest);
 
     /**
      * [#28039] Register, record and connect the datasources `manifest`
@@ -4390,7 +6729,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     private applySideEffects = async (
         ctx: PluginContext,
         manifest: any,
-        opts: { seedNow: boolean; c?: any; door?: Exclude<SampleDataDoor, 'purge'> },
+        opts: { seedNow: boolean; c?: any; door?: Exclude<SampleDataDoor, 'purge'>; userId?: string },
     ): Promise<{ translationsLoaded: number; seeded: { mode: 'inline' | 'replayer' | 'skipped' | 'refused'; inserted?: number; updated?: number; skipped?: number; errors?: number; reason?: string; errorSample?: string } }> => {
         const appId = String(manifest?.id ?? 'unknown');
         let translationsLoaded = 0;
@@ -4508,7 +6847,17 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         }
                     }
                     if (!multiTenant || organizationId) {
-                        const s = await this.runInlineSeed(ctx, datasets, organizationId);
+                        // [#30281] The installing (or reseeding) user and this
+                        // package's own declared default locale.
+                        const s = await this.runInlineSeed(ctx, datasets, organizationId, {
+                            userId: opts.userId,
+                            app: manifest,
+                        }, {
+                            // [#30324] The person who ran this install (or reseed).
+                            userId: opts.userId ?? null,
+                            door: opts.door ?? 'install',
+                            none: 'the request names no person',
+                        });
                         seedSummary = { mode: 'inline', ...s };
                         ctx.logger?.info?.(`[MarketplaceInstallLocal] inline seed for ${appId}${organizationId ? ` (org=${organizationId})` : ''}: inserted=${s.inserted} updated=${s.updated} skipped=${s.skipped} errors=${s.errors}`);
                     }
@@ -4523,36 +6872,141 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * One SeedLoaderService run over `datasets` (upsert, multi-pass) — the
-     * shared engine behind install-time seeding, the reseed endpoint and the
-     * rehydrate-time healer. Throws when objectql/metadata are unavailable;
-     * per-row write failures are counted into `errors`, not thrown.
+     * [#30324 · ruling 6670861426] Stamp the person a seeding door names as
+     * `owner_id` / `created_by` on the rows its load created
+     * ({@link stampSeedOwner}), and say what happened: one info line for the
+     * stamp, one for a door with no person (the rows keep no owner, as before
+     * the ruling), one warning per object a write was refused on. Never throws:
+     * the load already landed, and a refused stamp leaves its rows as the seed
+     * wrote them.
+     */
+    private stampLoadOwner = async (
+        ctx: PluginContext,
+        ql: any,
+        results: unknown,
+        owner: SeedOwnerOfLoad,
+        organizationId: string | undefined,
+    ): Promise<void> => {
+        const loaded = (Array.isArray(results) ? results : []) as SeedOwnerStampInput[];
+        const created = loaded.reduce((n, r) => n + (Array.isArray(r?.insertedIds) ? r.insertedIds.length : 0), 0);
+        if (created === 0) return;
+        const where = organizationId ? ` (org=${organizationId})` : '';
+        if (!isStampableOwner(owner.userId)) {
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] ${owner.door}${where}: the ${created} sample row(s) this load created keep no owner `
+                + `— ${owner.none ?? 'no person named'}`,
+            );
+            return;
+        }
+        let stamp: SeedOwnerStampResult;
+        try {
+            stamp = await stampSeedOwner(ql, loaded, owner.userId, { organizationId });
+        } catch (err: any) {
+            ctx.logger?.warn?.(`[MarketplaceInstallLocal] ${owner.door}${where}: the owner stamp of ${created} sample row(s) failed — they keep no owner: ${err?.message ?? err}`);
+            return;
+        }
+        const owned = stamp.objects.filter((o) => o.owner > 0 || o.createdBy > 0);
+        if (owned.length > 0) {
+            ctx.logger?.info?.(
+                `[MarketplaceInstallLocal] ${owner.door}${where}: sample rows owned by ${owner.userId}: `
+                + owned.map((o) => `${o.object}=${Math.max(o.owner, o.createdBy)}`).join(', '),
+            );
+        }
+        for (const o of stamp.objects) {
+            if (o.refused === 0) continue;
+            ctx.logger?.warn?.(
+                `[MarketplaceInstallLocal] ${owner.door}${where}: ${o.refused} sample row(s) of '${o.object}' keep the owner the seed `
+                + `wrote — the owner stamp was refused: ${o.error ?? 'no reason given'}`,
+                { object: o.object, ownerUserId: owner.userId, refused: o.refused },
+            );
+        }
+    };
+
+    /**
+     * [#30324] The person a boot heal names as its rows' owner: the installer
+     * the ledger entry records (`installedBy`), when that is a person who can
+     * still sign in — a `sys_user` row a system read finds. No boot request
+     * carries a person, so this is the one the heal has; an entry with none,
+     * or an installer since removed, names nobody (the rows keep no owner, as
+     * before) and says which.
+     */
+    private resolveRecordedInstaller = async (ctx: PluginContext, entry: InstalledEntry): Promise<SeedOwnerOfLoad> => {
+        const door = 'sample-data heal';
+        const installedBy = entry?.installedBy;
+        if (!isStampableOwner(installedBy)) {
+            return { userId: null, door, none: `the install ledger records no installer for ${entry?.manifestId}` };
+        }
+        try {
+            const ql = ctx.getService<IObjectQLEngine>('objectql');
+            const rows: unknown = await ql.find('sys_user', { where: { id: installedBy }, fields: ['id'], limit: 1 }, { context: { isSystem: true } });
+            const found = (Array.isArray(rows) ? rows[0] : (rows as { items?: unknown[] } | null)?.items?.[0]) as { id?: unknown } | undefined;
+            if (found && String(found.id) === installedBy) return { userId: installedBy, door };
+            return { userId: null, door, none: `the recorded installer ${installedBy} of ${entry.manifestId} is no longer a user` };
+        } catch (err: any) {
+            return { userId: null, door, none: `the recorded installer ${installedBy} of ${entry.manifestId} could not be looked up: ${err?.message ?? err}` };
+        }
+    };
+
+    /**
+     * One SeedLoaderService run over `datasets` (multi-pass, each dataset in
+     * its own `mode`, the spec default `ignore` when it declares none) — the
+     * shared engine behind install-time seeding, the reseed endpoint, the
+     * rehydrate-time healer and this file's per-org replayer. Throws when
+     * objectql/metadata are unavailable, or when the seed locale cannot be
+     * read; per-row write failures are counted into `errors`, not thrown.
+     *
+     * [#30281] `localeFrom` names who the load is for, and the runtime's
+     * `resolveSeedLocaleForLoad` turns it into the `Seed.locale` filter: the
+     * organization's Localization setting, then `userId`'s language, then
+     * `app`'s declared `i18n.defaultLocale` (`app` is the package body; ruling
+     * A, maintainer, 2026-11-05: the install paths
+     * pick datasets by locale). Nothing answers ⇒ no locale, and every dataset
+     * loads as before. A dataset without `locale` loads whatever it answers.
      */
     private runInlineSeed = async (
         ctx: PluginContext,
         datasets: any[],
         organizationId?: string,
+        localeFrom: { userId?: string; app?: unknown } = {},
+        owner: SeedOwnerOfLoad = { userId: null, door: 'seed', none: 'no person named' },
     ): Promise<{ inserted: number; updated: number; skipped: number; errors: number; errorList: any[]; droppedRefs: number; errorSample?: string }> => {
         const ql: any = ctx.getService('objectql');
         let metadata: any;
         try { metadata = ctx.getService('metadata'); } catch { /* none */ }
         if (!ql || !metadata) throw new Error('objectql-or-metadata-missing');
 
-        const [{ SeedLoaderService }, { SeedLoaderRequestSchema }] = await Promise.all([
+        const [{ SeedLoaderService, appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad }, { SeedLoaderRequestSchema }] = await Promise.all([
             import('@objectstack/runtime'),
             import('@objectstack/spec/data'),
         ]);
+        const seedLocale = await resolveSeedLocaleForLoad(ctx, {
+            seeds: datasets,
+            organizationId,
+            userId: localeFrom.userId,
+            appDefaultLocale: appDefaultSeedLocale(localeFrom.app),
+        });
+        ctx.logger?.info?.(`[MarketplaceInstallLocal] seed locale${organizationId ? ` for org ${organizationId}` : ''}: ${describeSeedLocale(seedLocale)}`);
         const seedLoader = new (SeedLoaderService as any)(ql, metadata, ctx.logger);
         const request = (SeedLoaderRequestSchema as any).parse({
             // ADR-0036 / seed rename: the field is `seeds` (was `datasets`).
             seeds: datasets,
             config: {
-                defaultMode: 'upsert',
+                // [#30081] No mode of its own: an install, an upgrade or a
+                // reseed inserts the rows a dataset is missing and leaves the
+                // customer's existing rows alone, unless the dataset declares
+                // `mode: 'upsert'` (the spec default, ruling 6631016988).
                 multiPass: true,
                 ...(organizationId ? { organizationId } : {}),
+                // Spread, never `locale: undefined`: absence is what the
+                // loader's unresolved-scope warning is keyed on.
+                ...(seedLocale ? { locale: seedLocale.locale } : {}),
             },
         });
         const result = await seedLoader.load(request);
+        // [#30324 · ruling 6670861426] The rows this load CREATED get the
+        // person this door names as `owner_id` and `created_by`, then follow
+        // the ordinary permission rules like any record they own.
+        await this.stampLoadOwner(ctx, ql, result?.results, owner, organizationId);
         return {
             inserted: result.summary.totalInserted,
             updated: result.summary.totalUpdated,
@@ -4807,6 +7261,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 userAuthGates: userAuthGateSourceOf(authService),
                 // [#23367] The API-key lifecycle policy, from the same service.
                 apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
+                // [#31898] Where the request came from, for the `credential_use` row an
+                // admitted API key writes; the auth service applies the trust rule.
+                client: credentialUseClientFor(authService, { headers, remoteAddress: transportPeerAddressOf(c) }),
             });
             if (!authz.userId) return null;
             // ADR-0069: the ONE consult of the authentication-policy gate for
@@ -5008,6 +7465,37 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             + `this runtime, though its ledger entry lists it as installed — none of its objects, data or handlers `
             + `are available: ${diagnostic.message}. Install a version of the package built for protocol `
             + `${diagnostic.protocolVersion} (POST ${ROUTE_BASE}), or remove it (DELETE ${ROUTE_BASE}/${entry.manifestId}).`,
+        );
+    };
+
+    /**
+     * [#30217] Copy the working-directory ledger into this one, once
+     * ({@link LocalManifestSource.adoptLegacyEntries}), and say so.
+     *
+     * A copy that happened is a `warn`: the runtime now reads the new place,
+     * and the old directory, left in place, is stale state the operator should
+     * remove. A copy that failed is an `error` (AGENTS.md, "Degradation log
+     * levels"): the old ledger lists packages as installed, this runtime loads
+     * none of them, and the boot otherwise looks normal. Nothing was lost — the
+     * old files are untouched and the next boot copies again.
+     */
+    private adoptLegacyLedger = (ctx: PluginContext): void => {
+        let adoption: LegacyLedgerAdoption | null;
+        try {
+            adoption = this.ledger.adoptLegacyEntries();
+        } catch (cause) {
+            ctx.logger?.error?.(
+                `[MarketplaceInstallLocal] the packages ledgered in ${this.ledger.legacyDir} are NOT loaded into this `
+                + `runtime: copying them into ${this.storageDir}, where the ledger now lives (it follows OS_HOME), `
+                + `failed: ${describeLedgerCause(cause)}. Make ${this.storageDir} writable and restart, or copy the `
+                + `files there yourself; the old files are untouched.`,
+            );
+            return;
+        }
+        if (!adoption) return;
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] copied ${adoption.files.length} installed package(s) from ${adoption.from} `
+            + `into ${adoption.to}: the ledger now follows OS_HOME. ${adoption.from} is no longer read; remove it.`,
         );
     };
 

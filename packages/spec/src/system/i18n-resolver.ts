@@ -50,7 +50,8 @@
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
  *     .successMessage / .disabledReason / .submitText / .cancelText /
- *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.*
+ *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.* /
+ *     .preflight.fields.<path>
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
  * translations are for object-less actions. A `globalActions` entry that names
@@ -85,6 +86,7 @@ import { mapFlowNodeList } from '../conversions/walk.js';
 import { flowScreenFieldOptionKey } from '../automation/flow-screen-option-key.js';
 import { pageComponentSlotPositions } from '../ui/component.zod.js';
 import { templateSlotSource } from '../automation/flow-text-slot-template.js';
+import { platformLocaleTagOf } from './platform-locales.js';
 
 import type {
   PlatformTranslationBundle,
@@ -253,6 +255,8 @@ export interface ActionLike {
   objectName?: string;
   /** Post-success reveal dialog (see `Action.resultDialog` in ui/action.zod). */
   resultDialog?: ResultDialogLike;
+  /** Param-dialog preflight read (see `Action.preflight` in ui/action.zod). */
+  preflight?: PreflightLike;
 }
 
 /**
@@ -293,6 +297,15 @@ export interface ResultDialogLike {
   title?: string;
   description?: string;
   acknowledge?: string;
+  fields?: Array<{ path: string; label?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+/**
+ * Minimal preflight shape consumed by `resolveActionPreflight` — the panel's
+ * `fields` rows, the same `{ path, label? }` row `resultDialog.fields` carries.
+ */
+export interface PreflightLike {
   fields?: Array<{ path: string; label?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 }
@@ -372,19 +385,145 @@ export interface TranslateDocumentOptions extends ResolveOptions {
    * evidence that a value was authored.
    *
    * See {@link translateObject} for the rule it feeds.
+   *
+   * For a declared override from the base's paired `.custom` package
+   * (ADR-0146 D2) it is the BASE package's item — the document the override
+   * replaces, as the read would serve it without the override — never the
+   * override itself. Every document translator reads it, each string against
+   * its packaged counterpart: see {@link labelCatalogs} for the order.
    */
   packagedBase?: unknown;
+  /**
+   * The translations the served item's paired `.custom` package ships itself
+   * (ADR-0146 D2/D3), locale-keyed as `bundle` is — that package's own
+   * `translation` items and nothing else.
+   *
+   * Needed because `bundle` cannot say where a string came from: the serving
+   * layer hands the translators one catalog per locale, every package's code
+   * bundle and every authored `translation` row deep-merged with the package
+   * ids dropped. Only this option lets a translation the pair ships outrank
+   * the override's own text, which outranks the base's translation — the
+   * order {@link labelCatalogs} applies to every translatable string of the
+   * document translators.
+   *
+   * Absent, every translator answers exactly as it does without it.
+   */
+  pairBundle?: TranslationBundle;
+}
+
+/**
+ * [ADR-0146 D2] The two catalogs a document translator reads one string from,
+ * built once per document by {@link labelCatalogs}.
+ */
+interface LabelCatalogs {
+  /**
+   * For a string the served document did NOT change against its packaged
+   * base: the pair's translations laid over the deployment catalog, locale
+   * by locale along the chain.
+   */
+  readonly unchanged: TranslationBundle | undefined;
+  /**
+   * For a string the override changed: the pair's own translations, and no
+   * other catalog.
+   */
+  readonly changed: TranslationBundle | undefined;
+}
+
+/**
+ * [ADR-0146 D2] Label precedence on an overridden item — one order for every
+ * translatable string of every document translator (ruling record
+ * 6631250894):
+ *
+ *  1. a translation the paired `.custom` package ships
+ *     ({@link TranslateDocumentOptions.pairBundle});
+ *  2. the override's own text;
+ *  3. the base's translation.
+ *
+ * A string the override did not change still takes the base's translation:
+ * whether a string changed is the ONE comparison every translator already
+ * asks, {@link valueOverridesPackagedBase} against
+ * {@link TranslateDocumentOptions.packagedBase}, and {@link catalogFor} turns
+ * its answer into the catalog the string is read from:
+ *
+ *  - **changed** — the pair's own translations only, along the locale chain;
+ *    no entry keeps the override's text, because the deployment catalog
+ *    translates the BASE's text;
+ *  - **unchanged** — locale by locale, the pair's translation and then the
+ *    deployment catalog's. Interleaved, not pair-first across the chain, so a
+ *    pair that ships only `en` never displaces the base's `zh-CN` on a string
+ *    it left alone.
+ *
+ * With no `pairBundle` — or one that answers none of the chain's locales — the
+ * unchanged catalog IS `bundle` (the same reference) and the changed one is
+ * empty, which is exactly what every translator did
+ * before the option existed: a changed string keeps its text, an unchanged
+ * one reads `bundle`. With no `packagedBase` nothing counts as changed.
+ */
+function labelCatalogs(
+  bundle: TranslationBundle | undefined,
+  opts: TranslateDocumentOptions | undefined,
+): LabelCatalogs {
+  const pair = opts?.pairBundle;
+  if (!pair) return { unchanged: bundle, changed: undefined };
+  const chain = localeChain(opts);
+  const pairData = chain.map((code) => pickData(pair, code));
+  // A pair that answers none of the chain's locales adds nothing to read, so
+  // the catalogs are the ones without it — the same references, which is what
+  // keeps "no bundle" handing back the input document untouched.
+  if (pairData.every((data) => data === undefined)) return { unchanged: bundle, changed: undefined };
+  // Keyed by the chain's own codes, each resolved against both bundles the
+  // way `pickData` resolves it, so every lookup on the result hits exactly.
+  // A code neither bundle answers gets `{}`: a bare miss would let
+  // `pickData` re-resolve the code against the OTHER codes kept here.
+  const unchanged: Record<string, TranslationData> = {};
+  chain.forEach((code, index) => {
+    unchanged[code] = overlayTranslationData(pickData(bundle, code), pairData[index]) ?? {};
+  });
+  return { unchanged: unchanged as TranslationBundle, changed: pair };
+}
+
+/** The catalog a string is read from: {@link labelCatalogs}' rule, by whether the override changed it. */
+function catalogFor(catalogs: LabelCatalogs, changed: boolean): TranslationBundle | undefined {
+  return changed ? catalogs.changed : catalogs.unchanged;
+}
+
+/**
+ * `top` laid over `under`, one locale's translation data: nested groups merge
+ * key by key, and a non-empty leaf of `top` replaces `under`'s. An empty
+ * string is no translation (every lookup here reads only non-empty strings),
+ * so it never masks the leaf beneath it. Neither input is mutated; a branch
+ * `top` does not reach keeps `under`'s reference.
+ */
+function overlayTranslationData(
+  under: TranslationData | undefined,
+  top: TranslationData | undefined,
+): TranslationData | undefined {
+  if (top === undefined) return under;
+  if (under === undefined) return top;
+  return overlayRecord(under as Record<string, unknown>, top as Record<string, unknown>) as TranslationData;
+}
+
+function overlayRecord(under: Record<string, unknown>, top: Record<string, unknown>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...under };
+  for (const [key, value] of Object.entries(top)) {
+    if (value === undefined || value === '') continue;
+    const below = asRecord(under[key]);
+    const above = asRecord(value);
+    next[key] = below !== undefined && above !== undefined ? overlayRecord(below, above) : value;
+  }
+  return next;
 }
 
 /**
  * Resolve a requested locale code against the locales actually present in a
  * bundle, applying BCP-47 fallback so callers that pass a base language
  * (e.g. `zh`) or a differently-cased / region-qualified variant still hit the
- * available data (e.g. `zh-CN`). Mirrors `resolveLocale` in
- * `@objectstack/core` but is inlined here so `@objectstack/spec` stays
- * dependency-free.
+ * available data (e.g. `zh-CN`). The ladder is {@link resolveLocaleAmong}'s,
+ * run over the bundle's keys; `resolveLocale` in `@objectstack/core` runs the
+ * same function, so the two cannot answer differently.
  *
- * Order: exact → case-insensitive → base-language → variant-expansion.
+ * Order: exact → case-insensitive → platform table language →
+ * base-language → variant-expansion.
  * Returns the matched bundle key, or `undefined` when nothing matches.
  *
  * Exported so sibling locale-keyed constant tables in this package — the
@@ -395,23 +534,68 @@ export function resolveBundleLocale(
   bundle: Record<string, unknown>,
   requested: string,
 ): string | undefined {
-  // 1. Exact match (fast path).
-  if (bundle[requested] !== undefined) return requested;
+  // 1. Exact match (fast path). An own key only: an `Object.prototype`
+  // member name (`constructor`, `toString`, `__proto__`) is found on every
+  // plain-object bundle and is never a locale the bundle registered.
+  if (Object.prototype.hasOwnProperty.call(bundle, requested) && bundle[requested] !== undefined) {
+    return requested;
+  }
+  return resolveLocaleAmong(requested, Object.keys(bundle));
+}
 
-  const available = Object.keys(bundle);
+/**
+ * Resolve a requested locale code against a list of available locale codes:
+ * the one locale-matching ladder of the platform. {@link resolveBundleLocale}
+ * runs it over a bundle's keys, and `resolveLocale` in `@objectstack/core`
+ * is this function.
+ *
+ * 1. Exact match.
+ * 2. Case-insensitive match (`zh-cn` → `zh-CN`): BCP-47 tags are
+ *    case-insensitive.
+ * 3. The same platform table language (`platformLocaleTagOf`, which reads
+ *    the table's read aliases): `zh-TW`, `zh-HK` and `zh-MO` reach a
+ *    `zh-Hant` key; `zh`, `zh-CN`, `zh-SG` and `zh-Hans` reach a `zh-CN` (or
+ *    `zh-Hans`) key; `ja` reaches `ja-JP`. A key spelled as the table tag
+ *    itself wins, else the first key the table maps to that tag. Registration
+ *    order cannot hand a Traditional reader the Simplified key, or the other
+ *    way round, while the bundle holds both. A code the table does not know
+ *    (`es-MX`, `pt-PT`, `en-GB`) skips this step.
+ * 4. Base-language match (`en-GB` → `en`).
+ * 5. Variant expansion (`es-MX` → `es-ES`; the first registered variant
+ *    wins). A `zh-TW` request still reaches `zh-CN` here when the list holds
+ *    no Traditional key: a related language beats none.
+ *
+ * Returns the matched code, or `undefined` when nothing matches.
+ */
+export function resolveLocaleAmong(
+  requested: string,
+  available: readonly string[],
+): string | undefined {
   if (available.length === 0) return undefined;
+
+  // 1. Exact match.
+  if (available.includes(requested)) return requested;
 
   const lower = requested.toLowerCase();
   // 2. Case-insensitive match (e.g. `zh-cn` → `zh-CN`).
   const caseMatch = available.find((code) => code.toLowerCase() === lower);
   if (caseMatch) return caseMatch;
 
+  // 3. The same platform table language (e.g. `zh-TW` → `zh-Hant`).
+  const tag = platformLocaleTagOf(requested);
+  if (tag !== undefined) {
+    const folded = tag.toLowerCase();
+    const tagMatch = available.find((code) => code.toLowerCase() === folded)
+      ?? available.find((code) => platformLocaleTagOf(code) === tag);
+    if (tagMatch) return tagMatch;
+  }
+
   const base = lower.split('-')[0];
-  // 3. Base-language match (e.g. `zh-CN` → `zh`).
+  // 4. Base-language match (e.g. `zh-CN` → `zh`).
   const baseMatch = available.find((code) => code.toLowerCase() === base);
   if (baseMatch) return baseMatch;
 
-  // 4. Variant expansion (e.g. `zh` → `zh-CN`; first registered variant wins).
+  // 5. Variant expansion (e.g. `zh` → `zh-CN`; first registered variant wins).
   const variantMatch = available.find((code) => code.toLowerCase().split('-')[0] === base);
   if (variantMatch) return variantMatch;
 
@@ -423,7 +607,9 @@ function pickData<D>(
   locale: string,
 ): D | undefined {
   if (!bundle) return undefined;
-  const exact = bundle[locale];
+  // An own key only, as in `resolveBundleLocale`: an inherited member is
+  // never bundle data, so `constructor` reads as an unknown code, not a function.
+  const exact = Object.prototype.hasOwnProperty.call(bundle, locale) ? bundle[locale] : undefined;
   if (exact !== undefined) return exact;
   const resolved = resolveBundleLocale(bundle, locale);
   return resolved !== undefined ? bundle[resolved] : undefined;
@@ -782,6 +968,44 @@ export function resolveActionResultDialog<T extends ResultDialogLike>(
 }
 
 /**
+ * Resolve a translated copy of an action's `preflight`, overlaying each
+ * declared field's `label` from `…preflight.fields.<path>` (keyed by the
+ * literal field path, indexed directly and never split on `.`), exactly as
+ * {@link resolveActionResultDialog} overlays `resultDialog.fields`. Returns the
+ * original spec untouched (same reference) when the action has no `preflight`
+ * or it declares no `fields` — the panel then shows the answer as JSON and
+ * reads no label; otherwise a shallow copy with translated labels merged in.
+ */
+export function resolveActionPreflight<T extends PreflightLike>(
+  bundle: TranslationBundle | undefined,
+  action: ActionLike & { preflight?: T },
+  opts?: ResolveOptions,
+): T | undefined {
+  const spec = action.preflight;
+  if (!spec || !Array.isArray(spec.fields)) return spec;
+  const fields = spec.fields.map((field) => {
+    if (!field || typeof field.path !== 'string') return field;
+    const label = lookupActionPreflightFieldLabel(bundle, action, field.path, opts) ?? field.label;
+    return label !== undefined ? { ...field, label } : field;
+  });
+  return { ...spec, fields };
+}
+
+function lookupActionPreflightFieldLabel(
+  bundle: TranslationBundle | undefined,
+  action: ActionLike,
+  path: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const value = actionTranslationNode(pickData(bundle, code), action)?.preflight?.fields?.[path];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+/**
  * Resolve a translated success message for an action, returning `undefined`
  * if neither the bundle nor the action defines one. With no translation the
  * authored value is answered as written, as {@link resolveActionConfirm} does.
@@ -995,13 +1219,13 @@ function lookupBulkActionText(
  */
 function translateBulkActionDefs(
   defs: unknown,
-  bundle: TranslationBundle | undefined,
+  catalogs: LabelCatalogs,
   objectName: string,
   viewKey: string,
   opts: ResolveOptions | undefined,
   packagedConfig: Record<string, unknown> | undefined,
 ): unknown {
-  if (!Array.isArray(defs) || !bundle) return defs;
+  if (!Array.isArray(defs) || !catalogs.unchanged) return defs;
   let changed = false;
   const next = defs.map((raw) => {
     const def = raw as BulkActionDefLike;
@@ -1010,16 +1234,18 @@ function translateBulkActionDefs(
     }
     const defName = def.name;
     const packagedDef = packagedPart(packagedConfig, 'bulkActionDefs', (candidate) => candidate.name === defName);
-    // The catalog's string for `attr`, unless the authored value diverged from
-    // `packaged`'s — then `undefined`, which leaves the authored value in place.
+    // The catalog's string for `attr`, read from the catalog `labelCatalogs`
+    // assigns by whether the authored value diverged from `packaged`'s;
+    // `undefined` leaves the authored value in place.
     const text = (
       packaged: Record<string, unknown> | undefined,
       attr: string,
       authored: unknown,
       pick: (node: NonNullable<ReturnType<typeof lookupBulkActionNode>>) => unknown,
-    ) => valueOverridesPackagedBase(packaged, attr, authored)
-      ? undefined
-      : lookupBulkActionText(bundle, objectName, viewKey, defName, pick, opts);
+    ) => lookupBulkActionText(
+      catalogFor(catalogs, valueOverridesPackagedBase(packaged, attr, authored)),
+      objectName, viewKey, defName, pick, opts,
+    );
 
     const label = text(packagedDef, 'label', def.label, (n) => n.label);
     // `confirmText` is a template slot (#24798): the authored side and the
@@ -1082,12 +1308,13 @@ function translateBulkActionDefs(
  * caller then leaves the authored value in place.
  */
 function lookupSectionText(
-  bundle: TranslationBundle,
+  bundle: TranslationBundle | undefined,
   objectName: string,
   sectionName: string,
   attr: 'label' | 'description',
   opts: ResolveOptions | undefined,
 ): string | undefined {
+  if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
     const candidate = pickData(bundle, code)?.objects?.[objectName]?._sections?.[sectionName]?.[attr];
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
@@ -1102,13 +1329,14 @@ function lookupSectionText(
  * leaves the authored value in place.
  */
 function lookupSectionEntryText(
-  bundle: TranslationBundle,
+  bundle: TranslationBundle | undefined,
   objectName: string,
   sectionName: string,
   fieldName: string,
   attr: FormSectionEntryAttr,
   opts: ResolveOptions | undefined,
 ): string | undefined {
+  if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
     const candidate = pickData(bundle, code)?.objects?.[objectName]?._sections?.[sectionName]
       ?.fields?.[fieldName]?.[attr];
@@ -1178,7 +1406,7 @@ function formSectionObjectName(config: Record<string, unknown>, viewObject: stri
  */
 function translateFormSections(
   sections: unknown,
-  bundle: TranslationBundle,
+  catalogs: LabelCatalogs,
   objectName: string,
   opts: ResolveOptions | undefined,
   packagedConfig: Record<string, unknown> | undefined,
@@ -1191,15 +1419,18 @@ function translateFormSections(
     const sectionName = section.name;
     const packagedSection = packagedPart(packagedConfig, 'sections', (candidate) => candidate.name === sectionName);
     const text = (attr: 'label' | 'description', authored: unknown): string | undefined =>
-      !sectionCopyAuthored(authored) || valueOverridesPackagedBase(packagedSection, attr, authored)
+      !sectionCopyAuthored(authored)
         ? undefined
-        : lookupSectionText(bundle, objectName, sectionName, attr, opts);
+        : lookupSectionText(
+          catalogFor(catalogs, valueOverridesPackagedBase(packagedSection, attr, authored)),
+          objectName, sectionName, attr, opts,
+        );
 
     const label = text('label', section.label);
     const description = text('description', section.description);
     const fields = translateFormSectionEntries(
       section.fields,
-      bundle,
+      catalogs,
       objectName,
       sectionName,
       opts,
@@ -1236,7 +1467,7 @@ function translateFormSections(
  */
 function translateFormSectionEntries(
   entries: unknown,
-  bundle: TranslationBundle,
+  catalogs: LabelCatalogs,
   objectName: string,
   sectionName: string,
   opts: ResolveOptions | undefined,
@@ -1250,9 +1481,12 @@ function translateFormSectionEntries(
     const fieldName = entry.field;
     const packagedEntry = packagedPart(packagedSection, 'fields', (candidate) => candidate.field === fieldName);
     const text = (attr: FormSectionEntryAttr): string | undefined =>
-      !sectionCopyAuthored(entry[attr]) || valueOverridesPackagedBase(packagedEntry, attr, entry[attr])
+      !sectionCopyAuthored(entry[attr])
         ? undefined
-        : lookupSectionEntryText(bundle, objectName, sectionName, fieldName, attr, opts);
+        : lookupSectionEntryText(
+          catalogFor(catalogs, valueOverridesPackagedBase(packagedEntry, attr, entry[attr])),
+          objectName, sectionName, fieldName, attr, opts,
+        );
 
     const label = text('label');
     const placeholder = text('placeholder');
@@ -1291,15 +1525,15 @@ function translateFormSectionEntries(
  */
 function translateFormTitle(
   title: unknown,
-  bundle: TranslationBundle,
+  catalogs: LabelCatalogs,
   objectName: string,
   viewKey: string,
   opts: ResolveOptions | undefined,
   packagedConfig: Record<string, unknown> | undefined,
 ): unknown {
   if (typeof title !== 'string' || title.length === 0) return title;
-  if (valueOverridesPackagedBase(packagedConfig, 'title', title)) return title;
-  return lookupViewText(bundle, objectName, viewKey, 'title', opts) ?? title;
+  const catalog = catalogFor(catalogs, valueOverridesPackagedBase(packagedConfig, 'title', title));
+  return lookupViewText(catalog, objectName, viewKey, 'title', opts) ?? title;
 }
 
 /**
@@ -1333,7 +1567,8 @@ function translateFormTitle(
  */
 function translateFormSubmitBehavior(
   behavior: unknown,
-  lookup: (attr: SubmitBehaviorCopyKey) => string | undefined,
+  catalogs: LabelCatalogs,
+  lookup: (catalog: TranslationBundle | undefined, attr: SubmitBehaviorCopyKey) => string | undefined,
   packagedConfig: Record<string, unknown> | undefined,
 ): unknown {
   const served = asRecord(behavior);
@@ -1342,8 +1577,7 @@ function translateFormSubmitBehavior(
   const text = (attr: SubmitBehaviorCopyKey): string | undefined => {
     const value = served[attr];
     if (typeof value !== 'string' || value.length === 0) return undefined;
-    if (valueOverridesPackagedBase(packaged, attr, value)) return undefined;
-    return lookup(attr);
+    return lookup(catalogFor(catalogs, valueOverridesPackagedBase(packaged, attr, value)), attr);
   };
   const title = text('title');
   const message = text('message');
@@ -1363,12 +1597,13 @@ type SubmitBehaviorCopyKey = 'title' | 'message';
  * locale chain — `undefined` when no locale carries it.
  */
 function lookupSubmitBehaviorText(
-  bundle: TranslationBundle,
+  bundle: TranslationBundle | undefined,
   objectName: string,
   viewKey: string,
   attr: SubmitBehaviorCopyKey,
   opts: ResolveOptions | undefined,
 ): string | undefined {
+  if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
     const candidate = pickData(bundle, code)?.objects?.[objectName]?._views?.[viewKey]?.submitBehavior?.[attr];
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
@@ -1483,22 +1718,30 @@ export function translateView<T extends ViewLike>(
   opts?: TranslateDocumentOptions,
 ): T {
   const base = asRecord(opts?.packagedBase);
-  const label = valueOverridesPackagedBase(base, 'label', view.label)
-    ? (view.label as string)
-    : resolveViewLabel(bundle, view, opts);
-  const description = valueOverridesPackagedBase(base, 'description', view.description)
-    ? view.description
-    : resolveViewDescription(bundle, view, opts);
+  const catalogs = labelCatalogs(bundle, opts);
+  // A changed string reads the pair's catalog only, and falls back to its own
+  // value: `resolveViewLabel` / `resolveViewDescription` answer the view's
+  // own text on a miss.
+  const label = resolveViewLabel(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', view.label)),
+    view,
+    opts,
+  );
+  const description = resolveViewDescription(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', view.description)),
+    view,
+    opts,
+  );
 
   let config = view.config;
   const objectName = viewObjectName(view);
-  if (config && typeof config === 'object' && bundle && objectName) {
+  if (config && typeof config === 'object' && catalogs.unchanged && objectName) {
     // The base's own `config` — `{}` when the base is known but carries none,
     // so every def and section on the served view then counts as authored.
     const packagedConfig = base === undefined ? undefined : asRecord(base.config) ?? {};
     const defs = translateBulkActionDefs(
       config.bulkActionDefs,
-      bundle,
+      catalogs,
       objectName,
       viewTranslationKey(view, objectName),
       opts,
@@ -1506,14 +1749,14 @@ export function translateView<T extends ViewLike>(
     );
     const sections = translateFormSections(
       config.sections,
-      bundle,
+      catalogs,
       formSectionObjectName(config, objectName),
       opts,
       packagedConfig,
     );
     const title = translateFormTitle(
       config.title,
-      bundle,
+      catalogs,
       objectName,
       viewTranslationKey(view, objectName),
       opts,
@@ -1522,7 +1765,8 @@ export function translateView<T extends ViewLike>(
     const viewKey = viewTranslationKey(view, objectName);
     const submitBehavior = translateFormSubmitBehavior(
       config.submitBehavior,
-      (attr) => lookupSubmitBehaviorText(bundle, objectName, viewKey, attr, opts),
+      catalogs,
+      (catalog, attr) => lookupSubmitBehaviorText(catalog, objectName, viewKey, attr, opts),
       packagedConfig,
     );
     if (
@@ -1554,8 +1798,8 @@ export function translateView<T extends ViewLike>(
  * `label`, `description`, `confirmText`, `successMessage`, `disabledReason`,
  * `submitText` (for an action that declares `params`), `cancelText` (for an
  * action that declares `confirmText` or `params`), each declared
- * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy
- * with translated values when available. The
+ * `outcomeMessages` entry, the `params[]` copy, the `resultDialog` copy and
+ * the `preflight` panel's field labels with translated values when available. The
  * original document is not mutated; a shallow copy is returned.
  *
  * ## Why `description` and `params` are overlaid HERE
@@ -1606,6 +1850,9 @@ export function translateAction<T extends ActionLike>(
     : action.cancelText;
   const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
+  // [#31885] The preflight panel's field labels, overlaid like the result
+  // dialog's: only for the fields the action declares.
+  const preflight = resolveActionPreflight(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
   return {
     ...action,
@@ -1618,6 +1865,7 @@ export function translateAction<T extends ActionLike>(
     ...(cancelText !== undefined ? { cancelText } : {}),
     ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
+    ...(preflight !== action.preflight ? { preflight } : {}),
     ...(params !== action.params ? { params } : {}),
   };
 }
@@ -1744,6 +1992,31 @@ function lookupNavLabel(
 }
 
 /**
+ * The packaged base's navigation nodes by `id` — the key
+ * `apps.<app>.navigation.<id>` addresses a node by, at any depth — with
+ * {@link packagedPart}'s three answers per node: `undefined` for every id when
+ * no base was supplied, `{}` for an id the known base does not carry (a node
+ * authored after the fact), the packaged node otherwise. The first node of an
+ * id, depth-first, wins; the walk stops at {@link MAX_NESTED_COMPONENT_DEPTH}
+ * levels, since `children` is authored data.
+ */
+function packagedNavNodes(base: Record<string, unknown> | undefined): (id: string) => Record<string, unknown> | undefined {
+  if (base === undefined) return () => undefined;
+  const byId = new Map<string, Record<string, unknown>>();
+  const visit = (nodes: unknown, depth: number): void => {
+    if (!Array.isArray(nodes) || depth >= MAX_NESTED_COMPONENT_DEPTH) return;
+    for (const raw of nodes) {
+      const node = asRecord(raw);
+      if (node === undefined) continue;
+      if (typeof node.id === 'string' && !byId.has(node.id)) byId.set(node.id, node);
+      visit(node.children, depth + 1);
+    }
+  };
+  visit(base.navigation, 0);
+  return (id) => byId.get(id) ?? {};
+}
+
+/**
  * Apply the active locale to an app metadata document — translates the app's
  * `label` / `description` and walks the (possibly nested) `navigation` tree,
  * replacing each node's `label` with `apps.<app>.navigation.<id>.label` when a
@@ -1752,24 +2025,45 @@ function lookupNavLabel(
  * Translation keys are addressed by the stable navigation-node `id`
  * (e.g. `group_overview`, `nav_users`) — the same flat keyspace used by the
  * `apps.<app>.navigation` map, regardless of tree depth.
+ *
+ * ## An override's own text — ADR-0146 D2
+ *
+ * An app is overridable from its base's paired `.custom` package, and the
+ * catalog translates the BASE's text. So every string here follows
+ * {@link labelCatalogs}' order, judged against
+ * {@link TranslateDocumentOptions.packagedBase} by
+ * {@link valueOverridesPackagedBase}: the app's `label` and `description`
+ * against the base's, each navigation node's `label` against the base's node
+ * of the same `id` ({@link packagedNavNodes}). A string the override changed
+ * reads only the pair's translations and otherwise keeps its own text; a
+ * string it left alone takes the pair's translation, then the base's. No base
+ * supplied: the catalog applies to every string, as before.
  */
 export function translateApp<T extends AppLike>(
   doc: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const appName = doc.name;
-  if (!appName || !bundle) return doc;
+  const catalogs = labelCatalogs(bundle, opts);
+  if (!appName || !catalogs.unchanged) return doc;
 
-  const label = lookupAppAttr(bundle, appName, 'label', opts) ?? doc.label;
-  const description = lookupAppAttr(bundle, appName, 'description', opts) ?? doc.description;
+  const base = asRecord(opts?.packagedBase);
+  const label = lookupAppAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), appName, 'label', opts,
+  ) ?? doc.label;
+  const description = lookupAppAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', doc.description)), appName, 'description', opts,
+  ) ?? doc.description;
+  const packagedNode = packagedNavNodes(base);
 
   const translateNav = (node: NavNodeLike): NavNodeLike => {
     if (!node || typeof node !== 'object') return node;
     const next: NavNodeLike = { ...node };
     if (typeof node.id === 'string') {
-      const translated = lookupNavLabel(bundle, appName, node.id, opts);
+      const changed = valueOverridesPackagedBase(packagedNode(node.id), 'label', node.label);
+      const translated = lookupNavLabel(catalogFor(catalogs, changed), appName, node.id, opts);
       if (translated) next.label = translated;
     }
     if (Array.isArray(node.children)) {
@@ -1922,7 +2216,9 @@ function isOptionValue(value: unknown): value is string | number | boolean {
  */
 function packagedPart(
   parent: Record<string, unknown> | undefined,
-  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params' | 'sections' | 'fields' | 'blocks',
+  key:
+    | 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params' | 'sections' | 'fields' | 'blocks'
+    | 'dimensions' | 'measures' | 'groups' | 'items' | 'tabs',
   matches: (candidate: Record<string, any>) => boolean,
 ): Record<string, unknown> | undefined {
   if (parent === undefined) return undefined;
@@ -1978,7 +2274,7 @@ function packagedObjectField(
  */
 function translateGlobalFilter(
   filter: GlobalFilterLike,
-  bundle: TranslationBundle,
+  catalogs: LabelCatalogs,
   dashboardName: string,
   opts: ResolveOptions | undefined,
   packagedFilter: Record<string, unknown> | undefined,
@@ -1987,9 +2283,10 @@ function translateGlobalFilter(
   if (key === undefined) return filter;
 
   let next = filter;
-  const label = valueOverridesPackagedBase(packagedFilter, 'label', filter.label)
-    ? undefined
-    : lookupGlobalFilterLabel(bundle, dashboardName, key, opts);
+  const label = lookupGlobalFilterLabel(
+    catalogFor(catalogs, valueOverridesPackagedBase(packagedFilter, 'label', filter.label)),
+    dashboardName, key, opts,
+  );
   if (label !== undefined) next = { ...next, label };
 
   if (Array.isArray(filter.options)) {
@@ -2007,8 +2304,10 @@ function translateGlobalFilter(
         'options',
         (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(value),
       );
-      if (valueOverridesPackagedBase(packagedOption, 'label', option.label)) return option;
-      const translated = lookupGlobalFilterOption(bundle, dashboardName, key, String(value), opts);
+      const translated = lookupGlobalFilterOption(
+        catalogFor(catalogs, valueOverridesPackagedBase(packagedOption, 'label', option.label)),
+        dashboardName, key, String(value), opts,
+      );
       if (translated === undefined) return option;
       changed = true;
       return { ...option, label: translated };
@@ -2105,15 +2404,16 @@ export function translateDashboard<T extends DashboardLike>(
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const name = doc.name;
-  if (!name || !bundle) return doc;
+  const catalogs = labelCatalogs(bundle, opts);
+  if (!name || !catalogs.unchanged) return doc;
 
   const base = asRecord(opts?.packagedBase);
-  const label = valueOverridesPackagedBase(base, 'label', doc.label)
-    ? doc.label
-    : lookupDashboardAttr(bundle, name, 'label', opts) ?? doc.label;
-  const description = valueOverridesPackagedBase(base, 'description', doc.description)
-    ? doc.description
-    : lookupDashboardAttr(bundle, name, 'description', opts) ?? doc.description;
+  const label = lookupDashboardAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), name, 'label', opts,
+  ) ?? doc.label;
+  const description = lookupDashboardAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', doc.description)), name, 'description', opts,
+  ) ?? doc.description;
 
   let globalFilters: GlobalFilterLike[] | undefined;
   if (Array.isArray(doc.globalFilters)) {
@@ -2126,7 +2426,7 @@ export function translateDashboard<T extends DashboardLike>(
         'globalFilters',
         (candidate) => key !== undefined && globalFilterKey(candidate) === key,
       );
-      const next = translateGlobalFilter(filter, bundle, name, opts, packagedFilter);
+      const next = translateGlobalFilter(filter, catalogs, name, opts, packagedFilter);
       if (next !== filter) changed = true;
       return next;
     });
@@ -2138,13 +2438,15 @@ export function translateDashboard<T extends DashboardLike>(
         if (!w || typeof w !== 'object' || typeof w.id !== 'string') return w;
         const next: WidgetLike = { ...w };
         const packagedWidget = packagedPart(base, 'widgets', (candidate) => candidate.id === w.id);
-        const title = valueOverridesPackagedBase(packagedWidget, 'title', w.title)
-          ? undefined
-          : lookupWidgetAttr(bundle, name, w.id, 'title', opts);
+        const title = lookupWidgetAttr(
+          catalogFor(catalogs, valueOverridesPackagedBase(packagedWidget, 'title', w.title)),
+          name, w.id, 'title', opts,
+        );
         if (title) next.title = title;
-        const desc = valueOverridesPackagedBase(packagedWidget, 'description', w.description)
-          ? undefined
-          : lookupWidgetAttr(bundle, name, w.id, 'description', opts);
+        const desc = lookupWidgetAttr(
+          catalogFor(catalogs, valueOverridesPackagedBase(packagedWidget, 'description', w.description)),
+          name, w.id, 'description', opts,
+        );
         if (desc) next.description = desc;
         return next;
       })
@@ -2169,6 +2471,8 @@ export interface DatasetMemberLike {
   name?: string;
   /** `I18nLabelSchema` — a plain string OR an inline locale map (#5728). */
   label?: unknown;
+  /** `I18nLabelSchema` — the member's business definition (ADR-0149 D1). */
+  description?: unknown;
   [key: string]: unknown;
 }
 
@@ -2196,32 +2500,43 @@ function lookupDatasetAttr(
   return undefined;
 }
 
-function lookupDatasetMemberLabel(
+/**
+ * `datasets.<name>.{dimensions,measures}.<member>.{label,description}` — the
+ * member's `label`, and since ADR-0149 D1 its `description` (a business
+ * definition, display text like the label; its `synonyms` are match input and
+ * have no key).
+ */
+function lookupDatasetMemberAttr(
   bundle: TranslationBundle | undefined,
   datasetName: string,
   group: 'dimensions' | 'measures',
   memberName: string,
+  attr: 'label' | 'description',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
     const candidate =
-      pickData(bundle, code)?.datasets?.[datasetName]?.[group]?.[memberName]?.label;
+      pickData(bundle, code)?.datasets?.[datasetName]?.[group]?.[memberName]?.[attr];
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
   }
   return undefined;
 }
 
 /**
- * Overlay the bundle's labels onto a dataset's `dimensions[]` / `measures[]`,
- * returning the SAME array reference when nothing matched.
+ * Overlay the bundle's labels and descriptions onto a dataset's
+ * `dimensions[]` / `measures[]`, returning the SAME array reference when
+ * nothing matched. Each string of each member is judged against the packaged
+ * base's member of the same `name` ({@link packagedPart}) —
+ * {@link translateDataset}'s rule, one level down.
  */
 function translateDatasetMembers(
   members: unknown,
-  bundle: TranslationBundle | undefined,
+  catalogs: LabelCatalogs,
   datasetName: string,
   group: 'dimensions' | 'measures',
-  opts?: ResolveOptions,
+  opts: ResolveOptions | undefined,
+  base: Record<string, unknown> | undefined,
 ): unknown {
   if (!Array.isArray(members)) return members;
   let changed = false;
@@ -2230,10 +2545,23 @@ function translateDatasetMembers(
     if (!member || typeof member !== 'object' || typeof member.name !== 'string' || member.name.length === 0) {
       return raw;
     }
-    const label = lookupDatasetMemberLabel(bundle, datasetName, group, member.name, opts);
-    if (label === undefined) return raw;
+    const memberName = member.name;
+    const packagedMember = packagedPart(base, group, (candidate) => candidate.name === memberName);
+    const label = lookupDatasetMemberAttr(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedMember, 'label', member.label)),
+      datasetName, group, memberName, 'label', opts,
+    );
+    const description = lookupDatasetMemberAttr(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedMember, 'description', member.description)),
+      datasetName, group, memberName, 'description', opts,
+    );
+    if (label === undefined && description === undefined) return raw;
     changed = true;
-    return { ...member, label };
+    return {
+      ...member,
+      ...(label !== undefined ? { label } : {}),
+      ...(description !== undefined ? { description } : {}),
+    };
   });
   return changed ? next : members;
 }
@@ -2241,8 +2569,10 @@ function translateDatasetMembers(
 /**
  * Apply the active locale to a dataset metadata document — translates the
  * dataset's `label` / `description` and each dimension's and measure's `label`
- * against `datasets.<name>.{dimensions,measures}.<member>.label`. The input
- * document is not mutated.
+ * and `description` against
+ * `datasets.<name>.{dimensions,measures}.<member>.{label,description}`. The
+ * input document is not mutated. A member's `synonyms` are never translated:
+ * they are match input in every language at once (ADR-0149 D1).
  *
  * ## Why a dataset needs this at all
  *
@@ -2260,26 +2590,46 @@ function translateDatasetMembers(
  *
  * ## Writes only where the bundle answered
  *
- * `Dataset.label` / `.description` and the member labels are `I18nLabelSchema`,
+ * `Dataset.label` / `.description` and the member labels and descriptions are `I18nLabelSchema`,
  * so an author may already have written an inline `{ en, 'zh-CN' }` map (#5728).
  * Overwriting one with a resolved string would flatten a four-language label
  * down to one, so — exactly as `translatePage` does — a key the bundle does not
  * carry leaves the authored value untouched, and the arrays keep their identity
  * when nothing matched.
+ *
+ * ## An override's own text — ADR-0146 D2
+ *
+ * A dataset is overridable from its base's paired `.custom` package, and the
+ * catalog translates the BASE's text. So every string here follows
+ * {@link labelCatalogs}' order, judged against
+ * {@link TranslateDocumentOptions.packagedBase} by
+ * {@link valueOverridesPackagedBase}: `label` and `description` against the
+ * base's, each dimension's and measure's `label` and `description` against the
+ * base's member of the same `name`. A string the override changed reads only the pair's
+ * translations and otherwise keeps its own text; a string it left alone takes
+ * the pair's translation, then the base's. An inline locale map is never
+ * "changed" (the comparison reads strings only), so the catalog keeps the
+ * reading it has today. No base supplied: the catalog applies, as before.
  */
 export function translateDataset<T extends DatasetLike>(
   doc: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const name = doc.name;
-  if (!name || !bundle) return doc;
+  const catalogs = labelCatalogs(bundle, opts);
+  if (!name || !catalogs.unchanged) return doc;
 
-  const label = lookupDatasetAttr(bundle, name, 'label', opts);
-  const description = lookupDatasetAttr(bundle, name, 'description', opts);
-  const dimensions = translateDatasetMembers(doc.dimensions, bundle, name, 'dimensions', opts);
-  const measures = translateDatasetMembers(doc.measures, bundle, name, 'measures', opts);
+  const base = asRecord(opts?.packagedBase);
+  const label = lookupDatasetAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), name, 'label', opts,
+  );
+  const description = lookupDatasetAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', doc.description)), name, 'description', opts,
+  );
+  const dimensions = translateDatasetMembers(doc.dimensions, catalogs, name, 'dimensions', opts, base);
+  const measures = translateDatasetMembers(doc.measures, catalogs, name, 'measures', opts, base);
 
   return {
     ...doc,
@@ -2437,22 +2787,46 @@ function lookupBookGroupLabel(
  * console's docs portal builds its sidebar from), and the book tree route
  * (`GET /meta/book/:name/tree`) translates the book it resolves through the
  * same table before the spine is rendered.
+ *
+ * ## An override's own text — ADR-0146 D2
+ *
+ * A book is overridable from its base's paired `.custom` package, and the
+ * catalog translates the BASE's text. So every string here follows
+ * {@link labelCatalogs}' order, judged against
+ * {@link TranslateDocumentOptions.packagedBase} by
+ * {@link valueOverridesPackagedBase}: `label` and `description` against the
+ * base's, each group's `label` against the base's group of the same `key`. A
+ * string the override changed reads only the pair's translations and
+ * otherwise keeps its own text; a string it left alone takes the pair's
+ * translation, then the base's. No base supplied: the catalog applies, as
+ * before.
  */
 export function translateBook<T extends BookLike>(
   doc: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const bookName = doc.name;
-  if (typeof bookName !== 'string' || bookName.length === 0 || !bundle) return doc;
-  const label = lookupBookAttr(bundle, bookName, 'label', opts);
-  const description = lookupBookAttr(bundle, bookName, 'description', opts);
+  const catalogs = labelCatalogs(bundle, opts);
+  if (typeof bookName !== 'string' || bookName.length === 0 || !catalogs.unchanged) return doc;
+  const base = asRecord(opts?.packagedBase);
+  const label = lookupBookAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), bookName, 'label', opts,
+  );
+  const description = lookupBookAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', doc.description)), bookName, 'description', opts,
+  );
   let groupsMoved = false;
   const groups = Array.isArray(doc.groups)
     ? doc.groups.map((group) => {
       if (!group || typeof group !== 'object' || typeof group.key !== 'string') return group;
-      const translated = lookupBookGroupLabel(bundle, bookName, group.key, opts);
+      const groupKey = group.key;
+      const packagedGroup = packagedPart(base, 'groups', (candidate) => candidate.key === groupKey);
+      const translated = lookupBookGroupLabel(
+        catalogFor(catalogs, valueOverridesPackagedBase(packagedGroup, 'label', group.label)),
+        bookName, groupKey, opts,
+      );
       if (translated === undefined) return group;
       groupsMoved = true;
       return { ...group, label: translated };
@@ -2526,7 +2900,7 @@ function lookupReportBlockAttr(
  */
 function translateReportBlocks(
   blocks: unknown,
-  bundle: TranslationBundle,
+  catalogs: LabelCatalogs,
   name: string,
   base: Record<string, unknown> | undefined,
   opts?: ResolveOptions,
@@ -2538,12 +2912,14 @@ function translateReportBlocks(
     const blockName = block.name;
     if (typeof blockName !== 'string' || blockName.length === 0) return block;
     const packagedBlock = packagedPart(base, 'blocks', (candidate) => candidate.name === blockName);
-    const label = valueOverridesPackagedBase(packagedBlock, 'label', block.label)
-      ? undefined
-      : lookupReportBlockAttr(bundle, name, blockName, 'label', opts);
-    const description = valueOverridesPackagedBase(packagedBlock, 'description', block.description)
-      ? undefined
-      : lookupReportBlockAttr(bundle, name, blockName, 'description', opts);
+    const label = lookupReportBlockAttr(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedBlock, 'label', block.label)),
+      name, blockName, 'label', opts,
+    );
+    const description = lookupReportBlockAttr(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedBlock, 'description', block.description)),
+      name, blockName, 'description', opts,
+    );
     if (label === undefined && description === undefined) return block;
     changed = true;
     return {
@@ -2594,16 +2970,17 @@ export function translateReport<T extends ReportLike>(
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const name = doc.name;
-  if (typeof name !== 'string' || name.length === 0 || !bundle) return doc;
+  const catalogs = labelCatalogs(bundle, opts);
+  if (typeof name !== 'string' || name.length === 0 || !catalogs.unchanged) return doc;
 
   const base = asRecord(opts?.packagedBase);
-  const label = valueOverridesPackagedBase(base, 'label', doc.label)
-    ? undefined
-    : lookupReportAttr(bundle, name, 'label', opts);
-  const description = valueOverridesPackagedBase(base, 'description', doc.description)
-    ? undefined
-    : lookupReportAttr(bundle, name, 'description', opts);
-  const blocks = translateReportBlocks(doc.blocks, bundle, name, base, opts);
+  const label = lookupReportAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), name, 'label', opts,
+  );
+  const description = lookupReportAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', doc.description)), name, 'description', opts,
+  );
+  const blocks = translateReportBlocks(doc.blocks, catalogs, name, base, opts);
   if (label === undefined && description === undefined && blocks === undefined) return doc;
   return {
     ...doc,
@@ -2733,20 +3110,27 @@ function sameAuthoredText(a: string | Record<string, string>, b: unknown): boole
  *     `os i18n extract` offers no `title` key for such a header (it offers the
  *     label alone), so reading the label here is what translates it.
  *
+ * The two cases of step 3 read two different labels (ADR-0146 D2). An
+ * untitled header is filled with the PAGE's label, so `fillLabel` is that
+ * label's own translation, under whatever rule the page label follows. A
+ * title that restates a label translates as THAT label: `restated` names the
+ * label the title is compared with and its translation — the served page's
+ * when the header's title is the override's own, the base page's when the
+ * override left the header's title as the base wrote it.
+ *
  * `undefined` means "leave the authored title alone".
  */
 function resolvePageHeaderTitle(
   bundleTitle: string | undefined,
-  bundleLabel: string | undefined,
+  fillLabel: string | undefined,
+  restated: { label: unknown; translation: string | undefined },
   authoredTitle: unknown,
-  authoredPageLabel: unknown,
   derivesFromRecord: boolean,
 ): string | undefined {
   if (bundleTitle !== undefined) return bundleTitle;
-  if (bundleLabel === undefined) return undefined;
   const own = authoredLabelText(authoredTitle);
-  if (own === undefined) return derivesFromRecord ? undefined : bundleLabel;
-  if (sameAuthoredText(own, authoredPageLabel)) return bundleLabel;
+  if (own === undefined) return derivesFromRecord ? undefined : fillLabel;
+  if (sameAuthoredText(own, restated.label)) return restated.translation;
   return undefined;
 }
 
@@ -2864,12 +3248,13 @@ export const PAGE_FORM_COMPONENT_TYPE = 'object-form';
  * key by key, as {@link lookupPageComponentCopy} is.
  */
 function lookupPageFormSubmitBehaviorText(
-  bundle: TranslationBundle,
+  bundle: TranslationBundle | undefined,
   name: string,
   id: string,
   attr: SubmitBehaviorCopyKey,
   opts: ResolveOptions | undefined,
 ): string | undefined {
+  if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
     const candidate = pickData(bundle, code)?.pages?.[name]?.components?.[id]?.submitBehavior?.[attr];
     if (typeof candidate === 'string' && candidate.length > 0) return candidate;
@@ -2918,13 +3303,18 @@ function lookupPageTabItemLabel(
  * Overlay a `page:tabs` component's item labels from the bundle. Returns the
  * component unchanged when no item resolves, so a tab strip the bundle does
  * not cover — an inline locale map included — is left exactly as authored.
+ *
+ * `packagedProps` is the packaged base's same component's `properties`
+ * ({@link packagedPageParts}); each item is judged against the packaged item
+ * of the same `value` ({@link labelCatalogs}).
  */
 function translatePageTabItems(
   component: PageComponentLike,
-  bundle: TranslationBundle | undefined,
+  catalogs: LabelCatalogs,
   name: string,
   id: string,
-  opts?: ResolveOptions,
+  opts: ResolveOptions | undefined,
+  packagedProps: Record<string, unknown> | undefined,
 ): PageComponentLike {
   const props = component.properties;
   if (!props || typeof props !== 'object' || !Array.isArray(props.items)) return component;
@@ -2932,7 +3322,12 @@ function translatePageTabItems(
   const items = (props.items as unknown[]).map((item) => {
     const value = pageTabItemKey(item);
     if (value === undefined) return item;
-    const label = lookupPageTabItemLabel(bundle, name, id, value, opts);
+    const packagedItem = packagedPart(packagedProps, 'items', (candidate) => pageTabItemKey(candidate) === value);
+    const authored = (item as Record<string, unknown>).label;
+    const label = lookupPageTabItemLabel(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedItem, 'label', authored)),
+      name, id, value, opts,
+    );
     if (label === undefined) return item;
     changed = true;
     return { ...(item as Record<string, unknown>), label };
@@ -3280,6 +3675,45 @@ export function walkAddressedPageComponents(
 }
 
 /**
+ * Where a page component's copy key lands, read back: a `label` on the
+ * component's own top-level `label` when it authors a string there, every
+ * other key (and a `label` otherwise) in `properties` — the one either/or
+ * {@link translatePage} writes the copy back by.
+ */
+function pageComponentCopyValue(component: Record<string, unknown>, key: PageComponentCopyKey): unknown {
+  if (key === 'label' && typeof component.label === 'string') return component.label;
+  return asRecord(component.properties)?.[key];
+}
+
+/**
+ * The packaged base page's counterparts, for {@link translatePage}'s rule
+ * (ADR-0146 D2): each addressed component by `id`, found by the same walk and
+ * the same collision arbitration the translator reads the served page with
+ * ({@link walkAddressedPageComponents}), and THE page's header — its first
+ * root-level `page:header`, the one the page-name route addresses.
+ *
+ * {@link packagedPart}'s three answers for each: `undefined` when no base was
+ * supplied, `{}` when the known base carries no such part, the part itself
+ * otherwise.
+ */
+function packagedPageParts(base: Record<string, unknown> | undefined): {
+  component: (id: string) => Record<string, unknown> | undefined;
+  header: Record<string, unknown> | undefined;
+} {
+  if (base === undefined) return { component: () => undefined, header: undefined };
+  const byId = new Map<string, Record<string, unknown>>();
+  let header: Record<string, unknown> | undefined;
+  walkAddressedPageComponents(base as AddressedPageRoots, (component, { id, nested, addressed }) => {
+    if (addressed && id !== undefined && !byId.has(id)) byId.set(id, component as Record<string, unknown>);
+    if (!nested && header === undefined && component.type === PAGE_HEADER_COMPONENT) {
+      header = component as Record<string, unknown>;
+    }
+    return component;
+  });
+  return { component: (id) => byId.get(id) ?? {}, header: header ?? {} };
+}
+
+/**
  * Apply the active locale to a page metadata document — translates the page's
  * own `label` / `description` and the `properties.title` / `properties.subtitle`
  * of every `page:header` component in its regions, against
@@ -3389,23 +3823,49 @@ export function walkAddressedPageComponents(
  * `objects.<object>._tabs.<tab_name>.label` — see
  * {@link translateInterfaceTabs} for why that key is object-scoped and why
  * only this one of `ViewTabSchema`'s two carriers is covered (#5377).
+ *
+ * ## An override's own text — ADR-0146 D2
+ *
+ * A page is overridable from its base's paired `.custom` package, and the
+ * catalog translates the BASE's text. So every string here follows
+ * {@link labelCatalogs}' order, judged against
+ * {@link TranslateDocumentOptions.packagedBase} by
+ * {@link valueOverridesPackagedBase}, each against its packaged counterpart
+ * ({@link packagedPageParts}): the page's `label` and `description` against
+ * the base page's; the root-level header's `title` and `subtitle` against the
+ * base's root-level header; an addressed component's copy, key by key, against
+ * the base's component of the same `id`, read where the copy lands; a tab
+ * item's `label` against the base component's item of the same `value`; an
+ * `object-form`'s thank-you panel against the base component's; a preset tab's
+ * `label` against the base's tab of the same `name`. A string the override
+ * changed reads only the pair's translations and otherwise keeps its own
+ * text; a string it left alone takes the pair's translation, then the
+ * base's. No base supplied: the catalog applies to every string, as before.
  */
 export function translatePage<T extends PageLike>(
   doc: T,
   bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  opts?: TranslateDocumentOptions,
 ): T {
   if (!doc || typeof doc !== 'object') return doc;
   const name = doc.name;
-  if (!name || !bundle) return doc;
+  const catalogs = labelCatalogs(bundle, opts);
+  if (!name || !catalogs.unchanged) return doc;
 
-  const bundleLabel = lookupPageAttr(bundle, name, 'label', opts);
+  const base = asRecord(opts?.packagedBase);
+  const packaged = packagedPageParts(base);
+  const bundleLabel = lookupPageAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), name, 'label', opts,
+  );
   const label = bundleLabel ?? doc.label;
-  const description = lookupPageAttr(bundle, name, 'description', opts) ?? doc.description;
-  // The header title is decided per header, against what that header authors
-  // (`resolvePageHeaderTitle`); only the bundle half is page-wide.
-  const bundleHeaderTitle = lookupPageAttr(bundle, name, 'title', opts);
-  const headerSubtitle = lookupPageAttr(bundle, name, 'subtitle', opts);
+  const description = lookupPageAttr(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', doc.description)), name, 'description', opts,
+  ) ?? doc.description;
+  // The header strings are decided per header, against what that header
+  // authors (`resolvePageHeaderTitle`) and against the base's header.
+  const packagedHeaderProps = packaged.header === undefined
+    ? undefined
+    : asRecord(packaged.header.properties) ?? {};
 
   // The traversal — roots, descent, depth cap, cycle guard, collision
   // arbitration — is the shared walk (commit c45d8e6b4). This visitor owns only the
@@ -3438,9 +3898,27 @@ export function translatePage<T extends PageLike>(
     // the document, decided identically for every consumer of the walk; only
     // whether this consumer READS the entry changes here, and the extractor
     // blocks the namesake the same way.
+    // The base's component of the same id, and its `properties`
+    // (`packagedPageParts`' three answers), for every rule below.
+    const packagedComponent = addressed ? packaged.component(id as string) : undefined;
+    const packagedProps = packagedComponent === undefined
+      ? (base === undefined ? undefined : {})
+      : asRecord(packagedComponent.properties) ?? {};
+
     let copy: Partial<Record<PageComponentCopyKey, string>> | undefined;
     if (addressed && (nested || component.type !== PAGE_HEADER_COMPONENT)) {
-      copy = lookupPageComponentCopy(bundle, name, id as string, opts);
+      // Key by key, each from the catalog its own served value earns:
+      // compared where the copy lands, the base's value read in the same place.
+      const fromUnchanged = lookupPageComponentCopy(catalogs.unchanged, name, id as string, opts);
+      const fromChanged = lookupPageComponentCopy(catalogs.changed, name, id as string, opts);
+      for (const key of PAGE_COMPONENT_COPY_KEYS) {
+        const packagedCopy = packagedComponent === undefined
+          ? undefined
+          : { [key]: pageComponentCopyValue(packagedComponent, key) };
+        const changed = valueOverridesPackagedBase(packagedCopy, key, pageComponentCopyValue(component, key));
+        const text = (changed ? fromChanged : fromUnchanged)?.[key];
+        if (text !== undefined) (copy ??= {})[key] = text;
+      }
     }
 
     let next = component;
@@ -3469,21 +3947,21 @@ export function translatePage<T extends PageLike>(
     // entry belongs to one tabs component. The walk keeps a visitor's edit to
     // a panel's own keys and still descends the authored panel children.
     if (addressed && component.type === PAGE_TABS_COMPONENT_TYPE) {
-      next = translatePageTabItems(next, bundle, name, id as string, opts);
+      next = translatePageTabItems(next, catalogs, name, id as string, opts, packagedProps);
     }
 
     // An `object-form`'s thank-you panel, under the form component's own id
     // (`pages.<name>.components.<id>.submitBehavior`), on the same
     // `addressed` arbitration. The rules are the form view's panel's, through
-    // the one function both carriers share; `translatePage` is handed no
-    // packaged base for any page string, so the catalog applies as it does
-    // to this component's `title` and `description`.
+    // the one function both carriers share, judged against the base's same
+    // component's `properties.submitBehavior`.
     if (addressed && component.type === PAGE_FORM_COMPONENT_TYPE) {
       const behavior = next.properties?.submitBehavior;
       const submitBehavior = translateFormSubmitBehavior(
         behavior,
-        (attr) => lookupPageFormSubmitBehaviorText(bundle, name, id as string, attr, opts),
-        undefined,
+        catalogs,
+        (catalog, attr) => lookupPageFormSubmitBehaviorText(catalog, name, id as string, attr, opts),
+        packagedProps,
       );
       if (submitBehavior !== behavior) {
         next = { ...next, properties: { ...next.properties, submitBehavior } };
@@ -3496,8 +3974,21 @@ export function translatePage<T extends PageLike>(
     if (next.type !== PAGE_HEADER_COMPONENT) return next;
     // One call for a region root and a slot root alike: both arrive here with
     // `nested: false`, so the fallback order cannot differ between them.
+    const authoredTitle = next.properties?.title;
+    const titleChanged = valueOverridesPackagedBase(packagedHeaderProps, 'title', authoredTitle);
+    const bundleHeaderTitle = lookupPageAttr(catalogFor(catalogs, titleChanged), name, 'title', opts);
+    const headerSubtitle = lookupPageAttr(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedHeaderProps, 'subtitle', next.properties?.subtitle)),
+      name, 'subtitle', opts,
+    );
+    // A title the override left as the base wrote it restates the BASE's
+    // label, and translates as that label does; the override's own title
+    // restates the served label.
+    const restated = titleChanged || base === undefined
+      ? { label: doc.label, translation: bundleLabel }
+      : { label: base.label, translation: lookupPageAttr(catalogs.unchanged, name, 'label', opts) };
     const headerTitle = resolvePageHeaderTitle(
-      bundleHeaderTitle, bundleLabel, next.properties?.title, doc.label,
+      bundleHeaderTitle, bundleLabel, restated, authoredTitle,
       headerDerivesFromRecord(doc, next),
     );
     if (headerTitle === undefined && headerSubtitle === undefined) return next;
@@ -3515,7 +4006,7 @@ export function translatePage<T extends PageLike>(
     };
   });
 
-  const interfaceConfig = translateInterfaceTabs(doc, bundle, opts);
+  const interfaceConfig = translateInterfaceTabs(doc, catalogs, opts, base);
 
   return {
     ...doc,
@@ -3545,11 +4036,15 @@ export function translatePage<T extends PageLike>(
  * the records these presets filter — falling back to the page-level `object`.
  * Same order `i18n-extract` uses when it scaffolds the keys, and the same
  * "component's own binding first" discipline `_sections` follows.
+ *
+ * Each tab is judged against the packaged page's tab of the same `name`
+ * ({@link labelCatalogs}; `base` is {@link TranslateDocumentOptions.packagedBase}).
  */
 function translateInterfaceTabs(
   doc: PageLike,
-  bundle: TranslationBundle | undefined,
-  opts?: ResolveOptions,
+  catalogs: LabelCatalogs,
+  opts: ResolveOptions | undefined,
+  base: Record<string, unknown> | undefined,
 ): PageLike['interfaceConfig'] | undefined {
   const cfg = doc.interfaceConfig;
   if (!cfg || typeof cfg !== 'object') return undefined;
@@ -3562,10 +4057,17 @@ function translateInterfaceTabs(
     : doc.object;
   if (!objectName) return undefined;
 
+  const packagedFilters = base === undefined
+    ? undefined
+    : asRecord(asRecord(base.interfaceConfig)?.userFilters) ?? {};
   let changed = false;
   const tabs = userFilters.tabs.map((tab) => {
     if (!tab || typeof tab !== 'object') return tab;
-    const label = lookupTabLabel(bundle, objectName, tab, opts);
+    const packagedTab = packagedPart(packagedFilters, 'tabs', (candidate) => candidate.name === tab.name);
+    const label = lookupTabLabel(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedTab, 'label', tab.label)),
+      objectName, tab, opts,
+    );
     if (label === undefined) return tab;
     changed = true;
     return { ...tab, label };
@@ -3610,6 +4112,8 @@ export interface ObjectFieldLike {
   inlineHelpText?: string;
   /** `FieldSchema.inlineTitle` — the inline child grid's heading on the parent's form. */
   inlineTitle?: string;
+  /** `FieldSchema.relatedListTitle` — the related list's title on the parent's record page. */
+  relatedListTitle?: string;
   options?: Array<{ label?: string; value: string | number | boolean }>;
   [key: string]: any;
 }
@@ -3633,7 +4137,7 @@ function lookupObjectFieldAttr(
   bundle: TranslationBundle | undefined,
   objectName: string,
   fieldName: string,
-  attr: 'label' | 'help' | 'description' | 'inlineTitle',
+  attr: 'label' | 'help' | 'description' | 'inlineTitle' | 'relatedListTitle',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -4031,10 +4535,27 @@ const SYSTEM_FIELD_LABELS: Record<string, Record<string, string>> = {
 };
 
 /**
+ * Every locale the built-in system-field labels above carry a row for, `en`
+ * included — derived from the table, never listed by hand.
+ *
+ * These are locales a `/meta` read translates an injected column's label into
+ * with NO bundle registered for them at all: the request's `Accept-Language`
+ * is matched against this table directly (`builtinSystemFieldLabel`). So a
+ * write door that must recognise a served label coming back as a translation
+ * — and keep it out of the stored document, where it would read as the
+ * author's own field — has to try these locales as well as the bundle's own
+ * (`@objectstack/metadata-protocol`'s save door does).
+ */
+export const BUILTIN_SYSTEM_FIELD_LABEL_LOCALES: readonly string[] = Object.freeze([
+  ...new Set(Object.values(SYSTEM_FIELD_LABELS).flatMap((entry) => Object.keys(entry))),
+]);
+
+/**
  * Fallback label for a platform-injected system field, honouring the same
- * locale-matching rules as bundle lookup (exact → case-insensitive → base
- * language → variant). Applied only when the field still carries its injected
- * English default — an author's custom label is never overridden.
+ * locale-matching rules as bundle lookup (exact → case-insensitive → platform
+ * table language → base language → variant). Applied only when the field
+ * still carries its injected English default — an author's custom label is
+ * never overridden.
  */
 function builtinSystemFieldLabel(
   fieldName: string,
@@ -4174,12 +4695,12 @@ function authorsInlineHelpText(field: Record<string, unknown> | undefined): bool
  */
 function translateObjectListViews(
   listViews: unknown,
-  bundle: TranslationBundle | undefined,
+  catalogs: LabelCatalogs,
   objectName: string,
   opts: TranslateDocumentOptions | undefined,
 ): unknown {
   const views = asRecord(listViews);
-  if (views === undefined || !bundle) return listViews;
+  if (views === undefined || !catalogs.unchanged) return listViews;
   const base = asRecord(opts?.packagedBase);
   // The base's own `listViews` — `{}` when the base is known but carries none,
   // so every view on the served document then counts as authored.
@@ -4193,13 +4714,13 @@ function translateObjectListViews(
       continue;
     }
     const packagedView = packagedViews === undefined ? undefined : asRecord(packagedViews[viewKey]) ?? {};
-    const text = (attr: 'label' | 'description') =>
-      valueOverridesPackagedBase(packagedView, attr, view[attr])
-        ? undefined
-        : lookupViewText(bundle, objectName, viewKey, attr, opts);
+    const text = (attr: 'label' | 'description') => lookupViewText(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedView, attr, view[attr])),
+      objectName, viewKey, attr, opts,
+    );
     const label = text('label');
     const description = text('description');
-    const defs = translateBulkActionDefs(view.bulkActionDefs, bundle, objectName, viewKey, opts, packagedView);
+    const defs = translateBulkActionDefs(view.bulkActionDefs, catalogs, objectName, viewKey, opts, packagedView);
     if (label === undefined && description === undefined && defs === view.bulkActionDefs) {
       next[viewKey] = raw;
       continue;
@@ -4456,6 +4977,15 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * copies the served child field's `inlineTitle` as is, so serving it
  * translated here is the whole wiring. An authored heading with no entry keeps
  * its text; the child's plural label is never swapped in for it.
+ *
+ * ## A field's `relatedListTitle` — the related list's title
+ *
+ * `objects.<child>.fields.<field>.relatedListTitle` overlays the field's own
+ * `relatedListTitle` under the same rule, for the same reason: the field sits
+ * on the CHILD object, and the console derives the parent record page's
+ * related list (side card or full-width table) from the served child field.
+ * An authored title with no entry keeps its text; the child's label is never
+ * swapped in for it.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -4470,14 +5000,17 @@ export function translateObject<T extends ObjectLike>(
 
   // [#8284] `catalog ?? document`, EXCEPT where the document's own value has
   // diverged from the packaged declaration — there the document is authored
-  // data and the catalog yields to it.
+  // data and the deployment catalog yields to it (the pair's own catalog
+  // still applies, ADR-0146 D2 — see `labelCatalogs`).
+  const catalogs = labelCatalogs(bundle, opts);
   const resolveScalar = (
     key: 'label' | 'pluralLabel' | 'description',
     authored: string | undefined,
   ): string | undefined =>
-    scalarOverridesPackagedBase(opts?.packagedBase, key, authored)
-      ? authored
-      : lookupObjectField(bundle, objectName, key, opts) ?? authored;
+    lookupObjectField(
+      catalogFor(catalogs, scalarOverridesPackagedBase(opts?.packagedBase, key, authored)),
+      objectName, key, opts,
+    ) ?? authored;
 
   const label = resolveScalar('label', doc.label);
   const pluralLabel = resolveScalar('pluralLabel', doc.pluralLabel);
@@ -4487,43 +5020,53 @@ export function translateObject<T extends ObjectLike>(
   const translateField = (name: string, def: ObjectFieldLike): ObjectFieldLike => {
     const next: ObjectFieldLike = { ...def };
     const packagedField = packagedObjectField(packagedObject, name);
-    // The field `label` keeps a value that diverged from the packaged field's
-    // — an extension's `fieldPatches` label, a tenant's rename — under the one
-    // comparison its sibling slots use (ADR-0029 D9.2a; see the docblock).
-    if (!valueOverridesPackagedBase(packagedField, 'label', def.label)) {
-      const translatedLabel =
-        lookupObjectFieldAttr(bundle, objectName, name, 'label', opts) ??
+    // Each slot reads the catalog `labelCatalogs` assigns by whether its
+    // served value diverged from the packaged field's (ADR-0029 D9.2a,
+    // ADR-0146 D2; see the docblock).
+    const slotCatalog = (slot: string, value: unknown): TranslationBundle | undefined =>
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedField, slot, value));
+    // The field `label`: a value that diverged from the packaged field's — an
+    // extension's `fieldPatches` label, a tenant's rename — reads only the
+    // pair's catalog, and the built-in system-field labels apply only where
+    // the deployment catalog may.
+    const labelChanged = valueOverridesPackagedBase(packagedField, 'label', def.label);
+    const translatedLabel = labelChanged
+      ? lookupObjectFieldAttr(catalogs.changed, objectName, name, 'label', opts)
+      : lookupObjectFieldAttr(catalogs.unchanged, objectName, name, 'label', opts) ??
         builtinSystemFieldLabel(name, def.label, opts);
-      if (translatedLabel) next.label = translatedLabel;
-    }
+    if (translatedLabel) next.label = translatedLabel;
     // The bundle's field `help` entry is served on the slot the extractor
     // seeded it from: the field's own `inlineHelpText` when it authors one —
     // the slot the console draws first — and `description` only when neither
     // the served nor the packaged field authors one; never on an undeclared
-    // `help`. The slot keeps a value that diverged from the packaged field's
-    // (ADR-0029 D9.2a; see the docblock).
-    const translatedHelp = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
-    if (translatedHelp) {
-      const servedInlineHelp = authorsInlineHelpText(def);
-      if (servedInlineHelp) {
-        if (!valueOverridesPackagedBase(packagedField, 'inlineHelpText', def.inlineHelpText)) {
-          next.inlineHelpText = translatedHelp;
-        }
-      } else if (
-        !authorsInlineHelpText(packagedField) &&
-        !valueOverridesPackagedBase(packagedField, 'description', def.description)
-      ) {
-        next.description = translatedHelp;
-      }
+    // `help`.
+    if (authorsInlineHelpText(def)) {
+      const translatedHelp = lookupObjectFieldAttr(
+        slotCatalog('inlineHelpText', def.inlineHelpText), objectName, name, 'help', opts,
+      );
+      if (translatedHelp) next.inlineHelpText = translatedHelp;
+    } else if (!authorsInlineHelpText(packagedField)) {
+      const translatedHelp = lookupObjectFieldAttr(
+        slotCatalog('description', def.description), objectName, name, 'help', opts,
+      );
+      if (translatedHelp) next.description = translatedHelp;
     }
-    // The inline child grid's heading, under the same divergence rule. The
-    // console's inline-subform pass copies the served value onto the parent's
-    // form, so this is the one place it is localized. An untranslated heading
-    // keeps its authored text — never the child's plural label in its place.
-    if (!valueOverridesPackagedBase(packagedField, 'inlineTitle', def.inlineTitle)) {
-      const translatedInlineTitle = lookupObjectFieldAttr(bundle, objectName, name, 'inlineTitle', opts);
-      if (translatedInlineTitle) next.inlineTitle = translatedInlineTitle;
-    }
+    // The inline child grid's heading, under the same rule. The console's
+    // inline-subform pass copies the served value onto the parent's form, so
+    // this is the one place it is localized. An untranslated heading keeps its
+    // authored text — never the child's plural label in its place.
+    const translatedInlineTitle = lookupObjectFieldAttr(
+      slotCatalog('inlineTitle', def.inlineTitle), objectName, name, 'inlineTitle', opts,
+    );
+    if (translatedInlineTitle) next.inlineTitle = translatedInlineTitle;
+    // The related list's title on the parent's record page, under the same
+    // rule: the console derives the list from the served child field, so this
+    // is the one place it is localized, and an untranslated title keeps its
+    // authored text.
+    const translatedRelatedListTitle = lookupObjectFieldAttr(
+      slotCatalog('relatedListTitle', def.relatedListTitle), objectName, name, 'relatedListTitle', opts,
+    );
+    if (translatedRelatedListTitle) next.relatedListTitle = translatedRelatedListTitle;
     if (Array.isArray(def.options)) {
       // A picklist-bound field is served with its list's options resolved
       // onto it (`PicklistServedFieldSchema`), and INHERITS the list's option
@@ -4543,10 +5086,10 @@ export function translateObject<T extends ObjectLike>(
           'options',
           (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(opt.value),
         );
-        if (valueOverridesPackagedBase(packagedOption, 'label', opt.label)) return opt;
+        const catalog = catalogFor(catalogs, valueOverridesPackagedBase(packagedOption, 'label', opt.label));
         const translated =
-          lookupObjectFieldOption(bundle, objectName, name, opt.value, opts) ??
-          (picklist !== undefined ? lookupPicklistOption(bundle, picklist, opt.value, opts) : undefined);
+          lookupObjectFieldOption(catalog, objectName, name, opt.value, opts) ??
+          (picklist !== undefined ? lookupPicklistOption(catalog, picklist, opt.value, opts) : undefined);
         return translated ? { ...opt, label: translated } : opt;
       });
     }
@@ -4581,7 +5124,7 @@ export function translateObject<T extends ObjectLike>(
       })
     : undefined;
 
-  const listViews = translateObjectListViews(doc.listViews, bundle, objectName, opts);
+  const listViews = translateObjectListViews(doc.listViews, catalogs, objectName, opts);
   const authoredValidations = (doc as { validations?: unknown }).validations;
   const validations = translateObjectValidations(authoredValidations, bundle, objectName, opts);
 

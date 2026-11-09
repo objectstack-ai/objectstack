@@ -26,12 +26,28 @@
  * gate's host (cut 8, `protocol-authoring-gate.ts`), whose closure calls it.
  *
  * The body reads no module-level declaration of `protocol.ts`; it imports the
- * class type and the shared walk (`resolvePackageClosure`, below). Nothing
- * re-exports this module, so the published surface does not move.
+ * class type and the shared walk ({@link packageDependencyClosure}).
+ *
+ * ## One declared dependency closure for every reader (#31575, ADR-0150 D3)
+ *
+ * {@link packageDependencyClosure} is the one answer to "what may package P
+ * reach by declaration": the save door's write scope (the method above, which
+ * now only adds its silent `catch`) and objectql's package-scoped name
+ * resolver (`resolvePackageScopedName`) both ask it, so the closure a write is
+ * judged against and the closure a bare name resolves in can never disagree.
+ * It is the one export of this module the package root re-exports.
+ *
+ * [epic #31527 child R2] The walk, the App-pair widening and this closure live
+ * in `@objectstack/metadata-core` (`package-closure.ts`), so the resolution
+ * rule's readers inside objectql's lean entry, which this package stays out
+ * of (ADR-0076 D2), read the same one. Re-exported here under their names, so
+ * this package's surface is unchanged.
  */
 
-import { resolvePackageClosure } from '@objectstack/lint/runtime';
+import { packageDependencyClosure, widenPairClosureToAppMembers, type PackageClosureRegistry } from '@objectstack/metadata-core';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
+
+export { packageDependencyClosure, widenPairClosureToAppMembers };
 
 /**
  * The `ObjectStackProtocolImplementation` members the function below reads —
@@ -47,23 +63,20 @@ export interface WritePackageScopeHost {
 /**
  * The body of `ObjectStackProtocolImplementation#resolveWritePackageScope`; the method's docblock there is its contract.
  *
- * [#28240] The dependency walk itself is `resolvePackageClosure` in
- * `@objectstack/lint`, the same function Studio's object pickers call over
+ * [#28240] The dependency walk itself is `resolvePackageClosure` (in
+ * `@objectstack/metadata-core` since epic #31527 child R2, re-exported by
+ * `@objectstack/lint`), the same function Studio's object pickers call over
  * the served package list, so the picker offers exactly what this gate
  * admits. This body keeps the two host guards: a registry with no
- * `getPackage`, and the silent `catch` answering `undefined`.
+ * `getPackage`, and the silent `catch` answering `undefined`. An App's pair's
+ * closure is widened by the App's members ({@link widenPairClosureToAppMembers}).
  */
 export function resolveWritePackageScope(
     this: Pick<WritePackageScopeHost, 'engine'>,
     packageId: string | null | undefined,
 ): { packageId: string; dependencies: string[] } | undefined {
     try {
-        const registry = this.engine.registry as
-            | { getPackage?: (id: string) => { manifest?: unknown } | undefined }
-            | undefined;
-        const getPackage = registry?.getPackage;
-        if (typeof getPackage !== 'function') return undefined;
-        return resolvePackageClosure(packageId, (id) => getPackage.call(registry, id));
+        return packageDependencyClosure(packageId, this.engine.registry as PackageClosureRegistry | undefined);
     } catch {
         // Context gathering must never fail a write (the same contract
         // `listCollection` above holds). An unreadable registry means an

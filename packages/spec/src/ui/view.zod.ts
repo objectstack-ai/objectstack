@@ -2007,16 +2007,24 @@ export const ViewTabSchema = lazySchema(() => strictObject({
  * Rendering details (widget, options) default to inference from the field
  * definition on the source object — authors only override when needed.
  *
+ * Each property carries a `.meta({ title })` because `view.form.ts` enumerates
+ * `userFilters.fields` as a repeater: the title is the English column head
+ * Studio reads, and the form's declared row `label` repeats it so the i18n
+ * extractor emits a catalog key per column (#30267).
+ *
  * @see Airtable Interface → "User filters" panel (Dropdowns element)
  */
 export const UserFilterFieldSchema = lazySchema(() => strictObject({
   surface: 'this user filter field',
   history: VIEW_HISTORY,
 }, {
-  field: z.string().describe('Field name on the source object (must exist — checked by reference diagnostics)'),
-  label: I18nLabelSchema.optional().describe('Display label override (defaults to the field label)'),
+  field: z.string().describe('Field name on the source object (must exist — checked by reference diagnostics)')
+    .meta({ title: 'Field' }),
+  label: I18nLabelSchema.optional().describe('Display label override (defaults to the field label)')
+    .meta({ title: 'Label' }),
   type: z.enum(['select', 'multi-select', 'boolean', 'date-range', 'text']).optional()
-    .describe('Filter control type. Omit to infer from the field definition'),
+    .describe('Filter control type. Omit to infer from the field definition')
+    .meta({ title: 'Type' }),
   options: z.array(strictObject({
     surface: 'this user filter option',
     history: VIEW_HISTORY,
@@ -2033,10 +2041,12 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
     value: z.union([z.string(), z.number(), z.boolean()]).describe('Option value'),
     label: I18nLabelSchema.describe('Option label'),
     color: z.string().optional().describe('Option color token/hex'),
-  })).optional().describe('Static options. Omit to derive from the field definition (select options / lookup records)'),
-  showCount: z.boolean().optional().describe('Show per-option record counts'),
+  })).optional().describe('Static options. Omit to derive from the field definition (select options / lookup records)')
+    .meta({ title: 'Options' }),
+  showCount: z.boolean().optional().describe('Show per-option record counts').meta({ title: 'Show Count' }),
   defaultValues: z.array(z.union([z.string(), z.number(), z.boolean()])).optional()
-    .describe('Pre-selected values when the view loads'),
+    .describe('Pre-selected values when the view loads')
+    .meta({ title: 'Default Values' }),
 }).describe('Quick-filter field configuration'));
 
 /**

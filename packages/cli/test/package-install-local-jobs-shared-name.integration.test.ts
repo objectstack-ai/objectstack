@@ -275,7 +275,7 @@ interface InstallRun { exit: number | null; output: string; elapsedMs: number }
 function packageInstall(appDir: string, live: LiveStart, deadline: number): Promise<InstallRun> {
   return new Promise((done, fail) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
+    const child = spawn(process.execPath, [CLI, 'package', 'install', './dist/objectstack.json', '--url', live.base, '--email', EMAIL, '--password', PASSWORD], {
       cwd: appDir,
       env: childEnv({ NO_COLOR: '1' }),
       stdio: ['ignore', 'pipe', 'pipe'],

@@ -392,8 +392,11 @@ describe('toFieldNameLoose (prefix-stable — for live keystroke input)', () => 
 /**
  * objectui#12326 — a master-detail field starts required. Added to a
  * `controlled_by_parent` object, it is the one required `master_detail` the
- * installed spec derives the master from (ADR-0055 §1); without `required` the
- * same object is refused. The spec's `ObjectSchema` is the oracle.
+ * installed spec derives the master from (ADR-0055 §1). Without `required` the
+ * spec reads that field as an OPTIONAL master (ADR-0055 §1 as amended,
+ * objectstack#30905 ruling A: a row may name none), so the `required: true`
+ * this writes is what keeps every row naming its master. The spec's
+ * `ObjectSchema` is the oracle.
  */
 describe('newField — a master-detail field starts required (objectui#12326)', () => {
   const cbpObject = (def: Record<string, unknown>) => ({
@@ -406,9 +409,12 @@ describe('newField — a master-detail field starts required (objectui#12326)', 
     const { def } = newField('account', 'master_detail');
     expect(def.required).toBe(true);
     expect(ObjectSchema.safeParse(cbpObject(def)).success).toBe(true);
-    // The control leg: the same field without `required` is refused.
+    // The control leg: the same field without `required` is read as an
+    // optional master — it parses, as `required: false`.
     const { required: _omitted, ...withoutRequired } = def;
-    expect(ObjectSchema.safeParse(cbpObject(withoutRequired)).success).toBe(false);
+    const control = ObjectSchema.safeParse(cbpObject(withoutRequired));
+    expect(control.success).toBe(true);
+    expect((control.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(false);
   });
 
   it('leaves every other type without required', () => {

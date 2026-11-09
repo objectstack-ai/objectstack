@@ -136,6 +136,7 @@ import {
   REFERENCE_VALUE_TYPES,
   STRUCTURED_JSON_TYPES,
 } from '@objectstack/spec/data';
+import { readSqlDriverSource } from '../../../../scripts/sql-driver-split-source.mjs';
 import { describe, expect, it } from 'vitest';
 
 import { generateMigrationSql, generateMigrationTs, generateTypesFromConfig } from './generate.js';
@@ -318,7 +319,9 @@ describe('generate.ts field-type vocabularies (#13871)', () => {
 
 /** `packages/drivers/driver-sql/src` — declared for `@objectstack/cli#test` in `turbo.json`. */
 const DRIVER_SQL_SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../drivers/driver-sql/src');
-const SQL_DRIVER_SOURCE = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'sql-driver.ts'), 'utf8');
+// `SqlDriver` as one text: `sql-driver.ts` with each codemod stub's body read
+// from the facet module it moved to, and the leaf ahead of the class (#30147).
+const SQL_DRIVER_SOURCE = readSqlDriverSource(DRIVER_SQL_SRC).text;
 const SCHEMA_DRIFT_SOURCE = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'schema-drift.ts'), 'utf8');
 
 /**

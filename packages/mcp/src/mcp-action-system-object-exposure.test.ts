@@ -131,3 +131,46 @@ describe('[#27681] run_action: a sys_* action runs only where list_actions lists
     expect(bridge.runs).toEqual(['complete_task']);
   });
 });
+
+describe('[#30771] run_action: a sys_* action left out for the caller\'s capability answers the gate, not the system-object sentence', () => {
+  const GATE = "Action 'ban_user' on 'sys_user' requires capability [manage_users] — caller is missing [manage_users]";
+  /** The bridge's answer for an exposed action whose declared gate refuses this caller. */
+  const withCapabilityRefusal = (listing: McpActionSummary[]) => {
+    const bridge = makeBridge(listing);
+    const asked: Array<[string, string]> = [];
+    return Object.assign(bridge, {
+      asked,
+      async capabilityRefusal(name: string, objectName: string) {
+        asked.push([name, objectName]);
+        return name === 'ban_user' ? { code: 'PERMISSION_DENIED', status: 403, message: GATE } : undefined;
+      },
+    });
+  };
+
+  it('answers the bridge\'s capability refusal (403, PERMISSION_DENIED, the gate\'s sentence) and runs nothing', async () => {
+    const bridge = withCapabilityRefusal([APP]);
+    const json = await call(bridge, toolsCall(7, 'run_action', { actionName: 'ban_user', objectName: SYS, recordId: 'u1' }));
+    expect(json.result.isError).toBe(true);
+    const body = JSON.parse(json.result.content[0].text);
+    expect(body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403, message: GATE });
+    expect(String(json.result.content[0].text)).not.toMatch(/is not exposed via MCP/);
+    expect(bridge.asked).toEqual([['ban_user', SYS]]);
+    expect(bridge.runs).toEqual([]);
+  });
+
+  it('CONTROL — an action the bridge answers no capability refusal for keeps the system-object sentence', async () => {
+    const bridge = withCapabilityRefusal([APP]);
+    const json = await call(bridge, toolsCall(8, 'run_action', { actionName: 'unban_user', objectName: SYS, recordId: 'u1' }));
+    expect(json.result.isError).toBe(true);
+    expect(String(json.result.content[0].text)).toMatch(/system object "sys_user" is not exposed via MCP/);
+    expect(bridge.runs).toEqual([]);
+  });
+
+  it('CONTROL — a listed action never asks: the listing admits it as before', async () => {
+    const bridge = withCapabilityRefusal([EXPOSED]);
+    const json = await call(bridge, toolsCall(9, 'run_action', { actionName: 'ban_user', objectName: SYS, recordId: 'u1' }));
+    expect(json.result.isError, JSON.stringify(json.result)).toBeFalsy();
+    expect(bridge.asked).toEqual([]);
+    expect(bridge.runs).toEqual(['ban_user']);
+  });
+});

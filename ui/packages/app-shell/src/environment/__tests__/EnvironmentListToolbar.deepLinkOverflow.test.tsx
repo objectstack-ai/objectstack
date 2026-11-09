@@ -49,15 +49,13 @@ import type { EnvironmentEntitlementsState } from '../entitlements';
 import type { ActionContext, ActionDef } from '@object-ui/core';
 
 /**
- * The card's shape: a create action that declares neither `order` nor
- * `variant: 'primary'`, registered LAST. `action:bar`'s `needsOrdering` is then
- * false, so registration order stands and the 4th action lands past the desktop
- * `maxVisible: 3` — in the overflow menu.
- *
- * The `setup_production` state is safe today only by accident: the toolbar's own
- * label override gives the create action `variant: 'primary'`, which flips
- * `needsOrdering` and floats it into the primary slot. `add_development` applies
- * no variant, which is why this file uses it.
+ * The card's shape: a create action registered LAST, behind three actions that
+ * outrank it. The toolbar's `setup_production` override gives the create action
+ * `variant: 'primary'`, which on its own would float it into the primary slot;
+ * the fillers declare `order: -1`, and `action:bar` sorts by `order` before the
+ * primary tie-break, so the create action still lands 4th, past the desktop
+ * `maxVisible: 3` — in the overflow menu. (Setting up production is the only
+ * create state left since the development type retired, objectstack-ai/cloud#3487 D.)
  */
 const CREATE = {
   name: 'create_environment',
@@ -66,19 +64,18 @@ const CREATE = {
   locations: ['list_toolbar'],
 };
 const FILLERS = [
-  { name: 'a1', label: 'a1', type: 'api', locations: ['list_toolbar'] },
-  { name: 'a2', label: 'a2', type: 'api', locations: ['list_toolbar'] },
-  { name: 'a3', label: 'a3', type: 'api', locations: ['list_toolbar'] },
+  { name: 'a1', label: 'a1', type: 'api', order: -1, locations: ['list_toolbar'] },
+  { name: 'a2', label: 'a2', type: 'api', order: -1, locations: ['list_toolbar'] },
+  { name: 'a3', label: 'a3', type: 'api', order: -1, locations: ['list_toolbar'] },
 ];
 
-/** ready + has production + may create a dev env → `add_development`, no variant override. */
-const ADD_DEVELOPMENT: EnvironmentEntitlementsState = {
+/** ready + no production env yet → `setup_production`. */
+const SETUP_PRODUCTION: EnvironmentEntitlementsState = {
   ready: true,
-  hasProductionEnv: true,
-  canCreateDevelopmentEnv: true,
+  hasProductionEnv: false,
   upgradeUrl: '/settings/billing',
   source: 'summary',
-} as EnvironmentEntitlementsState;
+};
 
 const runActionParam = () => new URL(window.location.href).searchParams.get('runAction');
 
@@ -108,7 +105,7 @@ function mountStack(actions: any[]) {
   const view = render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
       <ActionProvider context={{ user: { id: 'u1' } } as any} handlers={{ api: execute as any }}>
-        <EnvironmentListToolbar actions={actions} entitlements={ADD_DEVELOPMENT} />
+        <EnvironmentListToolbar actions={actions} entitlements={SETUP_PRODUCTION} />
       </ActionProvider>
     </I18nProvider>,
   );
@@ -124,7 +121,7 @@ describe('the create deep link survives the create action overflowing (#4162)', 
     // with no create button of its own. This is the card's `buttons=[…]` line.
     expect(await screen.findByRole('button', { name: 'a1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'a3' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Add environment/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Set up your production environment/i })).toBeNull();
     expect(screen.getByRole('button', { name: /more actions/i })).toBeTruthy();
 
     // Was `execute=0`. The param is still consumed exactly once — that half was

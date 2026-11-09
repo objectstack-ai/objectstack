@@ -158,6 +158,8 @@ function fakeObjectQL() {
   return {
     find: vi.fn(async (object: string, _query?: unknown, _options?: unknown) => {
       if (object === 'sys_api_key') return [{ id: 'k1', user_id: 'usr_stdio', revoked: false }];
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      if (object === 'sys_user') return (_query as any)?.where?.id === 'usr_stdio' ? [{ id: 'usr_stdio' }] : [];
       if (object === 'task') return [{ id: 't1', title: 'the row behind the declaration' }];
       return [];
     }),

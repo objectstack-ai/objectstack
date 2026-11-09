@@ -414,6 +414,7 @@ describe('DatasetWidget', () => {
       fields: [{ name: 'status', type: 'string', label: 'Status' }, { name: 'task_count', type: 'number', label: 'Tasks' }],
       object: 'showcase_task',
       dimensionFields: { status: 'status' },
+      drillScopes: { task_count: {} },
       drillRawRows: [{ status: 'open' }],
     })) };
     render(<DatasetWidget widget={{ type: 'pivot', dataset: 'tasks', dimensions: ['status'], values: ['task_count'] }} dataSource={src} />);
@@ -426,6 +427,7 @@ describe('DatasetWidget', () => {
       fields: [{ name: 'close_date', type: 'date', label: 'Close Date' }, { name: 'task_count', type: 'number', label: 'Tasks' }],
       object: 'showcase_task',
       // No dimensionFields — a date bucket isn't equality-drillable; only a range sidecar.
+      drillScopes: { task_count: {} },
       drillRanges: [{ close_date: { field: 'close_date', gte: '2026-04-01', lt: '2026-07-01' } }],
     })) };
     render(<DatasetWidget widget={{ type: 'pivot', dataset: 'tasks', dimensions: ['close_date'], values: ['task_count'] }} dataSource={src} />);
@@ -722,6 +724,7 @@ describe('DatasetWidget', () => {
         ],
         object: 'showcase_deal',
         dimensionFields: { region: 'region', quarter: 'quarter' },
+        drillScopes: { amount: {} },
         drillRawRows: [
           { region: 'new', quarter: 'york_q1' },
           { region: 'new_york', quarter: 'q1' },
@@ -771,6 +774,7 @@ describe('DatasetWidget', () => {
         dimensionFields: { region: 'region', quarter: 'quarter' },
         // Deliberately distinguishable raw values: the drill filter names which
         // flat index the clicked cell resolved to.
+        drillScopes: { amount: {} },
         drillRawRows: [
           { region: 'was_null', quarter: 'q1' },
           { region: 'literal_emptyset', quarter: 'q1' },
@@ -808,6 +812,7 @@ describe('DatasetWidget', () => {
       fields: [{ name: 'status', type: 'string', label: 'Status' }, { name: 'priority', type: 'string', label: 'Priority' }, { name: 'task_count', type: 'number', label: 'Tasks' }],
       object: 'showcase_task',
       dimensionFields: { status: 'status', priority: 'priority' },
+      drillScopes: { task_count: {} },
       drillRawRows: [{ status: 'open', priority: 'high' }],
     })) };
     render(<DatasetWidget widget={{ type: 'pivot', dataset: 'tasks', dimensions: ['status', 'priority'], values: ['task_count'] }} dataSource={src} />);
@@ -1059,5 +1064,169 @@ describe('DatasetWidget — dimension metadata probe (objectui#5280)', () => {
     render(<DatasetWidget widget={{ type: 'table', dataset: 'tasks', dimensions: ['status'], values: ['task_count'] }} dataSource={src} />);
     await waitFor(() => expect(screen.getByText('In Progress')).toBeInTheDocument());
     expect(screen.queryByText('in_progress')).not.toBeInTheDocument();
+  });
+});
+
+// ── The KPI tile's click (ADR-0021 D2) ───────────────────────────────────────
+// A tile drills only when the answer carries a `drillScopes` entry for its
+// measure, and the list it opens is the widget filter AND that entry.
+describe('DatasetWidget metric tile drill', () => {
+  const OPEN = { stage: { $nin: ['closed_won', 'closed_lost'] } };
+  const tileSource = (answer: Record<string, unknown>) => ({
+    queryDataset: vi.fn(async () => ({
+      rows: [{ total_amount: 814400 }],
+      fields: [{ name: 'total_amount', type: 'number', label: 'Total Amount', aggregate: 'sum' }],
+      object: 'crm_opportunity',
+      ...answer,
+    })),
+    // Parameters declared: the assertions read `find.mock.calls[0][1]`.
+    find: vi.fn(async (_object: string, _params: unknown) => ({ data: [] })),
+    getObjectSchema: vi.fn(async () => ({ fields: {} })),
+  });
+  const renderTile = (src: ReturnType<typeof tileSource>, filter: Record<string, unknown> | undefined = OPEN) =>
+    render(
+      <DatasetWidget
+        widget={{ type: 'metric', dataset: 'opportunity_metrics', values: ['total_amount'], ...(filter ? { filter } : {}) }}
+        dataSource={src}
+      />,
+    );
+
+  it('offers no click when the answer carries no drillScopes', async () => {
+    renderTile(tileSource({}));
+    await screen.findByText('814400');
+    expect(screen.queryByTestId('dataset-metric-drill')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('offers no click when the tile measure has no entry (a derived measure)', async () => {
+    renderTile(tileSource({ drillScopes: { opp_count: {} } }));
+    await screen.findByText('814400');
+    expect(screen.queryByTestId('dataset-metric-drill')).not.toBeInTheDocument();
+  });
+
+  it('opens the widget filter AND the measure scope on click', async () => {
+    const src = tileSource({ drillScopes: { total_amount: { amount: { $null: false } } } });
+    renderTile(src);
+    fireEvent.click(await screen.findByTestId('dataset-metric-drill'));
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    expect(src.find.mock.calls[0][0]).toBe('crm_opportunity');
+    expect((src.find.mock.calls[0][1] as any).$filter).toEqual({
+      $and: [{ stage: { $nin: ['closed_won', 'closed_lost'] } }, { amount: { $null: false } }],
+    });
+  });
+
+  it('opens the widget filter alone when the entry is empty', async () => {
+    const src = tileSource({ drillScopes: { total_amount: {} } });
+    renderTile(src);
+    fireEvent.keyDown(await screen.findByTestId('dataset-metric-drill'), { key: 'Enter' });
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    expect((src.find.mock.calls[0][1] as any).$filter).toEqual(OPEN);
+  });
+
+  it('bounds the list by the answer date window', async () => {
+    const src = tileSource({
+      drillScopes: { total_amount: {} },
+      drillRanges: [{ close_date: { field: 'close_date', gte: '2026-10-01', lt: '2027-01-01' } }],
+    });
+    renderTile(src, { stage: 'closed_won' });
+    fireEvent.click(await screen.findByTestId('dataset-metric-drill'));
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    const sent = JSON.stringify((src.find.mock.calls[0][1] as any).$filter);
+    expect(sent).toContain('closed_won');
+    expect(sent).toContain('2026-10-01');
+    expect(sent).toContain('2027-01-01');
+  });
+});
+
+// ── objectstack-ai/objectstack#30615 — a table/cross-tab drill lists the records the number counted ──
+// The app-showcase `revenue-pulse` `table_rate_by_status` shape: `invoice_count`
+// (scope `{}`), `paid_count` (`filter: { status: 'paid' }`) and `paid_rate`
+// (derived: no entry), grouped by `status`.
+describe('DatasetWidget table drill — measure drill scopes (#30615)', () => {
+  const invoiceSource = (answer: Record<string, unknown>) => ({
+    queryDataset: vi.fn(async () => ({
+      rows: [{ status: 'Sent', region: 'EMEA', invoice_count: 4, paid_count: 0, paid_rate: 0 }],
+      fields: [
+        { name: 'status', type: 'string', label: 'Status' },
+        { name: 'region', type: 'string', label: 'Region' },
+        { name: 'invoice_count', type: 'number', label: 'Invoices' },
+        { name: 'paid_count', type: 'number', label: 'Paid Invoices' },
+        { name: 'paid_rate', type: 'number', label: 'Paid Rate' },
+      ],
+      object: 'showcase_invoice',
+      dimensionFields: { status: 'status', region: 'region' },
+      drillRawRows: [{ status: 'sent', region: 'emea' }],
+      ...answer,
+    })),
+    find: vi.fn(async (_object: string, _params: unknown) => ({ data: [] })),
+    getObjectSchema: vi.fn(async () => ({ fields: {} })),
+  });
+  const SCOPES = { invoice_count: {}, paid_count: { status: 'paid' } };
+  const renderTable = (src: ReturnType<typeof invoiceSource>, values: string[]) =>
+    render(
+      <DatasetWidget
+        widget={{ type: 'table', dataset: 'invoices', dimensions: ['status'], values, filter: { region: 'emea' } }}
+        dataSource={src}
+      />,
+    );
+  const sentFilter = (src: ReturnType<typeof invoiceSource>) => (src.find.mock.calls[0][1] as any).$filter;
+
+  it('a filtered measure cell lists bucket AND widget filter AND the measure scope', async () => {
+    const src = invoiceSource({ drillScopes: SCOPES });
+    renderTable(src, ['invoice_count', 'paid_count', 'paid_rate']);
+    await waitFor(() => expect(screen.getAllByTestId('dataset-drill-cell')).toHaveLength(2));
+    // A plain count beside a filtered count: the row is no one list.
+    expect(screen.queryByTestId('dataset-drill-row')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByTestId('dataset-drill-cell')[1]);
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    expect(src.find.mock.calls[0][0]).toBe('showcase_invoice');
+    expect(sentFilter(src)).toEqual({ $and: [{ $and: [{ region: 'emea' }, { status: 'paid' }] }, { status: 'sent' }] });
+  });
+
+  it('an unfiltered measure cell (`{}`) lists bucket AND widget filter only', async () => {
+    const src = invoiceSource({ drillScopes: SCOPES });
+    renderTable(src, ['invoice_count', 'paid_count', 'paid_rate']);
+    await waitFor(() => expect(screen.getAllByTestId('dataset-drill-cell')).toHaveLength(2));
+    fireEvent.click(screen.getAllByTestId('dataset-drill-cell')[0]);
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    expect(sentFilter(src)).toEqual({ $and: [{ region: 'emea' }, { status: 'sent' }] });
+  });
+
+  it('a measure with no entry (derived) offers no drill', async () => {
+    const src = invoiceSource({ drillScopes: SCOPES });
+    renderTable(src, ['paid_rate']);
+    await screen.findByText('Sent');
+    expect(screen.queryByTestId('dataset-drill-row')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset-drill-cell')).not.toBeInTheDocument();
+  });
+
+  it('an answer with no drillScopes offers no drill', async () => {
+    const src = invoiceSource({});
+    renderTable(src, ['invoice_count']);
+    await screen.findByText('Sent');
+    expect(screen.queryByTestId('dataset-drill-row')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset-drill-cell')).not.toBeInTheDocument();
+  });
+
+  it('a row whose measures share one scope drills as a row, carrying it', async () => {
+    const src = invoiceSource({ drillScopes: SCOPES });
+    renderTable(src, ['paid_count']);
+    fireEvent.click(await screen.findByTestId('dataset-drill-row'));
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    expect(sentFilter(src)).toEqual({ $and: [{ $and: [{ region: 'emea' }, { status: 'paid' }] }, { status: 'sent' }] });
+  });
+
+  it('cross-tab: a cell drills with its own measure scope; a measure with no entry does not drill', async () => {
+    const src = invoiceSource({ drillScopes: { paid_count: { status: 'paid' } } });
+    render(
+      <DatasetWidget
+        widget={{ type: 'pivot', dataset: 'invoices', dimensions: ['status', 'region'], values: ['paid_count', 'paid_rate'] }}
+        dataSource={src}
+      />,
+    );
+    await waitFor(() => expect(screen.getAllByTestId('dataset-drill-cell')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('dataset-drill-cell'));
+    await waitFor(() => expect(src.find).toHaveBeenCalled());
+    expect(sentFilter(src)).toEqual({ $and: [{ status: 'paid' }, { $and: [{ status: 'sent' }, { region: 'emea' }] }] });
   });
 });

@@ -56,6 +56,11 @@ delegate holds. In the permission set editor (Studio's **All metadata** area), t
 block lists the five, marks which ones the set already grants, and adds the
 missing ones to the set in one click.
 
+The scope itself grants read on the business units inside its subtree, and on
+no unit outside it, so a delegate can pick the units it administers without a
+`sys_business_unit` grant. A `sys_business_unit` read grant the delegate holds
+reads as that grant says, as before.
+
 ## What the runtime gate enforces
 
 Writes to the governed tables (`sys_user_position`, `sys_user_permission_set`,
@@ -67,8 +72,8 @@ set, and the gate resolves the name in the security catalog. The gate's rules:
 | Rule | Effect |
 |---|---|
 | Tenant admins pass through | The superuser wildcard reaches the ordinary CRUD/RLS checks — delegation constrains *delegates*, not HQ |
-| Subtree anchoring | Assignments a delegate creates must be anchored (`sys_user_position.business_unit_id`) inside their subtree, and the target user must sit inside it |
-| Allowlist, no self-escalation | Every set reached by the write — bound to the assigned position, or granted directly — must be on `assignablePermissionSets`. Granting an un-allowlisted set is refused **for anyone, including the delegate themselves** |
+| Subtree anchoring | Assignments a delegate creates must be anchored (`sys_user_position.business_unit_id`) inside their subtree, and the target user must sit inside it. A direct grant's holder must too, at both ends of an edit that moves the grant to another user: a delegate can neither capture nor evict a direct grant beyond its subtree |
+| Allowlist, no self-escalation | Every set reached by the write — bound to the assigned position, or granted directly — must be on `assignablePermissionSets`. Granting an un-allowlisted set is refused **for anyone, including the delegate themselves**. An edit that re-names a stored direct grant is judged on the set it takes away as well, exactly as removing that grant is: a delegate can neither capture nor evict a direct grant beyond its scope |
 | Action flag | `manageAssignments` gates the assignment rows — `sys_user_position`, and direct `sys_user_permission_set` grants — and is the scope's only action right. A position's sets are part of its definition and a permission set is a definition: both are written through the metadata door, which admits a `manage_metadata` holder (the platform operator under `group` or `isolated`) and reads no `adminScope` (ADR-0131 D3). The scope's former `manageBindings` and `authorEnvironmentSets` named the retired `sys_position_permission_set` and `sys_permission_set` rows, admitted no write once those objects were gone, and are retired: the schema refuses both with the fix |
 | Strict containment | Granting a set that itself carries an `adminScope` — assigning a position that distributes it, or granting it directly — requires a held scope that **strictly contains** it: the same root, no wider subtree, `manageAssignments` only if yours has it, an allowlist inside yours, and smaller on at least one of those. Handing your own exact scope to a peer is refused (no lateral propagation) |
 | Single-row writes | Delegates write single rows by id only — a broad filter-write cannot be boundary-checked |
@@ -97,9 +102,15 @@ fact. Capability bits are never BU-scoped.
 
 The [explain engine](/docs/permissions/explain) closes the loop twice:
 
-- explaining **another user** is authorized by `manage_users` *or* a delegated
-  `adminScope` whose subtree covers that user — a delegate can diagnose their
-  own people, and only their own people;
+- explaining **another user** — and reading that user's effective access — is
+  authorized by `manage_users`, organization administration of an
+  organization that user is a member of, *or* a delegated `adminScope` whose
+  subtree covers that user — a delegate can diagnose their own people, and
+  only their own people. A scope covers a user the delegate can read, through
+  a business unit of the subtree; a user it cannot read is covered by no
+  scope, so the answer about that user does not depend on whether it exists
+  or what it is a member of. The direct-grant write gate judges its target
+  user the same way, a stored grant's holder included;
 - contributor attribution plus the `granted_by` stamp answer both *who
   granted this* and *who could have*.
 
@@ -129,7 +140,7 @@ const scope = await client.security.describeDelegableScope();
 }
 ```
 
-Three properties worth knowing:
+Four properties worth knowing:
 
 - **It narrows; it does not decide.** The lists are computed by the same
   helpers the write gate enforces with, so an option here is one the gate
@@ -140,8 +151,13 @@ Three properties worth knowing:
   withheld, exactly as the write gate would refuse it.
 - **Strictly self-scoped** — there is no target-user parameter, so it
   discloses nothing beyond the authority you already hold. A tenant-level
-  admin comes back `isTenantAdmin: true` with everything enumerated, so
-  consumers render one uniform picker rather than special-casing.
+  admin comes back `isTenantAdmin: true` with every unit of its active
+  organization enumerated, so consumers render one uniform picker rather than
+  special-casing.
+- **No active organization, no units.** Business units belong to one
+  organization, so a caller whose context names no organization is offered
+  no placeable unit — a tenant-level admin included — and a delegated scope
+  it holds covers nothing.
 
 Scoped invitations (ADR-0105 D8) are the first consumer: the invitation form
 narrows its unit/position pickers with this, and the invitation's placement

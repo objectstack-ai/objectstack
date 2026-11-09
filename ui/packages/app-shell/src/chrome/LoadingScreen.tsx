@@ -2,7 +2,7 @@
 import { Spinner, Button } from '@object-ui/components';
 import { Database, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { getProductName, getLogoUrl } from '../runtime-config.js';
-import { en as enLocale, getLoadedBuiltInLocales, useObjectTranslation } from '@object-ui/i18n';
+import { en as enLocale, getLoadedBuiltInLocales, resolveBuiltInLanguage, useObjectTranslation } from '@object-ui/i18n';
 
 interface LoadingScreenProps {
   /** Optional message override */
@@ -75,14 +75,16 @@ interface StartupStrings {
 }
 
 function getStartupStrings(language: string): StartupStrings {
-  const resident = getLoadedBuiltInLocales();
-  // Exact tag first, then its base language — the registry's own order. An
-  // empty language has resolved nothing, so it has no catalogue and no line.
+  // The snapshot is keyed by table tag, so the language is read as the tag it
+  // means first — the registry's own resolution (`zh-CN` and `zh` → `zh-Hans`,
+  // `zh-TW` → `zh-Hant`, `fr-CA` → `fr`). An empty language has resolved
+  // nothing, so it has no catalogue and no line.
   // `as unknown as` because a catalogue is typed by SHAPE here while
   // `enLocale` carries `en`'s literal VALUES — the same cast `createI18n` makes.
-  const catalogue = (
-    language ? (resident[language] ?? resident[language.toLowerCase().split('-')[0]]) : undefined
-  ) as unknown as { console?: Partial<ConsoleStrings> } | undefined;
+  const tag = language ? resolveBuiltInLanguage(language) : null;
+  const catalogue = (tag ? getLoadedBuiltInLocales()[tag] : undefined) as unknown as
+    | { console?: Partial<ConsoleStrings> }
+    | undefined;
   const pack = catalogue?.console;
   return {
     line: pack?.initializing ?? null,

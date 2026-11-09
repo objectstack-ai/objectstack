@@ -12,7 +12,7 @@ import { DATE_MACRO_WRAPPED_RE, isDateMacroToken } from './date-macros.zod';
 import { nextUtcCalendarDay } from './calendar-day';
 
 describe('date-range preset vocabulary — one source of truth, read by both the UI and the data side', () => {
-  it('declares exactly the thirteen shipped preset names, in filter-bar order', () => {
+  it('declares exactly the shipped preset names, in filter-bar order', () => {
     // Pinned literally: this list is a published vocabulary (dashboard
     // defaultRange / date-filter defaultValue accept it, filter comparands
     // refuse it), so a member appearing or vanishing must be a loud diff here,
@@ -20,10 +20,11 @@ describe('date-range preset vocabulary — one source of truth, read by both the
     expect([...DATE_RANGE_PRESETS]).toEqual([
       'today', 'yesterday',
       'this_week', 'last_week',
-      'this_month', 'last_month',
-      'this_quarter', 'last_quarter',
+      'this_month', 'last_month', 'next_month',
+      'this_quarter', 'last_quarter', 'next_quarter',
       'this_year', 'last_year',
       'last_7_days', 'last_30_days', 'last_90_days',
+      'next_30_days',
     ]);
   });
 
@@ -61,6 +62,15 @@ describe('date-range preset vocabulary — one source of truth, read by both the
     expect(DATE_RANGE_PRESET_MACRO_WINDOWS.last_7_days).toEqual(['{7_days_ago}', '{today}']);
     expect(DATE_RANGE_PRESET_MACRO_WINDOWS.last_30_days).toEqual(['{30_days_ago}', '{today}']);
     expect(DATE_RANGE_PRESET_MACRO_WINDOWS.last_90_days).toEqual(['{90_days_ago}', '{today}']);
+  });
+
+  it('the forward presets prescribe their own period, and next_30_days {today} through {30_days_from_now}', () => {
+    expect(DATE_RANGE_PRESET_MACRO_WINDOWS.next_month).toEqual(['{next_month_start}', '{next_month_end}']);
+    expect(DATE_RANGE_PRESET_MACRO_WINDOWS.next_quarter).toEqual(['{next_quarter_start}', '{next_quarter_end}']);
+    // The mirror of last_30_days: today plus the 30 days after it.
+    expect(DATE_RANGE_PRESET_MACRO_WINDOWS.next_30_days).toEqual(['{today}', '{30_days_from_now}']);
+    expect(bareDateRangePresetComparandMessage('next_30_days', '$lte'))
+      .toContain("e.g. { $between: ['{today}', '{30_days_from_now}'] } — or an ISO date");
   });
 
   it('the refusal message names the value, the operator, the macro fix and the ISO fallback', () => {
@@ -133,6 +143,11 @@ const TOKEN_DAY_ON_REFERENCE: Readonly<Record<string, string>> = {
   '{year_end}': '2026-12-31',
   '{last_year_start}': '2025-01-01',
   '{last_year_end}': '2025-12-31',
+  '{next_month_start}': '2026-08-01',
+  '{next_month_end}': '2026-08-31',
+  '{next_quarter_start}': '2026-10-01',
+  '{next_quarter_end}': '2026-12-31',
+  '{30_days_from_now}': '2026-08-14',
 };
 
 /**
@@ -161,6 +176,9 @@ const EXPECTED_WINDOW_DAYS: Readonly<
   last_7_days: ['2026-07-08', '2026-07-15'],
   last_30_days: ['2026-06-15', '2026-07-15'],
   last_90_days: ['2026-04-16', '2026-07-15'],
+  next_month: ['2026-08-01', '2026-08-31'],
+  next_quarter: ['2026-10-01', '2026-12-31'],
+  next_30_days: ['2026-07-15', '2026-08-14'],
 };
 
 const DAY_MS = 86_400_000;
@@ -229,6 +247,11 @@ describe('the prescribed window covers exactly the days the preset names', () =>
     expect(prescribedDayCount('2026-07-08', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.last_7_days[1]])).toBe(8);
     expect(prescribedDayCount('2026-06-15', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.last_30_days[1]])).toBe(31);
     expect(prescribedDayCount('2026-04-16', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.last_90_days[1]])).toBe(91);
+    // The forward rolling window mirrors last_30_days: today and the 30 days after it.
+    expect(prescribedDayCount('2026-07-15', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.next_30_days[1]])).toBe(31);
+    // August is 31 days; Q4 is 92.
+    expect(prescribedDayCount('2026-08-01', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.next_month[1]])).toBe(31);
+    expect(prescribedDayCount('2026-10-01', TOKEN_DAY_ON_REFERENCE[DATE_RANGE_PRESET_MACRO_WINDOWS.next_quarter[1]])).toBe(92);
 
     // And the full census, so no preset can drift either.
     for (const preset of DATE_RANGE_PRESETS) {
@@ -255,6 +278,17 @@ describe('the prescribed window covers exactly the days the preset names', () =>
       const counted = rows.filter((day) => midnightUtc(day) >= from && midnightUtc(day) < stopsBefore);
       expect(counted, preset).toEqual(['2026-07-10']);
     }
+  });
+
+  it('next_30_days counts a row five days ahead and NOT a row five days ago', () => {
+    // The mirror of the measurement above: closed on both sides, so neither
+    // past rows nor rows past the 30th day ahead are counted.
+    const rows = ['2026-07-10', '2026-07-20', '2026-08-15']; // − 5, + 5, + 31
+    const [start, end] = DATE_RANGE_PRESET_MACRO_WINDOWS.next_30_days;
+    const from = midnightUtc(TOKEN_DAY_ON_REFERENCE[start]);
+    const stopsBefore = midnightUtc(nextUtcCalendarDay(TOKEN_DAY_ON_REFERENCE[end]) as string);
+    const counted = rows.filter((day) => midnightUtc(day) >= from && midnightUtc(day) < stopsBefore);
+    expect(counted).toEqual(['2026-07-20']);
   });
 
   it('the refusal prescribes a one-day window for a one-day preset', () => {

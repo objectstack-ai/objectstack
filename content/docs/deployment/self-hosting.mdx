@@ -34,7 +34,7 @@ workable default:
 | Variable | Why it must be set |
 |:---|:---|
 | `OS_DATABASE_URL` | Without it, data lands in a SQLite file under the ObjectStack home directory (`~/.objectstack`, or `<cwd>/.objectstack` next to a project config) — fine for one box, wrong for containers. Use `postgres://…`, `mysql://…`, `mongodb://…`, `libsql://…`, or a mounted `file:…` path (`postgres://…`'s driver is an **optional** package too — `npm install pg`, or the boot fails loudly rather than degrading to SQLite; `libsql://` / Turso is inferred, but its driver is an **optional** package — `npm install @objectstack/driver-turso`, or the boot fails loudly rather than degrading to SQLite; see [Drivers](/docs/data-modeling/drivers)). `mysql://…` is a supported deployment target that carries three dialect caveats — two of them integrity guarantees MySQL cannot enforce at the database — see [Drivers → MySQL dialect caveats](/docs/data-modeling/drivers#mysql-dialect-caveats) before choosing it; its driver is likewise an **optional** package — `npm install mysql2`, or the boot fails loudly rather than degrading to SQLite. `mongodb://…` is **single-tenant only**: the MongoDB driver has no row-level tenant isolation and refuses to boot unless the tenancy posture is `single` — see [Drivers → Multi-tenancy](/docs/data-modeling/drivers#multi-tenancy-not-supported). |
-| `OS_AUTH_SECRET` | Session secret for the auth plugin (`AUTH_SECRET` is the legacy alias). Without it, `/api/v1/auth/*` is **silently skipped** — the server runs unauthenticated. |
+| `OS_AUTH_SECRET` | Session secret for the auth plugin (`AUTH_SECRET` is the legacy alias). Without it, `os start` generates one and keeps it in `auth-secret` under the ObjectStack home directory, reused on restart: lose that file (a replaced container) and everyone is signed out. Several replicas declared over the redis cluster driver need one value set on every replica: there `os start` refuses to generate one. |
 | `OS_SECRET_KEY` | 32-byte master key encrypting every stored secret (`openssl rand -hex 32`). On a container's ephemeral filesystem the auto-minted key is **lost on restart**, making previously-encrypted secrets undecryptable. |
 | `OS_PORT` | `os start` **fails loudly** if the port is busy (it never auto-shifts like `os dev`). Pin it and keep your reverse-proxy upstream in sync. |
 
@@ -44,6 +44,40 @@ Generate strong values once and store them in your secret manager:
 OS_AUTH_SECRET=$(openssl rand -hex 32)
 OS_SECRET_KEY=$(openssl rand -hex 32)
 ```
+
+### When the three are not set
+
+**The official image refuses to start** unless `OS_DATABASE_URL`,
+`OS_AUTH_SECRET` and `OS_SECRET_KEY` are all set explicitly. It exits naming
+the ones that are missing, before it writes a database file or a secret: a
+container's disk is the part that gets replaced, so booting on it would lose
+the data, sign everyone out and leave every saved credential unreadable. The
+image turns the check on with `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true` in
+its `ENV`.
+
+- An explicit `OS_DATABASE_URL=file:/path/on/a/volume/app.db` passes: SQLite on
+  a mounted volume stays a choice ([below](#docker-compose-with-postgres)).
+- **Already running on values the image generated?** Carry them over before you
+  set new ones, or the saved credentials stop decrypting and every session
+  ends. They are files in the old container's home, `/home/node/.objectstack`
+  (`docker exec <container> cat <file>`, or read them from its volume):
+  `OS_AUTH_SECRET` is the contents of `auth-secret`, `OS_SECRET_KEY` the
+  contents of `dev-crypto-key`, and the data is `data/objectstack.db`
+  (`OS_DATABASE_URL=file:…` on a kept volume, or migrate it to your database).
+  The refusal prints these paths and says which of them the container holds.
+
+**Every other `os start` keeps booting.** In production mode, when it keeps any
+of the three on its own disk, it prints a warning block naming each file and the
+variable that moves it off that disk. Administrators also see it in the Console:
+a standing notice on the home page and at the top of Setup's System Overview,
+listing the same files with a button that copies the variables to set, plus two
+lower-severity lines when uploads are stored on the local disk or no email
+service is set up. Members never see it, and it is not on the public auth
+config (it is read from `GET /api/settings/deployment/notice`, which needs
+`manage_platform_settings`). An administrator can hide it: the hide is written
+to the audit log as a `config_change` (and refused where no audit log is
+mounted), it lasts for that administrator in that browser until the findings
+change, and System Overview keeps one small line saying the notice is hidden.
 
 The full catalog is in
 [Environment Variables](/docs/deployment/environment-variables).
@@ -75,7 +109,7 @@ docker run -p 8080:8080 \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET \
   -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:18.2.0
+  ghcr.io/objectstack-ai/objectstack:18.3.0
 ```
 
 (`OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
@@ -93,7 +127,7 @@ docker run -p 8080:8080 \
   -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:18.2.0
+  ghcr.io/objectstack-ai/objectstack:18.3.0
 ```
 
 Both schemes work: `https://…` is fetched at boot, `file:///…` is read directly
@@ -150,7 +184,7 @@ COPY . .
 RUN npx os build              # → dist/objectstack.json
 
 # ── Runtime: the official ObjectStack runtime image ──────────────────
-FROM ghcr.io/objectstack-ai/objectstack:18.2.0
+FROM ghcr.io/objectstack-ai/objectstack:18.3.0
 COPY --from=build --chown=node:node /app/dist/objectstack.json /srv/app/objectstack.json
 ```
 
@@ -173,7 +207,7 @@ FROM node:22-slim
 RUN npm install --prefix /tmp/os-installer-npm --no-save --no-audit --no-fund "npm@11.21.0" \
  && export PATH="/tmp/os-installer-npm/node_modules/.bin:$PATH" \
  && test "$(npm --version)" = "11.21.0" \
- && npm install -g @objectstack/cli@18.2.0 "pg@^8.0.0" "mysql2@^3.0.0" \
+ && npm install -g @objectstack/cli@18.3.0 "pg@^8.0.0" "mysql2@^3.0.0" \
  && npm cache clean --force \
  && rm -rf /tmp/os-installer-npm
 
@@ -252,7 +286,9 @@ curl -fsS http://localhost:8080/api/v1/health
 
 Prefer SQLite on a single small host? Skip the `db` service, mount a volume,
 and point `OS_DATABASE_URL` at it: `file:/srv/data/app.db` (with
-`- appdata:/srv/data` on the app service). See
+`- appdata:/srv/data` on the app service). Set it explicitly even then: the
+official image refuses to start on its default database file, which lives in
+the container layer ([When the three are not set](#when-the-three-are-not-set)). See
 [Drivers](/docs/data-modeling/drivers) for when to reach for which database.
 
 ## Health checks & orchestration
@@ -439,7 +475,44 @@ then treats the deployment as multi-node and **refuses to boot without an
 explicit `OS_SECRET_KEY`** rather than minting per-node keys that can't
 decrypt each other's secrets. All replicas must share the same
 `OS_SECRET_KEY`, `OS_AUTH_SECRET`, and database. See
-[Cluster](/docs/kernel/cluster).
+[Cluster](/docs/kernel/cluster). A database local to each replica cannot be
+shared — SQLite (the default when `OS_DATABASE_URL` is unset), sqlite-wasm, or
+libSQL over a `file:` URL — so once several replicas are declared over the
+redis cluster driver, `os serve` refuses to start on one, exits 1 and names a
+Postgres `OS_DATABASE_URL` instead. A libSQL server URL (`libsql://…`) is one
+shared database and is not refused.
+
+**Uploads need S3 or one shared volume once replicas are declared.** The
+default local storage adapter writes uploads to the replica's own disk, so a
+file uploaded through one replica would be missing on the others. When the
+deployment declares several replicas (`OS_EXPECT_MULTI_NODE=true` or
+`OS_CLUSTER_REPLICAS` greater than 1) over the redis cluster driver, a boot on
+the local adapter is refused, and a storage settings change onto it is not
+applied. Either use S3 — `OS_STORAGE_ADAPTER=s3` with `OS_STORAGE_S3_BUCKET` and
+`OS_STORAGE_S3_REGION` (plus the endpoint and keys your store needs), or
+**Setup → Settings → File Storage** — or, when every replica mounts the same
+volume at `OS_STORAGE_LOCAL_ROOT` (several Compose replicas on one host sharing
+a named volume), set `OS_STORAGE_LOCAL_ROOT_SHARED=true`. That variable is a
+declaration, not a check. A `ReadWriteOnce` volume, as on Kubernetes, cannot be
+shared across replicas: use S3 there.
+
+**`/ready` reports the cluster driver's health once replicas are declared.**
+When the deployment declares itself multi-node — `OS_EXPECT_MULTI_NODE=true` or
+`OS_CLUSTER_REPLICAS` greater than 1; `OS_CLUSTER_DRIVER` alone is not a
+declaration — and runs the redis cluster driver, `/api/v1/ready` adds a
+`cluster` entry to its 200 body. While Redis answers it reads
+`{ driver: "redis", reachable: true }` and `status` stays `"ready"`. While it
+does not, the probe still answers **200**, with `status: "degraded"` and
+`cluster: { driver: "redis", reachable: false, reason }`, where `reason` is one
+of `timeout`, `ping-failed`, `unexpected-reply` or `no-probe`; the store's
+address never appears in the body. It is not a 503 on purpose: every replica
+loses a shared Redis at the same moment, so draining on it would take every
+replica out of the load balancer while the database can still serve. Wire your
+alerting to `status: "degraded"` (or `cluster.reachable: false`) rather than to
+the status code. The check is one `PING` bounded at 500 ms and cached ~1s, like
+the data-driver check, and recovery needs no restart. A single-node deployment
+sees no change: its body and status code are exactly what they were, and its
+Redis, if any, is never probed.
 
 **Scheduled jobs' leader election has a window, not a deadline.** `cron` /
 `interval` / `once` schedules dedupe across replicas by holding a lock for
@@ -577,12 +650,15 @@ dead end this section describes.
 
 **The recovery is out of band, and it is one row.** Write a pending invitation
 directly against the store the deployment reads, then have that person register
-through the ordinary sign-up endpoint — the invitation carve-out admits that
-one creation under every posture, so the `invite_only` default stays where it
-is. One `sys_invitation` row:
+through the ordinary sign-up endpoint, sending the row's `id` as `invitationId`
+beside the email — under `invite_only` a sign-up is admitted only by the
+invitation it presents. The invitation carve-out admits that one creation under
+every posture, so the `invite_only` default stays where it is. One
+`sys_invitation` row:
 
 | Column | Value |
 |:---|:---|
+| `id` | a long random value of your own: it is what the sign-up presents |
 | `email` | the address you intend to administer — one the directory does **not** already hold |
 | `status` | `pending` |
 | `expires_at` | any future timestamp |
@@ -628,6 +704,28 @@ logins too, or leave the directory empty until the first administrator exists.
 A deployment that boots with zero human rows is the case both paths above
 describe, and it needs none of this.
 
+### No sign-in method left
+
+Accounts are not enough if nothing serves a way to use them. With email and
+password sign-in off, the deployment depends on its other sign-in methods: a
+social or OIDC provider with a client ID and secret, enterprise SSO with at
+least one registered identity provider, phone-number sign-in, or a host
+sign-in handoff. Three doors used to remove the last of them without a word;
+each now answers:
+
+| Door | What happens now |
+|:---|:---|
+| The auth settings save turns email and password off, or removes Google, leaving nothing | Refused `400 SETTINGS_VALIDATION` at the field |
+| Setup's **Delete SSO Provider** on the last identity provider (`POST /api/v1/auth/sso/delete-provider`) | Refused `409 DELETE_RESTRICTED`, nothing deleted; `503 SERVICE_UNAVAILABLE` when the provider list cannot be read to tell |
+| A redeploy whose configuration no longer declares the last provider (for example, without the `GOOGLE_CLIENT_*` pair) | Boots, and reports at **error** under the grep token `no_sign_in_method_at_boot` |
+
+The boot is not refused: a deployment that signs people in through a door the
+auth plugin cannot see keeps starting. **Recovery:** set
+`OS_AUTH_EMAIL_PASSWORD_ENABLED=true` and restart. The environment override
+wins over a stored `auth.email_password_enabled = false` and over the stack
+config, and email and password sign-in comes back. Or restore the sign-in
+method the configuration no longer declares.
+
 ## Who may sign up — and what each posture tells a stranger
 
 `auth.audience.posture` is the one declaration answering who may become a user
@@ -641,6 +739,16 @@ a populated deployment, posting to `/api/v1/auth/sign-up/email`:
 | `invite_only` (default) | **Nothing.** A registered address and an unknown one both answer `403 SELF_REGISTRATION_CLOSED` — same body bytes, same headers. |
 | `email_domain` | **Only inside a domain you allowlisted.** Any address outside the list answers `403 EMAIL_DOMAIN_NOT_ALLOWED`, registered or not, so a caller must already hold an address on an allowlisted domain before they learn anything. |
 | `open` | **Nothing, while the mail transport is live.** A registered address gets the same answer as a new sign-up, nothing is written, and the address's holder is mailed that it already has an account. Without a live transport, or with email verification declared off and auto sign-in left on, a registered address is refused explicitly, so the answer tells a caller that the address is registered. |
+
+**Under `invite_only`, a sign-up is admitted only by the invitation it
+presents.** The sign-up sends the invitation's `id`, the last segment of its
+`/accept-invitation/` link, as `invitationId` beside the email: the Console's
+register page does this for an invitee who arrived from the link, and
+`os register --invitation` does it from a terminal. An address alone gets the
+same `403 SELF_REGISTRATION_CLOSED` as an address nobody invited. The link
+reaches the invitee in the invitation mail; on a deployment with no mail
+transport, an administrator hands it over with the invitation's **Copy Invite
+Link** action. The first account of a new deployment needs no invitation.
 
 **What decides it on `open` and `email_domain`.** A sign-up for an address that
 already has an account gets the same answer as a successful new sign-up, and

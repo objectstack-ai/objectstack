@@ -7,7 +7,10 @@
  * through. The handler retires the permission-set memo on a write, refuses a
  * flow run's identity-assignment writes, lets every other system operation
  * through, and serves the ADR-0056 public-form grant. It then runs the
- * engine-owned write guard and the ADR-0090 D12 delegated-administration gate,
+ * engine-owned write guard and the ADR-0090 D12 delegated-administration gate
+ * (whose refusal of a by-id write answers a caller the read door refuses with
+ * that read refusal, and a row the caller's read does not return with the read
+ * door's not-found, `readDoorAnswerForGateRefusal`),
  * resolves the operation's principals and the object's posture, and runs the
  * numbered steps in the order they stand: the `requiredPermissions` AND-gate
  * (1.5), the CRUD check (2), the access depth and an external principal's
@@ -97,9 +100,11 @@ import { renderOperationMessage } from '@objectstack/spec/system';
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
 import type { II18nService, IMetadataService, IObjectQLEngine, SharingWriteVerdict } from '@objectstack/spec/contracts';
 import { crossFieldClassRefusalCarriedBy, findCrossFieldClassRefusal } from '@objectstack/formula';
+import { declaredHttpStatus } from '@objectstack/types';
 import type { SecurityPlugin } from './security-plugin.js';
-import { isGuestEnvelope, requiredCapsForOperation } from './security-plugin.js';
+import { isGuestEnvelope, readUnlessRefused, requiredCapsForOperation } from './security-plugin.js';
 import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
+import { delegatedUnitReadScope, isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 import {
   intersectDelegatedScope,
@@ -229,6 +234,70 @@ function userFacingDenialMessage(
 }
 
 /**
+ * [ADR-0090 D12; ruling of record 5985885287] What a by-id write the
+ * delegated-administration gate refused answers a caller the read door
+ * refuses — that door's refusal — and a caller whose read returns no row for
+ * a write the gate refused for that reason: that door's not-found.
+ *
+ * The gate judges the caller and the object before any grant is read and
+ * before any row is, and words its refusal for the write. The by-id write
+ * doors answer a caller who cannot read a row what they answer for an id
+ * naming no row (ruling of record 5985885287), and where a write is answered
+ * from the caller's own read of its row — the by-id version comparison answers
+ * a mismatched token with that read's refusal (`assertVersionOf`,
+ * `@objectstack/metadata-protocol`) — a caller the read door refuses is
+ * answered that refusal. So the gate answers that caller the same way: the
+ * read door's own question is asked of the id the caller addressed
+ * ({@link SecurityPlugin.getCallerPreImage}: the caller's by-id read through
+ * the engine, never a second evaluator), and
+ *
+ *  - the read is REFUSED (a declared 4xx): that refusal is the answer. It is
+ *    the read door's answer to this caller for any id, so the row and an id
+ *    naming none answer alike, with a version token and without;
+ *  - the read answers NO ROW, and the gate refused because its own read of
+ *    the row returned none (`isUnreadableAddressedRowRefusal`: the
+ *    organization administrator's branch and the delegated branch): the read
+ *    door's not-found, `recordNotFoundError` for this object and id — the
+ *    answer step 2.7 gives every other object, so a row the caller cannot read
+ *    and an id naming none answer alike here too, and as they do everywhere;
+ *  - the read ANSWERS otherwise (a row; or none, under any other refusal of
+ *    the gate): the caller reads the object, and the gate's own refusal
+ *    stands, its guidance intact;
+ *  - the read FAULTS: the fault propagates as raised (#7505) — an outage is
+ *    neither an answer nor a refusal.
+ *
+ * Asked only of a refusal (a declared 4xx; anything else the gate throws stays
+ * what it is), only for the by-id update or delete the caller addressed (an
+ * insert, a predicate write and a nested write name no row of the caller's —
+ * {@link SecurityPlugin.addressedByIdWriteId}), and never for a row-write
+ * probe, whose verdict is admitted or refused and nothing more.
+ */
+async function readDoorAnswerForGateRefusal(
+  this: Pick<AuthzMiddlewareHost, 'addressedByIdWriteId' | 'getCallerPreImage'>,
+  opCtx: any,
+  refusal: unknown,
+  nestedInOperation: boolean,
+): Promise<unknown> {
+  const status = declaredHttpStatus(refusal);
+  if (status === undefined || status >= 500 || isRowWriteProbe(opCtx)) return refusal;
+  const referentialFieldClear = opCtx.operation === 'update' && opCtx.context?.__referentialFieldClear === true;
+  const addressedId = this.addressedByIdWriteId(opCtx, nestedInOperation, referentialFieldClear);
+  if (addressedId === undefined) return refusal;
+  let row: Record<string, unknown> | null;
+  try {
+    row = await this.getCallerPreImage(opCtx, addressedId);
+  } catch (readRefusal) {
+    const readStatus = declaredHttpStatus(readRefusal);
+    if (readStatus !== undefined && readStatus < 500) return readRefusal;
+    throw readRefusal;
+  }
+  if (row == null && isUnreadableAddressedRowRefusal(refusal)) {
+    return recordNotFoundError(opCtx.object, addressedId as string | number);
+  }
+  return refusal;
+}
+
+/**
  * The `SecurityPlugin` members the function below reads — every one of them,
  * and no other; the function's `this` is the `Pick` of the members it reads.
  * Each is typed AS the class member (an indexed access on the class), so a
@@ -324,10 +393,16 @@ export function registerAuthzMiddleware(
     //
     // [#27175] A row write probe is no write: it changes no grant, and it
     // must leave no shared state behind, so it advances nothing.
+    //
+    // [#30237] The verbs are the engine's write set (`WRITE_EPOCH_OPERATIONS`,
+    // `@objectstack/objectql` `write-epoch.ts`, a devDependency here, so it is
+    // spelled out): the recycle bin's `purge` removes rows or entries and its
+    // `restore` writes rows back.
     if (
       !this.epoch.seamOwnedByEngine &&
       !isRowWriteProbe(opCtx) &&
-      (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete')
+      (opCtx.operation === 'insert' || opCtx.operation === 'update' || opCtx.operation === 'delete' ||
+        opCtx.operation === 'purge' || opCtx.operation === 'restore')
     ) {
       this.epoch.bump('write');
     }
@@ -485,8 +560,17 @@ export function registerAuthzMiddleware(
     // else — including holders of plain CRUD grants on these tables — is
     // denied. Runs BEFORE the principal-less refusal below so RBAC
     // tables fail CLOSED for principal-less non-system contexts.
+    //
+    // It judges before any grant is read, in its own words; on the by-id
+    // update or delete the caller addressed, a caller the read door refuses
+    // is answered that read refusal instead, and a row its read does not
+    // return the read door's not-found — {@link readDoorAnswerForGateRefusal}.
     if (this.delegatedAdminGate) {
-      await this.delegatedAdminGate.assert(opCtx);
+      try {
+        await this.delegatedAdminGate.assert(opCtx);
+      } catch (refusal) {
+        throw await readDoorAnswerForGateRefusal.call(this, opCtx, refusal, nestedInOperation);
+      }
     }
 
     const positions = opCtx.context?.positions ?? [];
@@ -762,6 +846,14 @@ export function registerAuthzMiddleware(
     // guard this replaced admitted that caller to every object no set
     // grants. A principal-less context never reaches this line — it was
     // refused above ({@link isPrincipalLessContext}, [#21908] ADR-0096 D5).
+    //
+    // [ADR-0090 D12, ruling of record 6663849489] One admission beside the
+    // grant: a delegate reads the business units its admin scopes cover. For
+    // a read of `sys_business_unit` no set grants, `delegatedUnitReadScope`
+    // answers the `id IN <covered units>` scope step 3 ANDs into the read, or
+    // null — and null keeps the refusal below. Every condition and why it is
+    // no wider is on that function.
+    let delegatedUnitScope: Record<string, unknown> | null = null;
     if (!referentialFieldClearWrite) {
       const allowed = this.permissionEvaluator.checkObjectPermission(
         opCtx.operation,
@@ -769,8 +861,11 @@ export function registerAuthzMiddleware(
         permissionSets,
         { isPrivate: secMeta.isPrivate },
       );
-
       if (!allowed) {
+        delegatedUnitScope = await delegatedUnitReadScope(this.delegatedAdminGate, opCtx, permissionSets, delegatorSets);
+      }
+
+      if (!allowed && !delegatedUnitScope) {
         // [#7414] TWO messages, two audiences — the split #7307 made for
         // `DELETE_RESTRICTED`, reached from the authorization side and through
         // the SAME catalog.
@@ -965,13 +1060,12 @@ export function registerAuthzMiddleware(
     // `checkDelete` for the delete class, so an `edit` share widens update and
     // still leaves delete denied without this file knowing why.
     if (
-      // update/delete today; the lifecycle verbs stay listed so the M2 ops
-      // inherit the pre-image check the moment they dispatch — the CRUD bit
-      // alone must never be the only row-level defense. `transfer` clears
-      // the object gate via its mapped bit (#1883/#3004); `restore`/`purge`
-      // are denied AT the object gate since #12497 (bits tombstoned, rows
-      // retired, DESTRUCTIVE_OPERATIONS fail-closed), so this branch is
-      // dormant defense-in-depth for them until the M2 batch re-adds both.
+      // update/delete, and the lifecycle verbs, so the CRUD bit alone is
+      // never the only row-level defense. `transfer` clears the object gate
+      // via its mapped bit (#1883/#3004); [#30237] the recycle bin's
+      // permanent delete is a by-id `purge` and meets this check as a delete,
+      // while `purge(entryId)` / `empty(object)` / `restore(entryId)` carry no
+      // id and pass by (`extractSingleId` answers none).
       ['update', 'delete', 'transfer', 'restore', 'purge'].includes(opCtx.operation) &&
       permissionSets.length > 0 &&
       !!opCtx.context?.userId &&
@@ -1083,24 +1177,32 @@ export function registerAuthzMiddleware(
         // may not write it keeps the 403 below; nothing is disclosed to them.
         const addressedId = this.addressedByIdWriteId(opCtx, nestedInOperation, referentialFieldClearWrite);
         if (writeParts.length > 0) {
-          let visible: unknown = null;
-          // A re-read that THREW is not an absent row: a store fault or a
-          // read-time policy refusal keeps today's denial below (#7505).
-          let reReadThrew = false;
-          try {
-            visible = await this.ql.findOne(opCtx.object, {
-              where: { $and: [{ id: targetId }, ...writeParts] },
+          // The write predicates are the PLATFORM's, composed here — never the
+          // caller's own predicate. They ride into the caller-context re-read
+          // under one fresh `$and` marked `'policy'` (the filter-subtree
+          // provenance mark step 3 stamps on every scope it injects), so the
+          // re-read's caller-predicate guard (step 2.9) judges the caller's
+          // part, `{ id }`, and not a wall or row-level predicate on a field
+          // the caller cannot read. The mark goes on a node built here, so a
+          // frozen or shared filter object cannot leave it unmarked.
+          const platformWritePredicate = markFilterSubtreeProvenance({ $and: writeParts }, 'policy');
+          // Three outcomes of the re-read, classified by `readUnlessRefused`
+          // (#7505): a row or no row; a declared 4xx refusal (the read door
+          // refuses this caller), which keeps the record-level denial below,
+          // one answer for every id; anything else is a store fault and
+          // propagates as raised — an outage is neither a hidden row nor a
+          // refusal, and answering it as either would relabel it.
+          const reRead = await readUnlessRefused(() =>
+            this.ql.findOne(opCtx.object, {
+              where: { $and: [{ id: targetId }, platformWritePredicate] },
               context: opCtx.context,
-            });
-          } catch {
-            // A read denial (e.g. no read permission) is itself a "cannot
-            // touch this row" signal — fall through to the deny below.
-            visible = null;
-            reReadThrew = true;
-          }
+            }),
+          );
+          const reReadRefused = reRead.refused;
+          const visible: unknown = reRead.refused ? null : reRead.value;
           if (
             !visible &&
-            !reReadThrew &&
+            !reReadRefused &&
             addressedId !== undefined &&
             (await this.callerCannotReadAddressedRow(opCtx, addressedId))
           ) {
@@ -1151,7 +1253,14 @@ export function registerAuthzMiddleware(
           // question is the only row-level question asked here, so a row the
           // read door hides (a data middleware's parent-derived visibility
           // included) answers not-found before any later gate can tell it
-          // apart from a missing one.
+          // apart from a missing one. A caller the read door REFUSES (the read
+          // grant withheld, a capability the object requires for a read and
+          // not for a write) is answered that refusal, thrown by the question
+          // itself, for every id alike: a caller who cannot read the object
+          // writes none of its records by id. (The branch above needs no such
+          // step: a caller whose read is refused makes the caller-context
+          // re-read throw for every id, and the record-level 403 is one answer
+          // for all of them.)
           throw recordNotFoundError(opCtx.object, addressedId as string | number);
         }
       }
@@ -2218,32 +2327,16 @@ export function registerAuthzMiddleware(
     // the public getReadFilter service via computeRlsFilter, so the engine
     // find-path and the analytics raw-SQL path enforce identical scoping.
     //
-    // [#7809] `opCtx.operation` is passed RAW here — no `purge -> delete`,
-    // `transfer|restore -> update` normalisation like the 2.7 gate above
-    // does at `rlsOperation` (through `rlsOperationForVerb`, the one
-    // declaration of that mapping). That asymmetry is deliberate and safe, but ONLY
-    // because of an invariant that lives in another package: the engine's
-    // middleware dispatch vocabulary (`OperationContext['operation']`) has
-    // seven members and none of them is a destructive lifecycle verb, and
-    // middleware is reachable only through the private
-    // `executeWithMiddleware(ctx: OperationContext, …)`. So no `purge` /
-    // `transfer` / `restore` can arrive here to be mis-derived.
-    //
-    // Measured, not assumed — a real engine driven through every public
-    // method dispatches exactly `find/findOne/count/aggregate` (with ast),
-    // `insert/update/delete` by-id (no ast) and bulk `update`/`delete` (with
-    // ast). The 2.7 gate normalises anyway because it is pre-wired for the
-    // M2 ops (#1883); this path is not, and does not need to be while the
-    // invariant holds.
-    //
-    // ⚠️ The invariant is PINNED, in the package that owns it:
+    // [#7809] `opCtx.operation` is passed RAW here, and that is safe on two
+    // counts. The step runs only for an operation that carries an `ast`, and
+    // the engine dispatches the recycle bin's lifecycle verbs (`purge`,
+    // `restore`) with none — an invariant pinned in the package that owns it,
     // `packages/objectql/src/engine-middleware-operation-vocabulary.test.ts`.
-    // If a recycle bin (#3146) ever makes one of those verbs dispatchable,
-    // that pin goes red first — and THIS site and the D10 delegator half
-    // below are what must normalise before it can go green again, by
-    // reading `rlsOperationForVerb` (`lifecycle-verb-rls-operation.ts`), the
-    // mapping the 2.7 gate and `security/explain` already read — never a
-    // second inline copy of it.
+    // And [#30237] the composition maps a lifecycle verb to its write class
+    // itself: `computeLayeredRlsFilter` and the RLS compiler's operation map
+    // both read `rlsOperationForVerb` (`lifecycle-verb-rls-operation.ts`), so
+    // a verb that ever arrives here is composed as the write it is, never as
+    // a read.
     if (opCtx.ast) {
       const extra: Record<string, unknown>[] = [];
       // [#15813] The layered split rather than `computeRlsFilter`, composed
@@ -2258,6 +2351,9 @@ export function registerAuthzMiddleware(
       );
       const rlsFilter = andComposeLayers(layered.layer0, layered.layer1);
       if (rlsFilter) extra.push(rlsFilter);
+      // [ADR-0090 D12] The delegated unit read admitted at step 2 sees the
+      // units its scopes cover, and only those.
+      if (delegatedUnitScope) extra.push(delegatedUnitScope);
       let tenantLayer0Verdict = layered.tenantLayer0Verdict;
       // ADR-0055: a controlled_by_parent object derives its read scope from the
       // master record — `masterFK IN (<the master ids this caller may read>)`,
@@ -2265,7 +2361,7 @@ export function registerAuthzMiddleware(
       // (ADR-0139 D6), which the engine composes at its executor boundary
       // from this very service's `canReadObject` / `getReadFilter` of the
       // master. Nothing for a write verb's predicate (ADR-0139 D1).
-      const cbpFilter = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, opCtx.context);
+      const cbpFilter = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, opCtx.context, permissionSets);
       if (cbpFilter) extra.push(cbpFilter);
       // [ADR-0090 D10] AND the delegator's read RLS (and CBP) into the same
       // where — the delegated principal sees only rows BOTH may see. Computed
@@ -2284,7 +2380,7 @@ export function registerAuthzMiddleware(
         // scope `getReadFilter` answers as the ADR-0090 D10 intersection
         // (ADR-0139 D5.1 as amended), so both halves carry one subquery
         // twice — correct rows, measured, and left as it is.
-        const delCbp = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, delegatorContext);
+        const delCbp = this.computeControlledByParentFilter(opCtx.object, opCtx.operation, delegatorContext, delegatorSets);
         if (delCbp) extra.push(delCbp);
       }
       // [#21829] The write doors' rule on the PREDICATE door: a row the
@@ -2295,9 +2391,12 @@ export function registerAuthzMiddleware(
       // writable. Composed here, before `next()`, so it binds the engine's
       // matched-row read, its per-row hook dispatch and the driver write
       // alike — a hidden row is not written, not counted and not refused.
+      // [#21829, ruling B] A caller the read door REFUSES is answered that
+      // refusal here, thrown by the read question itself before `next()`: it
+      // writes none of the object's records, whatever its predicate addresses.
+      // The by-id leg (step 2.7) refuses the same caller too.
       if (this.addressedPredicateWrite(opCtx, nestedInOperation, referentialFieldClearWrite)) {
-        const readable = await this.readableRowsScopeForPredicateWrite(opCtx);
-        if (readable) extra.push(readable);
+        extra.push(await this.readableRowsScopeForPredicateWrite(opCtx));
       }
       // [#15813 / ADR-0131 D8] RECORD the Layer 0 verdict on the operation —
       // the seam ruled on #15706 (option (i)): the wall states what it

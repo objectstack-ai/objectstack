@@ -2,7 +2,8 @@
 
 import type { SharingRuleService } from './sharing-rule-service.js';
 import type { SharingRuleRow } from '@objectstack/spec/contracts';
-import { isMatchAllCriteria, SharingCriteriaValidationError } from './rule-criteria.js';
+import { isMatchAllCriteria, SharingCriteriaValidationError, SharingRuleObjectNotEnforcedError } from './rule-criteria.js';
+import type { SharingService } from './sharing-service.js';
 import {
   RULE_RECOMPUTE_ROW_CAP,
   RuleRegrantQueue,
@@ -28,6 +29,9 @@ export const RULE_REBIND_TRIGGER_PACKAGE = 'plugin-sharing:rule-rebind';
  * both packages above so neither rebind can unregister it.
  */
 export const RULE_CRITERIA_GUARD_PACKAGE = 'plugin-sharing:rule-criteria-guard';
+
+/** Package id of {@link bindRuleObjectEnforcementGuard}'s hooks. */
+export const RULE_OBJECT_ENFORCEMENT_GUARD_PACKAGE = 'plugin-sharing:rule-object-enforcement-guard';
 
 /*
  * RETIRED — the `isSystem` materialisation skip, and with it the INFO line that
@@ -354,4 +358,46 @@ export function bindRuleCriteriaGuard(engine: MinimalEngine, logger?: MinimalLog
   engine.registerHook('beforeInsert', guard(true), opts);
   engine.registerHook('beforeUpdate', guard(false), opts);
   logger?.info?.('[sharing-rule] criteria guard bound on sys_sharing_rule (ADR-0049)');
+}
+
+/**
+ * [#30621] Refuse a `sys_sharing_rule` write whose object is not under
+ * record-sharing enforcement.
+ *
+ * Before, such a rule saved (`201`) and its reconcile then met the ADR-0111 D7
+ * inert-grant guard and wrote no `sys_record_share`: the rule sat in Setup
+ * looking active and never applied. The verdict here is the reconcile's own
+ * ({@link SharingService.sharingRuleObjectRefusal}), so the two cannot disagree.
+ *
+ * An insert is checked. An update is checked only when it MOVES the rule onto
+ * another object (`object_name` supplied and different from the pre-image),
+ * so an administrator can still switch off a rule saved before this guard.
+ * System writes pass, as with the declared-name guard: `defineRule` makes the
+ * same check itself for its non-system callers, and the remaining system
+ * writers are the platform's own machinery.
+ */
+export function bindRuleObjectEnforcementGuard(
+  engine: MinimalEngine,
+  sharing: Pick<SharingService, 'sharingRuleObjectRefusal'>,
+): void {
+  if (typeof engine.registerHook !== 'function') return;
+  if (typeof engine.unregisterHooksByPackage === 'function') {
+    engine.unregisterHooksByPackage(RULE_OBJECT_ENFORCEMENT_GUARD_PACKAGE);
+  }
+  const guard = (insert: boolean) => (ctx: any) => {
+    if ((ctx?.session as any)?.isSystem) return;
+    const data = ctx?.input?.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+    const object = data.object_name;
+    if (typeof object !== 'string' || object.length === 0) return;
+    if (!insert) {
+      const previous = ctx?.previous as Record<string, unknown> | undefined;
+      if (previous && typeof previous === 'object' && previous.object_name === object) return;
+    }
+    const refusal = sharing.sharingRuleObjectRefusal(object);
+    if (refusal) throw new SharingRuleObjectNotEnforcedError(object, refusal);
+  };
+  const opts = { object: 'sys_sharing_rule', packageId: RULE_OBJECT_ENFORCEMENT_GUARD_PACKAGE, priority: 100 };
+  engine.registerHook('beforeInsert', guard(true), opts);
+  engine.registerHook('beforeUpdate', guard(false), opts);
 }

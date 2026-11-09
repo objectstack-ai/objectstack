@@ -369,6 +369,10 @@ export const ERROR_CODE_LEDGER = {
     // not a residue. Registered HERE and not under a producing service for the
     // same reason as its `FLOW_*` neighbours: the action door, not the
     // predicate, is where the wire vocabulary is named.
+    // Second emitter: the MCP `delete_record` and `delete_records` tools' gate
+    // (`deleteConfirmationRefusal`, `packages/mcp/src/mcp-http-tools.ts`)
+    // answers this code, 428, with the same `details` shape for every record
+    // delete without the member; listed under `@objectstack/mcp` too.
     'ACTION_CONFIRMATION_REQUIRED',
     // [ADR-0126 §8 item 2] a packaged ACTION this installation switched off,
     // refused at dispatch — the activation-ledger consult in
@@ -476,6 +480,22 @@ export const ERROR_CODE_LEDGER = {
     // rows for the addressed object. Provenance, not identity (see above).
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // [cloud#3814 D1] the runtime package doors refuse a package change, 409,
+    // right after the caller's authorization and the walled-catalog refusal
+    // (both still answer first) and before anything is written,
+    // when the deployment declares several replicas on the Redis cluster
+    // driver (`declaresMultiReplicaOnRedis`, `@objectstack/service-cluster`):
+    // `POST /packages`, `PATCH /packages/:id/enable` and `/disable`,
+    // `POST /packages/:id/duplicate` and `/ensure-customization`,
+    // `PATCH /packages/:id` and `DELETE /packages/:id`
+    // (`multi-replica-package-refusal.ts`), plus the flow and permission-set
+    // clone doors when the copy would CREATE the source's paired
+    // customization package (its App's pair, `pairOf`). Each change would reach only the serving
+    // replica: the registry is read at boot and the enable/disable choice is
+    // kept per replica. The string is the shared constant one package over
+    // (see the `@objectstack/cloud-connection` row and PROVENANCE_WAIVERS);
+    // this row records runtime's own doors.
+    'MULTI_REPLICA_PACKAGE_CHANGE_REFUSED',
     // [ADR-0131 D10 item 5, ruling 6163114098 Q3 A] The v18 boot refusal
     // (`OrganizationOwnershipBootGuardPlugin`, `organization-ownership-boot-
     // guard.ts`): `os serve` refuses to start against a database still in the
@@ -493,6 +513,26 @@ export const ERROR_CODE_LEDGER = {
     // direct-mount door of the same route; the two doors now state the same
     // failure the same way. Provenance, not identity (see above).
     'PACKAGE_DELETE_PARTIAL',
+    // [ADR-0141 Open item 4, ruling A on #30379] 409 from the package disable
+    // door (`PATCH /packages/:id/disable`, `domains/packages.ts`): the disable
+    // is refused because a validation rule of a package that stays enabled
+    // (any severity; an app's `.custom` pair, where tenant-written rules live,
+    // included) reads a field this package adds through `objectExtensions`.
+    // Disabling it would withhold that field, and every write to the object
+    // would then fail that rule. The refusal names each package · object ·
+    // rule triple it found, one or several. The remedy: disable or change the
+    // reading rule first, or keep this package enabled. A formula over the
+    // field is no reason to refuse: it answers `null`. Registered AHEAD of its
+    // producer (the `ACTION_CONFIRMATION_REQUIRED` split shape): the door's
+    // scan is #30379's and asserts this string by value. ⛔ NOT a `*_DISABLED`
+    // re-spelling: those name WHICH thing is off, and this names WHY a disable
+    // is refused, and the rule it names is what the operator acts on. Nor a
+    // mirror of `DEPENDENCY_MISSING`: no `manifest.dependencies` entry is
+    // read, so "RESTRICTED" (the standard `DELETE_RESTRICTED` word for a 409
+    // refused over a dependent) carries `BY_VALIDATION_RULE` to say which
+    // dependent. PACKAGE and DISABLE are tokens no standard member carries, so
+    // it needs no waiver.
+    'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE',
     'PROJECT_MEMBERSHIP_REQUIRED',
     'RECORD_GONE',                // share link resolves but the record was deleted
     'ROUTE_NOT_FOUND',
@@ -531,6 +571,14 @@ export const ERROR_CODE_LEDGER = {
     // standard member (`ARTIFACT`, `COLLECTION`, `SHAPE` are tokens none
     // carries).
     'MIXED_ARTIFACT_COLLECTION_SHAPE',
+    // [ADR-0106 D6 tier 3] The MCP object-schema reads over HTTP
+    // (`domains/mcp.ts`: `describe_object`, `list_objects`, option-field reads)
+    // answer 503 with this code when the caller's field visibility cannot be
+    // evaluated or the masked projection would leave no field, the same code
+    // and status the REST `/meta` object read answers. Rendered by the MCP
+    // tools' coded result. Second EMITTER of the code `@objectstack/rest`
+    // registers: provenance, not identity.
+    'FIELD_VISIBILITY_UNRESOLVED',
   ],
   '@objectstack/service-storage': [
     'ATTACHMENT_DELETE_DENIED',
@@ -567,6 +615,7 @@ export const ERROR_CODE_LEDGER = {
     'ASYNC_NOT_SUPPORTED',
     'AUTH_CONFIG_ERROR',
     'CREATE_FAILED',
+    'CREDENTIALS_NAME_DIFFERENT_ACCOUNTS', // 401, before every gate and the endpoint: the request's session cookie and its bearer token name two different signed-in accounts, so it is refused and nothing runs for either; an auth request is judged and executed as one account (one credential, one account, or a credential naming no live account is unaffected)
     'DOMAIN_VERIFICATION_DISABLED', // domain verification is off on this deployment
     'DOMAIN_VERIFICATION_FAILED', // pass-through from better-auth
     'EMAIL_DOMAIN_NOT_ALLOWED',   // [#11739] audience posture email_domain: the address's domain is off the allowlist
@@ -1049,6 +1098,24 @@ export const ERROR_CODE_LEDGER = {
     // synonym of any standard member: the manifest is well-formed, and the
     // refusal comes from what the deployment already holds.
     'DEFAULT_RECORD_PAGE_CONFLICT',
+    // [ADR-0148 D2, card #30235] The recycle bin's four restore refusals,
+    // REGISTERED AHEAD OF THEIR PRODUCER: the engine's restore (#30237) stamps
+    // them and asserts these strings by value; the Console (#30239) reads them
+    // in its own language. `status: 409` for all four — the entry is intact
+    // and the live state conflicts with writing it back; a restore refuses
+    // with the reason and never forces a write. The spec spells them once, in
+    // `RECYCLE_BIN_RESTORE_REFUSAL_CODES` (`data/recycle-bin.zod.ts`). RESTORE is
+    // a token no standard member carries, so none needs a waiver.
+    // A unique value of a snapshotted row is held by a live row now.
+    'RESTORE_UNIQUE_VALUE_TAKEN',
+    // A row's master-detail parent is neither live nor in the bin.
+    'RESTORE_PARENT_PURGED',
+    // An object of the entry no longer exists in the registry: its package
+    // was uninstalled.
+    'RESTORE_PACKAGE_UNINSTALLED',
+    // [#30237, ruling 6710220841] A row's master-detail parent is not live but
+    // is the record of another bin entry: restoring that entry first clears it.
+    'RESTORE_PARENT_IN_RECYCLE_BIN',
   ],
   '@objectstack/core': [
     // [#23367, ruling A] The API-key lifecycle refusals: three distinct key
@@ -1166,6 +1233,22 @@ export const ERROR_CODE_LEDGER = {
     // routes answer through `handleRouteError`, which resolves the thrown
     // refusal through this table. The code itself is metadata-protocol's.
     'METADATA_CONFLICT',
+    // The data API's host-configured per-query row budget
+    // (`query-read-limits.ts`, `OS_DATA_QUERY_ROW_BUDGET`):
+    // `QueryRowBudgetExceededError` declares it, 400, naming the budget.
+    // Thrown by `metadata-protocol`'s `findData` (the list doors) and
+    // `service-analytics`' `query` / `queryDataset` (the analytics, report and
+    // dashboard reads), before the driver is asked, or on a budget probe's
+    // answer.
+    //
+    // Deliberately NOT the standard `MAX_RECORDS_EXCEEDED` (400, `errors.zod.ts`:
+    // a caller-side limit, the request asked for more than a request may
+    // carry), which is what the same module answers for a page size over
+    // `OS_DATA_MAX_PAGE_SIZE`. The budget bounds how DEEP a query walks:
+    // `offset` plus the page, so a page well within the maximum is refused at
+    // a deep enough offset, and the remedy is a narrower filter or a shallower
+    // offset rather than a smaller page.
+    'QUERY_ROW_BUDGET_EXCEEDED',
     'UNIQUE_VIOLATION',
   ],
   '@objectstack/hono': [
@@ -1293,6 +1376,18 @@ export const ERROR_CODE_LEDGER = {
     'MARKETPLACE_PROXY_FAILED',
     'MARKETPLACE_STORAGE_FAILED',    // install-record read/write failed
     'MARKETPLACE_UNAVAILABLE',
+    // [cloud#3814 R6] install-local refused `POST` (install) and `DELETE …/:manifestId`
+    // (uninstall), 409, on the plugin's OWN Hono routes, right after admission
+    // and before the body or the ledger is read, because the deployment
+    // declares several replicas on the Redis cluster driver
+    // (`declaresMultiReplicaOnRedis`, `@objectstack/service-cluster`): these
+    // doors change only the serving replica's own ledger and kernel, so the
+    // other replicas would never see the change. The message names the
+    // maintenance-window recipe; nothing is written. The string is spelled
+    // once in `@objectstack/service-cluster` (a shared constant one package
+    // over; see PROVENANCE_WAIVERS), so every package-change door refusing
+    // under the same condition answers the same code.
+    'MULTI_REPLICA_PACKAGE_CHANGE_REFUSED',
     'NOTHING_TO_PURGE',              // package declares no seed datasets
     // [#28410, ADR-0146 D2] install-local refused a managed install whose items
     // the override write gate refuses (step 2d, `marketplace-install-local-plugin.ts`),
@@ -1305,6 +1400,20 @@ export const ERROR_CODE_LEDGER = {
     'PLUGIN_REGISTER_FAILED',
     'RESEED_NO_ROWS',                // reseed ran but wrote nothing
     'RESEED_SKIPPED',                // reseed declined to run; message carries why
+    // [epic cloud#3652 Q3, #30884] install-local refused a managed UPGRADE
+    // whose package upgrade plan (`comparePackageVersions`,
+    // `@objectstack/metadata-core`) lists an undeclared suspected rename (a
+    // stored field removed while one is added, nothing linking them) or a
+    // `needs_confirm` / `destructive` type change — or has no installed
+    // record it can read to compare against — 409, before any write
+    // (step 2c′, after the access gate), until the same request carries the
+    // finding set's token (`confirmSchemaUpgrade`); `details.findings` names
+    // each. The sibling of ACCESS_UPGRADE_CONFIRMATION_REQUIRED above, its own
+    // code because its findings and its token are its own: an access token
+    // never confirms a schema finding, nor the reverse. READ off the wire by
+    // `os package install` (`packages/cli/src/commands/package/install.ts`),
+    // which prints each finding and the `--confirm-upgrade` retry.
+    'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',
     // [#9246] ADR-0120 D5e posture gate: the marketplace install seam stops an
     // install that declares installation-wide (`'global'`) unique constraints
     // under the `isolated` tenancy posture, 409, until the caller confirms them
@@ -1389,6 +1498,24 @@ export const ERROR_CODE_LEDGER = {
     // for the data door.
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // The `delete_record` and `delete_records` tools' confirmation gate
+    // (`mcp-http-tools.ts`, `deleteConfirmationRefusal`): a record delete
+    // without the confirmation member as the boolean `true` is refused, 428,
+    // `details` shaped as `ActionConfirmationRequiredDetails` with `actionName`
+    // the tool's name. `delete_record` refuses before any bridge is reached;
+    // `delete_records` reads its selection first and answers a `preview`
+    // beside the refusal, deleting nothing. Rendered on both transports.
+    // Second EMITTER of the code `@objectstack/runtime` registers for
+    // `run_action`'s gate: provenance, not identity.
+    'ACTION_CONFIRMATION_REQUIRED',
+    // [ADR-0106 D6 tier 3] The stdio data bridge's object-schema reads
+    // (`stdio-data-bridge.ts`, `callerObjectView`: `describe_object`,
+    // `list_objects`, the `objectstack://objects` resources) answer 503 with
+    // this code when the caller's field visibility cannot be evaluated or the
+    // masked projection would leave no field; `mcp-server-runtime.ts` renders
+    // it as the tool's coded result. Third EMITTER, after `@objectstack/rest`
+    // and `@objectstack/runtime`: provenance, not identity.
+    'FIELD_VISIBILITY_UNRESOLVED',
   ],
   '@objectstack/service-datasource': [
     'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service
@@ -1957,7 +2084,9 @@ export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
   {
     code: 'NOT_FOUND',
     shadows: 'RESOURCE_NOT_FOUND',
-    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing. ' +
+    reason: 'Pre-gate synonym on the wire from @objectstack/rest and plugin-sharing; ' +
+      'service-messaging lists the same pre-existing wire value under its own provenance row ' +
+      '(its device-registry unregister 404). ' +
       'Wire value kept; consolidation deferred until it has a measured victim.',
   },
   {
@@ -2066,6 +2195,16 @@ export type ProvenanceWaiver = z.input<typeof ProvenanceWaiverSchema>;
 export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
   {
     package: '@objectstack/metadata-core',
+    code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',
+    registeredUnder: '@objectstack/cloud-connection',
+    reason: 'Shared verdict one package over (#31526): metadata-core\'s `package-upgrade-verdict.ts` ' +
+      'defines the constant beside `schemaUpgradeVerdict` so every install door applies one rule and ' +
+      'mints one token, but metadata-core has no HTTP door. The refusal ships on the wire from ' +
+      'install-local\'s own Hono route (`marketplace-install-local-plugin.ts`), the cloud-connection ' +
+      'row\'s emitter, which imports the constant; a host\'s install door forwards the same verdict.',
+  },
+  {
+    package: '@objectstack/metadata-core',
     code: 'UPDATE_ID_MISMATCH',
     registeredUnder: '@objectstack/objectql',
     reason: 'Shared constructor one package over: metadata-core\'s ' +
@@ -2141,6 +2280,17 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       'BOTH doors recognise one shape and answer it 400 with its `fields[]`, never 500; the ' +
       'throws are served under the emitting doors\' own registrations (runtime\'s ' +
       'dispatcher exits, rest\'s `mapDataError` — both packages list the code).',
+  },
+  {
+    package: '@objectstack/service-cluster',
+    code: 'MULTI_REPLICA_PACKAGE_CHANGE_REFUSED',
+    registeredUnder: '@objectstack/cloud-connection',
+    reason: 'Shared constant one package over: `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` ' +
+      '(multi-replica.ts) spells the string beside `declaresMultiReplicaOnRedis`, the one ' +
+      'condition every multi-replica refusal keys on, so the doors refusing a package change ' +
+      'under it answer one code; the stamps are the marketplace install-local install and ' +
+      'uninstall 409s (`marketplace-install-local-plugin.ts`), on the plugin\'s own Hono ' +
+      'routes — the cloud-connection row records that door. Service-cluster ships no door.',
   },
   {
     package: '@objectstack/types',

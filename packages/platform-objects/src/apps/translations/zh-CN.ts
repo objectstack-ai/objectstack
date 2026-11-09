@@ -16,6 +16,7 @@ export const zhCN: TranslationData = {
         grp_account_inbox: { label: '收件箱' },
         grp_account_security: { label: '安全' },
         grp_account_developer: { label: '开发者' },
+        grp_account_ai_assistant: { label: 'AI 助手' },
         nav_account_profile: { label: '个人资料' },
         nav_account_notifications: { label: '通知' },
         nav_account_approvals: { label: '待我审批' },
@@ -25,9 +26,9 @@ export const zhCN: TranslationData = {
         nav_account_api_keys: { label: 'API 密钥' },
         nav_account_oauth_apps: { label: 'OAuth 应用' },
         // Contributed at runtime by `@objectstack/mcp` into
-        // `grp_account_developer`; the Setup twin's key does not answer for the
+        // `grp_account_ai_assistant`; the Setup twin's key does not answer for the
         // Account app (one `apps.<app>.navigation` namespace per app).
-        nav_connect_agent: { label: '连接智能体' },
+        nav_connect_agent: { label: '连接 AI 助手' },
       },
     },
     setup: {
@@ -49,6 +50,7 @@ export const zhCN: TranslationData = {
         group_advanced: { label: '高级' },
 
         nav_system_overview: { label: '系统概览' },
+        nav_connect_agent: { label: '连接 AI 助手' },
 
         nav_users: { label: '用户' },
         nav_organization: { label: '当前组织' },
@@ -63,13 +65,16 @@ export const zhCN: TranslationData = {
         nav_record_shares: { label: '记录共享' },
         nav_queues: { label: '队列' },
         nav_queue_members: { label: '队列成员' },
+        nav_assignment_rules: { label: '分配规则' },
         // Conditionally contributed by `@objectstack/plugin-auth` (only when an
         // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
         // the rationale in `en.ts` (#6659). Wording matches this locale's
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'SSO 提供方' },
+        // Conditionally contributed by plugin-auth (only while SCIM is wired),
+        // the same case as the entry above; see `en.ts` (#31123).
+        nav_scim_credentials: { label: 'SCIM 凭据' },
         nav_api_keys: { label: 'API 密钥' },
-        nav_connect_agent: { label: '连接智能体' },
 
         // 审批中心 = the Approvals Inbox component (#7234) — the surface with
         // decision actions. The three below are the engine's raw tables.
@@ -88,11 +93,12 @@ export const zhCN: TranslationData = {
         nav_settings_sms: { label: '短信投递' },
         nav_settings_branding: { label: '品牌' },
         nav_settings_auth: { label: '认证' },
+        nav_settings_access_policy: { label: '访问策略' },
         nav_settings_storage: { label: '文件存储' },
         nav_settings_ai: { label: 'AI 与 Embedder' },
         nav_settings_knowledge: { label: '知识库' },
         nav_settings_lifecycle: { label: '数据生命周期' },
-        nav_settings_feature_flags: { label: '功能开关' },
+        nav_recycle_bin: { label: '回收站' },
         nav_notification_preferences: { label: '通知偏好' },
         nav_notification_templates: { label: '通知模板' },
 
@@ -192,8 +198,8 @@ export const zhCN: TranslationData = {
       subtitle: '将此运行时连接到 ObjectStack 控制平面，即可浏览并安装组织的私有包。',
     },
     connect_agent: {
-      label: '连接智能体',
-      subtitle: '让任意支持 MCP 的 AI 客户端受控访问本系统——每次调用都在调用者自身的权限与行级安全范围内执行。',
+      label: '连接 AI 助手',
+      subtitle: '在 Claude、豆包等 AI 助手里使用本系统。助手始终以你的身份操作：只能查看和修改你有权限的内容。',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

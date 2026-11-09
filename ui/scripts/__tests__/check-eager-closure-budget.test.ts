@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 // The structural locator for the prose attached to an exported constant, shared
 // with `vite-declared-lazy-views.test.ts` (objectui#7289). It was written here
@@ -492,7 +493,8 @@ describe('chunk attribution (objectui#7399)', () => {
   // until objectui#7479. The groups are per-code now
   // (`i18n-locale-<code>`), so a probe id that matches no catalogue file would
   // match no group and every case below would fail closed for the wrong reason.
-  const LOCALE_MODULE = moduleId('packages/i18n/src/locales/zh.ts');
+  // The file is named for its platform locale tag since objectstack#30511.
+  const LOCALE_MODULE = moduleId('packages/i18n/src/locales/zh-Hans.ts');
   const RESIDENT_LOCALE_MODULE = moduleId('packages/i18n/src/locales/en.ts');
   const I18N_RUNTIME_MODULE = moduleId('packages/i18n/src/provider.tsx');
   // objectstack#25922: the Studio designer namespace's two catalogues. The lazy
@@ -526,7 +528,7 @@ describe('chunk attribution (objectui#7399)', () => {
       expect(groups.map((g) => g.name)).toEqual(expect.arrayContaining([
         'framework',
         'i18n-locale-en',
-        'i18n-locale-zh',
+        'i18n-locale-zh-Hans',
         'i18n-runtime',
         'data-adapter',
         'ui-components',
@@ -560,7 +562,7 @@ describe('chunk attribution (objectui#7399)', () => {
     });
 
     it.each([
-      ['the lazy locale catalogue', LOCALE_MODULE, 'i18n-locale-zh'],
+      ['the lazy locale catalogue', LOCALE_MODULE, 'i18n-locale-zh-Hans'],
       ['the resident locale catalogue', RESIDENT_LOCALE_MODULE, 'i18n-locale-en'],
       ['the i18n runtime', I18N_RUNTIME_MODULE, 'i18n-runtime'],
       ['the lazy studio namespace catalogue', STUDIO_LAZY_MODULE, 'i18n-ns-studio-zh'],
@@ -715,7 +717,11 @@ describe('chunk attribution (objectui#7399)', () => {
    * run without a full build.
    */
   it('gives every catalogue a chunk of its OWN — a shared group would re-merge them', () => {
-    const CODES = ['en', 'zh', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar'];
+    // Every tag of the platform locale table (objectstack#30511): a tag the
+    // table gains with no group here reds below instead of falling to the
+    // eager runtime group.
+    const CODES = [...PLATFORM_LOCALE_TAGS];
+    expect(CODES.length).toBeGreaterThan(1);
     const winners = new Map<string, string>();
     for (const code of CODES) {
       const claiming = claimants(moduleId(`packages/i18n/src/locales/${code}.ts`));
@@ -725,7 +731,7 @@ describe('chunk attribution (objectui#7399)', () => {
       winners.set(code, claiming[0].name);
     }
     expect([...winners.values()]).toEqual(CODES.map((code) => `i18n-locale-${code}`));
-    // The property that matters, stated as itself: ten codes, ten DISTINCT
+    // The property that matters, stated as itself: N codes, N DISTINCT
     // chunk names. Any collision is the shared-group defect above.
     expect(new Set(winners.values()).size).toBe(CODES.length);
   });

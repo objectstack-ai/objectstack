@@ -148,6 +148,11 @@ vi.mock('../../../views/studio-design/packages-io', async (importOriginal) => ({
 // Home marks an opened notification read through the bell's own write
 // (`useInboxBell`); this harness serves no inbox feed, so the write is stubbed.
 vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead: vi.fn() }) }));
+// The deployment notice reads its own state from the server for an administrator
+// (objectstack#30120); its fetch, its gate and its copy are pinned in
+// `deployment-notice/__tests__/DeploymentNotice.test.tsx`, so it is stubbed here
+// like every other source this page reads.
+vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
 
 import { HomePage } from '../HomePage';
 

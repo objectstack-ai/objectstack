@@ -159,7 +159,7 @@ describe('/studio refused: the sentence arrives in the caller language (objectui
 });
 
 describe('CONTROL: a caller with Studio access enters Studio as today', () => {
-  it.each(['en', 'zh'] as const)('%s', async (lang) => {
+  it.each(['en', 'zh-Hans'] as const)('%s', async (lang) => {
     inLanguage(lang);
     systemPermissions = [STUDIO_ENTRY_CAPABILITY];
     renderStudio('/studio/');

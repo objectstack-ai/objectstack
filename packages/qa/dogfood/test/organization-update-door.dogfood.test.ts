@@ -5,7 +5,8 @@
  * the product actually uses.
  *
  * `sys_organization` carries four columns ObjectStack owns and better-auth
- * never reads or writes — `require_mfa` (ADR-0069 D3), `parent_organization_id`
+ * never reads or writes — `require_mfa` (ADR-0069 D3; retired since, and no
+ * longer editable: the multi-factor level is the access policy's), `parent_organization_id`
  * / `sort_order` (ADR-0105 D6) and `timezone` (#14238). plugin-auth declares
  * them generically editable (`MANAGED_EXTENSION_EDITABLE_FIELDS`, the ADR-0092
  * D2 identity write guard's per-object update whitelist), while the object set
@@ -158,18 +159,16 @@ describe('#15873: sys_organization platform-owned columns through PATCH /data/sy
     expect(row.sort_order).toBe(7);
   });
 
-  it('require_mfa is admitted on the same door (written at its current value — flipping it would lock this session out)', async () => {
-    // `require_mfa: true` on the caller's own organization is enforced at the
-    // session-validation gate, so the assertions after this one would start
-    // answering the MFA challenge instead of the door. Writing the column at
-    // its present value still proves the point: were it NOT whitelisted, a
-    // payload carrying it alone is refused 403 by the guard ("none of the
-    // submitted fields are editable"), exactly as `name` is above.
+  it('require_mfa is retired: a payload carrying it alone is refused by the column guard (403), and nothing changes', async () => {
+    // An organization's multi-factor requirement is its access policy now
+    // (`access_policy.mfa_required`, three levels); the column left the
+    // whitelist with it, so a write to it would be read by nothing.
     const before = await readOrg(orgId);
-    const current = before.require_mfa === true;
-    const res = await patchOrg(orgId, { require_mfa: current });
-    expect(res.status).toBe(200);
-    expect((await readOrg(orgId)).require_mfa === true).toBe(current);
+    const res = await patchOrg(orgId, { require_mfa: !(before.require_mfa === true) });
+    const body: any = await res.json();
+    expect(res.status).toBe(403);
+    expect(body.code).toBe('PERMISSION_DENIED');
+    expect((await readOrg(orgId)).require_mfa === true).toBe(before.require_mfa === true);
   });
 
   it('opens the columns, not the table: better-auth columns smuggled beside a legal one are stripped, the legal one lands', async () => {

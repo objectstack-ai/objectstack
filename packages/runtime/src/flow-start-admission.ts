@@ -68,6 +68,10 @@
  * says nothing about the row the run reads elsewhere under the same id. Every
  * start input the definition reads as a record id is judged that way, row
  * slot or not, and must be an id (or a list of ids, where it is read as one).
+ * An input the author DECLARES a record id (`objectName` on the variable) is
+ * judged the same way against the declared object, whether or not the
+ * definition reads it in plain sight; an undeclared input keeps the
+ * visible-read rule alone.
  *
  * ## Why a module, and why every door asks it
  *
@@ -240,6 +244,14 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
  * input as a record id of a FIXED object in these places, and only these,
  * across every region of the flow (`collectFlowGraphs`):
  *
+ *  - the input's own declaration, `objectName` on the variable (#29425 ruling
+ *    A): one id of that object, whatever the rest of the definition does with
+ *    it. It is ADDED to the reads below, never in place of them: a run that
+ *    also reads the input from another object reads that row too, so the
+ *    caller must be able to read both. Being the author's word about the
+ *    caller's value, it holds even where a `loop` or `map` later rebinds the
+ *    name, and a callee's declaration is followed through the hand-offs below
+ *    like any other callee read;
  *  - a `get_record`, `update_record` or `delete_record` node with a literal
  *    `objectName` whose `filter.id` is the input (one id), or whose
  *    `filter.id.$eq` / `filter.id.$in` is (one id / a list of ids);
@@ -283,8 +295,22 @@ async function declaredReadsOf(
     const flow = (await getFlow(flowName)) as FlowParsed | null | undefined;
     if (!flow || typeof flow !== 'object') return reads;
     const inputs = new Set<string>();
+    const add = (input: string, read: FlowDeclaredRecordRead): void => {
+        const list = reads.get(input) ?? [];
+        if (!list.some((r) => r.object === read.object && r.many === read.many)) list.push(read);
+        reads.set(input, list);
+    };
     for (const variable of Array.isArray(flow.variables) ? flow.variables : []) {
-        if (variable && variable.isInput === true && typeof variable.name === 'string') inputs.add(variable.name);
+        if (!variable || variable.isInput !== true || typeof variable.name !== 'string') continue;
+        inputs.add(variable.name);
+        // The author's own word (`objectName` on the input, #29425 ruling A):
+        // the value is the id of one record of that object. It reads the
+        // caller's value, so a `loop` or `map` that rebinds the name further
+        // down does not withdraw it, and it sits beside every read the
+        // definition makes in plain sight, never in place of one.
+        if (typeof variable.objectName === 'string' && variable.objectName !== '') {
+            add(variable.name, { object: variable.objectName, many: false });
+        }
     }
     const graphs = collectFlowGraphs(flow);
     // A `loop` or `map` node binds its item (and index) variable over the run's
@@ -302,11 +328,6 @@ async function declaredReadsOf(
         }
     }
     if (inputs.size === 0) return reads;
-    const add = (input: string, read: FlowDeclaredRecordRead): void => {
-        const list = reads.get(input) ?? [];
-        if (!list.some((r) => r.object === read.object && r.many === read.many)) list.push(read);
-        reads.set(input, list);
-    };
     const inputOf = (slot: unknown): string | undefined => {
         const name = handedOnVariable(slot);
         return name !== undefined && inputs.has(name) ? name : undefined;

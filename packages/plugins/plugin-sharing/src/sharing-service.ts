@@ -220,11 +220,18 @@ export function effectiveSharingModel(schema: any): 'private' | 'read' | 'public
   if (m === 'private') return 'private';
   if (m === 'public_read') return 'read';
   if (m === 'public_read_write' || m === 'controlled_by_parent') return 'public';
-  if (m == null) {
-    const isSystem = schema?.isSystem === true || String(schema?.name ?? '').startsWith('sys_');
-    return isSystem ? 'public' : 'private';
-  }
+  if (m == null) return isPlatformObjectSchema(schema) ? 'public' : 'private';
   return 'private';
+}
+
+/**
+ * A platform (system) object: one the registry marks `isSystem`, or one named
+ * with the platform's `sys_` prefix. The one spelling of that test, read by
+ * {@link effectiveSharingModel}'s default and by the sharing-rule object
+ * picker's ordering (`shareable-objects.ts`).
+ */
+export function isPlatformObjectSchema(schema: any): boolean {
+  return schema?.isSystem === true || String(schema?.name ?? '').startsWith('sys_');
 }
 
 /**
@@ -1714,7 +1721,7 @@ export class SharingService implements ISharingService {
     // not an owner column either — it is the one case `hasOwnerField` answers YES
     // about a column that is not there. The platform provisions no storage for a
     // federated object (`Engine.syncObjectSchema` returns early for
-    // `external != null`), so the ownership fast-path behind `checkEdit` /
+    // `isFederatedObject`), so the ownership fast-path behind `checkEdit` /
     // `checkDelete` selects `owner_id` off a remote table that has no such column.
     //
     // MEASURED on a booted showcase stack (SQLite external datasource, an
@@ -1766,11 +1773,55 @@ export class SharingService implements ISharingService {
    * input to this question).
    */
   private assertNotInertGrant(object: string): void {
+    const reason = this.objectInertReason(object);
+    if (reason) throw new Error(`SHARING_NOT_ENABLED: ${reason}`);
+  }
+
+  /**
+   * The caller-independent D7 verdict on `object`: why no share row on it
+   * could ever be consulted, whoever the recipient is, or `null`.
+   */
+  private objectInertReason(object: string): string | null {
     // [#25549] The arm the recipient's population decides is the recipient
     // half's ({@link assertRecipientNotInert}), asked once the organization is known.
-    if (this.recipientDecidesInertness(object)) return;
-    const reason = this.inertGrantReason(object);
-    if (reason) throw new Error(`SHARING_NOT_ENABLED: ${reason}`);
+    if (this.recipientDecidesInertness(object)) return null;
+    return this.inertGrantReason(object);
+  }
+
+  /**
+   * [#30621] The save door's refusal for a sharing rule on `object`, or `null`
+   * when a rule there can grant.
+   *
+   * A rule on an object no sharing gate consults saved and then did nothing:
+   * its reconcile met {@link assertNotInertGrant} and wrote no row. This reads
+   * the SAME verdict ({@link objectInertReason}), so the save door and the
+   * reconcile cannot disagree about which objects are under enforcement. The
+   * sentence adds what the administrator can do about it.
+   */
+  sharingRuleObjectRefusal(object: string): string | null {
+    const reason = this.objectInertReason(object);
+    if (!reason) return null;
+    return `A sharing rule on '${object}' would never share anything: ${reason}. ${this.sharingRuleObjectRemedy(object)}`;
+  }
+
+  /** [#30621] How to make `object` one a sharing rule applies to, per D7 arm. */
+  private sharingRuleObjectRemedy(object: string): string {
+    if (this.bypassObjects.has(object)) {
+      return 'Record sharing cannot be turned on for this platform object; author the rule on an object that uses record sharing.';
+    }
+    const schema = typeof this.engine.getSchema === 'function' ? this.engine.getSchema(object) : undefined;
+    const declared = schema?.sharingModel ?? schema?.security?.sharingModel;
+    if (declared === 'controlled_by_parent') {
+      return 'Author the rule on its master object instead.';
+    }
+    // Asked before the model: a federated object whose `owner_id` is the
+    // injected anchor already HAS that field, public or not, and a private
+    // model would still meet the phantom-anchor refusal.
+    if (schema && hasOwnerField(schema) && hasPhantomOwnerAnchor(schema)) {
+      return `To use sharing rules on it, declare a real remote '${OWNER_FIELD}' column on the federated object.`;
+    }
+    return `To use sharing rules on it, give the object a private or read-only sharing model `
+      + `(sharingModel: 'private' or 'read') and an '${OWNER_FIELD}' field.`;
   }
 
   /**

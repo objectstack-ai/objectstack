@@ -42,19 +42,47 @@ describe('owd-sharing — deriveMasterObject', () => {
 
 /**
  * objectui#12326 — the display reader agrees with the runtime (ADR-0055 §1,
- * objectstack#23100): the ONE `master_detail` declared `required: true` names
- * the master, and any other shape names none. The installed spec's
- * `ObjectSchema` is the oracle for which shapes the platform accepts: every
- * shape this reader names a master for parses as a `controlled_by_parent`
- * object, and every shape it names none for is refused.
+ * objectstack#23100): the master is the one the spec's
+ * `controlledByParentMasterOf` names, and any other shape names none. The
+ * installed spec's `ObjectSchema` is the oracle for which shapes the platform
+ * accepts: every shape this reader names a master for parses as a
+ * `controlled_by_parent` object, and every shape it names none for is refused.
+ *
+ * ADR-0055 §1 as amended (objectstack#30905 ruling A) adds an OPTIONAL master:
+ * an object's only `master_detail` declared `required: false`, which this
+ * reader names (objectstack#30974). An omitted `required` on that only
+ * `master_detail` is the master too: the parse admits it, and Studio, the
+ * builder and stored data read it as required.
  */
 describe('owd-sharing — deriveMasterObject agrees with the runtime (objectui#12326)', () => {
   const asCbp = (fields: Record<string, unknown>) =>
     ObjectSchema.safeParse({ name: 'crm_case', sharingModel: 'controlled_by_parent', fields }).success;
 
+  // [label, fields, the master named]
   const SHAPES: Array<[string, Record<string, unknown>, string | undefined]> = [
     ['one required master', { account: { type: 'master_detail', reference: 'crm_account', required: true } }, 'crm_account'],
-    ['one master without required', { account: { type: 'master_detail', reference: 'crm_account' } }, undefined],
+    ['one master without required', { account: { type: 'master_detail', reference: 'crm_account' } }, 'crm_account'],
+    [
+      'one optional master (required: false)',
+      { account: { type: 'master_detail', reference: 'crm_account', required: false } },
+      'crm_account',
+    ],
+    [
+      'a master-detail declared required: false beside the required one',
+      {
+        contact: { type: 'master_detail', reference: 'crm_contact', required: false },
+        account: { type: 'master_detail', reference: 'crm_account', required: true },
+      },
+      'crm_account',
+    ],
+    [
+      'two master-detail fields, none required',
+      {
+        account: { type: 'master_detail', reference: 'crm_account', required: false },
+        contact: { type: 'master_detail', reference: 'crm_contact', required: false },
+      },
+      undefined,
+    ],
     [
       'two required masters',
       {
@@ -100,6 +128,19 @@ describe('owd-sharing — requireCbpMasterDetails (objectui#12326)', () => {
   it('keeps the array shape', () => {
     const next = requireCbpMasterDetails([{ name: 'parent', type: 'master_detail', reference: 'crm_case' }]);
     expect(next).toEqual([{ name: 'parent', type: 'master_detail', reference: 'crm_case', required: true }]);
+  });
+
+  it('keeps an optional master: an explicit required: false is never turned required (objectstack#30974)', () => {
+    const fields = { account: { type: 'master_detail', reference: 'crm_account', required: false } };
+    expect(requireCbpMasterDetails(fields)).toBe(fields);
+    const arr = [{ name: 'parent', type: 'master_detail', reference: 'crm_case', required: false }];
+    expect(requireCbpMasterDetails(arr)).toBe(arr);
+    const mixed = requireCbpMasterDetails({
+      account: { type: 'master_detail', reference: 'crm_account', required: false },
+      contact: { type: 'master_detail', reference: 'crm_contact' },
+    }) as Record<string, Record<string, unknown>>;
+    expect(mixed.account.required).toBe(false);
+    expect(mixed.contact.required).toBe(true);
   });
 
   it('returns the input itself when every master-detail field is already required', () => {

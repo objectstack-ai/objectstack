@@ -38,14 +38,23 @@
 
 /**
  * The declared preset names, in the display order the filter bar offers them.
+ *
+ * The forward presets sit inside the family they extend, after its backward
+ * member: `next_month` closes the month group (this, last, next) and
+ * `next_quarter` the quarter group, so a reader scanning the dropdown finds
+ * every month window in one place; `next_30_days` follows the backward rolling
+ * windows, after `last_90_days`, so the rolling group reads backward then
+ * forward. A forward member never opens a group: the backward ones are the
+ * windows most filters ask for, and they keep the positions they shipped in.
  */
 export const DATE_RANGE_PRESETS = [
   'today',        'yesterday',
   'this_week',    'last_week',
-  'this_month',   'last_month',
-  'this_quarter', 'last_quarter',
+  'this_month',   'last_month',   'next_month',
+  'this_quarter', 'last_quarter', 'next_quarter',
   'this_year',    'last_year',
   'last_7_days',  'last_30_days', 'last_90_days',
+  'next_30_days',
 ] as const;
 
 export type DateRangePreset = (typeof DATE_RANGE_PRESETS)[number];
@@ -101,6 +110,15 @@ export function isDateRangePresetName(value: unknown): value is DateRangePreset 
  * would count next month's rows too. ⛔ So `end` is never absent: a reader
  * that branches on a missing end is reading a shape this table no longer has.
  *
+ * The FORWARD presets follow the same rule. `next_month` and `next_quarter`
+ * are calendar presets and close on their own last day. The forward rolling
+ * window `next_30_days` is the mirror of `last_30_days`: it runs from the
+ * whole of today through `{30_days_from_now}`, so it holds today and the 30
+ * days after it, as `last_30_days` holds today and the 30 days before it. It
+ * opens on `{today}` because a row due today is still ahead of a forecast. A
+ * `$lte`-only prescription for it would count every past row too, which is
+ * why it closes on both sides like every other entry.
+ *
  * ## Why the table exists: PRESCRIPTION
  *
  * When a preset name is refused as a bare filter comparand (#8793), the
@@ -133,6 +151,9 @@ export const DATE_RANGE_PRESET_MACRO_WINDOWS: Readonly<
   last_7_days:  ['{7_days_ago}', '{today}'],
   last_30_days: ['{30_days_ago}', '{today}'],
   last_90_days: ['{90_days_ago}', '{today}'],
+  next_month:   ['{next_month_start}', '{next_month_end}'],
+  next_quarter: ['{next_quarter_start}', '{next_quarter_end}'],
+  next_30_days: ['{today}', '{30_days_from_now}'],
 };
 
 /**

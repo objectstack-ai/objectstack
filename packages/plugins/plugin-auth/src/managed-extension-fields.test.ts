@@ -5,7 +5,7 @@
  * objects.
  *
  * Extending a better-auth table is established practice (`sys_user.manager_id`,
- * `sys_organization.require_mfa`, and now the D6 group-structure fields). The
+ * `sys_organization.timezone`, and now the D6 group-structure fields). The
  * hazard is a NAME COLLISION: if a better-auth upgrade introduces a field with
  * the same name, ownership of that column silently changes hands — our writes
  * start clobbering better-auth state, or better-auth's start clobbering ours,
@@ -107,6 +107,8 @@ import { admin } from 'better-auth/plugins/admin';
 import { bearer } from 'better-auth/plugins/bearer';
 import { customSession } from 'better-auth/plugins/custom-session';
 import { deviceAuthorization } from 'better-auth/plugins/device-authorization';
+import { oneTimeToken } from 'better-auth/plugins/one-time-token';
+import { ONE_TIME_TOKEN_EXPIRES_IN_MINUTES, oneTimeTokenStoreHasher } from './one-time-token-handoff.js';
 import { genericOAuth } from 'better-auth/plugins/generic-oauth';
 import { haveIBeenPwned } from 'better-auth/plugins/haveibeenpwned';
 import { magicLink } from 'better-auth/plugins/magic-link';
@@ -507,6 +509,18 @@ const AUTH_MANAGER_PLUGINS: Record<string, { construct: () => unknown } | { skip
   genericOAuth: { construct: () => genericOAuth({ config: [] }) },
   jwt: { construct: () => jwt() },
   deviceAuthorization: { construct: () => deviceAuthorization() },
+  // The options the plugin list passes. The plugin stores its tokens in the
+  // core `verification` model and declares no model or column of its own;
+  // it is constructed anyway, so a version bump that gives it one is
+  // compared the day it lands.
+  oneTimeToken: {
+    construct: () =>
+      oneTimeToken({
+        expiresIn: ONE_TIME_TOKEN_EXPIRES_IN_MINUTES,
+        disableClientRequest: true,
+        storeToken: { type: 'custom-hasher', hash: oneTimeTokenStoreHasher },
+      }),
+  },
   customSession: {
     construct: () =>
       customSession(async ({ user, session }: { user: unknown; session: unknown }) => ({

@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: i18n
   tags: i18n, translation, locale, l10n, bundle, coverage
 ---
@@ -89,7 +89,7 @@ const en: TranslationData = {
         details: { label: 'Details' },
       },
       _actions: {
-        complete: {
+        todo_complete: {
           label: 'Complete',
           confirmText: 'Mark this task as completed?',
           successMessage: 'Task completed',
@@ -159,7 +159,7 @@ All translatable content for a single object is aggregated under
 | Sub-key | Holds |
 |:--------|:------|
 | `label` / `pluralLabel` / `description` | Object-level text (every key optional) |
-| `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label), `inlineTitle` (the heading of the inline child grid a `master_detail` field draws on its parent's form — the field lives on the child object, so the key is the child's; untranslated it keeps its authored text, never the child's plural label) per field |
+| `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label), `inlineTitle` (the heading of the inline child grid a `master_detail` field draws on its parent's form — the field lives on the child object, so the key is the child's; untranslated it keeps its authored text, never the child's plural label), `relatedListTitle` (the title of the related list a `lookup` or `master_detail` field draws on its parent's record page — the key is the child's too; untranslated it keeps its authored text, never the child's label) per field |
 | `_views.{view_name}` | `label`, `description`, `title` (a form view's own heading — only a form that authors one is translated; a list view has none), `submitBehavior.title` / `submitBehavior.message` (the thank-you panel of a form whose `submitBehavior` is `kind: 'thank-you'`; only the copy the form authors is translated, and the other kinds carry none), `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
 | `_actions.{action_name}` | `label`, `description`, `confirmText`, `submitText` (the param dialog's button verb — only under an action that declares `params`), `successMessage`, `disabledReason` (the sentence a greyed action shows; absent keeps the console's default), `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key); the same keys hold under `globalActions.{action_name}` |
 | `_sections.{section_name}` | Form section `label`, `description`; `fields.{field_name}` — the `label`, `placeholder`, `helpText` an entry overrides for that form alone (`helpText` here, `help` under `fields.{field_name}` above: each spells what its source does) |
@@ -176,7 +176,9 @@ spine, by `Book.name`: `books.{book}.label` / `.description`, and `groups.{group
 each group's stable `key`, never its position — `books.crm_manual.groups.getting_started.label`;
 the pages themselves localize through `doc.translations`, and the inline `translations` map a
 book once carried stays retired), `metadataForms`, `settingsCommon`; `reports`, `positions` and
-`permissions` hold `label` + `description` by name, and a joined report's block headings sit at
+`permissions` hold `label` + `description` by name, so do `datasets` and each dataset member at
+`datasets.{dataset}.{dimensions,measures}.{member}` (a member's `synonyms` have no key: one
+authored list carries every language), and a joined report's block headings sit at
 `reports.{report}.blocks.{block_name}.{label,description}`, keyed by the block's required `name`.
 Two keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
@@ -337,17 +339,13 @@ re-translation: an up-to-date bundle re-extracts byte-identically. Requires
 
 ### Diff & Coverage Schemas
 
-The spec models coverage results for tooling: `TranslationCoverageResult`
+The spec models coverage results for tooling — the return shapes of the optional `getCoverage()` / `suggestTranslations()` (see *Service Contract* below): `TranslationCoverageResult`
 (totals, `coveragePercent`, per-group `breakdown`) and `TranslationDiffItem` —
 `key` (dot path), `status` (`missing | redundant | stale`), `locale`, optional
 `objectName`, optional `sourceHash` for stale detection, and AI-enrichment
 fields (`aiSuggested`, `aiConfidence`). Full Zod shape:
 `node_modules/@objectstack/spec/src/system/translation.zod.ts` —
 `TranslationCoverageResultSchema`, `TranslationDiffItemSchema`.
-
-These schemas back the **optional** contract methods `getCoverage()` and
-`suggestTranslations()`, which **no shipped adapter implements** — point coverage
-workflows at `os i18n check` / `os lint --i18n-strict` instead.
 
 ---
 
@@ -377,8 +375,10 @@ registers when no i18n plugin is present):
   plugins can each contribute their own `objects.*` slice
 - **`getLocales()`** / **`setSupportedLocales()`** / **`getDefaultLocale()`** / **`setDefaultLocale()`**
 
-The in-memory fallback additionally resolves locale codes
-(exact → case-insensitive → base language `zh-CN` → `zh` → variant `zh` → `zh-CN`).
+The in-memory fallback additionally resolves locale codes through `resolveLocaleAmong`
+(`@objectstack/spec/system`), the one ladder `resolveBundleLocale` also runs: exact →
+case-insensitive → same platform-table language (`zh-TW` → `zh-Hant`) → base language
+`zh-CN` → `zh` → first registered variant `zh` → `zh-CN`.
 
 The contract also declares optional methods — `getFieldLabels`, `getCoverage`,
 `suggestTranslations` — that **no shipped implementation provides**. Treat them

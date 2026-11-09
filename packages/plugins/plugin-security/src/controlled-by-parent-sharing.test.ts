@@ -1100,10 +1100,16 @@ describe('[#23100] the retired master tiers derive NO master — fail-closed on 
   });
 
   it.each([
-    ['a master_detail without `required` (the retired second tier)', 'master-not-required' as const, CONTACT_SCHEMA_MASTER_NOT_REQUIRED, 'sharingModel', /no required master_detail field; master_detail without required: true: account/],
-    ['a required lookup (the retired third tier — the HotCRM shape)', 'master-required-lookup' as const, CONTACT_SCHEMA_MASTER_REQUIRED_LOOKUP, 'sharingModel', /no required master_detail field; required lookup: account/],
-    ['two required master_details (no longer resolved by field order)', 'two-masters' as const, CONTACT_SCHEMA_TWO_MASTERS, 'fields', /2 required master_detail fields \(account, billing_account\)/],
-  ])('%s: every read DENIED, every write 422 INVALID_METADATA, reported once', async (_label, detail, schema, parsePath, why) => {
+    // [#30905 ruling A] The parse reads the PARSED field map, where an omitted
+    // `required` is `false`, so it admits this object as an OPTIONAL master;
+    // this gate reads the unparsed registry, where the omission is visible,
+    // and still derives no master from it (`required === false` is the
+    // optional master, an absent key is not). The recorded divergence: a
+    // registry row in this shape fails closed, as before.
+    ['a master_detail without `required` (the retired second tier)', 'master-not-required' as const, CONTACT_SCHEMA_MASTER_NOT_REQUIRED, [] as string[], /no required master_detail field; master_detail without required: true: account \(add required: true, or required: false for an optional master/],
+    ['a required lookup (the retired third tier — the HotCRM shape)', 'master-required-lookup' as const, CONTACT_SCHEMA_MASTER_REQUIRED_LOOKUP, ['sharingModel'], /no required master_detail field; required lookup: account/],
+    ['two required master_details (no longer resolved by field order)', 'two-masters' as const, CONTACT_SCHEMA_TWO_MASTERS, ['fields'], /2 required master_detail fields \(account, billing_account\)/],
+  ])('%s: every read DENIED, every write 422 INVALID_METADATA, reported once', async (_label, detail, schema, parsePaths, why) => {
     const h = await boot({ shareLevel: 'edit', detail });
 
     // READ: the master the old tier would have picked holds readable rows
@@ -1126,8 +1132,9 @@ describe('[#23100] the retired master tiers derive NO master — fail-closed on 
     expect(reports).toHaveLength(1);
     expect(String(reports[0][0])).toMatch(why);
 
-    // …and the parse refuses the same object, at the path the lint shares.
-    expect(cbpParseIssuePaths(schema)).toEqual([parsePath]);
+    // …and the parse refuses the same object, at the path the lint shares
+    // (bar the one divergence above).
+    expect(cbpParseIssuePaths(schema)).toEqual(parsePaths);
   });
 });
 

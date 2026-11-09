@@ -102,17 +102,22 @@ D2, D11). A `PUT` naming no package onto an item one installed read-only package
 `hotcrm` ships is refused `403 NOT_OVERRIDABLE`; for a type an override applies to,
 the sentence names the route: save it with `?package=hotcrm.custom`, the body
 declaring `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (`basedOn` is the
-`manifest.version` of `hotcrm` it was taken from, recorded and never judged). Only the pair declares an override: an item of any other
+`manifest.version` of `hotcrm` it was taken from, recorded and never a gate; an upgrade of `hotcrm` lists, as advice, each override whose `basedOn` is not the installed version or whose base item the upgrade changes). Only the pair declares an override: an item of any other
 package that depends on `hotcrm` and bears a `hotcrm` item's name is refused at save
 and publish, and its fix is a new name. A permission set, position or capability is
-never overridden; it is copied under a new name. What the reads then serve is in
+never overridden: a permission set or position is copied under a new name, and a
+capability changes only with a new version of the package that declares it. An
+`overrides` on a type that takes none is refused `403 NOT_OVERRIDABLE`, and the
+sentence names that type's own route. What the reads then serve is in
 [Metadata lifecycle](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146).
 `POST /packages/hotcrm/ensure-customization` creates the pair when absent (Studio calls
-it on the first change), and `GET /packages/hotcrm/customizations` lists its overrides,
+it on the first change); asked for a module that declares an App, it answers the App's one
+pair (`<app id>.custom`, `200` once it exists); a kernel package (scope `system` or `cloud`) has no pair in this
+version and answers `409 RESOURCE_CONFLICT`, though a pair an earlier version created keeps
+serving what it holds. `GET /packages/hotcrm/customizations` lists its overrides,
 extensions and switched-off items in one read, beside `contributions`: the fields (kind `field`)
-and flows (kind `flow`) other installed packages contribute to `hotcrm`'s objects, each entry
-naming its package. Its `nav` kind (a navigation item another package contributes to a
-`hotcrm` app) is declared and not yet served.
+and flows (kind `flow`) other installed packages contribute to `hotcrm`'s objects, and the
+navigation items (kind `nav`) they contribute to `hotcrm`'s apps, each entry naming its package.
 
 **Body**: `{ type: "object", name: "account", item: { ... } }`  
 **Response**: `{ success: true }`
@@ -176,9 +181,37 @@ before.
 
 Enable a disabled package.
 
+The mirror of the disable door's refusal below: the enable is refused
+`409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` while a validation rule it
+would put into service (the package's own, or one on an object it owns) reads a
+field that another, still disabled package adds through `objectExtensions`:
+that field stays withheld, and every write to the object would fail the rule.
+The message names each rule as `package · object · rule (reads FIELD)` and the
+disabled package to enable first, and nothing changes. A rule is judged as the
+object will serve it once the package is enabled: one rule per name, a tenant
+overlay's switch honoured. A rule the enable does not bring into service is not
+counted. `POST /packages` answers the same `409` for an overwrite of a disabled
+package with `enableOnInstall: true`; the overwrite lands and the package stays
+disabled. A boot whose stored state leaves such a rule served (the state records
+only disables) logs one warning naming every rule and the remedies.
+
 ### `PATCH /packages/:id/disable`
 
 Disable a package without uninstalling.
+
+A package that adds fields to another object through `objectExtensions` is
+refused `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` while a validation
+rule of any enabled package reads one of those fields (declared dependent or
+not, an app's `.custom` pair included, any severity): withheld, the field could
+not be read, and every write to that object would fail the rule. The message
+names each rule as `package · object · rule (reads FIELD)`, and nothing changes.
+A rule is judged as the object serves it: one rule per name, a tenant overlay's
+switch honoured. Switch off or change each named rule first, or disable the
+package that owns it. A formula over the field does not refuse the disable; it
+answers `null`. `POST /packages` answers the same `409` for an overwrite of an
+enabled package with `enableOnInstall: false` that would leave such a package
+disabled; the overwrite lands and the package stays enabled. A fresh install
+with `enableOnInstall: false` lands disabled, as before.
 
 ---
 

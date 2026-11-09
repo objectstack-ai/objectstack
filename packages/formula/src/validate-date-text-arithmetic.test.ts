@@ -119,14 +119,25 @@ describe('date subtraction the runtime cannot answer (#28944)', () => {
     expect(since.message).toMatch(/daysBetween\(a, b\)/);
   });
 
-  it('judges a flattened (flow) condition the same way', () => {
+  it('judges a flattened (flow) condition the same way, under the flow codes (#30016)', () => {
     const flattened: ExprSchemaHint = {
       fields: ['start_date', 'end_date'],
       fieldTypes: { start_date: 'date', end_date: 'date' },
     };
+    // No declared outcome: the run fails wherever the name holds the date's text.
     const refused = validateExpression('predicate', 'end_date - start_date > duration("72h")', flattened);
-    expect(refused.errors.map((e) => e.code)).toEqual(['date-text-arithmetic']);
+    expect(refused.errors.map((e) => e.code)).toEqual(['date-text-arithmetic-run-may-fail']);
     expect(refused.errors[0].params).toEqual({ operands: 'DateText - DateText', reference: 'start_date' });
+    expect(refused.errors[0].message).not.toMatch(/evaluates to null/);
+    // The run is proven to hold the field: it fails at the condition.
+    const proven = validateExpression('predicate', 'end_date - start_date > duration("72h")', { ...flattened, faultOutcome: 'run-fails' });
+    expect(proven.errors.map((e) => e.code)).toEqual(['date-text-arithmetic-run-fails']);
+    expect(proven.errors[0].message).toMatch(/this faults at runtime, and a flow condition that cannot be evaluated fails the run/);
+    // A node can rebind the bare names: not proven, whatever the outcome.
+    const unproven = validateExpression('predicate', 'end_date - start_date > duration("72h")', {
+      ...flattened, faultOutcome: 'run-fails', bareNamesUnproven: true,
+    });
+    expect(unproven.errors.map((e) => e.code)).toEqual(['date-text-arithmetic-run-may-fail']);
     expect(validateExpression('predicate', 'today() - start_date > duration("72h")', flattened).errors).toEqual([]);
   });
 

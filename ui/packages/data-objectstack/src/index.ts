@@ -39,6 +39,7 @@ import { isRefusedTextComparand, textComparandRefusalReason } from '@objectstack
 import type { ApiError, BatchUpdateResponse, ValidateDataIssue } from '@objectstack/spec/api';
 import { ValidateDataIssueSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
+import { isPlatformProvidedObjectName } from '@objectstack/spec/system';
 // #4237 — the metadata save door's advisory reader, shared with `MetadataClient`
 // rather than forked. ONE reader, two call sites: the other client class calls it
 // from `MetadataClient.save` (#4133/#4236), this one from the interceptor below.
@@ -1162,9 +1163,9 @@ export type AppAccessVerdict = 'granted' | 'denied' | 'not_found' | 'unreachable
 export interface MetaItemAccess {
   readonly verdict: AppAccessVerdict;
   /**
-   * The refusal's own `message`, as the server wrote it — for a dashboard,
-   * `You do not have permission to open the 'NAME' dashboard.` Only on
-   * `denied`, and absent when the server wrote none.
+   * The refusal's own `message`, as the server wrote it, in the caller's
+   * locale — in English, `You do not have permission to perform this action. Contact your administrator if you need access.`
+   * Only on `denied`, and absent when the server wrote none.
    */
   readonly message?: string;
 }
@@ -3448,10 +3449,13 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   private inflightFieldAccess = new Map<string, Promise<RecordFieldAccess | null>>();
   private unansweredFieldAccess = new Set<string>();
   private fieldAccessUnsupported = false;
-  // Resources that have responded 404 at least once (collection not installed
-  // on this backend). Subsequent find() calls short-circuit to an empty result
-  // so optional collections like sys_presence don't hammer the server with
-  // failing requests on every record open / panel render.
+  // Platform collections that have responded 404 at least once (the package
+  // that registers them is not installed on this backend). Subsequent find()
+  // calls short-circuit to an empty result so optional collections like
+  // sys_presence don't hammer the server with failing requests on every record
+  // open / panel render. Only names in the platform registry
+  // (`isPlatformProvidedObjectName`, @objectstack/spec) ever enter it: a 404
+  // on any other object is the surface's own object missing, and is rethrown.
   private missingResources = new Set<string>();
   // Set once the server has told us it can't do a cross-object transactional
   // batch (the client SDK's data.batchTransaction threw HTTP 404/405/501). After
@@ -3609,7 +3613,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
             : undefined,
         });
         if (!res.ok) {
-          throw new Error(`discovery ${res.status} ${res.statusText}`);
+          // The server answered: its status rides on the error, so the
+          // ConnectionError below carries the server's status rather than
+          // none (objectstack#29916).
+          throw Object.assign(new Error(`discovery ${res.status} ${res.statusText}`), {
+            status: res.status,
+          });
         }
         const body = await res.json();
         return body && typeof body.success === 'boolean' && 'data' in body
@@ -3631,10 +3640,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       this.setConnectionState('connected');
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to connect to ObjectStack server';
+      // A status only when discovery was answered (the `!res.ok` throw above);
+      // a rejected `fetch` got no answer and the error carries no status
+      // (objectstack#29916).
+      const answeredStatus = (error as { status?: unknown } | null)?.status;
       const connectionError = new ConnectionError(
         errorMessage,
         undefined,
-        { originalError: error }
+        { originalError: error },
+        typeof answeredStatus === 'number' ? answeredStatus : undefined,
       );
 
       this.setConnectionState('error', connectionError);
@@ -3784,6 +3798,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       if (this.connectionState !== 'reconnecting') this.setConnectionState('reconnecting');
       return;
     }
+    // No status: nothing answered this request (objectstack#29916).
     this.setConnectionState(
       'error',
       new ConnectionError(
@@ -3812,9 +3827,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * Converts OData-style params to ObjectStack query options.
    */
   async find(resource: string, params?: QueryParams): Promise<QueryResult<T>> {
-    // Short-circuit when this resource has previously responded 404 — the
-    // collection isn't installed on this backend. Callers (AppHeader,
-    // RecordDetailView, …) treat empty data as "feature unavailable".
+    // Short-circuit when this platform collection has previously responded
+    // 404 — the package that registers it isn't installed on this backend.
+    // Callers (AppHeader, RecordDetailView, …) treat empty data as "feature
+    // unavailable". Only registry names are ever memoised (see the catch).
     if (this.missingResources.has(resource)) {
       return { data: [], total: 0 } as QueryResult<T>;
     }
@@ -3849,7 +3865,21 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         // (objectui#4408). Rethrow so the surface can say what happened; the
         // `missingResources` memo must not absorb it either, or the very first
         // denial would silently pin every later call to empty.
-        if (!isApiAccessDeniedError(err) && is404Error(err)) {
+        //
+        // A 404 degrades to empty ONLY for a platform-provided collection
+        // (the curated registry in @objectstack/spec): there, absence means
+        // "this deployment does not install the feature", and the optional
+        // probes read empty as exactly that. The error code cannot make this
+        // split: an uninstalled sys_presence and a list's own unregistered
+        // object both answer 404 `OBJECT_NOT_FOUND`. Any other object is the
+        // surface's own, so its 404 is rethrown, unmemoised, and the surface's
+        // load-failure state shows the server's code and sentence instead of
+        // "no data yet" (an object that failed to register is not empty).
+        if (
+          !isApiAccessDeniedError(err)
+          && is404Error(err)
+          && isPlatformProvidedObjectName(resource)
+        ) {
           // Mark the resource so subsequent calls don't repeat the 404.
           this.missingResources.add(resource);
           return { data: [], total: 0 } as QueryResult<T>;
@@ -4702,11 +4732,16 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * Optional `opts.ifMatch` enables Optimistic Concurrency Control —
    * see {@link update} for details. On 409 the call rejects with
    * a {@link ConcurrentUpdateError}.
+   *
+   * `opts.onRecycleBinEntry` is told the server's `recycleBinEntryId`
+   * (ADR-0148): the recycle-bin entry the delete wrote, which
+   * {@link restoreRecycleBinEntry} restores. Not called when the answer
+   * carries none (a platform object, a server with no recycle bin).
    */
   async delete(
     resource: string,
     id: string | number,
-    opts?: { ifMatch?: string },
+    opts?: { ifMatch?: string; onRecycleBinEntry?: (entryId: string) => void },
   ): Promise<boolean> {
     await this.connect();
     try {
@@ -4728,8 +4763,31 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // `undefined`. Following the rename is what restores both.
       if (result.success) {
         this.emitMutation({ type: 'delete', resource, id: String(id) });
+        // Told only after the mutation event, so a host that offers an undo
+        // offers it for a delete its lists already reflect.
+        if (typeof result.recycleBinEntryId === 'string' && result.recycleBinEntryId !== '') {
+          opts?.onRecycleBinEntry?.(result.recycleBinEntryId);
+        }
       }
       return result.success;
+    } catch (err) {
+      throw normaliseClientError(err);
+    }
+  }
+
+  /**
+   * Restore one recycle-bin entry of `resource` (ADR-0148): the SDK's
+   * `recycleBin.restore`, `POST {data}/:object/recycle-bin/:entryId/restore`.
+   * Its records come back under their original ids; it is never a create.
+   * A refusal rejects with the server's error, normalised as every write's
+   * is, so its `code` and `details` name the reason.
+   */
+  async restoreRecycleBinEntry(resource: string, entryId: string): Promise<unknown> {
+    await this.connect();
+    try {
+      // No mutation event: the event vocabulary has no restore, and a restore
+      // is never a create. The host that restores refreshes what it shows.
+      return await this.client.recycleBin.restore(resource, entryId);
     } catch (err) {
       throw normaliseClientError(err);
     }
@@ -5451,6 +5509,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // `code` first, then the nested envelope's.
       err.code = envelope.code;
       err.httpStatus = res.status;
+      // …and the answer's structured members, on `details`, where the client's
+      // wrapper puts them (its `details` falls back to the WHOLE body when the
+      // envelope carries none, the flat shape `@objectstack/rest` answers). A
+      // `400 INVALID_FIELD` names the refused field there (`details.field`),
+      // and the list reads it to say which column asked for it
+      // (objectstack#31893). Without this, a view with a lookup column took
+      // this branch and arrived with the field dropped.
+      err.details = errorBody?.details ?? errorBody?.error?.details ?? errorBody;
       throw err;
     }
 
@@ -5695,7 +5761,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         throw error;
       }
       
-      throw createErrorFromResponse(errorObj, `getObjectSchema(${objectName})`);
+      // objectstack#29728 — the rewrap keeps the transport's own error as its
+      // cause, as the 404 arm above does. `createErrorFromResponse` replaces
+      // the server's ADR-0112 code with its own taxonomy (`CONNECTION_ERROR`,
+      // `UNKNOWN_ERROR`) and its sentence with its own ("Connection error:
+      // ..."), so the wrapper alone cannot say what the server answered (a
+      // dropped connection carries no status, objectstack#29885). The cause can: the
+      // by-name route read throws `status` + the server's `code` and sentence
+      // for an answer, and the bare fetch failure for none.
+      const wrapped = createErrorFromResponse(errorObj, `getObjectSchema(${objectName})`);
+      wrapped.details = { ...wrapped.details, originalError: error };
+      throw wrapped;
     }
   }
 
@@ -7260,6 +7336,18 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
      * `DatasetDrillRange` declares them `unknown`.
      */
     drillRanges?: Array<Record<string, DatasetDrillRange>>;
+    /**
+     * The per-MEASURE drill scope (objectstack-ai/objectstack#30526): measure
+     * NAME → the list filter that selects the records that measure aggregates
+     * (the dataset's own `filter` AND the measure's own `filter` AND the
+     * aggregated column holding a value), which the host has no other read of.
+     * A drill composes the clicked bucket AND the widget filter AND this; a
+     * measure with no entry offers no drill. The spec's `AnalyticsResult`
+     * member BY REFERENCE, like `fields`, so its meaning is read in one place.
+     * Only the MAP is validated below; each scope is the server's filter as
+     * sent.
+     */
+    drillScopes?: AnalyticsResult['drillScopes'];
     /** Server-computed marginal aggregates, one entry per requested grouping. */
     totals?: Array<{ dimensions: string[]; rows: Array<Record<string, unknown>> }>;
   }> {
@@ -7426,8 +7514,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // away, the whole drill entry point disappeared, and a mixed grouping
     // drilled to a superset (every bucket, not the clicked one).
     const drillRanges = Array.isArray((data as any)?.drillRanges) ? (data as any).drillRanges : undefined;
+    // objectstack-ai/objectstack#30526 — the measure drill scope. Hand-picked
+    // like every key above, so it is named here or it never reaches a drill:
+    // the fourth key of this family, after objectui#3613, #3752 and #3813.
+    const rawScopes = (data as any)?.drillScopes;
+    const drillScopes = rawScopes && typeof rawScopes === 'object' && !Array.isArray(rawScopes)
+      ? (rawScopes as NonNullable<AnalyticsResult['drillScopes']>)
+      : undefined;
     const totals = Array.isArray((data as any)?.totals) ? (data as any).totals : undefined;
-    return { rows, fields, object, dimensionFields, drillRawRows, drillRanges, totals };
+    return { rows, fields, object, dimensionFields, drillRawRows, drillRanges, drillScopes, totals };
   }
 
   /** Client-side aggregation fallback */
@@ -7905,6 +8000,11 @@ export { MetadataClient, readSaveAdvisories } from './metadata-client';
 // `getDraft` that produces the envelope, because the unwrap-and-strip is part
 // of that method's contract rather than a detail of any one view.
 export { extractDraftBody } from './draft-envelope';
+// objectstack#29793, objectstack#30786 - the one reading of which document an
+// editor edits (the item as authored, from `layered()`), exported beside the
+// client whose answer it reads so every editor that saves an item asks it.
+export { authoredBuffer, authoredPublished, editsAuthoredLayers } from './authored-layers';
+export type { AuthoredBuffer, AuthoredLayers } from './authored-layers';
 // objectui#12725 - the reader of the same envelope's per-key provenance
 // (`draftChanges`, objectstack#24298): which surface last changed a key of the
 // pending draft. One reader, so the longest-prefix rule is spelled once.
@@ -7958,3 +8058,9 @@ export type {
   MetadataAuditEntry,
   MetadataAuditResponse,
 } from './metadata-client';
+// The browser-side upload adapter for an ObjectStack server's storage service:
+// fetch logic, so it lives in this package. It implements `@object-ui/types`'s
+// `UploadAdapter`, which `UploadProvider` from `@object-ui/fields` makes
+// ambient for the file, image and avatar widgets.
+export { createObjectStackUploadAdapter } from './upload-adapter';
+export type { ObjectStackUploadAdapterOptions } from './upload-adapter';

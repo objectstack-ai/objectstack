@@ -190,8 +190,11 @@ export const PACKAGED_BASE_REGIME: Readonly<Record<string, PackagedBaseRegimeRow
     action: {
         regime: 'C',
         routes: {
-            switchOff: 'POST /api/v1/actions/_activation/:object/:action, body {enabled: false}, '
-                + ':object = global for an object-less action; '
+            // [#30065] `:object_or_global` names the object-less spelling in
+            // the segment itself: the declared-override save sentence adds the
+            // declaration's clause, and the route must keep it under the REST
+            // door's 500-character bound for an 88-character name.
+            switchOff: 'POST /api/v1/actions/_activation/:object_or_global/:action, body {enabled: false}; '
                 + 'operator-only where one install serves several organizations',
         },
     },
@@ -319,7 +322,8 @@ export function isOriginGatedType(type: string): boolean {
  * Kept under the REST door's 500-character client-message bound
  * (`truncateClientMessage`, `packages/rest/src/error-response.ts`), past which
  * the tail is truncated. Characters outside the item's name, save / removal:
- * `flow` 395 / 388, `action` 349 / 342, `permission` 301 / 294,
+ * `flow` 395 / 388, `action` 315 / 308 ([#30065] its declared-override save 398
+ * with a 22-character pair id), `permission` 301 / 294,
  * `datasource` 192 / 193, `sharing_rule` 390 / 383 — so a name of up to 88
  * characters arrives whole for every row (pinned). [#21944] A row's `hostOwned` name is a fixed, short name
  * with its own remedy (`default`: under 300 characters whole).

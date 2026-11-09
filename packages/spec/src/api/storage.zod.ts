@@ -82,6 +82,19 @@ export const CompleteUploadRequestSchema = lazySchema(() => z.object({
     + 'that the storage backend holds bytes under the file\'s key and, when the upload declared a size, '
     + 'that the held size equals it.',
   ),
+  // The attach verb of the record attachments surface: the commit and the
+  // `sys_attachment` insert run as one unit, as the caller, in this call —
+  // `FileAttachmentService.attachUploadAs` (`@objectstack/service-storage`).
+  attachTo: z.object({
+    parentObject: z.string().min(1).describe('Object of the record the file is attached to (enable.files: true)'),
+    parentId: z.string().min(1).describe('Id of the record the file is attached to'),
+  }).optional().describe(
+    'Attach the uploaded file to this record in the same call, as the signed-in caller: the commit and the '
+    + 'attachment row are one unit, and the answer carries the new attachmentId. Only the uploader\'s own '
+    + 'pending upload in the attachments scope can be attached this way. The attachment is judged as the '
+    + 'caller\'s own create: the permission to create an attachment, edit access to the record, and the '
+    + 'record object\'s enable.files opt-in. A refused attach leaves the upload pending and uncommitted.',
+  ),
 }));
 
 // ==========================================
@@ -107,7 +120,11 @@ export const PresignedUrlResponseSchema = lazySchema(() => BaseResponseSchema.ex
 }));
 
 export const FileUploadResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: FileMetadataSchema.describe('Uploaded file metadata'),
+  data: FileMetadataSchema.extend({
+    attachmentId: z.string().optional().describe(
+      'Id of the sys_attachment row the commit created, when the request carried attachTo',
+    ),
+  }).describe('Uploaded file metadata'),
 }));
 
 /**

@@ -7,7 +7,7 @@
  *
  * `record:activity` — the pure half (objectui#3165).
  *
- * Four things live here, all testable without a DOM:
+ * Five things live here, all testable without a DOM:
  *
  *  1. the `sys_activity` row → {@link FeedItem} map the block's self-fetch
  *     uses (the same map `RecordDetailView` applies to the rows it merges
@@ -20,7 +20,10 @@
  *     reads use the same verdict (objectui#11195);
  *  4. {@link foldFeedItems}, which folds a run of consecutive updates by one
  *     actor into one timeline row (objectstack#25959). `RecordActivityTimeline`
- *     renders its answer.
+ *     renders its answer;
+ *  5. {@link withReaderRecordName}, which names the page record in an
+ *     activity summary as the reader reads it, not as the writer did
+ *     (objectstack#29962). `RecordActivityTimeline` applies it.
  *
  * (2) exists as its own function on purpose. Before #3165 every one of those
  * inputs was a filter over a feed that was hard-coded empty — declared,
@@ -37,6 +40,7 @@
 import { FeedFilterMode as FeedFilterModeEnum, FeedItemType as FeedItemTypeEnum } from '@objectstack/spec/data';
 import { RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES } from '@objectstack/spec/api';
 import { classifyLoadError } from '@object-ui/react';
+import { recordDisplayValueAt, resolveNameField } from '@object-ui/core';
 import type { FeedItem, FeedItemType } from '@object-ui/types';
 import type { FeedFilterMode } from '../RecordActivityTimeline';
 
@@ -954,6 +958,68 @@ export function activityActorName(row: SysActivityRow): string | null {
 }
 
 /**
+ * Who a `sys_activity` row says acted, as one line: {@link activityActorName}
+ * (else `systemActorLabel`), and, when an administrator made the write from an
+ * impersonation session, that administrator beside them.
+ */
+export function activityActorLine(
+  row: SysActivityRow,
+  systemActorLabel: string,
+  impersonatedActorTemplate?: string,
+  unknownUserLabel = 'Unknown',
+): string {
+  const actor = activityActorName(row) ?? systemActorLabel;
+  // An administrator the writer could not name is still an administrator: the
+  // unknown-user text, never "System" and never the raw id.
+  const admin = activityImpersonatorName(row, unknownUserLabel);
+  return admin ? composeImpersonatedActor(impersonatedActorTemplate, admin, actor) : actor;
+}
+
+/**
+ * The English template of the actor line a write made from an impersonation
+ * session reads as. `{{admin}}` is the administrator at the keyboard and
+ * `{{user}}` the impersonated user the write is recorded as; a caller passes
+ * the translated `detail.impersonatedActor` in its place.
+ */
+export const IMPERSONATED_ACTOR_FALLBACK = '{{admin}} on behalf of {{user}}';
+
+/**
+ * The administrator who made this row's write from an impersonation session,
+ * or `null` for every write the user made themselves. The writer
+ * (`@objectstack/plugin-audit`) stamps `metadata.impersonated_by` with the
+ * administrator's id and `metadata.impersonated_by_name` with their name as it
+ * read it; the name is what can be shown, so a row that carries only the id
+ * still names an administrator, by the localized unknown-user text the caller
+ * passes as `unknownLabel`.
+ */
+export function activityImpersonatorName(row: SysActivityRow, unknownLabel?: string): string | null {
+  const raw = row?.metadata;
+  if (typeof raw !== 'string') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const meta = parsed as { impersonated_by?: unknown; impersonated_by_name?: unknown };
+  if (typeof meta.impersonated_by !== 'string' || !meta.impersonated_by.trim()) return null;
+  const name = meta.impersonated_by_name;
+  if (typeof name === 'string' && name.trim()) return name.trim();
+  return unknownLabel ?? null;
+}
+
+/**
+ * The actor line 「Dev Admin 代王工操作」: `template` (the translated
+ * `detail.impersonatedActor`, or {@link IMPERSONATED_ACTOR_FALLBACK}) with
+ * `{{admin}}` and `{{user}}` filled in.
+ */
+export function composeImpersonatedActor(template: string | undefined, admin: string, user: string): string {
+  const pattern = template && template.includes('{{admin}}') ? template : IMPERSONATED_ACTOR_FALLBACK;
+  return pattern.split('{{admin}}').join(admin).split('{{user}}').join(user);
+}
+
+/**
  * One `sys_activity` row → one {@link FeedItem}, or `null` when the row is not
  * record activity (see {@link ACTIVITY_TYPE_TO_FEED_TYPE}).
  *
@@ -979,6 +1045,8 @@ export function activityActorName(row: SysActivityRow): string | null {
 export function activityRowToFeedItem(
   row: SysActivityRow,
   systemActorLabel: string,
+  impersonatedActorTemplate?: string,
+  unknownUserLabel?: string,
 ): FeedItem | null {
   const rawType = String(row?.type);
   const known = Object.prototype.hasOwnProperty.call(ACTIVITY_TYPE_TO_FEED_TYPE, rawType);
@@ -994,12 +1062,15 @@ export function activityRowToFeedItem(
     ? MILESTONE_ACTIVITY_FEED_TYPE
     : mapped;
   const changedFields = activityChangedFields(row);
-  return {
+  const recordFacts = activityRecordFacts(row);
+  const item: FeedItem & ActivityRecordFacts = {
     id: row.id as string | number,
     type: feedType,
     // `systemActorLabel` only when no person can be named (objectui#12067):
     // a row a user made used to read "System" whenever `actor_name` was empty.
-    actor: activityActorName(row) ?? systemActorLabel,
+    // A write made from an impersonation session names the administrator
+    // beside the user it is recorded as: 「Dev Admin 代王工操作」.
+    actor: activityActorLine(row, systemActorLabel, impersonatedActorTemplate, unknownUserLabel),
     actorAvatarUrl: row.actor_avatar_url ?? undefined,
     body: row.summary ?? '',
     createdAt: activityTimestamp(row),
@@ -1014,7 +1085,119 @@ export function activityRowToFeedItem(
     ...(activityKind ? { activityKind } : {}),
     actorId: activityActorId(row),
     ...(changedFields ? { changedFields } : {}),
+    // Which record the summary names, and by what name, as stored
+    // (objectstack#29962). See `withReaderRecordName`.
+    ...recordFacts,
   };
+  return item;
+}
+
+/**
+ * The record a `sys_activity` row is about, as the row stores it
+ * (objectstack#29962): `record_id`, and `record_label`, the record's name as
+ * the WRITER read it. plugin-audit stores that name when the write happens and
+ * interpolates the same text, quoted, into `summary`; the server composes the
+ * rest of the summary in the reader's language on read, but not the name.
+ *
+ * What an activity item carries beyond {@link FeedItem} for
+ * {@link withReaderRecordName}. Package-local hand-off: written by
+ * {@link activityRowToFeedItem}, read by {@link withReaderRecordName}, never
+ * authored.
+ */
+interface ActivityRecordFacts {
+  activityRecordId?: string;
+  activityRecordLabel?: string;
+}
+
+/** The row's {@link ActivityRecordFacts}, or none when it does not carry both columns. */
+function activityRecordFacts(row: SysActivityRow): ActivityRecordFacts {
+  const id = row?.record_id;
+  const label = row?.record_label;
+  if (typeof id !== 'string' && typeof id !== 'number') return {};
+  if (typeof label !== 'string' || label.trim() === '') return {};
+  return { activityRecordId: String(id), activityRecordLabel: label };
+}
+
+/** The page record's name, as the reader reads it. */
+export interface ReaderRecordName {
+  /** The record's id, as `sys_activity.record_id` names it. */
+  recordId: string;
+  /** The value of the object's name field on the reader's copy of the record. */
+  name: string;
+}
+
+/**
+ * The page record's name for THIS reader, or `null` when the activity feed
+ * should keep the stored name (objectstack#29962).
+ *
+ * The name is the value of the object's name field ({@link resolveNameField},
+ * the ADR-0079 ladder plugin-audit titles the row by) on the record the page
+ * read, so it is the text the record's H1 shows. Only an object whose name
+ * field is a FORMULA is answered: such a name can be composed in the reader's
+ * language (`label(record.FIELD)`), so the writer's copy is the wrong one for
+ * this reader. A stored name field is the record's own datum, the same in
+ * every language, and the name a row stored then is the name it had then: a
+ * rename does not rewrite the older rows.
+ */
+export function readerRecordNameOf(
+  objectSchema: unknown,
+  record: unknown,
+  recordId: unknown,
+): ReaderRecordName | null {
+  if ((typeof recordId !== 'string' && typeof recordId !== 'number') || recordId === '') return null;
+  const field = resolveNameField(objectSchema);
+  if (!field) return null;
+  const fields = (objectSchema as { fields?: Record<string, { type?: unknown } | undefined> } | null | undefined)
+    ?.fields;
+  if (fields?.[field]?.type !== 'formula') return null;
+  const name = recordDisplayValueAt(record, field);
+  return name ? { recordId: String(recordId), name } : null;
+}
+
+/**
+ * The quotes plugin-audit's summary templates put around the record's name:
+ * `"…"` (en, zh-CN, es-ES) and `「…」` (ja-JP).
+ */
+const RECORD_NAME_QUOTES: ReadonlyArray<readonly [string, string]> = [
+  ['"', '"'],
+  ['「', '」'],
+];
+
+/**
+ * `summary` with the record's stored name replaced by `name`, where the
+ * summary quotes it; `summary` itself when it does not. Only the first quoted
+ * occurrence is the name: every template that names the record names it once,
+ * before anything else it quotes.
+ */
+export function readerRecordSummary(summary: string, stored: string, name: string): string {
+  if (stored === name) return summary;
+  for (const [open, close] of RECORD_NAME_QUOTES) {
+    const quoted = `${open}${stored}${close}`;
+    const at = summary.indexOf(quoted);
+    if (at >= 0) return `${summary.slice(0, at)}${open}${name}${close}${summary.slice(at + quoted.length)}`;
+  }
+  return summary;
+}
+
+/**
+ * The feed with every activity row of the page record naming the record as
+ * the reader reads it (objectstack#29962). A row of another record, a row with
+ * no stored name, and a summary that does not quote the stored name are kept
+ * as they are. Answers `items` itself when no row changes, so a reader in the
+ * writer's language gets the feed it was handed.
+ */
+export function withReaderRecordName<T extends FeedItem>(items: T[], reader: ReaderRecordName | null): T[] {
+  if (!reader) return items;
+  let changed = false;
+  const out = items.map((item) => {
+    const facts = item as T & ActivityRecordFacts;
+    if (facts.activityRecordId !== reader.recordId || !facts.activityRecordLabel || !item.body) return item;
+    const body = readerRecordSummary(item.body, facts.activityRecordLabel, reader.name);
+    if (body === item.body) return item;
+    changed = true;
+    return { ...item, body };
+  });
+  return changed ? out : items;
 }
 
 /** The subset of `RecordActivityProps` that decides which items survive. */

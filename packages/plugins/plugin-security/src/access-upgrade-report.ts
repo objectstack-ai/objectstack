@@ -106,6 +106,7 @@ import {
   type SecurityCatalogReader,
 } from '@objectstack/core';
 import { isTenantAuthored } from '@objectstack/metadata-core';
+import { objectPermissionGrants, type EffectiveObjectPermission } from '@objectstack/spec/security';
 import {
   deliverUpgradeReport,
   type UpgradeReportDelivery,
@@ -218,6 +219,18 @@ export interface UncoveredFieldDeny {
 }
 
 export type AccessUpgradeReportStop = 'scan-unreadable' | 'catalog-unreadable' | 'sharing-unreadable';
+
+/**
+ * Does this entry's own `allowEdit` bit grant edit? The bit, AND the spec
+ * fold's edit cell — an object permission that edits a record also reads it,
+ * so an entry stored with `allowEdit: true` and no read grants no edit. The
+ * raw bit stays a conjunct on purpose: this report judges the entry's
+ * declared edit grant, and does not widen it to the super-user bits, whose
+ * meeting with a package's field denies is not this report's question.
+ */
+function grantsEditBit(entry: Record<string, unknown>): boolean {
+  return entry.allowEdit === true && objectPermissionGrants(entry as EffectiveObjectPermission, 'allowEdit');
+}
 
 export interface AccessUpgradeReport {
   orphans: LedgerOrphan[];
@@ -497,7 +510,7 @@ export async function collectAccessUpgradeFindings(
       for (const [key, value] of Object.entries(mFields)) {
         const split = splitFieldKey(key);
         if (!split || !isRecord(value)) continue;
-        const grantsEdit = isRecord(mObjects[split.object]) && (mObjects[split.object] as Record<string, unknown>).allowEdit === true;
+        const grantsEdit = isRecord(mObjects[split.object]) && grantsEditBit(mObjects[split.object] as Record<string, unknown>);
         const deny = value.readable === false ? 'read' : grantsEdit && value.editable !== true ? 'edit' : undefined;
         if (!deny) continue;
         const list = denies.get(split.object) ?? [];
@@ -512,7 +525,7 @@ export async function collectAccessUpgradeFindings(
           if (!isRecord(grant)) continue;
           const lacking = list.filter((d) => {
             if (cFields[d.field] !== undefined) return false;
-            return d.denies === 'read' ? grant.allowRead === true : grant.allowEdit === true;
+            return d.denies === 'read' ? grant.allowRead === true : grantsEditBit(grant);
           });
           if (lacking.length === 0) continue;
           report.uncoveredDenies.push({

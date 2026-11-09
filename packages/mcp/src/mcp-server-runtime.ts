@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate, type RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import type { Logger, IMetadataService, AIToolDefinition, ToolCallPart } from '@objectstack/spec/contracts';
@@ -11,10 +11,21 @@ import type {
   McpAuthoringInjection,
   McpAuthoringToolContext,
   McpTokenPrincipal,
+  McpToolCallPrincipal,
+  McpToolInterceptor,
   ToolRegistry,
   ToolExecutionResult,
 } from './types.js';
-import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope } from './mcp-http-tools.js';
+import {
+  EMPTY_TOOL_CALL_PRINCIPAL,
+  routeToolCallsThrough,
+  toolCallPrincipalOf,
+  toolExecutionContextOf,
+  type McpCallerExecutionContext,
+} from './tool-call-interceptor.js';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { wireBridgeTools, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
+import { isServerFault, logServerFault } from '@objectstack/types';
 import type {
   McpDataBridge,
   McpActionBridge,
@@ -30,11 +41,20 @@ import { createPlatformMcpServer } from './request-params.js';
 import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
 import {
+  duplicateSkillFaceMessage,
   listSkillPrompts,
+  lookupSkillPrompt,
   registerSkillPrompts,
+  skillPromptFaces,
+  skillPromptListEntry,
+  skillPromptRefusalError,
   skillPromptResult,
   type McpSkillBridge,
+  type SkillPrompt,
 } from './skill-prompts.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { describePackageScopedHolder } from '@objectstack/core';
+import { deriveAiFaceName } from '@objectstack/spec/ai';
 import { z } from 'zod';
 
 /**
@@ -525,6 +545,14 @@ async function diagnoseListRead(
 export interface McpMergedMetadataRead {
   /** The protocol's merged listing for one metadata type. */
   getMetaItems(request: { type: string }): Promise<unknown>;
+  /**
+   * [#31514] The protocol's by-name read, the one `GET /api/v1/meta/TYPE/NAME`
+   * serves. `agent_prompt` resolves an agent through it where the host has it
+   * ({@link buildAgentPromptResult}), so an agent a package ships, which lives
+   * in the registry this read consults and has no copy in the metadata
+   * service, is served by name the way the REST read serves it.
+   */
+  getMetaItem?(request: { type: string; name: string; packageId?: string }): Promise<unknown>;
 }
 
 /**
@@ -697,6 +725,66 @@ export interface AgentPromptResult {
   messages: Array<{ role: 'user' | 'assistant'; content: { type: 'text'; text: string } }>;
 }
 
+/**
+ * [#31514] Read one agent by name through the protocol's by-name read, the read
+ * `GET /api/v1/meta/agent/NAME` serves, where this host has one; the metadata
+ * service otherwise, as before. Which of the two is {@link agentReadOf}'s
+ * decision, the one the roster takes too. ONE reader per host, never both:
+ * the defect this closes is that the two disagree (an agent a package ships
+ * lives in the registry the protocol reads, and the metadata service holds no
+ * copy of it), so a lookup that tried one and then the other would keep both
+ * answers alive.
+ *
+ * The protocol answers `{ type, name, item }`, with `item` absent on a miss,
+ * and throws `SERVICE_UNAVAILABLE` (503) when the metadata service behind it
+ * could not be read and the whole chain resolved nothing: that is the #6055
+ * outage, reported as {@link DiagnosedRead.degraded}. Any other throw travels
+ * to the caller, as a throw of the metadata service's read always did.
+ */
+async function readAgentByName(
+  metadataService: IMetadataService,
+  protocol: McpMergedMetadataRead | undefined,
+  name: string,
+  /**
+   * [ADR-0150 D5/D6] The package a face named: the protocol's exact
+   * qualifier (`?package=`), that package's agent or nothing. Omitted, the
+   * bare name resolves for a caller with no package (ADR-0150 D3).
+   */
+  packageId?: string,
+): Promise<DiagnosedRead> {
+  const read = agentReadOf(protocol);
+  if (!read?.getMetaItem) {
+    return diagnosedGet(metadataService, 'agent', name);
+  }
+  let envelope: unknown;
+  try {
+    envelope = await read.getMetaItem({ type: 'agent', name, ...(packageId ? { packageId } : {}) });
+  } catch (err) {
+    if ((err as { code?: unknown } | null)?.code === METADATA_UNAVAILABLE_CODE) {
+      return { data: undefined, degraded: true, errors: [err instanceof Error ? err.message : String(err)] };
+    }
+    throw err;
+  }
+  return { data: (envelope as { item?: unknown } | null | undefined)?.item, degraded: false, errors: [] };
+}
+
+/**
+ * [#31514] The ONE decision, per host, of which layer `agent_prompt` reads:
+ * the protocol when the host's read carries both the merged listing and the
+ * by-name read, the metadata service (`undefined` here) otherwise. The roster
+ * ({@link readAgentRoster}) and the get ({@link readAgentByName}) both take
+ * this answer, so they cannot split: a read with the listing but no by-name
+ * read would otherwise advertise a package agent that the get, left on the
+ * metadata service, answers "not found", the #28940 defect again.
+ */
+function agentReadOf(mergedRead: McpMergedMetadataRead | undefined): McpMergedMetadataRead | undefined {
+  return mergedRead
+    && typeof mergedRead.getMetaItems === 'function'
+    && typeof mergedRead.getMetaItem === 'function'
+    ? mergedRead
+    : undefined;
+}
+
 /** An `Error: …` answer on the prompt surface — this file's existing shape. */
 function promptError(text: string): AgentPromptResult {
   return { messages: [{ role: 'user' as const, content: { type: 'text' as const, text } }] };
@@ -726,18 +814,36 @@ function promptError(text: string): AgentPromptResult {
  * `degraded` only decides the answer once the read has resolved NOTHING, i.e.
  * only when the answer would otherwise have been the unfounded "not found".
  * A read that answered a body is served as it always was.
+ *
+ * [#31514] The agent is read through `protocol`, the read
+ * `GET /api/v1/meta/agent/NAME` serves, where the host has both its reads
+ * ({@link agentReadOf}, {@link readAgentByName}); the three states above are
+ * unchanged.
  */
 export async function buildAgentPromptResult(
   metadataService: IMetadataService,
   args: { agentName?: unknown; objectName?: unknown; recordId?: unknown; viewName?: unknown },
   logger?: Logger,
+  protocol?: McpMergedMetadataRead,
+  /**
+   * [ADR-0150 D6] The agents the roster read, each with its face. An
+   * `agentName` that is a face reads that one agent, by its package; a face
+   * two agents derive is refused, naming both. Any other `agentName` is a bare
+   * name, read for a caller with no package as before (ADR-0150 D3: the
+   * environment's own agent, else the one package holder, else the read's
+   * refusal naming each).
+   */
+  agents?: readonly AgentFace[],
 ): Promise<AgentPromptResult> {
   const agentName = String(args.agentName ?? '');
   if (!agentName) {
     return promptError('Error: agentName argument is required');
   }
 
-  const read = await diagnosedGet(metadataService, 'agent', agentName);
+  const faced = (agents ?? []).filter((agent) => agent.face === agentName);
+  if (faced.length > 1) throw duplicateAgentFaceError(agentName, faced);
+  const target = faced[0];
+  const read = await readAgentByName(metadataService, protocol, target?.name ?? agentName, target?.packageId);
 
   if (read.data === undefined || read.data === null) {
     if (read.degraded) {
@@ -790,32 +896,142 @@ export async function buildAgentPromptResult(
  *   the #6055 discipline) and its argument names no agent.
  */
 type AgentRoster =
-  | { state: 'agents'; names: string[] }
+  | { state: 'agents'; agents: AgentFace[] }
   | { state: 'none' }
   | { state: 'unknown'; errors: string[] };
+
+/**
+ * [ADR-0150 D6] One agent as the `agent_prompt` argument names it: its face
+ * (`deriveAiFaceName` over its address — `NS-NAME` for a package's agent, the
+ * bare name for an environment-authored one), its name and its package.
+ */
+export interface AgentFace {
+  face: string;
+  name: string;
+  packageId?: string;
+}
+
+/** How a refusal names one agent: its name and its holder. */
+function describeAgentHolder(agent: AgentFace): string {
+  return `agent "${agent.name}" of ${describePackageScopedHolder(
+    agent.packageId ? { kind: 'package', packageId: agent.packageId } : { kind: 'environment' },
+  )}`;
+}
+
+/** The sentence a duplicate agent face answers: every agent that derives it, and the author's fix. */
+function duplicateAgentFaceMessage(face: string, agents: readonly AgentFace[]): string {
+  return `The agent name "${face}" is derived for ${agents.length} agents: `
+    + `${agents.map(describeAgentHolder).join('; ')}. An agent name names one agent, so none of them is `
+    + 'served under it: rename one of the agents so their names differ.';
+}
+
+/**
+ * [ADR-0150 D6, Q3] A duplicate face is refused at the get, naming every
+ * agent: `-32602` with the ADR-0112 code and status of a name in conflict.
+ */
+function duplicateAgentFaceError(face: string, agents: readonly AgentFace[]): McpError {
+  return new McpError(ErrorCode.InvalidParams, duplicateAgentFaceMessage(face, agents), {
+    code: 'RESOURCE_CONFLICT',
+    status: 409,
+    candidates: agents.map((agent) => describeAgentHolder(agent)),
+  });
+}
+
+/** [ADR-0150 D6] Agents grouped by face, in roster order. */
+function groupByFace(agents: readonly AgentFace[]): Map<string, AgentFace[]> {
+  const byFace = new Map<string, AgentFace[]>();
+  for (const agent of agents) {
+    const holders = byFace.get(agent.face);
+    if (holders) holders.push(agent);
+    else byFace.set(agent.face, [agent]);
+  }
+  return byFace;
+}
+
+type PromptDispatcher = (request: unknown, extra: unknown) => Promise<unknown>;
+
+/**
+ * [ADR-0150 D5] Route a `prompts/get` for a bare skill name ahead of the SDK's
+ * handler on the long-lived server, which answers registered names only.
+ *
+ * A name in `registered` (a face, `agent_prompt`) goes to the SDK unchanged.
+ * Any other name is looked up as the HTTP transport looks it up
+ * ({@link lookupSkillPrompt}): the one skill a bare name means is served, a
+ * bare name two packages hold is refused naming each face, and anything else
+ * goes to the SDK, which answers it not found as before.
+ *
+ * The SDK keeps its handlers in the protocol's `_requestHandlers` map, the
+ * seam `createPlatformMcpServer` (request-params.ts) already wraps; there is
+ * no public hook. The handler exists once a prompt is registered, which the
+ * caller has done.
+ */
+function routeBareSkillPromptNames(
+  server: McpServer,
+  registered: ReadonlySet<string>,
+  listSkills: () => Promise<SkillPrompt[]>,
+): void {
+  const handlers = (server.server as unknown as { _requestHandlers?: unknown })._requestHandlers;
+  if (!(handlers instanceof Map)) {
+    throw new Error(
+      'routeBareSkillPromptNames: the MCP SDK no longer keeps its request handlers where this server reads '
+        + 'them, so a bare skill name could not be routed to its prompt. Re-read the SDK Protocol request path '
+        + 'and move this seam.',
+    );
+  }
+  const map = handlers as Map<string, PromptDispatcher>;
+  const sdkGet = map.get('prompts/get');
+  if (!sdkGet) return;
+  map.set('prompts/get', async (request, extra) => {
+    const wanted = (request as { params?: { name?: unknown } } | null | undefined)?.params?.name;
+    if (typeof wanted === 'string' && !registered.has(wanted)) {
+      const lookup = lookupSkillPrompt(await listSkills(), wanted);
+      if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
+      if (lookup.status === 'found') return skillPromptResult(lookup.prompt);
+    }
+    return sdkGet(request, extra);
+  });
+}
 
 /**
  * [#28940] Read which agents this boot holds, for the `agent_prompt`
  * advertisement.
  *
- * The roster is read from the metadata service — the same layer
- * {@link buildAgentPromptResult} resolves a name from — so the names the
- * argument teaches are names a `prompts/get` can answer. `agent` is a
- * code-only type (ADR-0063 §2 closes `*.agent.ts` to third parties, and the
- * save door refuses a runtime create), so no runtime write grows the set after
- * boot, and the merged overlay read the skill snapshot uses has nothing to add.
+ * The roster is read from the same layer {@link buildAgentPromptResult}
+ * resolves a name from, so the names the argument teaches are names a
+ * `prompts/get` can answer. [#31514] That layer is the protocol where the host
+ * has both its reads ({@link agentReadOf}, the decision the get takes too):
+ * its merged listing, `GET /api/v1/meta/agent`'s read
+ * ({@link mergedDiagnosedList}), which holds the agents a package ships. The
+ * metadata service holds no copy of those, so a roster read from it alone told
+ * a boot whose only agent a package ships that it held none, and the prompt
+ * was not advertised. The completeness verdict is still the metadata
+ * service's, as for the skill listing. `agent` is a code-only type (ADR-0063 §2
+ * closes `*.agent.ts` to third parties, and the save door refuses a runtime
+ * create), so no runtime write grows the set after boot.
  */
-async function readAgentRoster(metadataService: IMetadataService): Promise<AgentRoster> {
+async function readAgentRoster(
+  metadataService: IMetadataService,
+  mergedRead: McpMergedMetadataRead | undefined,
+  packageNamespace?: (packageId: string) => string | undefined,
+): Promise<AgentRoster> {
   let read: DiagnosedListRead;
   try {
-    read = await diagnosedList(metadataService, 'agent');
+    read = await mergedDiagnosedList(metadataService, agentReadOf(mergedRead), 'agent');
   } catch (err) {
     return { state: 'unknown', errors: [err instanceof Error ? err.message : String(err)] };
   }
-  const names = read.items
-    .map((item) => (item as { name?: unknown } | null | undefined)?.name)
-    .filter((name): name is string => typeof name === 'string' && name.length > 0);
-  if (names.length > 0) return { state: 'agents', names };
+  // [ADR-0150 D6] Each agent with its face, derived from its holder's
+  // namespace and its name by spec's one derivation.
+  const agents: AgentFace[] = [];
+  for (const item of read.items) {
+    const row = item as { name?: unknown; _packageId?: unknown } | null | undefined;
+    const name = row?.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    const packageId = typeof row?._packageId === 'string' && row._packageId !== '' ? row._packageId : undefined;
+    const namespace = packageId ? packageNamespace?.(packageId) : undefined;
+    agents.push({ face: deriveAiFaceName({ name, namespace }), name, ...(packageId ? { packageId } : {}) });
+  }
+  if (agents.length > 0) return { state: 'agents', agents };
   if (read.degraded) return { state: 'unknown', errors: read.errors };
   return { state: 'none' };
 }
@@ -869,12 +1085,51 @@ export type McpObjectView = Pick<IMetadataService, 'listObjects' | 'getObject'>;
 const runtimeObjectViews = new WeakMap<MCPServerRuntime, McpObjectView>();
 
 /**
+ * [#31605] The long-lived server's principal: the `OS_MCP_STDIO_API_KEY`
+ * identity the plugin resolves per call (ADR-0101), bound by the plugin once
+ * it has one. Read at each call, never captured — the plugin bridges the AI
+ * tools before it resolves the key, and a runtime nobody binds keeps serving
+ * exactly as before. Package-internal, like {@link setRuntimeObjectView}.
+ */
+const runtimeStdioPrincipals = new WeakMap<MCPServerRuntime, () => Promise<ExecutionContext>>();
+
+/**
+ * [#31605] Bind the long-lived server's principal. Two readers: the bridged AI
+ * tools run with it as their execution context ({@link MCPServerRuntime.bridgeTools}),
+ * and a tool-call interceptor reads it as the principal of every stdio call.
+ * Package-internal; not re-exported from `index.ts`.
+ */
+export function setRuntimeStdioPrincipal(
+  runtime: MCPServerRuntime,
+  resolvePrincipal: () => Promise<ExecutionContext>,
+): void {
+  runtimeStdioPrincipals.set(runtime, resolvePrincipal);
+}
+
+/**
  * [#25245] Give `runtime`'s two object resources `objects` to read in place of
  * the metadata service. Read at each `resources/read`, so the call may come
  * before or after `bridgeResources`. `index.ts` does not publish it.
  */
 export function setRuntimeObjectView(runtime: MCPServerRuntime, objects: McpObjectView): void {
   runtimeObjectViews.set(runtime, objects);
+}
+
+/**
+ * [ADR-0106] A coded refusal an object view raised (a schema whose field
+ * visibility could not be evaluated, refused by the stdio host's caller view),
+ * in the `{ error, code, status }` vocabulary the object resources answer a
+ * miss and an outage with; `undefined` for a throw with no code. `details` is
+ * withheld, as on the data tools.
+ */
+function objectResourceRefusal(err: unknown): { error: string; code: string; status?: number } | undefined {
+  const envelope = thrownRefusalEnvelope(err);
+  if (!envelope) return undefined;
+  return {
+    error: envelope.message,
+    code: envelope.code,
+    ...(envelope.status !== undefined ? { status: envelope.status } : {}),
+  };
 }
 
 /**
@@ -906,7 +1161,18 @@ export async function buildObjectSchemaResource(
 
   // [#25245] The object from `objects` ({@link McpObjectView}); the verdict
   // on a miss is still the metadata service's.
-  const objectDef = await objects.getObject(objectName);
+  // [ADR-0106] A coded refusal from the view (the stdio host's caller view
+  // refuses a schema whose field visibility it could not evaluate) answers
+  // in this resource's `{ error, code, status }` vocabulary
+  // ({@link objectResourceRefusal}); an uncoded throw travels, as before.
+  let objectDef: unknown;
+  try {
+    objectDef = await objects.getObject(objectName);
+  } catch (err) {
+    const refusal = objectResourceRefusal(err);
+    if (refusal) return body(refusal);
+    throw err;
+  }
 
   if (!objectDef) {
     const { degraded, errors } = await diagnoseEmptyRead(metadataService, 'object', objectName);
@@ -997,7 +1263,17 @@ export async function buildObjectListResource(
 ): Promise<ObjectSchemaResourceResult> {
   // [#25245] The items from `view` ({@link McpObjectView}); the verdict below
   // is still the metadata service's.
-  const objects = await view.listObjects();
+  // [ADR-0106] …and a coded refusal from it answers as on the schema resource.
+  let objects: unknown[];
+  try {
+    objects = await view.listObjects();
+  } catch (err) {
+    const refusal = objectResourceRefusal(err);
+    if (!refusal) throw err;
+    return {
+      contents: [{ uri: 'objectstack://objects', mimeType: 'application/json', text: JSON.stringify(refusal) }],
+    };
+  }
   const summary = ((objects ?? []) as ObjectDef[]).map(o => ({
     name: o.name,
     label: o.label ?? o.name,
@@ -1116,8 +1392,8 @@ function registerToolFromDefinition(
   tool: AIToolDefinition,
   execute: (toolCall: ToolCallPart) => Promise<ToolExecutionResult>,
   logger: Logger | undefined,
-): void {
-  server.registerTool(
+): RegisteredTool {
+  return server.registerTool(
     tool.name,
     {
       description: tool.description,
@@ -1248,6 +1524,49 @@ export function registerAuthoringTools(
 }
 
 /**
+ * [#31022] The per-request server instructions a host injected beside its
+ * authoring registry, or `undefined` when this request must not see them.
+ *
+ * The text rides {@link McpAuthoringInjection} rather than
+ * `handleHttpRequest`'s own options so that the authoring family stays its
+ * only reader: it is read under {@link grantsAuthoringTools}, the one
+ * predicate that admits the registry in {@link registerAuthoringTools}. A
+ * grant that registers the family is answered with the host's text; a
+ * `data:read` / `data:write` / `actions:execute` token, an empty grant, and
+ * the undefined grant of an API key or a session are not, whatever the host
+ * injected — they fall through to the configured or default instructions.
+ */
+function authoringInstructions(
+  authoring: McpAuthoringInjection | undefined,
+  grantedScopes: readonly string[] | undefined,
+): string | undefined {
+  if (!authoring || !grantsAuthoringTools(grantedScopes)) return undefined;
+  return authoring.instructions;
+}
+
+/**
+ * [#31605] Who an HTTP request was admitted as, as the HOST resolved it — the
+ * input `handleHttpRequest` projects every tool call's interceptor principal
+ * from. Only the members {@link McpCallerExecutionContext} names are read.
+ */
+export interface McpHttpCaller {
+  /** The request's resolved `ExecutionContext` (the credential's, never a header's). */
+  executionContext?: McpCallerExecutionContext;
+  /** The environment the host dispatched this request for. */
+  environmentId?: string;
+}
+
+/**
+ * [#31836] The one line a skipped AI-registry tool leaves: which name, which
+ * source was not served, and which was ({@link MCPServerRuntime.yieldBridgedTool}).
+ */
+function logNativeToolServed(logger: Logger | undefined, name: string): void {
+  logger?.debug(
+    `[MCP] Tool "${name}": serving the native data tool; the ToolRegistry tool of that name is not bridged`,
+  );
+}
+
+/**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
  * Responsibilities:
@@ -1272,6 +1591,16 @@ export class MCPServerRuntime {
   private readonly config: Required<Pick<MCPServerRuntimeConfig, 'name' | 'version'>> & MCPServerRuntimeConfig;
   private transport: StdioServerTransport | undefined;
   private started = false;
+  /** [#31605] The host-installed tool-call interceptor; single slot. */
+  private toolInterceptor: McpToolInterceptor | undefined;
+  /**
+   * [#31836] The AI-registry tools {@link bridgeTools} put on the long-lived
+   * server, by name: the handle is what lets a native data tool registered
+   * later take the name over ({@link yieldBridgedTool}).
+   */
+  private readonly bridgedTools = new Map<string, RegisteredTool>();
+  /** [#31836] The names {@link bridgeDataTools} registered on the long-lived server. */
+  private readonly nativeToolNames = new Set<string>();
 
   constructor(config: MCPServerRuntimeConfig = {}) {
     this.config = {
@@ -1326,6 +1655,21 @@ export class MCPServerRuntime {
         instructions: this.config.instructions ?? 'ObjectStack MCP Server — access data objects, AI tools, and agent prompts.',
       },
     );
+
+    // [#31605] Before any tool registers: every tool on the long-lived server
+    // (bridged AI tools, the data tools, a plugin's own on `mcp:ready`) runs
+    // through the interceptor slot. `start()` attaches only the stdio
+    // transport, so its calls are stamped `stdio`; their principal is the key
+    // the plugin bound, resolved at the call.
+    routeToolCallsThrough(this.mcpServer, {
+      transport: 'stdio',
+      interceptor: () => this.toolInterceptor,
+      principal: async () => {
+        const resolve = runtimeStdioPrincipals.get(this);
+        return resolve ? toolCallPrincipalOf(await resolve()) : EMPTY_TOOL_CALL_PRINCIPAL;
+      },
+      logger: this.config.logger,
+    });
   }
 
   /** The underlying McpServer instance (for advanced use cases). */
@@ -1336,6 +1680,33 @@ export class MCPServerRuntime {
   /** Whether the server is currently connected and running. */
   get isStarted(): boolean {
     return this.started;
+  }
+
+  // ── Tool-call interceptor ──────────────────────────────────────
+
+  /**
+   * [#31605] Install the interceptor every MCP tool call passes through, on
+   * both transports and every registration path (see
+   * {@link McpToolInterceptor} for the allow / deny / replace contract).
+   * Single slot: installing replaces any previous interceptor. Read at each
+   * call, so it applies to tools already registered and to every later
+   * per-request server.
+   *
+   * Neutral: the runtime holds no policy. With none installed, every tool call
+   * runs exactly as it did before this seam existed.
+   */
+  setToolInterceptor(interceptor: McpToolInterceptor): void {
+    this.toolInterceptor = interceptor;
+  }
+
+  /** [#31605] Remove the installed tool-call interceptor, if any. */
+  clearToolInterceptor(): void {
+    this.toolInterceptor = undefined;
+  }
+
+  /** [#31605] Whether a tool-call interceptor is installed. */
+  hasToolInterceptor(): boolean {
+    return this.toolInterceptor !== undefined;
   }
 
   // ── Tool Bridge ────────────────────────────────────────────────
@@ -1349,19 +1720,66 @@ export class MCPServerRuntime {
    * for `inputSchema`. Its safety annotations come from what the definition
    * declares — see {@link safetyAnnotations}. The handler delegates to the
    * ToolRegistry's execute path.
+   *
+   * [#31605] Once the plugin has bound the stdio principal
+   * ({@link setRuntimeStdioPrincipal}), each call resolves it and passes it as
+   * the registry's execution context — the key's user as `actor` — so a
+   * registry runs the tool as that user and a governed one sees an actor. The
+   * principal is resolved per call (ADR-0101: a revoked key stops working on
+   * the next call), and a key that no longer resolves refuses the call. A
+   * runtime with no principal bound calls `execute(call)` with one argument,
+   * as before.
    */
   bridgeTools(toolRegistry: ToolRegistry): void {
     const tools = toolRegistry.getAll();
     const logger = this.config.logger;
+    const execute = async (call: ToolCallPart): Promise<ToolExecutionResult> => {
+      const resolvePrincipal = runtimeStdioPrincipals.get(this);
+      if (!resolvePrincipal) return toolRegistry.execute(call);
+      return toolRegistry.execute(call, toolExecutionContextOf(await resolvePrincipal()));
+    };
 
+    let bridged = 0;
     for (const tool of tools) {
-      // The long-lived (stdio) bridge: the registry's own `execute(call)`,
-      // one argument, exactly as before [#26464] moved the registration body
-      // out of this class so the HTTP authoring bridge could share it.
-      registerToolFromDefinition(this.mcpServer, tool, (call) => toolRegistry.execute(call), logger);
+      // [#31836] One name, one tool: a name the native data tools already hold
+      // is theirs (see {@link yieldBridgedTool} for the rule and the other order).
+      if (this.nativeToolNames.has(tool.name)) {
+        logNativeToolServed(logger, tool.name);
+        continue;
+      }
+      // The long-lived (stdio) bridge: the registry's own `execute`, with the
+      // stdio principal as its context once one is bound — the registration
+      // body is the one [#26464] moved out of this class so the HTTP
+      // authoring bridge could share it.
+      this.bridgedTools.set(tool.name, registerToolFromDefinition(this.mcpServer, tool, execute, logger));
+      bridged++;
     }
 
-    logger?.info(`[MCP] Bridged ${tools.length} tools from ToolRegistry`);
+    logger?.info(`[MCP] Bridged ${bridged} tools from ToolRegistry`);
+  }
+
+  /**
+   * [#31836] Give a name the AI tool registry bridged over to the native data
+   * tool about to register under it.
+   *
+   * The rule, for any name both sources offer on the long-lived server: the
+   * NATIVE data tool is served and the bridged one is not. It is the tool HTTP
+   * serves under that name — {@link handleHttpRequest} builds its tool set
+   * from the data bridge and never bridges the AI registry — so one name is
+   * one tool on both doors, and it is the one that carries the MCP grant and
+   * scope checks. The rule holds whichever of {@link bridgeTools} and
+   * {@link bridgeDataTools} runs first: `bridgeTools` skips a name already
+   * native, and `bridgeDataTools` removes a bridged tool before its native
+   * namesake registers. Either way the skip is one `debug` line naming the
+   * tool and its source; never a boot failure and never a second
+   * registration under the name (the SDK refuses one by throwing).
+   */
+  private yieldBridgedTool(name: string): void {
+    const bridged = this.bridgedTools.get(name);
+    if (!bridged) return;
+    bridged.remove();
+    this.bridgedTools.delete(name);
+    logNativeToolServed(this.config.logger, name);
   }
 
   /**
@@ -1395,7 +1813,22 @@ export class MCPServerRuntime {
     bridge: McpDataBridge & Partial<McpActionBridge>,
     toolOptions?: RegisterObjectToolsOptions & RegisterActionToolsOptions,
   ): string[] {
-    const registered = wireBridgeTools(this.mcpServer, bridge, toolOptions);
+    // [#31836] Each native registration first takes its name back from a tool
+    // the AI registry bridged (see {@link yieldBridgedTool}). The server's own
+    // `registerTool` is put back as it was once the composition has run.
+    const server = this.mcpServer;
+    const registerTool = server.registerTool;
+    server.registerTool = ((name: string, ...rest: unknown[]) => {
+      this.yieldBridgedTool(name);
+      return (registerTool as (...args: unknown[]) => RegisteredTool).call(server, name, ...rest);
+    }) as typeof server.registerTool;
+    let registered: string[];
+    try {
+      registered = wireBridgeTools(server, bridge, toolOptions);
+    } finally {
+      server.registerTool = registerTool;
+    }
+    for (const name of registered) this.nativeToolNames.add(name);
     this.config.logger?.info(
       `[MCP] Bridged ${registered.length} data tools (${registered.join(', ')})`,
     );
@@ -1496,32 +1929,69 @@ export class MCPServerRuntime {
               }],
             };
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
             // [#23509] A coded refusal carries its ADR-0112 `code` (and its
             // `status`, when it has one) beside the sentence, so a client reads
             // the code it branches on. A held owner's key is refused here "with
             // the same code" (ruling C′ item 1) as on REST. The members are
             // ADDED to the body, in the `{ error, code, status }` vocabulary
             // the two sibling resources above already answer with (#6055,
-            // #6504). `error` stays the same string, so a client that tells a
-            // refusal from a row by `typeof body.error === 'string'` still
-            // does. A throw with no code answers `{ error }` as before.
+            // #6504). `error` stays a string, so a client that tells a refusal
+            // from a row by `typeof body.error === 'string'` still does.
             // `details` is withheld, as on the data tools; `errorResultWithCode`
             // in mcp-http-tools.ts says why.
-            const envelope = thrownRefusalEnvelope(err);
+            // [#31246] A coded refusal's `error` is the envelope's sentence,
+            // so a sandboxed hook's refusal answers the body's own sentence
+            // rather than the runner's wrapper naming the hook, as the tools do.
+            // [#31270] A throw with NO code answers what the record data tools
+            // answer since #31218: the `/api/v1/data` door's answer
+            // (`dataDoorAnswerOf`, the door's own `mapDataError`), in the same
+            // members, so `code` and `status` now appear on a code-less throw
+            // too. A sandboxed hook's abort is `HOOK_ABORTED` with the inner
+            // sentence; a fault (a bare `Error`, a crash) is the sanitised 500,
+            // its thrown text withheld from the client and logged once, as the
+            // door logs it.
+            // [#31273, #31341] …and so does a coded throw the door answers as a
+            // fault, not a refusal (`dataDoorRefusalEnvelope`): a driver's own
+            // code (`SQLITE_BUSY`), or a declared 5xx, whose code and status
+            // are kept and whose sentence is withheld unless `refusal: true`.
+            const uri = `objectstack://objects/${objectName}/records/${recordId}`;
+            const envelope = dataDoorRefusalEnvelope(err, objectName);
+            let body: { error: string; code?: string; status?: number; declaredCode?: string; userMessage?: string };
+            if (envelope) {
+              // [#31407] …with the door's `declaredCode` / `userMessage` beside
+              // a coded refusal, as the record data tools serve them.
+              body = {
+                error: envelope.message,
+                code: envelope.code,
+                ...(envelope.status !== undefined ? { status: envelope.status } : {}),
+                ...(envelope.declaredCode !== undefined ? { declaredCode: envelope.declaredCode } : {}),
+                ...(envelope.userMessage !== undefined ? { userMessage: envelope.userMessage } : {}),
+              };
+            } else {
+              const door = dataDoorAnswerOf(err, objectName);
+              if (isServerFault(door.status)) {
+                logServerFault({
+                  status: door.status,
+                  error: err,
+                  ...(door.code !== undefined ? { code: door.code } : {}),
+                  request: { method: 'resources/read', path: uri },
+                });
+              }
+              // [#31373] …and the door's `declaredCode` / `userMessage`, after
+              // `status`, when it serves them, as the record data tools do.
+              body = {
+                error: door.message,
+                ...(door.code !== undefined ? { code: door.code } : {}),
+                status: door.status,
+                ...(door.declaredCode !== undefined ? { declaredCode: door.declaredCode } : {}),
+                ...(door.userMessage !== undefined ? { userMessage: door.userMessage } : {}),
+              };
+            }
             return {
               contents: [{
-                uri: `objectstack://objects/${objectName}/records/${recordId}`,
+                uri,
                 mimeType: 'application/json',
-                text: JSON.stringify(
-                  envelope
-                    ? {
-                        error: message,
-                        code: envelope.code,
-                        ...(envelope.status !== undefined ? { status: envelope.status } : {}),
-                      }
-                    : { error: message },
-                ),
+                text: JSON.stringify(body),
               }],
             };
           }
@@ -1597,6 +2067,12 @@ export class MCPServerRuntime {
   async bridgePrompts(
     metadataService: IMetadataService,
     mergedRead?: McpMergedMetadataRead,
+    /**
+     * [ADR-0150 D6] The manifest namespace of an installed package, by its id:
+     * what a package-held skill's prompt name and agent's name are derived
+     * from (`NS-NAME`). Omitted, every face is the item's bare name.
+     */
+    packageNamespace?: (packageId: string) => string | undefined,
   ): Promise<void> {
     const logger = this.config.logger;
 
@@ -1611,11 +2087,16 @@ export class MCPServerRuntime {
     // once the transport attaches. A roster read that cannot say (degraded, or
     // it threw) keeps the prompt, which then answers the honest #6055 outage
     // text at get time.
-    const roster = await readAgentRoster(metadataService);
+    // [#31514] Through the protocol where the host has both its reads, the
+    // metadata service otherwise: one decision ({@link agentReadOf}) that the
+    // get below takes too.
+    const agentRead = agentReadOf(mergedRead);
+    const roster = await readAgentRoster(metadataService, agentRead, packageNamespace);
+    const agents = roster.state === 'agents' ? roster.agents : [];
     if (roster.state === 'none') {
       logger?.info(
         '[MCP] agent_prompt not advertised — this boot registers no agent, so nothing could answer it. '
-          + 'It is listed on a boot whose metadata service holds at least one agent.',
+          + 'It is listed on a boot that holds at least one agent, one a package ships included.',
       );
     } else {
       if (roster.state === 'unknown') {
@@ -1627,6 +2108,12 @@ export class MCPServerRuntime {
           { errors: roster.errors },
         );
       }
+      // [ADR-0150 D6, Q3] A face two agents derive is refused at every get
+      // (`buildAgentPromptResult`); said once here, naming both, so the author
+      // learns it at boot rather than from a client.
+      for (const [face, holders] of groupByFace(agents)) {
+        if (holders.length > 1) logger?.warn(`[MCP] ${duplicateAgentFaceMessage(face, holders)}`);
+      }
       // A dynamic prompt that loads the named agent at call time.
       this.mcpServer.registerPrompt(
         'agent_prompt',
@@ -1636,8 +2123,11 @@ export class MCPServerRuntime {
           argsSchema: {
             // [#28940] Examples come from the roster, never a fixed pair: see
             // {@link agentNameArgumentDescription}.
+            // [ADR-0150 D6] The examples are faces: the names a get resolves
+            // to one agent. The bare name an agent had before keeps working
+            // while one holder has it.
             agentName: z.string().describe(
-              agentNameArgumentDescription(roster.state === 'agents' ? roster.names : []),
+              agentNameArgumentDescription([...new Set(agents.map((agent) => agent.face))]),
             ),
             objectName: z.string().optional().describe('Current object the user is viewing'),
             recordId: z.string().optional().describe('Currently selected record ID'),
@@ -1646,8 +2136,10 @@ export class MCPServerRuntime {
         },
         async (args) =>
           // [#6055] Outage vs. miss lives in the builder — see
-          // {@link buildAgentPromptResult}.
-          buildAgentPromptResult(metadataService, args, logger),
+          // {@link buildAgentPromptResult}. [#31514] The agent is read through
+          // the protocol's by-name read where `agentRead` is the protocol.
+          // [ADR-0150 D6] …and by face, against the roster read above.
+          buildAgentPromptResult(metadataService, args, logger, agentRead, agents),
       );
 
       logger?.info('[MCP] Agent prompts bridged');
@@ -1675,6 +2167,7 @@ export class MCPServerRuntime {
     // request and self-heals — the line says which one the reader is looking at.
     let skillListVerdict: { degraded: boolean; errors: string[] } = { degraded: false, errors: [] };
     const skillBridge: McpSkillBridge = {
+      ...(packageNamespace ? { packageNamespace } : {}),
       listSkills: async () => {
         // The verdict of the READ, recorded as the read happens. `listSkills`
         // is also the per-call re-read behind each registered prompt's body, so
@@ -1718,29 +2211,56 @@ export class MCPServerRuntime {
       );
     }
 
+    // [ADR-0150 D6] One prompt per FACE, never per skill name: two packages'
+    // skills of one name are two faces (`NS-NAME`). A face two skills derive
+    // is registered once, as the refusal every get of it answers, and said
+    // here, naming both; neither skill is served under it, and neither is
+    // dropped from the list.
     let bridged = 0;
-    for (const skill of skills) {
-      if (skill.name === 'agent_prompt') {
+    const registeredNames = new Set<string>(roster.state === 'none' ? [] : ['agent_prompt']);
+    for (const entry of skillPromptFaces(skills)) {
+      if (entry.face === 'agent_prompt') {
         // The one reserved name on this surface. Never silently dropped: the
         // author is told which skill collided and what it costs them.
         logger?.warn(
-          `[MCP] Skill "${skill.name}" is not exposed as a prompt — that name is reserved by the built-in agent prompt. Rename the skill to make its instructions reachable over MCP.`,
+          `[MCP] Skill "${entry.face}" is not exposed as a prompt — that name is reserved by the built-in agent prompt. Rename the skill to make its instructions reachable over MCP.`,
         );
         continue;
       }
+      if (entry.prompts.length > 1) logger?.warn(`[MCP] ${duplicateSkillFaceMessage(entry)}`);
+      const listed = skillPromptListEntry(entry);
       this.mcpServer.registerPrompt(
-        skill.name,
+        entry.face,
         {
-          ...(skill.title ? { title: skill.title } : {}),
-          ...(skill.description ? { description: skill.description } : {}),
+          ...(listed.title ? { title: listed.title } : {}),
+          ...(listed.description ? { description: listed.description } : {}),
         },
         async () => {
           // Re-read at call time so an edited skill serves fresh instructions.
-          const current = (await listSkillPrompts(skillBridge)).find((s) => s.name === skill.name);
-          return skillPromptResult(current ?? skill);
+          const lookup = lookupSkillPrompt(await listSkillPrompts(skillBridge), entry.face);
+          if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
+          if (lookup.status === 'found') return skillPromptResult(lookup.prompt);
+          // Gone since the snapshot: the snapshot's one skill, as before.
+          if (entry.prompts.length === 1) return skillPromptResult(entry.prompts[0]);
+          throw skillPromptRefusalError({
+            status: 'refused',
+            message: duplicateSkillFaceMessage(entry),
+            candidates: entry.prompts.map((p) => p.face),
+          });
         },
       );
+      registeredNames.add(entry.face);
       bridged++;
+    }
+
+    // [ADR-0150 D5] The bare skill name a client fetched a package's skill by
+    // before faces were derived keeps answering while one holder has it, and a
+    // bare name two packages hold is refused naming both faces — the get the
+    // HTTP transport serves (`lookupSkillPrompt`). The SDK owns this server's
+    // `prompts/get` and answers only registered names, so the bare name is
+    // routed ahead of it, never registered: the list names faces only.
+    if (skills.some((skill: SkillPrompt) => skill.face !== skill.name)) {
+      routeBareSkillPromptNames(this.mcpServer, registeredNames, () => listSkillPrompts(skillBridge));
     }
 
     logger?.info(`[MCP] Bridged ${bridged} skill prompts`);
@@ -1876,6 +2396,10 @@ export class MCPServerRuntime {
    * @param opts.toolOptions  Tool exposure options (system objects, query limits, the token's `grantedScopes`).
    * @param opts.authoring    [#26464] The host's authoring registry plus the token principal and environment
    *                          that become each call's provenance; registered only for a `metadata:write` grant.
+   *                          [#31022] Its optional `instructions` answer `initialize` under that same grant.
+   * @param opts.caller       [#31605] The `ExecutionContext` the host admitted this request as and the
+   *                          environment it dispatched it for: the principal a tool-call interceptor reads
+   *                          for every call on this request. Read only when an interceptor is installed.
    */
   async handleHttpRequest(
     request: Request,
@@ -1885,6 +2409,7 @@ export class MCPServerRuntime {
       authInfo?: unknown;
       toolOptions?: RegisterObjectToolsOptions & RegisterActionToolsOptions;
       authoring?: McpAuthoringInjection;
+      caller?: McpHttpCaller;
     } = {},
   ): Promise<Response> {
     // [#25759] This transport answers POST and nothing else. It is stateless
@@ -1934,11 +2459,30 @@ export class MCPServerRuntime {
         // declaration is what makes the handlers installable, and it is gated
         // on the seam actually being there — declared IS served.
         capabilities: { ...(skillBridge ? { prompts: {} } : {}) },
+        // [#31022] A host's per-request instructions ride the authoring
+        // injection and are read under the grant that admits the family
+        // (`authoringInstructions`), so a request the family does not
+        // register for — a `data:read` token, a key, a session — is answered
+        // with the configured or default text and never sees them.
         instructions:
+          authoringInstructions(opts.authoring, opts.toolOptions?.grantedScopes) ??
           this.config.instructions ??
           'ObjectStack MCP Server — query and modify your app\'s data objects as tools.',
       },
     );
+
+    // [#31605] Before any tool registers on this request's server. The
+    // principal is projected from the host's `caller` alone — `request` is not
+    // in reach of it, so no header can name another user, client, organization
+    // or environment — once per request, and only if an interceptor asks.
+    const caller = opts.caller;
+    let callerPrincipal: McpToolCallPrincipal | undefined;
+    routeToolCallsThrough(server, {
+      transport: 'http',
+      interceptor: () => this.toolInterceptor,
+      principal: () => (callerPrincipal ??= toolCallPrincipalOf(caller?.executionContext, caller?.environmentId)),
+      logger: this.config.logger,
+    });
 
     if (skillBridge) {
       registerSkillPrompts(server, skillBridge);

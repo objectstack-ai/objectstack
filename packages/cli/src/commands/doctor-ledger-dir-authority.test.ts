@@ -5,7 +5,8 @@
  *
  * ── What this file pins, honestly ────────────────────────────────────────
  *
- * Not a live defect. `DEFAULT_INSTALLED_PACKAGES_DIR` is an export of
+ * Not a live defect. The directory authority (`DEFAULT_INSTALLED_PACKAGES_DIR`,
+ * `resolveInstalledPackagesDir` since #30217) is an export of
  * `@objectstack/cloud-connection` in every version ever shipped, so the `??`
  * fallback this change deletes had never fired. What is being hardened is a
  * DIAGNOSIS BOUNDARY — the last cell of the edge #5644 carved. That issue
@@ -114,10 +115,10 @@ describe('installedPackageLedgerDirAuthorityMissingCheck — loaded but unrecogn
     expect(check.message).not.toContain('\n');
   });
 
-  it('names the received value when the export exists but is not a string', () => {
+  it('names the received value when the export exists but is not a function', () => {
     const check = installedPackageLedgerDirAuthorityMissingCheck(42);
 
-    expect(check.message).toContain('not a string');
+    expect(check.message).toContain('not a function');
     expect(check.message).toContain('got number: 42');
   });
 
@@ -136,7 +137,7 @@ describe('installedPackageLedgerDirAuthorityMissingCheck — loaded but unrecogn
     // it from the #5644 row one cell over. Without both, the reader's first
     // move would be to rebuild a package that builds and loads fine.
     expect(fix).toContain('IS installed here and it DID load');
-    expect(fix).toContain('authority on what the ledger directory is called');
+    expect(fix).toContain('authority on where the ledger directory is');
     // And it names the remedy: the two ends of this contract disagree.
     expect(fix).toContain('Align their versions');
   });
@@ -145,7 +146,7 @@ describe('installedPackageLedgerDirAuthorityMissingCheck — loaded but unrecogn
     const check = installedPackageLedgerDirAuthorityMissingCheck(undefined);
 
     // The one name doctor had for the ledger is the export that came back
-    // non-string. A path in the row — the old `??` guess included — would be
+    // as no function. A path in the row — the old `??` guess included — would be
     // doctor asserting what it cannot know (#5644's option-B rejection, one
     // cell over).
     expect(check.message).not.toContain('.objectstack');
@@ -182,7 +183,7 @@ describe('installedPackageLedgerSkippedEntriesCheck — names the directory it a
  *
  * Simulated through the loader seam, like the #5644 cause case next door: the
  * mock hands doctor a module that LOADED (`state: 'loaded'`) and carries no
- * `DEFAULT_INSTALLED_PACKAGES_DIR`. No preflight (`assertLedgerReaderIsBuilt`)
+ * `resolveInstalledPackagesDir`. No preflight (`assertLedgerReaderIsBuilt`)
  * in this describe, and that is not a rollback of #5612: nothing here reads
  * the real package at all — the seam is mocked — so there is no accident for
  * a preflight to catch.
@@ -271,7 +272,7 @@ describe('os doctor, end to end, against a reader that declares no ledger direct
   it('reports the named row and reads NO directory — guessed or otherwise', async () => {
     const ctorCalls: string[] = [];
     const fakeModule = {
-      // Deliberately NO `DEFAULT_INSTALLED_PACKAGES_DIR` — the state under test.
+      // Deliberately NO `resolveInstalledPackagesDir` — the state under test.
       LocalManifestSource: class {
         constructor(dir: string) {
           ctorCalls.push(dir);
@@ -312,13 +313,13 @@ describe('os doctor, end to end, against a reader that declares no ledger direct
     expect(verboseRun.exitCode).toBeUndefined();
   }, 120_000);
 
-  it('a non-string export is the same fact — never a path.join over it', async () => {
+  it('a non-function export is the same fact — never a call of it', async () => {
     const ctorCalls: string[] = [];
     const fakeModule = {
-      // Present, and not a string: the shape whose `path.join` throw the old
-      // code mis-reported through the config `catch` (see the function's
-      // header in doctor.ts).
-      DEFAULT_INSTALLED_PACKAGES_DIR: 42,
+      // Present, and not a function: the shape a bare call would throw on, which
+      // the old `path.join` over the string authority mis-reported through the
+      // config `catch` (see the function's header in doctor.ts).
+      resolveInstalledPackagesDir: 42,
       LocalManifestSource: class {
         constructor(dir: string) {
           ctorCalls.push(dir);
@@ -333,7 +334,7 @@ describe('os doctor, end to end, against a reader that declares no ledger direct
 
     expect(ctorCalls).toHaveLength(0);
     expect(run.out).toContain(AUTHORITY_HEADLINE);
-    expect(run.out).toContain('not a string');
+    expect(run.out).toContain('not a function');
     expect(run.out).toContain('got number: 42');
     expect(run.out).not.toContain(CLEAN_BILL);
     expect(run.out).not.toContain('invoice.code');

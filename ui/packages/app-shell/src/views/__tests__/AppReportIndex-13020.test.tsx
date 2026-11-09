@@ -132,11 +132,17 @@ function adapterFor(reports: unknown[], asked: string[], app: unknown = CRM_APP)
   } as unknown as Parameters<typeof MetadataProvider>[0]['adapter'];
 }
 
-function shell(children: React.ReactNode, url: string, reports: unknown[] = REPORTS, app: any = CRM_APP) {
+function shell(
+  children: React.ReactNode,
+  url: string,
+  reports: unknown[] = REPORTS,
+  app: any = CRM_APP,
+  i18n = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false }),
+) {
   const asked: string[] = [];
   const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ANSWER }) as unknown as Response);
   render(
-    <I18nProvider instance={createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false })} persistLanguage={false}>
+    <I18nProvider instance={i18n} persistLanguage={false}>
       <MePermissionsProvider endpoint="/api/v1/auth/me/permissions" fetcher={fetcher as unknown as typeof fetch}>
         <MetadataProvider adapter={adapterFor(reports, asked, app)}>
           <ExpressionProvider app={app}>
@@ -149,13 +155,15 @@ function shell(children: React.ReactNode, url: string, reports: unknown[] = REPO
   return asked;
 }
 
-function renderIndex(reports: unknown[] = REPORTS) {
+function renderIndex(reports: unknown[] = REPORTS, i18n?: ReturnType<typeof createI18n>) {
   return shell(
     <Routes>
       <Route path="/apps/:appName/reports" element={<AppReportIndexView />} />
     </Routes>,
     '/apps/crm/reports',
     reports,
+    CRM_APP,
+    i18n,
   );
 }
 
@@ -274,5 +282,51 @@ describe('⌘K under a navigation that declares only the report index (objectsta
     expect(index).toBeDefined();
     // `undefined` never leaks into the matched value of an entry naming no report.
     expect(index?.getAttribute('data-value')).not.toContain('undefined');
+  });
+});
+
+/**
+ * objectstack#30244 — the index names a served report as served.
+ *
+ * The packaged catalog translates `crm_win_rate` and `crm_pipeline`. An
+ * override renamed `crm_win_rate`, and the `/meta/report` read serves the new
+ * name by the server's label order for an overridden item; the index
+ * re-applied the packaged translation of the old name over it, because the
+ * served label reached the catalog lookup only as its fallback.
+ *
+ * Directions, written before the run: the renamed cell RED before the change
+ * (the packaged zh-CN string), GREEN after; the controls GREEN on both sides.
+ */
+describe('the app report index names a served report as served (objectstack#30244)', () => {
+  const zh = () =>
+    createI18n({
+      defaultLanguage: 'zh-CN',
+      detectBrowserLanguage: false,
+      resources: { 'zh-CN': { crm: { reports: { crm_win_rate: { label: '赢单率' }, crm_pipeline: { label: '销售管道' } } } } },
+    });
+  const renamed = (label?: string) =>
+    REPORTS.map((r) => {
+      if (r.name !== 'crm_win_rate') return r;
+      const { label: _old, ...rest } = r;
+      return label === undefined ? rest : { ...rest, label };
+    });
+
+  it('zh-CN: a renamed report is listed under its served label, not the packaged translation', async () => {
+    renderIndex(renamed('Close Rate (renamed-30244)'), zh());
+    expect(await screen.findByRole('link', { name: /Close Rate \(renamed-30244\)/ })).toHaveAttribute(
+      'href',
+      '/apps/crm/report/crm_win_rate',
+    );
+    expect(screen.queryByRole('link', { name: /赢单率/ })).not.toBeInTheDocument();
+  });
+
+  it('zh-CN: control — a served report the server left unrenamed keeps the translation it serves', async () => {
+    renderIndex(REPORTS.map((r) => (r.name === 'crm_pipeline' ? { ...r, label: '销售管道' } : r)), zh());
+    expect(await screen.findByRole('link', { name: /销售管道/ })).toHaveAttribute('href', '/apps/crm/report/crm_pipeline');
+  });
+
+  it('zh-CN: control — a report served with no label is named by the bundle', async () => {
+    renderIndex(renamed(undefined), zh());
+    expect(await screen.findByRole('link', { name: /赢单率/ })).toHaveAttribute('href', '/apps/crm/report/crm_win_rate');
   });
 });

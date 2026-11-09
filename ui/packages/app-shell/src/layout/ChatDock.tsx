@@ -32,6 +32,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveApiBase } from '../console/ai/resolveApiBase.js';
 import { AiUsageIndicator } from './AiUsageIndicator.js';
 import { usePlanApprovalPending } from '../assistant/assistantBus.js';
+import type { ChatSurfaceContext } from './chatSurfaceContext.js';
 import {
   clampDockWidth,
   maximizedDockWidth,
@@ -248,6 +249,14 @@ export interface ChatDockPanelProps {
    * `children`.
    */
   appPackageId?: string;
+  /**
+   * objectstack#30043 — the page in view, forwarded to the default body as
+   * `context.surface` (see {@link ChatDockConversation}). Unused with
+   * `children`.
+   */
+  surfaceContext?: ChatSurfaceContext;
+  /** objectui#8219 — the chip's display label for `surfaceContext.artifact`. Unused with `children`. */
+  surfaceArtifactLabel?: string;
   /** Header title override; default "Assistant". */
   title?: string;
   /**
@@ -281,6 +290,8 @@ export function ChatDockPanel({
   apiBase: apiBaseProp,
   defaultAgent,
   appPackageId,
+  surfaceContext,
+  surfaceArtifactLabel,
   title,
   onMaximize,
   children,
@@ -367,6 +378,8 @@ export function ChatDockPanel({
               apiBase={apiBase}
               defaultAgent={defaultAgent}
               appPackageId={appPackageId}
+              surfaceContext={surfaceContext}
+              surfaceArtifactLabel={surfaceArtifactLabel}
               onCanvasOpenChange={handleCanvasOpenChange}
               onBoundPackageChange={setBoundPackageId}
             />
@@ -388,6 +401,10 @@ export interface ChatDockMobileSheetProps {
   defaultAgent?: string;
   /** objectui#10926 — same contract as {@link ChatDockPanelProps.appPackageId}. */
   appPackageId?: string;
+  /** objectstack#30043 — same contract as {@link ChatDockPanelProps.surfaceContext}. */
+  surfaceContext?: ChatSurfaceContext;
+  /** Same contract as {@link ChatDockPanelProps.surfaceArtifactLabel}. */
+  surfaceArtifactLabel?: string;
   /** Header title override; default "Assistant". */
   title?: string;
   /**
@@ -427,6 +444,8 @@ export function ChatDockMobileSheet({
   apiBase: apiBaseProp,
   defaultAgent,
   appPackageId,
+  surfaceContext,
+  surfaceArtifactLabel,
   title,
   onMaximize,
   children,
@@ -491,6 +510,8 @@ export function ChatDockMobileSheet({
                 apiBase={apiBase}
                 defaultAgent={defaultAgent}
                 appPackageId={appPackageId}
+                surfaceContext={surfaceContext}
+                surfaceArtifactLabel={surfaceArtifactLabel}
                 onBoundPackageChange={setBoundPackageId}
               />
             </React.Suspense>

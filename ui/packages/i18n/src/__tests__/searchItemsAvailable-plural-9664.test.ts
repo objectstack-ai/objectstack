@@ -37,6 +37,7 @@
  * parenthesised plural marker.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import i18next from 'i18next';
 import { builtInLocales } from '../locales';
 
@@ -67,7 +68,7 @@ void instance.init({
 
 describe('search.itemsAvailable reads a singular at one item, in every pack (objectui#9664)', () => {
   it('the walk covers all ten packs — not an empty assertion', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     for (const lang of LANGS) expect(slotsOf(lang).length, lang).toBeGreaterThan(0);
   });
 
@@ -91,7 +92,7 @@ describe('search.itemsAvailable reads a singular at one item, in every pack (obj
     // select only `other`. The five Latin packs and `ar` have a singular — and
     // in `ar` the slot two items read is the dual, `_two`, not `_other` (which
     // serves 100+ with the singular noun, as Arabic does).
-    const singular: LocaleCode[] = ['en', 'de', 'fr', 'es', 'pt', 'ar'];
+    const singular: LocaleCode[] = ['en', 'de', 'fr', 'es', 'pt-BR', 'ar'];
     for (const lang of singular) {
       const atTwo = `${KEY}_${new Intl.PluralRules(lang).select(2)}`;
       expect(at(builtInLocales[lang], `${KEY}_one`), `${lang} _one vs ${atTwo}`).not.toBe(

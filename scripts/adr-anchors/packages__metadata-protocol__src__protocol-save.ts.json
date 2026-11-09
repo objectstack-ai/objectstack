@@ -1,0 +1,8 @@
+{
+  "file": "packages/metadata-protocol/src/protocol-save.ts",
+  "adrs": [
+    "ADR-0005",
+    "ADR-0087"
+  ],
+  "invariant": "ADR-0005 appendix (c) (\"Addendum — 2026-05-16 (c): spec validation on overlay save\", as amended by ruling 甲 on #20051) + ADR-0087 (addendum 2026-08-01b, `storable` excludes schema defaults) — `saveMetaItem` stores a `view` as the parsed value of every key its request body carried (`projectStorableViewBody`): an undeclared key is dropped, a schema default the author did not write is NOT stored, and a moved key (`groups` → `sections`, `visibleOn` → `visibleWhen`) is stored under its canonical spelling, so the stored row re-parses to exactly what the save accepted. Every key the console reads back off a stored view row is declared on the contract (`VIEW_CONSOLE_ROUND_TRIP_KEYS`), which is what makes dropping the rest lossless. Every OTHER type still stores its request body verbatim, with only the operator and `groups` → `sections` grafts applied: the switch is gated on `singularType === 'view'`, and widening it to another type is its own decision, not a refactor.\n\n[#29985] Carried from the `protocol.ts` entry: the codemod split moved this body to `protocol-save.ts`, and its citation with it; the class member keeps its signature and docblock in `protocol.ts`, which keeps its own entry."
+}

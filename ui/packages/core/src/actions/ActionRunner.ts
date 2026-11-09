@@ -332,6 +332,16 @@ export interface ActionDef {
    */
   resultDialog?: ResultDialogSpec;
   /**
+   * Preflight read (spec `ActionSchema.preflight`, objectstack#31840): one
+   * same-origin `GET` the param dialog sends before submit, whose answer it
+   * shows above the params and seeds params from. Derived from the contract,
+   * never restated. The runner does not send it: it hands the param-collection
+   * handler the filler that interpolates its `read.url`
+   * (`ParamCollectionHandler`'s `interpolateRead`), and the console's dialog
+   * reads it (objectstack#31808).
+   */
+  preflight?: SpecActionInput['preflight'];
+  /**
    * The one handler slot: script name/expression for `type: 'script'`, URL for
    * `'url'`, flow name for `'flow'`, modal/page for `'modal'`, endpoint for
    * `'api'`, FormView name for `'form'`.
@@ -643,6 +653,9 @@ export type ToastHandler = (message: string, options?: {
  * - `completedSuccessfully` — the success toast when the author supplied no
  *   copy for it: no `outcomeMessages` entry for the answer's `outcome` and no
  *   `successMessage` (objectui#10900, objectui#11344).
+ * - `completedNamed` — the same toast for an action that carries a label: it
+ *   names the action (`{{action}}`), so the user reads what was done rather
+ *   than that something was.
  * - `failed` — the error toast when the error that reached the toast carries
  *   no readable message, and a parallel chain's result when its last action
  *   rejected (objectui#10969).
@@ -666,6 +679,10 @@ const RUNNER_TEXT = {
     key: 'actions.completedSuccessfully',
     defaultValue: 'Action completed successfully',
   },
+  completedNamed: {
+    key: 'actions.completedNamed',
+    defaultValue: '{{action}} completed',
+  },
   failed: {
     key: 'actions.failed',
     defaultValue: 'Action failed',
@@ -681,6 +698,16 @@ const RUNNER_TEXT = {
 } as const;
 
 type RunnerText = { readonly key: string; readonly defaultValue: string };
+
+/** The one hole in `completedNamed`, the action's label. */
+const COMPLETED_NAMED_HOLE = '{{action}}';
+
+/**
+ * What {@link ActionRunner.setTranslator} takes: an i18next-shaped `t`. The
+ * options carry `defaultValue` and, for a text with a hole, the hole's value
+ * (`completedNamed`'s `action`).
+ */
+type RunnerTranslate = (key: string, options: { defaultValue: string } & Record<string, string>) => string;
 
 /**
  * Modal handler — consumers provide to render modal dialogs.
@@ -730,13 +757,30 @@ export type NavigationHandler = (url: string, options?: {
  * after a refused run is a cancel, reported exactly as a cancel before any
  * run. A handler that never calls `run` keeps the old contract: the runner
  * dispatches once with the values it resolves.
+ *
+ * `interpolateRead` fills the holes of the action's `preflight.read.url`
+ * (objectstack#31808) with the dialog's current values: `${param.NAME}` from
+ * `values`, `${ctx.*}` from the scope the runner's own targets read
+ * (`buildInterpolationContext`), each value percent-encoded. A header
+ * dispatch carries no row, so `ctx.record` is the runner context's record
+ * there, the record the page shows. It answers `null` when a hole has no value
+ * (or names a scope the grammar does not know): the dialog then sends nothing,
+ * because a read with a blank segment asks a different question than the one
+ * declared.
  */
 export type ParamCollectionHandler = (
   params: ActionParamDef[],
   action?: ActionDef,
   interpolate?: (text: string) => string,
   run?: (values: Record<string, any>) => Promise<ActionResult>,
+  interpolateRead?: PreflightReadFiller,
 ) => Promise<Record<string, any> | null>;
+
+/**
+ * Fills a `preflight.read.url` template with the dialog's values, or answers
+ * `null` when any hole is left without a value. See `ParamCollectionHandler`.
+ */
+export type PreflightReadFiller = (template: string, values: Record<string, unknown>) => string | null;
 
 /**
  * The contract's own result-dialog block, and one entry of its field list.
@@ -884,6 +928,19 @@ export interface ActionParamDef {
   // `ActionParamDialog` renders every param through the same field widgets
   // the object form uses (ADR-0059), so params carry the widget-relevant
   // config for their type. Mirrors `ActionParamSchema` in @objectstack/spec.
+  /**
+   * Widget override — `@objectstack/spec`'s `ActionParamSchema.widget`, the
+   * same key, vocabulary and meaning as `FieldSchema.widget`: it names a
+   * registered field widget that draws this param instead of the `type`
+   * default (`'permission-ref'` on a `text` param picks a permission set by
+   * its machine name, ADR-0131 D4). `type` stays the VALUE's type.
+   *
+   * Set by `resolveActionParams()` — the param's own `widget`, else, for a
+   * field-backed param that also inherits or restates its `type`, the field's. Read by
+   * app-shell's `paramToField()`, which draws the named widget when it is
+   * registered and the `type` widget when it is not.
+   */
+  widget?: string;
   /** Accepted upload types (MIME types / extensions) for `file`/`image` params. */
   accept?: string[];
   /** Max upload size in bytes for `file`/`image` params. */
@@ -1372,7 +1429,7 @@ export class ActionRunner {
   private navigationHandler: NavigationHandler | null;
   private paramCollectionHandler: ParamCollectionHandler | null;
   private resultDialogHandler: ResultDialogHandler | null;
-  private translate: ((key: string, options: { defaultValue: string }) => string) | null;
+  private translate: RunnerTranslate | null;
   private displayLocale: (() => string | undefined) | null;
   private tenantCurrency: (() => string | undefined) | null;
   /** Who {@link ActionRunner.subscribeContext} tells of a context change. */
@@ -1433,7 +1490,7 @@ export class ActionRunner {
    * an early refusal that names its key (`ActionRunnerHandler`'s
    * `refuseBeforeInput`). With no translator the text stays English.
    */
-  setTranslator(translate: (key: string, options: { defaultValue: string }) => string): void {
+  setTranslator(translate: RunnerTranslate): void {
     this.translate = translate;
   }
 
@@ -1731,6 +1788,7 @@ export class ActionRunner {
             dialogCopy.action,
             this.dialogCopyFiller(action),
             run,
+            this.preflightReadFiller(action),
           );
           if (lastRun) {
             const last = await lastRun;
@@ -1917,6 +1975,17 @@ export class ActionRunner {
   }
 
   /**
+   * `completedNamed` for `label`: the translator's answer with the label as
+   * its `action` hole, else the English source with the label in that one
+   * hole. The runner fills no other hole and interpolates no other text.
+   */
+  private completedNamedText(label: string): string {
+    const { key, defaultValue } = RUNNER_TEXT.completedNamed;
+    return this.translate?.(key, { action: label, defaultValue })
+      || defaultValue.replace(COMPLETED_NAMED_HOLE, () => label);
+  }
+
+  /**
    * The success toast's text, by the contract's three rungs
    * (`ActionSchema.outcomeMessages`, objectui#11344):
    *
@@ -1924,7 +1993,10 @@ export class ActionRunner {
    *    of the handler's return value — the payload `{{ result.* }}` reads, so
    *    it is the same fact an author writes as `{{ result.outcome }}`;
    * 2. `successMessage`;
-   * 3. the runner's own default text, in its translator's language.
+   * 3. the runner's own default text, in its translator's language: it names
+   *    the action by its `label` when it has one (`completedNamed`; the host
+   *    localizes the label before dispatch, like the copy above), else the
+   *    generic `completedSuccessfully`.
    *
    * Rungs 1 and 2 are the author's copy. Both arrive already localized — the
    * host's localizer resolves the bundle entry or the inline `I18nLabel` map
@@ -1986,7 +2058,10 @@ export class ActionRunner {
         ? fillTemplateHoles(successCopy, resultRoots, this.displayLocale?.(), this.tenantCurrency?.())
         : successCopy;
     }
-    return this.runnerText(RUNNER_TEXT.completedSuccessfully);
+    const label = typeof action.label === 'string' ? action.label.trim() : '';
+    return label
+      ? this.completedNamedText(label)
+      : this.runnerText(RUNNER_TEXT.completedSuccessfully);
   }
 
   /**
@@ -2030,6 +2105,39 @@ export class ActionRunner {
       ? Object.fromEntries(Object.entries(params).filter(([key]) => key !== '_rowRecord'))
       : undefined;
     return { record: this.dispatchRecord(action), params: staticParams };
+  }
+
+  /**
+   * The filler the param dialog interpolates `preflight.read.url` with
+   * (`ParamCollectionHandler`'s `interpolateRead`, objectstack#31808): the
+   * runner's one `${scope.path}` grammar over `param` (the dialog's current
+   * values) and `ctx` (this dispatch's interpolation scope), percent-encoded as
+   * a target is. `ctx.record` is the dispatch's row when it carries one
+   * (`buildInterpolationContext`), else the runner context's record — a record
+   * page's header dispatch carries no row, and the record it acts on is the one
+   * the page shows. A hole with no value, or one naming a scope the grammar
+   * does not know, answers `null`: the dialog sends nothing rather than a read
+   * with a blank segment.
+   */
+  private preflightReadFiller(action: ActionDef): PreflightReadFiller {
+    return (template, values) => {
+      const ctx = this.buildInterpolationContext(action);
+      const pageRecord = this.context.record;
+      if (ctx.record === undefined && pageRecord && typeof pageRecord === 'object' && !Array.isArray(pageRecord)) {
+        ctx.record = pageRecord;
+      }
+      let unbound = false;
+      const filled = substituteScopeTokens(
+        template,
+        { param: values, ctx },
+        encodeURIComponent,
+        () => { unbound = true; },
+      );
+      // A token the grammar did not match (an unknown scope, an unterminated
+      // `${`) is left as written; sent, it would be a literal `${` in the path.
+      if (unbound || filled.includes('${')) return null;
+      return filled;
+    };
   }
 
   /**
@@ -3312,17 +3420,25 @@ function dialogCopyOf(
  * written. A path that resolves to nothing becomes `''`. `encode` is the only
  * thing a caller varies, and it belongs to the SINK, not to the dialect: a URL
  * position percent-encodes each value, a toast inserts it as text.
+ *
+ * `onMissing` hears each token that resolved to nothing (or to `''`). Only the
+ * preflight read asks (`preflightReadFiller`): it sends no read with a blank
+ * hole, where a target keeps the `''` the other callers have always had.
  */
 function substituteScopeTokens(
   template: string,
   scopes: Record<string, unknown>,
   encode: (value: string) => string,
+  onMissing?: () => void,
 ): string {
   if (typeof template !== 'string' || template.indexOf('${') === -1) return template;
   const pattern = new RegExp(`\\$\\{(${Object.keys(scopes).join('|')})\\.([\\w.]+)\\}`, 'g');
   return template.replace(pattern, (_match, scope: string, path: string) => {
     const value = readPath(scopes[scope], path);
-    if (value == null) return '';
+    if (value == null || value === '') {
+      onMissing?.();
+      return '';
+    }
     return encode(String(value));
   });
 }

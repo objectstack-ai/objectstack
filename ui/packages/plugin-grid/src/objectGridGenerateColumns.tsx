@@ -552,7 +552,15 @@ export function useObjectGridGenerateColumns({
               ...(!isEssential && { className: 'hidden sm:table-cell' }),
               ...(col.width && { width: col.width }),
               ...(inferredAlign && { align: inferredAlign }),
-              sortable: col.sortable !== false,
+              // objectstack#30024 — the column's own `sortable: false` AND its
+              // field's, as paths B-D read the field's. An explicit column on a
+              // field its author marked `sortable: false` used to keep its sort
+              // click wherever the sort stays in the browser. Where the sort
+              // leaves the browser, `withSortability` (ObjectGrid) adds the
+              // served projection's verdict; a client-side sort keeps the
+              // #3950 doctrine (a formula header stays live) and reads only
+              // these two author flags.
+              sortable: col.sortable !== false && objectDefField?.sortable !== false,
               ...(col.resizable !== undefined && { resizable: col.resizable }),
               ...(cellRenderer && { cell: cellRenderer }),
               ...(col.pinned && { pinned: col.pinned }),

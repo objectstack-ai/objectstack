@@ -4,7 +4,7 @@ navTitle: Error Code Catalog
 description: Complete reference for all ObjectStack error codes with causes, fixes, and retry strategies
 ---
 
-ObjectStack uses a structured error system of **error categories** and **56 error codes reachable on the wire**, catalogued in full below (that count is pinned by `packages/spec/src/api/error-catalog-docs.test.ts` against the wire face). Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+ObjectStack uses a structured error system of **error categories** and **58 error codes reachable on the wire**, catalogued in full below (that count is pinned by `packages/spec/src/api/error-catalog-docs.test.ts` against the wire face). Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
 
 This catalog documents the **wire face** — the codes a client can actually receive. That is not quite the
 `StandardErrorCode` enum: the enum also carries in-process spellings the REST door translates at the
@@ -181,28 +181,40 @@ substitute. See the [Data API](/docs/api/data-api).
 ### `MISSING_REQUIRED_FIELD`
 **Cause:** A required field was not provided in the request body.  
 **Fix:** Include the missing field. Check `fields` for the field name — **except** on the
-`controlled_by_parent` stored-master path below, where the status is `422` and no `fields`
+`controlled_by_parent` stored required-master path below, where the status is `422` and no `fields`
 array is sent; read the field name out of the message there.  
 **Retry:** `no_retry`
 
 <Callout type="warn">
 **`MISSING_REQUIRED_FIELD` is `400` with one exception: a `controlled_by_parent` detail
-whose stored master reference is null answers `422`, without `fields`.**
+whose stored reference to a required master is null answers `422`, without `fields`.**
 
 An object whose `sharingModel` is `controlled_by_parent` derives its access from a master
 record, so the gate authorizing writes to it resolves that master *before* the executor —
 and the executor is where required-field validation runs. An update or delete **by id** of
-a detail record whose *stored* master reference is null answers
-`422 MISSING_REQUIRED_FIELD`, whatever the declaration: the caller sent no such field, so
-nothing could be named in `fields` and no payload would fix it.
+a detail record whose *stored* master reference is null, where the master is declared
+`required: true`, answers `422 MISSING_REQUIRED_FIELD`, whether or not the master is marked
+`readonly` or `system`: the caller sent no such field, so nothing could be named in `fields`
+and no payload would fix it.
+
+An optional master never answers this code. When the object's only `master_detail` is
+declared `required: false` (an optional master, ADR-0055 §1 as amended), a stored empty
+reference is not an error: the row belongs to no master and is its owner's. Its owner and a
+holder of View All on the detail read it; its owner and a holder of Modify All on the detail
+update or delete it. Everyone else who reaches the gate, View All included, is refused
+`403 PERMISSION_DENIED`; a principal who cannot read the row meets the read door first
+(`404 RECORD_NOT_FOUND`), as for every hidden row.
 
 A request that leaves the master reference out, or empties it, does not answer this code.
-On a `master_detail` that is `required` and neither `readonly` nor `system`, validation
-answers it with the documented `400 VALIDATION_FAILED` and `fields`. A master reference
-marked `readonly` or `system` is not one an author's write supplies, so it cannot be the
-master (ADR-0055 §1): `ObjectSchema` refuses that declaration at parse
-(`master-not-writable`), and on an object that reaches the runtime without the parse, every
-write that sets the reference answers `422 INVALID_METADATA`:
+On a `master_detail` that is `required: true` and neither `readonly` nor `system`, validation
+answers it with the documented `400 VALIDATION_FAILED` and `fields`. On an optional master
+an insert that leaves it out is not refused, and its creator owns the row; an update that
+empties it is judged by the master it leaves, asking edit access on it
+(`403 PERMISSION_DENIED` without it). A master reference marked `readonly` or `system`,
+required or optional, is not one an author's write supplies, so it cannot be the master
+(ADR-0055 §1): `ObjectSchema` refuses that declaration at parse (`master-not-writable`), and
+on an object that reaches the runtime without the parse, every write that sets the
+reference answers `422 INVALID_METADATA`:
 
 - every insert, single or batch, whether or not it names a master;
 - every update whose body carries the reference key, whatever the value, `null` included.
@@ -211,19 +223,24 @@ Its message starts `[Security] Configuration defect:` and carries the parse's ow
 naming the object, the field, the flag and the fix. A delete, and an update that leaves the
 key out, are answered as on any detail.
 
-A `master_detail` with no `required`, and a `required` `lookup` on an object that declares no
-`master_detail`, are not master references at all: the master is exactly one `master_detail`
-declared `required: true` (ADR-0055 §1). `ObjectSchema` refuses such an object at parse, and
-one that reaches the runtime unparsed answers every write `422 INVALID_METADATA`.
+The master is exactly one `master_detail`: the one declared `required: true`, or, when the
+object declares none, its only `master_detail` declared `required: false` (ADR-0055 §1 as
+amended). Two `master_detail` fields with none required, two required ones, and a
+`required` `lookup` on an object that declares no `master_detail` name no master at all:
+`ObjectSchema` refuses such an object at parse, and one that reaches the runtime unparsed
+answers every write `422 INVALID_METADATA`. Write `required` on the master either way:
+`ObjectSchema.create()` forces an omitted one to `true` and `os lint` reports the omission
+at `error`, while a raw parse reads it as `false`, the optional master.
 
 The full matrix is on the protocol page:
 [`MISSING_REQUIRED_FIELD`](/docs/protocol/kernel/error-handling#missing_required_field).
 
 The `INVALID_METADATA` refusal is not going to be relaxed: required-field validation skips
 `system` and `readonly` fields before its required check, so on those two declarations the
-gate is the only thing standing between the request and a detail record outside its master
-— which the `controlled_by_parent` read filter (`fk IN (readable masters)`) can never match,
-leaving a record readable by nobody.
+gate is the only thing standing between the request and, under a required master, a detail
+record outside its master — which the read filter of a required master
+(`fk IN (readable masters)`, with no arm for an empty reference) can never match, leaving a
+record readable by nobody.
 
 **Branch on `code`, treat `fields` as optional, and read the status off the response**
 rather than deriving it from the table at the end of this page.
@@ -316,15 +333,21 @@ object is rejected with `400 VALIDATION_FAILED`, and the specifics ride in
 }
 ```
 
-The check covers create, update and bulk update. Four cases are deliberately
-*not* rejections: an empty value (`null` / `""` / `[]`) means "no link", a
-`isSystem` write is exempt (seed replay and package install legitimately write
-in an order that only resolves once the batch completes), a target that
-cannot be checked at all — an unregistered object, an unreachable datasource —
-fails **open** rather than inventing a rejection, and an update that carries back
+The check covers create, update and bulk update. A write that is not a system
+write may name, in a `lookup`, `master_detail` or `user` field, only a record
+the caller can read: a record the caller cannot read is answered exactly as one
+that exists nowhere, before the record's validation rules run, and so is one
+whose read by the caller fails. Four cases are deliberately *not* rejections: an
+empty value (`null` / `""` / `[]`) means "no link", a `isSystem` write is exempt
+(seed replay and package install legitimately write in an order that only
+resolves once the batch completes), a target that cannot be checked at all — an
+unregistered object, or an unreachable datasource on a check that does not read
+as the caller — fails **open** rather than inventing a rejection, and an update that carries back
 a value (or a member of a multi-valued field) the row already stores is not
 judged again, because the update does not add it; on a bulk update that holds
-only when every matched row already stores it.
+only when every matched row already stores it. That comparison reads only stored
+values the caller may read: a column the caller may edit but not read holds no
+stored value for it, so a value written there is judged like any other.
 </Callout>
 
 ### `DUPLICATE_VALUE`
@@ -367,8 +390,24 @@ result set — a response indistinguishable from a successful query.
 **Retry:** `no_retry`
 
 ### `MAX_RECORDS_EXCEEDED`
-**Cause:** The request attempts to create or return more records than the system limit.  
-**Fix:** Use pagination (`limit`/`offset` or cursor-based) for large datasets. Batch operations for bulk creates.  
+**Cause:** The request asked for more records than a request may carry. The data
+API answers it when the deployment sets `OS_DATA_MAX_PAGE_SIZE` and a list or
+analytics read named a `limit` (`$top`, `top` or `limit`) above it, and when an
+analytics read that named no `limit` would answer more rows than
+`OS_DATA_DEFAULT_PAGE_SIZE`. The message names the maximum (or the default).  
+**Fix:** Name a `limit` within the maximum and page with `offset` (or a cursor).
+See [Read limits a deployment may set](/docs/api/data-api#read-limits-a-deployment-may-set).  
+**Why it is an error and not a shorter page:** a clamped page is a different
+page from the one asked for, so a caller paging by its own `limit` would skip
+rows, and an analytics answer has no `hasMore` to say it was cut.  
+**Retry:** `no_retry`
+
+### `QUERY_ROW_BUDGET_EXCEEDED`
+**Cause:** The deployment sets `OS_DATA_QUERY_ROW_BUDGET` and the read's
+`offset` plus its rows would walk more than that budget. The message names the
+budget.  
+**Fix:** Narrow the read with a filter, or use a smaller `offset` and `limit`.
+See [Read limits a deployment may set](/docs/api/data-api#read-limits-a-deployment-may-set).  
 **Retry:** `no_retry`
 
 ---
@@ -460,8 +499,8 @@ result set — a response indistinguishable from a successful query.
 **Retry:** `no_retry`
 
 ### `API_KEY_REVOKED`
-**Cause:** The API key was revoked by its owner or an administrator, or by an administrator's forced password reset (the message says which).  
-**Fix:** Ask the key's owner or a platform administrator to restore it (the Restore API Key action on the API Keys list); the same key then works again at once. A key a forced password reset revoked is restored by a platform administrator only: its owner is refused `403 PERMISSION_DENIED`. Otherwise create a new key and replace this one wherever it is configured.  
+**Cause:** The API key was revoked by its owner or an administrator, suspended by a platform administrator, or revoked by an administrator's forced password reset (the message says which).  
+**Fix:** Ask the key's owner or a platform administrator to restore it (the Restore API Key action on the API Keys list); the same key then works again at once. A key a platform administrator suspended (revoked when it was not their own), or a forced password reset revoked, is restored by a platform administrator only: its owner is refused `403 PERMISSION_DENIED`. Otherwise create a new key and replace this one wherever it is configured.  
 **Retry:** `no_retry`
 
 These three are answered on every endpoint that accepts an API key: the endpoints the runtime serves (the MCP HTTP endpoint among them), the REST data API, the settings, file-download, datasource admin and share-link routes, the marketplace install routes and the MCP stdio transport. An unknown key is always the generic 401.
@@ -529,6 +568,11 @@ spelling never crosses HTTP.
 **Cause:** The record is locked by another process or user.  
 **Fix:** Wait for the lock to be released, or contact the lock holder.  
 **Retry:** `retry_backoff`
+
+### `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`
+**Cause:** `PATCH /api/v1/packages/:id/disable` was refused because a validation rule of an enabled package (declared dependent or not, an app's `.custom` pair included, any severity) reads a field this package adds to another object through `objectExtensions`. Disabling it would withhold that field, and every write to the object would then fail the rule. Each rule is judged as the object serves it: one rule per name (the copy a later layer declares wins), with a tenant overlay's switch honoured. The message names each rule as `package · object · rule (reads FIELD)`, one or several, after the layer whose copy is served (`tenant overlay` for a rule the overlay declares itself). Nothing changed. `POST /api/v1/packages` answers the same code for an overwrite of an enabled package with `enableOnInstall: false` that would leave such a package disabled: the overwrite itself lands and the package stays enabled. A fresh install with `enableOnInstall: false` lands disabled, as before. The enable door answers the same code for the mirror order: `PATCH /api/v1/packages/:id/enable` is refused while a rule the enable would put into service (the package's own, or one on an object it owns) reads a field a still-disabled package withholds, the message naming each rule and the disabled package to enable first; `POST /api/v1/packages` with `enableOnInstall: true` on an overwrite of a disabled package answers it too, and the package stays disabled.  
+**Fix:** Switch off or change each named rule first, or disable the package that owns it, then disable this package; or keep it enabled. A formula over the field is no reason to refuse: it answers `null`. On the enable door: enable the named disabled package first, or switch off or change each named rule.  
+**Retry:** `no_retry`
 
 ---
 
@@ -984,7 +1028,7 @@ async function handleApiCall() {
 | 404 | `not_found` | `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`, `ENDPOINT_NOT_FOUND` |
 | 409 | `conflict` | `CONCURRENT_MODIFICATION`, `UNIQUE_VIOLATION`, `DELETE_RESTRICTED` |
 | 413 | `validation` | `PAYLOAD_TOO_LARGE` — an upload over the storage settings' `max_upload_mb`, or an import over its row ceiling (see [above](#payload_too_large)) |
-| 422 | `validation` | `MISSING_REQUIRED_FIELD` on a `controlled_by_parent` detail whose stored master reference is null (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
+| 422 | `validation` | `MISSING_REQUIRED_FIELD` on a `controlled_by_parent` detail whose stored reference to a required master is null; an optional master's empty reference is not an error (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
 | 429 | `rate_limit` | `RATE_LIMIT_EXCEEDED`, `QUOTA_EXCEEDED` |
 | 500 | `server` | `INTERNAL_ERROR`, `DATABASE_ERROR` |
 | 501 | `server` | `NOT_IMPLEMENTED` — the storage routes answer it when the adapter cannot issue presigned URLs |

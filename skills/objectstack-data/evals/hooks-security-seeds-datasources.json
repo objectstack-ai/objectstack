@@ -33,8 +33,8 @@
     },
     {
       "id": 4,
-      "prompt": "Seed the `country` table for every environment; add demo `opportunity` rows (dev/test only) closing 45 days after install, owned by the installer. A nightly job advances `stage`; a seed replay must not reset it.",
-      "expected_output": "`defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data; `defineSeed(Opportunity, { env: ['dev', 'test'], ... })` for demo rows — natural-key lookups, CEL values (`close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``), parents first; `columns: { stage: { applyOn: 'create' } }` so an `upsert` replay leaves the job-owned column.",
+      "prompt": "Seed the `country` table for every environment; add demo `opportunity` rows (dev/test only) closing 45 days after install, owned by the installer, and refreshed from the seed on every replay except `stage`: a nightly job advances it, and a replay must not reset it.",
+      "expected_output": "`defineSeed(Country, { externalId: 'code', mode: 'upsert', records })` for reference data; `defineSeed(Opportunity, { mode: 'upsert', env: ['dev', 'test'], ... })` for the refreshed demo rows — natural-key lookups, CEL values (`close_date: cel`daysFromNow(45)``, `owner_id: cel`os.user.id``), parents first; `columns: { stage: { applyOn: 'create' } }` so the `upsert` replay leaves the job-owned column (the `ignore` default would refresh nothing).",
       "files": [],
       "assertions": {
         "must_contain": ["defineSeed", "externalId", "upsert", "env:", "daysFromNow", "applyOn: 'create'"],
@@ -74,11 +74,31 @@
     {
       "id": 8,
       "prompt": "Web-form leads arrive ownerless; inside sales holds them until a rep takes one, and two reps must never own the same lead.",
-      "expected_output": "`queues: [defineQueue({ name: 'inside_sales', label: 'Inside Sales', members: [{ type: 'position', value: 'inside_sales_rep' }] })]` and an `assignmentRules` entry `assignTo: { type: 'queue', value: 'inside_sales' }` with no `strategy` park each lead in the injected `queue` column; a rep claims by an ordinary by-id `{ owner_id: <self> }` update, the loser gets `409 CONCURRENT_UPDATE`.",
+      "expected_output": "`queues: [defineQueue({ name: 'crm_inside_sales', label: 'Inside Sales', members: [{ type: 'position', value: 'crm_inside_sales_rep' }] })]` and an `assignmentRules` entry `assignTo: { type: 'queue', value: 'crm_inside_sales' }` with no `strategy` park each lead in the injected `queue` column; a rep claims by an ordinary by-id `{ owner_id: <self> }` update, the loser gets `409 CONCURRENT_UPDATE`.",
       "files": [],
       "assertions": {
         "must_contain": ["defineQueue", "type: 'position'", "type: 'queue'", "CONCURRENT_UPDATE"],
         "must_not_contain": ["assigned_to", "beforeInsert"]
+      }
+    },
+    {
+      "id": 18,
+      "prompt": "Our package `com.acme.crm` must share every escalated `case` with the members of `support_tier2`, the ownership queue the `com.acme.helpdesk` package ships. `com.acme.crm` declares no dependencies today.",
+      "expected_output": "A sharing rule in `com.acme.crm` with `sharedWith: { type: 'queue', value: 'support_tier2' }`, and `com.acme.crm`'s manifest declares `dependencies` on `com.acme.helpdesk`: a package's rule reads the queue as its own package's, else the one holder in its declared `dependencies` closure plus `sys`. Without the dependency the only holder sits outside the closure and the rule is refused `outside-closure` (`RESOURCE_CONFLICT`), granting no one. The queue is not redeclared in `com.acme.crm`: a second package holding the name is refused too.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'queue'", "dependencies", "outside-closure"],
+        "must_not_contain": ["name: 'support_tier2'"]
+      }
+    },
+    {
+      "id": 19,
+      "prompt": "Our package `com.acme.crm` ships a position `crm_case_handler` whose holders must get `hd_agent`, the permission set the `com.acme.helpdesk` package ships. `com.acme.crm` declares no dependencies today.",
+      "expected_output": "In `com.acme.crm`, the position `{ name: 'crm_case_handler', label: 'Case Handler', permissionSets: ['hd_agent'] }`, and `com.acme.crm`'s manifest declares `dependencies: { 'com.acme.helpdesk': '^1.0.0' }`: a package's position reads each set name as its own package's set, else the one holder in its declared `dependencies` closure plus `sys`. Without the dependency the only holder sits outside the closure: the name is refused `outside-closure`, the boot's catalog reference report logs it, and the position grants nothing through it. The set is not redeclared in `com.acme.crm`: a second package shipping the name is refused at install.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["permissionSets: ['hd_agent']", "dependencies: {", "outside-closure"],
+        "must_not_contain": ["name: 'hd_agent'"]
       }
     },
     {
@@ -89,6 +109,86 @@
       "assertions": {
         "must_contain": ["INVALID_FIELD", "is_not_null"],
         "must_not_contain": ["starts_with"]
+      }
+    },
+    {
+      "id": 10,
+      "prompt": "An `account` whose `tax_id` appears in our `blocked_tax_id` object must not save, on create or edit. Our tax authority also offers a lookup API; can the same hook call it?",
+      "expected_output": "A `beforeInsert` / `beforeUpdate` hook on `account` with a sandboxed `body: { language: 'js', source, capabilities: ['api.read'] }`: the source returns when the write carries no `tax_id`, reads `ctx.api.object('blocked_tax_id').findOne({ where: { tax_id: ctx.input.tax_id } })` and throws when it finds a row. Not a validation rule (there is no `custom` / `async` type) and not the deprecated inline `handler`. The tax-authority API is not called from the hook: a `body` has no outbound HTTP, so that check goes through a Connector recipe.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["beforeInsert", "beforeUpdate", "language: 'js'", "'api.read'", "ctx.api.object("],
+        "must_not_contain": ["handler:", "HookContext", "'http.fetch'"]
+      }
+    },
+    {
+      "id": 11,
+      "prompt": "Expose the remote `suppliers` table of our `warehouse` datasource as a read-only `ext_supplier` object every member can read.",
+      "expected_output": "A complete `ObjectSchema.create` with `datasource: 'warehouse'`, `external: { remoteName: 'suppliers' }` and an authored `sharingModel: 'public_read'` — a publish with none is refused (`security-owd-unset`), and on 'private' a member reads no row of a binding whose remote rows carry no owner.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["ObjectSchema.create", "remoteName", "sharingModel: 'public_read'"],
+        "must_not_contain": ["columnName:"]
+      }
+    },
+    {
+      "id": 12,
+      "prompt": "When an `account`'s `industry` changes, copy the new value into `account_industry` on every contact of that account.",
+      "expected_output": "An `afterUpdate` hook on `account` with a sandboxed `body: { language: 'js', source, capabilities: ['api.write'] }`: the source compares `ctx.input.industry` with `ctx.previous.industry` and, when it changed, makes one bulk write, `ctx.api.object('contact').update({ account_industry: ctx.input.industry }, { where: { account_id: ctx.previous.id }, multi: true })`. The row is keyed on `ctx.previous.id`: a body's `ctx.input` carries `id` only when the payload does, so on a bulk or by-`where` update the key would be empty and the `where` would match every contact. Not the deprecated inline `handler`, and not a bulk method the hook's `ctx.api` does not have (`updateMany` throws \"not implemented\").",
+      "files": [],
+      "assertions": {
+        "must_contain": ["afterUpdate", "language", "js", "api.write", "multi: true", "ctx.previous.id"],
+        "must_not_contain": ["handler:", "HookContext", "account_id: ctx.input.id"]
+      }
+    },
+    {
+      "id": 13,
+      "prompt": "Run our `account` enrichment hook only for accounts whose `annual_revenue` (an optional currency field) is above 1,000,000.",
+      "expected_output": "The hook's declarative `condition: P`record.annual_revenue != null && record.annual_revenue > 1000000``. `record` is total over the declared fields, so an empty `annual_revenue` reads `null` and CEL has no `>` overload for it: the publish gate refuses the unguarded comparison, and at runtime it would refuse each write on an account with no `annual_revenue`. `has(record.annual_revenue)` is not a guard (a declared field holding null is present).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["condition:", "record.annual_revenue != null", "record.annual_revenue > 1000000"],
+        "must_not_contain": []
+      }
+    },
+    {
+      "id": 14,
+      "prompt": "Seed eight demo members for the gym app. For privacy, mask the phone numbers like `138****4207` and put `N/A` where we have no email.",
+      "expected_output": "A `defineSeed(Member, { env: ['dev', 'test'], records: [...] })` whose every value is fictional but WELL-FORMED: `+86 138 0013 8000`-style phones, `liyy@example.com`-style emails, option VALUES for selects. Explains that a seed row passes the same field validation as a user's insert, so a masked phone or an `N/A` email is refused and never lands — the table loads short or empty while bookings point at members that do not exist. Does not downgrade the `phone` field to `text` to make the rows load.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["defineSeed", "+86 138", "@example.com"],
+        "must_not_contain": ["****", "'N/A'", "type: 'text', label: 'Phone'"]
+      }
+    },
+    {
+      "id": 15,
+      "prompt": "报销单：申请人默认是当前用户，还有一个审批人和一个复核人。",
+      "expected_output": "`applicant`, `approver` and `reviewer` are `type: 'user'` fields (the person picker — no `reference`, never a `lookup` to a user object you invent); `applicant` carries `defaultValue: 'current_user'`; none is `required`, since the request does not ask for it and the platform already stamps the owner and `created_by`. Describes the default as SAVE-time — 「保存后申请人会自动填为当前用户；表单里这一栏可能显示为空，留空提交即可」 — and does not promise the create form pre-fills it.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'user'", "defaultValue: 'current_user'"],
+        "must_not_contain": ["reference: 'sys_user'", "reference: 'user'", "{ type: 'user', required: true }", "会自动预填"]
+      }
+    },
+    {
+      "id": 16,
+      "prompt": "Two objects: performance reviews that only the reviewed person's manager and HR may see, and a price list everyone can read but only finance maintains.",
+      "expected_output": "`performance_review` is `sharingModel: 'private'` (owner-only by default, widened to the manager and HR with sharing rules / RLS in a permission set, rules/security.md); `price_list` is `sharingModel: 'public_read'` (everyone reads, the owner writes) with finance as its owners. Neither is `public_read_write`, the posture for an ordinary shared business object — the posture is chosen from the request, not by habit. No `permissions` key on the object.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["sharingModel: 'private'", "sharingModel: 'public_read'"],
+        "must_not_contain": ["sharingModel: 'public_read_write'", "permissions:"]
+      }
+    },
+    {
+      "id": 17,
+      "prompt": "In our HR app each `employee` record has a `user` lookup to the person who signs in. An employee may read only their own `leave_request` rows (each has an `employee` lookup), and we don't want an owner stamp or a junction table for it. Call the set `my_employee_ids`.",
+      "expected_output": "On the `employee` roster: `membershipKeys: { my_employee_ids: { userField: 'user', valueField: 'id' } }`, so the set is the ids of the caller's own employee rows; a permission set reads it (`using: 'employee in current_user.my_employee_ids'`) on `leave_request`, whose `employee` references the roster. The key grants nothing by itself, and tested against a column that does not reference `employee` (or another object's `id`) the policy is refused (`rls-predicate-membership-key-target`). No `owner_id` scoping, no junction object.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["membershipKeys", "my_employee_ids", "valueField: 'id'", "employee in current_user.my_employee_ids"],
+        "must_not_contain": ["using: 'owner_id"]
       }
     }
   ]

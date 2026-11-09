@@ -109,8 +109,8 @@ export const ApproverBindingsFlow = defineFlow({
       config: {
         // Commits the position's machine NAME, not its row id: the engine routes
         // on `sys_user_position.position`, and a machine name is what stays
-        // valid across environments. `manager` is a showcase position.
-        approvers: [{ type: 'position', value: 'manager' }],
+        // valid across environments. `showcase_manager` is a showcase position.
+        approvers: [{ type: 'position', value: 'showcase_manager' }],
         behavior: 'first_response',
       },
     },

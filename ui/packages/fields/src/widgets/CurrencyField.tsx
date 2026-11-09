@@ -3,12 +3,15 @@ import { Input, EmptyValue, cn } from '@object-ui/components';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
-import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
+import { useLocalization, useDisplayLocale, readHomeAmountSource, formatDisplayNumber, type HomeAmountSource } from '@object-ui/i18n';
+import { formatDate } from '@object-ui/core';
 import { resolveFieldCurrency, currencySymbol } from '../currency.js';
+import { useFieldTranslation } from './useFieldTranslation.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
 import { formatCurrency, currencyDisplayWidth } from './number-format.js';
+import { HomeAmountPreview } from './homeAmountPreview.js';
 
-export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, ...props }: FieldWidgetComponentProps<number>) {
+export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, dataSource, ...props }: FieldWidgetComponentProps<number>) {
   const currencyField = field as any;
   // Shared precedence: field currency → currencyConfig → tenant default (ADR-0053).
   // A `record`-mode amount (ADR-0144 D2) reads the code its record holds —
@@ -19,8 +22,8 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
   const currency: string | undefined = resolveFieldCurrency(currencyField, tenantCurrency, dependentValues);
   // A currency's decimal places are the CURRENCY's, not a field setting — the
   // maintainer ruling recorded on objectstack-ai/objectstack#19910 (batch #218
-  // item 2), executed here by objectui#10276. The width is the ISO 4217
-  // minor-unit count of the resolved currency: 2 for USD / CNY, 0 for JPY,
+  // item 2), executed here by objectui#10276. The width is the CLDR
+  // fraction-digit count of the resolved currency: 2 for USD / CNY, 0 for JPY,
   // 3 for KWD. With no currency resolved there is no minor unit to ask about,
   // so the historical 2 stays. `currencyDisplayWidth` is that derivation, and
   // `formatCurrency` (the grid cell's formatter, and this widget's read-only
@@ -50,8 +53,20 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
   // Before the readonly return: hooks are unconditional (objectui#6780).
   const { refusal, readBadInput } = useBadInputRefusal('1234.56');
 
-  if (readonly) {
+  // A home field (ADR-0144 D5) is written by the engine alone, so it draws the
+  // read face wherever it is drawn, a form that hands it `disabled` included,
+  // and says which rate and document date produced it.
+  const homeSource = readHomeAmountSource(field);
+  if (readonly || homeSource) {
     if (value == null) return <EmptyValue />;
+    if (homeSource) {
+      return (
+        <span className="flex flex-col">
+          <span className="text-sm font-medium tabular-nums">{formatCurrency(Number(value), currency, locale)}</span>
+          <HomeAmountHint source={homeSource} record={dependentValues} />
+        </span>
+      );
+    }
     // The call `CurrencyCellRenderer` makes, so a read-only form and a table
     // cell show one amount identically (objectui#11444). This used to be a
     // private `formatAmount` beside the cell's `formatCurrency`; the two drew
@@ -204,6 +219,47 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
         />
       </div>
       <BadInputMessage refusal={refusal} />
+      {/* A record-mode amount declaring `homeAmount` (ADR-0144 D5): what the save will store. */}
+      <HomeAmountPreview field={currencyField} amount={value} record={dependentValues} dataSource={dataSource} />
     </div>
+  );
+}
+
+/**
+ * The line under a home amount (ADR-0144 D5): the rate the engine used and the
+ * document date that picked it, both read from the record's own `rateField` /
+ * `rateDate` values, never recomputed. An amount already in the home currency
+ * was converted at 1 with no rate row, so it says that instead. Nothing is
+ * drawn while the record holds no rate (a blank amount stores a blank rate).
+ * Shared by the form widget above and the record page's cell.
+ */
+export function HomeAmountHint({
+  source,
+  record,
+}: {
+  source: HomeAmountSource;
+  record: Readonly<Record<string, unknown>> | null | undefined;
+}): React.ReactElement | null {
+  const { t } = useFieldTranslation();
+  const { currency: homeCurrency } = useLocalization();
+  const locale = useDisplayLocale();
+  const rate = record?.[source.rateField];
+  if (rate == null || rate === '' || Number.isNaN(Number(rate))) return null;
+  const code = record?.[source.codeField];
+  const className = 'text-xs text-muted-foreground';
+  if (typeof code === 'string' && homeCurrency !== undefined && code.trim() === homeCurrency) {
+    return <span className={className} data-testid="home-amount-hint">{t('fields.currencyHome.homeCurrency')}</span>;
+  }
+  const date = record?.[source.rateDateField];
+  if (date == null || date === '') return null;
+  return (
+    <span className={className} data-testid="home-amount-hint">
+      {t('fields.currencyHome.convertedAt', {
+        // The rate as stored, every digit: a rounded rate would not reproduce the home amount.
+        rate: formatDisplayNumber(Number(rate), { locale, maximumFractionDigits: 12 }),
+        // With its year always: a rate is looked up by the whole date.
+        date: formatDate(date as string, undefined, { alwaysShowYear: true }),
+      })}
+    </span>
   );
 }

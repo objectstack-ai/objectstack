@@ -993,7 +993,7 @@ describe('the text-face members, driven — ONE error line, the exit status unch
 
   it('os package install, a runtime with no install-local endpoint (refused in the try itself): ONE error line, exit 1', async () => {
     fetchStub.mockImplementation(async () => answer(404, { error: { message: 'not found' } }));
-    const run = await driveText(PackageInstall, [ARTIFACT, '--runtime', RUNTIME]);
+    const run = await driveText(PackageInstall, [ARTIFACT, '--url', RUNTIME]);
     expectOneRefusal(run, RUNTIME);
     expect(fetchStub).toHaveBeenCalledTimes(1);
   });

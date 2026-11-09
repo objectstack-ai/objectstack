@@ -212,6 +212,60 @@ export async function runSettingsAction(
   return { ok: res.ok, message };
 }
 
+/**
+ * The caller's address as the server judges it (objectstack#30313), read from
+ * one of two routes that answer it alike ({@link JudgedClientAddressRoute}).
+ *
+ * `clientAddress` is the address the `allowed_ip_ranges` save checks (the
+ * deployment's `auth` list and an organization's `access_policy` list) and
+ * the sign-in gate judge this connection by (the save check's own call), or
+ * `null` when the server cannot establish one. `trustProxy` says whether
+ * forwarded headers counted (`server.trustProxy`). ⛔ The console never works
+ * its own address out: behind a proxy the address a browser could learn is not
+ * the one the server judges.
+ */
+export interface JudgedClientAddress {
+  clientAddress: string | null;
+  trustProxy: boolean;
+}
+
+const AUTH_BASE = `${SERVER_URL}/api/v1/auth`;
+
+/**
+ * The route under `/api/v1/auth` a page reads the judged address from, each
+ * gated to whoever may save the list it informs: `/admin/client-address` to a
+ * platform administrator (the `auth` namespace), `/client-address` to a caller
+ * holding `setup.write` in their current organization (the `access_policy`
+ * namespace).
+ */
+export type JudgedClientAddressRoute = '/admin/client-address' | '/client-address';
+
+/**
+ * Read {@link JudgedClientAddress} from `route`. A caller the route's gate
+ * refuses (`401`/`403`), or a server without the route, throws like any other
+ * failed read; so does a body that is not the declared shape. The caller
+ * decides what a failure shows.
+ */
+export async function getJudgedClientAddress(route: JudgedClientAddressRoute): Promise<JudgedClientAddress> {
+  const res = await fetch(`${AUTH_BASE}${route}`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  });
+  const body = await jsonOrThrow<Partial<JudgedClientAddress> | null>(res);
+  const address = body && typeof body === 'object' ? body.clientAddress : undefined;
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    typeof body.trustProxy !== 'boolean' ||
+    !(address === null || (typeof address === 'string' && address.length > 0))
+  ) {
+    throw new Error(
+      `Malformed response from GET /api/v1/auth${route}: expected an object carrying \`clientAddress\` (a string or null) and \`trustProxy\` (a boolean).`,
+    );
+  }
+  return { clientAddress: address, trustProxy: body.trustProxy };
+}
+
 /** A body that actually carries an action verdict — `ok` is the one required key. */
 function isActionResult(value: unknown): value is SettingsActionResult {
   return (

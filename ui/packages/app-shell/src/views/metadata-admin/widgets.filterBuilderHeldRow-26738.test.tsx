@@ -25,8 +25,13 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { I18nProvider } from '@object-ui/i18n';
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 import { WIDGETS } from './widgets';
 import { loaded } from './loadState';
+
+// The studio namespace fetches zh on demand; load it before any zh render.
+await loadStudioCatalogue('zh');
 
 // The builder lives inside a Radix popover, which does not open in jsdom.
 // Rendering the popover parts inline is this directory's existing way of
@@ -145,5 +150,26 @@ describe('the filter-builder widget holds a row until it is complete (objectstac
     expect(valueInputs()).toHaveLength(1);
     expect(valueInputs()[0].value).toBe('closed');
     expect(writes).toEqual([]);
+  });
+});
+
+describe('the empty filter trigger reads in the designer locale (objectstack#30039)', () => {
+  const renderIn = (lang: 'en' | 'zh') =>
+    render(
+      <I18nProvider config={{ defaultLanguage: lang, detectBrowserLanguage: false }}>
+        <Host initial={{ type: 'grid' }} writes={[]} />
+      </I18nProvider>,
+    );
+
+  it('a zh-CN console reads the Chinese prompt, not the English literal', () => {
+    renderIn('zh');
+    const trigger = screen.getByTestId('filter-builder-trigger');
+    expect(trigger).toHaveTextContent('+ 添加筛选…');
+    expect(trigger).not.toHaveTextContent('Add filter');
+  });
+
+  it('CONTROL: an English console keeps the English prompt', () => {
+    renderIn('en');
+    expect(screen.getByTestId('filter-builder-trigger')).toHaveTextContent('+ Add filter…');
   });
 });

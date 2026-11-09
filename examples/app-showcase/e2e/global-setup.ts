@@ -38,3 +38,4 @@ export default async function globalSetup() {
   mkdirSync(dirname(STATE_PATH), { recursive: true });
   writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
 }
+

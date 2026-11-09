@@ -16,9 +16,10 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@object-ui/types';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
-import { pickLocalized, useObjectTranslation, useLocalization } from '@object-ui/i18n';
+import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText } from '@object-ui/fields';
+import { isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
 import { resolveSubmitRedirect, submitRedirectScope } from './submitRedirect';
@@ -33,6 +34,7 @@ import {
   warnSectionMemberExcludedByFields,
   buildSectionFields,
   sectionEntryName,
+  fieldNameLabel,
   type SectionFieldsContext,
 } from './sectionFields';
 import { TabbedForm } from './TabbedForm';
@@ -970,7 +972,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         // Auto-generate field from schema
         const formField: FormFieldWithGroup = {
           name: name,
-          label: fieldLabel(schema.objectName, name, field.label || fieldName),
+          label: fieldLabel(schema.objectName, name, field.label || fieldNameLabel(fieldName)),
           // (type, multiple) decides the widget, not the type alone: a `select`
           // declared `multiple: true` renders the multi-value chip picker, whose
           // label must be associated by IDREF — a fact declared per WIDGET, so
@@ -1001,7 +1003,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // object's declared field groups when no explicit sections are given.
           group: field.group,
           // Important: Pass the original field metadata so widgets can access properties like precision, currency, etc.
-          field: field,
+          // A home field (ADR-0144 D5) also carries the amount, rate and document
+          // date that produced it, so an authored section draws it with its hint.
+          field: withHomeAmountSource(field, objectSchema.fields, name),
           // A per-field widget override. `form.tsx` resolves `widget || type`, so this makes the
           // auto-generated (no-form-view) form honor the override just like the
           // authored-section path already does (sectionFields.ts).
@@ -1124,6 +1128,17 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         // Read-only fields for computed types
         if (field.type === 'formula' || field.type === 'summary' || field.type === 'auto_number') {
           formField.disabled = true;
+        }
+
+        // A stored field carrying an `expression` is computed by the engine on
+        // every write, so a typed value never stands (objectstack#31759). It
+        // draws its type's READ face (`readonly`, not `disabled`, which is a
+        // greyed input), and the edit submit omits read-only fields, so the
+        // save no longer sends a value the engine would replace. The same stamp
+        // as `fromObjectSchema` in `sectionFields.ts`, the authored-section
+        // producer.
+        if (isExpressionComputedField(field)) {
+          formField.readonly = true;
         }
 
         // Conditional visibility is the spec's `visibleWhen`, carried above.

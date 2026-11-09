@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
@@ -423,7 +424,7 @@ export const HookSchema = lazySchema(() => strictObject(
    * Unique identifier for the hook
    * Required for debugging and overriding.
    */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Hook unique name (snake_case)'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Hook unique name (snake_case)'),
 
   /**
    * Human readable label
@@ -521,9 +522,9 @@ export const HookSchema = lazySchema(() => strictObject(
    * If provided and evaluates to FALSE, the hook is skipped entirely.
    * Useful for filtering by record data without writing handler code.
    * 
-   * @example "record.status == 'closed' && record.amount > 1000"
+   * @example "record.status == 'closed' && record.amount != null && record.amount > 1000"
    */
-  condition: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount > 1000`'),
+  condition: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL); hook runs only when TRUE. e.g. P`record.status == "closed" && record.amount != null && record.amount > 1000`'),
 
   /**
    * Human-readable description
@@ -881,11 +882,15 @@ export const HookContextSchema = lazySchema(() => z.object({
    * own options bag (`EngineQueryOptions` / `DataEngineInsertOptions` /
    * `EngineUpdateOptions` / `EngineDeleteOptions`) and only AFTER the `before*`
    * handlers return — before the driver call — merges the driver-facing keys
-   * onto it (`buildDriverOptions`: transaction, tenantId, timezone, …). So a
+   * onto it (`buildDriverOptions` produces the driver's set — transaction,
+   * tenantId, timezone, … — and `mergeDriverOptionsIntoHookView` merges that
+   * set into this view). So a
    * `before*` handler reads the CALLER's bag, `where` and `multi` included; an
-   * `after*` handler and the driver read the `DriverOptions` view. The merge is
+   * `after*` handler reads the merged view. The merge is
    * ADDITIVE — it spreads the caller's bag and adds keys, never strips one — so
    * the widening is one-way and nothing a `before*` handler saw disappears.
+   * The merged view is the hooks', not the driver's: a driver is handed the
+   * keys `DriverOptionsSchema` declares and nothing else.
    * #5997 corrected the two `before` envelope rows above, which had said `DriverOptions`
    * (a type that declares no `where` and no `multi`): that is not what the
    * engine builds there, and not what the two consumers named below read.
@@ -1374,14 +1379,17 @@ export const HookContextSchema = lazySchema(() => z.object({
    * or the audit writer — can tell "the run / the person this write belongs
    * to" from "an unrelated caller".
    *
-   * Three marks, none authorizing, for three different questions:
+   * Four marks, none authorizing, for four different questions:
    *  - `flowRunId` — WHAT produced the write (a machine origin, no person);
    *  - `attributedUserId` — WHO is CREDITED for a write the system authorized
    *    (a person, but never the subject the write was authorized as);
    *  - `performedByClientId` — WHICH AGENT performed a write authorized as the
    *    human in `session.userId` (ADR-0090 D10 rule 4's `performed_by`; the
    *    `on_behalf_of` half is that same `session.userId`, so it is not carried
-   *    a second time here).
+   *    a second time here);
+   *  - `impersonatedBy` — WHICH ADMINISTRATOR made a write from an
+   *    impersonation session, authorized as the impersonated user in
+   *    `session.userId`.
    *
    * Kept OUT of `session` on purpose. A writer can have provenance and no
    * identity at all — a schedule-triggered flow run resolves no principal — and
@@ -1396,16 +1404,18 @@ export const HookContextSchema = lazySchema(() => z.object({
     flowRunId: z.string().optional().describe('Id of the automation flow run performing this write, when it originates from a flow data node. Lets a hook recognize the run that OWNS state that run itself opened — the approvals record lock exempts the run holding the pending request.'),
     attributedUserId: z.string().optional().describe('The real human credited for a write whose authorization subject was the SYSTEM — e.g. the admin whose better-auth `update-member-role` call the identity adapter executes as `isSystem`. ATTRIBUTION ONLY: the audit writer records it as `sys_audit_log.user_id`; no security middleware reads it, and it never becomes the subject the write is authorized as.'),
     performedByClientId: z.string().optional().describe('[ADR-0090 D10 rule 4] The AGENT that performed this write — the OAuth client (`azp`, a registered sys_oauth_application id) the access token was issued to, when an AI client acted on behalf of the human in `session.userId`. Copied from `ExecutionContext.performedBy.clientId`, which only the /mcp OAuth door sets. ATTRIBUTION ONLY, exactly like `attributedUserId`: the audit writer records it in `sys_audit_log.metadata` as `performed_by` beside `on_behalf_of`; no security middleware reads it and it never becomes the subject the write is authorized as. Absent on every non-delegated write, so a hook tells the two apart by the key being there rather than by guesswork.'),
+    impersonatedBy: z.string().optional().describe('The ADMINISTRATOR (a sys_user id) who made this write from an impersonation session, while `session.userId` is the impersonated user the write is authorized as. Copied from `ExecutionContext.impersonatedBy`, which the shared request-identity resolution sets from the session read. ATTRIBUTION ONLY, exactly like `performedByClientId`: the audit writer records it as `sys_audit_log.metadata.impersonated_by` and on the sys_activity row; no security middleware reads it and it never becomes the subject the write is authorized as. Absent on every write the user made themselves.'),
   }).optional().describe('Server-stamped write provenance (never client-supplied, never an authorization input)'),
 
   /**
    * Referential-Cleanup Marker
    * `true` exactly when THIS write is the engine's own reference cleanup — the
-   * UPDATE `cascadeDeleteRelations` issues against a row that HOLDS a lookup
-   * whose `deleteBehavior` resolves to `set_null`, while the record it
-   * references is being deleted (clearing the slot, or on a `multiple: true`
-   * lookup removing the deleted member). Absent on every other dispatch; read
-   * it as `ctx.referentialFieldClear === true`.
+   * UPDATE `cascadeDeleteRelations` issues against a row that HOLDS a
+   * reference field whose `deleteBehavior` resolves to `set_null` (a `lookup`
+   * or `tree` by default, or a `user` field that declares it, #29253), while
+   * the record it references is being deleted (clearing the slot, or on a
+   * `multiple: true` field removing the deleted member). Absent on every other
+   * dispatch; read it as `ctx.referentialFieldClear === true`.
    *
    * ## Why a declared key (commit 34ce8e7db)
    *
@@ -1458,8 +1468,9 @@ export const HookContextSchema = lazySchema(() => z.object({
   referentialFieldClear: z.boolean().optional().describe(
     "Engine-produced marker: true exactly when this write is the engine's own referential cleanup "
     + "(the set_null cascade UPDATE clearing — or, for multiple: true, removing the deleted member "
-    + 'from — a lookup that references a record being deleted). Absent on every other write, '
-    + 'including a user hand-clearing the same lookup; read as `ctx.referentialFieldClear === true`. '
+    + 'from — a lookup, tree or user field that references a record being deleted, where a user field '
+    + 'takes part only when it declares its deleteBehavior). Absent on every other write, including a '
+    + 'user hand-clearing the same field; read as `ctx.referentialFieldClear === true`. '
     + 'The declared projection of the operation-private `__referentialFieldClear`, carried across '
     + 'the sandbox boundary by contract; server-derived and never client-supplied.',
   ),
@@ -1470,10 +1481,11 @@ export const HookContextSchema = lazySchema(() => z.object({
    * child DELETE `cascadeDeleteRelations` performs for each row that
    * references a record being deleted through a relation whose
    * `deleteBehavior` resolves to `cascade` (a `master_detail` unless it
-   * declares `restrict`; a `lookup` or `tree` that declares `cascade`), at any
-   * depth: a grandchild the child's own cascade removes is marked too. Present
-   * in both phases of that delete (`beforeDelete`, `afterDelete`). Absent on
-   * every other dispatch; read it as `ctx.referentialCascadeDelete === true`.
+   * declares `restrict`; a `lookup`, `tree` or `user` field that declares
+   * `cascade`, the `user` one since #29253), at any depth: a grandchild the
+   * child's own cascade removes is marked too. Present in both phases of that
+   * delete (`beforeDelete`, `afterDelete`). Absent on every other dispatch;
+   * read it as `ctx.referentialCascadeDelete === true`.
    *
    * The delete twin of {@link referentialFieldClear}. That key marks the
    * `set_null` cleanup UPDATE; this one marks the `cascade` child DELETE. A

@@ -5,6 +5,8 @@
 // the rows stored env-wide, hiding whole stretches of a package's ADR-0067
 // timeline from any session that had an active organization.
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

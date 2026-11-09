@@ -217,7 +217,10 @@ export async function seedRunGrants(
     // grants it was not derived from: the resolution below re-seeds the rung
     // with the grants, and a run whose grants stay unresolved (the resolver
     // throws, answers nothing, or is not wired) carries none.
-    if (needsGrants) delete (runContext as SeededRunContext).posture;
+    if (needsGrants) {
+        delete (runContext as SeededRunContext).posture;
+        delete (runContext as SeededRunContext).principalKind;
+    }
     if (
         runContext.runAs !== 'system' &&
         runContext.userId &&
@@ -236,6 +239,9 @@ export async function seedRunGrants(
                     // only with them: carried grants keep the rung they came
                     // with, so a narrowed ceiling never gains a wider rung.
                     if (grants.posture) (runContext as SeededRunContext).posture = grants.posture;
+                    // [ADR-0151 D3] An AI service account runs as the agent
+                    // principal it is, under the agent ceiling.
+                    if (grants.principalKind === 'agent') (runContext as SeededRunContext).principalKind = 'agent';
                 }
                 if (needsPeers && Array.isArray(grants.org_user_ids)) {
                     (runContext as SeededRunContext).org_user_ids = grants.org_user_ids;
@@ -325,7 +331,19 @@ async function deciderSegmentContext(
     const context = run.context;
     const decider = signal[RESUME_AUTHORITY_SERVICE] === true ? signal.resumedBy : undefined;
     if (typeof decider !== 'string' || decider === '') return context;
-    if (context?.userId === decider) return context;
+    // The decider's segment names exactly the DECISION's impersonating
+    // administrator: the one the owning service read off the decision
+    // request's session, honoured only beside the decider it vouches for.
+    // The stamp of the write that STARTED the run is never carried over:
+    // whoever was at the keyboard then did not make this decision.
+    const impersonatedBy = decisionImpersonatorOf(signal);
+    if (context?.userId === decider) {
+        if (context.impersonatedBy === impersonatedBy) return context;
+        const same: AutomationContext = { ...context };
+        if (impersonatedBy) same.impersonatedBy = impersonatedBy;
+        else delete same.impersonatedBy;
+        return same;
+    }
     const switched: SeededRunContext = {
         ...(context ?? {}),
         userId: decider,
@@ -338,6 +356,14 @@ async function deciderSegmentContext(
     // platform administrator's submission would hand a member's decision
     // segment the deployment-level rows. Seeded for the decider below.
     delete switched.posture;
+    // [ADR-0151 D3] The trigger user's kind is theirs too: a decider is
+    // resolved afresh, and only an account is an agent.
+    delete switched.principalKind;
+    // The impersonating administrator belonged to the write that STARTED the
+    // run: the segment the decider owns names only the administrator, if any,
+    // who made THIS decision while impersonating the decider.
+    delete switched.impersonatedBy;
+    if (impersonatedBy) switched.impersonatedBy = impersonatedBy;
     // The trigger user's email is theirs too: kept under the decider's id,
     // it would admit the decider to every row an email-keyed policy grants
     // the submitter. Removed on both postures, and seeded for the decider
@@ -347,6 +373,19 @@ async function deciderSegmentContext(
     if (switched.runAs === 'system') return switched;
     await this.seedRunGrants(run.flowName, switched, 'deciding');
     return switched;
+}
+
+/**
+ * The administrator a decision's resume signal names as impersonating its
+ * decider ({@link ResumeSignal.impersonatedBy}), as a non-blank string, or
+ * `undefined`. Read only by {@link deciderSegmentContext}, after the signal's
+ * service marker and decider are established.
+ */
+function decisionImpersonatorOf(signal: ResumeSignal): string | undefined {
+    const by = signal.impersonatedBy;
+    if (typeof by !== 'string') return undefined;
+    const trimmed = by.trim();
+    return trimmed ? trimmed : undefined;
 }
 
 /** The body of {@link AutomationEngine.expandDeclaredLookups}, moved unedited; that method's docblock is its contract. */

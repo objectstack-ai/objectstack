@@ -177,7 +177,7 @@ export const ScriptValidationSchema = lazySchema(() => strictObject({
 }, {
   ...BASE_VALIDATION_SHAPE,
   type: z.literal('script'),
-  condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row.'),
+  condition: EvaluatedExpressionInputSchema.describe('Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount != null && record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row.'),
 }));
 
 /**
@@ -254,7 +254,7 @@ export const FormatValidationSchema = lazySchema(() => strictObject({
  * {
  *   type: 'cross_field',
  *   name: 'discount_limit',
- *   condition: 'record.discount > (record.amount * 0.40)',
+ *   condition: 'record.discount != null && record.amount != null && record.discount > (record.amount * 0.40)',
  *   fields: ['discount', 'amount'],
  *   message: 'Discount cannot exceed 40% of the amount'
  * }
@@ -529,7 +529,7 @@ export const ValidationRuleSchema: z.ZodType<BaseValidationRuleShape, BaseValida
  *   then: {
  *     type: 'cross_field',
  *     name: 'amount_approval',
- *     condition: 'record.amount > 100000 && record.approval == null',
+ *     condition: 'record.amount != null && record.amount > 100000 && record.approval == null',
  *     fields: ['amount', 'approval']
  *   }
  * }

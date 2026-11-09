@@ -32,7 +32,7 @@ export const entry: SemanticMigration = {
     + 'child object\'s field. Write `name` where a column said `field` (or `fieldName`, `key`); '
     + 'delete `scale` from a column that renders as a currency column, whether it declares '
     + '`type: \'currency\'` or takes it from a `currency` child field — nothing replaces it, the '
-    + 'currency\'s ISO 4217 minor unit decides; delete `addLabel`, `formFields` '
+    + 'currency\'s CLDR fraction digits decide; delete `addLabel`, `formFields` '
     + 'and `inlineMode`, which belong to an `object-master-detail-form` detail entry and are not read '
     + 'here, `sortField`, which no block takes (the detail entry derives the line-position field from '
     + 'the child object), and any other key the shape does not declare.',

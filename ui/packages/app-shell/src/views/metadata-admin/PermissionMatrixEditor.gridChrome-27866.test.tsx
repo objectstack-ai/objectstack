@@ -169,8 +169,9 @@ describe.each([
       t('perm.field.when', 'en'),
     ]);
     for (const c of cells) expect(c).toHaveClass('sticky', 'top-9', 'bg-background');
-    // The name header is pinned both ways and stacks over the pinned name cells.
-    expect(cells[0]).toHaveClass('left-0', 'z-[3]');
+    // objectstack#29677 — the name header pins to the top only, like the
+    // others: the field panel around it holds it in view sideways.
+    expect(cells[0]).not.toHaveClass('left-0');
     // CONTROL: field rows are not pinned to the top.
     expect(screen.getByLabelText('a_project.owner readable').closest('td')).not.toHaveClass('top-9');
   });

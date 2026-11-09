@@ -76,6 +76,13 @@ export function ForgotPasswordPage() {
           phoneSuccessDescription: t('auth.forgotPassword.phoneSuccessDescription', {
             defaultValue: 'Your password has been reset. You can now sign in with your new password.',
           }),
+          noDeliveryTitle: t('auth.forgotPassword.noDeliveryTitle', {
+            defaultValue: "A reset link can't be emailed here",
+          }),
+          noDeliveryDescription: t('auth.forgotPassword.noDeliveryDescription', {
+            defaultValue:
+              "This deployment doesn't send email, so no password reset link can reach you. Ask an administrator: they can set a new password for you from Setup → Users.",
+          }),
           rememberPasswordText: t('auth.forgotPassword.rememberPasswordText', {
             defaultValue: 'Remember your password?',
           }),

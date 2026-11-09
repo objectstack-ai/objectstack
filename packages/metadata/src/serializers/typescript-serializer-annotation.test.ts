@@ -172,10 +172,10 @@ describe('TypeScriptSerializer annotation, per metadata type', () => {
   it('no exports entry of the package re-exports the internal channel', async () => {
     // Control: the name is spelled right, so the absences below can fail.
     expect(Object.keys(await import('./typescript-serializer.js'))).toContain('serializeTypeScriptForMetadataType');
-    // Seven since `./picklist-references` (after `./view-container-name`,
-    // #21412): the count is the control that the loop below visits every
-    // entry, so a new entry moves it here.
-    expect(EXPORT_ENTRY_SOURCES.length).toBe(7);
+    // Eight since `./history-snapshot` (after `./picklist-references` and
+    // `./view-container-name`, #21412): the count is the control that the loop
+    // below visits every entry, so a new entry moves it here.
+    expect(EXPORT_ENTRY_SOURCES.length).toBe(8);
     for (const source of EXPORT_ENTRY_SOURCES) {
       const entry = (await import(source)) as Record<string, unknown>;
       expect(Object.keys(entry).length, source).toBeGreaterThan(0);

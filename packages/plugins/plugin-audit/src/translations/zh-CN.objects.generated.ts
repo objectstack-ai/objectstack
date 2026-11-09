@@ -18,7 +18,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "审计日志",
     pluralLabel: "审计日志",
-    description: "平台事件的不可变审计追踪",
+    description: "平台事件的审计追踪。记录只由平台写入，在数据 API 和设置中只读。",
     fields: {
       created_at: {
         label: "时间戳"
@@ -37,8 +37,13 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "账户锁定",
           config_change: "配置变更",
           import: "导入",
+          export: "导出",
           platform_admin_standing_change: "平台管理员权限变更",
-          action_invocation: "动作调用"
+          action_invocation: "动作调用",
+          package_uninstall: "卸载软件包",
+          package_unmanaged_import: "Package Unmanaged Import",
+          credential_use: "Credential Use",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {
@@ -113,9 +118,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_activity: {
-    label: "活动",
-    pluralLabel: "活动",
-    description: "最近活动流条目（轻量、去规范化）",
+    label: "动态",
+    pluralLabel: "动态",
+    description: "最近大家对记录做了什么，按时间从新到旧：谁新建、修改或删除了什么。条目保留 14 天。",
     fields: {
       id: {
         label: "活动 ID"
@@ -193,6 +198,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "里程碑键",
         help: "对于已触发的活动里程碑,为该对象 activityMilestones 声明在触发时所监视的全部字段的排序、逗号连接的键;其他行为 NULL。由平台在写入时标记且从不返回:读取规则会将其与当前声明进行比较。"
       }
+    },
+    _views: {
+      recent: {
+        label: "最近动态",
+        emptyState: {
+          title: "暂无最近动态",
+          message: "大家对记录所做的更改会按时间从新到旧显示在这里。"
+        }
+      },
+      all: {
+        label: "全部条目"
+      }
     }
   },
   sys_comment: {
@@ -251,27 +268,27 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_comment_reaction: {
-    label: "Comment Reaction",
-    pluralLabel: "Comment Reactions",
-    description: "An emoji reaction to a comment, owned by the user who reacted",
+    label: "评论表情回应",
+    pluralLabel: "评论表情回应",
+    description: "对一条评论的表情回应，归回应的用户所有",
     fields: {
       id: {
-        label: "Reaction ID"
+        label: "回应 ID"
       },
       comment_id: {
-        label: "Comment",
-        help: "The id of the sys_comment this reaction is on. The reaction is readable exactly when that comment is."
+        label: "评论",
+        help: "该回应所在的评论。评论可读时，回应才可读。"
       },
       emoji: {
-        label: "Emoji",
-        help: "The emoji, as the character sequence the client renders (for example 👍)"
+        label: "表情",
+        help: "表情本身，即客户端显示的字符（例如 👍）"
       },
       user_id: {
-        label: "User",
-        help: "The user who reacted. Stamped from the session on create; a client-supplied value is replaced."
+        label: "用户",
+        help: "做出回应的用户。创建时取自当前会话；客户端传入的值会被替换。"
       },
       created_at: {
-        label: "Created At"
+        label: "创建时间"
       }
     }
   }

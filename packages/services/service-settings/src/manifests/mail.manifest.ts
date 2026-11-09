@@ -106,7 +106,14 @@ const manifest = {
     { type: 'group', id: 'from_address', label: 'From address', required: false },
     { type: 'email', key: 'from_email', label: 'From email', required: true,
       description: 'Example: no-reply@example.com' },
-    { type: 'text', key: 'from_name', label: 'From name', required: false, default: 'ObjectStack' },
+    // No `default`: an unset From name is not 'ObjectStack'. plugin-email
+    // names a sender that has none with the product name the auth mails'
+    // subject and body read (the Branding product name when one is set, else
+    // the deployment's name), so a manifest default here would show the page
+    // a name the mail never goes out under — the trap the Branding product
+    // name's own 'ObjectStack' default was removed for.
+    { type: 'text', key: 'from_name', label: 'From name', required: false,
+      description: 'Leave empty to use the product name (Branding), or the name this deployment was set up with.' },
 
     // Delivery mode (framework#5160). Off by default: turning it on changes
     // what `send()` returns (`queued` instead of `sent`/`failed`), so it is

@@ -16,13 +16,25 @@
  *  3. A caller who can read a matched row but may not write it keeps the 403 a
  *     per-row gate answers, as before.
  *  4. A visible, writable match is still written (control).
- *  5. The read question's three outcomes: a read the read door REFUSES keeps
- *     the write's previous answer; a store fault propagates; a readable set
+ *  5. The read question's three outcomes: a read the read door REFUSES is the
+ *     write's answer (8, below); a store fault propagates; a readable set
  *     larger than one write may name is refused, nothing written.
  *  6. A predicate write the platform issues under the caller's context (a
  *     hook's own write) is not addressed by the caller and keeps the answer it
  *     had before.
  *  7. The by-id doors keep their answers (regression).
+ *  8. A write from a caller the read door refuses is refused, whatever rows it
+ *     addresses: the predicate update and delete that caller addresses are
+ *     answered the read door's own refusal before the write runs, with
+ *     row-level policies and without, and nothing changes. The by-id leg
+ *     refuses the same caller too; with no row-level policy it gives the same
+ *     answer. A caller who reads keeps its scoped
+ *     write, and a write the platform issues under the caller's context, or a
+ *     system write, keeps the answer it had. (The read here is refused by a
+ *     capability the object requires for a read and not for a write, ADR-0066
+ *     ⑤: since an object permission that edits or deletes a record also reads
+ *     it, the one shape in which the write door admits a caller the read door
+ *     refuses.)
  *
  * ## The rig
  *
@@ -86,7 +98,23 @@ function outcome(p: Promise<unknown>): Promise<Outcome> {
   );
 }
 
-async function boot(opts: { bulkRows?: number } = {}): Promise<Rig> {
+/**
+ * The rig's knobs. Defaults are the rig the first suites run on; the
+ * read-refused caller's suite (8) gates the child's read on a capability, and
+ * runs with and without the guard set's row-level policies.
+ */
+interface BootOptions {
+  /** Rows on the bulk object, for the readable-set cap. */
+  bulkRows?: number;
+  /** `requiredPermissions` on the child object (ADR-0066 D3/⑤). */
+  childRequiredPermissions?: Record<string, string[]>;
+  /** Keep the guard set's row-level policies (the default) or run with none. */
+  rls?: boolean;
+  /** Capabilities the guard set grants. */
+  capabilities?: string[];
+}
+
+async function boot(opts: BootOptions = {}): Promise<Rig> {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as never,
@@ -114,7 +142,13 @@ async function boot(opts: { bulkRows?: number } = {}): Promise<Rig> {
         sharingModel: 'public_read_write',
         fields: { id: { name: 'id', type: 'text', primaryKey: true }, name: { name: 'name', type: 'text' } },
       },
-      { name: CHILD, label: 'Child', sharingModel: 'public_read_write', fields: childFields },
+      {
+        name: CHILD,
+        label: 'Child',
+        sharingModel: 'public_read_write',
+        ...(opts.childRequiredPermissions ? { requiredPermissions: opts.childRequiredPermissions } : {}),
+        fields: childFields,
+      },
       { name: BULK, label: 'Bulk', sharingModel: 'public_read_write', fields: childFields },
     ],
   } as never);
@@ -151,15 +185,19 @@ async function boot(opts: { bulkRows?: number } = {}): Promise<Rig> {
   ];
   const guard = PermissionSetSchema.parse({
     name: 'qa_pw_guard',
+    ...(opts.capabilities ? { systemPermissions: opts.capabilities } : {}),
     objects: { [PARENT]: crud, [CHILD]: crud, [BULK]: crud },
-    rowLevelSecurity: [...rls(CHILD), ...rls(BULK)],
+    rowLevelSecurity: opts.rls === false ? [] : [...rls(CHILD), ...rls(BULK)],
   });
   // Edit and delete on the child, and no read: the read door refuses this
   // caller outright, which is not a hidden row.
-  const writeOnly = PermissionSetSchema.parse({
+  // The authoring schema refuses this shape (an object permission that edits
+  // or deletes a record also reads it), so it is built raw — the shape a row
+  // stored before that refusal still carries.
+  const writeOnly = {
     name: 'qa_pw_write_only',
     objects: { [CHILD]: { allowRead: false, allowCreate: false, allowEdit: true, allowDelete: true } },
-  });
+  } as unknown as ReturnType<typeof PermissionSetSchema.parse>;
   const services: Record<string, unknown> = {
     manifest: { register: vi.fn() },
     objectql: engine,
@@ -285,14 +323,16 @@ describe('a predicate write matches only the rows the caller can read', () => {
       else expect(after).toBeNull();
     });
 
-    it(`${verb}: a caller the read door REFUSES keeps the answer the write had — a refusal is not a hidden row`, async () => {
+    it(`${verb}: a stored set granting ${verb} without read writes nothing — an object permission that ${verb}s a record also reads it`, async () => {
       const r = await boot();
+      const before = await names(r);
       await expect(r.engine.find(CHILD, { context: { ...WRITE_ONLY_CALLER } } as never)).rejects.toMatchObject({ status: 403 });
 
       const got = await write(r, ids('c_hidden_open', 'c_shared'), WRITE_ONLY_CALLER);
 
-      // No read question narrowed it: both rows are matched and changed.
-      expect(got).toEqual({ kind: 'landed', result: 2 });
+      // The object gate refuses before any row is matched: the grant has no read half.
+      expect(got).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect(await names(r)).toEqual(before);
     });
 
     it(`${verb}: a store fault on the read question propagates, and nothing is written`, async () => {
@@ -359,5 +399,95 @@ describe('the by-id doors keep their answers', () => {
     const r = await boot();
     const got = await outcome(r.engine.update(CHILD, { name: 'x' }, { where: { id: 'c_shared_locked' }, context: { ...CALLER } } as never));
     expect(got).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403, message: GATE_SENTENCE });
+  });
+});
+
+describe('a write from a caller the read door refuses is refused, whatever rows it addresses', () => {
+  // The child's read is gated on a capability the caller lacks, and its writes
+  // are not (ADR-0066 ⑤), so the write door admits a caller the read door
+  // refuses. The rig is a `single` install (its Default Organization), so every
+  // answer here is the `single` posture's.
+  const READ_CAP = 'qa_pw_read_cap';
+  const READ_GATED = { childRequiredPermissions: { read: [READ_CAP] } };
+  const EVERY_ROW = ids('c_own', 'c_hidden_locked', 'c_hidden_open', 'c_shared_locked', 'c_shared');
+
+  for (const verb of ['update', 'delete'] as const) {
+    const write = (r: Rig, where: Record<string, unknown>, context?: Record<string, unknown>) =>
+      verb === 'update' ? r.update(where, context) : r.remove(where, context);
+
+    for (const rls of [true, false]) {
+      const policies = rls ? 'under row-level policies' : 'with no row-level policy';
+      it(`${verb}, ${policies}: the caller gets the read door's refusal for every predicate, and nothing changes`, async () => {
+        const r = await boot({ ...READ_GATED, rls });
+        const read = await outcome(r.engine.find(CHILD, { where: EVERY_ROW, context: { ...CALLER } } as never));
+        expect(read).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+        const before = await names(r);
+
+        const answers = [
+          await write(r, EVERY_ROW),
+          await write(r, ids('c_own')),
+          await write(r, ids('c_hidden_open')),
+          await write(r, { team: 'ops' }),
+          await write(r, ids('c_nowhere')),
+        ];
+
+        for (const got of answers) expect(got).toEqual(read);
+        // Refused means untouched, every row.
+        expect(await names(r)).toEqual(before);
+      });
+    }
+
+    it(`${verb}: the by-id leg gives that caller the same answer`, async () => {
+      const r = await boot({ ...READ_GATED, rls: false });
+      const read = await outcome(r.engine.find(CHILD, { where: ids('c_own'), context: { ...CALLER } } as never));
+      const predicate = await write(r, ids('c_own'));
+      const byId = await outcome(
+        verb === 'update'
+          ? r.engine.update(CHILD, { name: 'swept' }, { where: { id: 'c_own' }, context: { ...CALLER } } as never)
+          : r.engine.delete(CHILD, { where: { id: 'c_own' }, context: { ...CALLER } } as never),
+      );
+      expect(read).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect(predicate).toEqual(read);
+      expect(byId).toEqual(read);
+      expect((await r.stored(CHILD, 'c_own'))?.name).toBe('mine');
+    });
+
+    it(`${verb}: a caller holding the capability the read asks for keeps its write, scoped to the rows it reads`, async () => {
+      const r = await boot({ ...READ_GATED, capabilities: [READ_CAP] });
+      expect(await outcome(r.engine.find(CHILD, { where: ids('c_own'), context: { ...CALLER } } as never)))
+        .toMatchObject({ kind: 'landed' });
+
+      const got = await write(r, ids('c_own', 'c_hidden_locked', 'c_hidden_open'));
+
+      expect(got).toEqual({ kind: 'landed', result: 1 });
+      const after = await names(r);
+      if (verb === 'update') expect(after.c_own).toBe('swept');
+      else expect(after).not.toHaveProperty('c_own');
+      expect(after.c_hidden_locked).toBe('theirs, hidden, locked');
+      expect(after.c_hidden_open).toBe('theirs, hidden, open');
+    });
+  }
+
+  it('a predicate write the platform issues under that caller\'s context, and a system write, keep the answers they had', async () => {
+    const r = await boot(READ_GATED);
+    r.engine.registerHook(
+      'beforeUpdate',
+      async (hookCtx: any) => {
+        await hookCtx.api.object(CHILD).update({ name: 'written by the hook' }, { where: ids('c_hidden_open'), multi: true });
+      },
+      { object: PARENT, packageId: PACKAGE },
+    );
+
+    const viaHook = await outcome(
+      r.engine.update(PARENT, { name: 'renamed' }, { where: { id: 'p_hook' }, context: { ...CALLER } } as never),
+    );
+    const system = await outcome(
+      r.engine.update(CHILD, { name: 'written by the system' }, { where: ids('c_shared'), multi: true, context: { isSystem: true } } as never),
+    );
+
+    expect(viaHook).toMatchObject({ kind: 'landed' });
+    expect((await r.stored(CHILD, 'c_hidden_open'))?.name).toBe('written by the hook');
+    expect(system).toEqual({ kind: 'landed', result: 1 });
+    expect((await r.stored(CHILD, 'c_shared'))?.name).toBe('written by the system');
   });
 });

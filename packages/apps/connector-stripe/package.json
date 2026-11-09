@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/connector-app-stripe",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Stripe connector app (open edition, read only): Stripe's OpenAPI document, trimmed offline to eight read operations, as a declarative `openapi` connector instance authenticated by a restricted secret key the administrator supplies through the credential store.",
   "license": "Apache-2.0",
   "private": true,

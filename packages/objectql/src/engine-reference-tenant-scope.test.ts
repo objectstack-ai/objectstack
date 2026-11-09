@@ -546,9 +546,10 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     const open = await refusalOf(() => insertLine('hy_open'));
     const nowhere = await refusalOf(() => insertLine('h_nowhere'));
 
-    // ADR-0137 D2: the unbound header leaves `note`'s requirement without a
-    // verdict, and that refusal precedes the reference guard's.
-    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'rule_violation' }] };
+    // [#29029] The header the write names is judged by the reference check
+    // before the record's rules: an unreadable header answers as one that
+    // exists nowhere.
+    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] };
     expect(locked).toBeInstanceOf(ValidationError);
     expect(envelopeOf(locked)).toEqual(expected);
     expect(envelopeOf(open)).toEqual(expected);
@@ -566,8 +567,8 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     const locked = await refusalOf(() => repoint('hy_locked'));
     const open = await refusalOf(() => repoint('hy_open'));
 
-    // ADR-0137 D2: see the describe's docblock — alike, and the rule's refusal.
-    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'rule_violation' }] };
+    // [#29029] Alike, and the reference check's refusal: the repoint names the header.
+    const expected = { status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] };
     expect(envelopeOf(locked)).toEqual(expected);
     expect(envelopeOf(open)).toEqual(expected);
     expect(storeFor('pb_line').get('ln_x')?.header).toBe('hx_open');
@@ -662,10 +663,11 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
     const global = await refusalOf(() => insertLine('gh_locked', 'pb_gline'));
     expect(envelopeOf(global)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'required' }] });
     // Bound because the engine withheld the tenant for this master (ADR-0066),
-    // on both of the write's header reads (#22519: the caller's read door, then
-    // the elevated read).
+    // on each of the write's header reads: the binding's two (#22519: the
+    // caller's read door, then the elevated read) and the reference check's
+    // read door, which runs before the record's rules (#29029).
     const read = observed.filter((c) => c.object === 'pb_gheader' && c.method === 'find');
-    expect(read).toHaveLength(2);
+    expect(read).toHaveLength(3);
     for (const r of read) expect(r.options?.tenantId).toBeUndefined();
   });
 
@@ -681,20 +683,21 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
       engine.insert('pb_line', { id: 'ln_grp', header: 'hy_locked' }, { context: GROUP_MEMBER } as any));
 
     expect(envelopeOf(inside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'required' }] });
-    // Both of the write's header reads (#22519: the caller's read door, then
-    // the elevated read) reach the union.
+    // Each of the write's header reads reaches the union: the binding's two
+    // (#22519: the caller's read door, then the elevated read) and the
+    // reference check's read door (#29029).
     const read = observed.filter((c) => c.object === 'pb_header' && c.method === 'find');
-    expect(read).toHaveLength(2);
+    expect(read).toHaveLength(3);
     for (const r of read) expect([...(r.options?.tenantIds ?? [])].sort()).toEqual([ORG_X, ORG_Y].sort());
 
     // Lit control: a member whose set is org X alone cannot see the org-Y
-    // header, so it binds absent and the write answers as an absent header does
-    // (ADR-0137 D2: `note`'s requirement has no verdict, and is refused).
+    // header, so the write answers as an absent header does (#29029: the
+    // reference check, before the record's rules).
     const ONLY_X = { ...MEMBER_X, accessible_org_ids: [ORG_X] } as unknown as ExecutionContext;
     const outside = await refusalOf(() =>
       engine.insert('pb_line', { id: 'ln_x_only', header: 'hy_locked' }, { context: ONLY_X } as any));
 
-    expect(envelopeOf(outside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'note', code: 'rule_violation' }] });
+    expect(envelopeOf(outside)).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: [{ field: 'header', code: 'reference_not_found' }] });
   });
 
   it('the header read asks the caller\'s read door first, then runs ELEVATED and TENANT-SCOPED — the two halves of `{ ...context, isSystem: true }`', async () => {

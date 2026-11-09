@@ -132,9 +132,16 @@ import { GeolocationField } from '../widgets/GeolocationField';
 import { SignatureField } from '../widgets/SignatureField';
 import { QRCodeField } from '../widgets/QRCodeField';
 import { ObjectRefField } from '../widgets/ObjectRefField';
+import { ShareableObjectRefField } from '../widgets/ShareableObjectRefField';
 import { FilterConditionField } from '../widgets/FilterConditionField';
 import { RecipientPickerField } from '../widgets/RecipientPickerField';
-import { PositionRefField, PermissionRefField } from '../widgets/RegistryRefField';
+import {
+  PositionRefField,
+  PermissionRefField,
+  NotificationTopicField,
+  NotificationChannelField,
+} from '../widgets/RegistryRefField';
+import { QuietHoursField } from '../widgets/QuietHoursField';
 
 /** Same widget map as the #3291 sweep, so the parity check covers the registry. */
 const WIDGETS: Record<string, ComponentType<any>> = {
@@ -184,10 +191,14 @@ const WIDGETS: Record<string, ComponentType<any>> = {
   signature: SignatureField,
   qrcode: QRCodeField,
   'object-ref': ObjectRefField,
+  'shareable-object-ref': ShareableObjectRefField,
   'filter-condition': FilterConditionField,
   'recipient-picker': RecipientPickerField,
   'position-ref': PositionRefField,
   'permission-ref': PermissionRefField,
+  'notification-topic': NotificationTopicField,
+  'notification-channel': NotificationChannelField,
+  'quiet-hours': QuietHoursField,
 };
 
 /**

@@ -29,12 +29,19 @@ import {
   // judges a key-admitted request by the KEY's answer.
   resolveApiKeyAdmission,
   userAuthGateSourceOf,
+  // [#31898] The one helper a door's facts meet the client-address trust rule through.
+  credentialUseClientFor,
   // [#23367] The API-key lifecycle policy source, and its branded refusal.
   apiKeyLifecyclePolicySourceOf,
   isApiKeyLifecycleRefusalError,
   // [#25693] The organization wall's one verdict, asked for an unclaimed
   // file's download (`isWithinCallerOrganization`).
   computeTenantLayer0Verdict,
+  // [#30892] An upload link acts as the user who minted it, resolved again
+  // when it is used: their grants (the `runAs: 'user'` automation
+  // precedent) and their organization claim vetted under the posture in force.
+  resolveUserAuthzGrants,
+  vetOrganizationClaim,
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
@@ -52,15 +59,23 @@ import {
   NoopMetricsRegistry,
   type MetricsRegistry,
 } from '@objectstack/observability';
+import { composedClusterDriver } from '@objectstack/service-cluster';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
+import { MULTI_REPLICA_LOCAL_STORAGE_REFUSAL, refusesUnsharedLocalRoot } from './multi-replica-local-root.js';
 import type { LocalStorageAdapterOptions } from './local-storage-adapter.js';
 import { S3StorageAdapter } from './s3-storage-adapter.js';
 import type { S3StorageAdapterOptions } from './s3-storage-adapter.js';
 import { StorageMetadataStore, releasingRecordOf } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
 import type { TenancyPosture } from '@objectstack/spec/security';
-import { registerStorageFamily } from './storage-routes.js';
-import type { FileReadVerdict, StorageGatedSessionReader, StorageUploadSession } from './storage-routes.js';
+import { registerStorageFamily, DEFAULT_DOWNLOAD_TTL } from './storage-routes.js';
+import type {
+  FileReadVerdict,
+  StorageGatedSessionReader,
+  StorageUploadAttacher,
+  StorageUploadSession,
+} from './storage-routes.js';
+import type { RecordFileAccessDeps, UploadLinkDoor } from './record-file-access.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
 import { installFileReferenceHooks, type FileReferenceEngine } from './file-reference-lifecycle.js';
 import { installSysFileStorageOwnedColumnsGuard } from './sys-file-storage-owned-columns.js';
@@ -71,7 +86,11 @@ import {
   installAttachmentReadVisibility,
 } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
-import { FileAttachmentService, type FileAttachmentEngine } from './file-attachment-service.js';
+import {
+  FileAttachmentService,
+  type FileAttachmentEngine,
+  type ICallerFileAttachmentService,
+} from './file-attachment-service.js';
 import { FieldFileService } from './field-file-service.js';
 import { SystemFile, SystemUploadSession } from './objects/index.js';
 // ADR-0052 §3 ownership: `sys_attachment` (a file↔record link) belongs with the
@@ -87,6 +106,7 @@ import { mayActIrreversibly } from '@objectstack/platform-objects/system';
 import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { SwappableStorageService } from './swappable-storage-service.js';
+import { S3SettingsIncompleteError, storageTestCopy } from './storage-test-copy.js';
 import {
   resolveStorageTarget,
   needsStorageSwap,
@@ -286,7 +306,7 @@ export class StorageServicePlugin implements Plugin {
       const bucket = values.s3_bucket as string | undefined;
       const region = values.s3_region as string | undefined;
       if (!bucket || !region) {
-        throw new Error('StorageServicePlugin: S3 adapter requires s3_bucket and s3_region');
+        throw new S3SettingsIncompleteError();
       }
       const opts: S3StorageAdapterOptions = {
         bucket,
@@ -404,6 +424,13 @@ export class StorageServicePlugin implements Plugin {
             return null;
           }
         },
+        // [#30892] The record-file verbs (read a record's file, mint and spend
+        // an upload link), bound over the download door's own verdict.
+        recordFiles: bindRecordFileAccess(
+          toGateRegistry(ctx),
+          () => this.attachmentEngine,
+          this.options.basePath ?? DEFAULT_STORAGE_BASE_PATH,
+        ),
       }),
     );
     // [#25779] The server-side field-file verb, under `FIELD_FILE_SERVICE`.
@@ -786,6 +813,22 @@ export class StorageServicePlugin implements Plugin {
               keyPrefix: this.options.s3?.keyPrefix ?? null,
             });
             if (!needsStorageSwap(this.target, nextTarget)) return;
+            // cloud#3814: several replicas declared over the redis cluster
+            // driver may not move onto an unshared local root — the boot
+            // refuses that root (the `kernel:ready` hook below), and a settings
+            // change must not reach it either. The current adapter keeps
+            // serving; the change is not applied.
+            if (refusesUnsharedLocalRoot({
+              kind: nextTarget.kind,
+              env: process.env,
+              clusterDriver: composedClusterDriver(ctx),
+            })) {
+              ctx.logger.error(
+                `${MULTI_REPLICA_LOCAL_STORAGE_REFUSAL} The storage settings change was NOT applied: the current `
+                + 'adapter keeps serving.',
+              );
+              return;
+            }
 
             const next = await this.buildAdapterFromValues(values);
             this.pendingSwapMovesStore = movesStorageLocation(this.target, nextTarget);
@@ -814,7 +857,11 @@ export class StorageServicePlugin implements Plugin {
         // Register the live `storage/test` probe handler.
         if (typeof settings.registerAction === 'function' && this.storage) {
           const proxy = this.storage;
-          settings.registerAction('storage', 'test', async ({ values, payload }: any) => {
+          settings.registerAction('storage', 'test', async ({ values, payload, locale }: any) => {
+            // [#30335] The answer is the toast the administrator reads: written
+            // in the caller's display language, which the settings action
+            // route hands over as `locale` (English when none is given).
+            const copy = storageTestCopy(typeof locale === 'string' ? locale : undefined);
             // Merge the (possibly unsaved) form state posted as
             // `payload.values` over the persisted snapshot so an operator
             // can validate edits before hitting "Save". Matches the
@@ -851,7 +898,10 @@ export class StorageServicePlugin implements Plugin {
               try {
                 target = await this.buildAdapterFromValues(merged);
               } catch (err: any) {
-                return { ok: false, severity: 'error', message: err?.message ?? String(err) };
+                const message = err instanceof S3SettingsIncompleteError
+                  ? copy.s3SettingsIncomplete
+                  : copy.failed(err?.message ?? String(err));
+                return { ok: false, severity: 'error', message };
               }
             }
 
@@ -900,18 +950,18 @@ export class StorageServicePlugin implements Plugin {
                 // unguarded delete, whose failure IS a probe failure the
                 // operator must be told about, and no path deletes twice.
                 await removeProbeObject();
-                return { ok: false, severity: 'error', message: 'Probe download did not match upload.' };
+                return { ok: false, severity: 'error', message: copy.downloadMismatch };
               }
               await target.delete(probeKey);
               const adapter = String(merged.adapter ?? this.options.adapter ?? 'local');
               return {
                 ok: true,
                 severity: 'info',
-                message: `Storage round-trip succeeded (adapter=${adapter}).`,
+                message: copy.succeeded(adapter),
               };
             } catch (err: any) {
               await removeProbeObject();
-              return { ok: false, severity: 'error', message: err?.message ?? String(err) };
+              return { ok: false, severity: 'error', message: copy.failed(err?.message ?? String(err)) };
             }
           });
           ctx.logger.info('StorageServicePlugin: registered settings action storage/test');
@@ -942,6 +992,24 @@ export class StorageServicePlugin implements Plugin {
             + 'restart after repairing the settings service, or pass `bindToSettings: false` to '
             + 'make the static configuration deliberate.',
         );
+      }
+    });
+
+    // ── cloud#3814: no unshared local root under declared replicas ─────
+    // Registered after the hook above, so it runs after `applySettings` has
+    // settled: the adapter in use is decided there, not in `init()` — a
+    // deployment whose `storage` settings (or `OS_STORAGE_ADAPTER=s3`) select
+    // S3 is constructed local and swapped at that hook. `this.target` is the
+    // adapter that will serve. Thrown from `kernel:ready`, the refusal fails
+    // the boot before any socket opens. A single node, any other cluster
+    // driver, the S3 adapter and a declared shared root boot as before.
+    ctx.hook('kernel:ready', async () => {
+      if (refusesUnsharedLocalRoot({
+        kind: this.target?.kind ?? 'local',
+        env: process.env,
+        clusterDriver: composedClusterDriver(ctx),
+      })) {
+        throw new Error(MULTI_REPLICA_LOCAL_STORAGE_REFUSAL);
       }
     });
   }
@@ -987,6 +1055,16 @@ function resolveMetrics(
     // Service not registered — silent fall-through.
   }
   return new NoopMetricsRegistry();
+}
+
+/**
+ * [#31898] The transport's own peer address (`IHttpRequest.remoteAddress`),
+ * when the request carries one: the fact every key-admitting storage door hands
+ * the key-admission seam for the `credential_use` row.
+ */
+function peerAddressOf(req: { remoteAddress?: unknown }): string | undefined {
+  const address = req?.remoteAddress;
+  return typeof address === 'string' && address ? address : undefined;
 }
 
 /** Normalize adapter request headers to a Web `Headers` (better-auth needs it). */
@@ -1175,6 +1253,7 @@ export function composeStorageRoutes(
   const resolveSession = buildAuthSessionResolver(registry);
   const readGatedSessionUser = buildAuthGateSessionReader(registry, engine);
   const authorizeFileRead = buildFileReadAuthorizer(registry, engine);
+  const attachUpload = buildUploadAttacher(registry, engine);
   const resolveFileHolder =
     engine && typeof (engine as any).find === 'function'
       ? (file: FileRecord) => findFileHolder(engine as any, file.id, file as any)
@@ -1207,6 +1286,11 @@ export function composeStorageRoutes(
     },
     // ADR-0069 — bound here with the other gates, so both mounts carry it.
     readGatedSessionUser,
+    // The commit door's `attachTo` arm — bound here with the other gates.
+    attachUpload,
+    // [#30892] The upload-link doors, served by the `file-attachments`
+    // service when the kernel has the storage plugin's.
+    resolveUploadLinkDoor(registry),
   );
 
   return {
@@ -1215,6 +1299,101 @@ export function composeStorageRoutes(
     downloadAuthorizer: authorizeFileRead !== undefined,
     tombstoneHolderResolver: resolveFileHolder !== undefined,
     metadataStore: engine ? 'engine' : 'memory',
+  };
+}
+
+/**
+ * [#30892] The upload-link doors' verbs, read per request from the kernel's
+ * `file-attachments` service (the plugin's `FileAttachmentService`), so a
+ * host's mount and the plugin's serve the same links. `undefined` from the
+ * reader when the kernel has no such service: the doors then answer the
+ * unusable-link refusal, as for any link this kernel never issued.
+ */
+function resolveUploadLinkDoor(registry: StorageGateRegistry): () => UploadLinkDoor | undefined {
+  return () => {
+    let service: Partial<UploadLinkDoor> | undefined;
+    try {
+      service = registry.getService<Partial<UploadLinkDoor>>('file-attachments') ?? undefined;
+    } catch {
+      return undefined;
+    }
+    return service && typeof service.inspectUploadLink === 'function' && typeof service.consumeUploadLink === 'function'
+      ? (service as UploadLinkDoor)
+      : undefined;
+  };
+}
+
+/**
+ * [#30892] What the record-file verbs on `FileAttachmentService` are bound
+ * over, from the kernel — each answer the existing door's own:
+ *
+ *  - `judgeFileRead`: the download door's verdict ({@link judgeFileRead}),
+ *    under the door's wiring fact as the file-reference rule reads it (a
+ *    kernel with no `auth` service binds no download gate, so every file is
+ *    served there).
+ *  - `isServable`: the download doors' servability — committed, or a
+ *    tombstone the reap guard's `findFileHolder` still finds held.
+ *  - `resolveUserContext`: the minting user, resolved now. Their grants are
+ *    read fresh (`bypassGrantsCache`, the `runAs: 'user'` precedent: a link is
+ *    not request-shaped), in the organization the link was minted in while a
+ *    current membership backs it under a walled posture
+ *    (`vetOrganizationClaim`, the session arm of `resolveAuthzContext`). A
+ *    claim that is no longer backed answers `null`: the user cannot act there
+ *    now, so nothing lands. A posture read that fails throws the branded
+ *    outage, never a verdict.
+ *  - `getDownloadTtl`: the record-governed download lifetime the routes use.
+ */
+function bindRecordFileAccess(
+  registry: StorageGateRegistry,
+  getEngine: () => IDataEngine | null,
+  basePath: string,
+): Pick<RecordFileAccessDeps, 'judgeFileRead' | 'isServable' | 'resolveUserContext' | 'getDownloadTtl' | 'getBasePath'> {
+  return {
+    judgeFileRead: async (file, context) => {
+      const engine = getEngine();
+      if (!engine) return 'deny';
+      if (!resolveGateAuthService(registry)) return 'allow';
+      return judgeFileRead(registry, engine, file, context);
+    },
+    isServable: async (file) => {
+      if (file.status === 'committed') return true;
+      const engine = getEngine();
+      if (file.status !== 'deleted' || !engine || typeof (engine as any).find !== 'function') return false;
+      try {
+        return (await findFileHolder(engine as any, file.id, file as any)) !== null;
+      } catch {
+        return false;
+      }
+    },
+    resolveUserContext: async (userId, organizationId) => {
+      const engine = getEngine();
+      if (!engine) return null;
+      const posture = await resolveAdmissionTenancyPosture(registry);
+      const grants = await resolveUserAuthzGrants(engine, userId, {
+        ...(organizationId ? { tenantId: organizationId } : {}),
+        bypassGrantsCache: true,
+      });
+      const tenantId = vetOrganizationClaim(organizationId ?? undefined, grants.accessible_org_ids, posture);
+      if (organizationId && tenantId === undefined) return null;
+      return {
+        userId,
+        ...(tenantId ? { tenantId } : {}),
+        isSystem: false,
+        positions: grants.positions,
+        permissions: grants.permissions,
+        systemPermissions: grants.systemPermissions,
+        org_user_ids: grants.org_user_ids,
+        accessible_org_ids: grants.accessible_org_ids,
+        ...(grants.tabPermissions ? { tabPermissions: grants.tabPermissions } : {}),
+        ...(grants.posture ? { posture: grants.posture } : {}),
+        ...(grants.audience ? { audience: grants.audience } : {}),
+        ...(grants.email ? { email: grants.email } : {}),
+        // [ADR-0151 D3] An AI service account reads as the agent it is.
+        ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
+      };
+    },
+    getDownloadTtl: () => DEFAULT_DOWNLOAD_TTL,
+    getBasePath: () => basePath,
   };
 }
 
@@ -1350,6 +1529,10 @@ function buildAuthGateSessionReader(
         // unclaimed-file download) never read a key and answer by the session
         // alone; the raw-transfer routes answer by their capability token.
         apiKeyLifecyclePolicySourceOf(auth),
+        // [#31898] Where the request came from, for the `credential_use` row
+        // this admission's use stamp writes; the auth service applies the
+        // trust rule to the transport's peer and the headers.
+        credentialUseClientFor(auth, { headers, remoteAddress: peerAddressOf(req) }),
       );
       if (admission.outcome === 'held') return { authGate: admission.gate };
       // [#24366] Every other answer falls through to the session's own gate.
@@ -1513,7 +1696,7 @@ async function resolveAdmissionTenancyPosture(
 function buildFileReadAuthorizer(
   registry: StorageGateRegistry,
   engine: IDataEngine | null,
-): ((file: FileRecord, req: { headers?: unknown }) => Promise<FileReadVerdict>) | undefined {
+): ((file: FileRecord, req: { headers?: unknown; remoteAddress?: unknown }) => Promise<FileReadVerdict>) | undefined {
   // The door's wiring fact: no `auth` service or no data engine binds no gate
   // at all, and parent-governed downloads stay open (the declared bare-kernel
   // behaviour). The service is looked up once, here, as the family's gate
@@ -1578,6 +1761,9 @@ function buildFileReadAuthorizer(
         accessToken: 'carry',
         oauth: undefined,
         onAdmission: undefined,
+        // [#31898] The transport's own peer address, for the `credential_use` row
+        // an admitted API key writes; the auth service applies the trust rule.
+        transport: { remoteAddress: peerAddressOf(req) },
       });
       if (!context?.userId) return 'unauthenticated';
 
@@ -1595,6 +1781,78 @@ function buildFileReadAuthorizer(
       if (isApiKeyLifecycleRefusalError(err)) throw err;
       return 'deny'; // fail closed
     }
+  };
+}
+
+/**
+ * The commit door's `attachTo` arm (`POST …/upload/complete`): attach the
+ * caller's own pending upload to a record and commit it, AS THE CALLER — the
+ * record attachments surface's attach verb, which the browser panel calls
+ * instead of a `sys_attachment` create through the generic data door.
+ *
+ * The caller is the request's FULL execution context, resolved through the one
+ * request-to-context composition with the download authorizer's parameters
+ * (the attach is a write judged by the caller's grants, RLS and sharing, so a
+ * bare `{ userId }` would not do), and the verb is the file-attachments
+ * service's caller-scoped `attachUploadAs`, looked up per request: it asks
+ * every check, and its `sys_attachment` insert vouches for that one file id
+ * and for nothing else. A request that resolves no user is refused
+ * `AUTH_REQUIRED` / `401`; a kernel whose file-attachments service is not
+ * registered, `SERVICE_UNAVAILABLE` / `503`. Everything else is the verb's own
+ * answer, thrown with its declared `code` and `status` for the door to relay.
+ *
+ * `undefined` — the door then refuses `attachTo` with `501` — when the kernel
+ * has no `auth` service or no data engine: there is no caller to attach as.
+ */
+function buildUploadAttacher(
+  registry: StorageGateRegistry,
+  engine: IDataEngine | null,
+): StorageUploadAttacher | undefined {
+  const authService = resolveGateAuthService(registry);
+  if (!authService || !engine) return undefined;
+  // Declared refusals (`refusal: true`): their text is written for the caller.
+  const refusal = (status: number, code: string, message: string) =>
+    Object.assign(new Error(message), { status, code, refusal: true });
+  return async (req, upload) => {
+    const headers = toWebHeaders(req);
+    // The download authorizer's parameters (see `buildFileReadAuthorizer`):
+    // the family's door has already asked the ADR-0069 gate on this request.
+    const context = headers
+      ? await resolveRequestExecutionContext({
+          headers,
+          ql: engine,
+          authService,
+          tenancy: tenancyServiceResolver(registry),
+          anonymous: 'fail-closed',
+          authGate: 'resolved',
+          credentials: 'api-key-and-session',
+          sessionApi: 'optional',
+          session: 'request',
+          localization: 'withhold',
+          requestLocale: undefined,
+          accessToken: 'carry',
+          oauth: undefined,
+          onAdmission: undefined,
+          // [#31898] The transport's own peer address, for the `credential_use` row
+          // an admitted API key writes; the auth service applies the trust rule.
+          transport: { remoteAddress: peerAddressOf(req) },
+        })
+      : undefined;
+    if (!context?.userId) throw refusal(401, 'AUTH_REQUIRED', 'Authentication required to attach a file');
+    let service: Partial<ICallerFileAttachmentService> | undefined;
+    try {
+      service = registry.getService<Partial<ICallerFileAttachmentService>>('file-attachments');
+    } catch {
+      service = undefined;
+    }
+    if (!service || typeof service.attachUploadAs !== 'function') {
+      throw refusal(
+        503,
+        'SERVICE_UNAVAILABLE',
+        'The file-attachments service is not registered in this kernel, so an upload cannot be attached.',
+      );
+    }
+    return service.attachUploadAs(upload, context);
   };
 }
 

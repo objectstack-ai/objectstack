@@ -57,13 +57,16 @@ const LOCALIZATION = {
   },
 };
 
+const POLICY_HELP = 'Recorded automatically (UTC, ISO 8601) the first time the server runs with this policy.';
+const POLICY_MESSAGE = `Key policy started at does not match the expected format. ${POLICY_HELP}`;
+
 const AUTH = {
   manifest: {
     namespace: 'auth',
     version: 1,
     label: 'Authentication',
     specifiers: [
-      { type: 'text', key: 'api_key_policy_started_at', label: 'Key policy started at' },
+      { type: 'text', key: 'api_key_policy_started_at', label: 'Key policy started at', description: POLICY_HELP },
     ],
   },
   values: {
@@ -74,9 +77,7 @@ const AUTH = {
 const TIMEZONE_MESSAGE =
   'Default timezone must be a valid IANA time zone identifier, e.g. Europe/Zurich (got "Mars/Olympus")';
 const CURRENCY_MESSAGE = 'Default currency must be a valid ISO 4217 currency code (got "XYZ")';
-const POLICY_MESSAGE =
-  'Key policy started at does not match the expected format. Recorded automatically (UTC, ISO 8601) ' +
-  'the first time the server runs with this policy.';
+
 
 interface Refused {
   field: string;
@@ -206,7 +207,14 @@ describe('a field-by-field refusal toasts the settings by label (objectui#13146)
     expect(msg).not.toContain('Recorded automatically');
     expect(msg).not.toMatch(/incomplete/i);
 
-    expect(await screen.findByText(POLICY_MESSAGE)).toBeTruthy();
+    // The row says the format miss in the console's words, with the help line
+    // the refusal replaces (objectstack#30206), not the server's sentence.
+    expect(
+      await screen.findByText(
+        VIEW.invalidFormatHelp.replace('{{setting}}', 'Key policy started at').replace('{{help}}', POLICY_HELP),
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(POLICY_MESSAGE)).toBeNull();
   });
 
   it('two refused settings: the plural slot, both labels joined by the pack separator', async () => {

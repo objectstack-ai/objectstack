@@ -8,7 +8,7 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
 import { assertDatasetGroupColumnsDistinct } from '../dataset-group-column-door.js';
-import { assertDatasetDateBucketsTemporal } from '../dataset-date-bucket-door.js';
+import { assertDatasetDateBucketsTemporal, assertDatasetGroupTargetsStored } from '../dataset-date-bucket-door.js';
 import {
   declaredDatetimeLowering,
   declaredDateColumn,
@@ -44,6 +44,7 @@ import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
+import { declaredCubeFilterMember, declaredCubeMemberKey } from '../cube-member-key.js';
 import {
   rebucketCrossObject,
   RECOMBINABLE_METHODS,
@@ -58,7 +59,7 @@ import {
 // [#21365] `windowClauseSql` is the same rule for the row window: one spelling
 // of an offset-only window per dialect, shared with the native face.
 // [#25907] `orderClauseSql` likewise for the order and its NULL placement.
-import { aggregateOfMeasure, orderClauseSql, windowClauseSql } from './native-sql-strategy.js';
+import { aggregateOfMeasure, orderClauseSql, windowClauseSql, windowTopSql } from './native-sql-strategy.js';
 
 /**
  * [#10861 / commit 399ecad58] Where a member in the cross-object envelope's inventory
@@ -144,6 +145,27 @@ interface CrossObjectPlanDim {
 
 interface CrossObjectPlan {
   crossDims: CrossObjectPlanDim[];
+}
+
+/**
+ * [#29304] The engine's refusal of a VIRTUAL (`formula`) attribute on the
+ * cross-object path, judged by the service's copy
+ * (`dataset-date-bucket-door.ts` `assertDatasetGroupTargetsStored`) on the
+ * keys that path's FK-resolve aggregate hands the related object
+ * (`resolveFkAttr`: `groupBy: ['id', attr]`). The engine refuses that
+ * aggregate, but only once a base row carries a key to resolve: an empty base
+ * served the dimension, and the echo, which runs nothing, rendered a `LEFT
+ * JOIN` grouping by a column no table stores. Called by both, after the base
+ * keys are judged, so the query and its echo give one answer on any data. A
+ * host that wired no field types is not judged.
+ */
+function assertCrossObjectAttrsStored(plan: CrossObjectPlan | null | undefined, ctx: StrategyContext): void {
+  const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+  if (!plan || typeof declared !== 'function') return;
+  for (const cd of plan.crossDims) {
+    if (cd.attr === 'id') continue;
+    assertDatasetGroupTargetsStored(cd.refObject, ['id', cd.attr], (field) => declared.call(ctx, cd.refObject, field));
+  }
 }
 
 /**
@@ -245,9 +267,9 @@ function pushGroupKey(groupBy: AggregateGroupKey[], item: AggregateGroupKey): vo
 }
 
 /**
- * The member `member` resolves to in `cube`'s `kind` bag: its own key, a
- * `<cube>.`-qualified or other dotted spelling of a key, the key with its dots
- * flattened, or (for a dotted dimension) a synthetic relation traversal.
+ * The member `member` resolves to in `cube`'s `kind` bag: the declared key it
+ * names ({@link declaredCubeMemberKey}, the one rule the door's gates read too),
+ * or (for a dotted dimension that names none) a synthetic relation traversal.
  * Module-level because it reads only the cube; `ObjectQLStrategy.lookupMember`
  * is this function.
  */
@@ -257,36 +279,48 @@ function lookupCubeMember(
   kind: 'dimension' | 'measure',
 ): { sql: string; type?: string } | undefined {
   const bag = kind === 'dimension' ? cube.dimensions : cube.measures;
-  if (bag[member]) return bag[member];
-  if (member.includes('.')) {
-    const [first, ...rest] = member.split('.');
-    const tail = rest.join('.');
-    if (first === cube.name && bag[tail]) return bag[tail];
-    if (bag[tail]) return bag[tail];
-    const flat = member.replace(/\./g, '_');
-    if (bag[flat]) return bag[flat];
-    if (kind === 'dimension') return { sql: member, type: 'string' };
-  } else if (bag[member]) {
-    return bag[member];
-  }
+  const key = declaredCubeMemberKey(cube, bag, member);
+  if (key !== undefined) return bag[key];
+  if (kind === 'dimension' && member.includes('.')) return { sql: member, type: 'string' };
   return undefined;
 }
 
 /**
+ * [#31880] The definition a FILTER member resolves to: the declared member it
+ * names across both bags ({@link declaredCubeFilterMember}: dimensions, then
+ * measures, the where gate's order), else — for a dotted one — the synthetic
+ * relation traversal. `NativeSQLStrategy.lookupFilterMember` is the same
+ * reading, so `CUBE.total` filters the measure's column on both strategies
+ * exactly as `total` does.
+ */
+function lookupCubeFilterMember(cube: Cube, member: string): { sql: string; type?: string } | undefined {
+  const declared = declaredCubeFilterMember(cube, member);
+  if (declared) return declared.kind === 'dimension' ? cube.dimensions[declared.key] : cube.measures[declared.key];
+  return lookupCubeMember(cube, member, 'dimension');
+}
+
+/**
  * The column `member` reads on the base object; `ObjectQLStrategy.resolveFieldName` is this function.
+ * `'any'` is a filter member's reading ({@link lookupCubeFilterMember}).
  * Module-level, and not exported from the package root, so the draft preview names the members over a
  * column with the strategy's own reading (`assertDatasetGroupColumnsDistinct`).
  */
 export function resolveCubeFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
-  if (kind === 'dimension' || kind === 'any') {
+  if (kind === 'any') {
+    const entry = lookupCubeFilterMember(cube, member);
+    return entry ? entry.sql.replace(/^\$/, '') : member;
+  }
+  if (kind === 'dimension') {
     const dim = lookupCubeMember(cube, member, 'dimension');
     if (dim) return dim.sql.replace(/^\$/, '');
   }
-  if (kind === 'measure' || kind === 'any') {
+  if (kind === 'measure') {
     const measure = lookupCubeMember(cube, member, 'measure');
     if (measure) return measure.sql.replace(/^\$/, '');
   }
-  return member.includes('.') ? member.split('.')[1] : member;
+  // [#31842] Undeclared: the member itself. A dotted one is a relationship
+  // path, never its second segment read as a base column.
+  return member;
 }
 
 /** The object an aggregate over `cube` runs on; `ObjectQLStrategy.extractObjectName` is this function. */
@@ -803,7 +837,14 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the query is served. A host that names no declared type is not judged,
     // as the engine judges no undeclared field.
     const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    // [#29304] A key of any form over a virtual (`formula`) field first, as
+    // the engine judges it first: the echo printed `GROUP BY calc` for a
+    // column no table stores.
+    assertDatasetGroupTargetsStored(tableName, echoGroupBy, (field) => declaredType?.call(ctx, tableName, field));
     assertDatasetDateBucketsTemporal(tableName, echoGroupBy, (field) => declaredType?.call(ctx, tableName, field));
+    // [#29304] …then a cross-object dimension over a virtual attribute, as
+    // `executeCrossObject` judges it after its base aggregate.
+    assertCrossObjectAttrsStored(plan, ctx);
     const joinClauses: string[] = [];
     // [#21441] The bucket expression the driver itself groups by for its
     // dialect, read from the `dateBucketSql` hook: `strftime('%Y-%m', …)` on
@@ -1018,7 +1059,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       }
     }
 
-    let sql = `SELECT ${selectParts.join(', ')} FROM "${tableName}"`;
+    // [#31626] On SQL Server a lone limit is the `TOP (n)` after `SELECT` that
+    // driver-sql's find path runs (`windowTopSql`, below with the rest).
+    const dialect = sqlDialectFor(ctx, tableName);
+    let sql = `SELECT ${windowTopSql(query.limit, query.offset, dialect)}${selectParts.join(', ')} FROM "${tableName}"`;
     if (joinClauses.length > 0) sql += ' ' + joinClauses.join(' ');
     if (whereParts.length > 0) {
       sql += ` WHERE ${whereParts.join(' AND ')}`;
@@ -1034,10 +1078,15 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the echoed `sql` and `/analytics/sql` print a window the dialect runs.
     // [#25907] The order renders through its `orderClauseSql`, so the echo
     // states the NULL placement this face applies (`applyOrdering`: last, in
-    // both directions) where the dialect has a spelling for it.
-    const dialect = sqlDialectFor(ctx, tableName);
-    sql += orderClauseSql(query.order, dialect);
-    sql += windowClauseSql(query.limit, query.offset, dialect);
+    // both directions) where the dialect has a spelling for it. [#31626] On
+    // SQL Server the window is `@objectstack/core`'s `mssqlWindow`, the one
+    // driver-sql's find path runs: `ORDER BY (SELECT NULL)` when this echo
+    // states no order and an offset applies, then `OFFSET … ROWS FETCH NEXT …
+    // ROWS ONLY`; it printed `LIMIT n OFFSET m` before, which SQL Server does
+    // not parse.
+    const orderSql = orderClauseSql(query.order, dialect);
+    sql += orderSql;
+    sql += windowClauseSql(query.limit, query.offset, dialect, orderSql !== '');
 
     return { sql, params };
   }
@@ -1530,6 +1579,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       context: ctx.context,
     });
 
+    // [#29304] A cross-object dimension over a virtual attribute, whether or
+    // not a base row carries a key to resolve. See {@link assertCrossObjectAttrsStored}.
+    assertCrossObjectAttrsStored(plan, ctx);
+
     // Resolve each cross-object dim's FK → attribute, SCOPED to the referenced
     // object: a related record the caller cannot read never yields its
     // attribute, so it buckets as RESTRICTED (no leak; ADR-0021 D-C / #3602).
@@ -1853,9 +1906,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     baseObject: string,
     referenceOf: HopReference | undefined,
   ): { object: string; field: string } {
-    const dim = this.lookupMember(cube, member, 'dimension');
-    const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
-    const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
+    // [#31842] An undeclared member is the member itself, as in the native
+    // twin: a dotted one is a relationship path (and `lookupCubeFilterMember`
+    // answers every dotted one), never its tail read as a base column.
+    const rawSql = lookupCubeFilterMember(cube, member)?.sql ?? member;
     if (rawSql.includes('.')) {
       const segments = rawSql.split('.');
       const field = segments[segments.length - 1];

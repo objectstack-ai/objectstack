@@ -18,6 +18,7 @@ import { objectPermissionGrants } from '@objectstack/spec/security';
 import {
   buildEffectiveFieldPermissions,
   buildEffectiveObjectPermissions,
+  engineExternalWriteForbidden,
   fieldPermissionVote,
   holdsSuperuserBypass,
   registryObjectPackageDisabled,
@@ -205,9 +206,15 @@ describe('[#20083] plain wildcard coverage', () => {
     );
     // Seeded all-false, then folded: the super-user entry shape, not the wildcard's own key
     // order — [#20134] with `allowTransfer`, which `modifyAllRecords` grants, appended by the
-    // per-set fold (the wildcard's own `allowTransfer: false` grants nothing and is not copied).
-    expect(Object.keys(map.crm_account)).toEqual(['allowCreate', 'allowRead', 'allowEdit', 'allowDelete', 'allowTransfer', 'apiOperations']);
+    // per-set fold (the wildcard's own `allowTransfer: false` grants nothing and is not copied),
+    // and [#30237 PR 4] the two recycle-bin keys, which `modifyAllRecords` implies (Q5 = A).
+    expect(Object.keys(map.crm_account)).toEqual([
+      'allowCreate', 'allowRead', 'allowEdit', 'allowDelete', 'allowTransfer',
+      'allowRestoreOwnDeleted', 'manageRecycleBin', 'apiOperations',
+    ]);
     expect(map.crm_account.allowTransfer).toBe(true);
+    expect(map.crm_account.allowRestoreOwnDeleted).toBe(true);
+    expect(map.crm_account.manageRecycleBin).toBe(true);
     // …and the private object is the seed's, as before.
     expect(map.crm_secret).toMatchObject({ allowRead: true, allowEdit: true });
   });
@@ -426,7 +433,7 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
     expect(map.crm_hidden_lead.apiOperations).toEqual([]);
     // The controls: the export axis alone, which takes `export` and nothing else.
     expect(map.crm_account.apiOperations).toEqual(
-      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'],
     );
     expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
   });
@@ -444,7 +451,7 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
       source,
     );
     expect(map.crm_secret.apiOperations).toEqual(
-      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'],
     );
     // The public objects the plain wildcard DOES cover keep `export` — an unrestricted one keeps its whole closure.
     expect(map.crm_account).not.toHaveProperty('apiOperations');
@@ -471,6 +478,199 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
       source,
     );
     expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+  });
+});
+
+describe('[#30370] an object whose external write gate is closed grants no write', () => {
+  const SCHEMAS: Record<string, any> = {
+    customer: { name: 'customer', datasource: 'showcase_external' },
+    order: { name: 'order', datasource: 'showcase_external', enable: { apiMethods: ['get', 'list', 'create', 'update'] } },
+    lead: { name: 'lead' },
+  };
+  const source = (forbidden: (name: string) => boolean = (name) => name === 'customer' || name === 'order') => ({
+    allSchemas: () => Object.values(SCHEMAS),
+    schemaOf: (name: string) => SCHEMAS[name],
+    isExternalWriteForbidden: forbidden,
+  });
+  const WRITE_OPERATIONS = ['create', 'update', 'delete', 'upsert', 'bulk', 'import', 'restore', 'purge'];
+  const VERBS = ['allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer'] as const;
+
+  it('an explicit grant, a plain wildcard and a super-user wildcard all lose every write verb, and keep read and export', () => {
+    for (const sets of [
+      [{ objects: { customer: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowTransfer: true, allowExport: true }, lead: { allowRead: true, allowCreate: true } } }],
+      [{ objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowExport: true } } }],
+      [{ objects: { '*': { allowRead: true, allowExport: true, viewAllRecords: true, modifyAllRecords: true } } }],
+    ]) {
+      const map: any = buildEffectiveObjectPermissions(sets, source());
+      const label = JSON.stringify(sets);
+      for (const verb of VERBS) expect(objectPermissionGrants(map.customer, verb), `${label} ${verb}`).toBe(false);
+      expect(objectPermissionGrants(map.customer, 'allowRead'), label).toBe(true);
+      expect(objectPermissionGrants(map.customer, 'allowExport'), label).toBe(true);
+      // The read operations stay served, export included; no write operation is.
+      expect(map.customer.apiOperations, label).toEqual(['get', 'list', 'aggregate', 'search', 'export']);
+      // An object on a managed datasource keeps exactly what it was granted.
+      const { isExternalWriteForbidden: _drop, ...without } = source();
+      expect(map.lead, label).toEqual((buildEffectiveObjectPermissions(sets, without) as any).lead);
+      expect(objectPermissionGrants(map.lead, 'allowCreate') || objectPermissionGrants(map.lead, 'allowEdit'), label).toBe(true);
+    }
+  });
+
+  it('modifyAllRecords on the object is lowered to the read it implies, so can() answers no write and the same read', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { customer: { modifyAllRecords: true } } }],
+      source(),
+    );
+    expect(map.customer.modifyAllRecords).toBe(false);
+    expect(map.customer.viewAllRecords).toBe(true);
+    expect(objectPermissionGrants(map.customer, 'allowRead')).toBe(true);
+    for (const verb of VERBS) expect(objectPermissionGrants(map.customer, verb), verb).toBe(false);
+  });
+
+  it('an object that already narrows its operations is served its narrowed reads only', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { order: { allowRead: true, allowCreate: true } } }], source());
+    expect(map.order.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
+    for (const op of WRITE_OPERATIONS) expect(map.order.apiOperations).not.toContain(op);
+  });
+
+  it('an open gate, or no accessor, leaves the map exactly as before', () => {
+    const sets = [{ objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowExport: true } } }];
+    const { isExternalWriteForbidden: _drop, ...without } = source();
+    const before = JSON.stringify(buildEffectiveObjectPermissions(sets, without));
+    expect(JSON.stringify(buildEffectiveObjectPermissions(sets, source(() => false)))).toBe(before);
+    expect((JSON.parse(before) as any).customer).toMatchObject({ allowCreate: true, allowEdit: true, allowDelete: true });
+  });
+
+  it('a predicate that throws is reported and clamps nothing — never half the map', () => {
+    const sets = [{ objects: { customer: { allowRead: true, allowEdit: true }, order: { allowRead: true, allowEdit: true } } }];
+    const warnings: string[] = [];
+    const map: any = buildEffectiveObjectPermissions(sets, {
+      ...source((name) => { if (name === 'order') throw new Error('registry offline'); return true; }),
+      logger: { warn: (message) => warnings.push(message) },
+    });
+    expect(map.customer.allowEdit).toBe(true);
+    expect(map.order.allowEdit).toBe(true);
+    expect(warnings).toEqual(['[effective-permissions] external write gate read failed']);
+  });
+
+  it('engineExternalWriteForbidden asks the engine\'s own verdict, and an engine without it forbids nothing', () => {
+    const engine = { isExternalWriteForbidden(name: string) { return this === engine && name === 'customer'; } };
+    expect(engineExternalWriteForbidden(engine)('customer')).toBe(true);
+    expect(engineExternalWriteForbidden(engine)('lead')).toBe(false);
+    expect(engineExternalWriteForbidden({})('customer')).toBe(false);
+    expect(engineExternalWriteForbidden(undefined)('customer')).toBe(false);
+  });
+});
+
+describe('[#31629] a platform object exposing delete is not annotated restore / purge: it has no recycle bin', () => {
+  // ADR-0148 D5: the bin takes no object in the platform namespaces (`sys_`,
+  // `cloud_`, `ai_`), so its doors refuse there whatever `apiMethods` says.
+  // The derivation table is a pure function of `enable` and cannot see that.
+  const SCHEMAS: Record<string, any> = {
+    sys_widget: { name: 'sys_widget' },
+    cloud_widget: { name: 'cloud_widget', enable: { apiMethods: ['get', 'list', 'delete'] } },
+    ai_widget: { name: 'ai_widget', enable: { apiEnabled: true } },
+    crm_widget: { name: 'crm_widget' },
+    crm_narrow: { name: 'crm_narrow', enable: { apiMethods: ['get', 'list', 'delete'] } },
+    sys_reader: { name: 'sys_reader', enable: { apiMethods: ['get', 'list'] } },
+    sys_closed: { name: 'sys_closed', enable: { apiEnabled: false } },
+  };
+  const source = { allSchemas: () => Object.values(SCHEMAS), schemaOf: (n: string) => SCHEMAS[n] };
+  const EVERY = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+  const SUPER = { ...EVERY, viewAllRecords: true, modifyAllRecords: true };
+  const FULL = ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'];
+  const withoutBin = (ops: string[]) => ops.filter((op) => op !== 'restore' && op !== 'purge');
+
+  it('an unrestricted platform object is annotated without restore / purge; a business object keeps both (CONTROL)', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': SUPER } }], source);
+    expect(map.sys_widget.apiOperations).toEqual(withoutBin(FULL));
+    expect(map.ai_widget.apiOperations).toEqual(withoutBin(FULL));
+    expect(map.crm_widget.apiOperations).toEqual(FULL);
+  });
+
+  it('a platform object that would otherwise need no annotation is annotated, so the client offers no bin door', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': { ...EVERY, allowExport: true } } }], source);
+    expect(map.sys_widget.apiOperations).toEqual([...withoutBin(FULL), 'export']);
+    // CONTROL: the business object keeps its whole closure, so it still carries no annotation.
+    expect(map.crm_widget).not.toHaveProperty('apiOperations');
+  });
+
+  it('an apiMethods subset that includes delete loses restore / purge on a platform object only', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': SUPER } }], source);
+    expect(map.cloud_widget.apiOperations).toEqual(['get', 'list', 'delete', 'aggregate', 'search']);
+    expect(map.crm_narrow.apiOperations).toEqual(['get', 'list', 'delete', 'aggregate', 'search', 'restore', 'purge']);
+  });
+
+  it('a platform object without delete, or with its API closed, is annotated exactly as before', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { '*': SUPER } }], source);
+    expect(map.sys_reader.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
+    expect(map.sys_closed.apiOperations).toEqual([]);
+  });
+});
+
+describe('[#30440] a guarded managed object grants no verb its write guard refuses, modifyAllRecords included', () => {
+  const SCHEMAS: Record<string, any> = {
+    // engine-owned, nothing opted in: the guard refuses every user-context write.
+    sys_automation_run: { name: 'sys_automation_run', managedBy: 'engine-owned' },
+    // better-auth with only `edit` opted in (the sys_user shape).
+    sys_user: { name: 'sys_user', managedBy: 'better-auth', userActions: { edit: true } },
+    // append-only with both row verbs opted in (object form for delete).
+    sys_feed_note: { name: 'sys_feed_note', managedBy: 'append-only', userActions: { edit: true, delete: { enabled: true } } },
+    // no guard covers it.
+    crm_lead: { name: 'crm_lead' },
+  };
+  const source = { allSchemas: () => Object.values(SCHEMAS), schemaOf: (name: string) => SCHEMAS[name] };
+  const ROW_VERBS = ['allowEdit', 'allowDelete', 'allowTransfer'] as const;
+  const can = (entry: any) => Object.fromEntries(
+    (['allowRead', 'allowCreate', ...ROW_VERBS] as const).map((verb) => [verb, objectPermissionGrants(entry, verb)]),
+  );
+
+  it('an explicit { modifyAllRecords: true } on an object opting nothing in answers no edit, delete or transfer, and the same read', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { sys_automation_run: { modifyAllRecords: true } } }], source);
+    expect(can(map.sys_automation_run)).toEqual({ allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, allowTransfer: false });
+    expect(map.sys_automation_run).toMatchObject({ modifyAllRecords: false, viewAllRecords: true });
+  });
+
+  it('an object opting edit in keeps edit and transfer through it, and loses delete', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { sys_user: { modifyAllRecords: true } } }], source);
+    expect(can(map.sys_user)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false, allowTransfer: true });
+    expect(map.sys_user).toMatchObject({ modifyAllRecords: false, viewAllRecords: true, allowEdit: true, allowTransfer: true });
+  });
+
+  it('an object opting edit and delete in keeps modifyAllRecords as granted', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { sys_feed_note: { modifyAllRecords: true } } }], source);
+    expect(map.sys_feed_note.modifyAllRecords).toBe(true);
+    expect(map.sys_feed_note).not.toHaveProperty('viewAllRecords');
+    expect(can(map.sys_feed_note)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
+  });
+
+  it('a plain allowTransfer on an object not opting edit in answers no transfer; opting edit in keeps it', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { sys_automation_run: { allowRead: true, allowTransfer: true }, sys_user: { allowRead: true, allowTransfer: true } } }],
+      source,
+    );
+    expect(objectPermissionGrants(map.sys_automation_run, 'allowTransfer')).toBe(false);
+    expect(objectPermissionGrants(map.sys_automation_run, 'allowRead')).toBe(true);
+    expect(objectPermissionGrants(map.sys_user, 'allowTransfer')).toBe(true);
+  });
+
+  it('CONTROL: the same entry on an unguarded object keeps every verb modifyAllRecords grants', () => {
+    const map: any = buildEffectiveObjectPermissions([{ objects: { crm_lead: { modifyAllRecords: true } } }], source);
+    expect(map.crm_lead.modifyAllRecords).toBe(true);
+    expect(can(map.crm_lead)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
+  });
+
+  it('CONTROL: the super-user wildcard fold answers as before, transfer on the object opting nothing in aside', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': { allowRead: true, viewAllRecords: true, modifyAllRecords: true } } }],
+      source,
+    );
+    expect(can(map.crm_lead)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
+    expect(can(map.sys_user)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: false, allowTransfer: true });
+    expect(can(map.sys_feed_note)).toEqual({ allowRead: true, allowCreate: false, allowEdit: true, allowDelete: true, allowTransfer: true });
+    // The fold copies the bits the wildcard grants, never modifyAllRecords itself.
+    for (const name of Object.keys(SCHEMAS)) expect(map[name], name).not.toHaveProperty('modifyAllRecords');
+    // The one answer that moves: the folded transfer bit, on the object whose guard refuses the update.
+    expect(can(map.sys_automation_run)).toEqual({ allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, allowTransfer: false });
   });
 });
 

@@ -77,9 +77,9 @@ async function json(res: Response): Promise<Answer> {
 }
 
 /** The three items the fixture locks (ADR-0010) — the CRM ships no lock of its own. */
-const LOCKED_DASHBOARD = 'pipeline_dashboard';
+const LOCKED_DASHBOARD = 'crm_pipeline_dashboard';
 const LOCKED_APP = 'crm_app';
-const LOCKED_DATASET = 'opportunity_metrics';
+const LOCKED_DATASET = 'crm_opportunity_metrics';
 const DASHBOARD_LOCK_REASON = 'The pipeline figures feed the board pack — edit the source package instead.';
 const DATASET_LOCK_REASON = 'Forecast reports read these measures; change them in the source package.';
 

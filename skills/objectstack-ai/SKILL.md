@@ -12,7 +12,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: ai
   tags: agent, tool, skill, knowledge, llm, embedding, mcp
 ---
@@ -94,7 +94,7 @@ copilot claiming abilities it did not have.
 import { defineSkill } from '@objectstack/spec';
 
 export default defineSkill({
-  name: 'case_management',
+  name: 'crm_case_management',
   label: 'Case Management',
   description: 'Triage, query, and escalate support cases.',
   instructions: `
@@ -104,8 +104,8 @@ export default defineSkill({
     - Escalated cases must summarise the actions already taken.
   `,
   // Every name resolves: two platform tools (rung 2) plus one action tool
-  // materialised from this stack's own `escalate_case` Action (rung 3).
-  tools: ['query_records', 'get_record', 'action_escalate_case'],
+  // materialised from this stack's own `crm_escalate_case` Action (rung 3).
+  tools: ['query_records', 'get_record', 'action_crm_escalate_case'],
   triggerConditions: [
     { field: 'objectName', operator: 'eq', value: 'support_case' },
   ],
@@ -199,8 +199,9 @@ permissions and row-level security:
 | `query_records`, `get_record` | reads — filter, field selection, sorting, pagination |
 | `aggregate_records` | GROUP BY totals; registered only when the data bridge implements `aggregate` |
 | `validate_expression` | build-accurate CEL check before a formula is authored into metadata |
-| `create_record`, `update_record`, `delete_record` | writes; `delete_record` is annotated destructive |
-| `list_actions`, `run_action` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above |
+| `create_record`, `update_record`, `delete_record` | writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true` — ask the human first, then retry |
+| `delete_records` | up to 200 records of one object per call (fewer under a smaller `OS_DATA_MAX_PAGE_SIZE` or `OS_DATA_QUERY_ROW_BUDGET`), by `where` or `recordIds`, not both; a call without `confirm: true` is the preview (match count, sample ids) and deletes nothing — show it to the human, and send `confirm: true` only once they approve; over OAuth it needs `data:read` and `data:write` |
+| `list_actions`, `run_action`, `resume_run` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above; registered only when the bridge implements `listActions` and `runAction` (the stdio bridge does not, so it serves none), `resume_run` only when it also implements `resumeRun`. An action flagged `ai.requiresConfirmation` (`list_actions` reports it) is refused with the same 428 unless the call sends `confirm: true`, and nothing runs — ask the human first, then retry; `resume_run` submits a paused screen flow's form under the same gates |
 
 ---
 

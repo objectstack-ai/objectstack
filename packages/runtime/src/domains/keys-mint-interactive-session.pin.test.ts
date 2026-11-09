@@ -58,7 +58,10 @@ function engine() {
         find: vi.fn(async (object: string, q: any) => (
             object === 'sys_api_key' && q?.where?.key === keyHash
                 ? [{ id: 'key_existing', key: keyHash, user_id: KEY_OWNER, revoked: false, scopes: '[]' }]
-                : []
+                // The key's owner exists: an API key authenticates only as an owner who exists.
+                : object === 'sys_user' && q?.where?.id === KEY_OWNER
+                    ? [{ id: KEY_OWNER }]
+                    : []
         )),
         insert: vi.fn(async (object: string, row: Record<string, unknown>) => {
             inserted.push({ object, row });

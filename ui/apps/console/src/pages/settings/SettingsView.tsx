@@ -4,7 +4,8 @@
  * Fetches manifest+values from `/api/settings/:namespace`, lays them
  * out via <SettingsField>, tracks dirty state, and saves through PUT.
  * A successful save or action reads the namespace again, manifest included.
- * Env-locked fields are read-only and show <EnvLockBadge>.
+ * Env-locked fields are read-only and show <EnvLockBadge>; one with a value
+ * stored beneath the pin offers to clear that saved value.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -14,14 +15,18 @@ import { ConsolePageHeader } from '@object-ui/app-shell';
 import { Loader2, ArrowLeft, ChevronRight, RotateCcw, ShieldAlert } from 'lucide-react';
 import { Button, Card, CardContent, Skeleton, Badge, getLazyIcon } from '@object-ui/components';
 import { ExpressionEvaluator } from '@object-ui/core';
-import { extractFieldErrors } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { SettingsField } from './SettingsField';
+import type { MapRefusalAt } from './SettingsMapField';
+import { fieldWording, settingsFieldRefusals } from './settingsFieldRefusals';
 import {
+  getJudgedClientAddress,
   getSettingsNamespace,
   lockedKeyOf,
   runSettingsAction,
   saveSettingsNamespace,
+  type JudgedClientAddress,
+  type JudgedClientAddressRoute,
 } from './api';
 import { resolveLabel, type SettingsNamespacePayload, type Specifier } from './types';
 import { useSettingsLabel, type SettingsLabelHelpers } from './useSettingsLabel';
@@ -46,6 +51,42 @@ function evalVisibility(expr: string | undefined, data: Record<string, unknown>)
   } catch {
     return false;
   }
+}
+
+/**
+ * The rows the judged client address is drawn beside (objectstack#30313): the
+ * Allowed IP ranges of the deployment (`auth`, platform administrators) and of
+ * an organization (`access_policy`, organization administrators), each with the
+ * route gated to whoever may save that list. A save of a list that leaves this
+ * address out is refused (`invalid_value`, `constraint.clientAddress`), so the
+ * admin is shown it before saving rather than learning it from the refusal.
+ */
+const CLIENT_ADDRESS_ROUTES: ReadonlyMap<string, JudgedClientAddressRoute> = new Map<string, JudgedClientAddressRoute>([
+  ['auth', '/admin/client-address'],
+  ['access_policy', '/client-address'],
+]);
+const CLIENT_ADDRESS_KEY = 'allowed_ip_ranges';
+
+/** The judged-address route of `namespace`, or undefined when its page draws no address. */
+function clientAddressRouteOf(namespace: string | undefined): JudgedClientAddressRoute | undefined {
+  return namespace === undefined ? undefined : CLIENT_ADDRESS_ROUTES.get(namespace);
+}
+
+/**
+ * The note under Allowed IP ranges, one whole sentence per state so a pack
+ * words each its own way: no address the server can establish (any non-empty
+ * list is then refused at the save), an address read through a trusted proxy's
+ * forwarded headers, or the transport's own peer address, which behind an
+ * untrusted proxy is the proxy's.
+ */
+function clientAddressNote(
+  judged: JudgedClientAddress,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  if (judged.clientAddress === null) return t('console.settingsView.clientAddressUnknown');
+  return judged.trustProxy
+    ? t('console.settingsView.clientAddressViaProxy', { address: judged.clientAddress })
+    : t('console.settingsView.clientAddressDirect', { address: judged.clientAddress });
 }
 
 /** `{ ...rest }` without `key`, returned as a new object so React sees the change. */
@@ -189,8 +230,78 @@ function missesDeclaredFormat(type: string, value: unknown): boolean {
   return !re.test(value.trim());
 }
 
-/** Why the page blocked a save on one key: an empty `required`, or a format miss. */
-type PreSaveBlock = { key: string; rule: 'required' | 'format'; type: string };
+/**
+ * The value a `json` key's draft stands for (objectstack#31241). The field is a
+ * textarea, so its draft is the TEXT the admin typed; ADR-0007 declares a
+ * `json` key persists an object, and the settings service refuses a string for
+ * one. The text is parsed here, at save: blank text is a clear (`null`, back to
+ * the default), text that does not parse is `{ ok: false }` and blocks the
+ * save. A draft that is not a string (nothing typed yet) passes through.
+ */
+function parseJsonDraft(value: unknown): { ok: true; value: unknown } | { ok: false } {
+  if (typeof value !== 'string') return { ok: true, value };
+  if (value.trim() === '') return { ok: true, value: null };
+  try {
+    return { ok: true, value: JSON.parse(value) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * The patch a save sends: the draft, with every `json` key's text replaced by
+ * the value it parses to (objectstack#31241), so a `json` key never leaves the
+ * page as text. Called only after {@link preSaveBlocks} passed, which refuses
+ * text that does not parse; such a key would otherwise be sent unchanged and
+ * refused by the server.
+ */
+function outgoingSettingsPatch(
+  specifiers: ReadonlyArray<Specifier>,
+  draft: Record<string, unknown>,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = { ...draft };
+  for (const spec of specifiers) {
+    if (spec.type !== 'json' || !spec.key || !(spec.key in draft)) continue;
+    const parsed = parseJsonDraft(draft[spec.key]);
+    if (parsed.ok) patch[spec.key] = parsed.value;
+  }
+  return patch;
+}
+
+/**
+ * True when a `json` key's STORED value is text (objectstack#31241): a console
+ * before that fix saved the textarea's text, so the setting holds a string
+ * where ADR-0007 declares an object. A locked row is left alone: nothing on
+ * this page can change it.
+ */
+function isStoredJsonText(spec: Specifier, resolved: { value?: unknown; locked?: boolean } | undefined): boolean {
+  return spec.type === 'json' && !!resolved && !resolved.locked && typeof resolved.value === 'string';
+}
+
+/**
+ * The draft a freshly loaded namespace starts with (objectstack#31241): every
+ * `json` key whose stored value is text, with that text. The page only saves
+ * what is in the draft, so without this an administrator told to "save the
+ * page once" would find no Save at all and the text would stay text. Seeded,
+ * the row counts as one unsaved change, and Save sends it through
+ * {@link outgoingSettingsPatch} as the object it parses to. Text that does not
+ * parse is blocked on its row like any other draft.
+ */
+function storedJsonTextDraft(payload: SettingsNamespacePayload): Record<string, unknown> {
+  const draft: Record<string, unknown> = {};
+  for (const spec of payload.manifest.specifiers) {
+    if (!spec.key) continue;
+    const resolved = payload.values[spec.key];
+    if (isStoredJsonText(spec, resolved)) draft[spec.key] = resolved!.value;
+  }
+  return draft;
+}
+
+/**
+ * Why the page blocked a save on one key: an empty `required`, a format miss,
+ * or a `json` draft whose text does not parse (objectstack#31241).
+ */
+type PreSaveBlock = { key: string; rule: 'required' | 'format' | 'json'; type: string };
 
 /**
  * The visible keys a save is blocked on, in manifest order: a `required` key
@@ -221,7 +332,17 @@ function preSaveBlocks(
     if (!evalVisibility(spec.visible, liveValues)) continue;
     const resolved = values[key];
     if (resolved?.locked) continue;
-    const effective = key in draft ? draft[key] : resolved?.value;
+    let effective = key in draft ? draft[key] : resolved?.value;
+    // A `json` key's draft is judged as the value its text parses to, and
+    // only the draft: a value already stored is not this save's to block.
+    if (spec.type === 'json' && key in draft) {
+      const parsed = parseJsonDraft(draft[key]);
+      if (!parsed.ok) {
+        blocks.push({ key, rule: 'json', type: spec.type });
+        continue;
+      }
+      effective = parsed.value;
+    }
     if (spec.required && isEmptySettingValue(effective)) {
       blocks.push({ key, rule: 'required', type: spec.type });
     } else if (missesDeclaredFormat(spec.type, effective)) {
@@ -261,8 +382,12 @@ export function SettingsView() {
    * `error.code`, which `extractFieldErrors` could not read — so the whole
    * batch collapsed into one toast that named no field. It now arrives as the
    * declared `FieldError[]` under `error.details.fields`.
+   *
+   * Each carries the sentence the row shows and, for a `map` key, where the
+   * refusal points inside the value (objectstack#31391), so the row and cell
+   * it names are marked. A pre-save block points nowhere.
    */
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, { message: string; at?: MapRefusalAt }>>({});
   /**
    * The last save's fail-closed crypto refusal, or null (objectui#4570).
    *
@@ -319,7 +444,7 @@ export function SettingsView() {
       try {
         const p = await getSettingsNamespace(namespace);
         setPayload(p);
-        setDraft({});
+        setDraft(storedJsonTextDraft(p));
         setFieldErrors({});
         setCryptoRefusal(null);
       } catch (err: any) {
@@ -330,6 +455,38 @@ export function SettingsView() {
     };
     void loadNamespace();
   }, [namespace]);
+
+  /**
+   * The caller's address as the server judges it, on a page that draws it
+   * ({@link CLIENT_ADDRESS_ROUTES}), or null: another page, not read yet, or
+   * the read failed. A failure draws no note rather than a guess: each route is
+   * gated to whoever may save its list and absent on an older server, and a
+   * refused save still names the address in the row.
+   */
+  const [judgedRead, setJudgedRead] = useState<{
+    namespace: string;
+    judged: JudgedClientAddress;
+  } | null>(null);
+  useEffect(() => {
+    const route = clientAddressRouteOf(namespace);
+    if (!namespace || !route) return;
+    let live = true;
+    getJudgedClientAddress(route).then(
+      (judged) => {
+        if (live) setJudgedRead({ namespace, judged });
+      },
+      () => {
+        // No note; see above.
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [namespace]);
+  // Tagged with the namespace it was read on, so another namespace's page
+  // never draws it.
+  const judgedAddress =
+    judgedRead && judgedRead.namespace === namespace ? judgedRead.judged : null;
 
   /** Effective live values for visibility expressions. */
   const liveValues = useMemo(() => {
@@ -428,12 +585,13 @@ export function SettingsView() {
     if (blocked.length > 0) {
       const messageFor = ({ rule, type }: PreSaveBlock): string => {
         if (rule === 'required') return t('form.fieldRequired');
+        if (rule === 'json') return t('fields.object.invalidJson');
         if (type === 'email') return t('validation.email');
         if (type === 'url') return t('validation.url');
         if (type === 'phone') return t('console.settingsView.invalidPhone');
         return t('console.settingsView.invalidColor');
       };
-      setFieldErrors(Object.fromEntries(blocked.map((b) => [b.key, messageFor(b)])));
+      setFieldErrors(Object.fromEntries(blocked.map((b) => [b.key, { message: messageFor(b) }])));
       setFocusKey({ key: blocked[0].key });
       const named = refusedSettingLabels(
         blocked.map(({ key }) => ({ field: key })),
@@ -455,7 +613,7 @@ export function SettingsView() {
     // reflects THIS save's verdict rather than a stale one from a previous try.
     setCryptoRefusal(null);
     try {
-      const res = await saveSettingsNamespace(namespace, draft);
+      const res = await saveSettingsNamespace(namespace, outgoingSettingsPatch(manifest.specifiers, draft));
       setPayload({ ...payload, values: { ...values, ...res.values } });
       setDraft({});
       setFieldErrors({});
@@ -510,9 +668,13 @@ export function SettingsView() {
         // repeats each row's whole message, help text included.
         // `{{settings}}` is the labels joined with the pack's own list
         // separator, the one the record form's field lists use.
-        const perField = extractFieldErrors(apiError);
+        //
+        // objectstack#30206 — a format miss (`invalid_format`) reads in the
+        // console's words and the reader's language; every other refusal
+        // keeps the server's sentence (`settingsFieldRefusals`).
+        const perField = settingsFieldRefusals(apiError, manifest.specifiers, fieldWording(labels), t);
         if (perField?.length) {
-          setFieldErrors(Object.fromEntries(perField.map((f) => [f.field, f.message])));
+          setFieldErrors(Object.fromEntries(perField.map((f) => [f.field, { message: f.message, at: f.at }])));
           const named = refusedSettingLabels(perField, manifest.specifiers, labels);
           toast.error(
             named.length > 0
@@ -528,6 +690,30 @@ export function SettingsView() {
           toast.error(err?.message ?? t('console.settingsView.saveFailed'));
         }
       }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /**
+   * Clear the value stored beneath an env pin (objectstack#30665): `null` for
+   * this one key, the write the server lets through a pin (ADR-0007 D6). It
+   * writes at once, after the row's own confirm, and leaves the draft alone: the
+   * row cannot be edited, so the clear is not one of the page's edits. The pin
+   * still answers the key, so the row reads the env value before and after.
+   */
+  const onClearSaved = async (key: string) => {
+    setSaving(true);
+    try {
+      const res = await saveSettingsNamespace(namespace, { [key]: null });
+      setPayload({ ...payload, values: { ...values, ...res.values } });
+      toast.success(t('console.settingsView.savedCleared'));
+      void reread(namespace);
+    } catch (err: any) {
+      // The pin itself never refuses a clear, so a refusal here is something
+      // else (a lock a stored row carries, a 403): the server's sentence says
+      // which, and `lockedByEnv` would misname it.
+      toast.error(err?.message ?? t('console.settingsView.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -660,7 +846,21 @@ export function SettingsView() {
                 locked={resolved?.locked}
                 saving={saving}
                 labels={labels}
-                error={key ? fieldErrors[key] : undefined}
+                error={key ? fieldErrors[key]?.message : undefined}
+                errorAt={key ? fieldErrors[key]?.at : undefined}
+                note={
+                  judgedAddress &&
+                  clientAddressRouteOf(namespace) !== undefined &&
+                  key === CLIENT_ADDRESS_KEY
+                    ? clientAddressNote(judgedAddress, t)
+                    : isStoredJsonText(spec, resolved)
+                      ? t('console.settingsView.jsonStoredAsText')
+                      : undefined
+                }
+                // The scope the server writes this key at: the specifier's
+                // own, else the manifest's, else the spec's default `tenant`.
+                writeScope={spec.scope ?? manifest.scope ?? 'tenant'}
+                onClearSaved={key ? () => onClearSaved(key) : undefined}
               />
             );
           })}

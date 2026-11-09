@@ -226,18 +226,41 @@ describe('validate-ai-tool-references', () => {
   });
 
   /**
-   * The `ask` agent's new-record draft signal (cloud#3383, ui half #28104): a
-   * skill naming `draft_record` resolves; a near name nobody registers does not.
+   * The chat's confirmed record write (cloud#3565; it replaced cloud#3383's
+   * `draft_record`): a skill naming `create_record` / `update_record` resolves;
+   * a near name nobody registers does not, and neither does the retired name.
    */
-  it('resolves the service-ai-studio record-draft signal', () => {
-    expect(validateAiToolReferences({ skills: [{ name: 's', tools: ['draft_record'] }] })).toEqual([]);
+  it('resolves the service-ai-studio record-write pair', () => {
+    expect(
+      validateAiToolReferences({ skills: [{ name: 's', tools: ['create_record', 'update_record'] }] }),
+    ).toEqual([]);
 
     const control = validateAiToolReferences({
-      skills: [{ name: 's', tools: ['draft_record', 'draft_records'] }],
+      skills: [{ name: 's', tools: ['create_record', 'create_records', 'draft_record'] }],
+    });
+    expect(control).toHaveLength(2);
+    expect(control[0].path).toBe('skills[0].tools[1]');
+    expect(control[0].message).toContain('create_records');
+    expect(control[1].path).toBe('skills[0].tools[2]');
+    expect(control[1].message).toContain('draft_record');
+  });
+
+  /**
+   * The build agent's package removal (cloud#3656), which only stages the
+   * removal of a package built in the environment: a skill naming
+   * `delete_package` resolves; a near name nobody registers does not.
+   */
+  it('resolves the service-ai-studio package removal', () => {
+    expect(validateAiToolReferences({ skills: [{ name: 's', tools: ['delete_package'] }] })).toEqual([]);
+
+    // The control: the plural registered by nobody is still reported, so this
+    // pin fails on a universe widened too far.
+    const control = validateAiToolReferences({
+      skills: [{ name: 's', tools: ['delete_package', 'delete_packages'] }],
     });
     expect(control).toHaveLength(1);
     expect(control[0].path).toBe('skills[0].tools[1]');
-    expect(control[0].message).toContain('draft_records');
+    expect(control[0].message).toContain('delete_packages');
   });
 
   it('reports stable paths and tolerates junk shapes', () => {

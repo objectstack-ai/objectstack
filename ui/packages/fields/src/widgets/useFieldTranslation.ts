@@ -26,6 +26,14 @@ const FIELD_DEFAULTS: Record<string, string> = {
   'fields.currencyCode.noResults': 'No currency found',
   'fields.currencyCode.available': 'Available',
   'fields.currencyCode.all': 'All currencies (ISO 4217)',
+  // ADR-0144 D5 — the home field's read-only hint (`HomeAmountHint`).
+  'fields.currencyHome.convertedAt': 'Converted at {{rate}} on {{date}}',
+  'fields.currencyHome.homeCurrency': 'In the home currency (rate 1)',
+  'fields.currencyHome.preview': '≈ {{amount}} at {{rate}} on {{date}}',
+  'fields.currencyHome.previewSame': '≈ {{amount}} (home currency)',
+  'fields.currencyHome.awaitingRate': 'No {{currency}} rate on or before {{date}}: saving is refused until one is added',
+  'fields.currencyHome.awaitingDate': 'Set the document date to see the home amount',
+  'fields.currencyHome.rateUnreadable': 'Converted to the home currency when you save',
   'fields.boolean.offBadge': '{{label}} — Off',
   'fields.boolean.completed': 'Completed',
   'fields.boolean.notCompleted': 'Not completed',
@@ -103,6 +111,29 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // the `en` pack.
   'fields.registryRef.loadFailed': 'The list could not be loaded. You can still type the name.',
   'fields.registryRef.notFound': '{{name}} (not found)',
+  // #30208 row 6 — the fillable arm (`notification-topic` /
+  // `notification-channel`): the `*` entry's two faces, a channel the
+  // deployment cannot send on, a value the list does not hold, and the row
+  // that commits the typed text as written. Same values as the `en` pack.
+  'fields.preferenceOption.allTopics': 'All topics ({{value}})',
+  'fields.preferenceOption.allChannels': 'All channels ({{value}})',
+  'fields.preferenceOption.notConfigured': '{{value}} (not configured)',
+  'fields.preferenceOption.notInList': '{{value}} (not in the list)',
+  'fields.preferenceOption.useTyped': 'Use "{{value}}"',
+  // `quiet-hours`: the window's three part labels, its readonly line, the
+  // two notes about what the window holds, the refusal of a half-entered
+  // window, the unreadable-value note and its replace button, and the mark on
+  // a stored zone the list does not hold. Same values as the `en` pack.
+  'fields.quietHours.timeZone': 'Time zone',
+  'fields.quietHours.start': 'Start',
+  'fields.quietHours.end': 'End',
+  'fields.quietHours.range': '{{start}} to {{end}} ({{zone}})',
+  'fields.quietHours.pastMidnight': 'Runs past midnight and ends the next day.',
+  'fields.quietHours.sameTimes': 'Start and end are the same, so nothing is held.',
+  'fields.quietHours.incomplete': 'Enter both a start and an end time.',
+  'fields.quietHours.unreadable': 'This value is not a time range this control can show. It is kept as stored.',
+  'fields.quietHours.replace': 'Set a time range',
+  'fields.quietHours.zoneNotInList': '{{zone}} (not in the list)',
   'fields.recipient.selectTypeFirst': 'Select a recipient type first.',
   'fields.recipient.loading': 'Loading…',
   'fields.recipient.search': 'Search…',

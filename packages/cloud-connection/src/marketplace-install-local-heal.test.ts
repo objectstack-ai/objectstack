@@ -42,6 +42,11 @@ vi.mock('@objectstack/runtime', () => ({
     },
     // #3430 — the heal path records a per-source outcome for the boot banner.
     recordSeedOutcome: vi.fn(),
+    // [#30281] The seed-locale producer, answering "no locale": this suite's
+    // subject is not the locale (pinned in marketplace-install-local-seed-replayer.test.ts).
+    resolveSeedLocaleForLoad: async () => undefined,
+    appDefaultSeedLocale: () => undefined,
+    describeSeedLocale: () => 'none',
 }));
 // Only the seed-request parse is stubbed; every other export stays the real one,
 // because `@objectstack/core` reads `@objectstack/spec/data` values at module load
@@ -180,9 +185,12 @@ describe('rehydrate sample-data healing', () => {
         await rehydrateWith({}, { crm_x: [], crm_y: [] });
 
         expect(loadCalls).toHaveLength(1);
-        // The full bundled datasets are replayed, as an upsert.
+        // The full bundled datasets are replayed, each in its own mode: the
+        // healer sets no mode of its own, so a dataset that declares none
+        // takes the spec default, create-only (#30081).
         expect(loadCalls[0].seeds).toHaveLength(2);
-        expect(loadCalls[0].config).toMatchObject({ defaultMode: 'upsert', multiPass: true });
+        expect(loadCalls[0].config).toMatchObject({ multiPass: true });
+        expect(loadCalls[0].config).not.toHaveProperty('defaultMode');
         // No org id in single-tenant mode.
         expect(loadCalls[0].config.organizationId).toBeUndefined();
 

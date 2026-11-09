@@ -36,6 +36,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { assembleExecutionContext } from '@objectstack/core';
 import { installAuditWriters } from './audit-writers.js';
 import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
 
@@ -49,6 +50,7 @@ const sysAuditLog = {
     user_id: f('user_id', 'text'), object_name: f('object_name', 'text'),
     record_id: f('record_id', 'text'), old_value: f('old_value', 'textarea'),
     new_value: f('new_value', 'textarea'), tenant_id: f('tenant_id', 'text'),
+    actor: f('actor', 'text'), metadata: f('metadata', 'textarea'),
   },
 };
 
@@ -373,5 +375,201 @@ describe('[#22527] sys_activity.actor_avatar_url — the acting user\'s image, w
     expect(readsOf('sys_user') - before).toBe(1);
     const [renamed] = activityFor(storeFor, 'm1').filter((r) => r.type === 'updated').slice(-1);
     expect(renamed.actor_avatar_url).toBe(GRACE_IMAGE);
+  });
+});
+
+/**
+ * An administrator impersonating a user writes AS that user — `user_id`,
+ * `actor` and `actor_id` stay the user's, because the session is theirs — and
+ * both rows now also name the administrator, from the attribution-only
+ * `impersonatedBy` the request door carries. The envelope is built at the
+ * real door (`assembleExecutionContext`) from an authz context whose session
+ * arm read `impersonatedBy`, so a door that stops carrying it turns the first
+ * pin red, and the engine's provenance copy list is crossed on the way to the
+ * writer (this package resolves `@objectstack/objectql` through its `dist/`,
+ * so a change there reaches this suite after that package's build).
+ */
+describe('a write made from an impersonation session names the administrator beside the user', () => {
+  const AUTHZ = {
+    userId: ADA,
+    tenantId: 'org_1',
+    positions: ['member'],
+    permissions: [],
+    directPermissions: [],
+    systemPermissions: [],
+    org_user_ids: [ADA],
+    accessible_org_ids: ['org_1'],
+  };
+  const envelope = (authz: Record<string, unknown>) =>
+    assembleExecutionContext({
+      authz: authz as any,
+      oauth: undefined,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+      authGate: undefined,
+    }) as any;
+
+  /** Grace (the administrator) impersonates Ada. */
+  const impersonated = () => envelope({ ...AUTHZ, impersonatedBy: GRACE });
+  /** Ada, in her own session. */
+  const own = () => envelope({ ...AUTHZ });
+
+  const ledgerFor = (storeFor: (o: string) => Map<string, Record<string, unknown>>, recordId: string) =>
+    Array.from(storeFor('sys_audit_log').values()).filter((r) => r.record_id === recordId);
+  const meta = (row: Record<string, unknown> | undefined) =>
+    row?.metadata == null ? null : (JSON.parse(String(row.metadata)) as Record<string, unknown>);
+
+  it('control — the door carries the administrator only for an impersonation session, and the subject stays the user', () => {
+    expect(impersonated().impersonatedBy).toBe(GRACE);
+    expect(impersonated().userId).toBe(ADA);
+    expect('impersonatedBy' in own()).toBe(false);
+  });
+
+  it('the ledger row records `impersonated_by`; `user_id` and `actor` stay the user', async () => {
+    const { engine, storeFor } = await boot();
+    await engine.insert('biz_task', { id: 'i1', title: 'Fix ticket', status: 'open' }, { context: impersonated() });
+    await engine.update('biz_task', { status: 'done' }, { where: { id: 'i1' }, context: impersonated() } as any);
+
+    const rows = ledgerFor(storeFor, 'i1');
+    expect(rows.map((r) => r.action)).toEqual(['create', 'update']);
+    for (const row of rows) {
+      expect(meta(row)).toEqual({ impersonated_by: GRACE });
+      expect(row.user_id).toBe(ADA);
+      expect(row.actor).toBe(ADA);
+    }
+  });
+
+  it('the activity row carries the same fact, with the administrator\'s name beside it', async () => {
+    const { engine, storeFor } = await boot();
+    await engine.insert('biz_task', { id: 'i2', title: 'Fix ticket', status: 'open' }, { context: impersonated() });
+
+    const [row] = activityFor(storeFor, 'i2');
+    expect(row.actor_id).toBe(ADA);
+    expect(row.actor_name).toBe('Ada Lovelace');
+    expect(meta(row)).toMatchObject({ impersonated_by: GRACE, impersonated_by_name: 'Grace Hopper' });
+  });
+
+  it('the user\'s own write claims no impersonation, on either row — absence is the record', async () => {
+    const { engine, storeFor } = await boot();
+    await engine.insert('biz_task', { id: 'i3', title: 'Own work', status: 'open' }, { context: own() });
+
+    const [ledger] = ledgerFor(storeFor, 'i3');
+    expect(ledger.user_id).toBe(ADA);
+    expect(meta(ledger)).toBeNull();
+    const [activity] = activityFor(storeFor, 'i3');
+    expect(activity.actor_id).toBe(ADA);
+    expect(meta(activity)).not.toHaveProperty('impersonated_by');
+    expect(meta(activity)).not.toHaveProperty('impersonated_by_name');
+  });
+
+  it('the administrator never reaches a hook as the caller: the hook session is the user\'s, the mark rides provenance', async () => {
+    const { engine } = await boot();
+    const seen: Array<{ session: unknown; provenance: unknown }> = [];
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      seen.push({ session: ctx.session, provenance: ctx.provenance });
+    }, { object: 'biz_task' } as any);
+    await engine.insert('biz_task', { id: 'i4', title: 'Probe', status: 'open' }, { context: impersonated() });
+
+    expect(seen).toHaveLength(1);
+    expect((seen[0].session as any)?.userId).toBe(ADA);
+    expect(JSON.stringify(seen[0].session)).not.toContain(GRACE);
+    expect(seen[0].provenance).toEqual({ impersonatedBy: GRACE });
+  });
+});
+
+/**
+ * A comment is mirrored like every other write (maintainer ruling on #30213's
+ * comments fork, 「A 评论也记审计和动态」): `sys_comment` is no longer on the
+ * writer's skip list, so a comment written from an impersonation session
+ * leaves the same two rows, with the same administrator stamp, as the task
+ * above. Without it, a comment the administrator wrote as the user could not
+ * be told from one the user wrote.
+ */
+describe('a comment written from an impersonation session is recorded like any other write', () => {
+  const AUTHZ = {
+    userId: ADA,
+    tenantId: 'org_1',
+    positions: ['member'],
+    permissions: [],
+    directPermissions: [],
+    systemPermissions: [],
+    org_user_ids: [ADA],
+    accessible_org_ids: ['org_1'],
+  };
+  const envelope = (authz: Record<string, unknown>) =>
+    assembleExecutionContext({
+      authz: authz as any,
+      oauth: undefined,
+      localization: undefined,
+      requestLocale: undefined,
+      accessToken: undefined,
+      authGate: undefined,
+    }) as any;
+  const impersonated = () => envelope({ ...AUTHZ, impersonatedBy: GRACE });
+  const own = () => envelope({ ...AUTHZ });
+
+  /** The comment columns the writer reads; access and stamping hooks are not this file's subject. */
+  const sysComment = {
+    name: 'sys_comment', label: 'Comment', nameField: 'body',
+    fields: {
+      id: f('id', 'text', { primaryKey: true }), thread_id: f('thread_id', 'text'),
+      body: f('body', 'textarea'), author_id: f('author_id', 'text'),
+    },
+  };
+  const bootWithComments = async () => {
+    const booted = await boot();
+    booted.engine.registry.registerObject(sysComment as any, OWNER_PACKAGE);
+    return booted;
+  };
+  const rowsAbout = (storeFor: (o: string) => Map<string, Record<string, unknown>>, table: string, id: string) =>
+    Array.from(storeFor(table).values()).filter((r) => r.object_name === 'sys_comment' && r.record_id === id);
+  const meta = (row: Record<string, unknown> | undefined) =>
+    row?.metadata == null ? null : (JSON.parse(String(row.metadata)) as Record<string, unknown>);
+
+  it('an impersonated comment insert writes a ledger row and an activity row, both naming the administrator', async () => {
+    const { engine, storeFor } = await bootWithComments();
+    await engine.insert('sys_comment', { id: 'c1', thread_id: 'biz_task:t1', body: 'Looks good', author_id: ADA }, { context: impersonated() });
+
+    const [ledger, ...moreLedger] = rowsAbout(storeFor, 'sys_audit_log', 'c1');
+    expect(moreLedger).toEqual([]);
+    expect(ledger.action).toBe('create');
+    expect(ledger.user_id).toBe(ADA);
+    expect(meta(ledger)).toEqual({ impersonated_by: GRACE });
+
+    const [activity, ...moreActivity] = rowsAbout(storeFor, 'sys_activity', 'c1');
+    expect(moreActivity).toEqual([]);
+    expect(activity.type).toBe('created');
+    expect(activity.actor_id).toBe(ADA);
+    expect(meta(activity)).toMatchObject({ impersonated_by: GRACE, impersonated_by_name: 'Grace Hopper' });
+  });
+
+  it('an impersonated edit and delete of a comment are recorded and stamped too', async () => {
+    const { engine, storeFor } = await bootWithComments();
+    await engine.insert('sys_comment', { id: 'c2', thread_id: 'biz_task:t1', body: 'Draft', author_id: ADA }, { context: own() });
+    await engine.update('sys_comment', { body: 'Final' }, { where: { id: 'c2' }, context: impersonated() } as any);
+    await engine.delete('sys_comment', { where: { id: 'c2' }, context: impersonated() } as any);
+
+    const ledger = rowsAbout(storeFor, 'sys_audit_log', 'c2');
+    expect(ledger.map((r) => r.action)).toEqual(['create', 'update', 'delete']);
+    expect(ledger.map((r) => meta(r)?.impersonated_by ?? null)).toEqual([null, GRACE, GRACE]);
+    const activity = rowsAbout(storeFor, 'sys_activity', 'c2');
+    expect(activity.map((r) => r.type)).toEqual(['created', 'updated', 'deleted']);
+    expect(activity.map((r) => meta(r)?.impersonated_by ?? null)).toEqual([null, GRACE, GRACE]);
+  });
+
+  it('control — the user\'s own comment writes both rows, unstamped', async () => {
+    const { engine, storeFor } = await bootWithComments();
+    await engine.insert('sys_comment', { id: 'c3', thread_id: 'biz_task:t1', body: 'Mine', author_id: ADA }, { context: own() });
+
+    const [ledger] = rowsAbout(storeFor, 'sys_audit_log', 'c3');
+    expect(ledger.action).toBe('create');
+    expect(ledger.user_id).toBe(ADA);
+    expect(meta(ledger)).toBeNull();
+    const [activity] = rowsAbout(storeFor, 'sys_activity', 'c3');
+    expect(activity.type).toBe('created');
+    expect(activity.actor_id).toBe(ADA);
+    expect(meta(activity)).not.toHaveProperty('impersonated_by');
+    expect(meta(activity)).not.toHaveProperty('impersonated_by_name');
   });
 });

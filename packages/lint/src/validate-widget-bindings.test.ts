@@ -1506,8 +1506,8 @@ describe('widget-filter-field-unknown (#14148 limb A)', () => {
     // alone, and the object's field list is no longer echoed.
     expect(f.message).toContain('Did you mean "due_date"?');
     expect(f.hint).toBe(
-      'Filter on a field of "duly_task" (dataset "duly_workload"), or on a relationship path whose prefix that ' +
-        "dataset's `include` declares.",
+      'Filter on a field of "duly_task" (dataset "duly_workload"), a dimension of that dataset, or a relationship ' +
+        'path whose prefix its `include` declares.',
     );
     expect(f.hint).not.toContain('business_unit');
   });
@@ -1593,6 +1593,63 @@ describe('widget-filter-field-unknown (#14148 limb A)', () => {
       validateWidgetBindings(widgetOwnStack({ filter: { created_at: { $gte: '{today}' } } })),
       WIDGET_FILTER_FIELD_UNKNOWN,
     )).toHaveLength(0);
+  });
+});
+
+// [#30006] One accept set for a bare key, shared with `report-filter-field-unknown`:
+// a field, then a dimension of the dataset; a measure is refused with its own
+// message. The dimension `state` is named APART from the field it reads, so
+// "a dimension key is accepted" is a different fact from "a field key is".
+describe('widget-filter-field-unknown — dataset dimensions and measures (#30006)', () => {
+  const ds = {
+    dimensions: [{ name: 'state', field: 'business_unit' }],
+    measures: [
+      { name: 'untouched_over_14d', aggregate: 'count' },
+      { name: 'total_estimate', aggregate: 'sum', field: 'estimate' },
+      { name: 'estimate', aggregate: 'avg', field: 'estimate' },
+      { name: 'estimate_per_task', derived: { op: 'ratio', of: ['total_estimate', 'untouched_over_14d'] } },
+    ],
+  };
+  const judge = (filter: unknown) =>
+    idsOf(validateWidgetBindings(widgetOwnStack({ filter }, ds)), WIDGET_FILTER_FIELD_UNKNOWN);
+
+  it('accepts a bare key naming a dimension of the dataset, under `$` combinators too', () => {
+    expect(judge({ state: 'emea' })).toEqual([]);
+    expect(judge({ $or: [{ state: 'emea' }, { $not: { state: 'apac' } }] })).toEqual([]);
+  });
+
+  it('refuses a key naming a measure, with the measure message and its column as the fix', () => {
+    const findings = judge({ total_estimate: { $gt: 100 } });
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.severity).toBe('error');
+    expect(f.path).toBe('dashboards[0].widgets[0].filter.total_estimate');
+    expect(f.message).toContain('names a measure of dataset "duly_workload"');
+    expect(f.message).toContain('"estimate"');
+    expect(f.message).not.toContain('Did you mean');
+    expect(f.hint).toContain('key the filter by the field "estimate"');
+  });
+
+  it('refuses a count and a derived measure, which read no single column', () => {
+    for (const key of ['untouched_over_14d', 'estimate_per_task']) {
+      const [f, ...rest] = judge({ [key]: { $gt: 1 } });
+      expect(rest, key).toEqual([]);
+      expect(f.message, key).toContain('reads no single column');
+      expect(f.hint, key).toContain('a dimension of the dataset');
+    }
+  });
+
+  it('a measure sharing a field\'s name is the field: accepted, as the dataset door binds it', () => {
+    expect(judge({ estimate: { $gt: 3 } })).toEqual([]);
+  });
+
+  it('CONTROL — an unknown bare key and a dotted dimension-shaped key are still refused as unknown', () => {
+    const findings = judge({ $and: [{ no_such_key: 1 }, { 'owner.state': 'x' }] });
+    expect(findings.map((f) => f.path)).toEqual([
+      'dashboards[0].widgets[0].filter.$and[0].no_such_key',
+      'dashboards[0].widgets[0].filter.$and[1].owner.state',
+    ]);
+    expect(findings.every((f) => !f.message.includes('names a measure'))).toBe(true);
   });
 });
 

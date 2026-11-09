@@ -26,7 +26,7 @@
  *  2. **Whole amounts** — the OTHER half of the wholeness switch. This half
  *     pinned the objectui#4033 whole-amount trimming ("Salesforce convention:
  *     `$1,234.50` keeps cents; `$1,234` does not") until objectui#11444
- *     retired it: triage ruled the declared width, the ISO 4217 minor unit,
+ *     retired it: triage ruled the declared width, the CLDR fraction digits,
  *     the protocol's convention (comment 5946462862), so a whole amount now
  *     shows its `.00`, as the read-only form always did. The rows moved on
  *     purpose and stay as a control: a range `[0, 2]` would trim them again.

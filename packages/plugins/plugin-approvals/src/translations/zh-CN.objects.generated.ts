@@ -35,6 +35,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "来源",
         help: "请求来源 —— 节点驱动的审批为 `flow:<flowName|nodeId>`"
       },
+      process_package: {
+        label: "来源软件包",
+        help: "发起此请求的流程来自的应用。由平台填写;在此创建的流程为空。"
+      },
       process_label: {
         label: "流程",
         help: "打开此请求的流程标签，记录的是请求打开时的值"
@@ -366,7 +370,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_until: {
         label: "失效时间",
-        help: "此刻（含）及之后规则不生效（半开区间 [from, until)，UTC）。留空 = 永不过期。"
+        help: "规则到此时间即失效（按 UTC 计）。留空 = 永不过期。"
       },
       reason: {
         label: "原因",

@@ -17,12 +17,15 @@
  *     and an `org_membership_level` approver logged "expanded to nobody",
  *     indistinguishable from a tier nobody holds.
  *
- * What a caller sees now: a failed read throws out of the expansion, the
- * approver-spec resolver's directory catch takes it, and the slot falls back
- * to its literal (`position:<p>`, acted on by whoever holds the position at
- * decision time; `org_membership_level:<t>`, decided by the override) with a
- * warning that names the failed read and carries its `error` — never a slate
- * cut down to the part that happened to read.
+ * What a caller sees now: a failed read throws out of the expansion and the
+ * approver-spec resolver's directory catch takes it. An `org_membership_level`
+ * slot falls back to its literal (`org_membership_level:<t>`, decided by the
+ * override) with a warning that names the failed read and carries its `error`.
+ * [ADR-0142 D6 as amended, #29604] A `position` approver, whose transition limb
+ * this read is, refuses the approval node instead
+ * (`ApproverDirectoryUnreadableError`); only the `'literal'` reader keeps its
+ * `position:<p>` literal. Never a slate cut down to the part that happened to
+ * read.
  *
  * Measured on a REAL engine (ObjectQL + SqlDriver over in-memory SQLite)
  * carrying the shipped `SysMember`, because the completion is a keyset read
@@ -33,7 +36,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
-import { ApprovalService } from './approval-service.js';
+import { ApprovalService, ApproverDirectoryUnreadableError } from './approval-service.js';
 
 const ORG = 'org_large';
 const ELSEWHERE = 'org_elsewhere';
@@ -112,8 +115,8 @@ async function boot(n: number, opts: { registerMember?: boolean } = {}): Promise
 /** The private expansions, as the approver-spec resolver calls them. */
 const tier = (rig: Rig, value: string) => (rig.svc as any).expandMembershipTierUsers(value, ORG) as Promise<string[]>;
 const position = (rig: Rig, value: string) => (rig.svc as any).expandPositionUsers(value, ORG) as Promise<string[]>;
-const resolveSpec = (rig: Rig, a: { type: string; value: string }) =>
-  (rig.svc as any).resolveApproverSpec(a, undefined, ORG, Date.now()) as Promise<string[]>;
+const resolveSpec = (rig: Rig, a: { type: string; value: string }, onDirectoryFailure?: 'refuse' | 'literal') =>
+  (rig.svc as any).resolveApproverSpec(a, undefined, ORG, Date.now(), undefined, onDirectoryFailure) as Promise<string[]>;
 
 const failMemberReads = (rig: Rig, fault: Error) => {
   const memberDriver = (rig.engine as any).getDriverForObject('sys_member');
@@ -168,11 +171,18 @@ describe('[#29362] approvals membership-tier expansion reads every holder (drive
     expect(rig.warn.mock.calls.some(([, meta]) => typeof meta?.error === 'string')).toBe(false);
   });
 
-  it('⛔ what the caller sees: the slot falls back to its literal, and the warning names the failed read', async () => {
+  it('⛔ what the caller sees: a position refuses the node on its sys_member limb; the tier slot keeps its literal', async () => {
     const rig = await boot(3);
     failMemberReads(rig, new Error('SQLITE_IOERR: disk I/O error'));
 
-    expect(await resolveSpec(rig, { type: 'position', value: TIER })).toEqual([`position:${TIER}`]);
+    // [#29604] The ADR-0057 D4 transition limb is a read behind the position:
+    // its failure is a failed read, and the node refuses on it.
+    const refusal = await resolveSpec(rig, { type: 'position', value: TIER }).then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(refusal).toMatchObject({ approverType: 'position', approverValue: TIER, retryable: true });
+    expect((refusal as ApproverDirectoryUnreadableError).failedRead).toMatch(/SQLITE_IOERR/);
+
+    expect(await resolveSpec(rig, { type: 'position', value: TIER }, 'literal')).toEqual([`position:${TIER}`]);
     expect(await resolveSpec(rig, { type: 'org_membership_level', value: TIER })).toEqual([`org_membership_level:${TIER}`]);
     const failed = rig.warn.mock.calls.filter(([, meta]) => typeof meta?.error === 'string');
     expect(failed.map(([, meta]) => meta.type)).toEqual(['position', 'org_membership_level']);

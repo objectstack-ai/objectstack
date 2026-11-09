@@ -24,6 +24,8 @@
  *     `'no-overlay'`: the door refused the save under one order and the delete
  *     under the other, and refuses both under both orders now.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';

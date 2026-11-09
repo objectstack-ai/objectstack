@@ -13,7 +13,7 @@
  * `actions[]`), the regression `i18n-walk-output-parity` exists for.
  */
 import { describe, it, expect } from 'vitest';
-import { collectExpectedEntries } from '../src/utils/i18n-extract.js';
+import { collectExpectedEntries } from '../src/utils/i18n-bundle-extract.js';
 
 const envelope = (source: string) => ({ dialect: 'template', source });
 

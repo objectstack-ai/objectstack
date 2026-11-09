@@ -12,6 +12,8 @@ import {
   analyzeRegion,
   findRegionEntry,
   validateControlFlow,
+  collectFlowGraphs,
+  FlowRegionShapeError,
   LOOP_MAX_ITERATIONS_CEILING,
   LOOP_NODE_TYPE,
   PARALLEL_NODE_TYPE,
@@ -641,5 +643,116 @@ describe('validateControlFlow and the unknown-key gate meet at the region-slot s
     } catch (e) { message = (e as Error).message; }
     expect(message).toContain("loop 'c1' body → try_catch 'inner' try");
     expect(message).toContain('A region is not labelled');
+  });
+});
+
+// ─── [#29719] The refusal carries the container's location as data ─────────
+//
+// `validateControlFlow` throws a `FlowRegionShapeError` at each of its three
+// throw sites: the container's `path` (spelled as `collectFlowGraphs`'
+// `FlowGraph.path`, plus `['nodes', i]`) and its `nodeId` ride on the error,
+// so a reader such as the `flow-region-shape-invalid` lint rule anchors the
+// fault without parsing the sentence. The sentence itself is unchanged: each
+// case pins the engine's own words literally and derives only the part a
+// judge it calls (Zod, `analyzeRegion`) words.
+describe('validateControlFlow throws FlowRegionShapeError with the container path and id', () => {
+  const refusalOf = (flow: unknown): FlowRegionShapeError => {
+    try {
+      validateControlFlow(flow as never);
+    } catch (err) {
+      expect(err).toBeInstanceOf(FlowRegionShapeError);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).name).toBe('FlowRegionShapeError');
+      return err as FlowRegionShapeError;
+    }
+    throw new Error('expected validateControlFlow to refuse the flow');
+  };
+  /** The path's graph half must be a path `collectFlowGraphs` hands out — one spelling. */
+  const expectGraphPathSpelling = (flow: unknown, path: readonly (string | number)[]) => {
+    const graphPaths = collectFlowGraphs(flow as never).map((g) => JSON.stringify(g.path));
+    expect(path.slice(-2)[0]).toBe('nodes');
+    expect(graphPaths).toContain(JSON.stringify(path.slice(0, -2)));
+  };
+  const loopCfg = (body: unknown) => ({ collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item', body });
+  const twoStep = { nodes: [node('a'), node('b')], edges: [edge('e1', 'a', 'b')] };
+
+  it('an invalid region (the region schema refuses it): a top-level try_catch', () => {
+    const tryRegion = { nodes: [node('a')], edges: [], bogus: true };
+    const flow = { nodes: [node('start', 'start'), { ...node('tc', TRY_CATCH_NODE_TYPE), config: { try: tryRegion } }] };
+    const err = refusalOf(flow);
+    expect(err.path).toEqual(['nodes', 1]);
+    expect(err.nodeId).toBe('tc');
+    const issues = FlowRegionSchema.safeParse(tryRegion).error!.issues.map((i) => i.message).join('; ');
+    expect(err.message).toBe(`try_catch 'tc' try: invalid region — ${issues}`);
+    expectGraphPathSpelling(flow, err.path);
+  });
+
+  it('a region analysis error: a loop nested in a parallel branch', () => {
+    const body = { nodes: [node('x'), node('y')], edges: [] }; // two entries, two exits
+    const flow = {
+      nodes: [
+        node('start', 'start'),
+        {
+          ...node('fan', PARALLEL_NODE_TYPE),
+          config: {
+            branches: [
+              twoStep,
+              { nodes: [node('c'), { ...node('sweep', LOOP_NODE_TYPE), config: loopCfg(body) }], edges: [edge('e2', 'c', 'sweep')] },
+            ],
+          },
+        },
+      ],
+    };
+    const err = refusalOf(flow);
+    expect(err.path).toEqual(['nodes', 1, 'config', 'branches', 1, 'nodes', 1]);
+    expect(err.nodeId).toBe('sweep');
+    expect(err.message).toBe(
+      `parallel 'fan' branch 1 → loop 'sweep' body: ${analyzeRegion(body as never).errors.join('; ')}`,
+    );
+    expect(err.message.startsWith("parallel 'fan' branch 1 → loop 'sweep' body: region must be single-entry but has 2: x, y; ")).toBe(true);
+    expectGraphPathSpelling(flow, err.path);
+  });
+
+  it('a parallel block with fewer than 2 branches, at the top level', () => {
+    const flow = { nodes: [{ ...node('p', PARALLEL_NODE_TYPE), config: { branches: [twoStep] } }] };
+    const err = refusalOf(flow);
+    expect(err.path).toEqual(['nodes', 0]);
+    expect(err.nodeId).toBe('p');
+    expect(err.message).toBe("parallel 'p': a parallel block needs at least 2 branches");
+    expectGraphPathSpelling(flow, err.path);
+  });
+
+  it('the nested case: a one-branch parallel inside a try region, whose sentence names no scope', () => {
+    const flow = {
+      nodes: [
+        node('start', 'start'),
+        {
+          ...node('guard', TRY_CATCH_NODE_TYPE),
+          config: {
+            try: {
+              nodes: [{ ...node('fan', PARALLEL_NODE_TYPE), config: { branches: [{ nodes: [node('only_step')], edges: [] }] } }],
+              edges: [],
+            },
+            catch: { nodes: [node('catch_step')], edges: [] },
+          },
+        },
+      ],
+    };
+    const err = refusalOf(flow);
+    // The sentence the draft-publish verdict pins, byte for byte.
+    expect(err.message).toBe("parallel 'fan': a parallel block needs at least 2 branches");
+    expect(err.path).toEqual(['nodes', 1, 'config', 'try', 'nodes', 0]);
+    expect(err.nodeId).toBe('fan');
+    expectGraphPathSpelling(flow, err.path);
+  });
+
+  it('the index is the RAW list\'s: a dropped non-record member does not renumber the container', () => {
+    // `collectFlowGraphs` hands out `nodes` without the `null`, while
+    // `FlowGraph.path` keeps indexing the raw list; the container's index follows
+    // `path`, so it reads 2 here, not 1.
+    const flow = { nodes: [node('start', 'start'), null, { ...node('p', PARALLEL_NODE_TYPE), config: { branches: [twoStep] } }] };
+    const err = refusalOf(flow);
+    expect(err.path).toEqual(['nodes', 2]);
+    expect(err.nodeId).toBe('p');
   });
 });

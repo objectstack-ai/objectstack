@@ -27,6 +27,11 @@ export * from './native-error-name.js';
 // Seek-based pagination for batch walks — the offset alternative that neither
 // skips rows when the walk mutates as it goes, nor costs O(n²/p) (#4363).
 export * from './keyset-walk.js';
+// The data API's host-configured read limits — default and maximum page size,
+// and a per-query row budget (`OS_DATA_*`). The list doors (`metadata-protocol`)
+// and the analytics doors (`service-analytics`) plan every read through the same
+// rule, and both already depend on this package.
+export * from './query-read-limits.js';
 export * from './module-not-found.js';
 export * from './response-envelope.js';
 export * from './representation-validator.js';
@@ -102,12 +107,20 @@ export * from './unique-scope-install-gate.js';
 // this package depends only on `@objectstack/spec`, so a driver (in this
 // repository or out of it) adopting the seam takes no heavier edge.
 export * from './datasource-secret-resolver.js';
+// The service a plugin registers the host's ONE secret crypto provider under
+// (a KMS/Vault-backed `ICryptoProvider`): `os serve` reads it once every plugin
+// has initialized and falls back to `LocalCryptoProvider` when none is there.
+export * from './crypto-provider-service.js';
 // [#20919] The REST door's error CLASSIFICATION half (`mapDataError` through
 // `classifyDataError`), moved here from `@objectstack/rest` beside the
 // primitives it composes, so the bulk-import runner in `@objectstack/core`
 // judges a failed row with the same table the HTTP door answers with. `rest`
 // keeps the emission half and re-exports the public names.
 export * from './data-error-classification.js';
+// [#31271] The `/api/v1/actions` door's answer to a thrown value, beside the
+// `/data` door's classification above: the runtime door and the MCP
+// `run_action` / `resume_run` tools both answer through it.
+export * from './actions-door-answer.js';
 // [#22049] The one reading of a share-link password's request header pair
 // (`X-Share-Password` + the `X-Share-Password-Encoding` that declares it), for
 // the two mounts of the public share-link routes: `plugin-sharing`'s routes and

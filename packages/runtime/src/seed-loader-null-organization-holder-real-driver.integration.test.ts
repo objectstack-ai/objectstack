@@ -147,7 +147,7 @@ async function plantOwn(plant: (o: string, r: Record<string, unknown>) => Promis
 function scopedRequest(organizationId: string, seeds: unknown = SEEDS) {
   return SeedLoaderRequestSchema.parse({
     seeds,
-    config: { defaultMode: 'upsert', multiPass: true, organizationId },
+    config: { multiPass: true, organizationId },
   });
 }
 
@@ -246,8 +246,8 @@ describe('every scoped caller reads the same way (sqlite-file)', () => {
   });
 
   // `MarketplaceInstallLocalPlugin.runInlineSeed` serves both doors and builds
-  // the same request for each: `defaultMode: 'upsert'`, `multiPass: true`, the
-  // caller's organization.
+  // the same request for each: `multiPass: true` and the caller's organization,
+  // each dataset in its own mode.
   it('walled install and reseed: the request runInlineSeed builds for both', async () => {
     const { engine, all, plant } = await boot();
     await plantOwn(plant);

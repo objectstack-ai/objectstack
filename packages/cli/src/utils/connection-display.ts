@@ -24,18 +24,33 @@
  *    that the driver label and the host don't already say.
  */
 
+import { redactUrlCredentials } from '@objectstack/spec/data';
+
 /**
  * Strip credentials from a connection string.
  *
- * Values that aren't URLs — a sqlite path, `:memory:`, the `(in-memory)`
- * marker — pass through untouched, as does anything the URL parser rejects
- * (minus its userinfo segment). Idempotent, so a call site that can't tell
- * whether its input was already redacted may apply it defensively.
+ * Credentials go first, and by the platform's ONE URL credential grammar
+ * (`redactUrlCredentials` from `@objectstack/spec/data`, the composite the
+ * datasource read door applies): wherever that grammar reads a userinfo
+ * password or a credential query pair — the string judged as a URL parser
+ * cleans it, the pair judged by the shared query-pair judge and its one list
+ * of credential names — the label drops it, so the label cannot print a
+ * credential the doors would refuse or redact. No second grammar and no second
+ * name list live here; when the shared ones read more, this label follows
+ * without an edit.
+ *
+ * Then the display shaping, unchanged: a value carrying `://` loses its
+ * username and query string through the URL parser, or its userinfo segment
+ * by hand when the parser rejects it. Values that aren't URLs — a sqlite path,
+ * `:memory:`, the `(in-memory)` marker — pass through untouched unless the
+ * shared grammar read a credential in them. Idempotent, so a call site that
+ * can't tell whether its input was already redacted may apply it defensively.
  */
 export function redactConnectionUrl(value: string): string {
-  if (!value.includes('://')) return value;
+  const withoutCredentials = redactUrlCredentials(value);
+  if (!withoutCredentials.includes('://')) return withoutCredentials;
   try {
-    const url = new URL(value);
+    const url = new URL(withoutCredentials);
     url.username = '';
     url.password = '';
     // Query params are where tokens hide (`libsql://….turso.io?authToken=…`),
@@ -45,7 +60,7 @@ export function redactConnectionUrl(value: string): string {
   } catch {
     // Not parseable (a driver-specific dialect, a malformed URL). Drop the
     // userinfo segment by hand rather than printing the whole thing.
-    return value.replace(/:\/\/[^@/]*@/, '://');
+    return withoutCredentials.replace(/:\/\/[^@/]*@/, '://');
   }
 }
 

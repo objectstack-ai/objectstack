@@ -98,7 +98,7 @@ its own (`page:section` spaces its children with `space-y-4`; `page:footer`
 draws a separator above a justified, muted row; `page:sidebar` is a
 `w-full md:w-80 shrink-0` column, fixed at 20rem from `md` up), and
 `page:header` renders the page's `header`, a title row (`title`, `subtitle`,
-`breadcrumb`, `actions`) that takes no `children`. The bare HTML sectioning
+`actions` or `placedActions: true`) that takes no `children`. The bare HTML sectioning
 tags (`section`, `header`, `nav`, …) are not curated blocks; they belong to
 `kind:'html'` pages.
 
@@ -300,7 +300,7 @@ When pages need heavy widgets (grids, forms, kanbans, charts), import the plugin
 Those three `gantt` keys are the required ones; every other option — the tree,
 dependency, baseline, resource-view, quick-filter, working-calendar and
 read-only surfaces — is optional and documented in
-[`@object-ui/plugin-gantt`'s README](https://github.com/objectstack-ai/objectui/blob/main/packages/plugin-gantt/README.md).
+[`@object-ui/plugin-gantt`'s README](https://github.com/objectstack-ai/objectstack/tree/main/ui/packages/plugin-gantt).
 A flat `startDateField` / `endDateField` / `titleField` on the node is refused
 by name; the refusal points at `properties.gantt.KEY`, the block's one home.
 

@@ -198,7 +198,7 @@ and caches the manifest on disk so the install survives a restart:
 
 ```bash
 # catalog mode: the target runtime fetches the version from its own catalog
-os package install com.acme.crm --version 1.2.0 --runtime https://app.example.com
+os package install com.acme.crm --version 1.2.0 --url https://app.example.com
 
 # air-gapped mode: the artifact is read locally and sent inline, no catalog
 os package install ./dist/objectstack.json
@@ -208,6 +208,20 @@ This authenticates against an account on the **target runtime**, not your cloud
 login. Uninstall (`DELETE /api/v1/marketplace/install-local/:manifestId`) removes
 the cached manifest and withdraws the app from the running kernel; its answer
 says whether any part stays loaded until the next restart.
+
+**Deploying your working copy to a runtime you operate, again and again?**
+Remember it once with
+[`os environments use-runtime <url> --token <key>`](/docs/deployment/cli#deploy-to-a-self-hosted-runtime)
+(an API key that runtime issued). [`os deploy`](/docs/deployment/cli#to-a-self-hosted-runtime)
+— and the `d` key in `os dev`, which runs it — then deploys there with no URL or
+key to type: it builds, prints the runtime's upgrade plan from a dry run,
+installs the build inline, and reports the app live once the running kernel has
+loaded it (`hotLoaded`). An undeclared rename or a risky type change stops it
+before anything is written, and on a terminal it asks whether to deploy anyway;
+`os deploy --dry-run` prints the plan and installs nothing. `os package install`
+uses the same runtime when `-u` / `-t` are not given. `os environments use-runtime --forget`, or an
+`os environments switch <id>` recorded for your `os cloud login` control plane,
+makes ObjectOS Cloud the target again.
 
 For the full command reference — every flag, every subcommand — see the
 [CLI reference](/docs/deployment/cli).

@@ -38,6 +38,7 @@
 
 import { judgeOverrideWrite, overrideWriteItemsOf, type OverrideWriteItem } from '@objectstack/metadata-protocol';
 import { OverrideDeclarationSchema } from '@objectstack/spec/kernel';
+import type { InstalledManifestLookup } from '@objectstack/metadata-core';
 
 import { artifactPackages } from './artifact-packages.js';
 
@@ -56,6 +57,8 @@ export interface OverrideDeclarationRefusalRow {
 
 interface WalkedPackage {
   id: string;
+  /** The package's manifest as the artifact carries it. */
+  manifest: Record<string, unknown> | undefined;
   dependencies: string[];
   items: OverrideWriteItem[];
 }
@@ -75,6 +78,7 @@ function packagesOf(parsed: Record<string, unknown>): WalkedPackage[] {
   if (entries.length > 0) {
     return entries.map(({ index, id, body }) => ({
       id,
+      manifest: body,
       dependencies: dependencyIds(body),
       items: overrideWriteItemsOf(body, `packages[${index}].manifest.`),
     }));
@@ -82,7 +86,7 @@ function packagesOf(parsed: Record<string, unknown>): WalkedPackage[] {
   const manifest = isRecord(parsed.manifest) ? parsed.manifest : undefined;
   const id = typeof manifest?.id === 'string' && manifest.id !== '' ? manifest.id : undefined;
   if (id === undefined) return [];
-  return [{ id, dependencies: dependencyIds(manifest), items: overrideWriteItemsOf(parsed, '') }];
+  return [{ id, manifest, dependencies: dependencyIds(manifest), items: overrideWriteItemsOf(parsed, '') }];
 }
 
 /** `id`'s dependency closure, followed through the packages this artifact carries. */
@@ -107,6 +111,9 @@ export function findOverrideDeclarationRefusals(parsed: Record<string, unknown>)
   const packages = packagesOf(parsed);
   const byId = new Map(packages.map((p) => [p.id, p]));
   const shipped = new Map(packages.map((p) => [p.id, new Set(p.items.map((i) => `${i.type}\u0000${i.identity}`))]));
+  // The manifests this artifact carries, as the pair lookup reads installed
+  // ones: who may declare an override of a base is its App's pair.
+  const installed: InstalledManifestLookup = (packageId) => byId.get(packageId)?.manifest;
   const rows: OverrideDeclarationRefusalRow[] = [];
   for (const pkg of packages) {
     const dependencies = closureOf(pkg.id, byId);
@@ -122,9 +129,18 @@ export function findOverrideDeclarationRefusals(parsed: Record<string, unknown>)
       if (base !== undefined && dependencies.includes(base) && !byId.has(base) && !shippers.includes(base)) {
         shippers.push(base);
       }
+      // [#30065] The base's own item of this identity, when this artifact
+      // carries the base: what a declared action override is judged against.
+      const baseItemOf = (baseId: string): unknown =>
+        byId.get(baseId)?.items.find((i) => `${i.type}\u0000${i.identity}` === key)?.item;
+      // [#30623] The base's items of this type, when this artifact carries
+      // the base: what the ships-no-such-item refusal names an action's
+      // object from.
+      const baseItemsOf = (baseId: string): unknown[] =>
+        (byId.get(baseId)?.items ?? []).filter((i) => i.type === walked.type).map((i) => i.item);
       const verdict = judgeOverrideWrite(
         { type: walked.type, name: walked.name, packageId: pkg.id, item: walked.item },
-        { dependencies, shippers },
+        { dependencies, shippers, baseItemOf, baseItemsOf, installed },
       );
       if (verdict.verdict !== 'refuse') continue;
       rows.push({ path: walked.path, code: 'NOT_OVERRIDABLE', rule: verdict.rule, packageId: pkg.id, message: verdict.message });

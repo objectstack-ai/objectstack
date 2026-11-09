@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#7037] `task_completion`'s recurrence branch computes a real next due date.
+ * [#7037] `todo_task_completion`'s recurrence branch computes a real next due date.
  *
  * The defect: `create_next_task` wrote
  * `DATEADD({completedTask.due_date}, {completedTask.recurrence_interval}, "…")`
@@ -177,7 +177,7 @@ async function completeRecurringTask(opts: {
   await data.update('todo_task', { status: 'completed' }, { where: { id }, ...ctx });
   await sleep(600);
 
-  const runs = await automation.listRuns('task_completion');
+  const runs = await automation.listRuns('todo_task_completion');
   const all = await data.find('todo_task', { where: { subject: opts.subject }, ...ctx });
   const spawned = (Array.isArray(all) ? all : []).find((r: any) => r.id !== id);
   return { spawned, run: runs[0], data };
@@ -370,7 +370,7 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
       await data.update('todo_task', { status: 'completed' }, { where: { id }, ...ctx });
       await sleep(600);
 
-      const runs = await automation.listRuns('task_completion');
+      const runs = await automation.listRuns('todo_task_completion');
       expect(runs[0].status).toBe('completed');
       // The gate still routes past BOTH nodes — adding the script node did not
       // put date arithmetic on the non-recurring path.
@@ -438,7 +438,7 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
       // Non-vacuous: the REAL flow, on the very same kernel and record, computes
       // the date and completes. So the refusal above is the retired dialect, not
       // a broken fixture or an unusable harness.
-      const good: any = await automation.execute('task_completion', trigger);
+      const good: any = await automation.execute('todo_task_completion', trigger);
       expect(good?.success, `unexpected result: ${JSON.stringify(good)}`).toBe(true);
       const spawned = (await data.find('todo_task', { where: { subject: 'Reverse fixture task' }, ...ctx }))
         .find((r: any) => r.id !== id);

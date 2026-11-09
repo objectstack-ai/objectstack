@@ -44,9 +44,9 @@ export const CONNECTOR_CONNECTIONS_NAV_CAPABILITY = 'manage_connector_connection
  * `priority` orders contributions within a group, lowest first. The group's
  * other contributors, read where they are declared: Webhooks / HTTP Deliveries
  * (`@objectstack/plugin-webhooks`) and Datasources
- * (`@objectstack/service-datasource`) at 100, Connect an Agent
- * (`@objectstack/mcp`) at 110, Cloud Connection (`@objectstack/cloud-connection`)
- * at 200 — so 120 sorts this entry after the connection surfaces it serves.
+ * (`@objectstack/service-datasource`) at 100, Cloud Connection
+ * (`@objectstack/cloud-connection`) at 200 — so 120 sorts this entry after the
+ * connection surfaces it serves.
  */
 export const CONNECTOR_CREDENTIALS_UI_BUNDLE = {
     id: 'com.objectstack.service-automation.connector-credentials-ui',

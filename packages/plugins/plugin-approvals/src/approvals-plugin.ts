@@ -40,6 +40,9 @@ import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 import { backfillActionSlots } from './action-slot-backfill.js';
 import { backfillApprovalDisplayLabels } from './display-label-backfill.js';
+import { backfillProcessPackages, logProcessPackageBackfill, type FlowHolderSource } from './stored-process-package-backfill.js';
+import { APPROVAL_EMAIL_TEMPLATES } from './approval-email-templates.js';
+import { resolvePublicBaseUrl } from './public-base-url.js';
 
 export interface ApprovalsPluginOptions {
   /** Disable runtime registration (schemas still register). */
@@ -51,8 +54,12 @@ export interface ApprovalsPluginOptions {
    */
   escalationScanIntervalMs?: number;
   /**
-   * Absolute origin for actionable links in outbound notifications
-   * (ADR-0043), e.g. `https://app.example.com`. Relative by default.
+   * Absolute origin for links in outbound notifications — the approval
+   * e-mail's link to the request, and ADR-0043's action link — e.g.
+   * `https://app.example.com`. Unset, it resolves from `OS_AUTH_URL`
+   * (legacy `BETTER_AUTH_URL`), then `OS_BASE_URL`; with none of them set the
+   * links are relative and the plugin warns once at start
+   * (`public-base-url.ts`).
    */
   publicBaseUrl?: string;
   /**
@@ -233,10 +240,19 @@ export class ApprovalsServicePlugin implements Plugin {
       }
     };
 
+    // [#30509] The origin approval links are built under: the option, else the
+    // deployment's configured address — never a guessed one.
+    const publicBase = resolvePublicBaseUrl(this.options.publicBaseUrl);
+    if (!publicBase.url) {
+      ctx.logger.warn(
+        `ApprovalsServicePlugin: no public base URL (${publicBase.problem}) — approval e-mails link to the request with a relative URL, which a mail client cannot open. Set OS_BASE_URL (or OS_AUTH_URL) to this deployment's address, or pass the publicBaseUrl option.`,
+      );
+    }
+
     this.service = new ApprovalService({
       engine: engine as ApprovalEngine,
       logger: ctx.logger,
-      publicBaseUrl: this.options.publicBaseUrl,
+      publicBaseUrl: publicBase.url,
       // [#8652] Read-only record-reader visibility. Default OFF — an absent
       // option reaches the service as an empty set. This is the host's half
       // only: an object's own `enable.approvalsVisibleToReaders` is read by
@@ -408,6 +424,18 @@ export class ApprovalsServicePlugin implements Plugin {
       const messaging = ctx.getService<ApprovalMessagingSurface>('messaging');
       if (messaging && typeof messaging.emit === 'function') {
         this.service.attachMessaging(messaging);
+        // [#30509] The approval e-mail's text: title, body, and the link to
+        // the request. A messaging service without the seam renders the
+        // e-mail from the title and body alone.
+        if (typeof messaging.registerBuiltinTemplates === 'function') {
+          try {
+            messaging.registerBuiltinTemplates(APPROVAL_EMAIL_TEMPLATES);
+          } catch (err: any) {
+            ctx.logger.warn('ApprovalsServicePlugin: the approval e-mail templates were NOT registered — approval e-mails carry the notice title and body with no link to the request', {
+              error: err?.message ?? String(err),
+            });
+          }
+        }
       }
     } catch { /* messaging not installed */ }
 
@@ -582,6 +610,30 @@ export class ApprovalsServicePlugin implements Plugin {
       (ctx as any).hook('kernel:ready', backfillApproverIndex);
       (ctx as any).hook('kernel:ready', backfillSlots);
       (ctx as any).hook('kernel:ready', backfillDisplayLabels);
+      // [ADR-0150 D8 row R7] Open requests gain the package that holds their
+      // flow, once the registry's bare-name holders are sealed
+      // (`kernel:bootstrapped`): before that, a package of this boot could
+      // still register and change who holds a name. The ambiguous set is
+      // reported, never bound; never fails the boot. A kernel that dispatches
+      // no boot-phase hook runs no pass. See `stored-process-package-backfill.ts`.
+      (ctx as any).hook('kernel:bootstrapped', async () => {
+        try {
+          let ql: { registry?: { bareNameHoldersAreSealed?: boolean } } | undefined;
+          let flows: Partial<FlowHolderSource> | undefined;
+          try { ql = ctx.getService<typeof ql>('objectql'); } catch { ql = undefined; }
+          try { flows = ctx.getService<Partial<FlowHolderSource>>('automation'); } catch { flows = undefined; }
+          if (ql?.registry?.bareNameHoldersAreSealed !== true) return;
+          if (!flows || typeof flows.flowHolder !== 'function') return;
+          const report = await backfillProcessPackages(slotEngine as any, flows as FlowHolderSource);
+          logProcessPackageBackfill(report, ctx.logger as any);
+        } catch (err: any) {
+          ctx.logger.warn?.(
+            '[approvals] the sys_approval_request.process_package backfill did not finish: open requests that name no '
+            + 'package keep naming none, every reader still reads the flow by name as before, and the next boot tries again.',
+            { error: err?.message ?? String(err) },
+          );
+        }
+      });
     } else {
       await wireEscalationClock();
       await mountActionPages();

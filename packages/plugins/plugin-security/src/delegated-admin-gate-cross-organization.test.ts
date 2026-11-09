@@ -41,6 +41,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { PermissionSet } from '@objectstack/spec/security';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { DelegatedAdminGate } from './delegated-admin-gate.js';
 
 const ORG_A = 'org_a_acme';
@@ -237,8 +238,8 @@ describe('DelegatedAdminGate — a scope anchor never crosses an organization', 
     expect(report.placeableBusinessUnitIds).not.toContain(b.sales);
   });
 
-  // ── Controls: the assertions above must be able to fail, and the
-  //    organization-less surface must be untouched. ───────────────────────
+  // ── Controls: the assertions above must be able to fail, and a context
+  //    that names no organization holds nothing. ──────────────────────────
   it('control (dark) — one organization holding `sales` resolves it, and the in-org write is approved', async () => {
     const engine = await bootEngine();
     const a = await seedOrganization(engine, ORG_A, 'a');
@@ -265,15 +266,29 @@ describe('DelegatedAdminGate — a scope anchor never crosses an organization', 
     );
   });
 
-  it('a `single`-posture caller (no organization in context) keeps the by-name answer', async () => {
+  it('a context that names no organization holds nothing: no scope, no placeable unit, and its write is refused naming the missing active organization', async () => {
     const engine = await bootEngine();
+    const b = await seedOrganization(engine, ORG_B, '0');
     const a = await seedOrganization(engine, ORG_A, 'a');
     const gate = gateOn(engine);
+    const noOrganization = { principal: 'delegate', userId: 'usr_delegate', positions: ['sales_admin'] };
 
-    const report = await gate.describeDelegableScope(DELEGATE_SETS, {
-      principal: 'delegate',
-      userId: 'usr_delegate',
-    });
-    expect([...report.placeableBusinessUnitIds].sort()).toEqual([a.sales, a.salesEast].sort());
+    // A context that names no organization holds nothing (ADR-0123 D2).
+    const report = await gate.describeDelegableScope(DELEGATE_SETS, noOrganization);
+    expect(report).toEqual({ isTenantAdmin: false, scopes: [], placeableBusinessUnitIds: [], assignablePositions: [] });
+    for (const [unit, user] of [[a.salesEast, a.user], [b.salesEast, b.user]]) {
+      const refusal: any = await gate.assert({
+        object: 'sys_user_position',
+        operation: 'insert',
+        data: { user_id: user, position: 'sales_rep', business_unit_id: unit },
+        context: noOrganization,
+      }).then(() => null, (e) => e);
+      expect(refusal, `${unit}: expected a refusal`).not.toBeNull();
+      const r = resolveThrownHttpError(refusal);
+      expect([r.status, r.code], `${unit}: ${refusal.message}`).toEqual([403, 'PERMISSION_DENIED']);
+      expect(String(refusal.message)).toMatch(/no active organization/);
+    }
+    // CONTROL: the same delegate, naming its organization, keeps its own subtree.
+    await expect(assignInto(gate, ORG_A, a.salesEast, a.user)).resolves.toBeUndefined();
   });
 });

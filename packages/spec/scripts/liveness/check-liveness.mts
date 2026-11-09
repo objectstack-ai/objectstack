@@ -189,6 +189,7 @@ import {
   RouteGenerationConfigSchema,
 } from '../../src/api/rest-server.zod';
 import { SubscriptionSchema } from '../../src/api/realtime.zod';
+import { TemplateManifestSchema } from '../../src/marketplace/template-manifest.zod';
 import {
   BOUND_PROOF_PATHS,
   HIGH_RISK_CLASSES,
@@ -278,7 +279,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'picklist', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'rest_api', 'realtime_subscription', 'sharing_rule', 'connector', 'analytics_cube', 'queue', 'assignment_rule'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'picklist', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation', 'rest_api', 'realtime_subscription', 'sharing_rule', 'connector', 'analytics_cube', 'queue', 'assignment_rule', 'template_manifest'];
 
 // Authorable metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -478,6 +479,17 @@ const PENDING_GOVERNANCE: Record<string, string> = {};
 // and this override records what has been measured. There is no registry to
 // fold this one back onto either — like `query`, `qa` and `manifest`, the
 // override IS its governance.
+//
+// `template_manifest` is the SIXTH category: a PACKAGE-LISTING file surface.
+// `TemplateManifestSchema` (src/marketplace/template-manifest.zod.ts) is the
+// schema of `objectstack.manifest.json`, the file a package author writes to
+// describe how the package is listed — read by `os package publish` and by
+// `create-objectstack`, parsed for every shipped file by
+// `check:template-manifests`, and never loaded by a runtime boot. It entered
+// with the marketplace taxonomy: the facet keys it gained have their consumers
+// outside this repository (the cloud catalog) and in the console, and a row is
+// where those consumers are named. Like `qa` and `manifest`, there is no
+// registry to fold it back onto — the override IS its governance.
 const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   webhook: WebhookSchema,
   query: QuerySchema,
@@ -490,6 +502,7 @@ const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   route_generation: RouteGenerationConfigSchema,
   rest_api: RestApiConfigSchema,
   realtime_subscription: SubscriptionSchema,
+  template_manifest: TemplateManifestSchema,
 };
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.

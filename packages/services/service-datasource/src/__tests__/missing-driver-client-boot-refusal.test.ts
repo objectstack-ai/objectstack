@@ -48,6 +48,9 @@ import { join } from 'node:path';
 // cold load of the driver's whole module graph — clocked windows measure
 // behaviour, never loading.
 import '@objectstack/driver-sql';
+// No case here builds a memory datasource; the shared factory's lazy memory
+// arm is stubbed rather than loaded.
+vi.mock('@objectstack/driver-memory', () => ({}));
 import { DatasourceConnectionService, type ConnectionEngineLike } from '../datasource-connection-service.js';
 import { createDefaultDatasourceDriverFactory } from '../default-datasource-driver-factory.js';
 import {
@@ -158,6 +161,10 @@ describe('a missing database client refuses the boot with ITS install (#24909)',
     ['pg', 'postgres', () => ({ url: 'postgres://app@127.0.0.1:1/app' })],
     ['mysql2', 'mysql', () => ({ host: '127.0.0.1', port: 1, database: 'app', user: 'app' })],
     ['better-sqlite3', 'sqlite', () => ({ filename: join(scratch, 'app.db') })],
+    // #31328 — federation only, so the datasource declares `schemaMode: 'external'`.
+    ['oracledb', 'oracle', () => ({ host: '127.0.0.1', port: 1, serviceName: 'FREEPDB1', username: 'app', schemaMode: 'external' })],
+    // SQL Server, federation only too; knex's `mssql` client requires `tedious`.
+    ['tedious', 'mssql', () => ({ host: '127.0.0.1', port: 1, database: 'app', username: 'app', schemaMode: 'external' })],
   ];
 
   it.each(arms)('%s absent: the %s default is refused, ending on the install of that client', async (client, driver, config) => {

@@ -119,6 +119,7 @@ import {
 } from '@object-ui/react';
 import type { QueryParams } from '@object-ui/types';
 import { Link2Off, Loader2 } from 'lucide-react';
+import { servedObjectLabel } from '../../hooks/servedObjectLabel.js';
 
 /**
  * The one read the card makes. Structural, so the console's adapter satisfies
@@ -221,7 +222,7 @@ export function RecordPreviewCard({ objectName, recordId, dataSource, className 
     };
   }, [targetObject, targetRecord, targetKey, defReady, expandKey, dataSource, invalidation]);
 
-  const { t } = useObjectTranslation();
+  const { t, language } = useObjectTranslation();
   const { objectLabel } = useObjectLabel();
   // The host's record-URL builder (see "The link" in the module header).
   const recordLinks = useRelatedRecordActions();
@@ -252,7 +253,8 @@ export function RecordPreviewCard({ objectName, recordId, dataSource, className 
   if (def && current?.status === 'readable') {
     const row = withoutDeniedFields(current.record, perms, targetObject);
     const title = getRecordDisplayName(def, row);
-    const typeLabel = objectLabel({ name: targetObject, label: def.label || targetObject });
+    // The served label as given; the bundle only when none is served (objectstack#30390).
+    const typeLabel = servedObjectLabel({ name: targetObject, label: def.label }, language, objectLabel, targetObject);
     // Asked only here, where the read returned the record (objectui#12557).
     const href =
       targetRecord !== null && recordLinks?.recordHref ? recordLinks.recordHref(targetObject, targetRecord) : null;

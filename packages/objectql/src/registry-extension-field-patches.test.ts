@@ -21,6 +21,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SchemaRegistry } from './registry.js';
 import { ObjectQL } from './engine.js';
 import { fieldPatchTargetRefusals } from '@objectstack/metadata-core';
+import { ObjectExtensionSchema } from '@objectstack/spec/data';
 
 const OWNER_PKG = 'com.vendor.crm';
 const EXT_PKG = 'com.acme.crm-display';
@@ -403,5 +404,101 @@ describe('ADR-0146 D10 — the manifest loop carries fieldPatches onto the exten
     const served = industryOf(ql.registry.getObject(OBJ));
     expect(served.label).toBe('Sector');
     expect(served.options[0]).toEqual({ value: 'tech', label: 'Technology' });
+  });
+});
+
+describe('#29903, #29872 — a read can fold only one package\'s own extensions', () => {
+  const PAIR_PKG = `${OWNER_PKG}.custom`;
+  /** The vendor's object, a third package's patch, and the pair's field plus its patch. */
+  function extended(): SchemaRegistry {
+    const reg = withVendor();
+    extend(reg, { name: { label: 'Account name' } });
+    reg.registerObject({
+      name: OBJ,
+      fields: { region__c: { name: 'region__c', type: 'text', label: 'Region' } },
+      fieldPatches: { industry: { label: 'Sector (customized)' } },
+    } as any, PAIR_PKG, undefined, 'extend', 300);
+    return reg;
+  }
+  const shape = (body: any) => ({
+    region: !!body?.fields?.region__c,
+    industry: body?.fields?.industry?.label,
+    name: body?.fields?.name?.label,
+  });
+  const listed = (reg: SchemaRegistry, packageId: string, options?: { withoutExtensionsOf?: string; onlyExtensionsOf?: string }) =>
+    (reg.listItems<any>('object', packageId, options)).find((o) => o?.name === OBJ);
+
+  it('[#29903] `withoutExtensionsOf` leaves that one package\'s extension out, and folds every other', () => {
+    const reg = extended();
+    expect(shape(listed(reg, OWNER_PKG, { withoutExtensionsOf: PAIR_PKG }))).toEqual({ region: false, industry: 'Industry', name: 'Account name' });
+    expect(listed(reg, OWNER_PKG, { withoutExtensionsOf: PAIR_PKG })?._packageId).toBe(OWNER_PKG);
+    expect(shape(reg.foldObjectExtendersOnto(OBJ, vendorAccount(), { withoutExtensionsOf: PAIR_PKG })))
+      .toEqual({ region: false, industry: 'Industry', name: 'Account name' });
+    // A package that extends nothing changes nothing: the cached merged object.
+    expect(listed(reg, OWNER_PKG, { withoutExtensionsOf: 'com.nobody' })).toBe(reg.getObject(OBJ));
+  });
+
+  it('the owner\'s listed object with only its own extensions is the object as no package had extended it', () => {
+    const reg = extended();
+    // Neither the pair's extension nor the third package's is folded in.
+    expect(shape(listed(reg, OWNER_PKG, { onlyExtensionsOf: OWNER_PKG }))).toEqual({ region: false, industry: 'Industry', name: 'Name' });
+    expect(listed(reg, OWNER_PKG, { onlyExtensionsOf: OWNER_PKG })?._packageId).toBe(OWNER_PKG);
+    // CONTROL: every other read of the object still folds both in.
+    expect(shape(listed(reg, OWNER_PKG))).toEqual({ region: true, industry: 'Sector (customized)', name: 'Account name' });
+    expect(shape(reg.getObject(OBJ))).toEqual({ region: true, industry: 'Sector (customized)', name: 'Account name' });
+  });
+
+  it('an extender\'s listed object folds that extender\'s own extension only', () => {
+    expect(shape(listed(extended(), EXT_PKG, { onlyExtensionsOf: EXT_PKG }))).toEqual({ region: false, industry: 'Industry', name: 'Account name' });
+  });
+
+  it('an object no other package extends is the cached merged object', () => {
+    const reg = withVendor();
+    expect(listed(reg, OWNER_PKG, { onlyExtensionsOf: OWNER_PKG })).toBe(reg.getObject(OBJ));
+  });
+
+  it('leaving every other package out is the answer a registry with no extender gives, byte for byte', () => {
+    expect(JSON.stringify(listed(extended(), OWNER_PKG, { onlyExtensionsOf: OWNER_PKG })))
+      .toBe(JSON.stringify(listed(withVendor(), OWNER_PKG)));
+  });
+
+  it('the fold onto a stored body leaves the other packages\' extensions out the same way', () => {
+    const reg = extended();
+    expect(shape(reg.foldObjectExtendersOnto(OBJ, vendorAccount(), { onlyExtensionsOf: OWNER_PKG })))
+      .toEqual({ region: false, industry: 'Industry', name: 'Name' });
+    expect(shape(reg.foldObjectExtendersOnto(OBJ, vendorAccount(), { onlyExtensionsOf: PAIR_PKG })))
+      .toEqual({ region: true, industry: 'Sector (customized)', name: 'Name' });
+    expect(shape(reg.foldObjectExtendersOnto(OBJ, vendorAccount())))
+      .toEqual({ region: true, industry: 'Sector (customized)', name: 'Account name' });
+  });
+});
+
+describe('#29872 — getObjectExtensionsOf reads a package\'s extensions back as the entries it registered from', () => {
+  const MANIFEST_EXTENSION = { extend: OBJ, fields: { acme_code: { type: 'text', label: 'Billing code' } } };
+  const STORED_EXTENSION = { extend: OBJ, fieldPatches: { industry: { label: 'Sector' } }, priority: 250 };
+
+  it('a manifest `objectExtensions` entry (registerApp, no item) comes back as written, its default priority omitted', () => {
+    const ql = new ObjectQL();
+    (ql.registry as SchemaRegistry).logLevel = 'silent';
+    ql.registerApp({ id: OWNER_PKG, name: 'CRM', version: '1.0.0', objects: [vendorAccount()] });
+    ql.registerApp({ id: EXT_PKG, name: 'CRM ext', version: '1.0.0', objectExtensions: [{ ...MANIFEST_EXTENSION }] });
+
+    const entries = (ql.registry as SchemaRegistry).getObjectExtensionsOf(EXT_PKG);
+    expect(entries).toEqual([MANIFEST_EXTENSION]);
+    expect(ObjectExtensionSchema.safeParse(entries[0]).success).toBe(true);
+    // The owner contributes no extension, and a package that extends nothing reads none.
+    expect((ql.registry as SchemaRegistry).getObjectExtensionsOf(OWNER_PKG)).toEqual([]);
+    expect((ql.registry as SchemaRegistry).getObjectExtensionsOf('com.nobody')).toEqual([]);
+  });
+
+  it('a stored item\'s extension (registerObjectExtension) comes back with its own priority, and re-registers to the same object', () => {
+    const reg = withVendor();
+    reg.registerObjectExtension({ ...STORED_EXTENSION }, EXT_PKG);
+    const entries = reg.getObjectExtensionsOf(EXT_PKG);
+    expect(entries).toEqual([STORED_EXTENSION]);
+    // The inverse of registerObjectExtension: a fresh registry fed the entries serves the same object.
+    const fresh = withVendor();
+    for (const entry of entries) fresh.registerObjectExtension(entry, EXT_PKG);
+    expect(JSON.stringify(fresh.getObject(OBJ))).toBe(JSON.stringify(reg.getObject(OBJ)));
   });
 });

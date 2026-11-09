@@ -10,6 +10,7 @@ import { AuthProvider } from '../AuthProvider';
 import { useAuth } from '../useAuth';
 import { AuthGuard } from '../AuthGuard';
 import type { AuthClient } from '../types';
+import { registerBeforeSignOut, resetBeforeSignOutForTests } from '../beforeSignOut';
 
 function createMockClient(overrides: Partial<AuthClient> = {}): AuthClient {
   return {
@@ -206,6 +207,73 @@ describe('useAuth', () => {
     await waitFor(() => {
       expect(screen.getByTestId('auth').textContent).toBe('false');
     });
+  });
+});
+
+/**
+ * objectstack#29042 — a step registered with `registerBeforeSignOut` runs while
+ * the session still exists: `signOut()` awaits it before `client.signOut()`,
+ * and a failing step does not hold the sign-out back.
+ */
+describe('signOut runs the before-sign-out steps first', () => {
+  function SignOutButton() {
+    const { signOut, isAuthenticated } = useAuth();
+    return (
+      <div>
+        <button onClick={() => signOut()}>Sign Out</button>
+        <span data-testid="auth">{String(isAuthenticated)}</span>
+      </div>
+    );
+  }
+
+  function signedInClient(order: string[]) {
+    return createMockClient({
+      getSession: vi.fn().mockResolvedValue({
+        user: { id: '1', name: 'Test', email: 'test@test.com' },
+        session: { token: 'tok' },
+      }),
+      signOut: vi.fn().mockImplementation(async () => {
+        order.push('client.signOut');
+      }),
+    });
+  }
+
+  async function signOutThrough(client: AuthClient) {
+    render(
+      <AuthProvider authUrl="/api/auth" client={client}>
+        <SignOutButton />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('auth').textContent).toBe('true'));
+    await act(async () => {
+      await userEvent.click(screen.getByText('Sign Out'));
+    });
+    await waitFor(() => expect(screen.getByTestId('auth').textContent).toBe('false'));
+  }
+
+  it('awaits a registered step before the session ends', async () => {
+    resetBeforeSignOutForTests();
+    const order: string[] = [];
+    const remove = registerBeforeSignOut(async () => {
+      await Promise.resolve();
+      order.push('step');
+    });
+    await signOutThrough(signedInClient(order));
+    expect(order).toEqual(['step', 'client.signOut']);
+    remove();
+  });
+
+  it('a step that fails does not stop the sign-out', async () => {
+    resetBeforeSignOutForTests();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const order: string[] = [];
+    const remove = registerBeforeSignOut(async () => {
+      throw new Error('unregister failed');
+    });
+    await signOutThrough(signedInClient(order));
+    expect(order).toEqual(['client.signOut']);
+    remove();
+    warn.mockRestore();
   });
 });
 

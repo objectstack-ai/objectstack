@@ -514,7 +514,7 @@ const READS: Readonly<Record<string, ReadRow>> = {
     ],
     why: 'both callers hand it the union (#22238).',
   },
-  'utils/i18n-extract.ts :: config': {
+  'utils/i18n-bundle-extract.ts :: config': {
     reads: 'resolved',
     evidence: [{ in: 'commands/i18n/extract.ts', code: 'extractTranslations(authoringRuleUnionStack(normalized' }],
     why: 'its caller hands it the union (#22238).',

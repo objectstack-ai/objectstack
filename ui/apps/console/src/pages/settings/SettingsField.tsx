@@ -6,7 +6,7 @@
  * (which carries provenance and lock state).
  */
 
-import { cloneElement, isValidElement, lazy, Suspense, useId, useState, type ReactElement } from 'react';
+import { cloneElement, isValidElement, lazy, Suspense, useId, useRef, useState, type ReactElement } from 'react';
 import {
   Input,
   Textarea,
@@ -27,13 +27,28 @@ import {
   Separator,
   Badge,
   Button,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
   cn,
   getLazyIcon,
 } from '@object-ui/components';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
 import { AlertTriangle, ChevronRight, Info, RotateCcw } from 'lucide-react';
 import { EnvLockBadge } from './EnvLockBadge';
-import { resolveLabel, type Specifier, type ResolvedSettingValue } from './types';
+import { SettingsMapField, type MapRefusalAt } from './SettingsMapField';
+import {
+  resolveLabel,
+  type Specifier,
+  type SpecifierScope,
+  type ResolvedSettingValue,
+} from './types';
 import type { SettingsLabelHelpers } from './useSettingsLabel';
 
 /**
@@ -44,8 +59,8 @@ import type { SettingsLabelHelpers } from './useSettingsLabel';
  * of text (an installed package's own words) through the same unconditional
  * `rehype-sanitize` pass, used as it is.
  *
- * Lazy on purpose. This module is in the EAGER closure (`AppContent` imports
- * `WorkspaceTimezonePrompt`, which imports it), and a static import would put
+ * Lazy on purpose. This module is in the EAGER closure (`App` imports
+ * `FirstRunChecklist`, which imports it), and a static import would put
  * `plugin-markdown`'s whole chunk, its syntax highlighter included, on every
  * console page load. Until the chunk arrives the body shows as its own plain
  * text.
@@ -92,25 +107,107 @@ export interface SettingsFieldProps {
   labels?: SettingsLabelHelpers;
   /**
    * Server-side rejection for THIS field, from the last failed save
-   * (objectstack#4224). Already localized by the server — rendered verbatim,
-   * not re-worded here.
+   * (objectstack#4224). Rendered verbatim, not re-worded here: the host passes
+   * the server's sentence, or the console's own for a format miss
+   * (`settingsFieldRefusals`, objectstack#30206).
    *
    * Replaces the help text while present, rather than stacking below it: the
    * two occupy the same slot and say the same kind of thing, and a description
    * sitting under a red error reads as if the field has two states at once.
    */
   error?: string;
+  /**
+   * Where the last refusal points inside a `map` value (objectstack#31391):
+   * the save door's `constraint.entry` and `constraint.column`. The row and
+   * cell named are marked; `error` stays the sentence. Read by `map` only.
+   */
+  errorAt?: MapRefusalAt;
+  /**
+   * A fact the PAGE knows about this row that the manifest cannot carry
+   * (objectstack#30313: the address the server judges beside Allowed IP
+   * ranges). Drawn under the control after the help text or the error, never
+   * in place of either: a refusal does not make the fact any less true.
+   * Already translated by the page.
+   */
+  note?: string;
+  /**
+   * The scope this row's Save writes. The page passes it; a host that does
+   * not (the first-run checklist) keeps the badges a lower scope would see.
+   */
+  writeScope?: SpecifierScope;
+  /**
+   * Clears the value stored beneath an env pin (objectstack#30665): the page
+   * writes `null` for this key, the one write the server lets through a pin
+   * (ADR-0007 D6). Offered only where {@link storedBeneathPin} holds, so a
+   * host that does not pass it, or a row with nothing stored, shows nothing.
+   */
+  onClearSaved?: () => void;
+}
+
+/**
+ * Whether a value is stored beneath the env pin at the scope this row writes,
+ * the one a clear would null (objectstack#30665). Read off the server's
+ * `cascadeChain` alone: the namespace read lists the stored cascade beneath an
+ * in-force `env` entry, a secret's entries as the read mask or `null`. Nothing
+ * stored, or stored only at another scope, is no control: a clear here could
+ * not remove it.
+ */
+export function storedBeneathPin(
+  resolved: ResolvedSettingValue | undefined,
+  writeScope: SpecifierScope | undefined,
+): boolean {
+  if (!resolved?.locked || resolved.source !== 'env' || !writeScope) return false;
+  return (resolved.cascadeChain ?? []).some(
+    (entry) => entry.scope === writeScope && entry.value !== null && entry.value !== undefined,
+  );
+}
+
+/**
+ * The line and control under a pinned row that has a value stored beneath the
+ * pin (objectstack#30665). The wording clears the saved value, never deletes
+ * it, and says the environment value stays in force; the clear asks first,
+ * because it writes at once rather than through the page's draft.
+ */
+function ClearSavedBeneathPin({ onClear, disabled }: { onClear: () => void; disabled?: boolean }) {
+  const { t } = useObjectTranslation();
+  return (
+    <div className="flex items-center justify-between gap-3 mt-1" data-testid="settings-saved-beneath-pin">
+      <p className="text-xs text-muted-foreground">{t('console.settingsView.savedBeneathPin')}</p>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button type="button" variant="outline" size="sm" className="h-7 shrink-0 text-xs" disabled={disabled}>
+            {t('console.settingsView.clearSaved')}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('console.settingsView.clearSaved')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('console.settingsView.clearSavedConfirm')}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('actionConfirm.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={onClear}>{t('console.settingsView.clearSaved')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
 }
 
 type SourceBadge =
   | { kind: 'inherited'; scope: ResolvedSettingValue['source'] }
-  | { kind: 'overrides'; scope: ResolvedSettingValue['source'] };
+  | { kind: 'overrides'; scope: ResolvedSettingValue['source'] }
+  /** The value is the one this page writes; `defaultValue` is the default layer's. */
+  | { kind: 'modified'; defaultValue: unknown };
 
 /**
  * Which source badge a row carries, read off the server's `cascadeChain` alone:
  * the console never invents a source state.
  */
-function sourceBadgeOf(resolved: ResolvedSettingValue): SourceBadge | null {
+function sourceBadgeOf(
+  resolved: ResolvedSettingValue,
+  writeScope: SpecifierScope | undefined,
+): SourceBadge | null {
   const chain = resolved.cascadeChain;
   if (!chain || chain.length === 0) return null;
 
@@ -125,7 +222,12 @@ function sourceBadgeOf(resolved: ResolvedSettingValue): SourceBadge | null {
     effective.scope !== 'user' &&
     effective.scope !== 'tenant'
   ) {
-    // global/env: show as inherited for downstream scopes
+    // global/env: inherited for downstream scopes, but a global value on the
+    // page that writes the global scope was set here.
+    if (effective.scope === writeScope) {
+      const defaultEntry = chain.find((e) => e.scope === 'default');
+      return { kind: 'modified', defaultValue: defaultEntry?.value };
+    }
     return { kind: 'inherited', scope: effective.scope };
   }
 
@@ -143,6 +245,13 @@ function InheritanceBadge({
   labels?: SettingsLabelHelpers;
 }) {
   const { t } = useObjectTranslation();
+  if (badge.kind === 'modified') {
+    return (
+      <Badge variant="outline" className="text-amber-700 border-amber-300 text-[10px]">
+        {t('console.settingsView.sourceBadgeModified')}
+      </Badge>
+    );
+  }
   const source = labels?.sourceLabel?.(badge.scope) ?? badge.scope;
 
   // Each badge is ONE sentence with the layer's label interpolated as
@@ -178,6 +287,8 @@ function FieldHeader({
   htmlFor,
   onReset,
   resetDisabled,
+  writeScope,
+  describeDefault,
 }: {
   spec: Specifier;
   resolved?: ResolvedSettingValue;
@@ -186,15 +297,20 @@ function FieldHeader({
   labelId?: string;
   htmlFor?: string;
   /**
-   * Clears this layer's value (objectui#13145). Offered only beside an
-   * `Overrides` badge, the one state where clearing hands the row back to a
-   * value the layer above carries.
+   * Clears this layer's value (objectui#13145). Offered beside an `Overrides`
+   * badge and a `Modified` one, the states where clearing hands the row back
+   * to a value the layer above, or the default, carries.
    */
   onReset?: () => void;
   resetDisabled?: boolean;
+  writeScope?: SpecifierScope;
+  /** The default value in words, or `null` when it has none worth showing. */
+  describeDefault?: (value: unknown) => string | null;
 }) {
   const { t } = useObjectTranslation();
-  const badge = resolved && !resolved.locked ? sourceBadgeOf(resolved) : null;
+  const badge = resolved && !resolved.locked ? sourceBadgeOf(resolved, writeScope) : null;
+  const defaultText =
+    badge?.kind === 'modified' && describeDefault ? describeDefault(badge.defaultValue) : null;
   return (
     <div className="flex items-center gap-2">
       <Label id={labelId} htmlFor={htmlFor} className="text-sm font-medium">
@@ -210,7 +326,12 @@ function FieldHeader({
       ) : null}
       {resolved?.locked ? <EnvLockBadge reason={resolved.lockedReason} /> : null}
       {badge ? <InheritanceBadge badge={badge} labels={labels} /> : null}
-      {badge?.kind === 'overrides' && onReset ? (
+      {defaultText !== null ? (
+        <span className="text-[11px] text-muted-foreground">
+          {t('console.settingsView.defaultValueHint', { value: defaultText })}
+        </span>
+      ) : null}
+      {(badge?.kind === 'overrides' || badge?.kind === 'modified') && onReset ? (
         // Sets the key to `null` in the draft; the page's Save sends it, and
         // the badge then follows the server's answer for the row.
         <Button
@@ -257,6 +378,35 @@ function FieldError({ id, message }: { id: string; message: string }) {
 }
 
 /**
+ * An option's name: its label without the option's own code beside it.
+ * The country picker labels read `Name (CODE)` (`中国 (CN)`, `Germany (DE)`),
+ * the currency suggestions `CODE — Name` (`CNY — Chinese Yuan`); either way the
+ * code is the option's `value`, so only that code is taken off, with the
+ * brackets or the dash that join it. A label that carries no such code is its
+ * own name.
+ */
+function optionName(option: { value: string; label: string }): string {
+  const label = option.label.trim();
+  const code = option.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const suffixed = new RegExp(`^(.*?)\\s*[(（]\\s*${code}\\s*[)）]$`, 'i').exec(label);
+  if (suffixed && suffixed[1].trim() !== '') return suffixed[1].trim();
+  const prefixed = new RegExp(`^${code}\\s*[—–-]\\s*(.+)$`, 'i').exec(label);
+  if (prefixed && prefixed[1].trim() !== '') return prefixed[1].trim();
+  return label;
+}
+
+/**
+ * The one option whose name is `text`, compared trimmed and case-insensitively,
+ * or `undefined` when no option, or more than one, carries that name.
+ */
+function optionByName<T extends { value: string; label: string }>(options: readonly T[], text: string): T | undefined {
+  const wanted = text.trim().toLocaleLowerCase();
+  if (wanted === '') return undefined;
+  const matches = options.filter((option) => optionName(option).toLocaleLowerCase() === wanted);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
  * <DomainCombobox> — the control a `select` gets when its specifier declares a
  * `valueDomain` (objectstack#5712 / PR objectstack#6581).
  *
@@ -280,8 +430,14 @@ function FieldError({ id, message }: { id: string; message: string }) {
  * the box while `DE` is what is committed. A datalist commits its option's
  * `value` attribute into the box verbatim, which is why the suggestions carry
  * the label there and `committedValue` maps it back. Typed text that equals an
- * option's `value` is a code and is committed as typed; any other text is
- * committed verbatim, as before.
+ * option's `value` is a code and is committed as typed.
+ *
+ * Typed text that is an option's NAME is committed as that option's code
+ * (objectstack#30206): 「中国」 typed into 默认国家, whose option reads
+ * 「中国 (CN)」, commits `CN`. The name is the label without the option's own
+ * code beside it (`optionByName`), compared trimmed and case-insensitively, and
+ * only a name exactly one option carries counts. Any other text is committed
+ * verbatim, as before, and the server judges it.
  *
  * Props beyond its own are forwarded to the `<input>` so `wrapper`'s
  * `aria-invalid` / `aria-describedby` reach the focusable control rather than a
@@ -308,7 +464,7 @@ function DomainCombobox({
     code === null ? '' : options.find((opt) => opt.value === code)?.label ?? code;
   const committedValue = (text: string): string | null => {
     if (text === '' || options.some((opt) => opt.value === text)) return textOrUnset(text);
-    return options.find((opt) => opt.label === text)?.value ?? text;
+    return options.find((opt) => opt.label === text)?.value ?? optionByName(options, text)?.value ?? text;
   };
   // What the admin typed, kept while it still stands for the stored value; a
   // value changed from outside (a reset, a re-read after save) shows as its name.
@@ -346,10 +502,104 @@ function DomainCombobox({
   );
 }
 
-export function SettingsField(props: SettingsFieldProps) {
-  const { spec, resolved, value, onChange, onAction, locked, saving, labels, error } = props;
-  const id = useId();
+/**
+ * <ToggleSwitch> — a `toggle` row's control.
+ *
+ * A specifier that declares `confirmOffText` (`SpecifierSchema`: "Confirm
+ * dialog text shown before a toggle's value changes to off (omit = no
+ * confirm)") asks before the switch goes from on to off. Cancel leaves the
+ * switch on and hands nothing to `onChange`, so the page's draft never holds
+ * the off and no Save can send it; Continue hands `false` to `onChange`, and
+ * the page's Save sends it like any other edit. Turning the switch on asks
+ * nothing, and a toggle without the key changes at once, as before.
+ *
+ * Judged on the DECLARATION (`confirmText != null`), as the `action_button`
+ * arm judges a handler's `confirmText`. The dialog is opened by state, never by
+ * an `AlertDialogTrigger`, since only one of the switch's two directions asks;
+ * so focus is handed back to the switch by hand when it closes.
+ *
+ * Props beyond its own reach the `<Switch>`, so the row's `aria-invalid` /
+ * `aria-describedby` land on the focusable control.
+ */
+function ToggleSwitch({
+  id,
+  checked,
+  disabled,
+  confirmOffText,
+  onChange,
+  ...switchProps
+}: {
+  id: string;
+  checked: boolean;
+  disabled?: boolean;
+  /** The resolved question, or `undefined` when the specifier declares none. */
+  confirmOffText?: string;
+  onChange: (next: boolean) => void;
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
+}) {
   const { t } = useObjectTranslation();
+  const [asking, setAsking] = useState(false);
+  const switchRef = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <Switch
+        ref={switchRef}
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(next) => {
+          if (checked && !next && confirmOffText !== undefined) {
+            setAsking(true);
+            return;
+          }
+          onChange(next);
+        }}
+        {...switchProps}
+      />
+      {confirmOffText !== undefined ? (
+        <AlertDialog open={asking} onOpenChange={setAsking}>
+          <AlertDialogContent
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              switchRef.current?.focus();
+            }}
+          >
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('actionConfirm.title')}</AlertDialogTitle>
+              <AlertDialogDescription>{confirmOffText}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t('actionConfirm.cancel')}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => onChange(false)}>
+                {t('actionConfirm.confirm')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
+    </>
+  );
+}
+
+export function SettingsField(props: SettingsFieldProps) {
+  const {
+    spec,
+    resolved,
+    value,
+    onChange,
+    onAction,
+    locked,
+    saving,
+    labels,
+    error,
+    errorAt,
+    note,
+    writeScope,
+    onClearSaved,
+  } = props;
+  const id = useId();
+  const { t, language } = useObjectTranslation();
   const disabled = Boolean(locked || saving);
   const literalLabel = resolveLabel(spec.label);
   // Field-scoped label/help/placeholder/option resolution. Falls back to the
@@ -445,6 +695,33 @@ export function SettingsField(props: SettingsFieldProps) {
     // One label per action row (objectui#12610): the button carries it. The
     // row's left side holds the manifest's one-line `description` when it
     // declares one, and nothing otherwise — the label is never drawn twice.
+    //
+    // A handler that declares `confirmText` (the spec's `SpecifierHandlerSchema`
+    // `http` / `action` arms: "omit = no confirm") asks before it invokes:
+    // cancel invokes nothing. Judged on the DECLARATION, as the spec's action
+    // resolver judges `confirmText != null`; the text resolves through the
+    // `actions.<id>.confirmText` slot with the manifest literal as fallback.
+    const declaredConfirm =
+      spec.handler && spec.handler.kind !== 'navigate' ? spec.handler.confirmText : undefined;
+    const confirmText = declaredConfirm != null
+      ? (labels
+          ? labels.actionConfirm(actionId, resolveLabel(declaredConfirm))
+          : resolveLabel(declaredConfirm))
+      : undefined;
+    const actionButton = (
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={declaredConfirm != null ? undefined : onAction}
+        disabled={saving}
+      >
+        {Icon ? (
+          // eslint-disable-next-line react-hooks/static-components -- getLazyIcon returns a module-cached stable component per name, not one created during render
+          <Icon className="h-4 w-4 mr-1.5" />
+        ) : null}
+        {actionLabel}
+      </Button>
+    );
     return (
       <div
         className={`flex items-center gap-4 py-3 ${spec.description ? 'justify-between' : 'justify-end'}`}
@@ -452,13 +729,23 @@ export function SettingsField(props: SettingsFieldProps) {
         {spec.description ? (
           <p className="text-sm text-muted-foreground">{spec.description}</p>
         ) : null}
-        <Button size="sm" variant="secondary" onClick={onAction} disabled={saving}>
-          {Icon ? (
-            // eslint-disable-next-line react-hooks/static-components -- getLazyIcon returns a module-cached stable component per name, not one created during render
-            <Icon className="h-4 w-4 mr-1.5" />
-          ) : null}
-          {actionLabel}
-        </Button>
+        {declaredConfirm != null ? (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>{actionButton}</AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t('actionConfirm.title')}</AlertDialogTitle>
+                <AlertDialogDescription>{confirmText}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t('actionConfirm.cancel')}</AlertDialogCancel>
+                <AlertDialogAction onClick={onAction}>{t('actionConfirm.confirm')}</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : (
+          actionButton
+        )}
       </div>
     );
   }
@@ -471,12 +758,21 @@ export function SettingsField(props: SettingsFieldProps) {
   // through `wrapper`, so marking it here covers all of them at once instead of
   // per-case (objectstack#4224).
   const errorId = `${id}-error`;
+  const noteId = `${id}-note`;
   const labelId = `${id}-label`;
+  // The note describes the control too, so a screen reader reads it with the
+  // field, after the error when there is one.
+  const describedBy = [error ? errorId : null, note ? noteId : null].filter(Boolean).join(' ');
   // `labelFor` is the id of the labelable control the row renders — `id`, the
   // one every single-control case puts on it — or `undefined` for a case whose
   // control is a group that names itself from `labelId` instead.
   // A value already cleared in the draft has nothing left to reset.
   const onReset = value === null ? undefined : () => onChange(null);
+  // The clear beneath an env pin, where a value is stored at this row's scope.
+  const clearSaved =
+    onClearSaved && storedBeneathPin(resolved, writeScope) ? (
+      <ClearSavedBeneathPin onClear={onClearSaved} disabled={saving} />
+    ) : null;
   // `data-settings-key` lets the page find this row to focus it when a save is
   // blocked on it (objectui#13239).
   const wrapper = (children: React.ReactNode, labelFor: string | undefined = id) => (
@@ -490,11 +786,13 @@ export function SettingsField(props: SettingsFieldProps) {
         htmlFor={labelFor}
         onReset={onReset}
         resetDisabled={disabled}
+        writeScope={writeScope}
+        describeDefault={describeDefault}
       />
-      {error && isValidElement(children)
+      {describedBy && isValidElement(children)
         ? cloneElement(children as ReactElement<Record<string, unknown>>, {
-            'aria-invalid': true,
-            'aria-describedby': errorId,
+            ...(error ? { 'aria-invalid': true } : {}),
+            'aria-describedby': describedBy,
           })
         : children}
       {error ? (
@@ -502,6 +800,12 @@ export function SettingsField(props: SettingsFieldProps) {
       ) : (
         <FieldDescription description={fieldHelp} />
       )}
+      {note ? (
+        <p id={noteId} className="text-xs text-muted-foreground mt-1" data-testid="settings-field-note">
+          {note}
+        </p>
+      ) : null}
+      {clearSaved}
     </div>
   );
 
@@ -509,6 +813,38 @@ export function SettingsField(props: SettingsFieldProps) {
     const literal = typeof opt.label === 'string' ? opt.label : opt.label?.defaultValue ?? String(opt.value);
     if (!spec.key || !labels) return literal;
     return labels.optionLabel(spec.key, String(opt.value), literal);
+  };
+
+  // A `map` header's shown text: the setting's `keyColumn` slot for the key
+  // column, its `columns.<name>` slot for a value column (objectstack#31453).
+  const renderMapHeader = (
+    column: string | undefined,
+    leaf: 'label' | 'help',
+    literal: string | undefined,
+  ): string | undefined => {
+    if (!spec.key || !labels) return literal;
+    if (column === undefined) {
+      return leaf === 'label'
+        ? labels.mapKeyColumnLabel(spec.key, literal ?? '')
+        : labels.mapKeyColumnHelp(spec.key, literal);
+    }
+    return leaf === 'label'
+      ? labels.mapColumnLabel(spec.key, column, literal ?? '')
+      : labels.mapColumnHelp(spec.key, column, literal);
+  };
+
+  // The default a `Modified` row names. A secret's default is never shown,
+  // and a value with no plain spelling (an object) is left unnamed.
+  const describeDefault = (raw: unknown): string | null => {
+    if (raw === null || raw === undefined || spec.type === 'password' || spec.encrypted) return null;
+    if (typeof raw === 'boolean') return t(raw ? 'common.yes' : 'common.no');
+    const optionText = (v: unknown): string => {
+      const opt = spec.options?.find((o) => o.value === v);
+      return opt ? renderOptionLabel(opt) : String(v);
+    };
+    if (Array.isArray(raw)) return raw.length > 0 ? raw.map(optionText).join(', ') : null;
+    if (typeof raw === 'object') return null;
+    return optionText(raw);
   };
 
   switch (spec.type) {
@@ -556,7 +892,9 @@ export function SettingsField(props: SettingsFieldProps) {
         <Input
           id={id}
           type="number"
-          value={value as any}
+          // An unset value (a reset in the draft) is an empty box: React leaves
+          // the last number on screen when `value` is `null`.
+          value={value === null || value === undefined ? '' : (value as number | string)}
           min={spec.min}
           max={spec.max}
           step={spec.step}
@@ -564,7 +902,17 @@ export function SettingsField(props: SettingsFieldProps) {
           onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
         />,
       );
-    case 'toggle':
+    case 'toggle': {
+      // The question a declared `confirmOffText` asks, through the
+      // `keys.<key>.confirmOffText` slot beside the row's label; a miss is the
+      // manifest literal, an inline locale map picked for the page's language.
+      const declaredConfirmOff = spec.confirmOffText;
+      const literalConfirmOff =
+        declaredConfirmOff != null ? pickLocalized(declaredConfirmOff, language) : undefined;
+      const confirmOffText =
+        literalConfirmOff !== undefined && spec.key && labels
+          ? labels.fieldConfirmOff(spec.key, literalConfirmOff)
+          : literalConfirmOff;
       return (
         <div className="flex items-center justify-between py-3" data-settings-key={spec.key}>
           <div>
@@ -577,23 +925,28 @@ export function SettingsField(props: SettingsFieldProps) {
               htmlFor={id}
               onReset={onReset}
               resetDisabled={disabled}
+              writeScope={writeScope}
+              describeDefault={describeDefault}
             />
             {error ? (
               <FieldError id={errorId} message={error} />
             ) : (
               <FieldDescription description={fieldHelp} />
             )}
+            {clearSaved}
           </div>
-          <Switch
+          <ToggleSwitch
             id={id}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
             checked={Boolean(value)}
             disabled={disabled}
-            onCheckedChange={(checked) => onChange(checked)}
+            confirmOffText={confirmOffText}
+            onChange={(checked) => onChange(checked)}
           />
         </div>
       );
+    }
     case 'select': {
       // Keyed off the DECLARATION, never off the key: a key that gains a
       // domain server-side gets the right control here with no edit.
@@ -734,6 +1087,22 @@ export function SettingsField(props: SettingsFieldProps) {
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
         />,
+      );
+    case 'map':
+      // objectstack#31391 — keyed rows over the served `options`, one cell per
+      // declared column. A group named by the row's label, so no `htmlFor`.
+      return wrapper(
+        <SettingsMapField
+          spec={spec}
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          labelId={labelId}
+          optionLabel={renderOptionLabel}
+          headerText={renderMapHeader}
+          errorAt={error ? errorAt : undefined}
+        />,
+        undefined,
       );
     default:
       return wrapper(

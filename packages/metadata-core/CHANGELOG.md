@@ -1,5 +1,534 @@
 # @objectstack/metadata-core
 
+## 18.3.0
+
+### Minor Changes
+
+- a9f654e: feat!: ownership queues: records wait in a queue until a member claims them, and assignment rules route new records (ADR-0142)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered object-queue-field-reserved -->
+  
+  **BREAKING** for one shape only: an object whose records have a user owner (`ownership: 'user'`, the default) can no longer declare its own field named `queue`. The platform now injects a `queue` column on every such object, and `registerObject` refuses the declaration with `422 INVALID_METADATA` (`ObjectQueueColumnRefusedError`), naming the object. An `objectExtensions` entry that declares `queue` on such an object is not refused, because an extension is folded over its object at read time: its `queue` is ignored, the platform's column stands, and a warning names the extension. The remedy: rename the business field (for example `support_queue`) and copy its data across, or, when the object's records have no user owner, declare `ownership: 'business_unit'`, `'org'` or `'none'`. The upgrade guide entry is `object-queue-field-reserved`.
+  
+  Beside that, two enum additions: `ShareRecipientType` gains `queue` (a sharing rule can now name a queue as its recipient), and the `queue` approver type is authorable again (it leaves `NON_AUTHORABLE_APPROVER_TYPES`, so it is no longer marked deprecated). Two metadata types are new: `queue` and `assignment_rule`.
+  
+  - **`@objectstack/spec`**: new `queue` and `assignment_rule` metadata types (`QueueSchema`, `AssignmentRuleSchema`) and the stack keys `queues` and `assignmentRules`. A declared queue's members are positions. New `IOwnershipQueueService` contract, registered under `ownership-queue`. `queue` joins the injected system columns of `ownership: 'user'` objects and `PUBLIC_FORM_SERVER_MANAGED_FIELDS`. `APPROVER_VALUE_BINDINGS.queue` reads both a declared queue and an organization's `sys_queue` row, and `APPROVER_ORG_SCOPED.queue` is `true`. The explain rule kinds `queue_membership` and `queue_claim` are new. `QUEUE_NOT_FOUND` (422) is registered under plugin-security.
+  - **`@objectstack/objectql`**: objects with `ownership: 'user'` get a system-managed `queue` column beside `owner_id`. Declaring your own `queue` field on one is refused at registration (`INVALID_METADATA`), and an extension's own `queue` field on one is ignored with a warning. An update can carry a write precondition: when it no longer matches, the update answers `409 CONCURRENT_UPDATE`. Declared assignment rules run once for each inserted row that has no owner and no queue after the `beforeInsert` hooks. A rule can park the row in a queue, or pick a member by `round_robin` or `least_loaded`. Assignment never refuses an insert. `kernel:ready` refuses to boot a stack that declares queues or assignment rules when no `ownership-queue` service is registered.
+  - **`@objectstack/metadata-core`**: `queue` is classified as an injected system column.
+  - **`@objectstack/metadata`**: the artifact door registers a stack's `queues` and `assignmentRules`, so an artifact-only runtime serves them.
+  - **`@objectstack/plugin-sharing`**: three new objects, `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, and the `ownership-queue` service. The service resolves a queue name from the registry first, then from the organization's own rows, and has one member expander. A record with no owner that sits in a queue can be read and edited by the queue's members, never deleted. The `queue` sharing recipient grants matched records to the queue's members, and its grants are recomputed when membership changes or the queue is switched on or off.
+  - **`@objectstack/plugin-security`**: the owner gate handles `queue`. A **claim** sets `owner_id` from empty to yourself, by id. It is admitted when the sharing model allows you the record, and only one claimant wins: the loser gets `409`. A **release** gives your own record back to its home queue. A **move** to another queue needs the transfer grant, and a queue name that does not resolve is refused with `422 QUEUE_NOT_FOUND`. An insert that names a queue needs the transfer grant or membership of that queue. A guest can supply neither. Explain reports the queue reasons on the sharing layer.
+  - **`@objectstack/plugin-approvals`**: a `queue` approver resolves to the queue's members when the step opens. An empty queue adds nobody and logs a warning. The `queue:<name>` placeholder is never written again.
+  - **`@objectstack/lint`**: a queue-only approval node is reported `approval-approvers-may-resolve-empty`, and the org-axis red line admits the queue recipient. Two new advisory rules come with `os explain` entries: `assignment-rule-user-target` (warning) and `assignment-rule-queue-unstaffed` (info).
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, so `os migrate organization-ownership` plans them instead of refusing.
+  - **`@objectstack/runtime`**: `POST /security/_activation/:type/:name` also switches a declared `queue` or `assignment_rule` on and off.
+  - **`@objectstack/platform-objects`**: the two new metadata types' labels, and the queue recipient option, are translated in zh-CN, ja-JP and es-ES.
+  - **`@object-ui/app-shell`**: the flow designer no longer warns that a queue approver resolves to nobody.
+  - **`@objectstack/skills`**: the platform skill lists `queues` and `assignmentRules` among the stack's top-level keys.
+  
+  What to do: rename any `queue` field on a user-owned object, or in an extension of one, as above. Every other existing stack behaves as before. To use queues, declare `queues` and `assignmentRules` in your stack, and make sure plugin-sharing is installed: it registers the `ownership-queue` service.
+- c63ce2a: feat(spec): an object declares the business order of its related lists (`relatedLists`), and `relatedList: 'primary'` places a list instead of ordering it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  The order of a record page's related lists was not authorable: owned (`master_detail`) children came first and lookup children after, each in the order the packages declared them, so a lead's related lists were in an order nobody chose.
+  
+  - **`@objectstack/spec`**: `ObjectSchema` gains `relatedLists?: string[]`, beside `highlightFields`. It is an ordered list of inbound relationships, most important first. Each entry is a child object name (`'task'`, every list of that child) or `object.field` for one FK when the child points at this object through several (`'event.related_to'`). Listed lists come first in that order, and the rest follow in the old derived order. `defineStack`, and so `os validate` and `os build`, refuses an entry that matches no inbound `lookup` / `master_detail` field with `STACK_CROSS_REFERENCE_INVALID`, naming the entry and the relationships that do exist. A child declared only by a sibling package, or a platform object, is not judged there. The runtime publish door gives the same verdict on an object write (`related-list-ref-unknown`, HTTP 422 `INVALID_METADATA`), judged against the objects the registry and the stored rows hold, so a Studio, REST or MCP author is refused too. `ObjectFieldGroupSchema` gains `relatedList?: string`, spelled the same way: a group that carries it stands for that list's table in the record's details column instead of a section of fields, and a field that names such a group as its `group` is refused at parse. The record page v3 layout draws that placement; until then such a group is not drawn, as any group without fields is not. The Studio object form offers both keys.
+  - **`relatedList: 'primary'` changes meaning.** It no longer orders lists; `relatedLists` does. It now says where a list is drawn: in the record's body as a full-width table rather than as a side card, which on today's tabbed record page is still its own tab. And a `master_detail` FK that sets `inlineEdit` (any arm) and declares no `relatedList` is now `'primary'` by default, so inline-edited line items get their own tab on the tabbed page. Write `relatedList: true` on that FK to keep the old placement in the shared Related tab. `relatedList: false` still hides a list whatever `relatedLists` says.
+  - **`@object-ui/app-shell`**: `deriveRelatedLists` resolves the order in one pure function, `resolveRelatedListOrder`, and marks the inline-edit default as `isPrimary`. Studio's related-list control on a relationship field reads that default too: an inline-edited `master_detail` with no `relatedList` shows as Primary, and picking Show there writes `relatedList: true`.
+  - **`@objectstack/lint`**: new reference-integrity member `validateRelatedListRefs` (rule `related-list-ref-unknown`, `error`), on the CLI and on `object` writes at the runtime publish gate. A child the snapshot does not hold is refused only when no package closure is in force; under a closure it is not judged.
+  - **`@objectstack/metadata-core`**: the served object's field-level-security scrub classifies `relatedLists` and a field group's `relatedList` as relationship names, not fields of the object, so a caller denied a field still receives them.
+  - **`@objectstack/platform-objects`**: the two new form rows are labelled in en, zh-CN, ja-JP and es-ES.
+  - **`@objectstack/skills`**: objectstack-data's relationship rules teach `relatedLists` and the placement reading of `'primary'`; objectstack-ui's related-list bullet follows.
+  
+  In this repo three record pages move on merge, each gaining its own line-items tab out of the shared Related tab: `crm_opportunity` (its `crm_opportunity_line_item.opportunity` FK), `showcase_invoice` (`showcase_invoice_line.invoice`) and `showcase_expense_report` (`showcase_expense_line.expense_report`). Each FK sets `inlineEdit: 'grid'` and declares no `relatedList`.
+  
+  What to do: nothing, unless an object has a `master_detail` child with `inlineEdit` that should stay in the shared Related tab; write `relatedList: true` on that FK. To choose the order of an object's related lists, declare `relatedLists` on it.
+- c3842ac: feat(spec): a lookup field declares which fields a pick fills (`lookupAutofill`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A single-value `lookup` / `master_detail` field can now declare `lookupAutofill`: a list of `{ target, source, overwrite? }` pairs. A pick in the lookup copies the picked record's `source` field (a field of the referenced object) into the record's `target` field. A quote line's product lookup declares `[{ target: 'unit_price', source: 'list_price' }]`, so the sales price can fill from the product as soon as the product is picked, instead of only after save.
+  
+  - **The overwrite rule.** By default (`overwrite` absent or false), a pick never replaces a value somebody wrote. The target is filled only while it is empty or still holds the value an earlier pick filled in, so a typed value, or one the record already stored, stays. A pair that declares `overwrite: true` replaces the target on every pick.
+  - **One home for the form and the grid.** The declaration lives on the field, so the record form and a line-item grid column over the field both read it. The grid column key `autofill` is unchanged: it still governs only the grid's same-named copy, on by default. A declared pair takes its target out of that copy.
+  - **Client-side only.** It fills the form. Nothing on the write path reads it, so an import or API write that sets the lookup fills nothing.
+  - **Refused at parse:** the key on anything but a single-value relationship; a target that is the lookup itself, not a field of the object, `readonly`, computed (`formula`, `summary`, `autonumber`, or a field with an `expression`), or named twice; an unknown key in a pair.
+  - **Refused by `os validate` / `os build`** (`STACK_CROSS_REFERENCE_INVALID`): a source the referenced object does not declare, an `internal` source, and a source whose value the target cannot hold (the same type and multiplicity, a string into a plain text field, `number` and `currency` into each other, or a relationship over the same object).
+  - **Every-key tables classify the new key.** `@objectstack/driver-sql` classifies it `presentation` in `FIELD_KEY_STORAGE_CLASS`: no column DDL reads it. `@objectstack/metadata-core`'s field-level-security scrub (`FIELD_REFERENCE_POSITIONS`) drops a pair whose `target` is a field the caller cannot read, and deletes a list left empty. Each `source` names a field of the referenced object, which that object's own projection governs, so it is kept.
+  
+  The form and grid that write the declared targets on pick ship in a follow-up. Until then the declaration is checked and stored, and fills nothing. Nothing to do for existing metadata.
+- 5b7dbb8: feat(spec): a `percent` field declares its read-only face with `percentDisplay` (`bar` or `plain`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A `percent` field had no key to choose how it is drawn read-only, so every host showed a progress bar, even for a rate or a probability (an opportunity's win probability is not progress). `FieldSchema` gains an optional `percentDisplay`:
+  
+  - **absent** (unchanged): the renderer's default face, the progress bar today;
+  - **`bar`**: the author pins the progress bar;
+  - **`plain`**: the percentage as text alone (a stored `0.25` reads `25%`, at the field's `scale`), with no bar.
+  
+  ```ts
+  probability: Field.percent({ label: 'Probability', percentDisplay: 'plain' }),
+  ```
+  
+  Display only: the stored value, its validation and its decimal places are unchanged. The key is declared ahead of its renderer: the Studio UI does not read it yet, so every percent field still draws the bar until the console's percent face reads it. No existing metadata changes meaning.
+  
+  `@objectstack/metadata-core` classifies the new key for field-level security (ADR-0106 D1) as `keep`: it names no field, so a served object schema keeps an authored `percentDisplay` whatever the caller may read. Unclassified, a value that happened to spell a denied field's name (`bar`, `plain`) would have been scrubbed. `@objectstack/driver-sql` classifies it `presentation` in its FieldSchema storage/presentation table: the DDL never reads it.
+- e62dcc5: feat(objectql): an object extension's `fieldPatches` is applied on every object read; a patch naming a field or option its target lacks is refused at install and by `os validate`
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  ADR-0146 D10's second rule, live. The per-field display patch an object extension declares (`objectExtensions[].fieldPatches`, added unenforced in the previous release) now reaches the screen:
+  
+  ```ts
+  objectExtensions: [{
+    extend: 'crm_account',
+    fieldPatches: {
+      industry: { label: 'Sector', inlineHelpText: 'The market the account sells into', options: { technology: { label: 'Tech' } } },
+    },
+  }]
+  ```
+  
+  - **Applied, never carried.** The engine's extension registration carries the slot, and the registry merge (`mergeObjectDefinitions`) applies it after the additive merges: the `BASE_FIELD_DISPLAY_WHITELIST` keys (`label`, `description`, `inlineHelpText`, `placeholder`) onto the named field, and `label` onto each option addressed by its stored `value`. The field's type, requiredness, options and values stay the owner's. The list read, the by-name read and the layered view serve the same text, and uninstalling the extension serves the owner's text again.
+  - **Precedence.** A key the tenant has edited keeps the tenant's text (ADR-0029 D9.2a, as for an extension's object `label`). Two extensions patching one key: the higher `priority` wins.
+  - **Refused when it names nothing.** A patch naming a field the target does not have, an option value its field does not have, or an option of a picklist-bound field is refused at `POST /api/v1/marketplace/install-local` (`400 VALIDATION_ERROR`, every refusal located in `error.details.refusals`, nothing installed) and by `os validate` when the target is in the same stack. At boot such a patch is not applied and is named once in the log; the boot carries on.
+  - **New export.** `@objectstack/metadata-core` exports the one judge the three readers share: `fieldPatchTargetMisses`, `fieldPatchTargetRefusals`, `fieldPatchTargetRefusalMessage`.
+  
+  What changes for an existing package: a package that declared `fieldPatches` since the slot landed now sees them applied, and one whose patch names a missing field or option is now refused at install. An extension without `fieldPatches` folds exactly as before.
+- 5f7d554: **BREAKING** fix(metadata)!: a flow whose loop is not closed by a `type: 'back'` edge is refused at publish, and its draft read says so, instead of publishing and then never registering
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/objectstack-automation/references/state-machines-and-approvals.md` teaches that the resubmit edge MUST be typed `'back'` and that `registerFlow` rejects an unmarked cycle; both stay true, and the publish door now refuses the same flow earlier, in the same words.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped. The publish doors now refuse a flow body the automation engine already refused to register, with the engine's own sentence, so a published body that could never run has nothing a migration could rewrite it to: the author's fix is the one the refusal names. -->
+  
+  **BREAKING** accept-set narrowing at the runtime authoring gate (`@objectstack/metadata-protocol`), which the metadata draft read and every publish door run (`PUT /api/v1/meta/:type/:name` live, `POST …/publish`, `POST /api/v1/packages/:id/publish-drafts`).
+  
+  - **Before.** A flow whose top-level graph had a cycle with no edge typed `back` (ADR-0044) saved as a draft, its draft read answered `_diagnostics: { valid: true }`, and it published (`outcome: 'published'`). The automation engine then refused to register it ("Flow contains a cycle: push → check → revise → push. …"), so the flow never ran, and only the by-name read's `registration` and a boot-log warning said why.
+  - **Now.** The draft still saves (drafts are never gated). Its read answers `valid: false` with an error coded `flow-undeclared-cycle` on the cycle-closing edge (`edges.N`), and every publish door refuses it `422 INVALID_METADATA` with that finding; a package publish refuses the batch (`outcome: 'refused'`). The message is the engine's registration refusal, word for word.
+  - **One judge.** The cycle walk moved from `@objectstack/service-automation` to `@objectstack/metadata-core` as `findUndeclaredFlowCycle` (with `undeclaredFlowCycleMessage`). The engine's registration and the publish gate both call it, so they refuse exactly the same graphs; the engine's behaviour and message are unchanged. `@objectstack/metadata-core/testing` exports `FLOW_CYCLE_CORPUS`, the case table both faces are tested against.
+  - **Unchanged.** A cycle with any of its edges typed `back` publishes and registers, as before. Cycles inside a `loop` / `parallel` / `try_catch` region are judged where they were. `os validate` and `os build` do not run this check yet.
+  
+  **The remedy.** None for a flow that registers today: it publishes exactly as before. A flow this now refuses was already refused by the engine at registration and never ran; the refusal names the closing edge, and ADR-0044's `type: 'back'` on that edge is how an intended loop is declared. A stored flow published before this change is re-registered exactly as before (still refused by the engine).
+
+### Patch Changes
+
+- dbf7e04: feat(spec)!: retirement kits whose conversion retired at or below protocol 16.x leave the tree; the strict unknown-key refusal names the protocol upgrade guide
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  **BREAKING** for a source or a stored `sys_metadata` row still carrying a key whose ≤16.x kit aged out.
+  
+  - **The rule (ADR-0087, amended 2026-10-26, #25767 ruling D2 = A as scoped by ruling 6434038284).** A retirement kit — the `retiredKey()` tombstone and its D2 conversion with fixtures — lives through the protocol major after the one it retired in and is removed when the next major is cut. At 18 that removes the kits whose conversion retired at or below 16.x; 19 repeats the move one major on. The kit ages out; the migration chain's step stays.
+  - **Before.** Such a key met a `retiredKey()` tombstone: the parse refused it with the key's own prescription in the error, `os migrate meta --from 16` listed and applied the mechanical edit, and a stored row in that shape was rewritten at read by the ≤16.x conversions.
+  - **Now.** Where the tombstone sat in a strict container, the key is gone from the shape, so a `strictObject` refuses it as an unknown key. The refusal carries one more sentence, after its fix channels and ahead of its history sentence (`RETIRED_KEY_UPGRADE_GUIDE_SENTENCE`, exported with `PROTOCOL_UPGRADE_GUIDE_URL` from `@objectstack/spec`): it says that keys retired before the previous major are no longer prescribed in the error and names the protocol upgrade guide, `https://objectstack.ai/docs/protocol-upgrade`, where the prescription lives; the CHANGELOG of the release that retired the key carries it too. A tombstone that stays (its container strips unknown keys) ends its error with a sentence that says the edit left `os migrate meta` with the 16.x conversions, to be applied by hand or on a release that still carries the conversion, and links the guide.
+  - **The chain stays.** `MIGRATION_SUPPORT_FLOOR` stays 16; step 17 and its entry files stay, and `os migrate meta --from 16` still replays 16 → 18, listing every surviving conversion and semantic to-do. Step 17's graduated list drops the ids of the 45 conversions that aged out, so their edits are no longer applied for you.
+  - **Stored rows.** A `sys_metadata` row still carrying such a spelling is no longer rewritten at read; canonicalize it once with `os migrate meta --stored --apply` on 18.2 or earlier, before moving to 18.3. `app-hidden-to-unpublished` is among the removed conversions, so a pre-split `hidden: true` app row is no longer rewritten to `_unpublished` by any seam, and the artifact door's refusal of it by id is removed as moot (`@objectstack/metadata-core`).
+  - **What left.** 50 D2 conversions with `retiredAfter` at or below 16.x (5 at 15.0.0, 45 at 16.1.0) and their fixtures; 55 tombstones already `[RETIRED]` at `@objectstack/spec@17.0.0` whose container is strict; 61 `[RETIRED]` lines of the authorable surface and their liveness-ledger rows. 58 same-age tombstones whose container strips unknown keys stay, because deleting one would turn a refusal into a silent strip; the four inline-credential refusals are not retirements and are untouched.
+  - **The deletion gate.** `check:authorable-surface` proof 1 ages a tombstone one major (was two). A deleted `[RETIRED]` line is dated by an exact `RETIRED_KEYS_BY_MAJOR` row or, new, by the previous major's release tag: a line already `[RETIRED]` on the surface at `@objectstack/spec@<current major − 1>.0.0` was retired before that cut. The tag is immutable, so neither a row a PR writes nor one it deletes moves the clock; where the tag cannot be read the gate dates by the registry alone and says so. No gate was added.
+  - **Who moves.** No `examples/**`, `ui/` or `hotcrm` source in this repository writes a removed key (the `ui/` hits for the removed names are the console's own same-named props and type mirrors, not readers of the retired spec keys, per the liveness ledger's measurements). A consumer source still carrying one meets the strict refusal and the guide link at `os validate`.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the diff registers no retirement: it removes the ≤16.x kits that aged out under the 2026-10-26 ruling (ADR-0087 D2 = A), and nothing here prescribes a rewrite — each removed key's prescription lives in the protocol upgrade guide and in the CHANGELOG of the release that retired it -->
+- 7dd5a2f: fix(metadata-core)!: a package built for a NEWER protocol major than the runtime is told to upgrade the runtime, not to run `migrate meta`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/metadata-core/src/protocol-handshake.ts#ProtocolIncompatibleDiagnostic) The one narrowing is an output member of a published runtime TypeScript interface: `migrateCommand` on `ProtocolIncompatibleDiagnostic` becomes optional. No Zod schema, no spec declaration and no stored representation carries it, so there is nothing for the metadata migration to rewrite and no tombstone; a TypeScript reader that dereferences the member is told by its compiler. -->
+  
+  **BREAKING** public-surface narrowing of `@objectstack/metadata-core`: `ProtocolIncompatibleDiagnostic.migrateCommand` changes from `string` to optional, and the `OS_PROTOCOL_INCOMPATIBLE` answer's `error.details` omits `migrateCommand` for a package ahead of the runtime. Shipped as `patch`: it is not a metadata-protocol change.
+  
+  The `OS_PROTOCOL_INCOMPATIBLE` refusal (422) used to prescribe `objectstack migrate meta --from N` for every refused range, taking N from the range's floor major. For a package declaring `engines.protocol: '^19'` on a protocol-18 runtime that sent the operator to `migrate meta --from 19`, a command that cannot apply: migration only moves metadata forward from an older major.
+  
+  Now the handshake compares the declared floor major with the runtime's protocol major:
+  
+  - **Floor major above the runtime's** (the package is ahead): the message names the two remedies that can apply, upgrading the runtime to the package's protocol or installing a build of the package for this runtime's protocol. The diagnostic carries no `migrateCommand`, so `error.details` on `POST /api/v1/packages` and `POST /api/v1/marketplace/install-local` holds `requiredRange`, `rangeSource`, `protocolVersion` and `targetMajor` only.
+  - **Floor major at or below the runtime's**: unchanged, and `details.migrateCommand` is present as before.
+  
+  The refusal's code and status do not change. A reader of `migrateCommand` (TypeScript, or JSON over the wire) treats an absent member as "no command applies; read `message`". No in-repo code outside tests reads it.
+- 804a2b0: fix(metadata-core): an exclusive protocol comparator (`'>18'`, `'<18'`) names the major it admits in the `OS_PROTOCOL_INCOMPATIBLE` refusal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The refusal for a package whose `engines.protocol` excludes this runtime names a target major (`targetMajor` in the diagnostic and in `error.details`) and, for a package behind the runtime, `objectstack migrate meta --from N`. It used to find the target by peeling every leading operator off the range as if it were `^`, so on a protocol-18 runtime both `'>18'` (19 and up) and `'<18'` (17 and below) answered `migrate meta --from 18`, a migration from the runtime's own major.
+  
+  Now the target is read from the majors the range admits, with the same grammar that decides whether it admits the runtime:
+  
+  - **`'>18'` on an 18 runtime** targets 19. The package is ahead, so the answer is the upgrade remedy from the previous release: "Upgrade the runtime to protocol 19", and no `migrateCommand`. On a 17 runtime it now names protocol 19 too, where it used to name 18, which `'>18'` does not admit.
+  - **`'<18'` and `'<18.0.0'`** target 17: `migrate meta --from 17`.
+  - **A compound range** targets its floor in either order: `'<18 >=15'` targets 15 (it named 18), and `'>15 <18'` targets 16 (it named 15).
+  - **A `||` union** still targets its lowest alternative, now read the same way: `'<17 || >19'` targets 16.
+  - **A range that admits no major** (`'>=19 <15'`, `'<0'`) has `targetMajor: null` and the bare `objectstack migrate meta`.
+  
+  `^`, `~`, `>=`, `<=`, wildcards, exact versions, hyphen ranges and partial bounds (`'>18.1'`, `'<18.5'`) answer as before. No range changes between admitted and refused: only the refusal's target and prescription change.
+  
+  Two CLI readers of `targetMajor` follow: `objectstack migrate meta` now rewrites a `'<18'` range to `'^18'` when it migrates a stack to protocol 18 (it used to leave it for the load to refuse), and the protocol-version advisory now speaks for such a range.
+- 5bd3d2f: fix(metadata-protocol): load-time diagnostics no longer report "`picklist` and `options` cannot both be declared" on a field that declares only `picklist`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A select field that names a shared list (`picklist: 'industry'`) is served with the list's options written beside `picklist`, and the diagnostics judged that served copy, so every shared-picklist field of every app was reported as declaring both keys: in an item's `_diagnostics`, in the list read's, and in `GET /meta/diagnostics` (Setup › All Metadata Types). They now judge the field as its author wrote it.
+  
+  - **The rule stands.** A field that authors both `picklist` and `options` is still reported, with the same message and severity, at `fields.NAME.options`.
+  - **What `/meta` serves is unchanged.** A picklist-bound field is still served with `picklist` and the resolved `options`.
+  - **How the two are told apart.** The picklist resolution marks the options array it derives; `@objectstack/metadata-core` exports `markResolvedPicklistOptions` and `isResolvedPicklistOptions`, and the diagnostics leave a marked array out of the judgement. The mark is not part of any response or stored row.
+- 119931d: fix(objectql,rest,metadata-core)!: a datasource definition's stored row is served only to datasource administrators, whichever exit reads it (#27884)
+  
+  Clause-②: no (narrowing for readers below datasource administration)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no metadata an author writes changes meaning: a stored datasource definition is written, stored and served to its administrators exactly as before. What narrows is which readers a stored row of a capability-gated type is served to. There is nothing for a migration to rewrite and no tombstone; a reader who needs the definition is granted the capability. -->
+  
+  **BREAKING** read-set narrowing for callers below datasource administration. The metadata read door already served a `datasource` or `external_catalog` definition only to holders of `manage_platform_settings`, the capability the datasource family's own door requires. The stored row each definition lives in now admits the same readers, so one document admits one set of callers at every exit.
+  
+  - **One row.** The type-to-capability table moves to `@objectstack/metadata-core` as `STORED_METADATA_TYPE_READ_CAPABILITIES`, with `storedMetadataTypesWithheldFrom(caller)` and `isCapabilityGatedStoredMetadataType(type)`. `@objectstack/rest` keeps exporting `META_TYPE_READ_CAPABILITIES`, now that same frozen object, and the metadata read door answers exactly as before.
+  - **Now.** A caller-context read of a stored metadata row of a listed type, by a caller without the type's capability, is served no row: a list or count leaves it out, and a read of its id answers as a read of a row that does not exist. Holders of the capability, platform administrators among them, are served everything as before. System reads are unchanged.
+  - **Events.** A record-change event of such a row carries no metadata body to any subscriber; the row's other columns are unchanged.
+  - **Who sees it.** A reader below datasource administration is no longer served stored datasource or federation-catalog rows.
+  
+  **The remedy.** Grant `manage_platform_settings` to a caller that needs a datasource definition, or read it through the datasource admin door (`GET /api/v1/datasources/:name`) as such a caller.
+- 6a940d1: docs(metadata-core): the `ITEM_KEY_DISCRIMINATORS` docblock no longer says email template resolution is exact with no language-subtag folding
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The docblock ships in the package's type declarations, and it still described the exact `(name, locale)` ladder: the named tag matched exactly, then `en-US`. Over the built-in registry template loader a named locale is now folded against the bundle's tags, then the stack's declared fallback locale is tried, then `en-US`. The docblock now cites `SendTemplateInput.locale` in `@objectstack/spec` as the ladder of record instead of restating its rungs, and keeps the point the table rests on: every rung loads one row at one tag exactly, so `en` and `en-US` stay two distinct rows of one bundle. No code changed.
+- 9467a1b: feat(spec): a lookup can declare that its target's name is visible to every reader of the record (`referenceNameVisible`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `FieldSchema` declares one optional boolean, `referenceNameVisible`, on `lookup` and `user` fields. `true` declares that a principal who can read the record carrying the field may see the referenced record's display name (the target object's `nameField` value) and its id, even when that principal cannot read the referenced record. Nothing else of the target is exposed: `$expand` on the field returns the same name and id only, the field's `displayField` does not widen it, and the name renders as text with no link to the target. The same key covers `sys_user` targets. It is declared on the referencing field only, so each application decides whose names its own pages reveal; there is no target-object switch.
+  
+  Absent or `false` keeps the current posture: a lookup whose target the reader cannot read shows no name. The key is refused at parse on any other field type, `master_detail` included, and an authored `false` off-type is refused too.
+  
+  This is the contract half. No runtime serves the name yet, so the describe carries the `[PLANNED — not yet served]` marker and setting the key changes no read today. The server read and `$expand` branch and the console's text-only rendering follow in later changes. Nothing to do for existing metadata.
+  
+  `@objectstack/driver-sql` and `@objectstack/metadata-core` classify the new key in their closed `FieldSchema` key tables (a presentation key that names no field), so the built-in column collision warning and the field-level-security projection keep covering every key.
+- Updated dependencies [ea025d3]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [0c64014]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [8ce974c]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [e7a6cc7]
+- Updated dependencies [4d278c9]
+- Updated dependencies [76bf6c5]
+- Updated dependencies [1a95c74]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [bc02a77]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [c594e1c]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [7b293c4]
+- Updated dependencies [3fb74b6]
+- Updated dependencies [b399cb8]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [8d208a4]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [c708de6]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [bf03ebb]
+- Updated dependencies [2c3574c]
+- Updated dependencies [1335c6b]
+- Updated dependencies [bdb19ca]
+- Updated dependencies [d8c611d]
+- Updated dependencies [ec0316e]
+- Updated dependencies [8bb2417]
+- Updated dependencies [2ac698b]
+- Updated dependencies [462b4f9]
+- Updated dependencies [138dacf]
+- Updated dependencies [7f4258f]
+- Updated dependencies [1ac1c24]
+- Updated dependencies [97ca257]
+- Updated dependencies [104cd1a]
+- Updated dependencies [f1d795b]
+- Updated dependencies [b3d1415]
+- Updated dependencies [078e581]
+- Updated dependencies [18e4ac1]
+- Updated dependencies [51058ef]
+- Updated dependencies [f125ce4]
+- Updated dependencies [b16ee8b]
+- Updated dependencies [86d0a8c]
+- Updated dependencies [d089dac]
+- Updated dependencies [3557366]
+- Updated dependencies [29c70ca]
+- Updated dependencies [b5e7ba5]
+- Updated dependencies [38a278b]
+- Updated dependencies [bb82da1]
+- Updated dependencies [85ea12f]
+- Updated dependencies [e9fb529]
+- Updated dependencies [7b55ea9]
+- Updated dependencies [53dda03]
+- Updated dependencies [ba1f164]
+- Updated dependencies [20f052d]
+- Updated dependencies [9467a1b]
+- Updated dependencies [8b65633]
+- Updated dependencies [c268b72]
+- Updated dependencies [d68d129]
+- Updated dependencies [a20dcae]
+- Updated dependencies [5d46f43]
+- Updated dependencies [c9aaee9]
+- Updated dependencies [3d6f230]
+- Updated dependencies [7eb0b19]
+- Updated dependencies [8e6ab05]
+- Updated dependencies [e756782]
+- Updated dependencies [aee9c47]
+- Updated dependencies [0e75081]
+- Updated dependencies [45b4922]
+- Updated dependencies [31204d1]
+- Updated dependencies [2c881fb]
+- Updated dependencies [1bdf674]
+- Updated dependencies [5f99582]
+- Updated dependencies [63f962f]
+- Updated dependencies [df8d020]
+- Updated dependencies [6f09464]
+- Updated dependencies [772b356]
+- Updated dependencies [4008e62]
+- Updated dependencies [b64bb72]
+- Updated dependencies [b861525]
+- Updated dependencies [6903c93]
+- Updated dependencies [4b06a54]
+- Updated dependencies [ebbb5b8]
+- Updated dependencies [a81b7cb]
+- Updated dependencies [eeb3117]
+- Updated dependencies [a5fcd06]
+- Updated dependencies [56076fd]
+- Updated dependencies [fdb9a07]
+- Updated dependencies [57958aa]
+- Updated dependencies [59775a0]
+- Updated dependencies [744211f]
+- Updated dependencies [87956dc]
+- Updated dependencies [3482f3d]
+- Updated dependencies [a6a369e]
+- Updated dependencies [5c4e752]
+- Updated dependencies [4ab2e7e]
+- Updated dependencies [589049b]
+- Updated dependencies [d0f308c]
+- Updated dependencies [4dc41e6]
+- Updated dependencies [eb05ea2]
+- Updated dependencies [55a4898]
+- Updated dependencies [f87239a]
+- Updated dependencies [2ae8c89]
+- Updated dependencies [a4daa85]
+- Updated dependencies [b64980a]
+- Updated dependencies [bbb98c4]
+- Updated dependencies [1bb9536]
+- Updated dependencies [2bf71ce]
+- Updated dependencies [c1af99c]
+- Updated dependencies [99a6a78]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [3ac22c9]
+- Updated dependencies [ceef714]
+- Updated dependencies [b388cfe]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [cfd237f]
+  - @objectstack/spec@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

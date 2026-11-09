@@ -32,8 +32,8 @@ import {
   type CalendarVisibleRange,
   type CalendarWindow,
 } from './calendarWindow';
-import { SchemaRenderer, useNavigationOverlay, classifyLoadError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
-import type { LoadErrorKind } from '@object-ui/react';
+import { SchemaRenderer, useNavigationOverlay, classifyLoadError, answeredLoadFailure, isPermissionError, usePredicateScope, useDataInvalidation, useFilterScope, useResolvedFilter, NonGridRowCeilingNote } from '@object-ui/react';
+import type { LoadErrorKind, AnsweredLoadFailure } from '@object-ui/react';
 import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
@@ -50,10 +50,11 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
-import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
+import { resolveBulkActions, useBulkActionItems, useUndeclaredActionNamesWarning } from '@object-ui/plugin-grid';
 
 /**
  * The `case 'map'` branch below builds an `object-map` schema by flattening
@@ -324,6 +325,8 @@ export interface ListViewProps {
    * the element (readonly T[] in, T[] out) and so preserves whatever it is
    * given. Normalized-vs-raw therefore does not move the TYPE here; it only
    * decides whether platform-unsortable entries are still present (#6455).
+   * Under a served projection they never are: the emit drops them, as every
+   * request this list sends already does (objectstack#30024).
    */
   onSortChange?: (sort: SortItem[]) => void;
   /**
@@ -341,6 +344,27 @@ export interface ListViewProps {
   onSearchChange?: (search: string) => void;
   /** Called when the user toggles fields via the Hide Fields popover. */
   onHiddenFieldsChange?: (hidden: string[]) => void;
+  /**
+   * objectstack#30077 — the names among `schema.columns` that the READER added
+   * to their own list (`onAddedFieldsChange`), not the view. The host appends
+   * them to the columns it hands in `schema`; this prop is its split of that
+   * one value into its two sources, so unticking an added column takes it off
+   * the list again instead of hiding it. A HOST prop, never a schema key.
+   * Read by content, never by identity.
+   */
+  addedFields?: ReadonlyArray<string>;
+  /**
+   * objectstack#30077 — the door that lets a reader add a field to their list.
+   * When it is wired, the Hide Fields popover (the toolbar's and the Display
+   * panel's) lists, after the view's columns, every other field of the object
+   * the caller may read (`canReadField`) and the definition does not mark
+   * `hidden`, unticked; ticking one calls this with the whole new list of
+   * added names, and unticking an added column calls it without that name.
+   * The host stores the list as the reader's own and appends it to
+   * `schema.columns`. A HOST prop, never a schema key. Absent ⇒ the popover
+   * lists the view's columns alone, exactly as before.
+   */
+  onAddedFieldsChange?: (added: string[]) => void;
   /**
    * Called when the user toggles inline record editing. Wiring it is also what
    * offers the wide toolbar's toggle. The toggle switches the grid's edit MODE,
@@ -473,8 +497,17 @@ export interface ListViewProps {
    * carries over the view's in `schema`. Unlike the three above, a
    * `viewDefaults` without the `grouping` key leaves the grouping `schema`
    * opened with as the view's own.
+   *
+   * `filters` (objectstack#30073) are the view's own conditions, for a host
+   * that shows them as Filter panel rows (and passes them as
+   * `initialFilters`) instead of applying them under the list: the panel's
+   * finished conditions are then judged against these, so the view's own
+   * rows are not a personalization and an edit, a removal or a "Clear all"
+   * is. Absent ⇒ any finished panel condition is the reader's own, as before.
    */
-  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight' | 'sort' | 'grouping'>;
+  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight' | 'sort' | 'grouping'> & {
+    filters?: FilterBuilderRowGroup;
+  };
   /**
    * A reset to the view's own, told apart from a choice (objectstack#28948).
    * For a host that stores the user's preference and passes `viewDefaults`:
@@ -586,6 +619,31 @@ export interface ListViewProps {
    * Absent ⇒ the panel draws no such section, exactly as before.
    */
   recordOpen?: ViewSettingsRecordOpen;
+  /**
+   * The page a paged grid shows, 1-based, for a host that keeps it
+   * (objectstack#30850): the console keeps it in the address, so Back from a
+   * record opened as a full page, a reload and a copied link land on it.
+   * Passing it makes the page CONTROLLED: the list reads this value every
+   * render and keeps no page of its own, so the host answers every
+   * `onPageChange` by passing the new value back. A whole number from 1 up.
+   *
+   * The list still decides when the page moves: the pager; back to 1 when the
+   * object, filters, sort, search, grouping, page size or view change; to the
+   * last reachable page when a load comes back empty past the end. Each move
+   * is an `onPageChange`. Only a paged grid reads it; other kinds fetch one
+   * window and draw no pager.
+   *
+   * A HOST prop, never a schema key: the page is the reader's place in the
+   * list, not anything an author writes. Absent ⇒ the list keeps the page
+   * itself and starts at 1, exactly as before.
+   */
+  page?: number;
+  /**
+   * Called with the page the list moves to (objectstack#30850). Under a
+   * controlled `page` the host passes the value back; without one it is a
+   * notification. A HOST prop, never a schema key.
+   */
+  onPageChange?: (page: number) => void;
 }
 
 // Helper to convert FilterBuilder group to ObjectStack AST.
@@ -967,8 +1025,16 @@ const NO_QUEUE_SITTING_CONDITIONS: ReadonlyArray<QueueSittingCondition> = [];
  * records can sit in a queue (the `ownership: 'user'` tier) and refuses an
  * author's own `queue` field on. The filter is offered only there: anywhere
  * else it would name a column the object does not have.
+ *
+ * The column must also have storage behind it. On an ADR-0015 `external`
+ * (federated) object the remote database owns the schema, so the injected
+ * `queue` column exists in the registered definition and nowhere else, and no
+ * row of that table can ever sit in a queue (assignment rules skip such
+ * objects too). The spec's `platformProvisionsStorage` is the one spelling of
+ * that verdict, read here rather than re-derived.
  */
 export function objectHasOwnershipQueue(objectDef: unknown): boolean {
+  if (!platformProvisionsStorage(objectDef)) return false;
   const raw = (objectDef as { fields?: unknown } | null | undefined)?.fields;
   const queue = Array.isArray(raw)
     ? raw.find((f) => (f as { name?: unknown } | null)?.name === 'queue')
@@ -1009,6 +1075,16 @@ function isAppliedFilterRow(row: { operator: string; value?: unknown }): boolean
  * Returns `group` itself when every row is finished, so an emit with nothing
  * to drop hands the host the identity it had before.
  */
+/**
+ * A filter-panel group by what it selects: its rows' field, operator and
+ * value in order, and its logic once two rows make it matter. Never by row
+ * `id`, which the builder mints per row.
+ */
+function filterRowsKey(group: FilterBuilderRowGroup): string {
+  const rows = (group.conditions ?? []).map((c) => [c.field, c.operator, c.value ?? null]);
+  return JSON.stringify([rows.length > 1 ? group.logic ?? 'and' : 'and', rows]);
+}
+
 function appliedFilterGroup(group: FilterBuilderRowGroup): FilterBuilderRowGroup {
   const rows = group.conditions ?? [];
   const finished = rows.filter(isAppliedFilterRow);
@@ -1180,6 +1256,9 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // request, so the copy points at the filter instead of the network.
   'list.loadErrorRejectedTitle': 'This view’s query was rejected',
   'list.loadErrorRejectedMessage': 'The server could not process this view’s filter or query options. Clearing the filters usually fixes it; if the view is saved this way, an administrator needs to correct it.',
+  // objectstack#31893 — a 400 `INVALID_FIELD` that names the refused field.
+  'list.loadErrorUnknownColumnMessage': 'The column “{{column}}” shows the field “{{field}}”, which {{object}} does not have. An administrator needs to correct or remove the column in this view.',
+  'list.loadErrorUnknownFieldMessage': 'This view’s query names the field “{{field}}”, which {{object}} does not have. Clearing the filters usually fixes it; if the view is saved this way, an administrator needs to correct it.',
   // Load DENIED BY THE OBJECT — the server answered 404 `OBJECT_API_DISABLED`
   // or 405 `OBJECT_API_METHOD_NOT_ALLOWED`. This is not "no records", not a
   // permission grant anyone can give, and not something a retry can change:
@@ -1250,6 +1329,9 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.groupBy': 'Group By',
   'list.export': 'Export',
   'list.exportAs': 'Export as {{format}}',
+  // The export doors' refusal sentence, shared with `ObjectGrid` and
+  // `RelatedList`. Byte-identical to the `en` pack.
+  'view.exportNotPermitted': 'You don’t have permission to export these records. Contact your administrator if you think you should be able to.',
   'list.color': 'Color',
   'list.rowColor': 'Row Color',
   'list.colorByField': 'Color by field',
@@ -1460,6 +1542,44 @@ function kanbanCardFieldsFromView(columns: readonly unknown[], skip: ReadonlyArr
 }
 
 /**
+ * The field a `400 INVALID_FIELD` load failure refused, or `null`
+ * (objectstack#31893).
+ *
+ * Read from the answer's structured `details.field` only: `@objectstack/rest`
+ * answers the refusal flat (`{ error, code, field, object }`), and both list
+ * read paths keep that body on `details` (`@objectstack/client`'s wrapper, and
+ * the adapter's raw `$expand`/`$search` branch). ⛔ Never the sentence: its
+ * wording is the server's and moves with it. Any other code, or an
+ * `INVALID_FIELD` that names no field, answers `null` and keeps the generic
+ * rejected panel.
+ */
+function refusedQueryField(err: unknown): string | null {
+  const e = err as { code?: unknown; details?: { field?: unknown } } | null | undefined;
+  if (e?.code !== 'INVALID_FIELD') return null;
+  const field = e.details?.field;
+  return typeof field === 'string' && field.trim() !== '' ? field : null;
+}
+
+/**
+ * The view column whose field is `field`, by the same `columnIdentity` the
+ * `$select` projection reads a column by (objectstack#31893). A bare-string
+ * column has no authored label, so it answers `{ label: undefined }`.
+ */
+function refusedFieldColumn(
+  columns: unknown,
+  field: string,
+): { label?: string | Record<string, string> } | null {
+  if (!Array.isArray(columns)) return null;
+  for (const column of columns) {
+    if (columnIdentity(column) !== field) continue;
+    return typeof column === 'object' && column !== null
+      ? { label: (column as { label?: string | Record<string, string> }).label }
+      : {};
+  }
+  return null;
+}
+
+/**
  * The record field holding a record's owner, when the object has one
  * (objectui#12619) — the board shows the owner's avatar off it. Read from the
  * spec's own declaration, never guessed: `resolveInjectedSystemColumns` answers
@@ -1645,6 +1765,22 @@ function canReadField(
   return !perms?.isLoaded || !objectName || perms.checkField(objectName, field, 'read');
 }
 
+/**
+ * Whether the object definition marks a field `hidden: true`: the injected
+ * system columns `@objectstack/spec` hides from pickers (`organization_id`,
+ * `queue`, the `__search` companion). The toolbar's field lists ask this one
+ * predicate. The Filter panel's list and the Sort picker's list leave such a
+ * field out unless the current filter or sort already names it, so that row
+ * is not blank and can be removed; the hide-fields lists never offer one to
+ * add. A plain function of the definition's field map, like `canReadField`.
+ */
+function isDeclaredHidden(
+  defs: Record<string, { hidden?: unknown } | undefined> | undefined,
+  field: string,
+): boolean {
+  return defs?.[field]?.hidden === true;
+}
+
 /** The item a value none of a picker's options carries is shown by. */
 const OUTSIDE_OPTIONS = 'outside';
 
@@ -1731,6 +1867,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onGroupingChange,
   onSearchChange,
   onHiddenFieldsChange,
+  addedFields,
+  onAddedFieldsChange,
   onInlineEditChange,
   onColumnStateChange,
   onRowClick,
@@ -1751,6 +1889,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onRestoreViewDefaults,
   onPersonalizationChange,
   recordOpen,
+  page,
+  onPageChange,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
   // The switcher can be enabled either by the host component (prop) or by
@@ -1882,6 +2022,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const [objectDefLoaded, setObjectDefLoaded] = React.useState(false);
 
   /**
+   * ONE read of the served per-column sortability projection
+   * (objectstack#10235 ruling A, consumed through `@object-ui/core`), for every
+   * leg of this component that asks it: the sort this list SENDS (`serverSort`
+   * below), the sort picker's list, and the sort it emits for a host to persist
+   * (`emitSortChange`). Read more than once, two copies could answer
+   * differently about the same field on the same render, which is the drift
+   * `isPlatformSortableField` was consolidated to end.
+   *
+   * Declared beside `objectDef` because the data fetch reads it, and that
+   * effect's dependency list is evaluated where the effect is declared.
+   * `undefined` is "no signal served" (an older deployment, an inline or mock
+   * data source, or `objectDef` not yet read), never "nothing is sortable".
+   */
+  const platformSortability = React.useMemo(
+    () => readObjectSortability(objectDef),
+    [objectDef],
+  );
+
+  /**
    * objectui#12966 — the object's `search` resolves to no field, so the server
    * refuses any term with `400 INVALID_FIELD`: no quick-search box, and a term
    * restored at mount or carried across a view switch is not applied, for the
@@ -1984,6 +2143,32 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   }, [schemaSortKey]);
 
   /**
+   * objectstack#30024 — the sort this list ASKS THE SERVER FOR: `currentSort`
+   * less every entry the served projection refuses.
+   *
+   * `currentSort` is seeded from the stored view `sort` (and a URL or
+   * restored user sort), so it can name a field the platform will not order
+   * by: a `formula`, an unknown name, or one its author marked
+   * `sortable: false`. The Data API answers such a sort `400 INVALID_SORT`, so
+   * sending it failed the whole list on its first fetch. Every request this
+   * component makes, and every child view that fetches its own rows from the
+   * `sort` handed to it, reads this list instead, so a refused entry never
+   * reaches the server and the rows load in the order of the entries left,
+   * kept in their original order.
+   *
+   * The refused entry stays in `currentSort`: the sort picker still lists it
+   * removable-only, and the persist boundary (`emitSortChange`) drops it from
+   * the next write. No signal served ⇒ sent unchanged, as before
+   * objectstack#10235, because there is no verdict to filter by.
+   */
+  const serverSort = React.useMemo(
+    () => (platformSortability
+      ? filterPlatformSortableSort(currentSort, platformSortability)
+      : currentSort),
+    [currentSort, platformSortability],
+  );
+
+  /**
    * The view's DECLARED sort, for the "reset to default" affordance
    * (objectui#4243).
    *
@@ -2050,6 +2235,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // shows the server's own sentence, which names the object and the remedies,
   // instead of the generic "query was rejected" copy.
   const [loadErrorIsSearchRefusal, setLoadErrorIsSearchRefusal] = React.useState(false);
+  // objectstack#29704 — the server's code and sentence when it ANSWERED the
+  // failed read (a 404 `OBJECT_NOT_FOUND`, a 500 it explained). A `network`
+  // kind with an answer shows them instead of "check your connection", which
+  // is only true of a request that got no answer. `null` = no answer.
+  const [loadErrorAnswer, setLoadErrorAnswer] = React.useState<AnsweredLoadFailure | null>(null);
+  // objectstack#31893 — the field a `400 INVALID_FIELD` refused, read from the
+  // answer's structured `details.field` (never its sentence). The rejected
+  // panel names it, and the column that asked for it when it is one of this
+  // view's columns. `null` = not such a refusal.
+  const [loadErrorRefusedField, setLoadErrorRefusedField] = React.useState<string | null>(null);
   // Start in loading state when we will fetch from a dataSource so the empty
   // state doesn't flash before the first effect runs. Inline data (schema.data
   // as an array or a `value` provider) starts as not-loading.
@@ -2101,7 +2296,28 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // result. That total + page controls are handed DOWN to the flat grid view so
   // its existing (single) DataTable pager becomes server-driven — records past
   // the first window are reachable, and we never stack a second pager on top.
-  const [serverPage, setServerPage] = React.useState(1);
+  //
+  // objectstack#30850 — a host that passes `page` owns the number: the list
+  // reads it every render and asks for every move through `onPageChange` (the
+  // pager, the reset to page 1, the clamp past the last page). Without it the
+  // list keeps the page itself, exactly as before.
+  //
+  // `setServerPage` is stable and reads the latest committed page and host
+  // callback through a ref: the fetch effect's clamp and the sort handlers
+  // call it from closures taken renders ago. A move to the page already shown
+  // tells the host nothing.
+  const [ownPage, setOwnPage] = React.useState(1);
+  const pageControlled = page !== undefined;
+  const serverPage = pageControlled ? page : ownPage;
+  const pageMoveRef = React.useRef({ controlled: pageControlled, current: serverPage, onPageChange });
+  React.useLayoutEffect(() => {
+    pageMoveRef.current = { controlled: pageControlled, current: serverPage, onPageChange };
+  });
+  const setServerPage = React.useCallback((next: number) => {
+    const { controlled, current, onPageChange: notify } = pageMoveRef.current;
+    if (!controlled) setOwnPage(next);
+    if (next !== current) notify?.(next);
+  }, []);
   /**
    * The match total the LAST fetch reported, exactly as it came back
    * (objectui#7394). Read through the derived `serverTotal` below, never
@@ -2421,6 +2637,76 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     if (bulkDeleteVerdict.allowed) return declared;
     return declared.filter((a: unknown) => String(a).toLowerCase() !== 'delete');
   }, [schema.bulkActions, bulkDeleteVerdict]);
+
+  /**
+   * [objectstack#30394] What the non-grid bar DRAWS out of `permittedBulkActions`:
+   * the grid's own rule (objectstack#30169, ruling C), folded by the grid's own
+   * `resolveBulkActions` so the two bars cannot drift.
+   *
+   * A bare name draws only when the object declares an action of that name,
+   * labelled from that declaration (through the app's i18n bundle, as the grid
+   * labels it). The canonical `delete` keeps its own path: it is not an object
+   * action but the built-in bulk delete, gated above by `bulkDeleteVerdict`,
+   * so it is held out of the fold exactly as the grid holds it out. Any other
+   * name draws nothing; `undeclared` exists only for the development warning
+   * below. Before this fold every member drew a button, so a name the object
+   * never declared, an action a disabled package withholds included, showed a
+   * button that only toasted "not executable" when pressed.
+   *
+   * [objectstack#30535] A declared action then passes the grid bar's OWN gate,
+   * `useBulkActionItems`, before it draws: its `requiredPermissions` (ADR-0066
+   * D4, the caller's held capabilities), its activation switch, and its
+   * `visible`, evaluated once per selected record and offered when at least
+   * one record passes. The fold carried the resolved definition all along; the
+   * bar read only its label, so a gated action drew for every user and every
+   * selection. A repeated name draws once, as the fold surfaces it once.
+   */
+  const nonGridBulkFold = React.useMemo(() => {
+    const seen = new Set<string>();
+    const names = ((permittedBulkActions ?? []) as unknown[]).filter((a): a is string => {
+      if (typeof a !== 'string' || a === '') return false;
+      // The built-in `delete` is one button whatever its spelling's case.
+      const key = a.toLowerCase() === 'delete' ? 'delete' : a;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const { defs, undeclared } = resolveBulkActions({
+      bulkActions: names.filter((a) => a.toLowerCase() !== 'delete'),
+      objectActions: objectDef?.actions,
+      localizeLabel: (actionName, fallback) =>
+        schema.objectName && typeof resolveActionLabel === 'function'
+          ? resolveActionLabel(schema.objectName, actionName, fallback)
+          : fallback,
+    });
+    return { names, defs, undeclared };
+  }, [permittedBulkActions, objectDef, schema.objectName, resolveActionLabel]);
+  const nonGridBulkItems = useBulkActionItems({
+    selectedRows,
+    actions: undefined,
+    actionDefs: nonGridBulkFold.defs,
+    objectFields: objectDef?.fields,
+  });
+  const nonGridBulkBar = React.useMemo(() => {
+    const labels = new Map(nonGridBulkItems.defs.map((def) => [def.name, def.label]));
+    // Authored order, the built-in `delete` where the author put it.
+    const drawn = nonGridBulkFold.names
+      .filter((a) => a.toLowerCase() === 'delete' || labels.has(a))
+      .map((name) => ({ name, label: labels.get(name) }));
+    return { drawn, undeclared: nonGridBulkFold.undeclared };
+  }, [nonGridBulkFold, nonGridBulkItems]);
+  // The grid says its own (ObjectGrid warns for the names it leaves undrawn),
+  // so this one speaks only while a non-grid view is on screen, and only once
+  // the object's schema read has settled. A list with an object but no schema
+  // in hand (no `getObjectSchema`, or the read failed) reports the names as
+  // unread, never as undeclared: the grid's own reading.
+  useUndeclaredActionNamesWarning({
+    key: 'bulkActions',
+    names: nonGridBulkBar.undeclared,
+    ready: objectDefLoaded && currentView !== 'grid',
+    basis: schema.objectName && objectDef == null ? 'unread' : 'declared',
+    address: { component: 'ListView', blockType: currentView, objectName: schema.objectName, label: schema.label },
+  });
 
   /**
    * [objectui#4420] The PER-RECORD half of the same key, for the same bar.
@@ -3165,6 +3451,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       setLoading(true);
       setLoadError(null);
       setLoadErrorIsSearchRefusal(false);
+      setLoadErrorAnswer(null);
+      setLoadErrorRefusedField(null);
       // [objectui#10384] Set when this result clamps the pager (see below).
       // The window it moves to is already being fetched, so loading stays on:
       // settling it here would paint the empty window — and with it the
@@ -3177,8 +3465,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
         // Convert sort to query format
         // Use array format to ensure order is preserved (Object keys are not guaranteed ordered)
-        const sort: any = currentSort.length > 0
-          ? currentSort
+        // `serverSort`, not `currentSort`: a stored entry the platform's
+        // sortability projection refuses never reaches the server (objectstack#30024).
+        const sort: any = serverSort.length > 0
+          ? serverSort
               .filter(item => item.field) // Ensure field is selected
               .map(item => ({ field: item.field, order: item.order }))
           : undefined;
@@ -3728,10 +4018,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           setData([]);
           setLoadError((err as any)?.message ? String((err as any).message) : String(err ?? 'Unknown error'));
           setLoadErrorKind(classifyLoadError(err));
-          setLoadErrorIsSearchRefusal(
-            // `searchTerm` is what put `$search` on this request's params.
-            !!searchTerm && (err as { code?: unknown } | null)?.code === 'INVALID_FIELD',
-          );
+          setLoadErrorAnswer(answeredLoadFailure(err));
+          // `searchTerm` is what put `$search` on this request's params.
+          const isSearchRefusal = !!searchTerm && (err as { code?: unknown } | null)?.code === 'INVALID_FIELD';
+          setLoadErrorIsSearchRefusal(isSearchRefusal);
+          // The search path above keeps its own panel; this read is for every
+          // other `INVALID_FIELD` (objectstack#31893).
+          setLoadErrorRefusedField(isSearchRefusal ? null : refusedQueryField(err));
         }
       } finally {
         if (isMounted && requestId === fetchRequestIdRef.current && clampedToPage === null) {
@@ -3820,7 +4113,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // silently un-suppresses nothing, because the finding it was suppressing
     // simply moves elsewhere. Add prose ABOVE this point, never below it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, currentSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
+  }, [schema.objectName, schema.data, dataSource, authoredFilter, effectivePageSize, serverSort, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, refreshKey, searchTerm, schema.searchableFields, schema.columns, schema.kanban, schema.calendar, schema.gallery, schema.timeline, schema.gantt, schema.map, objectDef?.fields, objectDefLoaded, schema.refreshTrigger, perms, fetchSkip, groupingConfig, predicateProjectionKey, invalidationNonce, groupingNeedsHeaderQuery, calendarWindowKey, rowsCarryConcurrencyToken]); // Re-fetch on filter/sort/search/refreshTrigger/perms/window change; `rowsCarryConcurrencyToken` (objectui#12292) re-reads the rows with their token when inline edit turns on
 
   // Any change to the result-defining inputs (object, filters, sort, search,
   // grouping, page size) invalidates the current page number — snap back to
@@ -4309,7 +4602,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // chart branch below, and any of these rendered standalone) never saw the
       // view's base filter at all.
       filter: authoredFilter,
-      sort: currentSort,
+      // `serverSort`: the kanban, calendar, timeline and gantt fetch their own
+      // rows from this `sort`, so it carries no entry the platform refuses
+      // (objectstack#30024).
+      sort: serverSort,
       className: "h-full w-full",
       // Disable internal controls that clash with ListView toolbar
       showSearch: false,
@@ -4916,7 +5212,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // asynchronously (`/me/permissions`) and `objectDef` loads into state, so a
   // grid schema built before either resolved must be rebuilt when they do —
   // otherwise `editable` keeps the pre-verdict answer for the session.
-  }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
+  }, [currentView, schema, authoredFilter, serverSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
   // The count the toolbar shows: a record-mode amount's code condition is
   // part of its amount row (objectstack#27188), not a filter of its own, and a
@@ -5069,7 +5365,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    */
   const filterFields = React.useMemo(() => {
     const defs: Record<string, { hidden?: unknown; system?: boolean } | undefined> | undefined = objectDef?.fields;
-    const isHidden = (name: string) => defs?.[name]?.hidden === true;
+    const isHidden = (name: string) => isDeclaredHidden(defs, name);
     const held = new Set((currentFilters.conditions ?? []).map((c) => c.field));
     const columnRank = new Map<string, number>();
     for (const column of effectiveFields) {
@@ -5153,24 +5449,24 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // field the current sort already names (a stored or URL sort) stays listed,
   // so its row is not blank and can be removed.
   //
+  // A field the object definition marks `hidden: true` (`isDeclaredHidden`,
+  // the rule the Filter panel's list follows) is withheld the same way as an
+  // unreadable one: not offered, no relational hint, and kept by the in-use
+  // exception alone.
+  //
   // An entry the exception alone keeps is listed REMOVABLE ONLY
   // (objectui#11943): it carries `disabled`, which `SortBuilder` renders as an
   // unavailable option. Its own row still shows its label and can be changed
   // to another field or removed, but no row's dropdown offers it as a choice
   // and "Add sort" never seeds it. That holds for each reason the exception
-  // keeps a field: unreadable, relational, or refused by the platform (or by
-  // the type read when no projection is served). A field the two rules list
-  // anyway carries no flag, whether or not the sort names it.
+  // keeps a field: unreadable, hidden, relational, or refused by the platform
+  // (or by the type read when no projection is served). A field the two rules
+  // list anyway carries no flag, whether or not the sort names it.
   //
-  // ONE read of the served projection, for BOTH legs below — the list this
-  // picker renders, and the sort it emits for a host to persist. Read twice,
-  // the two copies could answer differently about the same field on the same
-  // render, which is the drift `isPlatformSortableField` was consolidated to
-  // end. `undefined` stays "no signal served", never "nothing is sortable".
-  const platformSortability = React.useMemo(
-    () => readObjectSortability(objectDef),
-    [objectDef],
-  );
+  // Both legs below — the list this picker renders, and the sort it emits for
+  // a host to persist — read `platformSortability`, the ONE read of the served
+  // projection declared beside `objectDef` (the same read `serverSort` filters
+  // the request by).
 
   const { sortFields, sortHasRelationalField, sortPicksRelationalField } = React.useMemo(() => {
     const inUse = new Set(currentSort.map((item) => item.field).filter(Boolean));
@@ -5180,16 +5476,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // stored ID: said in one line under the rows, only while it is true.
     let picked = false;
     const fields: Array<{ value: string; label: string; disabled?: boolean; type?: string }> = [];
+    const defs: Record<string, { hidden?: unknown } | undefined> | undefined = objectDef?.fields;
     for (const field of candidateFields) {
-      const readable = canReadField(perms, schema.objectName, field.value);
-      if (!readable && !inUse.has(field.value)) continue;
+      const offered = canReadField(perms, schema.objectName, field.value) && !isDeclaredHidden(defs, field.value);
+      if (!offered && !inUse.has(field.value)) continue;
       const relational = EXPANDABLE_FIELD_TYPES.has(field.type);
       const platformSortable = platformSortability
         ? isPlatformSortableField(platformSortability, field.value)
         : !UNMATERIALIZED_FIELD_TYPES.has(field.type);
       // `type` lets the picker name a date's direction as time
       // (objectstack#27520): "Oldest → Newest", not "A → Z".
-      if (readable && !relational && platformSortable) {
+      if (offered && !relational && platformSortable) {
         fields.push({ value: field.value, label: field.label, type: field.type });
         continue;
       }
@@ -5207,7 +5504,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       if (relational) excluded = true;
     }
     return { sortFields: fields, sortHasRelationalField: excluded, sortPicksRelationalField: picked };
-  }, [candidateFields, currentSort, t, platformSortability, perms, schema.objectName]);
+  }, [candidateFields, currentSort, t, platformSortability, perms, schema.objectName, objectDef]);
 
   /**
    * [#6455] THE persist boundary: what this picker LISTS is not what it
@@ -5227,9 +5524,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * So the two legs part company HERE, at the one boundary every emit crosses,
    * exactly as #5729 parted them at the grid seam (`ObjectGrid`'s
    * `manualSort` / `manualOnSortChange` pair). The refused entry stays in
-   * `currentSort` — listed, removable, and still the order this list asks the
-   * server for — while no write ever carries it. Removing it persists the
-   * removal; a sort with nothing refused in it is emitted unchanged.
+   * `currentSort`, listed and removable, while no write ever carries it.
+   * Removing it persists the removal; a sort with nothing refused in it is
+   * emitted unchanged.
+   *
+   * Nor does any REQUEST carry it (objectstack#30024): the fetch, the export
+   * and the child views read `serverSort`, which drops it through the same
+   * `filterPlatformSortableSort` call. This boundary used to leave it in "the
+   * order this list asks the server for", and the server answers such a sort
+   * `400 INVALID_SORT`, so a stored view naming one failed its first fetch.
    *
    * Every `onSortChange` in this component goes through here rather than each
    * call site filtering for itself: a builder edit, a header click and a
@@ -5378,8 +5681,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         .map((f: any) => columnIdentity(f))
         .filter(Boolean) as string[];
 
-      const sort = currentSort.length > 0
-        ? currentSort
+      // The rows on screen were asked for with `serverSort`, so the file is too:
+      // a refused entry would fail the export the way it failed the list.
+      const sort = serverSort.length > 0
+        ? serverSort
             .filter(item => item.field)
             .map(item => ({ field: item.field, direction: item.order as 'asc' | 'desc' }))
         : undefined;
@@ -5428,7 +5733,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // Surface the failure instead of swallowing it (e.g. permission denied
           // or a server error) — the toolbar shows the message.
           console.error('ListView export failed:', err);
-          setExportError(err instanceof Error ? err.message : String(err));
+          // A refusal says the Console's sentence, never the server's text.
+          setExportError(isPermissionError(err)
+            ? t('view.exportNotPermitted')
+            : err instanceof Error ? err.message : String(err));
         } finally {
           setExportBusy(false);
         }
@@ -5486,7 +5794,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     setShowExport(false);
     // `searchTerm` / `searchableFields` belong here: the export now narrows by
     // the active search, so a stale closure would export the wrong row set.
-  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, currentSort, searchTerm, objectDef, resolveObjectLabel]);
+  }, [data, effectiveFields, resolvedExportOptions, schema.objectName, authoredFilter, schema.searchableFields, exportPermitted, dataSource, appliedFilters, appliedUserFilterConditions, appliedQueueSittingConditions, serverSort, searchTerm, objectDef, resolveObjectLabel, t]);
 
   // All available fields for hide/show (with i18n)
   //
@@ -5499,11 +5807,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // field still shows: `GroupingEditor` mounts a value its options do not
   // carry as its own entry, labelled with the field name, so the level can be
   // removed, and no other level or "Add group field" offers it.
+  //
+  // objectstack#30077 — the label, in order: the translation of the field,
+  // then the column's own `label`, then the object definition's field label,
+  // then the field name. A column with no label of its own (a bare `{ field }`
+  // or name, and every column a reader added) is listed under the label the
+  // definition declares, the source the grid's header falls back to, rather
+  // than under its machine name.
   const allFields = React.useMemo(() => {
+    const definitionLabel = (name: string): string | undefined => {
+      const label = objectDef?.fields?.[name]?.label;
+      return typeof label === 'string' && label ? label : undefined;
+    };
     return (Array.isArray(schema.columns) ? (schema.columns as any[]) : []).flatMap((f: any) => {
       if (typeof f === 'string') {
         if (!canReadField(perms, schema.objectName, f)) return [];
-        return [{ name: f, label: tFieldLabel(f, f) }];
+        return [{ name: f, label: tFieldLabel(f, definitionLabel(f) || f) }];
       }
       // `name` here is this popover's OWN key (it drives `hiddenFields`), which
       // is why it keeps that shape — but the value is the column identity, so
@@ -5512,9 +5831,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // No resolvable identity → nothing to hide or show; it used to render a
       // checkbox keyed `undefined` that could never match a column.
       if (!name || !canReadField(perms, schema.objectName, name)) return [];
-      return [{ name, label: tFieldLabel(name, f.label || name) }];
+      return [{ name, label: tFieldLabel(name, f.label || definitionLabel(name) || name) }];
     });
-  }, [schema.columns, tFieldLabel, perms, schema.objectName]);
+  }, [schema.columns, tFieldLabel, perms, schema.objectName, objectDef]);
 
   // objectui#11984 — what the two hide-fields lists (the toolbar popover and
   // the View settings section) are handed of `hiddenFields`. An entry naming a
@@ -5533,6 +5852,57 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     : new Set([...hiddenFields].filter((name) => !withheldHiddenFields.includes(name)));
   const updateOfferedHiddenFields = (next: Set<string>) =>
     updateHiddenFields(withheldHiddenFields.length === 0 ? next : new Set([...next, ...withheldHiddenFields]));
+
+  // objectstack#30077 — the fields a reader may add to their own list, offered
+  // by both hide-fields lists after the view's columns when the host wires
+  // `onAddedFieldsChange`: every field of the object's definition that is not
+  // already a column (`allFields`, which carries the added ones the host
+  // appended), that the caller may read (`canReadField`, the predicate every
+  // field list asks), and that the definition does not mark `hidden: true`.
+  // Business fields first, then the system fields, each in the definition's
+  // order, as the Filter panel ranks them. Nothing is offered until the
+  // definition has loaded. Plain per-render values, not memos (AGENTS.md #10).
+  const addedFieldNames = addedFields ?? [];
+  const addableFields: Array<{ name: string; label: string }> = [];
+  if (onAddedFieldsChange && objectDef?.fields) {
+    const defs = objectDef.fields as Record<string, { label?: string; hidden?: unknown; system?: boolean } | undefined>;
+    const listed = new Set(allFields.map((f) => f.name));
+    const candidates = Object.entries(defs).filter(([name]) =>
+      !listed.has(name) && !isDeclaredHidden(defs, name) && canReadField(perms, schema.objectName, name));
+    for (const tier of [false, true]) {
+      for (const [name, def] of candidates) {
+        if (isSystemManagedField(name, def) !== tier) continue;
+        addableFields.push({ name, label: tFieldLabel(name, def?.label || name) });
+      }
+    }
+  }
+  // What both hide-fields lists write through. Unticking a column the reader
+  // added takes it off their list (`onAddedFieldsChange` without it) rather
+  // than hiding it; every other change is a hide or a show, as before.
+  const updateListedFields = (next: Set<string>) => {
+    const dropped = onAddedFieldsChange
+      ? addedFieldNames.filter((name) => next.has(name) && !offeredHiddenFields.has(name))
+      : [];
+    if (dropped.length === 0) {
+      updateOfferedHiddenFields(next);
+      return;
+    }
+    onAddedFieldsChange!(addedFieldNames.filter((name) => !dropped.includes(name)));
+    const hidden = new Set([...next].filter((name) => !dropped.includes(name)));
+    if (hidden.size !== offeredHiddenFields.size || [...hidden].some((name) => !offeredHiddenFields.has(name))) {
+      updateOfferedHiddenFields(hidden);
+    }
+  };
+  // Ticking an offered field adds it to the reader's list. A stale hidden
+  // entry with the same name (a column the view has since dropped) is cleared
+  // with it, or the added column would be drawn hidden.
+  const addListedField = (name: string) => {
+    if (!onAddedFieldsChange || addedFieldNames.includes(name)) return;
+    onAddedFieldsChange([...addedFieldNames, name]);
+    if (offeredHiddenFields.has(name)) {
+      updateOfferedHiddenFields(new Set([...offeredHiddenFields].filter((n) => n !== name)));
+    }
+  };
 
   // objectui#11984 — a row-color rule on a field the caller may not read is
   // withheld from both Row color selects the same way: they show "None" with
@@ -5600,8 +5970,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     JSON.stringify((fields ?? []).map((f) => [f.field, f.order ?? 'asc']));
   const personalizationParts: ListPersonalizationPart[] = [];
   if (sortDiffersFromDeclared) personalizationParts.push('sort');
+  const viewPanelFilters = viewDefaults?.filters;
   if (
-    appliedFilterGroup(currentFilters).conditions.length > 0
+    (viewPanelFilters
+      ? filterRowsKey(appliedPanelFilters) !== filterRowsKey(appliedFilterGroup(viewPanelFilters))
+      : appliedPanelFilters.conditions.length > 0)
     || userFilterConditions.length > 0
     || appliedQueueSittingConditions.length > 0
   ) personalizationParts.push('filters');
@@ -5772,6 +6145,29 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // component fetched: there the rows ARE the list, and two lines each say
   // what a grid row said. A board, a calendar or a grouped grid keeps its own
   // rendering, because its structure is its meaning.
+  // objectstack#31893 — the rejected panel's sentence for a refused field: the
+  // column that asked for it when it is one of this view's columns (its
+  // authored label, else the field name), otherwise the field alone with the
+  // filter remedy. The server's projection door runs before its filter door,
+  // so a field that is a column is always the column's refusal.
+  const refusedFieldCopy = (() => {
+    if (!loadErrorRefusedField) return null;
+    const objectName = (objectDef?.label && objectDef?.name && typeof resolveObjectLabel === 'function'
+      ? resolveObjectLabel(objectDef)
+      : objectDef?.label) || schema.objectName || '';
+    const column = refusedFieldColumn(schema.columns, loadErrorRefusedField);
+    if (column) {
+      const label = column.label == null ? undefined
+        : typeof column.label === 'string' ? column.label
+          : pickLocalized(column.label, displayLocale);
+      return t('list.loadErrorUnknownColumnMessage', {
+        column: label || loadErrorRefusedField,
+        field: loadErrorRefusedField,
+        object: objectName,
+      });
+    }
+    return t('list.loadErrorUnknownFieldMessage', { field: loadErrorRefusedField, object: objectName });
+  })();
   const compactPosture = compact && paginate && surfaceDrawsFetchedRows;
   const compactTitle = compactPosture
     ? (resolveInlineI18nLabel(schema.label, displayLocale)
@@ -6149,13 +6545,29 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                           } else {
                             next.add(field.name);
                           }
-                          updateOfferedHiddenFields(next);
+                          updateListedFields(next);
                         }}
                         className="rounded border-input"
                       />
                       <span className="truncate">{field.label}</span>
                     </label>
                   ))}
+                  {/* objectstack#30077 — the object's other readable fields, to add to the reader's list. */}
+                  {addableFields.length > 0 && (
+                    <div className="border-t pt-1 space-y-1" data-testid="hide-fields-addable">
+                      {addableFields.map((field) => (
+                        <label key={field.name} className="flex items-center gap-2 text-sm py-1 px-1 rounded hover:bg-muted cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={false}
+                            onChange={() => addListedField(field.name)}
+                            className="rounded border-input"
+                          />
+                          <span className="truncate">{field.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </PopoverContent>
@@ -6474,7 +6886,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 : density as any}
               showHideFields={toolbarFlags.showHideFields}
               hiddenFields={offeredHiddenFields}
-              updateHiddenFields={updateOfferedHiddenFields}
+              updateHiddenFields={updateListedFields}
+              addableFields={addableFields}
+              onAddField={addListedField}
               rowNumbers={rowNumbers}
               setRowNumbers={currentView === 'grid' ? setRowNumbers : undefined}
               /* [#4647] The Display panel's inline-edit entry — the SECOND
@@ -6835,7 +7249,13 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // A refused search term shows the server's sentence: it names the
             // object and the two remedies, and clearing the term (the toolbar
             // box stays) is the reader's way out (objectui#12966).
-            message={loadErrorIsSearchRefusal ? loadError : t(
+            // A server that answered a plain failure (kind `network`: no special
+            // verdict) is quoted, with its code below — the network sentence is
+            // only for a request that got no answer (objectstack#29704).
+            message={loadErrorIsSearchRefusal ? loadError
+              : loadErrorKind === 'rejected' && refusedFieldCopy ? refusedFieldCopy
+              : loadErrorKind === 'network' && loadErrorAnswer ? loadErrorAnswer.message
+              : t(
               loadErrorKind === 'api-disabled' ? 'list.loadErrorApiDisabledMessage'
                 : loadErrorKind === 'forbidden' ? 'list.loadErrorForbiddenMessage'
                   : loadErrorKind === 'unauthorized' ? 'list.loadErrorUnauthorizedMessage'
@@ -6849,6 +7269,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 the empty state. `DataErrorState` grew three icon props for this
                 migration and no fourth — an `action` prop would be a second
                 spelling of an affordance it already has. */}
+            {loadErrorKind === 'network' && loadErrorAnswer?.code ? (
+              <code
+                data-testid="list-error-code"
+                className="mb-3 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+              >
+                {loadErrorAnswer.code}
+              </code>
+            ) : null}
             {loadErrorKind === 'api-disabled' || loadErrorKind === 'forbidden' ? null : (
               // No Retry for an `enable`-block denial or a permission refusal
               // (403). Neither verdict is one a retry can change (the first is
@@ -7124,7 +7552,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       )}
 
       {/* Bulk Actions Bar — skip for grid view since ObjectGrid renders its own BulkActionBar */}
-      {permittedBulkActions && permittedBulkActions.length > 0 && selectedRows.length > 0 && currentView !== 'grid' && (
+      {nonGridBulkBar.drawn.length > 0 && selectedRows.length > 0 && currentView !== 'grid' && (
         <div
           className="border-t border-primary/30 px-4 py-2 flex items-center gap-2 text-xs bg-primary/10 text-foreground shrink-0 shadow-sm"
           role="region"
@@ -7136,8 +7564,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {selectedRows.length} {selectedRows.length === 1 ? 'item' : 'items'} selected
           </span>
           <div className="flex items-center gap-1.5 ml-3">
-            {permittedBulkActions.map((action: any) => {
-              const actionStr = String(action).toLowerCase();
+            {nonGridBulkBar.drawn.map(({ name: action, label }) => {
+              const actionStr = action.toLowerCase();
               const isDestructive = actionStr.includes('delete') || actionStr.includes('remove') || actionStr.includes('destroy');
               const Icon = isDestructive ? Trash2 : null;
               // [objectui#4420] The built-in `delete` runs over the ALLOWED
@@ -7160,7 +7588,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   data-testid={`bulk-action-${action}`}
                 >
                   {Icon && <Icon className="h-3 w-3" />}
-                  {tActionLabel(action)}
+                  {label ?? tActionLabel(action)}
                 </Button>
               );
             })}
@@ -7174,7 +7602,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               the dialog's slot: one name for one fact, whichever surface says
               it. */}
           {bulkDeleteEligibility.skipped > 0
-            && permittedBulkActions.some((a: any) => String(a).toLowerCase() === 'delete') && (
+            && nonGridBulkBar.drawn.some(({ name }) => name.toLowerCase() === 'delete') && (
             <span
               className="text-muted-foreground ml-3"
               data-testid="bulk-skipped-notice"

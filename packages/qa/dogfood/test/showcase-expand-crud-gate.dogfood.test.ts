@@ -3,7 +3,7 @@
 // [#7626] `$expand` must not become a second, ungated read door.
 //
 // The defect this file pins was a CROSS-PERSONA DISCLOSURE on the real
-// showcase app: a `contributor`-only member is 403'd on `showcase_contact`
+// showcase app: a `showcase_contributor`-only member is 403'd on `showcase_contact`
 // (neither `showcase_contributor` nor `showcase_member_default` grants it),
 // yet `GET /data/showcase_invoice?$expand=contact` handed back the referenced
 // contact FULLY MATERIALISED — byte-identical to what the admin sees — because
@@ -62,7 +62,7 @@ describe('showcase: $expand honours the referenced object’s CRUD gate + OWD (#
     contribTok = await stack.signUp(CONTRIB_EMAIL);
     ql = await stack.kernel.getServiceAsync('objectql');
 
-    // The persona: `contributor` and nothing else — the app's OWN
+    // The persona: `showcase_contributor` and nothing else — the app's OWN
     // `showcase_contributor` set, unmodified. It names `showcase_invoice` and
     // does NOT name `showcase_contact`; the `showcase_member_default` baseline
     // every member also holds does not name it either. That absence IS the
@@ -75,7 +75,7 @@ describe('showcase: $expand honours the referenced object’s CRUD gate + OWD (#
     // auditor/delegate personas).
     const contribId = (await ql.findOne('sys_user', { where: { email: CONTRIB_EMAIL }, context: SYS }))?.id;
     expect(contribId, 'contributor user provisioned').toBeTruthy();
-    await ql.insert('sys_user_position', { user_id: contribId, position: 'contributor' }, { context: SYS });
+    await ql.insert('sys_user_position', { user_id: contribId, position: 'showcase_contributor' }, { context: SYS });
     const contribSet = await catalogPermissionSet(ql, 'showcase_contributor');
     expect(contribSet, 'the app’s contributor set is served by the security catalog').toBeTruthy();
     await ql.insert(

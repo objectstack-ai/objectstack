@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { declaredHttpStatus } from '@objectstack/types';
-import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, registryObjectPackageDisabled } from '@objectstack/core';
+import { Plugin, PluginContext, POSTURE_LADDER, buildEffectiveObjectPermissions, engineExternalWriteForbidden, registryObjectPackageDisabled } from '@objectstack/core';
 import type { EffectiveObjectPermission, PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits } from '@objectstack/spec/security';
 import type { AnchorBindingContext } from '@objectstack/spec/security';
@@ -27,6 +27,7 @@ import {
 import {
   unregisterGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
+import { unregisterPermissionSetPackageStamp } from './stored-permission-set-package-stamp.js';
 import {
   SHARING_RULES_SERVICE,
   type DeclaredSharingRuleReader,
@@ -91,6 +92,7 @@ import {
   assertMasterRowEditable,
   checkControlledByParentWrite,
   controlledByParentPredicateWriteMasters,
+  type CbpPredicateWriteSelection,
   type CbpWriteGateHost,
 } from './security-plugin-cbp-write-gate.js';
 // [#25223 cut 4] The controlled-by-parent read leaf (ADR-0055 §2, ADR-0139 D6)
@@ -204,6 +206,12 @@ import {
   explainAccessForCaller,
   type ExplainAccessHost,
 } from './security-plugin-explain-access.js';
+// [ADR-0090 D6/D12] One user's effective permission sets with their origins;
+// the method of the same name below hands the body the members it reads.
+import {
+  describeEffectiveAccess,
+  type EffectiveAccessHost,
+} from './security-plugin-effective-access.js';
 // [#25223 cut 10] The record-sharing verdicts: the read filter, the edit gate,
 // the write-depth stash, the tri-state write verdict, the pre-image floor
 // decision and the delegator's own floor knobs; the methods of the same names
@@ -269,6 +277,12 @@ import {
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
 import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
+  externalOrganizationScopeIsUndeclared,
+  refuseUndeclaredExternalObjectScope,
+  registeredObjectsOf,
+  undeclaredExternalScopeDenialWarning,
+} from './external-organization-scope.js';
+import {
   type UnresolvedPostureCause,
 } from './unresolved-posture.js';
 import {
@@ -288,6 +302,7 @@ import {
   type ControlledByParentWriteOutcome,
   type PositionGrantSummary,
   type ExplainAccessRequest,
+  type EffectiveAccess,
 } from '@objectstack/spec/contracts';
 import {
   type MatchesFilterOptions,
@@ -468,12 +483,23 @@ interface ObjectSecurityMeta {
    * backing store, because `syncObjectSchema` issues no DDL for a federated
    * object. Layer 0 reads this to answer "is this a tenant object?" truthfully;
    * see `federated-phantom-anchors.ts` for the provenance test and for why the
-   * question is provenance rather than `external != null`.
+   * question is provenance rather than `isFederatedObject`.
    *
    * `false` on every local object and on a federated object that declares a
    * real remote `organization_id` — both keep the tenant wall exactly as it is.
    */
   tenantAnchorIsPhantom: boolean;
+  /**
+   * [ADR-0015 §10] The object is FEDERATED and states no organization scope the
+   * wall can enforce: neither its own `organization_id`, nor
+   * `tenancy.enabled: false`, nor `systemFields.tenant: false` — or it names a
+   * `tenancy.tenantField` other than `organization_id`. Under a walled posture
+   * Layer 0 DENIES such an object (`external-organization-scope.ts`); the boot
+   * refuses one registered before `kernel:ready` by name, so this is reached by
+   * an object registered after the boot. `false` on every local object and on
+   * a federated object that declared its scope.
+   */
+  externalOrganizationScopeUndeclared: boolean;
   /**
    * [#8023] The object DECLARES `sharingModel: 'public_read_write'` — the one
    * OWD that states row-level writes are open org-wide. Read from the author's
@@ -747,9 +773,38 @@ interface CbpRelation {
    * Read by the by-id `update` leg of
    * {@link SecurityPlugin.assertControlledByParentWrite} and by nothing else:
    * an insert, a delete, a predicate write and a delegated write keep the
-   * master-edit rule whatever this says.
+   * master-edit rule whatever this says, and so does an update whose body
+   * empties an {@link optional} master (#30905 ruling A: detaching a row from
+   * its master is that master's question).
    */
   ownerMayEdit: boolean;
+  /**
+   * [ADR-0055 §1 and §2 as amended · #30905 ruling A] The master is OPTIONAL:
+   * the object declares no required `master_detail`, and its only one is
+   * declared `required: false` (read `=== false`, as the spec's
+   * `controlledByParentMasterOf` reads it — an omitted `required` on an object
+   * that reached the registry without the parse is not it). A detail row whose
+   * {@link fk} is empty then belongs to no master, and the read leaf
+   * ({@link SecurityPlugin.computeControlledByParentFilter}) admits it through
+   * the owner arm alone. The write gate
+   * ({@link SecurityPlugin.assertControlledByParentWrite}, ADR-0055 §3 as
+   * amended) judges such a row by its owner rule — its owner, or Modify All on
+   * the object — on a by-id write, on each row a predicate write selects and on
+   * a hop of the chain walk; it admits an insert that names no master, and an
+   * update that empties the reference asks edit on the master it leaves.
+   * `false` for a required master: its rows are read and written through the
+   * master and nothing else, exactly as before.
+   */
+  optional: boolean;
+  /**
+   * The registry's schema carries the `owner_id` column — the injected
+   * per-record owner under `ownership: 'user'` (the default), or an author's
+   * own field of that name. The owner arm of an {@link optional} master
+   * compares the caller against it; without it a row with an empty master is
+   * read through View All on the detail alone. Resolved from the same schema
+   * as {@link ownerMayEdit}, which reads it too.
+   */
+  ownerColumn: boolean;
 }
 
 /**
@@ -802,19 +857,20 @@ export async function unreadableUnderCallerRead(read: () => Promise<unknown>): P
  *  - an answer: whatever the read door returned (no row, a row, a row set);
  *  - `refused`: a declared 4xx — the read itself was refused (the object's read
  *    grant withheld, a predicate the driver will not compile). Not a hidden
- *    row, so the write keeps the answer it has today;
+ *    row: a write door that asks this question throws it, carried in `error`,
+ *    and the write is refused;
  *  - anything else is a store fault and propagates as raised (#7505): an outage
  *    is neither an answer nor a refusal, and reporting it as either would
  *    relabel it.
  */
 export async function readUnlessRefused<T>(
   read: () => Promise<T>,
-): Promise<{ refused: true } | { refused: false; value: T }> {
+): Promise<{ refused: true; error: unknown } | { refused: false; value: T }> {
   try {
     return { refused: false, value: await read() };
   } catch (e) {
     const status = declaredHttpStatus(e);
-    if (status !== undefined && status < 500) return { refused: true };
+    if (status !== undefined && status < 500) return { refused: true, error: e };
     throw e;
   }
 }
@@ -1829,7 +1885,7 @@ export class SecurityPlugin implements Plugin {
     // An engine with no reader bound resolves an empty catalog — no position
     // distributes a set and no set grants — so a failure here is said at once.
     try {
-      bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: (ql as any).registry, metadata: metadata as any }));
+      bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: (ql as any).registry, metadata: metadata as any, logger: ctx.logger }));
     } catch (e) {
       ctx.logger.warn(
         '[security] the security catalog read was NOT bound to the ObjectQL engine: '
@@ -1997,6 +2053,17 @@ export class SecurityPlugin implements Plugin {
     // wall; declared under `single` they are refused here, the first moment the
     // posture is known, rather than left looking enforced.
     refuseAcceptedDefaultsWithoutWall(this.tenancyPosture, this.acceptedDefaultPermissionSets);
+    // [ADR-0015 §10] Under a walled posture every external object states its
+    // organization scope; one stating none is refused BY NAME when the boot
+    // completes. Judged at `kernel:ready` — every plugin has registered its
+    // objects by then, while here the registry is still filling (the moment the
+    // identity objects are judged above, for the same reason) — and the
+    // refusal fails `bootstrap()` on both kernels. A context without hooks
+    // judges now, over what is registered. The `single` posture reads nothing.
+    const refuseUndeclaredExternalObjects = () =>
+      refuseUndeclaredExternalObjectScope(this.tenancyPosture, registeredObjectsOf(this.ql));
+    if (typeof (ctx as any).hook === 'function') (ctx as any).hook('kernel:ready', refuseUndeclaredExternalObjects);
+    else refuseUndeclaredExternalObjects();
     // [ADR-0105 D11] Optional app/plugin membership resolver for the §7.3.1
     // `IN (current_user.<key>)` sets. Absent is the norm — probe once.
     try {
@@ -2082,10 +2149,14 @@ export class SecurityPlugin implements Plugin {
     // [ADR-0090 D12] Delegated-admin gate shares the SAME permission-set
     // resolution as the CRUD middleware, so a delegate's authority and their
     // ordinary grants can never drift. (`ql` is guaranteed non-null here —
-    // start() bailed out above without a middleware-capable engine.)
+    // start() bailed out above without a middleware-capable engine.) Its
+    // caller-context read of an addressed row is THIS operation's pre-image
+    // read ({@link getCallerPreImage}), so the gate and the write gates after
+    // it read the row once between them.
     this.delegatedAdminGate = new DelegatedAdminGate({
       ql,
       resolveSets: (context: any) => this.resolvePermissionSetsForContext(context),
+      readAsCaller: (opCtx: any, id: string | number) => this.getCallerPreImage(opCtx, id),
       logger: ctx.logger,
     });
 
@@ -2117,7 +2188,7 @@ export class SecurityPlugin implements Plugin {
       const readPermissionEvaluator = () => this.permissionEvaluator;
       const readQl = () => this.ql;
       const readTenancyPosture = () => this.tenancyPosture;
-      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      const host: Pick<SecurityServiceHost, 'acceptedDefaultPermissionSets' | 'canExport' | 'canReadObject' | 'checkAuthoredRowWrite' | 'checkControlledByParentWrite' | 'declareEveryone' | 'delegatedAdminGate' | 'describeEffectiveAccess' | 'describePositionGrants' | 'explainAccessForCaller' | 'getEffectiveObjectPermissions' | 'getMetadataReadableFields' | 'getObjectSecurityMeta' | 'getQueryableFields' | 'getReadFilter' | 'getReadableFields' | 'getRecordFieldAccess' | 'getWritableFields' | 'logger' | 'ownershipFloorAlternates' | 'permissionEvaluator' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
         acceptedDefaultPermissionSets: this.acceptedDefaultPermissionSets,
         canExport: (...a) => this.canExport(...a),
         canReadObject: (...a) => this.canReadObject(...a),
@@ -2125,6 +2196,7 @@ export class SecurityPlugin implements Plugin {
         checkControlledByParentWrite: (...a) => this.checkControlledByParentWrite(...a),
         declareEveryone: (...a) => this.declareEveryone(...a),
         get delegatedAdminGate() { return readDelegatedAdminGate(); },
+        describeEffectiveAccess: (...a) => this.describeEffectiveAccess(...a),
         describePositionGrants: (...a) => this.describePositionGrants(...a),
         explainAccessForCaller: (...a) => this.explainAccessForCaller(...a),
         getEffectiveObjectPermissions: (...a) => this.getEffectiveObjectPermissions(...a),
@@ -2332,6 +2404,7 @@ export class SecurityPlugin implements Plugin {
   async destroy(): Promise<void> {
     for (const unsubscribe of this.metadataChangeUnsubscribes.splice(0)) unsubscribe();
     unregisterGrantPermissionSetNameHooks(this.ql);
+    unregisterPermissionSetPackageStamp(this.ql);
   }
 
   /**
@@ -2410,6 +2483,32 @@ export class SecurityPlugin implements Plugin {
       get tenancyPosture() { return readTenancyPosture(); },
     };
     return explainAccessForCaller.call(host, request, callerContext);
+  }
+
+  /**
+   * [ADR-0090 D6/D12] `ISecurityService.describeEffectiveAccess` — `userId`'s
+   * effective permission sets in the caller's organization, each with every
+   * origin it arrives through (default binding, held position, direct grant,
+   * or a name derived from the user's standing). Gated by explain's caller
+   * gate; an id no user has is refused exactly as one the caller may not
+   * manage, for every caller, which is where it departs from explain's `404`.
+   * The spec member's docblock is the contract.
+   */
+  describeEffectiveAccess(userId: string, callerContext?: any): Promise<EffectiveAccess> {
+    // The body lives in `security-plugin-effective-access.ts` (see `EffectiveAccessHost`).
+    const readDelegatedAdminGate = () => this.delegatedAdminGate;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const readQl = () => this.ql;
+    const readTenancyPosture = () => this.tenancyPosture;
+    const host: EffectiveAccessHost = {
+      baselinePermissionSets: this.baselinePermissionSets,
+      get delegatedAdminGate() { return readDelegatedAdminGate(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
+      get ql() { return readQl(); },
+      get tenancyPosture() { return readTenancyPosture(); },
+      resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
+    };
+    return describeEffectiveAccess.call(host, userId, callerContext);
   }
 
   /**
@@ -2839,12 +2938,17 @@ export class SecurityPlugin implements Plugin {
     context?: any,
   ): Promise<Record<string, unknown> | undefined> {
     // [#25223 cut 9] The body moved to `security-plugin-read-filter.ts` (see `ReadFilterHost`).
+    const readDelegatedAdminGate = () => this.delegatedAdminGate;
     const readLogger = () => this.logger;
-    const host: Pick<ReadFilterHost, 'computeControlledByParentFilter' | 'computeDelegatedReadFilter' | 'computeRlsFilter' | 'logger' | 'resolvePermissionSetsForContext' | 'resolveSharingReadFilter'> = {
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<ReadFilterHost, 'computeControlledByParentFilter' | 'computeDelegatedReadFilter' | 'computeRlsFilter' | 'delegatedAdminGate' | 'getObjectSecurityMeta' | 'logger' | 'permissionEvaluator' | 'resolvePermissionSetsForContext' | 'resolveSharingReadFilter'> = {
       computeControlledByParentFilter: (...a) => this.computeControlledByParentFilter(...a),
       computeDelegatedReadFilter: (...a) => this.computeDelegatedReadFilter(...a),
       computeRlsFilter: (...a) => this.computeRlsFilter(...a),
+      get delegatedAdminGate() { return readDelegatedAdminGate(); },
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get logger() { return readLogger(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
       resolvePermissionSetsForContext: (...a) => this.resolvePermissionSetsForContext(...a),
       resolveSharingReadFilter: (...a) => this.resolveSharingReadFilter(...a),
     };
@@ -3272,7 +3376,13 @@ export class SecurityPlugin implements Plugin {
    *      CRUD class, checked BEFORE the grant, for the caller AND (D10) the
    *      delegator;
    *   5. the `allowRead` CRUD grant ({@link PermissionEvaluator.checkObjectPermission}
-   *      on `find`);
+   *      on `find`) — or, where no set grants it, the one admission the
+   *      middleware makes beside it: [ADR-0090 D12, ruling of record
+   *      6663849489] a delegate reads the business units its admin scopes
+   *      cover (`delegatedUnitReadAdmission`, the middleware's own judgment).
+   *      That read is of SOME units, so `true` here comes with
+   *      {@link getReadFilter} confining it to them, as every row-restricted
+   *      read does;
    *   6. ADR-0090 D10 — the delegator must independently hold the same grant;
    *      a dangling delegator denies.
    *
@@ -3290,10 +3400,12 @@ export class SecurityPlugin implements Plugin {
    */
   canReadObject(object: string, context?: any): Promise<boolean> {
     // [#25223 cut 9] The body moved to `security-plugin-object-admission.ts` (see `ObjectAdmissionHost`).
+    const readDelegatedAdminGate = () => this.delegatedAdminGate;
     const readLogger = () => this.logger;
     const readQl = () => this.ql;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<ObjectAdmissionHost, 'logger' | 'objectReadAdmission' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+    const host: Pick<ObjectAdmissionHost, 'delegatedAdminGate' | 'logger' | 'objectReadAdmission' | 'ql' | 'resolvePermissionSetsForContext' | 'tenancyPosture'> = {
+      get delegatedAdminGate() { return readDelegatedAdminGate(); },
       get logger() { return readLogger(); },
       objectReadAdmission: (...a) => this.objectReadAdmission(...a),
       get ql() { return readQl(); },
@@ -3329,7 +3441,10 @@ export class SecurityPlugin implements Plugin {
    *   - 3. [#3545] An unresolvable posture denies.
    *   - 4. The capabilities the object requires for a read, held by the caller
    *     and (D10) by a delegator who resolved any set.
-   *   - 5. The caller's `find` grant, with the posture's `isPrivate` (ADR-0066 D2).
+   *   - 5. The caller's `find` grant, with the posture's `isPrivate` (ADR-0066 D2),
+   *     or `ungrantedRead` where the asker hands it — the read door's admission
+   *     beside the grant (`canReadObject` hands the ADR-0090 D12 delegated unit
+   *     read; the ADR-0055 master-derived scope hands none).
    *   - 6. [ADR-0090 D10] The delegator's `find` grant, asked over its list
    *     whatever its length, as the middleware asks it: a delegator who resolves
    *     NO set grants nothing, the deny baseline for the second principal too.
@@ -3341,6 +3456,7 @@ export class SecurityPlugin implements Plugin {
     objectName: string,
     permissionSets: PermissionSet[],
     delegatorSets: PermissionSet[] | null,
+    ungrantedRead?: () => Promise<boolean>,
   ): Promise<boolean> {
     // [#25223 cut 9] The body moved to `security-plugin-object-admission.ts` (see `ObjectAdmissionHost`).
     const readPermissionEvaluator = () => this.permissionEvaluator;
@@ -3348,7 +3464,7 @@ export class SecurityPlugin implements Plugin {
       getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get permissionEvaluator() { return readPermissionEvaluator(); },
     };
-    return objectReadAdmission.call(host, objectName, permissionSets, delegatorSets);
+    return objectReadAdmission.call(host, objectName, permissionSets, delegatorSets, ungrantedRead);
   }
 
   /**
@@ -3614,6 +3730,9 @@ export class SecurityPlugin implements Plugin {
       // [#28877] The data plane's own predicate, as `/auth/me/permissions` hands
       // it: a disabled package's objects leave the map `can()` reads.
       isObjectPackageDisabled: registryObjectPackageDisabled(ql?.registry),
+      // [#30370] The write gate's own verdict, as `/auth/me/permissions` hands
+      // it: a read-only external object grants no write `can()` reads.
+      isExternalWriteForbidden: engineExternalWriteForbidden(ql),
       logger: this.logger,
     }));
   }
@@ -3942,12 +4061,17 @@ export class SecurityPlugin implements Plugin {
    * visibility included — and never a second visibility evaluator.
    *
    * Only ABSENCE is "cannot read". A read-time policy refusal (a declared 4xx
-   * envelope: the object's read grant withheld, a predicate the driver will not
-   * compile) is not a hidden row, so it answers `false` and the write keeps
-   * today's answer; a store fault is neither and propagates as raised (#7505).
+   * envelope: the object's read grant withheld, a capability the object
+   * requires for a read and not for a write) is not a hidden row: it is the
+   * read door's answer to this caller for ANY id, so it is THROWN, and the
+   * addressed by-id write is answered that refusal whether its id names a row
+   * or none — a caller the read door refuses gets one answer from the write
+   * door too. A store fault is neither and propagates as raised (#7505).
    */
   private async callerCannotReadAddressedRow(opCtx: any, id: unknown): Promise<boolean> {
-    return absentUnderCallerRead(() => this.getCallerPreImage(opCtx, id));
+    const answer = await readUnlessRefused(() => this.getCallerPreImage(opCtx, id));
+    if (answer.refused) throw answer.error;
+    return answer.value == null;
   }
 
   /**
@@ -3990,15 +4114,19 @@ export class SecurityPlugin implements Plugin {
    *  - an answer: the scope to compose. An empty answer composes the empty id
    *    list, so a predicate that matches only rows the caller cannot read
    *    matches nothing at all;
-   *  - `refused` (a declared 4xx — the read grant withheld, a predicate the
-   *    driver will not compile): `null`, and the write keeps the answer it has
-   *    today;
+   *  - `refused` (a declared 4xx — a capability the object requires for a read
+   *    and not for a write, a predicate the driver will not compile): that
+   *    refusal is THROWN, so the write is answered the read door's own refusal
+   *    before it runs and changes nothing ([#21829] ruling B). A caller the
+   *    read door refuses writes none of the object's records, whatever its
+   *    predicate addresses; the by-id leg refuses the same caller too (step
+   *    2.7);
    *  - a store fault propagates as raised.
    *
    * The id list is bounded by {@link PREDICATE_WRITE_READABLE_ID_CAP}; see
    * there for what happens above it.
    */
-  private readableRowsScopeForPredicateWrite(opCtx: any): Promise<Record<string, unknown> | null> {
+  private readableRowsScopeForPredicateWrite(opCtx: any): Promise<Record<string, unknown>> {
     // [#25223 cut 8] The body moved to `security-plugin-addressed-writes.ts` (see `AddressedWritesHost`).
     const readQl = () => this.ql;
     const host: Pick<AddressedWritesHost, 'ql'> = {
@@ -4462,9 +4590,10 @@ export class SecurityPlugin implements Plugin {
     // [#25223 cut 5] The body moved to `security-plugin-write-tenant-wall.ts` (see `WriteTenantWallHost`).
     const readOrgScopingEnabled = () => this.orgScopingEnabled;
     const readTenancyPosture = () => this.tenancyPosture;
-    const host: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'computeWriteTenantWall' | 'orgScopingEnabled' | 'organizationWallRefusal' | 'tenancyPosture'> = {
+    const host: Pick<WriteTenantWallHost, 'computeWriteTenantCheckFilter' | 'computeWriteTenantWall' | 'getObjectSecurityMeta' | 'orgScopingEnabled' | 'organizationWallRefusal' | 'tenancyPosture'> = {
       computeWriteTenantCheckFilter: (...a) => this.computeWriteTenantCheckFilter(...a),
       computeWriteTenantWall: (...a) => this.computeWriteTenantWall(...a),
+      getObjectSecurityMeta: (...a) => this.getObjectSecurityMeta(...a),
       get orgScopingEnabled() { return readOrgScopingEnabled(); },
       organizationWallRefusal: (...a) => this.organizationWallRefusal(...a),
       get tenancyPosture() { return readTenancyPosture(); },
@@ -4553,6 +4682,14 @@ export class SecurityPlugin implements Plugin {
    * read of it because it reads the unparsed registry — the reference-spelling
    * tolerance below is why — and ⛔ it must not grow a fallback tier back: a
    * relation the parse refuses must not be one this gate derives access from.
+   *
+   * ⚠️ Amended by ruling A of #30905 (ADR-0055 §1 as amended): with no
+   * required one, the object's ONLY `master_detail`, declared
+   * `required: false`, resolves too — an OPTIONAL master
+   * ({@link CbpRelation.optional}), picked by the spec's own resolver
+   * (`controlledByParentMasterOf`, which the parse judges with). An omitted
+   * `required` is not `false` on this unparsed read, so such an object still
+   * resolves `null`, as before.
    *
    * A `controlled_by_parent` object that resolves no relation is REPORTED, once
    * per object per cache generation ({@link SecurityPlugin.reportCbpMasterUnresolved}),
@@ -4769,6 +4906,19 @@ export class SecurityPlugin implements Plugin {
    * object matches no row). Returns null when the object is not
    * controlled_by_parent, or when the caller is the system.
    *
+   * [ADR-0055 §1 and §2 as amended · #30905 ruling A] An OPTIONAL master
+   * ({@link CbpRelation.optional}) answers one `$or` of two arms that never
+   * share a row: the master arm above, unchanged, and a null-master arm for
+   * the rows whose reference is empty — every such row for a holder of View
+   * All on the detail (`permissionSets`; it opens nothing of the master arm),
+   * else the caller's own (`owner_id` equal to the caller), else none (an
+   * object without an `owner_id` column, {@link CbpRelation.ownerColumn}).
+   * A queue row (ADR-0142, no owner) is therefore View All's alone. The `$or`
+   * is this layer's answer, so every caller still ANDs it under the tenant
+   * wall and beside the detail's own layers. A required master's leaf is
+   * byte-identical to before. A cycle or a depth refusal still denies the
+   * whole object, null-master rows too: the declared shape is the defect.
+   *
    * [ADR-0055 amendment] The derivation COMPOSES ACROSS A CHAIN — a master
    * that is itself `controlled_by_parent` is scoped by ITS master, at every
    * level — and two guards bound the chain, both fail-CLOSED (`$in: []`, the
@@ -4792,17 +4942,25 @@ export class SecurityPlugin implements Plugin {
     /** The engine verb the answer is composed onto; a write verb answers `null` (ADR-0139 D1). */
     operation: string,
     context: any,
+    /**
+     * The permission sets resolved for `context`'s principal: read for View
+     * All on the detail by an optional master's null-master arm, and by
+     * nothing else (ADR-0055 §2 as amended).
+     */
+    permissionSets: PermissionSet[],
   ): Record<string, unknown> | null {
     // [#25223 cut 4] The body moved to `security-plugin-cbp-read-filter.ts` (see `CbpReadFilterHost`).
     const readLogger = () => this.logger;
+    const readPermissionEvaluator = () => this.permissionEvaluator;
     const readQl = () => this.ql;
-    const host: Pick<CbpReadFilterHost, 'controlledByParentChainRefusal' | 'logger' | 'ql' | 'resolveCbpRelation'> = {
+    const host: Pick<CbpReadFilterHost, 'controlledByParentChainRefusal' | 'logger' | 'permissionEvaluator' | 'ql' | 'resolveCbpRelation'> = {
       controlledByParentChainRefusal: (...a) => this.controlledByParentChainRefusal(...a),
       get logger() { return readLogger(); },
+      get permissionEvaluator() { return readPermissionEvaluator(); },
       get ql() { return readQl(); },
       resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),
     };
-    return computeControlledByParentFilter.call(host, object, operation, context);
+    return computeControlledByParentFilter.call(host, object, operation, context, permissionSets);
   }
 
   /**
@@ -5101,6 +5259,31 @@ export class SecurityPlugin implements Plugin {
    * refused `422` otherwise — after the stored masters' question, so a master
    * the caller may not edit is still the answer there.
    *
+   * [ADR-0055 §3 as amended · #30905 ruling A] …unless the master is OPTIONAL
+   * ({@link CbpRelation.optional}): a row may then name none, and is its
+   * owner's. The gate judges such a row instead of refusing it:
+   *
+   *  - an insert that names no master is admitted (the detail's own `create`
+   *    grant has been asked, and its creator becomes its owner);
+   *  - a write of a stored row that names none — a by-id write, each row a
+   *    predicate write selects, and a master on the chain walk whose own
+   *    master is empty — is admitted for the row's OWNER (`owner_id` equal to
+   *    the principal) and for a holder of Modify All on its object, and
+   *    refused `403 PERMISSION_DENIED` for every other principal, on the
+   *    `master_chain` leg; a row with no owner, and every row of an object
+   *    with no `owner_id` column, is Modify All's alone. On an on-behalf-of
+   *    write both passes ask it, each of its own principal;
+   *  - a body that NAMES a master on such a row asks edit on that master, as
+   *    re-pointing does; a body that EMPTIES an optional master asks edit on
+   *    the master it leaves (the §3 walk), and the opt-in owner leg
+   *    ({@link CbpRelation.ownerMayEdit}) never admits it.
+   *
+   * Step 2.7 hands the platform ownership floor of every by-id write of a
+   * `controlled_by_parent` detail to this gate (`masterGateCoversThisWrite`),
+   * null-master rows included, so the owner rule here is what refuses a
+   * principal who only reads such a row. A required master's answers are
+   * unchanged, byte for byte.
+   *
    * [#7474] SIX conditions refuse a write here, and they are NOT one verdict.
    * Three are genuine authorization answers (no object-level `update` on the
    * master, the master row outside the caller's write RLS, no `edit`-level
@@ -5116,6 +5299,8 @@ export class SecurityPlugin implements Plugin {
    *     ({@link DetailRecordNotFoundError})
    *   - the detail's master reference is empty, or an update's body empties
    *     it → `422 MISSING_REQUIRED_FIELD` ({@link MasterReferenceMissingError})
+   *     — for a REQUIRED master; an optional master's empty reference is a
+   *     verdict, the owner rule above
    *
    * [#8688] The last of those three has since NARROWED, by the maintainer
    * ruling of 2026-08-15: on an `insert` whose master FK is absent, this gate
@@ -5149,11 +5334,13 @@ export class SecurityPlugin implements Plugin {
     context: any,
   ): Promise<void> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).
-    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'readRowById' | 'resolveCbpRelation'> = {
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
       assertControlledByParentChainEditable: (...a) => this.assertControlledByParentChainEditable(...a),
       controlledByParentPredicateWriteMasters: (...a) => this.controlledByParentPredicateWriteMasters(...a),
       declaresControlledByParent: (...a) => this.declaresControlledByParent(...a),
       extractSingleId: (...a) => this.extractSingleId(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
       readRowById: (...a) => this.readRowById(...a),
       resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),
     };
@@ -5181,6 +5368,13 @@ export class SecurityPlugin implements Plugin {
    * passed in rather than rebuilt so every refusal, at every hop and for every
    * write shape, names the CALLER's object and operation (#7474's envelope)
    * and records its leg ({@link MASTER_EDIT_DENIAL_LEG}).
+   *
+   * [ADR-0055 §3 as amended · #30905 ruling A] A master that is itself
+   * `controlled_by_parent` with an OPTIONAL master of its own, and names none,
+   * ends the chain: the walk asks of it the owner rule a write of that row is
+   * asked (its owner, or Modify All on its object), and refuses on the
+   * `master_chain` leg otherwise. A required master left empty is refused on
+   * that leg as before.
    */
   private assertControlledByParentChainEditable(
     permissionSets: PermissionSet[],
@@ -5193,9 +5387,11 @@ export class SecurityPlugin implements Plugin {
     denyMasterEdit: (leg: ControlledByParentWriteDenialLeg, reason: string, recordId?: unknown) => never,
   ): Promise<void> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).
-    const host: Pick<CbpWriteGateHost, 'assertMasterRowEditable' | 'declaresControlledByParent' | 'readRowById' | 'resolveCbpRelation'> = {
+    const readPermissionEvaluator = () => this.permissionEvaluator;
+    const host: Pick<CbpWriteGateHost, 'assertMasterRowEditable' | 'declaresControlledByParent' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
       assertMasterRowEditable: (...a) => this.assertMasterRowEditable(...a),
       declaresControlledByParent: (...a) => this.declaresControlledByParent(...a),
+      get permissionEvaluator() { return readPermissionEvaluator(); },
       readRowById: (...a) => this.readRowById(...a),
       resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),
     };
@@ -5236,14 +5432,21 @@ export class SecurityPlugin implements Plugin {
    * its one target row's: only the reference's value is needed, and a field
    * rule hiding it from the caller must not hide the master from this gate. A
    * row whose reference is empty answers the by-id leg's stored-row refusal
-   * ({@link MasterReferenceMissingError}, `422`).
+   * ({@link MasterReferenceMissingError}, `422`) when the master is required.
+   *
+   * [ADR-0055 §3 as amended · #30905 ruling A] When the master is OPTIONAL
+   * ({@link CbpRelation.optional}) such a row is not refused here: it is
+   * returned among `nullMasterRows`, with its `owner_id` read beside the
+   * reference where the object carries one, and the gate judges each by the
+   * owner rule a by-id write of it meets. The answer is the
+   * {@link CbpPredicateWriteSelection}: the distinct masters, and those rows.
    */
   private controlledByParentPredicateWriteMasters(
     object: string,
     operation: string,
     rel: CbpRelation,
     opCtx: any,
-  ): Promise<unknown[]> {
+  ): Promise<CbpPredicateWriteSelection> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).
     const readQl = () => this.ql;
     const host: Pick<CbpWriteGateHost, 'ql'> = {
@@ -5484,6 +5687,9 @@ export class SecurityPlugin implements Plugin {
       // [#7835] Federated object carrying the registry's INJECTED
       // `organization_id` — a column the platform provisions no storage for.
       tenantAnchorIsPhantom: hasPhantomTenantAnchor(obj),
+      // [ADR-0015 §10] …and such an object stated nothing about its organization
+      // scope unless it opted out of tenancy: under a wall Layer 0 DENIES it.
+      externalOrganizationScopeUndeclared: externalOrganizationScopeIsUndeclared(obj),
       // [#8023] The author's DECLARED OWD, not the effective sharing bucket.
       owdOpensRowWrites: owdDeclaresOpenRowWrites(obj),
       requiredPermissions: normalizeRequiredPermissions((obj as any)?.requiredPermissions),
@@ -5494,6 +5700,14 @@ export class SecurityPlugin implements Plugin {
       // refusing. All causes deny identically — see the field's TSDoc.
       ...(obj ? {} : { unresolvedCause: await this.resolveUnresolvedCause(object) }),
     };
+    // [ADR-0015 §10] An external object registered after the boot that states
+    // no organization scope is denied under a wall, and said so ONCE — here,
+    // where its posture is computed once and cached — naming the rule, the
+    // verdict and the three ways out. "Absence must be loud": a deny that only
+    // ever reads as zero rows is the shape nobody diagnoses.
+    if (obj && meta.externalOrganizationScopeUndeclared && postureEnforcesWall(this.tenancyPosture)) {
+      this.logger?.warn?.(undeclaredExternalScopeDenialWarning(object, this.tenancyPosture, obj), { object });
+    }
     if (obj) this.objectSecurityMetaCache.set(object, meta);
     return meta;
   }

@@ -88,6 +88,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "AI アクセス",
         help: "このユーザーが AI シートを保有しているかどうか。シートは `ai_seat` ケイパビリティを付与し、アプリ内の AI アシスタント（build と ask）を利用できるようにします。保有できるユーザー数は、ライセンスに含まれるシート数までです。"
       },
+      principal_kind: {
+        label: "プリンシパルの種類",
+        help: "このユーザーが人か AI サービスアカウントか。AI サービスアカウントはサインインせず、自身の API キーだけで操作します。ユーザー作成時に設定され、変更されません。",
+        options: {
+          human: "人",
+          agent: "AI サービスアカウント"
+        }
+      },
+      accountable_user_id: {
+        label: "責任者",
+        help: "AI サービスアカウントについて、その責任を負う人。人のユーザーでは空です。責任者自身の権限はアカウントに引き継がれません。"
+      },
       image: {
         label: "プロフィール画像"
       },
@@ -159,7 +171,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "利用停止",
-        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできなくなります。",
+        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。OAuth アクセストークンとトークンの更新も同様に拒否されます。解除後はキーが再び使えるようになります。",
         successMessage: "ユーザーを利用停止にしました",
         params: {
           banReason: {
@@ -252,6 +264,43 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "閉じる",
           fields: {
             entries: "プラットフォーム管理者"
+          }
+        }
+      },
+      register_service_account: {
+        label: "AI サービスアカウントを登録",
+        description: "この組織に AI サービスアカウントを登録します。人が介在せずに動作するエージェントのための独立した ID で、作成された API キーを通じてのみ動作します。権限セットが付与されるまでは何もできず、管理者権限を持つことはありません。",
+        successMessage: "AI サービスアカウントを登録しました",
+        params: {
+          name: {
+            label: "名前",
+            helpText: "このエージェントが何であり、何のためのものか。ユーザー一覧と監査証跡では、この名前でアカウントを識別します。"
+          },
+          ownerId: {
+            label: "責任者",
+            helpText: "このアカウントに責任を持つ人で、この組織のメンバーである必要があります。空欄のままにすると、あなた自身が責任者になります。"
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "API キーを作成",
+        description: "この AI サービスアカウントの API キーを作成します。キーはアカウント自身として、アカウント自身の権限で、アカウントの組織内で動作します。",
+        params: {
+          name: {
+            label: "キー名"
+          },
+          expires_at: {
+            label: "有効期限",
+            helpText: "空欄のままにすると、「設定 → 認証 → API キー」のキーの既定の有効期間(変更していなければ 90 日)が使われます。そこにあるキーの最大有効期間より後の日付は拒否されます。"
+          }
+        },
+        resultDialog: {
+          title: "API キーを作成しました",
+          description: "今すぐキーをコピーしてください。キーは一度しか表示されず、後から取得することはできません。漏えいした場合は失効させて新しいキーを作成してください。",
+          acknowledge: "キーを保存しました",
+          fields: {
+            key: "API キー",
+            expires_at: "有効期限"
           }
         }
       },
@@ -369,7 +418,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "失効理由",
-        help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended、admin_password_reset など）。"
+        help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset など）。"
       },
       active_organization_id: {
         label: "アクティブ組織"
@@ -556,8 +605,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON シリアライズされた組織メタデータ"
       },
       require_mfa: {
-        label: "多要素認証を必須化",
-        help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。"
+        label: "多要素認証を必須化（廃止）",
+        help: "廃止されました。この組織の多要素認証の要件は「設定 → アクセスポリシー」で設定してください。ここでオンだった値は「全員」として移行され、クリアされました。"
       },
       timezone: {
         label: "タイムゾーン",
@@ -633,6 +682,20 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "組織から退出",
         confirmText: "この組織から退出しますか？この組織の環境とメンバーへのアクセスを失います。",
         successMessage: "組織から退出しました"
+      }
+    },
+    _sections: {
+      identity: {
+        label: "基本情報"
+      },
+      branding: {
+        label: "ブランディング"
+      },
+      configuration: {
+        label: "設定"
+      },
+      group_structure: {
+        label: "グループ構成"
       }
     }
   },
@@ -1146,9 +1209,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "失効理由",
-        help: "管理者によるパスワードの強制リセットでこのキーが失効したときに記録されます。このようなキーを復元できるのはプラットフォーム管理者のみで、所有者は新しいキーを作成します。キーを復元するとクリアされます。API キー一覧から失効させたキーでは空です。",
+        help: "キーが失効した理由で、誰が復元できるかを左右する場合に記録されます。管理者によるパスワードの強制リセット：キーを復元できるのはプラットフォーム管理者のみです。組織メンバーシップの終了：所有者が組織を離れたため、誰もキーを復元できません。組織のメンバーが新しいキーを作成します。管理者による一時停止：プラットフォーム管理者が自分のものではないキーを失効させたため、キーを復元できるのはプラットフォーム管理者のみです。キーを復元するとクリアされます。所有者が API キー一覧から失効させたキーでは空です。",
         options: {
-          admin_password_reset: "管理者によるパスワードの強制リセット"
+          admin_password_reset: "管理者によるパスワードの強制リセット",
+          organization_membership_ended: "組織メンバーシップの終了",
+          administrator_suspended: "管理者による一時停止"
         }
       },
       key: {
@@ -1859,6 +1924,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "更新日時"
+      },
+      last_used_at: {
+        label: "最終使用日時",
+        help: "この同意のもとでクライアントが検証済みの MCP 呼び出しを最後に行った時間帯の開始時刻。記録がない場合は空です"
       }
     }
   },
@@ -2029,6 +2098,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML 設定",
         help: "JSON: entryPoint、cert、identifierFormat、マッピング（better-auth が管理）"
       },
+      allow_idp_initiated: {
+        label: "IdP 起点のサインインを許可",
+        help: "本システムではなく ID プロバイダーから始まるサインイン（要求していない SAML レスポンス、または state のない OIDC コールバック）を受け入れます。既定ではオフです。IdP 起点の SAML レスポンスは、本システムが送ったどの要求にも結び付いていません。「サインインオプションを編集」で変更します。"
+      },
+      allow_jit: {
+        label: "ジャストインタイムのプロビジョニングを許可",
+        help: "招待制のオーディエンス方針のもとで、アカウントも招待もないままこのプロバイダー経由でサインインした人のアカウントを作成します。既定ではオフで、そのような人は拒否されます。ほかの方針では従来どおりプロビジョニングされます。「サインインオプションを編集」で変更します。"
+      },
       user_id: {
         label: "登録者",
         help: "このプロバイダーを登録したユーザー"
@@ -2095,6 +2172,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             label: "マッピング: 名前クレーム",
             helpText: "任意。表示名にマッピングするクレーム。既定値は「name」。",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "マッピング: グループクレーム",
+            helpText: "任意。ユーザーのグループを含むクレーム（例:「groups」）。サインインのたびに、それらのグループにマッピングされた権限セットが付与されます。空欄の場合、グループはマッピングされません。",
+            placeholder: "groups"
           }
         }
       },
@@ -2125,6 +2207,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID フォーマット",
             helpText: "任意。要求する SAML NameID フォーマット。既定では IdP に設定されたフォーマットを使用します。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "マッピング: グループ属性",
+            helpText: "任意。ユーザーのグループを含むアサーション属性。サインインのたびに、それらのグループにマッピングされた権限セットが付与されます。空欄の場合、グループはマッピングされません。",
+            placeholder: "groups"
           }
         }
       },
@@ -2149,6 +2236,39 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "SSO プロバイダーを削除",
         description: "この SSO プロバイダーを削除しますか？そのドメインのユーザーは、これを通じてサインインできなくなります。",
         successMessage: "SSO プロバイダーを削除しました"
+      },
+      edit_sso_sign_in_options: {
+        label: "サインインオプションを編集",
+        successMessage: "サインインオプションを保存しました"
+      },
+      show_sso_groups_claim: {
+        label: "グループクレームを表示",
+        resultDialog: {
+          title: "グループクレーム",
+          description: "このプロバイダーがサインインのたびにユーザーのグループを読み取る OIDC クレームまたは SAML 属性です。空の場合、このプロバイダーはグループをマッピングしません。「グループクレームを編集」で変更できます。",
+          acknowledge: "完了",
+          fields: {
+            groupsClaim: "グループクレーム"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "グループクレームを編集",
+        params: {
+          groupsClaim: {
+            label: "グループクレーム",
+            helpText: "ユーザーのグループを含む OIDC クレームまたは SAML 属性です。サインインのたびに、それらのグループにマッピングされた権限セットが付与されます。空欄にすると削除され、このプロバイダーはグループをマッピングしなくなります。",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "グループクレームを保存しました",
+          description: "このプロバイダーが今後サインインのたびに読み取るグループクレームです。空の場合、グループはマッピングされません。",
+          acknowledge: "完了",
+          fields: {
+            groupsClaim: "グループクレーム"
+          }
+        }
       }
     }
   },
@@ -2263,6 +2383,49 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       all: {
         label: "すべて"
+      }
+    },
+    _actions: {
+      mint_scim_credential: {
+        label: "資格情報を発行",
+        description: "SCIM 接続用のベアラー資格情報を発行します。SCIM トークンとして IdP に渡してください。一度しか表示されません。",
+        params: {
+          connectionId: {
+            label: "接続 ID",
+            helpText: "この資格情報が認証する SCIM 接続（例: 「okta-prod」）。最大 246 文字です。ローテーションするには、同じ接続に 2 つ目の資格情報を発行し、IdP をそちらに切り替えてから、古いものを失効させます。"
+          },
+          label: {
+            label: "ラベル",
+            helpText: "任意。この資格情報の名前（例: 「rotation 2026-Q3」）。"
+          },
+          organizationId: {
+            label: "組織",
+            helpText: "任意。この接続を所有する組織。空欄の場合は既定の組織になります。"
+          },
+          provisioningDomainId: {
+            label: "プロビジョニングドメイン",
+            helpText: "任意。プロビジョニングされたユーザーとグループを受け取る境界。空欄の場合は接続 ID が使われます。"
+          },
+          expiresAt: {
+            label: "有効期限",
+            helpText: "任意。この日時を過ぎると資格情報は拒否されます。空欄の場合は期限のない資格情報になります。"
+          }
+        },
+        resultDialog: {
+          title: "SCIM 資格情報を発行しました",
+          description: "今すぐトークンをコピーしてください。トークンは一度しか表示されず、後から取得することはできません。IdP に SCIM ベアラートークンとして貼り付けてください。漏えいした場合は失効させて新しく発行してください。",
+          acknowledge: "トークンを保存しました",
+          fields: {
+            token: "トークン",
+            connectionId: "接続 ID",
+            expiresAt: "有効期限"
+          }
+        }
+      },
+      revoke_scim_credential: {
+        label: "資格情報を失効",
+        confirmText: "この SCIM 資格情報を失効させますか？これを使っている IdP は次のリクエストから拒否されます。この操作は元に戻せません。プロビジョニングを再開するには新しい資格情報を発行してください。",
+        successMessage: "SCIM 資格情報を失効させました"
       }
     }
   },
@@ -2575,6 +2738,55 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "IdP グループマッピング",
+    pluralLabel: "IdP グループマッピング",
+    description: "ID プロバイダーのグループを、そのメンバーに付与する権限セットに対応付けます",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "ソース種別",
+        help: "グループを送信するもの：SCIM 接続、またはサインイン時の SSO プロバイダー。",
+        options: {
+          scim: "SCIM 接続",
+          sso: "SSO プロバイダー"
+        }
+      },
+      source_id: {
+        label: "ソース ID",
+        help: "グループが届く SCIM 接続の ID または SSO プロバイダーの ID（例：\"okta-prod\"）。"
+      },
+      group_external_id: {
+        label: "グループ外部 ID",
+        help: "ID プロバイダーが送信するグループの externalId。表示名とどちらか一方を設定し、両方は設定しません。"
+      },
+      group_display_name: {
+        label: "グループ表示名",
+        help: "グループの displayName（完全一致）。マッピングに外部 ID がない場合に使用します。"
+      },
+      permission_set: {
+        label: "権限セット",
+        help: "グループのメンバーに付与される権限セット。管理者セットは拒否されます。"
+      },
+      organization_id: {
+        label: "組織",
+        help: "付与が行われる組織：SCIM 接続または SSO プロバイダーを所有する組織。"
+      },
+      created_at: {
+        label: "作成日時"
+      },
+      updated_at: {
+        label: "更新日時"
+      }
+    },
+    _views: {
+      all: {
+        label: "すべて"
+      }
+    }
+  },
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
@@ -2777,6 +2989,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       name: {
         label: "名前",
         help: "ドット区切り snake_case 識別子（例: auth.password_reset）"
+      },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
       },
       label: {
         label: "表示名",
@@ -3388,7 +3604,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "名前空間",
-        help: "マニフェスト名前空間（例: mail、branding、feature_flags）。"
+        help: "マニフェスト名前空間（例: mail、branding、storage）。"
       },
       key: {
         label: "キー",
@@ -3443,6 +3659,54 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       all_settings: {
         label: "すべて"
+      }
+    }
+  },
+  sys_platform_setting: {
+    label: "Platform Setting",
+    pluralLabel: "Platform Settings",
+    description: "Deployment-wide settings values: the global rung of the settings cascade.",
+    fields: {
+      id: {
+        label: "Setting ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      },
+      namespace: {
+        label: "Namespace",
+        help: "Manifest namespace (e.g. mail, storage, ai)."
+      },
+      key: {
+        label: "Key",
+        help: "Specifier key inside the namespace (snake_case)."
+      },
+      value: {
+        label: "Value",
+        help: "JSON-encoded value. Null when encrypted=true (see value_enc)."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "When true, the value is stored encrypted-at-rest in value_enc; value column is null."
+      },
+      locked: {
+        label: "Locked",
+        help: "When true, tenant and user rows cannot override this value; writes against those scopes return 409."
+      },
+      locked_reason: {
+        label: "Lock Reason",
+        help: "Human-readable explanation surfaced in the UI tooltip when locked=true."
+      },
+      value_enc: {
+        label: "Encrypted Value",
+        help: "Handle of the sys_secret row holding the ciphertext. Set only when encrypted=true."
+      },
+      updated_by: {
+        label: "Updated By",
+        help: "Last actor who wrote this row through the settings service."
       }
     }
   },
@@ -3570,6 +3834,84 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       recent: {
         label: "最近"
+      }
+    }
+  },
+  sys_platform_setting_audit: {
+    label: "Platform Setting Audit Entry",
+    pluralLabel: "Platform Setting Audit",
+    description: "Append-only audit trail for SettingsService mutations of global-scope keys.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      created_at: {
+        label: "Created At",
+        help: "When the mutation was recorded."
+      },
+      namespace: {
+        label: "Namespace"
+      },
+      key: {
+        label: "Key"
+      },
+      scope: {
+        label: "Scope",
+        help: "Cascade layer the row was written to — always the global rung here.",
+        options: {
+          global: "Global"
+        }
+      },
+      action: {
+        label: "Action",
+        help: "Mutation kind.",
+        options: {
+          set: "Set",
+          reset: "Reset",
+          lock: "Lock",
+          unlock: "Unlock",
+          rotate: "Rotate"
+        }
+      },
+      actor_id: {
+        label: "Actor",
+        help: "User who performed the mutation; null for system jobs."
+      },
+      source: {
+        label: "Source",
+        help: "Mutation entry-point.",
+        options: {
+          ui: "UI",
+          api: "API",
+          migration: "Migration",
+          import: "Import",
+          system: "System"
+        }
+      },
+      reason: {
+        label: "Reason",
+        help: "Free-text justification provided by the actor (optional)."
+      },
+      old_hash: {
+        label: "Old Hash",
+        help: "Digest of the previous value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null when previously unset, or for a secret with no keyed digest."
+      },
+      new_hash: {
+        label: "New Hash",
+        help: "Digest of the new value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null on reset, or for a secret with no keyed digest."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "True when the field carries secret material (rotation is interesting)."
+      },
+      request_id: {
+        label: "Request ID",
+        help: "Correlates with sys_audit_log / tracing."
+      }
+    },
+    _views: {
+      recent: {
+        label: "Recent"
       }
     }
   },

@@ -36,10 +36,10 @@ import { useId, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { BarChart3, ChevronDown, ChevronRight, Loader2, Search } from 'lucide-react';
 import { Empty, EmptyTitle, EmptyDescription, Input, cn } from '@object-ui/components';
-import { useDisplayLocale, useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
-import { resolveKeyedI18nLabel } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
@@ -92,7 +92,7 @@ export function AppReportIndexView() {
   const { apps: metadataApps } = useMetadata();
   const { apps: launcherApps } = useLauncherApps(metadataApps);
   const otherApps = useOtherAppsWithReports(launcherApps, app);
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
 
   if (loading) {
     return (
@@ -202,7 +202,7 @@ export function AppReportIndexView() {
                         data-testid={`report-index-other-app-${String(other.name)}`}
                       >
                         <BarChart3 className="h-4 w-4 text-muted-foreground" aria-hidden />
-                        {appLabel({ name: String(other.name), label: resolveKeyedI18nLabel(other.label, t) })}
+                        {appLabel({ ...other, name: String(other.name) })}
                       </Link>
                     </li>
                   ))}

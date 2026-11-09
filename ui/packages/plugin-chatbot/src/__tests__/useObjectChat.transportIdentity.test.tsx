@@ -87,8 +87,10 @@ describe('useObjectChat — transport identity (#4187)', () => {
           api: API,
           conversationId: 'build_1',
           // Fresh identity on every render — the shape every caller uses today
-          // (the AI page's chat pane builds its `body.context` inline).
-          body: { context: { activeApp: 'AI', tick } },
+          // (the AI page's chat pane builds its `body.context` inline). The
+          // context names the SELECTED app by its package, never a constant
+          // (objectstack#30043).
+          body: { context: { activeApp: 'app.crm', tick } },
           headers: { 'x-oui-tick': String(tick) },
         }),
       { initialProps: { tick: 0 } },

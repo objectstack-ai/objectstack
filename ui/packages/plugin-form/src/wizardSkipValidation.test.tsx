@@ -272,3 +272,81 @@ describe('WizardForm — the form view’s own `columns`', () => {
     expect(document.body.querySelector('[class*="@2xl:grid-cols-3"]')).toBeNull();
   });
 });
+
+/**
+ * objectstack#30220 (ruled option A) — on an EDIT wizard the cross-step gate
+ * judges `requiredWhen` as the engine does: a TRANSITION gate. objectql
+ * refuses an update only when the merged record violates the rule AND the
+ * stored row complied (ADR-0113 non-regression), so a record already inside
+ * the gate without the value saves an unrelated edit. The field sits on the
+ * step the user skips, so only the cross-step gate judges it. The CONTROL is a
+ * record that complied and is moved into the gate: still refused.
+ */
+describe('WizardForm edit — the final gate reads requiredWhen as a transition gate (objectstack#30220)', () => {
+  const CONTRACT_SCHEMA = {
+    name: 'contract',
+    fields: {
+      subject: { type: 'text', label: 'Subject' },
+      status: { type: 'text', label: 'Status' },
+      signed_copy: { type: 'text', label: 'Signed Copy', requiredWhen: "record.status == 'activated'" },
+      notes: { type: 'text', label: 'Notes' },
+    },
+  };
+
+  const editWizard = (stored: Record<string, unknown>) => {
+    const dataSource = {
+      getObjectSchema: vi.fn().mockResolvedValue(CONTRACT_SCHEMA),
+      findOne: vi.fn().mockResolvedValue({ id: 'c1', ...stored }),
+      create: vi.fn(),
+      update: vi.fn(async (_o: string, _id: string, d: any) => ({ id: 'c1', ...stored, ...d })),
+    };
+    render(
+      <WizardForm
+        schema={{
+          type: 'object-form',
+          formType: 'wizard',
+          objectName: 'contract',
+          mode: 'edit',
+          recordId: 'c1',
+          allowSkip: true,
+          sections: [
+            { name: 's1', label: 'Step 1', fields: ['subject', 'status'] },
+            { name: 's2', label: 'Step 2', fields: ['signed_copy'] },
+            { name: 's3', label: 'Step 3', fields: ['notes'] },
+          ],
+        }}
+        dataSource={dataSource as any}
+      />,
+    );
+    return dataSource;
+  };
+
+  /** Edit step 1 as asked, jump past step 2 to step 3, and press Update. */
+  async function editAndSubmit(step1: Record<string, string>) {
+    await waitFor(() => {
+      const el = document.body.querySelector<HTMLInputElement>('[data-field="subject"] input');
+      if (!el || el.value !== 'Lease') throw new Error('record not on screen yet');
+    });
+    for (const [name, value] of Object.entries(step1)) fill(name, value);
+    fireEvent.click(stepIndicator(2));
+    await waitFor(() => expect(document.body.querySelector('[data-field="notes"]')).toBeTruthy());
+    fill('notes', 'renewed');
+    expect(document.body.querySelector('[data-field="signed_copy"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Update/i }));
+  }
+
+  it('saves an unrelated edit to a record already inside the gate without the value', async () => {
+    const dataSource = editWizard({ subject: 'Lease', status: 'activated', signed_copy: null, notes: '' });
+    await editAndSubmit({ subject: 'Lease 2026' });
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    expect(dataSource.update.mock.calls[0][2]).toMatchObject({ subject: 'Lease 2026', notes: 'renewed' });
+  });
+
+  it('CONTROL: moving a compliant record into the gate without the value is still refused', async () => {
+    const dataSource = editWizard({ subject: 'Lease', status: 'draft', signed_copy: null, notes: '' });
+    await editAndSubmit({ status: 'activated' });
+    // Nothing is sent, and the wizard lands on the step holding the field.
+    await waitFor(() => expect(document.body.querySelector('[data-field="signed_copy"]')).toBeTruthy());
+    expect(dataSource.update).not.toHaveBeenCalled();
+  });
+});

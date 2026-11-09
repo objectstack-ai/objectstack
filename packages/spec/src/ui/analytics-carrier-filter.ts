@@ -17,7 +17,7 @@
  * dataset carriers' published JSON Schema did not move with it.
  */
 
-import type { z } from 'zod';
+import { z } from 'zod';
 import { FieldOperatorsSchema, FilterConditionSchema } from '../data/filter.zod';
 import { reportQueryFaceRefusals } from '../data/filter-save-door-refusals';
 
@@ -205,6 +205,66 @@ function refuseNestedRelationComparands(
  * check as `undefined`, which the walk passes.
  */
 export function analyticsCarrierFilter() {
-  return FilterConditionSchema.optional().superRefine((filter, ctx) =>
-    refuseNestedRelationComparands(filter, ctx));
+  return FilterConditionSchema.optional()
+    .superRefine((filter, ctx) => refuseNestedRelationComparands(filter, ctx))
+    .check(prescribeObjectFormForArrayFilter());
+}
+
+// ── [#30124] An array where the condition object belongs ────────────────────
+
+/**
+ * The words an ARRAY in an analytics carrier's filter slot is refused with:
+ * which form the slot takes, the form shown, and the neighbouring spelling it
+ * was most likely copied from — a list view's `filter` is the
+ * `[{ field, operator, value }]` rule array, and an author (or an AI) writing
+ * both in one project carries that shape across. The example filter is the
+ * one that rule array most often spells.
+ */
+export const ANALYTICS_FILTER_ARRAY_MESSAGE =
+  'This filter is an array, and an analytics filter — a dashboard widget\'s `filter`, a dataset\'s '
+  + 'or a measure\'s `filter`, a report\'s `runtimeFilter` — is the condition OBJECT a query\'s '
+  + '`where` takes, keyed by field: `{ status: { $in: [\'new\', \'in_progress\'] } }`, not the '
+  + 'rule array `[{ field: \'status\', operator: \'in\', value: [\'new\', \'in_progress\'] }]` '
+  + 'a list view\'s `filter` takes. Write one key per field, holding an operator map '
+  + '(`{ amount: { $gte: 100 } }`) or a bare value for equality (`{ status: \'open\' }`); '
+  + 'sibling keys AND together, and `$or: [{ … }, { … }]` ORs conditions.';
+
+/**
+ * [#30124] Replace the two type refusals an ARRAY earns in an analytics
+ * carrier's filter slot with ONE that names the fix.
+ *
+ * `FilterConditionSchema` is a record intersected with the `$and` / `$or` /
+ * `$not` object, and an array fails BOTH arms — two `invalid_type` issues at
+ * the slot itself, `expected: 'record'` and `expected: 'object'`. Through the
+ * ObjectStack error map they read `Expected record but received object.` and
+ * `Expected object but received object.`: two lines that contradict each other
+ * (an array's `typeof` is `object`) and name no fix.
+ *
+ * The check runs only when the slot already failed on an array, and only
+ * rewrites: it keeps the record arm's issue — its code (`invalid_type`), its
+ * `expected` and its path — with {@link ANALYTICS_FILTER_ARRAY_MESSAGE} as its
+ * message, and drops the object arm's twin. Every value refused before is
+ * refused now and every value accepted is accepted; nothing but the words and
+ * the duplicate changes. `when: () => true` is what lets a check see a value
+ * the inner schema refused (the same mechanism as the view filter element's
+ * claimed-branch check in `./view.zod.ts`).
+ *
+ * The check is a dropped refinement like the walk beside it: it has no JSON
+ * Schema form, and the published body of every carrier is unchanged.
+ */
+function prescribeObjectFormForArrayFilter(): z.core.$ZodCheck<unknown> {
+  const check = new z.core.$ZodCheck({ check: 'custom', when: () => true }) as z.core.$ZodCheck<unknown>;
+  check._zod.check = (payload) => {
+    if (!Array.isArray(payload.value) || payload.issues.length === 0) return;
+    const atSlot = (expected: string) => (issue: z.core.$ZodRawIssue) =>
+      issue.code === 'invalid_type'
+      && (issue as { expected?: unknown }).expected === expected
+      && (issue.path?.length ?? 0) === 0;
+    const recordIndex = payload.issues.findIndex(atSlot('record'));
+    if (recordIndex === -1) return;
+    payload.issues[recordIndex] = { ...payload.issues[recordIndex]!, message: ANALYTICS_FILTER_ARRAY_MESSAGE };
+    const objectIndex = payload.issues.findIndex(atSlot('object'));
+    if (objectIndex !== -1) payload.issues.splice(objectIndex, 1);
+  };
+  return check;
 }

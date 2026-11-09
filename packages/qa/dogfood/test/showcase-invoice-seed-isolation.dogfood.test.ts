@@ -17,7 +17,7 @@
 // permission set (ADR-0090):
 //
 //   • DIRECT   — a `sys_user_permission_set` row, and no position;
-//   • POSITION — a `sys_user_position` row for `contributor`, and no direct set
+//   • POSITION — a `sys_user_position` row for `showcase_contributor`, and no direct set
 //                row: the set reaches the member through the position binding.
 //
 // Every isolation assertion below runs once per holder shape, because a set's
@@ -36,7 +36,7 @@ import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const SET = 'showcase_contributor';
-const POSITION = 'contributor';
+const POSITION = 'showcase_contributor';
 
 interface Persona {
   /** How the persona holds `showcase_contributor`. */
@@ -112,7 +112,7 @@ describe('showcase: seeded invoice/line owner isolation on the shipped contribut
     const set = await catalogPermissionSet(ql, SET);
     expect(set, `the app's ${SET} set is served by the security catalog`).toBeTruthy();
     // [ADR-0131 D2/D3] The position → set edge is the app's own declaration —
-    // `contributor` names `showcase_contributor` in its `permissionSets` — and
+    // `showcase_contributor` names `showcase_contributor` in its `permissionSets` — and
     // the resolver reads it there. No `sys_position` row and no junction row
     // is involved: the boot writes neither.
 

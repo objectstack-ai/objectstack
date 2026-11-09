@@ -33,8 +33,9 @@
  *    keys). A fresh annotated literal carrying one is refused here.
  *  - `pattern`, `pattern_message` and `validate` RETIRE as `never` tombstones:
  *    the spec's regex check is the object's `format` validation rule.
- *  - `GeolocationFieldMetadata` leaves the `FieldMetadata` union: `geolocation`
- *    is not a spec `FieldType`.
+ *  - the `geolocation` member leaves the `FieldMetadata` union: `geolocation`
+ *    is not a spec `FieldType` (its interface was later retired outright,
+ *    objectstack#25921 batch 13).
  *
  * `dueLike` was deliberately NOT moved: `@objectstack/spec` declared it on
  * `FieldSchema` before it reached the installed release. Now that it has, it

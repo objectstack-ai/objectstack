@@ -137,7 +137,7 @@ export function DisabledReasonTrigger({
             <span id={reason.id} className="sr-only">{reason.text}</span>
           </span>
         </TooltipTrigger>
-        <TooltipContent>
+        <TooltipContent className="max-w-xs">
           {heading ? <p className="font-medium">{heading}</p> : null}
           <p>{reason.text}</p>
         </TooltipContent>

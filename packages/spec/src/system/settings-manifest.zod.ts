@@ -6,12 +6,13 @@ import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
+import { LIFECYCLE_DURATION_REGEX } from '../data/object.zod';
 
 /**
  * Settings Manifest Protocol
  *
  * Declarative description of a single namespace of platform settings
- * (e.g. `mail`, `branding`, `feature_flags`). Modelled on Apple's
+ * (e.g. `mail`, `branding`, `localization`). Modelled on Apple's
  * `Settings.bundle/Root.plist` PreferenceSpecifiers — a small, closed
  * set of specifier types that the system-owned renderer turns into a
  * uniform Settings page.
@@ -53,7 +54,8 @@ export const SpecifierType = z.enum([
   'multiselect',
   'slider',
   'color',
-  'json',
+  'json',           // raw config only; a map of rows is a `map` (ADR-0007, amended 2026-11-08)
+  'map',            // keyed rows: a key column plus typed value columns
 
   // Actions
   'action_button',  // calls handler (test connection / rotate / etc.)
@@ -63,12 +65,55 @@ export type SpecifierType = z.input<typeof SpecifierType>;
 const SPECIFIERS_REQUIRING_KEY: ReadonlySet<SpecifierType> = new Set([
   'text', 'textarea', 'password', 'email', 'url', 'phone',
   'number', 'toggle', 'select', 'radio', 'multiselect',
-  'slider', 'color', 'json',
+  'slider', 'color', 'json', 'map',
 ]);
 
 // ---------------------------------------------------------------------------
 // Sub-schemas
 // ---------------------------------------------------------------------------
+
+/**
+ * The value kinds a `map` column may declare (#30208, ADR-0007 as amended
+ * 2026-11-08). Closed, like the specifier set: a new kind is an ADR amendment.
+ *
+ * - `duration` — a duration literal `<n><unit>`, unit `h`, `d`, `w` or `y`
+ *   (`'6h'`, `'14d'`, `'12w'`, `'7y'`): the lifecycle window's own grammar,
+ *   {@link LIFECYCLE_DURATION_REGEX}, which the settings doors judge by too.
+ * - `positive_integer` — a whole number greater than 0.
+ */
+const SpecifierMapColumnKindSchema = z.enum(['duration', 'positive_integer'])
+  .describe(`Map column value kind: 'duration' (a literal matching ${LIFECYCLE_DURATION_REGEX.source}) or 'positive_integer'`);
+
+/**
+ * One value column of a `map` specifier.
+ *
+ * `name` is the property the column's value is stored under when the map has
+ * several value columns (`retention_overrides` stores
+ * `{ "<object>": { "maxAge": "1y", "expireAfter": "30d" } }`), so it keeps the
+ * stored property's own spelling, camelCase included. With one value column the
+ * name is not stored: the entry IS the value (`quotas` stores
+ * `{ "<object>": 1000000 }`).
+ */
+const SpecifierMapColumnSchema = z.object({
+  name: z.string()
+    .regex(/^[A-Za-z][A-Za-z0-9_]*$/, 'A map column name is an identifier (letters, digits, `_`), stored as the property name')
+    .describe('Column identifier: the stored property name when the map has several value columns'),
+  label: I18nLabelSchema.describe('Column header'),
+  description: z.string().optional().describe('Help text for the column'),
+  kind: SpecifierMapColumnKindSchema.describe('Value kind: duration literal or positive integer'),
+});
+
+/**
+ * The key column of a `map` specifier: the header the renderer draws over the
+ * keys. It declares no list of keys. The keys a map admits are served at run
+ * time by the settings service's option source for that map key (objects that
+ * declare a lifecycle, the lifecycle classes): a list written here would be
+ * stale the day an object is added.
+ */
+const SpecifierMapKeyColumnSchema = z.object({
+  label: I18nLabelSchema.describe('Key column header'),
+  description: z.string().optional().describe('Help text for the key column'),
+});
 
 export const SpecifierOptionSchema = lazySchema(() => z.object({
   value: z.union([z.string(), z.number(), z.boolean()]).describe('Stored value'),
@@ -499,6 +544,17 @@ export const SpecifierSchema = lazySchema(() => z.object({
    * `sms.provider` — where "legal" means "this deployment ships an adapter for
    * it", not "some registrar published it". Do not add `valueDomain` to those.
    *
+   * **The one other boundary mover is a runtime option source.** A select whose
+   * legal values are what the running deployment supports (`localization.locale`:
+   * the languages its i18n service reports) has its table served by the
+   * settings service from that system, not from this declaration. Where a
+   * source answers, its options are what a write is judged against and what
+   * every manifest read serves (the namespace read and the manifest list
+   * alike); the declared `options` are the fallback, standing only while the
+   * source has no answer (the system it reads is absent from the composition).
+   * That is a runtime registration, not an authorable key: a manifest cannot
+   * declare one.
+   *
    * `pattern` / `minLength` / `maxLength` still apply and still narrow: they
    * constrain the *shape* of the string, the domain constrains its
    * *membership*. A value must satisfy both. Reach for `valueDomain` precisely
@@ -532,6 +588,47 @@ export const SpecifierSchema = lazySchema(() => z.object({
 
   /** `action_button`: handler invoked on click. */
   handler: SpecifierHandlerSchema.optional().describe('Action handler (action_button)'),
+
+  /**
+   * `map`: the key column (#30208). A `map` is a set of keyed rows: one key
+   * column, then the value columns in {@link columns}. Stored shape:
+   *
+   * - **one value column** stores `Record<key, value>`: `{ "sys_audit_log": 1000000 }`;
+   * - **several value columns** store `Record<key, { [column.name]: value }>`:
+   *   `{ "sys_job_run": { "maxAge": "1y", "expireAfter": "30d" } }`, each entry
+   *   carrying at least one declared column and no other property.
+   *
+   * The keys a map admits are not declared here. A runtime option source the
+   * settings service registers for the map key serves them (they are what the
+   * running system has: its objects, its lifecycle classes), both doors judge a
+   * key against it, and every manifest read serves them as this specifier's
+   * `options`. Without a source, a declared `options` table is the fallback,
+   * as for a `select`; without either, any key is admitted.
+   *
+   * Translated under `settings.<namespace>.keys.<key>.keyColumn` (`label`, and
+   * `description` as `help`), beside the map's own `label`.
+   */
+  keyColumn: SpecifierMapKeyColumnSchema.optional().describe('Key column (map)'),
+
+  /**
+   * `map`: the value columns, in display order. See {@link keyColumn} for the
+   * stored shape. Translated under `settings.<namespace>.keys.<key>.columns.<name>`
+   * (`label`, and `description` as `help`), keyed by each column's `name`.
+   */
+  columns: z.array(SpecifierMapColumnSchema).optional().describe('Value columns (map): one stores a scalar per key, several an object'),
+
+  /**
+   * `toggle`: the confirm dialog text shown before the value changes to off
+   * (omit = no confirm). The name mirrors a handler's `confirmText`; it is
+   * asked only on the turn to OFF, the one direction a toggle such as
+   * `auth.email_password_enabled` takes away from people. Translated under
+   * `settings.<namespace>.keys.<key>.confirmOffText`, beside the toggle's
+   * `label`. The parse refuses it on every other specifier type, which would
+   * never ask it.
+   */
+  confirmOffText: I18nLabelSchema
+    .optional()
+    .describe("Confirm dialog text shown before a toggle's value changes to off (omit = no confirm)"),
 
   /** `child_pane`: namespace of the sub-manifest to navigate to. */
   childNamespace: SnakeCaseIdentifierSchema.optional().describe('Sub-namespace (child_pane)'),
@@ -567,6 +664,16 @@ export const SpecifierSchema = lazySchema(() => z.object({
       message: `Specifier of type '${spec.type}' carries no value, so it must not declare a 'valueDomain'.`,
     });
   }
+  // A turn to OFF is asked about only on a `toggle`, the one specifier with an
+  // off. On any other type the renderer never asks it, so the declaration is a
+  // silent no-op, the shape Prime Directive #10 refuses (ruling 6657805240).
+  if (spec.confirmOffText !== undefined && spec.type !== 'toggle') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['confirmOffText'],
+      message: `Specifier of type '${spec.type}' has no off to confirm, so it must not declare a 'confirmOffText' (only a 'toggle' may).`,
+    });
+  }
   // select/radio/multiselect require options.
   if (['select', 'radio', 'multiselect'].includes(spec.type)) {
     if (!spec.options || spec.options.length === 0) {
@@ -575,6 +682,47 @@ export const SpecifierSchema = lazySchema(() => z.object({
         path: ['options'],
         message: `Specifier of type '${spec.type}' requires non-empty 'options'.`,
       });
+    }
+  }
+  // A `map` declares its key column and at least one value column; no other
+  // type carries either, which would be a declaration nothing draws or judges
+  // (Prime Directive #10).
+  if (spec.type === 'map') {
+    if (!spec.keyColumn) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['keyColumn'],
+        message: `Specifier of type 'map' requires a 'keyColumn'.`,
+      });
+    }
+    if (!spec.columns || spec.columns.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['columns'],
+        message: `Specifier of type 'map' requires at least one value column in 'columns'.`,
+      });
+    } else {
+      const seen = new Set<string>();
+      spec.columns.forEach((col, idx) => {
+        if (seen.has(col.name)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['columns', idx, 'name'],
+            message: `Duplicate map column '${col.name}'.`,
+          });
+        }
+        seen.add(col.name);
+      });
+    }
+  } else {
+    for (const slot of ['keyColumn', 'columns'] as const) {
+      if (spec[slot] !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [slot],
+          message: `Specifier of type '${spec.type}' must not declare '${slot}' (only a 'map' may).`,
+        });
+      }
     }
   }
   // action_button requires a handler.

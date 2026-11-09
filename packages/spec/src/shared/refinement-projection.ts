@@ -160,7 +160,44 @@ export type ProjectableRefinement =
    * list's can; it is answered by keeping the set of patterns small enough to
    * read, ⛔ never by trusting the next caller to pick a good one.
    */
-  | { readonly pattern: 'banned-key-pattern'; readonly keyPattern: BannedKeyPattern };
+  | { readonly pattern: 'banned-key-pattern'; readonly keyPattern: BannedKeyPattern }
+  /**
+   * "no value appears twice in this list" — published as JSON Schema's own
+   * `uniqueItems: true`, which is that sentence and nothing else.
+   *
+   * Exact in the JSON domain, and ONLY because the items are JSON scalars —
+   * which is why the predicate's parameter type is {@link JsonScalar} and not
+   * `unknown`. `uniqueItems` judges equality the JSON way (same type, same
+   * value); the predicate judges it with a `Set`, which is SameValueZero. On
+   * the four JSON scalar types those are one relation: two strings are equal
+   * iff they are the same code units on both sides; `true`, `false` and `null`
+   * are each equal only to themselves; two numbers are equal iff they are the
+   * same number, and the one pair SameValueZero and `===` disagree about in
+   * JSON — `0` and `-0` — is equal on both sides, as JSON Schema compares
+   * numbers by mathematical value. `NaN`, the other pair, is not a JSON value.
+   * A string and a number (`"1"` and `1`) are distinct to both.
+   *
+   * ⛔ Objects and arrays are NOT this arm. A `Set` compares them by IDENTITY,
+   * so two equal objects parsed from one document are two members to the
+   * predicate and one value to `uniqueItems` — the published file would refuse
+   * a document the runtime accepts. The scalar parameter type is what makes a
+   * call site on an array of objects a compile error rather than a wider file.
+   *
+   * ⛔ And the ITEM PARSE must be the identity on scalars. The predicate judges
+   * the parsed OUTPUT, `uniqueItems` judges the DOCUMENT, and the scalar type
+   * bounds only the output. An item that rewrites its value — `z.coerce.*`,
+   * `.trim()`, `.toLowerCase()`, any `.transform()` to a scalar — still type-
+   * checks, yet `[1, "1"]` under coercion or `['a', ' a']` under a trim is one
+   * value to the runtime and two to the keyword: the file would read
+   * `projected` while being WIDER than the runtime, and the ledger would
+   * certify the gap. Compose it only over items that parse a scalar to itself:
+   * `z.enum`, `z.literal`, `z.string()`, `z.number()`, `z.boolean()`,
+   * `z.null()` and unions of them, with checks but no rewrite. The same wider
+   * direction exists, unreachably for the facets, for two JSON numerals beyond
+   * 2^53 that round to one double: one value to the predicate, two to a
+   * validator comparing mathematical value.
+   */
+  | { readonly pattern: 'unique-items' };
 
 /** Every arm's `pattern` tag, for a reader that needs the list itself. */
 export const PROJECTABLE_REFINEMENT_PATTERNS = [
@@ -169,6 +206,7 @@ export const PROJECTABLE_REFINEMENT_PATTERNS = [
   'dependent-required',
   'banned-keys',
   'banned-key-pattern',
+  'unique-items',
 ] as const;
 
 /**
@@ -375,3 +413,40 @@ export function bannedKeyPattern(keyPattern: BannedKeyPattern): (value: object) 
   const rule = (value: object): boolean => !Object.keys(value).some((key) => matches.test(key));
   return declare(rule, declared);
 }
+
+/**
+ * A JSON scalar — the only item type {@link UNIQUE_SCALAR_ITEMS} may judge,
+ * because it is the only one on which a `Set`'s equality and `uniqueItems`'
+ * equality are the same relation (the `unique-items` arm's docblock argues it).
+ */
+export type JsonScalar = string | number | boolean | null;
+
+/**
+ * "no value appears twice", as a `.refine()` predicate on a list of JSON
+ * scalars that declares itself — published as `uniqueItems: true`.
+ *
+ * One shared function rather than a factory, for the reason
+ * {@link NON_BLANK_STRING} is one: there is nothing per-call-site to declare,
+ * and one predicate means one registry entry covering every list that
+ * composes it. The equality the arm rests on is pinned rather than derived
+ * (`refinement-projection.test.ts` evaluates `uniqueItems` against the
+ * predicate on a corpus), since a `Set` and a keyword are two spellings of one
+ * rule, not one spelling used twice.
+ *
+ * ⛔ Only over items whose parse is the identity on scalars — `z.enum`,
+ * `z.literal`, `z.string()`, `z.number()`, `z.boolean()`, `z.null()` — and
+ * ⛔ never over a coercing, trimming, case-folding or transforming item: the
+ * predicate sees the rewritten values and the keyword the written ones, so
+ * the published file would be wider than the runtime while the ledger reads
+ * `projected` (the `unique-items` arm's docblock gives the specimens).
+ *
+ * ```ts
+ * z.array(MarketplaceIndustrySchema).refine(UNIQUE_SCALAR_ITEMS, {
+ *   message: '`industries` lists a value more than once; list each value once.',
+ * })
+ * ```
+ */
+export const UNIQUE_SCALAR_ITEMS: (values: readonly JsonScalar[]) => boolean = declare(
+  (values: readonly JsonScalar[]): boolean => new Set(values).size === values.length,
+  { pattern: 'unique-items' },
+);

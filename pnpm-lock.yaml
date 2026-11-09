@@ -62,7 +62,7 @@ patchedDependencies:
     hash: 41d44316f54bd1c52774d12640dfe9062604489561eee39886b1912c4197e822
     path: patches/@radix-ui__react-focus-scope.patch
   tsup@8.5.1:
-    hash: d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4
+    hash: 3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8
     path: patches/tsup@8.5.1.patch
   tsx@4.23.15:
     hash: 4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6
@@ -92,10 +92,13 @@ importers:
         version: 7.8.5
       svelte:
         specifier: ^5.55.7
-        version: 5.57.1(@typescript-eslint/types@8.72.1)
+        version: 5.57.3(@typescript-eslint/types@8.72.1)
+      ts-morph:
+        specifier: ^28.0.0
+        version: 28.0.0
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       tsx:
         specifier: ^4.23.15
         version: 4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6)
@@ -171,7 +174,7 @@ importers:
         version: 1.1.0
       postcss:
         specifier: ^8.5.10
-        version: 8.5.31
+        version: 8.5.32
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -344,6 +347,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@objectstack/plugin-auth':
+        specifier: workspace:*
+        version: link:../../packages/plugins/plugin-auth
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../../packages/services/service-automation
@@ -418,7 +424,32 @@ importers:
         version: 26.6.5
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
+
+  packages/apps/connector-docusign:
+    dependencies:
+      '@objectstack/connector-openapi':
+        specifier: workspace:*
+        version: link:../../connectors/connector-openapi
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+    devDependencies:
+      '@objectstack/cli':
+        specifier: workspace:*
+        version: link:../../cli
+      '@objectstack/verify':
+        specifier: workspace:*
+        version: link:../../verify
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -490,7 +521,7 @@ importers:
         version: 26.6.5
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -512,7 +543,7 @@ importers:
         version: 26.6.5
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -633,6 +664,9 @@ importers:
       '@objectstack/service-package':
         specifier: workspace:*
         version: link:../services/service-package
+      '@objectstack/service-push':
+        specifier: workspace:*
+        version: link:../services/service-push
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../services/service-queue
@@ -844,9 +878,15 @@ importers:
       '@objectstack/observability':
         specifier: workspace:*
         version: link:../observability
+      '@objectstack/rest':
+        specifier: workspace:*
+        version: link:../rest
       '@objectstack/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../services/service-cluster
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
@@ -854,12 +894,21 @@ importers:
         specifier: workspace:*
         version: link:../types
     devDependencies:
+      '@objectstack/driver-sql':
+        specifier: workspace:*
+        version: link:../drivers/driver-sql
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../platform-objects
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugins/plugin-security
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../services/service-settings
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -1001,6 +1050,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
@@ -1011,9 +1063,6 @@ importers:
         specifier: ^4.6.6
         version: 4.6.7
     devDependencies:
-      '@objectstack/metadata-core':
-        specifier: workspace:*
-        version: link:../metadata-core
       '@objectstack/refd-timer-testkit':
         specifier: workspace:*
         version: link:../qa/refd-timer-testkit
@@ -1053,7 +1102,7 @@ importers:
         version: 4.0.2
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1199,6 +1248,9 @@ importers:
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      oracledb:
+        specifier: ^6.10.0
+        version: 6.10.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1326,6 +1378,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@objectstack/sdui-parser':
         specifier: workspace:*
         version: link:../sdui-parser
@@ -1366,12 +1421,18 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../formula
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
       '@objectstack/types':
         specifier: workspace:*
         version: link:../types
+      unpdf:
+        specifier: 1.9.1
+        version: 1.9.1
       zod:
         specifier: ^4.6.6
         version: 4.6.7
@@ -1379,9 +1440,6 @@ importers:
       '@objectstack/lint':
         specifier: workspace:*
         version: link:../lint
-      '@objectstack/metadata-core':
-        specifier: workspace:*
-        version: link:../metadata-core
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -1455,7 +1513,7 @@ importers:
         version: 4.10.2
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1477,7 +1535,7 @@ importers:
         version: 26.6.5
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1529,7 +1587,7 @@ importers:
         version: 8.23.1
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1570,6 +1628,9 @@ importers:
         specifier: ^4.6.6
         version: 4.6.7
     devDependencies:
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../lint
       tsx:
         specifier: ^4.23.15
         version: 4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6)
@@ -1619,7 +1680,7 @@ importers:
         version: 26.6.5
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1850,13 +1911,13 @@ importers:
         version: 1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0)
       '@better-auth/oauth-provider':
         specifier: 1.7.12
-        version: 1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))
+        version: 1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))
       '@better-auth/scim':
         specifier: 1.7.12
-        version: 1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))
+        version: 1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))
       '@better-auth/sso':
         specifier: 1.7.12
-        version: 1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))
+        version: 1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))
       '@noble/hashes':
         specifier: ^2.4.0
         version: 2.4.0
@@ -1880,7 +1941,7 @@ importers:
         version: link:../../types
       better-auth:
         specifier: 1.7.12
-        version: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
+        version: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
       jose:
         specifier: ^6.2.12
         version: 6.2.12
@@ -1900,6 +1961,15 @@ importers:
       '@objectstack/plugin-security':
         specifier: workspace:*
         version: link:../plugin-security
+      '@objectstack/service-cache':
+        specifier: workspace:*
+        version: link:../../services/service-cache
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../../services/service-cluster
+      '@objectstack/service-cluster-redis':
+        specifier: workspace:*
+        version: link:../../services/service-cluster-redis
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../../services/service-settings
@@ -1909,6 +1979,9 @@ importers:
       hono:
         specifier: ^4.13.5
         version: 4.13.12
+      ioredis-mock:
+        specifier: ^8.13.1
+        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@6.0.0))(ioredis@6.0.0)
       tsx:
         specifier: ^4.23.15
         version: 4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6)
@@ -1988,6 +2061,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../../formula
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -1998,9 +2074,9 @@ importers:
         specifier: ^10.1.4
         version: 10.2.1
     devDependencies:
-      '@objectstack/objectql':
+      '@objectstack/driver-sql':
         specifier: workspace:*
-        version: link:../../objectql
+        version: link:../../drivers/driver-sql
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../../services/service-queue
@@ -2197,6 +2273,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -2216,9 +2295,6 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../../objectql
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -2442,6 +2518,40 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/qa/scenarios:
+    dependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/formula':
+        specifier: workspace:*
+        version: link:../../formula
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
+      '@objectstack/plugin-sharing':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-sharing
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+      playwright-core:
+        specifier: 1.63.0
+        version: 1.63.0
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
+
   packages/qa/vitest-filter-preflight:
     devDependencies:
       '@types/node':
@@ -2496,6 +2606,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../objectql
+      '@objectstack/plugin-email':
+        specifier: workspace:*
+        version: link:../plugins/plugin-email
       '@objectstack/plugin-hono-server':
         specifier: workspace:*
         version: link:../plugins/plugin-hono-server
@@ -2691,6 +2804,9 @@ importers:
       '@objectstack/metadata-protocol':
         specifier: workspace:*
         version: link:../../metadata-protocol
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -2707,9 +2823,6 @@ importers:
       '@objectstack/driver-sql':
         specifier: workspace:*
         version: link:../../drivers/driver-sql
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../../objectql
       '@objectstack/plugin-audit':
         specifier: workspace:*
         version: link:../../plugins/plugin-audit
@@ -2722,15 +2835,30 @@ importers:
       '@objectstack/refd-timer-testkit':
         specifier: workspace:*
         version: link:../../qa/refd-timer-testkit
+      '@objectstack/service-cache':
+        specifier: workspace:*
+        version: link:../service-cache
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../service-cluster
+      '@objectstack/service-cluster-redis':
+        specifier: workspace:*
+        version: link:../service-cluster-redis
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../service-job
       '@objectstack/service-messaging':
         specifier: workspace:*
         version: link:../service-messaging
+      '@objectstack/service-push':
+        specifier: workspace:*
+        version: link:../service-push
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      ioredis-mock:
+        specifier: ^8.13.1
+        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@6.0.0))(ioredis@6.0.0)
       tsx:
         specifier: ^4.23.15
         version: 4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6)
@@ -2749,13 +2877,22 @@ importers:
       '@objectstack/observability':
         specifier: workspace:*
         version: link:../../observability
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../service-cluster
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/service-cluster-redis':
+        specifier: workspace:*
+        version: link:../service-cluster-redis
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      ioredis-mock:
+        specifier: ^8.13.1
+        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@6.0.0))(ioredis@6.0.0)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -2797,6 +2934,12 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
     devDependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/service-job':
+        specifier: workspace:*
+        version: link:../service-job
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -2860,7 +3003,7 @@ importers:
         version: 26.6.5
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -3082,6 +3225,25 @@ importers:
         specifier: ^4.1.11
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
 
+  packages/services/service-push:
+    dependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/spec':
+        specifier: workspace:*
+        version: link:../../spec
+    devDependencies:
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.5
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
+
   packages/services/service-queue:
     dependencies:
       '@objectstack/core':
@@ -3150,6 +3312,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../service-cluster
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -3172,12 +3337,24 @@ importers:
         specifier: workspace:*
         version: link:../../spec
     devDependencies:
+      '@objectstack/service-cache':
+        specifier: workspace:*
+        version: link:../service-cache
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../service-cluster
+      '@objectstack/service-cluster-redis':
+        specifier: workspace:*
+        version: link:../service-cluster-redis
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../service-settings
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
+      ioredis-mock:
+        specifier: ^8.13.1
+        version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@6.0.0))(ioredis@6.0.0)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -3202,6 +3379,9 @@ importers:
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
+      '@objectstack/service-cluster':
+        specifier: workspace:*
+        version: link:../service-cluster
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -3435,6 +3615,9 @@ importers:
       '@objectstack/service-package':
         specifier: workspace:*
         version: link:../services/service-package
+      '@objectstack/service-push':
+        specifier: workspace:*
+        version: link:../services/service-push
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../services/service-queue
@@ -3522,7 +3705,7 @@ importers:
         version: 4.1.10(vitest@4.1.12)
       autoprefixer:
         specifier: ^10.5.4
-        version: 10.5.4(postcss@8.5.31)
+        version: 10.5.4(postcss@8.5.32)
       axe-core:
         specifier: ^4.14.0
         version: 4.14.0
@@ -3695,9 +3878,6 @@ importers:
       '@object-ui/plugin-view':
         specifier: workspace:*
         version: link:../../packages/plugin-view
-      '@object-ui/providers':
-        specifier: workspace:*
-        version: link:../../packages/providers
       '@object-ui/react':
         specifier: workspace:*
         version: link:../../packages/react
@@ -3754,7 +3934,7 @@ importers:
         version: 1.43.0(react@19.3.0)
       postcss:
         specifier: ^8.5.10
-        version: 8.5.31
+        version: 8.5.32
       react:
         specifier: 19.3.0
         version: 19.3.0
@@ -3921,9 +4101,6 @@ importers:
       '@object-ui/plugin-editor':
         specifier: workspace:*
         version: link:../plugin-editor
-      '@object-ui/providers':
-        specifier: workspace:*
-        version: link:../providers
       '@object-ui/react':
         specifier: workspace:*
         version: link:../react
@@ -3948,6 +4125,9 @@ importers:
       lucide-react:
         specifier: ^1.43.0
         version: 1.43.0(react@19.3.0)
+      pinyin-pro:
+        specifier: ^3.29.4
+        version: 3.29.4
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -4035,7 +4215,7 @@ importers:
         version: link:../../../packages/spec
       better-auth:
         specifier: 1.7.12
-        version: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
+        version: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
     devDependencies:
       '@types/react':
         specifier: 19.3.0
@@ -4072,7 +4252,7 @@ importers:
         version: 6.0.5(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
       autoprefixer:
         specifier: ^10.5.4
-        version: 10.5.4(postcss@8.5.31)
+        version: 10.5.4(postcss@8.5.32)
       chalk:
         specifier: ^6.0.0
         version: 6.0.1
@@ -4109,7 +4289,7 @@ importers:
         version: 26.6.5
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -4315,13 +4495,13 @@ importers:
         version: 6.0.5(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
       autoprefixer:
         specifier: ^10.5.4
-        version: 10.5.4(postcss@8.5.31)
+        version: 10.5.4(postcss@8.5.32)
       jsonc-parser:
         specifier: ^3.3.1
         version: 3.3.1
       postcss:
         specifier: ^8.5.10
-        version: 8.5.31
+        version: 8.5.32
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -4389,7 +4569,7 @@ importers:
         version: 2.4.9
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -4417,7 +4597,7 @@ importers:
         version: link:../test-support
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
+        version: 8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1)
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -4442,15 +4622,15 @@ importers:
       '@object-ui/permissions':
         specifier: workspace:*
         version: link:../permissions
-      '@object-ui/providers':
-        specifier: workspace:*
-        version: link:../providers
       '@object-ui/react':
         specifier: workspace:*
         version: link:../react
       '@object-ui/types':
         specifier: workspace:*
         version: link:../types
+      '@objectstack/formula':
+        specifier: workspace:^
+        version: link:../../../packages/formula
       '@objectstack/spec':
         specifier: workspace:^
         version: link:../../../packages/spec
@@ -4496,7 +4676,7 @@ importers:
         version: 6.0.5(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
       postcss:
         specifier: ^8.5.10
-        version: 8.5.31
+        version: 8.5.32
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -4518,6 +4698,9 @@ importers:
       '@object-ui/core':
         specifier: workspace:*
         version: link:../core
+      '@objectstack/spec':
+        specifier: workspace:^
+        version: link:../../../packages/spec
       i18next:
         specifier: ^26.4.0
         version: 26.4.0(typescript@6.0.3)
@@ -4531,6 +4714,9 @@ importers:
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
+      opencc-js:
+        specifier: 1.3.1
+        version: 1.3.1
       react:
         specifier: 19.3.0
         version: 19.3.0
@@ -5308,7 +5494,7 @@ importers:
         version: 6.0.5(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
       postcss:
         specifier: ^8.5.10
-        version: 8.5.31
+        version: 8.5.32
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -5393,7 +5579,7 @@ importers:
         version: 6.0.5(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
       postcss:
         specifier: ^8.5.10
-        version: 8.5.31
+        version: 8.5.32
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -5443,6 +5629,9 @@ importers:
       '@object-ui/plugin-detail':
         specifier: workspace:*
         version: link:../plugin-detail
+      '@object-ui/plugin-grid':
+        specifier: workspace:*
+        version: link:../plugin-grid
       '@object-ui/react':
         specifier: workspace:*
         version: link:../react
@@ -5876,31 +6065,6 @@ importers:
         specifier: ^4.1.10
         version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
 
-  ui/packages/providers:
-    dependencies:
-      '@object-ui/types':
-        specifier: workspace:*
-        version: link:../types
-      react:
-        specifier: 19.3.0
-        version: 19.3.0
-      react-dom:
-        specifier: 19.3.0
-        version: 19.3.0(react@19.3.0)
-    devDependencies:
-      '@types/react':
-        specifier: 19.3.0
-        version: 19.3.0
-      '@types/react-dom':
-        specifier: 19.3.0
-        version: 19.3.0(@types/react@19.3.0)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
-
   ui/packages/react:
     dependencies:
       '@object-ui/core':
@@ -6007,10 +6171,10 @@ importers:
         version: 6.0.5(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
       autoprefixer:
         specifier: ^10.5.4
-        version: 10.5.4(postcss@8.5.31)
+        version: 10.5.4(postcss@8.5.32)
       postcss:
         specifier: ^8.5.10
-        version: 8.5.31
+        version: 8.5.32
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -7061,21 +7225,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@inquirer/ansi@2.0.7':
-    resolution: {integrity: sha512-3eTuUO1vH2cZm2ZKHeQxnOqlTi9EfZDGgIe3BL3I4u+rJHocr9Fz86M4fjYABPvFnQG/gGK551HqDiIcETwU6Q==}
+  '@inquirer/ansi@2.0.10':
+    resolution: {integrity: sha512-dwrc+1aqVZpHNkNDswXGtn1typ+Pxpo5FHZRyBw1le7onEJUkPUkYOY1FIFC1LvFMYUqqLuWBwElhAmencL7MQ==}
     engines: {node: '>=23.5.0 || ^22.13.0 || ^20.17.0'}
 
-  '@inquirer/confirm@6.1.1':
-    resolution: {integrity: sha512-eb8DBZcz/2qHWQda4rk2JiQk5h9QV/cVHi1yjt0f69WFZMRFn0sJTye3EAP8icut8UDMjQPsaH5KbcOogefrFQ==}
-    engines: {node: '>=23.5.0 || ^22.13.0 || ^20.17.0'}
-    peerDependencies:
-      '@types/node': '>=18'
-    peerDependenciesMeta:
-      '@types/node':
-        optional: true
-
-  '@inquirer/core@11.2.1':
-    resolution: {integrity: sha512-Qd6GJT1yVyrZZCfN8W2qKF5ApmqryXRhRKCuip8h01x2w/esJQ2XIYc6f9abMIHgKQdBfFTSOdbHRLAhuM09UA==}
+  '@inquirer/confirm@6.3.5':
+    resolution: {integrity: sha512-BJ59BOyURiZiAxdr9AuRu38/k+rV+DcTIM2fUF/c/BXrab6H8zMZTTOl3LgkSJH96Xob2vOJxDiBkHiz32Xx2w==}
     engines: {node: '>=23.5.0 || ^22.13.0 || ^20.17.0'}
     peerDependencies:
       '@types/node': '>=18'
@@ -7083,12 +7238,21 @@ packages:
       '@types/node':
         optional: true
 
-  '@inquirer/figures@2.0.7':
-    resolution: {integrity: sha512-aJ8TBPOGB6f/2qziPfElISTCEd5XOYTFckA2SGjhNmiKzfK/u4ot3v0DUzGVdUnKjN10EqnnEPck36BkyfLnJw==}
+  '@inquirer/core@12.0.6':
+    resolution: {integrity: sha512-5yxn2LsJ8Tu4ei2a+yNkmFRhM/cb+JMEsEs/AW6CCOnBnpMy4IjYiPMFyHtYq8weOmlTyqqCx40y0DsD7OsEPw==}
+    engines: {node: '>=23.5.0 || ^22.13.0 || ^20.17.0'}
+    peerDependencies:
+      '@types/node': '>=18'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
+
+  '@inquirer/figures@2.0.10':
+    resolution: {integrity: sha512-51elrUJV3jZpvD0ygz8+U10Kc6+Lzqln+/tYmnbhy6jo5oXpE6hMCcv+OTBC0enwJXsb3JIuT3VtEinRNCSK2A==}
     engines: {node: '>=23.5.0 || ^22.13.0 || ^20.17.0'}
 
-  '@inquirer/type@4.0.7':
-    resolution: {integrity: sha512-t28inv14nMQ1PhKpsJPY+kEs/c00qzeCOS2gTNRyTjG5d6qsVA2fItxW4hkvGZ5lvanGLdtCzVIx5dwdRpN1+g==}
+  '@inquirer/type@4.2.1':
+    resolution: {integrity: sha512-lDkPsnv5M5CcYB2T1qTc3dobNTPkVr4DU3Ic2Q6SW8/qVRHgvzdRdmVZ6YqG9Ag1aJTeMsLU0s0WPRh3CZWDQQ==}
     engines: {node: '>=23.5.0 || ^22.13.0 || ^20.17.0'}
     peerDependencies:
       '@types/node': '>=18'
@@ -8681,6 +8845,9 @@ packages:
     peerDependencies:
       '@testing-library/dom': '>=7.21.4'
 
+  '@ts-morph/common@0.29.0':
+    resolution: {integrity: sha512-35oUmphHbJvQ/+UTwFNme/t2p3FoKiGJ5auTjjpNTop2dyREspirjMy82PLSC1pnDJ8ah1GU98hwpVt64YXQsg==}
+
   '@turbo/darwin-64@2.11.10':
     resolution: {integrity: sha512-By4idRap5+nLnMuRzLB4qkOPRlvNdyY1ne4VJYDyUoUB11H94k7uif9mbe3JT8JSNXs1D68uMcBj6hJ/jMQRvA==}
     cpu: [x64]
@@ -9245,8 +9412,8 @@ packages:
     peerDependencies:
       acorn: ^6.0.0 || ^7.0.0 || ^8.0.0
 
-  acorn@8.18.0:
-    resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
+  acorn@8.19.0:
+    resolution: {integrity: sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw==}
     engines: {node: '>=0.4.0'}
     hasBin: true
 
@@ -9744,6 +9911,9 @@ packages:
   cnfast@0.1.0:
     resolution: {integrity: sha512-rH0jBKeLkVrK7NsZ5Ba2l7WdMBmm1k0FMpABeXUU1PgTUxbz3261gEuCSsrYuXo4BwAe3yCcIbQ93YyS52lOGQ==}
     hasBin: true
+
+  code-block-writer@13.0.3:
+    resolution: {integrity: sha512-Oofo0pq3IKnsFtuHqSF7TqBfr71aeyZDVJ0HpmqB7FBM2qEigL0iPONSCZSO9pE9dZTAxANe5XHG9Uy0YMv8cg==}
 
   collapse-white-space@2.1.0:
     resolution: {integrity: sha512-loKTxY1zCOuG4j9f6EPnuyyYkf58RnhhWTvRoZEokgB+WbdXehfjFviyOVYkqzEWz1Q5kRiZdBYS5SwxbQYwzw==}
@@ -11028,6 +11198,10 @@ packages:
     resolution: {integrity: sha512-DWBMKyeM25D70nrIiTkgQth59/G+naKOTep6huF9j+GmeK3DMD60Zvxg5d5qQnz+38AHgou6ean2LECX+lrKDg==}
     engines: {node: '>= 12'}
 
+  ip-address@10.7.5:
+    resolution: {integrity: sha512-t2v0rkILYv9WXmSL7TpAaU3HXgaFYOPUcH3QHgwQ++gpJuH3bqyMy4Fvt/DJCTKwzH3Cf+bAp5W/mFL39KPLzA==}
+    engines: {node: '>= 12'}
+
   ipaddr.js@1.9.1:
     resolution: {integrity: sha512-0KI/607xoxSToH7GjN1FfSbLoU0+btTicjsQSWQlh/hZykN8KpmMf7uYwPW3R+akZ6R/w18ZlXSHBYXiYUPO3g==}
     engines: {node: '>= 0.10'}
@@ -12116,9 +12290,16 @@ packages:
     resolution: {integrity: sha512-++Zlftm0kVLPmzC06t6epuWmcRMDbI4z5P3NNX979WA/k23+NtSOynEGzsVfZwguKw2mi5umVgnBlJQMwRz4Pg==}
     engines: {node: '>=20'}
 
+  opencc-js@1.3.1:
+    resolution: {integrity: sha512-EyKDnjHNYlxo3Blll0OGH5qcyZBI3YmXpqeDEity/db50A5TFfCdvylrBlTyx1XvlSRUmh2a5AHvSf89h4u87Q==}
+
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
     engines: {node: '>= 0.8.0'}
+
+  oracledb@6.10.0:
+    resolution: {integrity: sha512-kGUumXmrEWbSpBuKJyb9Ip3rXcNgKK6grunI3/cLPzrRvboZ6ZoLi9JQ+z6M/RIG924tY8BLflihL4CKKQAYMA==}
+    engines: {node: '>=14.17'}
 
   outvariant@1.4.3:
     resolution: {integrity: sha512-+Sl2UErvtsoajRDKCE5/dBz4DIvHXQQnAxtQTF04OJxY0+DyZXSo5P5Bb7XYWOh81syohlYL24hbDwxedPUJCA==}
@@ -12324,8 +12505,8 @@ packages:
   postcss-value-parser@4.2.0:
     resolution: {integrity: sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==}
 
-  postcss@8.5.31:
-    resolution: {integrity: sha512-YUbWYCgErwnMAVkjUnYa+KlMBzGpHwiIt/DE7f0G33AuX2LH9UcTk6KgWxd3zRU+pN3u/C+Xl3EnMLM4Hea7Sg==}
+  postcss@8.5.32:
+    resolution: {integrity: sha512-LJlKCCAUFKOuZxipUdYw1NzIITEsPcgyOG9LkvRJvuKj/bRzbuRY0ARXvL0pWGpsZvn8jku+LMep2eU0seHp8g==}
     engines: {node: ^10 || ^12 || >=14}
 
   postgres-array@2.0.0:
@@ -12747,8 +12928,8 @@ packages:
     engines: {node: '>= 0.4'}
     hasBin: true
 
-  rettime@0.11.11:
-    resolution: {integrity: sha512-ILJRqVWBCTlg9r42fFgwVZx1gnFAcQF8mRoMkbgQfIrjEDf9nbBFDFx00oloOa+Q869FUtaYDXZvEfnecQSCoQ==}
+  rettime@0.11.12:
+    resolution: {integrity: sha512-5ExtR1ppiDBQkVoPw5NAqdbfH4Iq2VOmQKHMtUoaFxA9bo2krzFYBtyq6K40xxbYp+2w/YOr6D+1ToF6tTN53A==}
 
   rimraf@2.7.1:
     resolution: {integrity: sha512-uWjbaKIK3T1OSVptzX7Nl6PvQ3qAGtKEtVRjRuazjfL3Bx5eI409VZSqgND+4UNnmzLVdPj9FqFJNPqBZFve4w==}
@@ -12849,14 +13030,14 @@ packages:
     resolution: {integrity: sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==}
     engines: {node: '>= 18'}
 
-  seroval-plugins@1.7.1:
-    resolution: {integrity: sha512-5EiMqQiw2/KqzTCyJNdpMvBFbKlidtcinyRwZg77pW5Z+QllOp2JUkEpTdThkdsEFXsPGf8ofTpu5yC1kXwv0g==}
+  seroval-plugins@1.7.3:
+    resolution: {integrity: sha512-gKP1jak0eor3KVHRGAyCAFJ9xKXkf97eWruYK5lcDHimsjr23RJGDuO0B8iOU6rvgYvACHpW+krmn3j2+2vxpQ==}
     engines: {node: '>=20'}
     peerDependencies:
       seroval: ^1.0
 
-  seroval@1.7.1:
-    resolution: {integrity: sha512-tSRMcPkD/bu1rmY0/XfFP2zLPD8jXVuzHli6Y2UFi9AiG/d0kOd8LAc/G6NolpW8MA1PtgDUhywKCmerS4E3tg==}
+  seroval@1.7.3:
+    resolution: {integrity: sha512-fYkZS/GrMJhj1CW+IDoPlILRmYl5/S9L/OYju/sA2K/HQ3G5JBWDZHxaUWVZV/0hfAC2n1+9ysBRDtqMbMXvzA==}
     engines: {node: '>=20'}
 
   serve-static@1.16.3:
@@ -12875,6 +13056,9 @@ packages:
 
   set-cookie-parser@3.1.2:
     resolution: {integrity: sha512-5/r/lTwbJ3zQ+qwdUFZYeRNqda7P5HD8zQKqlSjdGt1/S0cjLAphHusj4Y58ahDtWn/g32xrIS58/ikOvwl0Lw==}
+
+  set-cookie-parser@3.2.1:
+    resolution: {integrity: sha512-Npd1Pt+4zb3BrSZDPd2qFwRpS6b1EUEasRrO8xS0zMJi0fApXXK5YuzP0minyJnxwnFHoVoJwA55q0A0cu63gQ==}
 
   set-value@2.0.1:
     resolution: {integrity: sha512-JxHc1weCN68wRY0fhCoXpyK55m/XPHafOmK4UWD7m2CI14GMcFypt4w/0+NV5f/ZMby2F6S2wwA7fgynh9gWSw==}
@@ -13132,8 +13316,8 @@ packages:
     resolution: {integrity: sha512-ot0WnXS9fgdkgIcePe6RHNk1WA8+muPa6cSjeR3V8K27q9BB1rTE3R1p7Hv0z1ZyAc8s6Vvv8DIyWf681MAt0w==}
     engines: {node: '>= 0.4'}
 
-  svelte@5.57.1:
-    resolution: {integrity: sha512-Uqj49lWKB+iSSnneuwiYYJ7MZgkB+eXr0LXBhv4uDuAkXqnWmq65Sxflfvp0Lc6MdKjMUxGaeOKWJqz5SNiVIA==}
+  svelte@5.57.3:
+    resolution: {integrity: sha512-5mAftM3SoDV9X0zdF386F9p2pv8iKOwi/KfBS1XnBAkVCKFzVOLHUoa8iGWAt4buoicLmyWVRpuuD5wplXOQsg==}
     engines: {node: '>=18'}
 
   swr@2.5.1:
@@ -13283,6 +13467,9 @@ packages:
   ts-interface-checker@0.1.13:
     resolution: {integrity: sha512-Y/arvbn+rrz3JCKl9C4kVNfTfSm2/mEp5FSz5EsZSANGPSlQrpRI5M4PKF+mJnE52jOO90PnPSc3Ur3bTQw0gA==}
 
+  ts-morph@28.0.0:
+    resolution: {integrity: sha512-Wp3tnZ2bzwxyTZMtgWVzXDfm7lB1Drz+y9DmmYH/L702PQhPyVrp3pkou3yIz4qjS14GY9kcpmLiOOMvl8oG1g==}
+
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
@@ -13322,8 +13509,8 @@ packages:
     resolution: {integrity: sha512-t0rzBq87m3fVcduHDUFhKmyyX+9eo6WQjZvf51Ea/M0Q7+T374Jp1aUiyUl0GKxp8M/OETVHSDvmkyPgvX+X2w==}
     engines: {node: '>=10'}
 
-  type-fest@5.8.0:
-    resolution: {integrity: sha512-YGYEVz3Fm5iy/AybuA0oyNFq7H4CgQNfRp/qfe8nurE1kuCeNm3/vfm9X4Mtl+qLyaKJUh5xrFZwogr41SMjYA==}
+  type-fest@5.10.0:
+    resolution: {integrity: sha512-NoSdpq/WEiAg5sjmBkmV/hfxv6HJH4NqPNrqjtSO5CwRmpsDfaf4begxW34KdJykH/l1yHtwBWQkCRdoXO8mPA==}
     engines: {node: '>=20'}
 
   type-is@1.6.18:
@@ -13405,6 +13592,15 @@ packages:
   universalify@2.0.1:
     resolution: {integrity: sha512-gptHNQghINnc/vTGIk0SOFGFNXw7JVrlRUtConJRlvaw6DuX0wO5Jeko9sWrMBhh+PsYAZ7oXAiOnf/UKogyiw==}
     engines: {node: '>= 10.0.0'}
+
+  unpdf@1.9.1:
+    resolution: {integrity: sha512-nO1npM2kNyd4hj1fKzUVU6bvnWjDSxI97eycM/DgzI83dYyW+pNRI9NeMQVEfef8fI3Q06i9lkMeE1HxrQqKoA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@napi-rs/canvas': ^0.1.69 || ^1.0.0
+    peerDependenciesMeta:
+      '@napi-rs/canvas':
+        optional: true
 
   unpipe@1.0.0:
     resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
@@ -14411,12 +14607,12 @@ snapshots:
     optionalDependencies:
       mongodb: 7.7.0(socks@2.8.9)
 
-  '@better-auth/oauth-provider@1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))':
+  '@better-auth/oauth-provider@1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))':
     dependencies:
       '@better-auth/core': 1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0)
       '@better-auth/utils': 0.5.0
       '@better-fetch/fetch': 1.3.2
-      better-auth: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
+      better-auth: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
       better-call: 1.4.4(zod@4.6.7)
       jose: 6.2.12
       zod: 4.6.7
@@ -14426,22 +14622,22 @@ snapshots:
       '@better-auth/core': 1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0)
       '@better-auth/utils': 0.5.0
 
-  '@better-auth/scim@1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))':
+  '@better-auth/scim@1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))':
     dependencies:
       '@better-auth/core': 1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0)
       '@better-auth/utils': 0.5.0
       '@noble/hashes': 2.4.0
-      better-auth: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
+      better-auth: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
       better-call: 1.4.4(zod@4.6.7)
       zod: 4.6.7
 
-  '@better-auth/sso@1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))':
+  '@better-auth/sso@1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12))(better-call@1.4.4(zod@4.6.7))':
     dependencies:
       '@better-auth/core': 1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0)
       '@better-auth/utils': 0.5.0
       '@better-fetch/fetch': 1.3.2
       '@xmldom/xmldom': 0.9.12
-      better-auth: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
+      better-auth: 1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12)
       better-call: 1.4.4(zod@4.6.7)
       fast-xml-parser: 5.10.1
       jose: 6.2.12
@@ -14969,22 +15165,22 @@ snapshots:
   '@img/sharp-win32-x64@0.35.5':
     optional: true
 
-  '@inquirer/ansi@2.0.7':
+  '@inquirer/ansi@2.0.10':
     optional: true
 
-  '@inquirer/confirm@6.1.1(@types/node@26.6.5)':
+  '@inquirer/confirm@6.3.5(@types/node@26.6.5)':
     dependencies:
-      '@inquirer/core': 11.2.1(@types/node@26.6.5)
-      '@inquirer/type': 4.0.7(@types/node@26.6.5)
+      '@inquirer/core': 12.0.6(@types/node@26.6.5)
+      '@inquirer/type': 4.2.1(@types/node@26.6.5)
     optionalDependencies:
       '@types/node': 26.6.5
     optional: true
 
-  '@inquirer/core@11.2.1(@types/node@26.6.5)':
+  '@inquirer/core@12.0.6(@types/node@26.6.5)':
     dependencies:
-      '@inquirer/ansi': 2.0.7
-      '@inquirer/figures': 2.0.7
-      '@inquirer/type': 4.0.7(@types/node@26.6.5)
+      '@inquirer/ansi': 2.0.10
+      '@inquirer/figures': 2.0.10
+      '@inquirer/type': 4.2.1(@types/node@26.6.5)
       cli-width: 4.1.0
       fast-wrap-ansi: 0.2.2
       mute-stream: 3.0.0
@@ -14993,10 +15189,10 @@ snapshots:
       '@types/node': 26.6.5
     optional: true
 
-  '@inquirer/figures@2.0.7':
+  '@inquirer/figures@2.0.10':
     optional: true
 
-  '@inquirer/type@4.0.7(@types/node@26.6.5)':
+  '@inquirer/type@4.2.1(@types/node@26.6.5)':
     optionalDependencies:
       '@types/node': 26.6.5
     optional: true
@@ -15185,7 +15381,7 @@ snapshots:
       '@types/estree-jsx': 1.0.5
       '@types/hast': 3.0.5
       '@types/mdx': 2.0.14
-      acorn: 8.18.0
+      acorn: 8.19.0
       collapse-white-space: 2.1.0
       devlop: 1.1.0
       estree-util-is-identifier-name: 3.0.0
@@ -15194,7 +15390,7 @@ snapshots:
       hast-util-to-jsx-runtime: 2.3.6
       markdown-extensions: 2.0.0
       recma-build-jsx: 1.0.0
-      recma-jsx: 1.0.1(acorn@8.18.0)
+      recma-jsx: 1.0.1(acorn@8.19.0)
       recma-stringify: 1.0.0
       rehype-recma: 1.0.0
       remark-mdx: 3.1.1
@@ -16352,9 +16548,9 @@ snapshots:
 
   '@standard-schema/utils@0.3.0': {}
 
-  '@sveltejs/acorn-typescript@1.0.13(acorn@8.18.0)':
+  '@sveltejs/acorn-typescript@1.0.13(acorn@8.19.0)':
     dependencies:
-      acorn: 8.18.0
+      acorn: 8.19.0
 
   '@swc/core-darwin-arm64@1.15.33':
     optional: true
@@ -16490,7 +16686,7 @@ snapshots:
       '@alloc/quick-lru': 5.2.0
       '@tailwindcss/node': 4.3.3
       '@tailwindcss/oxide': 4.3.3
-      postcss: 8.5.31
+      postcss: 8.5.32
       tailwindcss: 4.3.3
 
   '@tailwindcss/typography@0.5.20(tailwindcss@4.3.3)':
@@ -16529,8 +16725,8 @@ snapshots:
     dependencies:
       '@tanstack/history': 1.162.0
       cookie-es: 3.1.1
-      seroval: 1.7.1
-      seroval-plugins: 1.7.1(seroval@1.7.1)
+      seroval: 1.7.3
+      seroval-plugins: 1.7.3(seroval@1.7.3)
     optional: true
 
   '@tanstack/store@0.9.3':
@@ -16574,6 +16770,12 @@ snapshots:
   '@testing-library/user-event@14.6.8(@testing-library/dom@10.4.2)':
     dependencies:
       '@testing-library/dom': 10.4.2
+
+  '@ts-morph/common@0.29.0':
+    dependencies:
+      minimatch: 10.2.6
+      path-browserify: 1.0.1
+      tinyglobby: 0.2.17
 
   '@turbo/darwin-64@2.11.10':
     optional: true
@@ -17170,11 +17372,11 @@ snapshots:
       mime-types: 3.0.2
       negotiator: 1.1.0
 
-  acorn-jsx@5.3.2(acorn@8.18.0):
+  acorn-jsx@5.3.2(acorn@8.19.0):
     dependencies:
-      acorn: 8.18.0
+      acorn: 8.19.0
 
-  acorn@8.18.0: {}
+  acorn@8.19.0: {}
 
   agent-base@6.0.2:
     dependencies:
@@ -17332,13 +17534,13 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  autoprefixer@10.5.4(postcss@8.5.31):
+  autoprefixer@10.5.4(postcss@8.5.32):
     dependencies:
       browserslist: 4.29.4
       caniuse-lite: 1.0.30001819
       fraction.js: 5.3.4
       picocolors: 1.1.1
-      postcss: 8.5.31
+      postcss: 8.5.32
       postcss-value-parser: 4.2.0
 
   aws-ssl-profiles@1.1.2: {}
@@ -17396,7 +17598,7 @@ snapshots:
 
   baseline-browser-mapping@2.11.32: {}
 
-  better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.1(@typescript-eslint/types@8.72.1))(vitest@4.1.12):
+  better-auth@1.7.12(@opentelemetry/api@1.9.1)(mongodb@7.7.0(socks@2.8.9))(mysql2@3.24.6(@types/node@26.6.5))(next@16.4.1(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.6.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(svelte@5.57.3(@typescript-eslint/types@8.72.1))(vitest@4.1.12):
     dependencies:
       '@better-auth/core': 1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0)
       '@better-auth/drizzle-adapter': 1.7.12(@better-auth/core@1.7.12(@better-auth/utils@0.5.0)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.4(zod@4.6.7))(jose@6.2.12)(kysely@0.29.5)(nanostores@1.5.0))(@better-auth/utils@0.5.0)
@@ -17422,7 +17624,7 @@ snapshots:
       pg: 8.23.1
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
-      svelte: 5.57.1(@typescript-eslint/types@8.72.1)
+      svelte: 5.57.3(@typescript-eslint/types@8.72.1)
       vitest: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/coverage-v8@4.1.12)(@vitest/ui@4.1.10)(happy-dom@21.0.4)(jsdom@30.1.1(@noble/hashes@2.4.0))(msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1))
     transitivePeerDependencies:
       - '@opentelemetry/api'
@@ -17662,6 +17864,8 @@ snapshots:
       - '@types/react-dom'
 
   cnfast@0.1.0: {}
+
+  code-block-writer@13.0.3: {}
 
   collapse-white-space@2.1.0: {}
 
@@ -18140,7 +18344,7 @@ snapshots:
   esast-util-from-js@2.0.1:
     dependencies:
       '@types/estree-jsx': 1.0.5
-      acorn: 8.18.0
+      acorn: 8.19.0
       esast-util-from-estree: 2.0.0
       vfile-message: 4.0.3
 
@@ -18250,8 +18454,8 @@ snapshots:
 
   espree@11.2.0:
     dependencies:
-      acorn: 8.18.0
-      acorn-jsx: 5.3.2(acorn@8.18.0)
+      acorn: 8.19.0
+      acorn-jsx: 5.3.2(acorn@8.19.0)
       eslint-visitor-keys: 5.0.1
 
   esquery@1.7.0:
@@ -18964,7 +19168,7 @@ snapshots:
   headers-polyfill@5.0.1:
     dependencies:
       '@types/set-cookie-parser': 2.4.10
-      set-cookie-parser: 3.1.2
+      set-cookie-parser: 3.2.1
     optional: true
 
   hermes-estree@0.25.1: {}
@@ -19109,6 +19313,9 @@ snapshots:
       - supports-color
 
   ip-address@10.7.4: {}
+
+  ip-address@10.7.5:
+    optional: true
 
   ipaddr.js@1.9.1: {}
 
@@ -19983,8 +20190,8 @@ snapshots:
 
   micromark-extension-mdxjs@3.0.0:
     dependencies:
-      acorn: 8.18.0
-      acorn-jsx: 5.3.2(acorn@8.18.0)
+      acorn: 8.19.0
+      acorn-jsx: 5.3.2(acorn@8.19.0)
       micromark-extension-mdx-expression: 3.0.1
       micromark-extension-mdx-jsx: 3.0.2
       micromark-extension-mdx-md: 2.0.0
@@ -20165,7 +20372,7 @@ snapshots:
 
   mlly@1.8.2:
     dependencies:
-      acorn: 8.18.0
+      acorn: 8.19.0
       pathe: 2.0.3
       pkg-types: 1.3.1
       ufo: 1.6.4
@@ -20264,7 +20471,7 @@ snapshots:
 
   msw@2.15.0(@types/node@26.6.5)(typescript@6.0.3):
     dependencies:
-      '@inquirer/confirm': 6.1.1(@types/node@26.6.5)
+      '@inquirer/confirm': 6.3.5(@types/node@26.6.5)
       '@mswjs/interceptors': 0.41.9
       '@open-draft/deferred-promise': 3.0.0
       '@types/statuses': 2.0.6
@@ -20275,11 +20482,11 @@ snapshots:
       outvariant: 1.4.3
       path-to-regexp: 6.3.0
       picocolors: 1.1.1
-      rettime: 0.11.11
+      rettime: 0.11.12
       statuses: 2.0.2
       strict-event-emitter: 0.5.1
       tough-cookie: 6.0.2
-      type-fest: 5.8.0
+      type-fest: 5.10.0
       until-async: 3.0.2
       yargs: 17.7.3
     optionalDependencies:
@@ -20347,7 +20554,7 @@ snapshots:
       '@swc/helpers': 0.5.23
       baseline-browser-mapping: 2.11.32
       caniuse-lite: 1.0.30001819
-      postcss: 8.5.31
+      postcss: 8.5.32
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
       styled-jsx: 5.1.6(react@19.3.0)
@@ -20413,6 +20620,8 @@ snapshots:
       powershell-utils: 0.2.1
       wsl-utils: 1.0.0
 
+  opencc-js@1.3.1: {}
+
   optionator@0.9.4:
     dependencies:
       deep-is: 0.1.4
@@ -20421,6 +20630,8 @@ snapshots:
       prelude-ls: 1.2.1
       type-check: 0.4.0
       word-wrap: 1.2.5
+
+  oracledb@6.10.0: {}
 
   outvariant@1.4.3:
     optional: true
@@ -20581,12 +20792,12 @@ snapshots:
 
   postal-mime@4.1.4: {}
 
-  postcss-load-config@6.0.1(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1):
+  postcss-load-config@6.0.1(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1):
     dependencies:
       lilconfig: 3.1.3
     optionalDependencies:
       jiti: 2.7.0
-      postcss: 8.5.31
+      postcss: 8.5.32
       tsx: 4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6)
       yaml: 2.9.1
 
@@ -20597,7 +20808,7 @@ snapshots:
 
   postcss-value-parser@4.2.0: {}
 
-  postcss@8.5.31:
+  postcss@8.5.32:
     dependencies:
       nanoid: 3.3.20
       picocolors: 1.1.1
@@ -20915,10 +21126,10 @@ snapshots:
       estree-util-build-jsx: 3.0.1
       vfile: 6.0.3
 
-  recma-jsx@1.0.1(acorn@8.18.0):
+  recma-jsx@1.0.1(acorn@8.19.0):
     dependencies:
-      acorn: 8.18.0
-      acorn-jsx: 5.3.2(acorn@8.18.0)
+      acorn: 8.19.0
+      acorn-jsx: 5.3.2(acorn@8.19.0)
       estree-util-to-js: 2.0.0
       recma-parse: 1.0.0
       recma-stringify: 1.0.0
@@ -21088,7 +21299,7 @@ snapshots:
       path-parse: 1.0.7
       supports-preserve-symlinks-flag: 1.0.0
 
-  rettime@0.11.11:
+  rettime@0.11.12:
     optional: true
 
   rimraf@2.7.1:
@@ -21259,12 +21470,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  seroval-plugins@1.7.1(seroval@1.7.1):
+  seroval-plugins@1.7.3(seroval@1.7.3):
     dependencies:
-      seroval: 1.7.1
+      seroval: 1.7.3
     optional: true
 
-  seroval@1.7.1:
+  seroval@1.7.3:
     optional: true
 
   serve-static@1.16.3:
@@ -21290,6 +21501,9 @@ snapshots:
   set-cookie-parser@2.7.2: {}
 
   set-cookie-parser@3.1.2: {}
+
+  set-cookie-parser@3.2.1:
+    optional: true
 
   set-value@2.0.1:
     dependencies:
@@ -21401,7 +21615,7 @@ snapshots:
 
   socks@2.8.9:
     dependencies:
-      ip-address: 10.7.4
+      ip-address: 10.7.5
       smart-buffer: 4.2.0
     optional: true
 
@@ -21591,13 +21805,13 @@ snapshots:
 
   supports-preserve-symlinks-flag@1.0.0: {}
 
-  svelte@5.57.1(@typescript-eslint/types@8.72.1):
+  svelte@5.57.3(@typescript-eslint/types@8.72.1):
     dependencies:
       '@jridgewell/remapping': 2.3.5
       '@jridgewell/sourcemap-codec': 1.6.0
-      '@sveltejs/acorn-typescript': 1.0.13(acorn@8.18.0)
+      '@sveltejs/acorn-typescript': 1.0.13(acorn@8.19.0)
       '@types/estree': 1.0.9
-      acorn: 8.18.0
+      acorn: 8.19.0
       aria-query: 5.3.1
       axobject-query: 4.1.0
       clsx: 2.1.1
@@ -21752,9 +21966,14 @@ snapshots:
 
   ts-interface-checker@0.1.13: {}
 
+  ts-morph@28.0.0:
+    dependencies:
+      '@ts-morph/common': 0.29.0
+      code-block-writer: 13.0.3
+
   tslib@2.8.1: {}
 
-  tsup@8.5.1(patch_hash=d1c8d6bd9db5a776a639cd37b802f8b962f7846a6e3758af4478b0e0bde082e4)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1):
+  tsup@8.5.1(patch_hash=3b8e24cc030bee95729ead29db742cd9f65872aad110b4c59c6c424a15373ed8)(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(@swc/core@1.15.33(@swc/helpers@0.5.23))(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(typescript@6.0.3)(yaml@2.9.1):
     dependencies:
       bundle-require: 5.1.0(esbuild@0.28.2)
       cac: 6.7.14
@@ -21765,7 +21984,7 @@ snapshots:
       fix-dts-default-cjs-exports: 1.0.1
       joycon: 3.1.1
       picocolors: 1.1.1
-      postcss-load-config: 6.0.1(jiti@2.7.0)(postcss@8.5.31)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1)
+      postcss-load-config: 6.0.1(jiti@2.7.0)(postcss@8.5.32)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1)
       resolve-from: 5.0.0
       rollup: 4.62.2
       source-map: 0.7.6
@@ -21776,7 +21995,7 @@ snapshots:
     optionalDependencies:
       '@microsoft/api-extractor': 7.58.2(@types/node@26.6.5)
       '@swc/core': 1.15.33(@swc/helpers@0.5.23)
-      postcss: 8.5.31
+      postcss: 8.5.32
       typescript: 6.0.3
     transitivePeerDependencies:
       - jiti
@@ -21805,7 +22024,7 @@ snapshots:
 
   type-fest@0.21.3: {}
 
-  type-fest@5.8.0:
+  type-fest@5.10.0:
     dependencies:
       tagged-tag: 1.0.0
     optional: true
@@ -21907,6 +22126,8 @@ snapshots:
 
   universalify@2.0.1: {}
 
+  unpdf@1.9.1: {}
+
   unpipe@1.0.0: {}
 
   unplugin-dts@1.1.2(@microsoft/api-extractor@7.58.2(@types/node@26.6.5))(esbuild@0.28.2)(rolldown@1.2.15)(rollup@4.62.2)(typescript@6.0.3)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15(patch_hash=4d1d35da1809be2a945519cb26890e48107810b9b66c6913a6a89abb5ad6a1e6))(yaml@2.9.1)):
@@ -21933,7 +22154,7 @@ snapshots:
   unplugin@2.3.11:
     dependencies:
       '@jridgewell/remapping': 2.3.5
-      acorn: 8.18.0
+      acorn: 8.19.0
       picomatch: 4.0.7
       webpack-virtual-modules: 0.6.2
 
@@ -22064,7 +22285,7 @@ snapshots:
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
-      postcss: 8.5.31
+      postcss: 8.5.32
       rolldown: 1.2.15
       tinyglobby: 0.2.17
     optionalDependencies:

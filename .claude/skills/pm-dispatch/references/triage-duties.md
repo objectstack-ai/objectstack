@@ -5,24 +5,25 @@
 - ⛔ 分诊 fresh session 开局不做泛关键词 ToolSearch;可验判据:空转轮 ~4 万 token 以内。
 - 两级盘点:小时轮以 `since` 窗口读增量,锚 = 座位贴上一份收班简报的时间戳。
 - 查重缓存住席内:新会话全量拉,其后 `since` 增量;⛔ 不建分支、不共享、不依赖备份。
-- 每日一 fire 跑两仓全量对账并归集日频职责;选层按 fire 时刻 ⛔ 不用计数器,简报写明层。
+- 每日一 fire 跑两仓全量对账(`objectstack-ai/objectstack`、`objectstack-ai/cloud`)并归集日频职责;
+- 选层按 fire 时刻 ⛔ 不用计数器,简报写明层;cloud 卡首触归 `repo:cloud` 席自巡,见多仓协调。
+- 两仓对账兜底:cloud 卡无状态逾 4 h ⇒ 写信 `repo:cloud` 各席,⛔ 不代打标签(`lanes/cloud.md`)。
+- 每日看板的车道一节展示 devx 六项度量;清单住 `lanes/devx.md` 范围节度量行,⛔ 不另抄。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
 - 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
-- 分诊旧记录过期:delta 复审归车道或复审席,照 contract-review.md;⛔ 分诊不再审。
-- Backlog sweep 是常设职责,每 fire 扫任一析取命中的卡。
-- 析取 ①:全裸(无 `pm:*`、无 `needs-user-decision`、无 `domain:*`)。
-- 析取 ②:有 `pm:queue` 无 `domain:*`(仅多车道仓);析取 ③:有 `domain:*` 无 pm-state。
-- 析取 ④:有 `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2 分钟。
+- 轮次记录分写「决策卡 N」与「待您审合 PR M」,不合计;后者 = open `pm:awaiting-merge` PR。
+- 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
+- ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
 - 析取 ⑤:窗内新建且 `pm:queue`/`priority:*` 与建卡同分钟,照未分诊首触;⛔ 不凭 actor。
-- 半状态治愈积压 ②③④ 最老优先、P0 嫌疑先行,⛔ 优先最新不适用。
 - 首触定级与五析取 sweep 每 fire 跑到清空,先于旧卡重验:⛔ 无每轮预算、无逐卡豁免评论。
-- 排序:队列每轮清空时最新优先;清不空的那一刻起改最老优先。
+- 排序:每轮清空时最新优先,清不空起最老优先;半状态积压 ②③④ 恒最老、P0 嫌疑先行。
 - 裸卡数 >15 ⇒ 下一 fire 整轮改域分批集中模式,每批 ≤5 张同族卡,照样跑到清空。
 - 紧急卡直接分诊:维护者点名或 p0 嫌疑 ⇒ 立即起默认判断档分诊子代理,不等定时轮。
 - 每轮读上份轮次记录 fire 以来全部 main push、schedule 与队列结论,⛔ 不只读最新一跑。
 - 窗内无锚红当轮立锚卡、照首触定级,转绿照立并点名承修卡;逾 90 分钟无记录记明断档。
 - main-red 锚卡由席位先立先派,首触事后补作记录级:可改域,⛔ 不改动作,在飞照补。
+- 锚卡关闭同轮照 project-forms.md 敲门,一 PR 一敲;敲门数进轮次记录。
 - 主干全量红与确定性队列红首触定 p0(锚卡、根因卡、full-run 卡);flake 锚卡判确定性才升。
 - 车道席自分诊:本车道卡挡自有在飞(认领卡/PR/落地/拆分链)且证据清楚,方可首触定 p1/p2。
 - 证据 = 卡上引具名失败 check/run、复现读数或 pin 测试;记录照分诊格式贴卡,请分诊复审。
@@ -31,12 +32,17 @@
 - 分诊定级轮读车道 `Suggested-grade:` 行:是输入不是定级,确认或改判,不采纳给理由。
 - 分类动作每张三选一,外加一个修复通道;裁定写方向、给六态之一。
 - 停 `pm:blocked` 同笔在卡正文写行首 `Blocked-by: #N`(issue/PR 号;full-run 卡写评论),散文不算。
+- 日对账 fire 读 `check-half-states` H14,在飞卡亦然:NOT carrying ⇒ `label-write.mjs --add pm:blocking`;
+- stale/UNJUDGED 行手核跨仓依赖后 `--remove pm:blocking`,留则写明理由;增删卡号进轮次记录。
 - 方向在 ADR/本卡裁决/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
 - `pm:queue` = 有具名落点或复现的具体缺陷,无可问之事;⛔ 工具/门禁修复不由此进。
 - `tooling` 入 `pm:queue` 仅凭三门之一:首行带 `Unblocks: #N`(open 产品卡)或点名所护的已发布面;
 - 或实测拖慢车队开发:正确源上假红/假绿、反复重跑、同因丢复核轮;卡须具名实例。
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
-- `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
+- 入 `pm:queue` 前读最新转换评论(dispatch-runbook 状态提取):hold/冻结/裁决 ⇒ 分诊自补半状态。
+- 自补 = 同笔 `pm:on-hold`+引原文 `Restart-when:`;写不出可执行判据才挂 `pm:retriage` 问所属车道。
+- `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序;只挂 issue。
+- 先例已定新键/值/导出名非契约形状提案;分诊审计 ⛔ 不自加门,唯语义/形状真分歧呈人。
 - 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。
 - 决策卡速读居四棱块之上、同题,用业务语言先讲事情与选项,末句只问一字:A/B/C 或是否。
 - 首行写立卡门类别 ①–④;四类定义、⛔ 清单、四答、理由判据与配额见 `filing-gate.md`。
@@ -45,7 +51,6 @@
 - (a) 的分界是不完整 vs 错误,不是文档 vs 代码:示例照抄即失败是 (a),漏列成员不是。
 - 门禁头注、self-test 文案与 `check-*` 处方句 ⛔ 非已声明契约;(b) 须用户或已发布包读得到。
 - (c) 元数据 = 由写它的人以外的人存储并再作者化的键:React prop 不是,存储的视图配置是。
-- 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内;记为边界,⛔ 不扩类。
 - 三类同欠 `reach:`,分诊只把关不测;观察、休眠、零拉动 ⛔ 不立卡、不进收口卡、无配额。
 - 缺 `reach:` 且非例外 ⇒ 定 `priority:p3`,并入收口卡或清扫卡,⛔ 不单独派发、不因此关卡。
 - 先修复:正文被 sanitizer 截断的卡不可派发,评论修复指令后跳过。
@@ -59,19 +64,21 @@
 - 路由属分诊技术判断,⛔ 不升级哪个仓的问题;父单永不派发,`pm:epic` 卡 `pm:retriage` 即答。
 - 算涉 cloud:亦含托管面(objectos-runtime)、`Blocked-by:` cloud 卡、病因在 cloud。
 - 不算涉 cloud:只在 cloud 测得而修复与验收全在本仓;仅引 cloud 卡作历史。
-- 父单已有子结构的:父单队列标签即可,分诊逐个展开路由、补 `Blocked-by:` 排序。
-- 跨层功能点(≥2 层)立父单带 `area:*`+`pm:epic`+清单项级,逐层子单按 `Blocked-by:` 排。
+- 父单已有子结构的:父单挂 `tracking`,分诊逐个展开子卡路由、补 `Blocked-by:` 排序。
+- 跨层功能点(≥2 层)立父单带 `area:*`+`tracking`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
-- 同文件同机制 = 同一发现,不分车道,首触定级即并:证据搬先卡,后卡关 `duplicate_of`。
+- 同文件同机制 = 同一发现,不分车道即并:证据搬先卡,后卡经中继 `issue_patch` 关 `duplicate`。
 - 同族发现并入收口卡,不开单点卡;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。
 - 执行席 ⛔ 不并卡,疑重复挂 `pm:retriage` 写明哪两张同文件同机制;同 assignee 者自关后卡。
+- 关重复卡须目标具名且新读重叠;追踪父单 sub-issue 全关、无 open 工作 ⇒ `completed`。
+- 关卡先贴签名评论点名裁决与证据;⛔ 是非关、活认领卡、安全卡不在此权,归维护者。
 - 首触答责任三问:谁的代码出险/有正路否/谁可达且有人用否;据答改卡范围、域与路由。
 - 三类外不可逆或有硬时限(发版即固化、只被消费的文件、过窗不可补)⇒ 不关,报维护者。
 - 三类外首触关闭只清门前存量,关 not planned(不等批准可否决重开);三类内无证据拒收。
 - 三类内再过时前提检查,三选一:晋级 / 关闭 not planned / hold;判级只在此轮,不在立单时。
-- ⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动;例外:下三行、main-red 锚卡首触。
+- ⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动;例外:关卡行、下三行、锚卡首触。
 - 在飞活性复查:认领逾一天无自有产出(commit/PR/评论)⇒ 敲门一次,首行键 `Owned-24h re-check:`。
 - 敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ `label-write.mjs --release` 一笔中继释放,贴不动。
 - 释放:`Release:` 评论(出处三件)+ `Resume-from:` 行 + `pm:dispatched`→`pm:queue` + 清 assignee。
@@ -90,7 +97,5 @@
 - 例外一:`platform-readings.md` 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。
 - 例外二:AGENTS.md 报告态翻转,须①不删门不跳测;②同笔附两红 run 入下批待决;③否即翻回。
 - 条件:席位验收评论逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排。
-- 机械边界测试(条款②判据):改动扩大接受集或公开面 ⇒ 是;拉回已声明契约 ⇒ 否。
 - 回翻条款:实施中发现契约终究要动 ⇒ dev 停手,卡回决策箱,⛔ 永不静默重裁。
 - 请示纪律:方向性授权覆盖整条执行链一并做完,⛔ 不逐项回问。
-- 推送维护者只照 `lanes/triage.md` 推送清单;中间状态与限流/重试细节只进座位贴和触发器。

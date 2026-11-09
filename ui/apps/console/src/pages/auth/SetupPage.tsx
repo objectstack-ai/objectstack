@@ -32,7 +32,7 @@ import {
   Label,
 } from '@object-ui/components';
 import { withConsoleBase } from '../../utils/consoleBase';
-import { browserTimeZone } from '../settings/workspaceTimezonePromptLogic';
+import { browserTimeZone } from '../settings/firstRunChecklistLogic';
 
 const AUTH_BASE = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
 

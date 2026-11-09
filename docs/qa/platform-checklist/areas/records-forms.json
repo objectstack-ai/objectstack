@@ -597,7 +597,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -634,7 +634,7 @@
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
         "on in_progress, with the export grant from fixtures.requires[3] bound, open the toolbar's Display popover — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
-        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the bulk bar, or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, it POSTs to its own endpoint /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level); on legacy_row_actions confirm both named row actions resolve to live menu entries",
+        "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the bulk bar, or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal"
       ],
       "acceptance": [
@@ -687,9 +687,9 @@
           "evidence": "dropdown screenshot + one screenshot per visualization"
         },
         {
-          "clause": "bulk actions dispatch correctly by mode: per-record actions issue one dispatch per selected record; the aggregate def (showcase_recalc_selection, execution: 'aggregate', an api-type action) issues ONE request — POST /api/v1/apps/showcase/recalc — carrying every selected id in `_selectedIds` at the body's top level",
+          "clause": "bulk actions dispatch correctly by mode: per-record actions issue one dispatch per selected record; the aggregate def (showcase_recalc_selection, execution: 'aggregate', an api-type action) issues ONE request — POST /api/v1/actions/showcase_task/showcase_recalc_selection, the action door — carrying every selected id in `params._selectedIds`, which the server forwards flat to the action's target /api/v1/apps/showcase/recalc",
           "oracle": "network",
-          "verify": "count the captured POSTs against the selection size for each mode (the per-record selection holds not-done rows only, steps[8])",
+          "verify": "count the captured POSTs against the selection size for each mode (the per-record selection holds not-done rows only, steps[8]); for the aggregate mode the one POST is POST /api/v1/actions/showcase_task/showcase_recalc_selection with {params:{_selectedIds}} (QA run #29890 measured exactly one, answered 200)",
           "evidence": "network trace of both runs"
         },
         {
@@ -700,8 +700,8 @@
         }
       ],
       "negative": [
-        "a saved view whose filter is refused (400 INVALID_FILTER) while the grid silently shows ALL rows unfiltered is a FAIL — the objectui#3431 regression shape; zero rows with a captured refusal is the honest symptom, unfiltered rows is the lie. No stock view carries a refused filter, so stage one (QA run #24616): overlay PUT /api/v1/meta/view/showcase_task.done with filter [{field:'done', operator:'equals', value:'maybe'}] — authoring accepts it, every query refuses it (a non-boolean string against a boolean answers 400 INVALID_FILTER naming the field, packages/objectql/src/boolean-comparand-declared-type-door.ts) — and revert with DELETE /api/v1/meta/view/showcase_task.done. A filter on a missing field is refused at authoring (list-view-field-unknown), so it cannot stage this",
-        "tabs-element userFilters (or quickFilters) rendering on an OBJECT list view is a FAIL — ADR-0053 suppresses them there by design, as amended by ADR-0047: on an object list view only `element: 'tabs'` userFilters (and quickFilters) are ignored — objectui app-shell warnSuppressedListNav.ts, which logs the suppression — while `element: 'dropdown'` value chips ARE allowed there (examples/app-showcase/src/ui/views/project.view.ts ships them on All Projects, QA run #24616), so dropdown chips on an object list are not this FAIL",
+        "a saved view whose filter is refused (400 INVALID_FILTER) while the grid silently shows ALL rows unfiltered is a FAIL — the objectui#3431 regression shape; zero rows with a captured refusal is the honest symptom, unfiltered rows is the lie. No stock view carries a refused filter, so stage one in the showcase's customization pair. QA run #24616 staged it package-less; since ADR-0146 D11 a package-less PUT onto a name the showcase ships answers 403 NOT_OVERRIDABLE (packagelessOverlayWriteRefusal, packages/metadata-protocol/src/protocol-packaged-base-refusal.ts). So: POST /api/v1/packages/com.example.showcase/ensure-customization, then PUT /api/v1/meta/view/showcase_task.done?package=com.example.showcase.custom with the view's body, overrides: {package:'com.example.showcase', basedOn:'0.1.0'} and filter [{field:'done', operator:'equals', value:'maybe'}] — authoring accepts it, every query refuses it (a non-boolean string against a boolean answers 400 INVALID_FILTER naming the field, packages/objectql/src/boolean-comparand-declared-type-door.ts) — and revert with DELETE /api/v1/meta/view/showcase_task.done?package=com.example.showcase.custom. A filter on a missing field is refused at authoring (list-view-field-unknown), so it cannot stage this",
+        "tabs-element userFilters (or quickFilters) rendering on an OBJECT list view is a FAIL — ADR-0053 suppresses them there by design, as amended by ADR-0047: on an object list view only `element: 'tabs'` userFilters (and quickFilters) are ignored — objectui app-shell warnSuppressedListNav.ts, which logs the suppression — while `element: 'dropdown'` value chips ARE allowed there (examples/app-showcase/src/ui/views/project.view.ts ships them on All Projects, QA run #24616), so dropdown chips on an object list are not this FAIL. No stock object list view declares tabs userFilters; to stage one, write a view under a fresh name (a package-less write of a name no package ships still lands, ADR-0146 D11) or over a shipped view through the pair, as negative[0] does",
         "an export that returns the unfiltered table for a filtered view is a FAIL even though a file downloaded"
       ],
       "traps": [
@@ -768,6 +768,12 @@
           "date": "2026-10-31",
           "change": "steps[3], acceptance[4] (clause and verify), steps[8], acceptance[8].verify, fixtures.requires[0] and source[0] corrected. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). The tabular view's sort has been the array [{field:'estimate_hours', order:'desc'}] since #17053 retired the bare string clause platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock. The clause now scores the array sort reaching the request as sort=-estimate_hours (the adapter's `-field` spelling, ui/packages/data-objectstack/src/index.ts). steps[8] says to select rows that are not done: Mark Done's per-row visible gate either drops the button or skips done rows as not eligible, and either breaks the one-dispatch-per-selected-row count. Read at base a0f865491d: task.view.ts (tabular, bulk_actions), ui/packages/plugin-grid/src/components/BulkActionDialog.tsx. The sort clause's contract (renders, server-ordered) is unchanged; a prior verdict scored on the string form does not carry",
           "ref": "#27438"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-04",
+          "change": "steps[8], acceptance[8] (clause and verify), negative[0] and negative[1] corrected from QA run #29890 (W5-FAIL, at 589049b0; the re-point wave 4 parked until #29173 landed). The aggregate showcase_recalc_selection is sent through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with {params:{_selectedIds}}, since #27611, and the server forwards the params flat to /api/v1/apps/showcase/recalc in-process (buildApiActionRequest). negative[0]'s package-less overlay of showcase_task.done is refused 403 NOT_OVERRIDABLE since ADR-0146 D11, so the stage goes into com.example.showcase.custom through the ensure door; negative[1] says how to stage a tabs userFilter view. Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     },
@@ -897,7 +903,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -906,7 +912,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick — examples/app-showcase/src/ui/views/task.view.ts. Since spec 18.3.0 a form view's `type` is its layout only, simple | tabbed | wizard (ADR-0050, packages/spec/src/ui/view.zod.ts#FormViewSchema): the showcase's `split` entry is now a two-section tabbed form and `quick` a simple one, and the type values split, drawer and modal are refused by name (FORM_VIEW_TYPE_RETIRED). The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage through selectRecordFormView), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe: PUT /api/v1/meta/view/showcase_task.form?mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}}, then POST /api/v1/meta/view/showcase_task.form/publish. Each variant's sections can be read from its own served view item — the container serves formViews as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<variant>, QA run #24572). ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
+          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick — examples/app-showcase/src/ui/views/task.view.ts. Since spec 18.3.0 a form view's `type` is its layout only, simple | tabbed | wizard (ADR-0050, packages/spec/src/ui/view.zod.ts#FormViewSchema): the showcase's `split` entry is now a two-section tabbed form and `quick` a simple one, and the type values split, drawer and modal are refused by name (FORM_VIEW_TYPE_RETIRED). The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage through selectRecordFormView), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe goes through the customization pair (ADR-0146 D11; the package-less overlay PUT is the older shape): POST /api/v1/packages/com.example.showcase/ensure-customization, then PUT /api/v1/meta/view/showcase_task.form?package=com.example.showcase.custom&mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}} carrying overrides: { package: 'com.example.showcase', basedOn: <the showcase's version> }, then POST /api/v1/packages/com.example.showcase.custom/publish-drafts; revert with DELETE on the pair (DELETE /api/v1/meta/view/showcase_task.form?state=draft&package=com.example.showcase.custom, then the same without state). Once the pair exists, Studio Publish on the showcase leaves its read-only posture (#28562), so ux-conventions.disabled-control-reason variants[1] runs before this item creates it, or on a boot without it. Each variant's sections can be read from its own served view item — the container serves formViews as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<variant>, QA run #24572). ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
           "examples/app-showcase/src/ui/pages/task-desk.page.ts — the presentation surface: a JSX page whose ObjectForm opens with formType=\"drawer\" (edit, a side panel) and formType=\"modal\" (create, a dialog) over the task list"
         ],
         "knownGaps": [
@@ -1020,6 +1026,12 @@
           "date": "2026-10-31",
           "change": "variants, steps[3], steps[4], acceptance[0] (clause and verify), negative[1], fixtures.requires[0], knownGaps[0] and [1], and source[0], [1], [3] and [4] follow spec 18.3.0's form view `type`, and acceptance[5] is new. From QA run #27441 (W3-C3b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). ADR-0050 made `type` the layout only, simple | tabbed | wizard (#27305): split, drawer and modal are refused by name (view.zod.ts FORM_VIEW_TYPE_RETIRED), and the run measured a default-form overlay carrying one answer 422. The split variant is dropped, and steps[3] scores the three retired values as that refusal in acceptance[5], appended so that no clause index moves. The text no longer says the record-form page renders an overlaid drawer/modal as simple, because no form view can declare either. The drawer and modal presentations stay on task-desk.page.ts, whose React ObjectForm keeps both containers. Re-read at base a0f865491d: view.zod.ts, task.view.ts (formViews.split is now tabbed, quick simple), coverage.ts FORM_VIEW_TYPES (3), RecordFormPage.tsx (selectRecordFormView). steps[0] and steps[6] are untouched: the run's 'in-app navigation only' finding waits on a re-measure after #28066. A prior verdict on the split variant does not carry",
           "ref": "#27441"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-08",
+          "change": "fixtures.requires[0]'s overlay recipe moves to the customization pair (ADR-0146 D11): ensure-customization, a draft PUT into com.example.showcase.custom carrying overrides, publish-drafts, and DELETE on the pair to revert; the package-less overlay PUT is the older shape. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },
@@ -1600,7 +1612,7 @@
           "the permission-zoo sets examples/app-showcase/src/security/permission-sets.ts: showcase_manager grants showcase_contact read (line 124), showcase_contributor omits it (lines 36-45) — the both-sides read-gate probe binds a user to each"
         ],
         "knownGaps": [
-          "STALE (QA run #24616): the child-read-gate clause needs two members bound to the manager and contributor positions, and a stock boot provides them — the search:qa-contributor-bound-member recipe (invite, sign-up, then an admin POST of sys_user_position; run it twice, once with position 'manager', once with 'contributor'). It is not blocked(fixture) on a single-user boot; the paging clauses still run on the seeded admin alone",
+          "STALE (QA run #24616): the child-read-gate clause needs two members bound to the showcase_manager and showcase_contributor positions, and a stock boot provides them — the search:qa-contributor-bound-member recipe (invite, sign-up, then an admin POST of sys_user_position; run it twice, once with position 'showcase_manager', once with 'showcase_contributor'). It is not blocked(fixture) on a single-user boot; the paging clauses still run on the seeded admin alone",
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import."
         ]
       },
@@ -2438,7 +2450,7 @@
         "drag one task bar to new dates; capture the PATCH and re-read the record over the API",
         "reload and confirm the bar re-renders from the persisted dates",
         "on an extended fixture (per knownGaps): configure dependencies + a locked row (the direct drag on a locked leaf needs only knownGaps[0]'s lockField overlay); run toolbar auto-schedule; capture the confirm dialog, cancel once (verify zero writes), run again and apply",
-        "trigger a veto path (write rejected server-side) and confirm the bar snaps back. Runnable on stock with no lockField (QA run #24616): bind a member to the `contributor` position (search:qa-contributor-bound-member's steps; task_own_rows shows it only its assigned tasks), open the gantt as that member, have the admin reassign one of its tasks away over the API, then drag that bar — the PATCH answers 404 and the bar snaps back with 'Save failed — the change was rolled back'"
+        "trigger a veto path (write rejected server-side) and confirm the bar snaps back. Runnable on stock with no lockField (QA run #24616): bind a member to the `showcase_contributor` position (search:qa-contributor-bound-member's steps; task_own_rows shows it only its assigned tasks), open the gantt as that member, have the admin reassign one of its tasks away over the API, then drag that bar — the PATCH answers 404 and the bar snaps back with 'Save failed — the change was rolled back'"
       ],
       "acceptance": [
         {
@@ -2768,7 +2780,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2787,11 +2799,11 @@
       },
       "steps": [
         "sign in as admin; open showcase_task and switch to the in_progress saved view (stored filter status=in_progress); screenshot",
-        "open the FilterBuilder toolbar; add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); capture the data request",
+        "open the FilterBuilder toolbar; add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
         "assert the request's `filter` param is the MERGE of the view's stored rule AND the two toolbar conditions (buildEffectiveFilter/mergeFilterNodes), and `sort` carries the toolbar sort (e.g. sort=-due_date) — the console spells its list params without a `$`; the returned rows satisfy view-filter AND toolbar conditions",
         "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress; screenshot; confirm the toolbar filter + sort restored",
         "read where the toolbar filter and sort are kept: the signed-in user's own sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key; its value's perView.<view> carries the filters and the sort — objectui ListPreferencesProvider.tsx, objectui#12418), and its localStorage write-through cache list-state:<userId>:showcase_task. Confirm both are the signed-in user's: the row's user_id, and the cache key's user segment. (Only the search term stays under the older list-filters:<userId>:showcase_task:<viewId> key)",
-        "sign out; sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
+        "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage, which would also wipe the cache this step tests); sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
         "userFilters/URL: where UserFilters are hosted (an interface page or the userFilters surface — NOT a bare object list, ADR-0053), apply a quick-filter; copy the URL; open it in a fresh tab; confirm the uf_<field> params (comma-joined, URI-encoded) reproduce the same rows and uf__tab carries the active preset (ADR-0047)",
         "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak"
       ],
@@ -2811,13 +2823,13 @@
         {
           "clause": "the toolbar filter + search survive a FULL in-app navigation away and back — restored from the user's own list preference (sys_user_preference ui.list.<object>, cached in localStorage list-state:<user>:<object>; URL params alone are lost on an in-app nav link that carries no query string, which is what the preference bridges)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the list rendered, the FilterBuilder shows the two conditions and the SortBuilder the sort; the request re-issued on return carries the same merged `filter` param (the console spells it without a `$`; objectui app-shell/src/context/ListPreferencesProvider.tsx)",
+          "verify": "after a screenshot confirms the list rendered, the FilterBuilder shows the two conditions, the SortBuilder the sort and the quick search box the term (kept under list-filters:<userId>:showcase_task:<viewId>, steps[4]); the request re-issued on return carries the same merged `filter` param (the console spells it without a `$`; objectui app-shell/src/context/ListPreferencesProvider.tsx)",
           "evidence": "before/after screenshots + the re-issued request"
         },
         {
           "clause": "the list state is USER-SCOPED — it is the user's own sys_user_preference row (user_id = the signed-in user), and its localStorage cache key embeds the user id (list-state:<userId>:<object>), so a second account on the same browser never reads the first account's filters (a filter value can be sensitive)",
           "oracle": "dom",
-          "verify": "read account A's ui.list.showcase_task preference row and its list-state cache key, then sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter (B reads its own row, or none)",
+          "verify": "read account A's ui.list.showcase_task preference row and its list-state cache key, then sign A out through the account menu's Log out and sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter (B reads its own row, or none)",
           "evidence": "the two accounts' storage keys + B's clean toolbar"
         },
         {
@@ -2830,7 +2842,7 @@
       "negative": [
         "a toolbar filter that REPLACES the view's stored filter (rows appear that the view filter should exclude) is a FAIL — buildEffectiveFilter merges, it does not overwrite the base",
         "tabs-element userFilters (preset chips, the uf__tab preset) leaking onto a bare OBJECT list view is a FAIL — ADR-0053 suppresses them there by design, as amended by ADR-0047: on an object list view only `element: 'tabs'` userFilters (and quickFilters) are ignored — objectui app-shell warnSuppressedListNav.ts, which logs the suppression — while `element: 'dropdown'` value chips ARE allowed there (examples/app-showcase/src/ui/views/project.view.ts ships them on All Projects, QA run #24616) (the list-view-capabilities item flags the same regression). The reserved list-state params an object list writes for ITSELF — uf__filter, uf__search, uf__sort, uf__group (objectui#11860, userFilterUrlState.ts), e.g. uf__sort after a toolbar sort — are the list's own state mirrored into the URL, not userFilters, and do not count",
-        "a cached toolbar filter from account A visible to account B on the same browser is a FAIL — the key embeds the user id precisely to prevent that leak",
+        "a cached toolbar filter from account A visible to account B on the same browser (A signed out through the account menu's Log out, never by clearing storage) is a FAIL — the key embeds the user id precisely to prevent that leak",
         "an incomplete FilterBuilder row emitted as [field, op, ''] (which matches only empty and silently excludes everything) instead of being dropped is a FAIL — convertFilterGroupToAST skips valueless rows (#1964)"
       ],
       "traps": [
@@ -2897,6 +2909,12 @@
           "date": "2026-10-27",
           "change": "automated.ref says why the unpinned clauses stay live legs: every one is browser-only, and the card adds no Playwright lane (#26573 Done-when). No clause changed",
           "ref": "#26573"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-04",
+          "change": "steps[1], steps[5], acceptance[2].verify, acceptance[3].verify and negative[2] corrected from QA run #29890 (W5-FAIL, at 589049b0): the clause restores filter AND search, so the steps add a quick search and the verify reads it back; the sign-out between accounts is the account menu's Log out, which keeps the cache under test. Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     },
@@ -3578,7 +3596,7 @@
       "title": "Select-all-matching covers every matching id across pages (server total, not the rendered page); clear resets both selection sources",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 8,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3601,9 +3619,9 @@
         "click select-all-matching; the banner reads 'All M matching records are selected'",
         "dispatch a bulk action; capture the requests — resolveBulkRows fans out a paged find (dropping $top/$skip, paging 500) collecting every matching id ACROSS pages",
         "cross-check the collected id count against a direct API count for the same search: GET /api/v1/data/showcase_task?$search=…&$top=0 (or the response total)",
-        "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in `_selectedIds` — it is an api-type action, so the ONE request is POST /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level (the grid hands them to the action runner as params._selectedIds, objectui plugin-grid ObjectGrid.tsx); the run dialog then reads 'N / 55 processed' for ~15 s (QA run #24616); a per-record action (showcase_mark_done) fans out one dispatch per matching id",
+        "confirm the AGGREGATE action (showcase_recalc_selection) carries every matching id in `_selectedIds` — it is an api-type action, so the ONE request is the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}} (the grid hands them to the action runner as params._selectedIds, ui/packages/plugin-grid/src/ObjectGrid.tsx; since #27611 the console sends a declared same-origin api action through the door, and the server forwards the params flat to /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts); the run dialog then reads 'N / 55 processed' for ~15 s (QA run #24616); a per-record action (showcase_mark_done) fans out one dispatch per matching id",
         "click clear; confirm both selection sources reset (the toolbar empties AND the row checkboxes clear)",
-        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the banner and the selected count before and after Select all; delete the rows afterwards (deleteMany, at most 200 ids per call)"
+        "cap leg (acceptance[5]): provision more than 5000 matching scratch tasks — POST /api/v1/data/showcase_task/createMany with a bare JSON array of at most 200 records per call (the batch doors' default maxBatchSize; a 201-record call answers 400 BATCH_TOO_LARGE), e.g. 26 calls of 200 sharing one prefix — then repeat steps[1] and steps[2] and screenshot the banner and the selected count before and after Select all; delete the rows afterwards (POST /api/v1/data/showcase_task/deleteMany with {\"ids\": [...]}, at most 200 ids per call; a bare array answers 400)"
       ],
       "acceptance": [
         {
@@ -3619,7 +3637,7 @@
           "evidence": "the collected-id count + the filtered API count"
         },
         {
-          "clause": "an AGGREGATE bulk action issues ONE dispatch carrying the full matching id set in `_selectedIds` (top level of the api action's request body); a per-record action fans out one dispatch per matching id",
+          "clause": "an AGGREGATE bulk action issues ONE dispatch carrying the full matching id set in `params._selectedIds` of the action door's body (POST /api/v1/actions/showcase_task/showcase_recalc_selection; the server forwards it flat to the api action's target); a per-record action fans out one dispatch per matching id",
           "oracle": "network",
           "verify": "count captured POSTs against the match-set size per mode (ObjectGrid dispatchBulkAction → resolveBulkRows → params._selectedIds)",
           "evidence": "the dispatch trace(s)"
@@ -3697,6 +3715,18 @@
           "date": "2026-11-01",
           "change": "acceptance[5] added with steps[7] and fixtures.knownGaps[1]: past HARD_CAP 5000 the cross-page banner must name the cap (e.g. 「将处理前 5000 条」), never present the uncapped server total as the set the action processes. Today the banner counts totalMatching uncapped (BulkActionBar.tsx) while resolveBulkRows stops at 5000 (ObjectGrid.tsx), so the clause is an expected FAIL until the product defect #28552 is fixed. Read at base 37184244. No existing clause changed. Ruling 6545938831 item ④ on #28345. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "steps[5] and acceptance[2].clause corrected from QA run #29890 (W5-FAIL, at 589049b0): the aggregate action's one request is the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with {params:{_selectedIds}} (since #27611), not a top-level _selectedIds POST to /api/v1/apps/showcase/recalc, which the server reaches in-process (buildApiActionRequest). Read at base f68b47ca",
+          "ref": "#29906"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-08",
+          "change": "steps[7]: deleteMany takes {\"ids\": [...]}; a bare array answers 400. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },
@@ -5528,12 +5558,12 @@
       "title": "A validation rule reads a parent field one hop through a lookup",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "api",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123)",
-        "a member with create/edit on a child object and NO read on its lookup parent — the persona the rule exists to constrain. ⚠ No stock showcase persona is one (fixtures.knownGaps): acceptance[3] is scored from the engine pin or on a scratch pair"
+        "a member with create/edit on a child object and NO read on its lookup parent — who may not name that parent at all: a non-system write may name, in a lookup, only a record the caller's own read door returns. ⚠ No stock showcase persona is one (fixtures.knownGaps): acceptance[3] is scored on a scratch pair"
       ],
       "fixtures": {
         "app": "showcase",
@@ -5543,14 +5573,14 @@
           "at least one churned account and one non-churned account to invoice against"
         ],
         "knownGaps": [
-          "No stock persona has showcase_invoice CRUD WITHOUT showcase_account read, and none can be made from the stock showcase objects: showcase_member_default, the everyone baseline every member holds, grants showcase_account allowRead (examples/app-showcase/src/security/permission-sets.ts), and permission sets only ever ADD grants, so no extra set takes it away (QA run #21720, parked on #22017 row 14). An earlier revision of this item said the opposite, reading packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts. That test's persona is its own injected fallback set, not a stock persona, and it never writes against a churned account. So acceptance[3] is scored from the ENGINE pin in `automated`, which proves the mechanism the clause rests on: the related row is read under SYSTEM authority with the acting identity carried, and the write path accepts and refuses by the parent field. Or it is scored live on the scratch substitute #21720 measured, which is runtime-only on a stock boot (QA run #27438 built and drove it at c4c515ad): POST /api/v1/packages with a declared namespace; PUT /api/v1/meta/object for a parent object, and for a child object carrying a one-hop script validation over its lookup to the parent; PUT /api/v1/meta/permission for a set granting the member the CHILD only, bound with POST /api/v1/data/sys_user_permission_set; then, as that member, write against a tripping and a non-tripping parent. The control is the member's GET of a parent row, which must answer 403: without it the leg proves nothing about an unreadable parent"
+          "No stock persona has showcase_invoice CRUD WITHOUT showcase_account read, and none can be made from the stock showcase objects: showcase_member_default, the everyone baseline every member holds, grants showcase_account allowRead (examples/app-showcase/src/security/permission-sets.ts), and permission sets only ever ADD grants, so no extra set takes it away (QA run #21720, parked on #22017 row 14). An earlier revision of this item said the opposite, reading packages/qa/dogfood/test/showcase-d3-d4-capabilities.dogfood.test.ts. That test's persona is its own injected fallback set, not a stock persona, and it never writes against a churned account. So acceptance[3] is scored on a scratch pair: the dogfood pin in `automated` builds one at boot, or it is scored live on the scratch substitute #21720 measured, which is runtime-only on a stock boot (QA run #27438 built and drove it at c4c515ad): POST /api/v1/packages with a declared namespace; PUT /api/v1/meta/object for a parent object, and for a child object carrying a one-hop script validation over its lookup to the parent; PUT /api/v1/meta/permission for a set granting the member the CHILD only, bound with POST /api/v1/data/sys_user_permission_set; then, as that member, write naming a parent row. The control is the member's GET of a parent row, which must answer 403: without it the leg proves nothing about an unreadable parent"
         ]
       },
       "steps": [
         "POST /api/v1/data/showcase_invoice with `account` pointing at a NON-churned account",
         "POST /api/v1/data/showcase_invoice with `account` pointing at a CHURNED account",
         "PATCH an existing invoice to REPOINT it at a churned account (the update path reads the FK off the merged record, not the patch alone)",
-        "as a persona with NO read on the parent (none exists on stock — fixtures.knownGaps): run the engine pin, or on the scratch substitute write against a non-tripping parent, then a tripping one"
+        "as a member with NO read on the parent (none exists on stock — fixtures.knownGaps), on the scratch pair: write naming a parent row"
       ],
       "acceptance": [
         {
@@ -5572,23 +5602,23 @@
           "evidence": "the patch response"
         },
         {
-          "clause": "a rule whose parent the acting user cannot read still ENFORCES, and still lets a legitimate write through — the read is system-authority, bounded by the fields the predicate names",
+          "clause": "a member who cannot read the parent cannot name it: the write answers reference_not_found on the lookup, before the record's validation rules",
           "oracle": "api",
-          "verify": "on stock showcase no such persona exists (fixtures.knownGaps), so score this from the engine pin in `automated` or live on the scratch substitute. The engine-pin verdict is a layer exception this item declares (fixtures.knownGaps), not a RUNNER rule 6 pass of this api clause: the run record says the verdict rests on the engine layer. With such a persona, the non-churned write is 2xx and the churned write is 400 carrying the AUTHORED message; an unevaluable-rule envelope for this persona is the defect this clause exists to catch, and so is a 2xx on the churned account",
-          "evidence": "both responses for the restricted persona"
+          "verify": "on stock showcase no such persona exists (fixtures.knownGaps), so score this on the scratch pair. For the member who cannot read the parent, the write naming it is 400 VALIDATION_FAILED with exactly one fields[] entry, { field: <the lookup>, code: 'reference_not_found' } — the answer for a parent that exists nowhere — and nothing is stored. The answer carries neither the rule's authored message nor the unevaluable-rule fault, and the member's own GET of the parent answers 403 (the control)",
+          "evidence": "the restricted persona's responses"
         }
       ],
       "negative": [
         "a 2xx on the churned-account create is a FAIL — the rule did not run",
         "a rejection whose text is the unevaluable-rule fault on the READABLE-parent cases is a FAIL: the related row was not preloaded and the rule is rejecting every write, which is the pre-capability behaviour",
-        "a 400 unevaluable-rule envelope for the persona who cannot read the parent is a FAIL: it means the related read was not system-authority, and the rule cannot be authored for the persona it exists to constrain. A 2xx on the CHURNED account is also a FAIL — the rule did not enforce"
+        "for the member who cannot read the parent, a 2xx is a FAIL — it named a record it cannot read — and so is a refusal carrying the rule's authored message or the unevaluable-rule fault instead of the lookup's reference_not_found: the write answered for a parent its caller cannot read"
       ],
       "traps": [
         "seed-data-thin"
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/predicate-relationship-traversal.dogfood.test.ts, at the REST data door of a booted stack: on the showcase as shipped, acceptance[0] (an invoice on an active account is 2xx and reads back, no unevaluable fault), acceptance[1] and negative[0] (an invoice on a churned account is 400 VALIDATION_FAILED with one _record rule_violation entry carrying the authored message, and nothing is stored), acceptance[2] (a PATCH carrying only the repointed account is refused and the stored account is unchanged) and negative[1] (no readable-parent case answers the unevaluable fault); on a scratch pair, acceptance[3] and negative[2] for the persona no stock showcase persona is (fixtures.knownGaps): a member with create/edit on the child and no grant on the parent, whose parent read is the control (403 PERMISSION_DENIED), writes 2xx against a non-tripping parent and 400 with the authored message against a tripping one. packages/objectql/src/engine-predicate-relationship.test.ts stays engine-layer evidence of the mechanism ('reads the related row under SYSTEM authority' and its two siblings)"
+        "ref": "packages/qa/dogfood/test/predicate-relationship-traversal.dogfood.test.ts, at the REST data door of a booted stack: on the showcase as shipped, acceptance[0] (an invoice on an active account is 2xx and reads back, no unevaluable fault), acceptance[1] and negative[0] (an invoice on a churned account is 400 VALIDATION_FAILED with one _record rule_violation entry carrying the authored message, and nothing is stored), acceptance[2] (a PATCH carrying only the repointed account is refused and the stored account is unchanged) and negative[1] (no readable-parent case answers the unevaluable fault); on a scratch pair, acceptance[3] and negative[2] for a member no stock showcase persona is (fixtures.knownGaps): a member with create/edit on the child and no grant on the parent, whose parent read is the control (403 PERMISSION_DENIED), is answered 400 VALIDATION_FAILED with the lookup's reference_not_found, before the record's validation rules, and nothing is stored. packages/objectql/src/engine-predicate-relationship.test.ts stays engine-layer evidence of the mechanism ('reads the related row under SYSTEM authority' and its two siblings)"
       },
       "source": [
         "examples/app-showcase/src/data/objects/invoice.object.ts (no_invoice_for_churned_account)",
@@ -5631,6 +5661,12 @@
           "date": "2026-10-31",
           "change": "fixtures.knownGaps[0] no longer says the restricted persona cannot be provisioned. From QA run #27438 (W3-C2b, at c4c515ad; wave anchor #27377, wave-3 accuracy slice S1). It still holds that no STOCK persona has invoice CRUD without account read. But the scratch substitute is runtime-only on a stock boot: the run installed a package, authored a parent and a child (a one-hop script validation on the child), granted the member the child alone and bound the set, with the member's 403 on a parent read as the control. The gap now spells that sequence and the control. acceptance[3] keeps both of its routes (the engine pin, or the live substitute); no clause changed",
           "ref": "#27438"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-05",
+          "change": "the persona that wrote a child without reading its lookup parent is retired: a non-system write may name, in a lookup or user field, only a record the caller's own read door returns, and that reference check runs before the record's validation rules (ruling records 6573561091 and 6663849489). acceptance[3], its verify, negative[2], step 4, the second persona and automated.ref now state that rule: the member who cannot read the parent is answered reference_not_found, before the record's validation rules. acceptance[0]–[2] are unchanged",
+          "ref": "#29029"
         }
       ]
     },
@@ -6138,7 +6174,7 @@
       "surface": "mixed",
       "personas": [
         "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
-        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password). Neither stock demo persona is an updater on showcase_task: the updater is a member bound to the `contributor` position (allowEdit on showcase_task), whose task RLS (task_own_rows) shows only tasks assigned to it — so assign it some tasks first (admin PATCH assignee), QA runs #24558 / #24616"
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password). Neither stock demo persona is an updater on showcase_task: the updater is a member bound to the `showcase_contributor` position (allowEdit on showcase_task), whose task RLS (task_own_rows) shows only tasks assigned to it — so assign it some tasks first (admin PATCH assignee), QA runs #24558 / #24616"
       ],
       "fixtures": {
         "app": "showcase",
@@ -6234,6 +6270,98 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[0] and [2] and steps[0] corrected. From QA run #27438 (W3-C2b, at c4c515ad), with QA run #27481's shared-tree boot note (W3-C1); wave anchor #27377, wave-3 accuracy slice S1. No stock showcase object holds more than 50 rows on a fresh boot (showcase_task has 11), so the 50-row check needs seeded rows, which the run supplied with 50 showcase_task POSTs; the item now says to seed before counting. A fresh database is not needed, so requires[0] takes any own-port boot, and it names `objectstack dev --fresh --no-compile -p PORT` for runners sharing one tree, because `pnpm dev -- --fresh` compiles dist/objectstack.json into it (packages/cli/src/commands/dev.ts, --no-compile). Read at base a0f865491d. No clause changed",
           "ref": "#27438"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.multi-currency-invoice",
+      "title": "A multi-currency invoice stores its home-currency amount at the rate in force on its document date, refuses a date no rate covers, and keeps a currency-less amount blank",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner; the only persona that may read Setup → Exchange Rates"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot whose home currency is USD. `os dev` / `os serve` / `os start` read examples/app-showcase/.env, which pins OS_LOCALIZATION_CURRENCY=USD; an in-process harness must set that variable itself (packages/qa/dogfood/test/showcase-boot.ts#bootShowcase does). Read the value back first with GET /api/settings/localization and confirm currency is USD before any clause",
+          "the stock seed's exchange rates (examples/app-showcase/src/data/seed/index.ts#exchangeRates): EUR 0.92 from 2025-01-01 and 0.9 from 30 days before the boot, JPY 151.5 from 2025-01-01 and 149.25 from 30 days before the boot, all source manual. No JPY or EUR rate exists before 2025-01-01, which is what the steps[3] refusal probe relies on",
+          "the stock seed's invoices carry a currency_code: INV-1004 / INV-1009 / INV-1010 are EUR, INV-1007 / INV-1008 are JPY (INV-1008 has two yen-priced lines), the rest USD",
+          "the console bundle for the browser legs (pnpm console:build)"
+        ],
+        "knownGaps": [
+          "invoice lines and the Subtotal (`total`) roll-up stay dynamic-mode currency: a child amount cannot take its parent's record currency, and a summary over a record-mode child amount is refused (packages/objectql/src/record-currency-aggregate-door.ts#RecordCurrencySummaryRefusedError). On a EUR or JPY invoice those two show the home currency's symbol while `amount` shows the record's own. That is the platform's current shape, not a failure of this item",
+          "a host with no .env reader and no other currency source has no home currency, so every coded seed invoice is refused ERR_HOME_CURRENCY_UNSET and dropped by the seeder with a warning: the invoice list is empty. That is a fixture failure (requires[0]), scored blocked(fixture), never a FAIL of these clauses"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/data/showcase_invoice?filter currency_code in EUR, JPY and read amount, currency_code, invoice_date, amount_home and amount_rate on each; GET /api/v1/data/sys_exchange_rate for the rows those dates select",
+        "POST a showcase_invoice with no currency_code (name, account, status draft) and read it back",
+        "PATCH a USD draft invoice's currency_code to EUR and read amount_home / amount_rate again",
+        "POST a showcase_invoice with currency_code JPY and invoice_date 2024-06-01 (before any JPY rate)",
+        "in the console, open a EUR invoice's detail page, then its edit form, and change currency_code and invoice_date on the form without saving"
+      ],
+      "acceptance": [
+        {
+          "clause": "a foreign-currency invoice stores `amount_rate` = the sys_exchange_rate row for its currency with the greatest effective_date on or before its invoice_date, and `amount_home` = amount ÷ that rate rounded to the home currency's 2 decimals",
+          "oracle": "api",
+          "verify": "for each EUR and JPY seed invoice, pick the governing rate row by hand from the steps[0] rate read and recompute amount ÷ rate; both stored fields must match. A rate taken from a later row, or a home amount computed as amount × rate, is a FAIL",
+          "evidence": "the invoice and rate reads, and the hand computation per invoice"
+        },
+        {
+          "clause": "a home-currency invoice stores rate 1 and amount_home = amount",
+          "oracle": "api",
+          "verify": "the USD seed invoices with a non-blank amount read amount_rate 1 and amount_home equal to amount",
+          "evidence": "the reads"
+        },
+        {
+          "clause": "an invoice with no currency_code is accepted and keeps amount, amount_home and amount_rate blank (a record-mode amount with no currency is not projected)",
+          "oracle": "api",
+          "verify": "the steps[1] POST answers 201 and its read-back has all three null",
+          "evidence": "the response and the read"
+        },
+        {
+          "clause": "changing currency_code re-projects: after the steps[2] PATCH the invoice carries the EUR rate in force on its invoice_date and the matching amount_home",
+          "oracle": "api",
+          "verify": "before and after reads of the same id; the after values match the clause-0 computation for EUR",
+          "evidence": "the two reads"
+        },
+        {
+          "clause": "a foreign invoice dated before any rate for its currency is refused ERR_EXCHANGE_RATE_MISSING, naming the currency and the date, and no row is written",
+          "oracle": "api",
+          "verify": "the steps[3] POST answers 400 with code ERR_EXCHANGE_RATE_MISSING (packages/objectql/src/home-amount-projection.ts#EXCHANGE_RATE_MISSING_CODE) and a message naming JPY and 2024-06-01; a follow-up list by that name returns nothing",
+          "evidence": "the response body and the empty list"
+        },
+        {
+          "clause": "the console shows the home amount read-only with its 'Converted at RATE on DATE' hint on a EUR invoice, and the edit form shows the live '≈ AMOUNT at RATE on DATE' preview, which follows a changed currency or date before save",
+          "oracle": "screenshot",
+          "verify": "screenshots at deviceScaleFactor 2 of the detail page and of the form before and after the steps[4] edits (ui/packages/fields/src/widgets/homeAmountPreview.tsx#HomeAmountPreview draws the preview)",
+          "evidence": "the screenshots"
+        }
+      ],
+      "negative": [
+        "a foreign invoice stored at rate 1, at a rate dated after its invoice_date, or with amount_home computed by multiplication is a FAIL; so is a currency-less invoice refused, or one stored with a home amount; so is a missing-rate write that stores a row"
+      ],
+      "traps": [
+        "seed-data-thin",
+        "clock-skew"
+      ],
+      "source": [
+        "docs/adr/0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md (record currency, home amount, rate direction)",
+        "packages/objectql/src/home-amount-projection.ts#HOME_CURRENCY_UNSET_CODE",
+        "examples/app-showcase/src/data/objects/invoice.object.ts (currency_code, invoice_date, amount, amount_home, amount_rate)",
+        "examples/app-showcase/src/automation/flows/exchange-rate-sync.flow.ts (the rates-feed template, shipped switched off)",
+        "#27197"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-09",
+          "change": "initial: the showcase invoice became the multi-currency example (#27197); verified live in the same PR, clause table in its body",
+          "ref": "#31757"
         }
       ]
     }

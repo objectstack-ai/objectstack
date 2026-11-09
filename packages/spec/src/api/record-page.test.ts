@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { SYS_ACTIVITY_BUILTIN_TYPES } from '../data/feed.zod';
 import {
   RECORD_PAGE_MAX_ACTIVITY_ROWS,
+  RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES,
   RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES,
   RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE,
   RECORD_PAGE_MAX_ATTACHMENT_ROWS,
@@ -144,5 +145,14 @@ describe('[#28737] the timeline part names its sources strictly and answers the 
     }
     expect(SYS_ACTIVITY_BUILTIN_TYPES as readonly string[]).toContain(RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE);
     expect(RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES as readonly string[]).not.toContain(RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE);
+  });
+
+  it('[#30343] pairs each ledger write action with a drawn built-in activity type, the update one among them', () => {
+    expect(Object.keys(RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES).sort()).toEqual(['create', 'delete', 'update']);
+    expect(RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES.update).toBe(RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE);
+    for (const type of Object.values(RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES)) {
+      expect(SYS_ACTIVITY_BUILTIN_TYPES as readonly string[], type).toContain(type);
+      expect(RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES as readonly string[], type).not.toContain(type);
+    }
   });
 });

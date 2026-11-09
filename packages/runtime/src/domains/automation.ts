@@ -23,7 +23,7 @@ import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT, readEffectiveT
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate: under a
 // wall the environment's metadata, flow definitions included, is the platform
 // operator's. The same verdict every `/meta` and `/packages` write door asks.
-import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { installedManifestsOf, pairOf, walledCatalogWriteVerdict, type InstalledPackageSource } from '@objectstack/metadata-core';
 // [#19874] What the run-lifecycle refusal names as the remedy is read off the
 // SAME inputs the platform-admin derivation reads — the requested posture, the
 // wall predicate, the declared-administrator variable and the set name — so
@@ -81,12 +81,14 @@ import {
     flowCloneNameTakenMessage,
     FLOW_CLONE_NAME_TAKEN_STATUS,
     FLOW_CLONE_NOTICE,
+    FLOW_CLONE_NOTICE_CODE,
 } from '../flow-clone.js';
 // [#28149, ADR-0146 D4] The clone body's declaration (its closed member set)
 // and the target rule every "new similar" door shares.
 import { CloneFlowRequestSchema } from '@objectstack/spec/api';
 import { newSimilarTargetRefusal, newSimilarTargetRefusalAnswer } from './new-similar-target.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
+import { multiReplicaPairCreationRefusal, multiReplicaPackageChangeError } from '../multi-replica-package-refusal.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
 // [#9416, #25821, #25976] The one value-shape check every door that starts or
@@ -224,11 +226,23 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     // re-resolve them and this is the only way it gets one.
     // `AutomationContext.posture` names its readers.
     if (typeof ec?.posture === 'string' && ec.posture.length > 0) automationContext.posture = ec.posture;
+    // [ADR-0151 D3] An AI service account's kind, forwarded beside its grants
+    // for the same reason: the run carries those grants, so its setup does not
+    // re-resolve them, and without the kind the account's run would be
+    // evaluated as a person's (the member baseline, no agent ceiling). Only the
+    // account (`agent` with no `onBehalfOf`); an OAuth-delegated agent is
+    // forwarded as before. Read by `runPrincipalKind` (`@objectstack/service-automation`).
+    if (ec?.principalKind === 'agent' && !ec?.onBehalfOf) automationContext.principalKind = 'agent';
     // [#22450] The caller's language, already resolved (the request's
     // `Accept-Language` first, then the `localization` settings) — forwarded,
     // never re-derived, so a refused run's message renders in the language of
     // the console around it. `AutomationContext.locale` names its reader.
     if (typeof ec?.locale === 'string' && ec.locale.length > 0) automationContext.locale = ec.locale;
+    // [#30213] The administrator an impersonation session names — attribution
+    // only, forwarded so the run's writes record who was at the keyboard while
+    // `userId` stays the impersonated user. Absent on the user's own request.
+    // `AutomationContext.impersonatedBy` names its readers.
+    if (typeof ec?.impersonatedBy === 'string' && ec.impersonatedBy.trim()) automationContext.impersonatedBy = ec.impersonatedBy.trim();
     return automationContext;
 }
 
@@ -1036,25 +1050,29 @@ const CONNECTOR_CONNECTION_DENY_MESSAGE =
     `Connecting, reconnecting or revoking a connector instance, or reading its connection, requires the \`${CONNECTOR_CONNECTION_CAPABILITY}\` capability.`;
 
 /**
- * ADR-0143 D5 — a caller that acts for a person instead of being that person
- * signed in, by kind: `agent` (an envelope that names a delegator,
- * `principalKind: 'agent'` or `onBehalfOf`), `oauth` (admitted by an OAuth
- * access token) or `api_key` (admitted by an API key). The credential half is
- * the forward table's own reading ({@link apiForwardCredentialKind}), so the
- * two doors cannot disagree about which credential admitted a caller.
+ * ADR-0143 D5 — a caller that is not a person signed in, by kind: `agent`
+ * (an envelope that names a delegator, `onBehalfOf`), `agent_account` (an AI
+ * service account, ADR-0151 D3: `principalKind: 'agent'` with no
+ * `onBehalfOf` — its own subject, acting for nobody, admitted by its own API
+ * key), `oauth` (admitted by an OAuth access token)
+ * or `api_key` (admitted by an API key). The credential half is the forward
+ * table's own reading ({@link apiForwardCredentialKind}), so the two doors
+ * cannot disagree about which credential admitted a caller.
  */
-export type ConnectorConnectionDelegatedCaller = 'agent' | 'oauth' | 'api_key';
+export type ConnectorConnectionDelegatedCaller = 'agent' | 'agent_account' | 'oauth' | 'api_key';
 
 /** The delegated kind of this request's caller, or `undefined` for a person signed in (or no recorded credential). */
 export function connectorConnectionDelegatedCaller(context: HttpProtocolContext | undefined): ConnectorConnectionDelegatedCaller | undefined {
     const ec: any = context?.executionContext;
-    if (ec?.principalKind === 'agent' || ec?.onBehalfOf) return 'agent';
+    if (ec?.onBehalfOf) return 'agent';
+    if (ec?.principalKind === 'agent') return 'agent_account';
     const credential = apiForwardCredentialKind(context);
     return credential === 'oauth' || credential === 'api_key' ? credential : undefined;
 }
 
 const CONNECTOR_CONNECTION_DELEGATED_CALLER_NAMES: Readonly<Record<ConnectorConnectionDelegatedCaller, string>> = {
     agent: 'an agent acting on a person\'s behalf',
+    agent_account: 'an AI service account, which acts as itself and never signs in',
     oauth: 'an OAuth access token, which a client holds to act for a person',
     api_key: 'an API key, which acts for its owner without them present',
 };
@@ -2547,10 +2565,15 @@ type CloneLanding = { packageId: string } | { refused: HttpDispatcherResult };
  * accepted the copy: the engine's registration is the one validation of a
  * flow definition (strict parse — the name pattern among it — cycles, node
  * config keys, expressions), so a copy it refuses is refused before any pair
- * exists, with no second copy of that check here. A refusal that can only
- * come later — the ensured pair judged not writable, or the save refused —
- * leaves the pair in place: that is the pair's ordinary state (ensure is
- * idempotent and an empty pair is a valid one) and the next clone reuses it.
+ * exists, with no second copy of that check here. A pair that is already
+ * installed is judged by the target rule before the ensure is asked, so a
+ * landing the rule refuses creates no pair; a pair the ensure creates is one
+ * the rule admits (an App member's included — the rule is membership in the
+ * save gate's closure, `packageDependencyClosure`, which holds the App's
+ * members once the pair declares its App). A refusal that can only
+ * come later — the save refused — leaves the pair in place: that is the
+ * pair's ordinary state (ensure is idempotent and an empty pair is a valid
+ * one) and the next clone reuses it.
  */
 async function resolveCloneTarget(
     deps: DomainHandlerDeps,
@@ -2600,6 +2623,26 @@ async function resolveCloneTarget(
     }
     return {
         land: async () => {
+            // [cloud#3814 D1] Declared replicas on the Redis driver: creating
+            // the pair here would register a package on this replica alone.
+            const oneReplica = await multiReplicaPairCreationRefusal(deps, context, await deps.getObjectQL(context), owner, `Cloning ${subject}`);
+            if (oneReplica) return { refused: { handled: true, response: deps.errorFromThrown(multiReplicaPackageChangeError(oneReplica)) } };
+            // Judge before creating: the pair the ensure derives (`pairOf`,
+            // the App's pair for an App member — ruling record 6691022506),
+            // when it is already installed, is judged BEFORE the ensure, so a
+            // refused landing creates nothing and its "Nothing was written"
+            // is literal. An absent pair is created by the ensure writable and
+            // declaring its App; the rule is membership in the save gate's
+            // closure (`packageDependencyClosure`, see
+            // `newSimilarTargetRefusal`), which for such a pair holds the
+            // App's members, `owner` among them — so a pair the ensure creates
+            // is never refused below.
+            const registry = ((await deps.getObjectQL(context)) as { registry?: InstalledPackageSource } | null | undefined)?.registry;
+            const derived = pairOf(owner, installedManifestsOf(registry));
+            if (derived.ok && registry?.getPackage?.(derived.value)) {
+                const existing = await judge(derived.value);
+                if ('refused' in existing) return existing;
+            }
             let pair: string;
             try {
                 pair = (await ensure.call(protocol, { basePackageId: owner })).packageId;
@@ -3964,9 +4007,16 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // opens the copy where it lives (Setup's "Open the clone in
                 // Studio"): the package is where the copy is, not where it
                 // came from, so it records no lineage.
+                // [#29727] `noticeCode` names the notice so a console can show
+                // it translated; `notice` stays the English fallback.
                 return {
                     handled: true,
-                    response: deps.success({ flow: servedFlowDefinition(clone), packageId: written.packageId, notice: FLOW_CLONE_NOTICE }),
+                    response: deps.success({
+                        flow: servedFlowDefinition(clone),
+                        packageId: written.packageId,
+                        notice: FLOW_CLONE_NOTICE,
+                        noticeCode: FLOW_CLONE_NOTICE_CODE,
+                    }),
                 };
             }
         }

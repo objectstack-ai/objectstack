@@ -59,7 +59,7 @@
  * token that request spends `actions: write` on reaches that path and the
  * failed-jobs re-run below, and no other (`ops.mjs`, `REFUSED_PATH_FAMILIES`).
  * A `run_rerun_failed` is fenced on the run and read back HERE (the section
- * of that name below).
+ * of that name below), and a `pr_enqueue_front` on the pull and its queue.
  * The FIRST failure stops the run — later actions are NOT attempted, and the
  * summary says which — because a seat that dispatched five related writes
  * must be able to read exactly where the board was left. A 404 on a directed
@@ -162,6 +162,26 @@
  * zero writes. Every read is an unpaced GET, and the one write is paced like
  * every write verb.
  *
+ * ## The front-of-queue enqueue — `pr_enqueue_front`, fenced on the PULL and its QUEUE and read back
+ *
+ * The fences (`ENQUEUE_FRONT_FENCES` in `ops.mjs`: open, ready, the head,
+ * not Version Packages, no governed path, the human-merge line count, a
+ * queue read whole, no entry already jumped) are facts about the pull and the
+ * queue, so this file is where they are AUTHORITATIVE
+ * (`enqueueFrontPreflight`): the pull's own `GET /repos/{repo}/pulls/{n}`,
+ * its whole file list (every page, the governed slice through the register
+ * as the governed-review follow-up reads it), then its base's queue by
+ * GraphQL query (`MERGE_QUEUE_READ_QUERY`, unpaced: a query writes nothing)
+ * — the last reads before the mutation. A read that fails or a fence that
+ * fails stops the action with the mutation NOT SENT, zero writes, exit 5.
+ * The mutation sends the node id and the expected head (`expectedHeadOid`).
+ * GraphQL errors on it are a FAILED action naming the grant when the
+ * platform says "not accessible by integration". A 200 is an acceptance:
+ * `confirmEnqueueFront` re-reads the queue every `ENQUEUE_FRONT_POLL_MS` for
+ * up to `ENQUEUE_FRONT_WINDOW_MS` and lands only on `enqueueFrontReadBack`
+ * (the entry jumped, nothing ahead). Queued without the jump, or behind
+ * another, is FAILED at once and says the pull IS queued — ⛔ never re-sent.
+ *
  * ## The hierarchy link — `sub_issue_add` / `sub_issue_remove`, fenced on the CARDS and read back
  *
  * The fences on the two cards (`SUB_ISSUE_FENCES` in `ops.mjs`: parent,
@@ -190,9 +210,14 @@
  * read the parent and ⛔ never re-send. Every read is an unpaced GET, and the
  * one write is paced like every write verb.
  *
- * ## The four advisory rows — fenced on the ADVISORY, printing none of its text
+ * ## The mailbox branch delete — `mailbox_branch_delete`
  *
- * `ops.mjs`'s header section "The four rows that touch a security advisory"
+ * Its fences and its landing are listed once, in `ops.mjs`'s header ("The one
+ * row that deletes a ref"); they are AUTHORITATIVE here, each that fails named.
+ *
+ * ## The advisory rows that write — fenced on the ADVISORY, printing none of its text
+ *
+ * `ops.mjs`'s header section "The rows that write a security advisory"
  * is the authority, and its "The one row that READS an advisory" for the read
  * below; this is where their fences and landings are measured.
  *
@@ -210,32 +235,42 @@
  *     its row (`advisoryCreateLandedText`) and annotation naming the id. A 2xx
  *     without an id is UNCONFIRMED, one in another state FAILED: neither is
  *     ever re-sent.
- *   - `advisory_collaborators_add` and `advisory_state` are fenced HERE, where
- *     the fences are AUTHORITATIVE (`advisoryPreflight`): the executor reads
+ *   - `advisory_collaborators_add`, `advisory_versions` and `advisory_state`
+ *     are fenced HERE, where the fences are AUTHORITATIVE
+ *     (`advisoryPreflight`): the executor reads
  *     `GET /repos/{repo}/security-advisories/{ghsa_id}`, the last request
  *     before the PATCH, and judges `ADVISORY_FENCES` on that answer — a read
- *     that is not a 200 advisory, an answer naming another advisory, or a
- *     state the action may not act in (`triage` / `draft` for the
- *     collaborators; `ADVISORY_TRANSITIONS` for a state change: `draft` only
- *     from `triage`, `closed` only from `triage` or `draft`) stops the action
- *     with the PATCH NOT SENT: its row says `not sent`, zero writes, exit 5.
+ *     that is not a 200 advisory, an answer naming another advisory, a state
+ *     the action may not act in (`triage` / `draft` for the collaborators;
+ *     `draft` for the versions; `ADVISORY_TRANSITIONS` for a state change:
+ *     `draft` from `triage` or `closed`, `closed` from `triage` or `draft`,
+ *     `published` from `draft` alone, a target the table does not name from
+ *     nothing), a list the versions may not replace whole, or a publish whose
+ *     versions are not set (the `versions` fence) stops the action with the
+ *     PATCH NOT SENT: its row says `not sent`, zero writes, exit 5.
  *     The collaborators' logins are merged case-insensitively
  *     (`advisoryCollaboratorPlan`): when every login asked for is already a
  *     collaborator nothing is sent, the row `not sent` and its result saying
  *     `no-op`, exit 0. Otherwise the ONE PATCH carries exactly
  *     `{ collaborating_users }` — the existing logins as the advisory listed
- *     them, then the missing ones — or exactly `{ state }`, the one asked for.
+ *     them, then the missing ones — or exactly `{ state }`, the one asked for —
+ *     or, for the versions, the table's `{ vulnerabilities }`, the entries alone.
  *     The action LANDS only on its own answer (`confirmAdvisory`): every login
- *     sent listed (`advisoryReadBack`), or the state asked for shown
- *     (`advisoryStateReadBack`). A non-2xx is a FAILED action carrying its
+ *     sent listed (`advisoryReadBack`), exactly the entries sent listed on a
+ *     draft (`advisoryVersionsReadBack`), or the state asked for shown
+ *     (`advisoryStateReadBack`) — a publish only when its answer also lists
+ *     exactly the entries its GET read, and then, alone of this row's
+ *     landings, with a notice annotation naming the id
+ *     (`relayAdvisoryAnnotationMessage`, `dispatch.mjs`), public once
+ *     published. A non-2xx is a FAILED action carrying its
  *     cause and then `ADVISORY_ACCESS_REMEDY`; a 2xx that does not show the
  *     result is a FAILED action naming what it shows.
  *
  * ⛔ The payload reaches this file through the event file (`readEventPayload`,
  * `validate.mjs`), never through `env:`, and the text this path prints — row,
  * log line, step summary, annotation — is built from the advisory's id, its
- * state and its collaborators' logins ALONE (`advisoryReportLandedText`, `advisoryCreateLandedText`,
- * `advisoryLandedText`, `advisoryStateLandedText`, `advisoryFenceText`, each
+ * state, its collaborators' logins and counts ALONE (`advisoryReportLandedText`, `advisoryCreateLandedText`,
+ * `advisoryLandedText`, `advisoryVersionsLandedText`, `advisoryStateLandedText`, `advisoryFenceText`, each
  * value in its own shape through `advisoryPrintable`), plus, on a refusal,
  * its CAUSE (`advisoryRefusalCause`): the platform's `message` and
  * `documentation_url` from the refusal's own answer — each capped
@@ -283,6 +318,41 @@
  * row, summary or annotation, nor in the sealed answer's bytes, and opens the
  * parts back to the GET's fields byte for byte; the ablation is recorded in
  * the pull request that landed this.
+ *
+ * ## The listing — `advisory_list`, projected, padded and sealed before anything leaves (`advisoryListAction`)
+ *
+ * The row's gate first: a `senderGate` other than `target-write` (the gate
+ * this stroke already passed) is a FAILED action with ZERO requests. Then,
+ * for each state of `ADVISORY_LIST_STATES` in order, one walk of the
+ * collection's GETs (`advisoryListPagePath`), nothing written: a page fails
+ * its fences (`advisoryListPageFailure`: 200, a list, every item an advisory
+ * in the state asked for, its severity and dates in their declared shapes) ⇒
+ * FAILED, naming the status alone, with
+ * `ADVISORY_LIST_ACCESS_REMEDY` on a refusal; a page that never reached the
+ * platform ⇒ FAILED with `ADVISORY_LIST_UNREACHED` and the row status
+ * `not reached`; every page's `Link` is read through `advisoryListNextCursor`,
+ * and a link it refuses ⇒ FAILED; a short page whose link names no next page,
+ * or a full one whose link names none, ends the walk, and a short page that
+ * still names one ⇒ FAILED with `ADVISORY_LIST_SHORT_PAGE_NEXT`; a full page
+ * with a next link is followed only on the cursor it admits, ⛔ never the link
+ * itself; an advisory met twice ⇒ FAILED; a walk still pending
+ * after `ADVISORY_LIST_PAGE_CAP` pages ⇒ FAILED, never a truncated answer.
+ * Otherwise it projects each advisory to `ADVISORY_LIST_FIELDS`
+ * (`advisoryListPlaintext`), pads the JSON to `ADVISORY_LIST_PADDED_BYTES`
+ * (`advisoryListPadded`: over it ⇒ FAILED, nothing emitted), seals it to the
+ * action's `public_key` under `advisorySealAad` and emits exactly
+ * `ADVISORY_READ_MAX_PARTS` notice parts — a seal that throws, is not
+ * base64url or is not exactly the channel's size ⇒ FAILED with
+ * `ADVISORY_READ_SEAL_FAILED` and no part. Every failure seals and emits
+ * nothing. `rest` hands the answer's `Link` header back for this walk.
+ *
+ * ⛔ What this path prints — the row, the log line, the step summary — is
+ * `advisoryListCall`, the last page's HTTP status and one fixed sentence:
+ * `ADVISORY_LIST_LANDED` or the failure's. Never an id, a count, a state, a
+ * severity, a cursor, a page number, or a byte or part count. The self-test
+ * serves items carrying a summary, a description, vulnerabilities and a
+ * marker in each, and finds the marker in no line, row, summary or
+ * annotation, nor in the opened plaintext.
  *
  * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
@@ -339,6 +409,16 @@
  * not sent, and the stroke stops there as on any failure: silence here is the
  * defect this follow-up exists to close, so it is never a quiet skip.
  *
+ * The `workflows` row's split: when EVERY governed hit is that row and the
+ * target is in its `split.repos` (`workflowSplitReadable`), the follow-up
+ * reads the queue guard's own measure — `readWorkflowDiff`, imported, merge
+ * base → head (`workflowReadingFor`: the compare answers the merge base, the
+ * checkout must be the target by its origin, the two commits are fetched by
+ * sha at depth 1 when missing) — and a reading that says S requests nobody.
+ * ⛔ Fail closed: no checkout, a commit missing, git throwing, an unread
+ * compare, an H reading, a mixed pull or a repository outside `split.repos`
+ * requests exactly as the path-only plan, and the verdict row says which.
+ *
  * ## The step summary — what a person reads back
  *
  * `$GITHUB_STEP_SUMMARY` gets one table per run: request id · sender and its
@@ -380,26 +460,28 @@
  *   4   the sender is not authorized on the target repo; zero writes.
  *   5   an action FAILED; the summary names it and which earlier ones landed —
  *       a `run_rerun_failed` refused at a fence among them, its POST not sent,
- *       and an `advisory_collaborators_add` or `advisory_state` refused at a
- *       fence, its PATCH not sent, and an `advisory_read` refused at a fence,
+ *       and an `advisory_collaborators_add`, `advisory_versions` or
+ *       `advisory_state` refused at a fence, its PATCH not sent, and an `advisory_read` refused at a fence,
  *       whose seal failed or did not fit — nothing of it emitted.
  *  10   the write throttle refused (its prescription was printed), or a stroke's
  *       rule ⑤ batch could not be recorded; zero writes in that second case.
  */
 
+import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
 // The register and the approver list, READ — never restated here (the ops.mjs header, "The governed-review follow-up").
-import { GOVERNED_TIER_H, GOVERNED_TIER_S, governedPathsIn, landingTierOf, pullPathsFrom, repoIdForSlug } from '../check-governed-merges.mjs';
+import { applyWorkflowSplit, GOVERNED_TIER_H, GOVERNED_TIER_S, governedPathsIn, landingTierOf, pullPathsFrom, readWorkflowDiff, repoIdForSlug, slugFromRemote } from '../check-governed-merges.mjs';
 import { GOVERNED_APPROVERS } from '../check-governed-queue-guard.mjs';
 import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { announceBatch, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceFilePath, paceWrite, releaseWriteLease, unrecordableText } from '../write-pace.mjs';
 import {
   ADVISORY_ANNOTATED_OPS,
+  ADVISORY_PUBLISH_OP,
   ADVISORY_READ_OPS,
   ANNOTATED_OPS,
   parseRelayAdvisoryAnnotation,
@@ -421,6 +503,32 @@ import {
   ADVISORY_READ_UNREACHED,
   ADVISORY_READ_UNREACHED_STATUS,
   advisoryReadAad,
+  advisorySealAad,
+  ADVISORY_LIST_ACCESS_REMEDY,
+  ADVISORY_LIST_CAP_HIT,
+  ADVISORY_LIST_CURSOR_REFUSED,
+  ADVISORY_LIST_FIELDS,
+  ADVISORY_LIST_LANDED,
+  ADVISORY_LIST_OVER_CAP,
+  ADVISORY_LIST_PAGE_CAP,
+  ADVISORY_LIST_PAGE_SIZE,
+  ADVISORY_LIST_PADDED_BYTES,
+  ADVISORY_LIST_REPEATED,
+  ADVISORY_LIST_SHORT_PAGE_NEXT,
+  ADVISORY_LIST_SENDER_REFUSED,
+  ADVISORY_LIST_STATES,
+  ADVISORY_LIST_UNREACHED,
+  ADVISORY_READ_MAX_PARTS,
+  ADVISORY_READ_MAX_SEALED_CHARS,
+  ADVISORY_READ_SENDER_GATES,
+  advisoryListCall,
+  advisoryListDisplay,
+  advisoryListNextCursor,
+  advisoryListPadded,
+  advisoryListPageFailure,
+  advisoryListPagePath,
+  advisoryListPlaintext,
+  advisoryListProjection,
   advisoryReadCall,
   advisoryReadFenceFailures,
   advisoryReadFenceText,
@@ -432,6 +540,12 @@ import {
   sealAdvisoryRead,
   ADVISORY_STATE_SHAPE,
   ADVISORY_TRANSITIONS,
+  ADVISORY_PUBLISHED_STATE,
+  ADVISORY_VERSIONS_STATES,
+  advisoryVersionsLandedText,
+  advisoryVersionsOf,
+  advisoryVersionsOnTheWire,
+  advisoryVersionsReadBack,
   GHSA_ID_SHAPE,
   advisoryCollaboratorLogins,
   advisoryCollaboratorPlan,
@@ -450,11 +564,18 @@ import {
   GOVERNED_REVIEW_FILES_PAGE_SIZE,
   GOVERNED_REVIEW_OPS,
   LOGIN_SHAPE,
+  MAILBOX_LABEL,
   OPS,
   PERMISSIONS,
   PR_LANDED_STATE,
+  MERGE_QUEUE_READ_QUERY,
   RERUN_FAILED_ATTEMPT,
   answerPlaceholder,
+  enqueueFrontFenceFailures,
+  enqueueFrontFenceText,
+  enqueueFrontLandedText,
+  enqueueFrontReadBack,
+  mergeQueueOf,
   failedJobNames,
   governedReviewRequests,
   rerunFailedFenceFailures,
@@ -523,6 +644,9 @@ export function repoOfIssue(json) {
  * A pull-request mutation lands only when its answer SHOWS the state the op table declares for it
  * (`PR_LANDED_STATE`, carried on the descriptor as `landed`) — a 200 with `data` and no `errors` is
  * the platform accepting the request, not the pull being in that state.
+ * A refusal keeps its status; the platform's `message` is printed only when it reproduces no prose of the body sent
+ * (`advisoryProseOf`, the `QUOTE_WINDOW` test `advisoryRefusalCause` applies), so a refusal that echoes an issue's
+ * title or body cannot carry it into the row, the log line or the step summary.
  */
 export function requestLanded(req, { status, json } = {}) {
   if (req.graphql) {
@@ -573,7 +697,12 @@ export function requestLanded(req, { status, json } = {}) {
     return { ok: true, why: '' };
   }
   if (status === 404 && req.idempotent404) return { ok: true, why: 'already absent', idempotent: true };
-  return { ok: false, why: `HTTP ${status}${typeof json?.message === 'string' ? ` — ${json.message}` : ''}` };
+  if (typeof json?.message !== 'string') return { ok: false, why: `HTTP ${status}` };
+  const known = advisoryProseOf(req?.body);
+  if (quotesKnown(json.message, known) || quotesKnown(flattenRefusalText(json.message), [...known, ...known.map(flattenRefusalText)])) {
+    return { ok: false, why: `HTTP ${status} — the platform's message is not printed: it quotes the body sent, and no row prints that` };
+  }
+  return { ok: false, why: `HTTP ${status} — ${json.message}` };
 }
 
 /** The logins an issue or pull answer lists as assigned, in the platform's order; `[]` when it lists none. Pure. */
@@ -609,12 +738,16 @@ export function reviewedLogins(json) {
  *   toRequest  on a Tier H hit, the approvers not covered and not the pull's author;
  *   toAssign   on a Tier H hit, the author when it is an uncovered approver (a request naming it is a 422).
  *
+ * `workflowDiff` is the queue guard's own reading (`readWorkflowDiff`, see `workflowReadingFor`), handed to
+ * `applyWorkflowSplit`: only a MEASURED reading can move the `workflows` row to S, and only in its `split.repos`;
+ * null — every path-only call — keeps that row H, so the answer is byte-identical to the path-only plan.
+ *
  * Logins are matched as GitHub matches them, case-insensitively; the answer keeps `approvers`' own spelling and order.
  */
-export function governedReviewPlan({ paths, repo, author = null, requested = [], assigned = [], reviewed = [], approvers = GOVERNED_APPROVERS } = {}) {
+export function governedReviewPlan({ paths, repo, author = null, requested = [], assigned = [], reviewed = [], approvers = GOVERNED_APPROVERS, workflowDiff = null } = {}) {
   const repoId = repoIdForSlug(repo);
   const matched = repoId ? governedPathsIn(Array.isArray(paths) ? paths : [], repoId) : [];
-  const tier = matched.length === 0 ? null : landingTierOf(matched);
+  const tier = matched.length === 0 ? null : landingTierOf(applyWorkflowSplit(matched, repoId, workflowDiff));
   const lower = (list) => (Array.isArray(list) ? list : []).map((l) => String(l).toLowerCase());
   const have = new Set([...lower(requested), ...lower(assigned), ...lower(reviewed)]);
   const list = Array.isArray(approvers) ? approvers : [];
@@ -634,6 +767,86 @@ export function governedReviewText(plan, { repo, files, approvers = GOVERNED_APP
   const sending = [plan.toRequest.length ? `requesting ${named(plan.toRequest)}` : '', plan.toAssign.length ? `assigning the author ${named(plan.toAssign)} (a request naming the author is a 422)` : ''].filter(Boolean).join(' and ');
   if (!sending) return `governed review: Tier H (${hits}) — ${named(approvers)} already requested, assigned or reviewed; nothing to send`;
   return `governed review: Tier H (${hits}) — ${plan.covered.length ? `${named(plan.covered)} already covered; ` : ''}${sending}`;
+}
+
+/**
+ * Whether the `workflows` split may be READ for this plan (header: "The governed-review follow-up"): a Tier H plan
+ * whose EVERY governed hit is a row with `split` naming this repository. Pure. `{ read: true }`, or `{ read: false,
+ * why }` — the words the verdict row adds, so the log says which case kept the path-only H. ⛔ Any other governed
+ * hit (Tier S or H) keeps the plan exactly as the path-only reading answers: a mixed pull is never split here.
+ */
+export function workflowSplitReadable(plan) {
+  const hits = Array.isArray(plan?.matched) ? plan.matched : [];
+  const splitRows = hits.filter((s) => s?.split);
+  if (plan?.tier !== GOVERNED_TIER_H || splitRows.length === 0) return { read: false, why: null };
+  const others = hits.filter((s) => !s?.split);
+  if (others.length > 0) return { read: false, why: `another governed row is hit too (${others.map((s) => `\`${s.glob}\``).join(', ')}), so the path-only tier stands` };
+  const outside = splitRows.filter((s) => !s.split.repos.includes(plan.repoId));
+  if (outside.length > 0) return { read: false, why: `${plan.repoId} is not in the row's split.repos (${outside[0].split.repos.join(', ')}), so the path-only tier stands` };
+  return { read: true, why: null };
+}
+
+const FULL_SHA = /^[0-9a-f]{40}$/;
+const GIT_FETCH_TIMEOUT_MS = 120_000;
+
+/**
+ * The workflow reading for ONE pull, merge base → head, the queue guard's `pull_request` leg (`readWorkflowDiff`
+ * imported, ⛔ no second reader): `GET /repos/{repo}/compare/{base.sha}...{head.sha}` answers the merge base; the
+ * checkout must be `repo` by its `origin` (`slugFromRemote`); the two commits are fetched by sha at depth 1 when the
+ * checkout lacks them (the relay checks out `main` at depth 1, anonymously — the repository is public), then
+ * verified present; the diff is read with the merge base as base AND inventory base. `git(argv)` returns stdout and
+ * throws — the seam; null is "no checkout". ⛔ Fail closed: every failure answers `{ measured: false, reason }`,
+ * which `applyWorkflowSplit` reads as Tier H. Never throws.
+ */
+export async function workflowReadingFor({ repo, paths, pr, api, t, git = null }) {
+  const unmeasured = (reason, extra = {}) => ({ measured: false, reason, base: null, head: null, files: [], ...extra });
+  if (typeof git !== 'function') return unmeasured('no checkout was handed to this run, so the workflow diff cannot be read');
+  const head = pr?.head?.sha;
+  const tip = pr?.base?.sha;
+  if (!FULL_SHA.test(String(head)) || !FULL_SHA.test(String(tip))) return unmeasured("the pull's head or base sha could not be read off its answer");
+  const cmp = await rest(api, `/repos/${repo}/compare/${tip}...${head}`, {}, t);
+  const mergeBase = cmp.json?.merge_base_commit?.sha;
+  if (cmp.status !== 200 || !FULL_SHA.test(String(mergeBase))) return unmeasured(`${cmp.call} -> HTTP ${cmp.status}${cmp.detail ? ` (${cmp.detail})` : ''}: the merge base could not be read`, { head });
+  const first = (error) => String(error?.stderr || error?.message || error).trim().split('\n')[0];
+  try {
+    const origin = slugFromRemote(git(['remote', 'get-url', 'origin']));
+    if (!origin || origin.toLowerCase() !== String(repo).toLowerCase()) return unmeasured(`the checkout is ${origin ?? 'an unparsed origin'}, not ${repo}, so it cannot vouch for this pull's commits`, { base: mergeBase, head });
+  } catch (error) {
+    return unmeasured(`git could not read the checkout's origin (${first(error)})`, { base: mergeBase, head });
+  }
+  const has = (sha) => {
+    try {
+      git(['cat-file', '-e', `${sha}^{commit}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const missing = [...new Set([mergeBase, head])].filter((sha) => !has(sha));
+  if (missing.length > 0) {
+    try {
+      git(['fetch', '--no-tags', '--depth=1', 'origin', ...missing]);
+    } catch (error) {
+      return unmeasured(`git could not fetch ${missing.map((s) => s.slice(0, 12)).join(', ')} (${first(error)})`, { base: mergeBase, head });
+    }
+    const still = missing.filter((sha) => !has(sha));
+    if (still.length > 0) return unmeasured(`the checkout still lacks ${still.map((s) => s.slice(0, 12)).join(', ')} after the fetch`, { base: mergeBase, head });
+  }
+  return readWorkflowDiff({ paths, base: mergeBase, head, inventoryBase: mergeBase, git });
+}
+
+/** The words a reading adds to the verdict row: what was read, or why nothing was — so the log says which happened. Pure. */
+export function workflowReadingText(reading) {
+  if (!reading) return '';
+  const range = reading.base && reading.head ? ` (merge base ${String(reading.base).slice(0, 12)} → head ${String(reading.head).slice(0, 12)})` : '';
+  if (reading.measured !== true) return ` · workflow split UNREAD${range}: ${reading.reason} — fail closed, the path-only tier H stands`;
+  const files = (Array.isArray(reading.files) ? reading.files : []).map((f) => `\`${f.path}\` ${f.tier}${f.tier === GOVERNED_TIER_H && f.reasons?.[0] ? ` (${f.reasons[0]})` : ''}`);
+  return ` · workflow split read${range}: ${files.join(', ')}`;
+}
+
+/** The CLI's git seam: argv against the relay's own checkout, stdout back, a throw on any failure (header). */
+export function checkoutGit(root) {
+  return (argv) => execFileSync('git', argv, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'], timeout: argv[0] === 'fetch' ? GIT_FETCH_TIMEOUT_MS : 30_000 });
 }
 
 /**
@@ -807,6 +1020,73 @@ export async function confirmRerunFailed(req, answer, pre, payload, api, t, { sl
   return { ok: false, why: `${platform} accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: the re-run may still start; read the run before anything else, ⛔ do not re-send (a second send meets attempt ${want} at the once fence and is refused)` };
 }
 
+/** The front-of-queue enqueue's read-back window and poll interval (header): the queue is re-read until the entry shows. */
+export const ENQUEUE_FRONT_WINDOW_MS = 30_000;
+export const ENQUEUE_FRONT_POLL_MS = 3_000;
+
+/** The base's merge queue, read by GraphQL query — unpaced (`read`). `{ queue }`, or `{ fail }` — the sentence. Never throws. */
+async function readMergeQueue(repo, branch, api, t) {
+  const [owner, name] = repo.split('/');
+  const r = await rest(api, '/graphql', { method: 'POST', body: { query: MERGE_QUEUE_READ_QUERY, variables: { owner, name, branch } }, read: true }, t);
+  const errors = Array.isArray(r.json?.errors) && r.json.errors.length ? `: GraphQL ${r.json.errors.map((e) => e?.message ?? 'error').join('; ')}` : '';
+  const queue = r.status === 200 && !errors ? mergeQueueOf(r.json) : null;
+  if (!queue) return { fail: `POST /graphql mergeQueue(branch: ${branch}) -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}${errors}: the merge queue could not be read` };
+  return { queue };
+}
+
+/**
+ * The fences, AUTHORITATIVE (header: "The front-of-queue enqueue"): the pull's own GET, its whole file list (the
+ * governed slice through the register) and its base's queue — the last three reads before the mutation — judged
+ * against `ENQUEUE_FRONT_FENCES`. Returns `{ pull, queue }` to send, or `{ fail: why }` — the sentence the row
+ * prints, the mutation NOT SENT. Never throws on a status.
+ */
+export async function enqueueFrontPreflight(req, payload, api, t) {
+  const { pull: number, expectedHeadSha } = req.enqueueFront;
+  const p = await rest(api, `/repos/${payload.repo}/pulls/${number}`, {}, t);
+  if (p.status !== 200 || !p.json || typeof p.json !== 'object') return { fail: `${p.call} -> HTTP ${p.status}${p.detail ? ` (${p.detail})` : ''}: pull #${number} could not be read, so its fences were not judged — nothing sent` };
+  const read = await readPullFiles(payload.repo, number, api, t);
+  if (read.fail) return { fail: `pull #${number}'s whole file list could not be read (HTTP ${read.fail.status}), so its governed fence was not judged — nothing sent` };
+  const repoId = repoIdForSlug(payload.repo);
+  const governed = repoId ? governedPathsIn(pullPathsFrom(read.files).paths, repoId).flatMap((surface) => surface.files) : [];
+  const base = typeof p.json.base?.ref === 'string' ? p.json.base.ref : null;
+  if (base === null) return { fail: `pull #${number}'s base ref could not be read, so its queue was not judged — nothing sent` };
+  const q = await readMergeQueue(payload.repo, base, api, t);
+  if (q.fail) return { fail: `${q.fail}, so its fences were not judged — nothing sent` };
+  const failures = enqueueFrontFenceFailures({ pull: p.json, expectedHeadSha, governed, queue: q.queue });
+  if (failures.length) return { fail: `REFUSED at the relay's fence on pull #${number}, nothing sent — ${enqueueFrontFenceText(failures)}` };
+  return { pull: p.json, base, queue: q.queue };
+}
+
+/**
+ * Did the jump LAND? Judged by reading the queue back, never by the 200 (header): GraphQL errors are FAILED with
+ * nothing changed; otherwise the queue is re-read until `enqueueFrontReadBack` settles. Returns `{ ok, why, result }`.
+ * Never throws on a status.
+ */
+export async function confirmEnqueueFront(req, answer, pre, payload, api, t, { sleep, now, windowMs = ENQUEUE_FRONT_WINDOW_MS, pollMs = ENQUEUE_FRONT_POLL_MS } = {}) {
+  const { pull } = req.enqueueFront;
+  if (answer.status !== 200 || !answer.json || typeof answer.json !== 'object') return { ok: false, why: `HTTP ${answer.status}${answer.detail ? ` — ${answer.detail}` : ''}` };
+  if (Array.isArray(answer.json.errors) && answer.json.errors.length) {
+    const said = answer.json.errors.map((e) => e?.message ?? 'error').join('; ');
+    const grant = /not accessible by integration/i.test(said) ? ' — the App token lacks the jump: the maintainer grants the objectstack-fleet App `Merge queues: write` (and accepts it on the installation)' : '';
+    return { ok: false, why: `GraphQL: ${said}${grant}; nothing was enqueued by this answer — read the pull before anything else` };
+  }
+  const started = now();
+  let last = 'nothing was read back';
+  for (;;) {
+    const q = await readMergeQueue(payload.repo, pre.base, api, t);
+    if (q.fail) last = q.fail;
+    else {
+      const v = enqueueFrontReadBack({ pull, queue: q.queue });
+      if (v.ok) return { ok: true, why: '', result: enqueueFrontLandedText(v, q.queue.entries.length) };
+      if (!v.pending) return { ok: false, why: `HTTP 200 accepted, but ${v.why} — the pull stays queued where it is; ⛔ do not re-send (it rebuilds every group again), read the queue and ask the maintainer` };
+      last = v.why;
+    }
+    if (now() - started >= windowMs) break;
+    await sleep(pollMs);
+  }
+  return { ok: false, why: `HTTP 200 accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: read the queue before anything else, ⛔ do not re-send` };
+}
+
 /** The hierarchy link's read-back window and poll interval (header): the parent's list is re-read until it settles. */
 export const SUB_ISSUE_WINDOW_MS = 30_000;
 export const SUB_ISSUE_POLL_MS = 3_000;
@@ -877,28 +1157,73 @@ export async function confirmSubIssue(req, answer, pre, payload, api, t, { sleep
 }
 
 /**
- * The advisory's fences, AUTHORITATIVE (header: "The four advisory rows"): its own GET, judged against
+ * The mailbox branch delete's fences on the reads (header): `[]` to send, else one sentence per fence that fails —
+ * an unread pull is one, judged alone. `pull`, `open` and `ref` are `rest` answers; a 404 ref fences nothing. Pure.
+ */
+export function mailboxBranchFenceFailures({ repo, branch, pull, open, ref }) {
+  if (pull?.status !== 200 || !pull.json || typeof pull.json !== 'object') return [`${pull?.call} -> HTTP ${pull?.status}: the pull could not be read`];
+  const pr = pull.json;
+  const out = [];
+  if (pr.state !== 'closed') out.push(`the pull is ${pr.state}, not closed`);
+  if (!labelNames(pr.labels).includes(MAILBOX_LABEL)) out.push(`the pull does not carry ${MAILBOX_LABEL}`);
+  if (pr.head?.ref !== branch) out.push(`the pull's head is ${pr.head?.ref ?? 'unread'}, not ${branch}`);
+  if (String(pr.head?.repo?.full_name ?? '').toLowerCase() !== repo.toLowerCase()) out.push(`the pull's head lives on ${pr.head?.repo?.full_name ?? 'no repository'}, not ${repo}`);
+  if (open?.status !== 200 || !Array.isArray(open.json)) out.push(`${open?.call} -> HTTP ${open?.status}: the open pulls on ${branch} could not be read`);
+  else if (open.json.length) out.push(`open pull(s) ${open.json.map((p) => `#${p?.number}`).join(', ')} have ${branch} as head — the DELETE would close them`);
+  const at = ref?.status === 200 && ref.json?.ref === `refs/heads/${branch}` ? ref.json.object?.sha : undefined;
+  if (ref?.status !== 404 && typeof at !== 'string') out.push(`${ref?.call} -> HTTP ${ref?.status}: the ref ${branch} could not be read`);
+  else if (ref?.status !== 404 && at !== pr.head?.sha) out.push(`${branch} is at ${at.slice(0, 12)}, not the pull's head ${String(pr.head?.sha ?? 'unread').slice(0, 12)} — a commit pushed after the close is not the mailbox's`);
+  return out;
+}
+
+/** The fences, AUTHORITATIVE (header): the three reads, then `{}` to send or `{ fail }`, the DELETE NOT SENT. Never throws. */
+export async function mailboxBranchPreflight(req, payload, api, t) {
+  const { pull, branch } = req.mailboxBranch;
+  const repo = payload.repo;
+  const pr = await rest(api, `/repos/${repo}/pulls/${pull}`, {}, t);
+  const open = await rest(api, `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${repo.split('/')[0]}:${branch}`)}`, {}, t);
+  const ref = await rest(api, `/repos/${repo}/git/ref/heads/${branch}`, {}, t);
+  const failures = mailboxBranchFenceFailures({ repo, branch, pull: pr, open, ref });
+  return failures.length ? { fail: `REFUSED at the relay's fence on #${pull}'s head ${branch}, nothing sent — ${failures.join('; ')}` } : {};
+}
+
+/** Did the delete LAND? The ref read back absent (header); a ref still there, or unread, is FAILED. Never throws. */
+export async function confirmMailboxBranch(req, answer, payload, api, t) {
+  const { branch } = req.mailboxBranch;
+  const back = await rest(api, `/repos/${payload.repo}/git/ref/heads/${branch}`, {}, t);
+  const platform = `HTTP ${answer.status}${answer.detail ? ` — ${answer.detail}` : ''}`;
+  if (back.status !== 404) return { ok: false, why: `${platform}, but ${back.call} answered HTTP ${back.status}: the branch ${back.status === 200 ? 'is still there' : 'could not be read back'} — read it before anything else` };
+  return { ok: true, why: '', idempotent: !(answer.status >= 200 && answer.status < 300), result: `deleted ${branch} (read back absent)` };
+}
+
+/**
+ * The advisory's fences, AUTHORITATIVE (header: "The advisory rows that write"): its own GET, judged against
  * `ADVISORY_FENCES` — for `advisory_collaborators_add` an open advisory (`ADVISORY_OPEN_STATES`), for
- * `advisory_state` a transition `ADVISORY_TRANSITIONS` allows — then, for the collaborators, the merge. Returns
- * `{ plan, state, known }` (`plan` null for a state change; `plan.missing` empty is the no-op; `known` the
- * advisory's own text, which a later refusal's cause may never quote) to proceed, or `{ fail }`, the sentence the
- * row prints, the PATCH NOT SENT. ⛔ That sentence carries nothing of the answer but what `advisoryFenceText`
- * prints and, on a refused read, its cause (`advisoryRefusalCause`). Never throws.
+ * `advisory_versions` a draft (`ADVISORY_VERSIONS_STATES`) whose whole list the entries may replace, for
+ * `advisory_state` a transition `ADVISORY_TRANSITIONS` allows — a target it does not name has no from-states and fails
+ * closed — and for a publish the versions set first — then, for the collaborators, the merge. Returns
+ * `{ plan, state, known, versions }` (`plan` null but for the collaborators, `plan.missing` empty the no-op; `known`
+ * the advisory's own text, which a later refusal's cause may never quote; `versions` the entries a publish's GET read,
+ * which its answer must list again) to proceed, or `{ fail }`, the sentence the row prints, the PATCH NOT SENT. ⛔ That
+ * sentence carries nothing of the answer but what `advisoryFenceText` prints and, on a refused read, its cause
+ * (`advisoryRefusalCause`). Never throws.
  */
 export async function advisoryPreflight(req, payload, api, t) {
-  const spec = req.advisoryCollaborators ?? req.advisoryState;
+  const spec = req.advisoryCollaborators ?? req.advisoryVersions ?? req.advisoryState;
   const { ghsaId } = spec;
   const to = req.advisoryState ? req.advisoryState.to : null;
-  const from = to ? ADVISORY_TRANSITIONS[to] : ADVISORY_OPEN_STATES;
+  const versions = req.advisoryVersions ? req.advisoryVersions.versions : null;
+  const from = to ? (Object.hasOwn(ADVISORY_TRANSITIONS, to) ? ADVISORY_TRANSITIONS[to] : []) : versions ? ADVISORY_VERSIONS_STATES : ADVISORY_OPEN_STATES;
   const read = await rest(api, `/repos/${payload.repo}/security-advisories/${ghsaId}`, {}, t);
-  const failures = advisoryFenceFailures({ ghsaId, answer: read, from, to });
+  const failures = advisoryFenceFailures({ ghsaId, answer: read, from, to, ...(versions ? { versions } : {}) });
   if (failures.length) {
     const refused = !(read.status >= 200 && read.status < 300);
     return { fail: `REFUSED at the relay's fence on ${ghsaId}, nothing sent — ${advisoryFenceText(failures)}${refused ? `; ${advisoryRefusalCause(read, advisoryProseOf(spec))}; ${ADVISORY_ACCESS_REMEDY}` : ''}` };
   }
   const known = advisoryProseOf(read.json);
-  if (to) return { plan: null, state: read.json.state, known };
-  return { plan: advisoryCollaboratorPlan({ existing: advisoryCollaboratorLogins(read.json), requested: spec.add }), state: read.json.state, known };
+  if (to) return { plan: null, state: read.json.state, known, versions: to === ADVISORY_PUBLISHED_STATE ? advisoryVersionsOf(read.json).entries : null };
+  if (versions) return { plan: null, state: read.json.state, known, versions: null };
+  return { plan: advisoryCollaboratorPlan({ existing: advisoryCollaboratorLogins(read.json), requested: spec.add }), state: read.json.state, known, versions: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -989,7 +1314,8 @@ export function advisoryRefusalCause(answer, known = []) {
 /**
  * Did an advisory action LAND? Judged on its own answer alone — `advisoryReportReadBack` (a 2xx carrying an id),
  * `advisoryCreateReadBack` (a 2xx carrying an id that reads state `draft`),
- * `advisoryReadBack` (every login sent listed) or `advisoryStateReadBack` (the state asked for shown) — and spelled
+ * `advisoryReadBack` (every login sent listed), `advisoryVersionsReadBack` (still a draft, exactly the entries sent)
+ * or `advisoryStateReadBack` (the state asked for shown; a publish with the entries its GET read) — and spelled
  * by the row texts of `ops.mjs` alone. Returns `{ ok, why, result, ghsaId }`. ⛔ Never `resultOf`, never the
  * answer's body; a refusal names its cause (`advisoryRefusalCause`), which never quotes the body this request
  * sent or the advisory the preflight read. Never throws.
@@ -1010,9 +1336,16 @@ export function confirmAdvisory(req, answer, pre) {
   }
   if (req.advisoryState) {
     const { ghsaId, to } = req.advisoryState;
-    const v = advisoryStateReadBack({ ghsaId, to, answer });
+    const v = advisoryStateReadBack({ ghsaId, to, answer, versions: pre.versions ?? [] });
     if (!v.ok) return failed(v.why);
-    return { ok: true, why: '', result: advisoryStateLandedText({ ghsaId, from: pre.state, to }) };
+    // A publish alone hands its id on — the annotation's — with the count of entries it was read back with.
+    return { ok: true, why: '', ...(v.ghsaId ? { ghsaId: v.ghsaId } : {}), result: advisoryStateLandedText({ ghsaId, from: pre.state, to, entries: v.entries ?? null }) };
+  }
+  if (req.advisoryVersions) {
+    const { ghsaId, versions } = req.advisoryVersions;
+    const v = advisoryVersionsReadBack({ ghsaId, sent: versions, answer });
+    if (!v.ok) return failed(v.why);
+    return { ok: true, why: '', result: advisoryVersionsLandedText({ ghsaId, state: answer.json.state, versions }) };
   }
   const { ghsaId } = req.advisoryCollaborators;
   const v = advisoryReadBack({ existing: pre.plan.existing, missing: pre.plan.missing, answer });
@@ -1043,7 +1376,7 @@ export async function advisoryReadAction(req, { payload, index, api, t, seal = s
   const plaintext = advisoryReadPlaintext(r.json);
   let sealed;
   try {
-    sealed = seal({ plaintext, publicKey, aad: advisoryReadAad({ requestId: payload.request_id, action: index, ghsaId }) });
+    sealed = seal({ plaintext, publicKey, aad: advisorySealAad({ requestId: payload.request_id, action: index, op: 'advisory_read', ghsaId }) });
   } catch {
     return { ok: false, status: r.status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
   }
@@ -1054,6 +1387,66 @@ export async function advisoryReadAction(req, { payload, index, api, t, seal = s
   if (!parts) return { ok: false, status: r.status, why: advisoryReadOverCapText({ plaintextBytes, sealedChars }), notes: [] };
   const notes = parts.map((chunk, k) => ({ action: index, op: 'advisory_read', part: k + 1, of: parts.length, sealed: chunk }));
   return { ok: true, status: r.status, result: advisoryReadLandedText({ plaintextBytes, sealedChars, parts: parts.length }), notes };
+}
+
+/**
+ * The listing (header: "The listing"): the gate, the walks, the projection, the pad, the seal and the parts. Returns
+ * `{ ok, status, result, why, notes }` in `advisoryReadAction`'s shape. ⛔ No string it returns carries an id, a count,
+ * a state, a severity, a cursor, a page number or a byte or part count: every sentence is a fixed one or names a status
+ * alone. `seal` and `senderGate` are the self-test's doors; the CLI passes neither. Never throws.
+ */
+export async function advisoryListAction(req, { payload, index, api, t, seal = sealAdvisoryRead, senderGate = OPS.advisory_list.senderGate }) {
+  const { publicKey } = req.advisoryList;
+  // The gate is judged BEFORE the first GET: `target-write` was the stroke's, every other value is closed.
+  if (!Object.hasOwn(ADVISORY_READ_SENDER_GATES, senderGate) || senderGate !== 'target-write') return { ok: false, status: 'not sent', why: ADVISORY_LIST_SENDER_REFUSED, notes: [] };
+  const items = [];
+  const seen = new Set();
+  let status = null;
+  for (const state of ADVISORY_LIST_STATES) {
+    let after = null;
+    let ended = false;
+    for (let page = 1; page <= ADVISORY_LIST_PAGE_CAP && !ended; page++) {
+      const r = await rest(api, advisoryListPagePath(payload.repo, state, after), { method: 'GET' }, t);
+      // Status 0 is `rest`'s word for a call that threw: ⛔ never its message, which carries the path and so a cursor.
+      if (r.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, why: ADVISORY_LIST_UNREACHED, notes: [] };
+      status = r.status;
+      const failed = advisoryListPageFailure(r, state);
+      if (failed) {
+        const refused = !(r.status >= 200 && r.status < 300);
+        return { ok: false, status: r.status, why: `REFUSED at the relay's fence on the listing, nothing sealed or emitted — ${failed}${refused ? `${advisoryPlatformText(r.detail)}; ${ADVISORY_LIST_ACCESS_REMEDY}` : ''}`, notes: [] };
+      }
+      for (const item of r.json) {
+        if (seen.has(item.ghsa_id)) return { ok: false, status: r.status, why: ADVISORY_LIST_REPEATED, notes: [] };
+        seen.add(item.ghsa_id);
+        items.push(item);
+      }
+      // Every page's Link is read, a short one's too: a short page that still names a next page is not the last.
+      const next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state });
+      if (next.fail) return { ok: false, status: r.status, why: next.fail, notes: [] };
+      if (r.json.length < ADVISORY_LIST_PAGE_SIZE) {
+        if (next.after !== null) return { ok: false, status: r.status, why: ADVISORY_LIST_SHORT_PAGE_NEXT, notes: [] };
+        ended = true;
+        break;
+      }
+      if (next.after === null) ended = true;
+      else after = next.after;
+    }
+    if (!ended) return { ok: false, status, why: ADVISORY_LIST_CAP_HIT, notes: [] };
+  }
+  const padded = advisoryListPadded(advisoryListPlaintext(items));
+  if (padded === null) return { ok: false, status, why: ADVISORY_LIST_OVER_CAP, notes: [] };
+  let sealed;
+  try {
+    sealed = seal({ plaintext: padded, publicKey, aad: advisorySealAad({ requestId: payload.request_id, action: index, op: 'advisory_list' }) });
+  } catch {
+    return { ok: false, status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
+  }
+  // A sealed listing is exactly the channel's size, so its length says nothing; anything else is a seal that failed.
+  if (typeof sealed !== 'string' || !/^[A-Za-z0-9_-]+$/.test(sealed) || sealed.length !== ADVISORY_READ_MAX_SEALED_CHARS) return { ok: false, status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
+  const parts = advisoryReadParts(sealed);
+  if (!parts || parts.length !== ADVISORY_READ_MAX_PARTS) return { ok: false, status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
+  const notes = parts.map((chunk, k) => ({ action: index, op: 'advisory_list', part: k + 1, of: parts.length, sealed: chunk }));
+  return { ok: true, status, result: ADVISORY_LIST_LANDED, notes };
 }
 
 /** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
@@ -1112,8 +1505,9 @@ export function escapeCommandProperty(s) {
  * naming another repository than the op lands the card on). Pure.
  */
 export function annotationFor({ action, op, req, json, payload, landed = null }) {
-  // A filed report names its id — the confirmation's, read from the answer in its shape — and nothing else (header).
-  if (ADVISORY_ANNOTATED_OPS.includes(op)) {
+  // A filed report names its id — the confirmation's, read from the answer in its shape — and nothing else (header);
+  // so does a landed publish, the one `advisory_state` landing annotated: the id is public once published.
+  if (ADVISORY_ANNOTATED_OPS.includes(op) || (op === ADVISORY_PUBLISH_OP && req?.advisoryState?.to === ADVISORY_PUBLISHED_STATE)) {
     const ghsaId = typeof landed?.ghsaId === 'string' && GHSA_ID_SHAPE.test(landed.ghsaId) ? landed.ghsaId : null;
     if (!ghsaId) return { note: null, why: 'the answer carries no advisory id' };
     const back = parseRelayAdvisoryAnnotation(relayAdvisoryAnnotationMessage({ action, op, ghsaId }));
@@ -1169,11 +1563,12 @@ export function summaryText({ payload, sender, role, rows, stoppedAt = null, not
 // ⛔ Nothing here throws on an HTTP status; a refusal is an observation.
 // ---------------------------------------------------------------------------
 
-async function rest(api, path, { method = 'GET', body = null } = {}, deps = {}) {
+async function rest(api, path, { method = 'GET', body = null, read = false } = {}, deps = {}) {
   const fetchImpl = deps.fetch ?? globalThis.fetch;
   const token = deps.token ?? '';
   const paceDeps = deps.pace ?? {};
-  const paced = isWriteMethod(method);
+  // `read`: a GraphQL QUERY (the merge-queue read) is a POST that writes nothing — unpaced, like every GET.
+  const paced = !read && isWriteMethod(method);
   if (paced) await paceWrite({ token, kind: `fleet-write ${method}` }, paceDeps);
   let res;
   try {
@@ -1206,7 +1601,8 @@ async function rest(api, path, { method = 'GET', body = null } = {}, deps = {}) 
       paceDeps,
     );
   }
-  return { status: res.status, json, detail: scrub(typeof json?.message === 'string' ? json.message : '', [token]), call: `${method} ${path}` };
+  // `link` is the answer's `Link` header, read by the listing's walk alone (header: "The listing"); ⛔ never printed.
+  return { status: res.status, json, detail: scrub(typeof json?.message === 'string' ? json.message : '', [token]), call: `${method} ${path}`, link: res.headers.get('link') };
 }
 
 /**
@@ -1219,6 +1615,8 @@ async function graphqlVariables(req, payload, api, t) {
   if (g.pull !== undefined) {
     const pr = await rest(api, `/repos/${payload.repo}/pulls/${g.pull}`, {}, t);
     if (pr.status !== 200 || typeof pr.json?.node_id !== 'string') return unread(pr, "the pull's node id");
+    // The front-of-queue enqueue (header) sends the head its fences judged, so a push after them is the platform's refusal.
+    if (req.enqueueFront) return { variables: { id: pr.json.node_id, head: req.enqueueFront.expectedHeadSha } };
     return { variables: { id: pr.json.node_id } };
   }
   // transferIssue: the card on THIS repository — never a pull request, never one already moved — then the target.
@@ -1259,7 +1657,7 @@ async function readPullFiles(repo, pull, api, t) {
  * — one row per verdict and per write pushed onto `rows`. Returns `{ ok: true }` or `{ fail: why }`, the sentence
  * the caller records as the action's failure. Never throws on a status.
  */
-async function requestGovernedReview({ index, op, pull, payload, api, t, log, rows }) {
+async function requestGovernedReview({ index, op, pull, payload, api, t, log, rows, git = null }) {
   const repo = payload.repo;
   const token = t.token ?? '';
   const FILES = `GET /repos/${repo}/pulls/${pull}/files`;
@@ -1283,12 +1681,28 @@ async function requestGovernedReview({ index, op, pull, payload, api, t, log, ro
   if (pr.status !== 200 || !pr.json || typeof pr.json !== 'object') {
     return failed(pr.call, pr.status, `${pr.call} -> HTTP ${pr.status}${pr.detail ? ` (${pr.detail})` : ''}: the pull could not be re-read, so who is already requested, assigned or its author is unknown and no review was requested — its diff hits a Tier H surface; read it on the board and request by hand`);
   }
+  // The `workflows` split (header): read only when every governed hit is that row in its split.repos; a reading
+  // that says S sends nothing, and every other outcome — unread, H, not readable here — requests as the path-only plan.
+  const readable = workflowSplitReadable(plan);
+  let reading = null;
+  let readingWords = readable.why ? ` · workflow split not read: ${readable.why}` : '';
+  if (readable.read) {
+    reading = await workflowReadingFor({ repo, paths, pr: pr.json, api, t, git });
+    readingWords = scrub(workflowReadingText(reading), [token]);
+    plan = governedReviewPlan({ paths, repo, workflowDiff: reading });
+    if (plan.tier !== GOVERNED_TIER_H) {
+      const text = `${governedReviewText(plan, { repo, files: read.files.length })}${readingWords}`;
+      rows.push({ action: index, op, call: FILES, status: 200, result: text });
+      log(`  · action ${index} ${op}: ${text}${renamed}`);
+      return { ok: true };
+    }
+  }
   const reviews = await rest(api, `/repos/${repo}/pulls/${pull}/reviews?per_page=100`, {}, t);
   if (reviews.status !== 200 || !Array.isArray(reviews.json)) {
     return failed(`GET /repos/${repo}/pulls/${pull}/reviews`, reviews.status, `${reviews.call} -> HTTP ${reviews.status}${reviews.detail ? ` (${reviews.detail})` : ''}: the pull's reviews could not be read, so who has already reviewed is unknown and no review was requested — its diff hits a Tier H surface; read it on the board and request by hand`);
   }
-  plan = governedReviewPlan({ paths, repo, author: pr.json.user?.login ?? null, requested: reviewerLogins(pr.json), assigned: assigneeLogins(pr.json), reviewed: reviewedLogins(reviews.json) });
-  const verdict = governedReviewText(plan, { repo, files: read.files.length });
+  plan = governedReviewPlan({ paths, repo, author: pr.json.user?.login ?? null, requested: reviewerLogins(pr.json), assigned: assigneeLogins(pr.json), reviewed: reviewedLogins(reviews.json), workflowDiff: reading });
+  const verdict = `${governedReviewText(plan, { repo, files: read.files.length })}${readingWords}`;
   rows.push({ action: index, op, call: FILES, status: 200, result: verdict });
   log(`  · action ${index} ${op}: ${verdict}${renamed}`);
   for (const req of governedReviewRequests(repo, pull, { reviewers: plan.toRequest, assignees: plan.toAssign })) {
@@ -1307,7 +1721,8 @@ async function requestGovernedReview({ index, op, pull, payload, api, t, log, ro
  * the notes this run emitted, in order; never throws on a status.
  *
  * @param {{ payload: unknown, sender: string, token: string, api?: string }} input
- * @param {{ fetch?: Function, pace?: object, log?: Function }} [deps]
+ * @param {{ fetch?: Function, pace?: object, log?: Function, git?: Function }} [deps] — `git` the checkout seam the
+ *   governed-review follow-up reads the `workflows` split through (`checkoutGit`; absent = no checkout, fail closed)
  */
 export async function executeFleetWrite({ payload: raw, sender, token, api = DEFAULT_API } = {}, deps = {}) {
   const lines = [];
@@ -1319,6 +1734,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   const ub = { sleep: deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))), now: deps.now ?? (() => Date.now()), ...(deps.updateBranch ?? {}) };
   const rr = { sleep: ub.sleep, now: ub.now, ...(deps.rerunFailed ?? {}) };
   const si = { sleep: ub.sleep, now: ub.now, ...(deps.subIssue ?? {}) };
+  const ef = { sleep: ub.sleep, now: ub.now, ...(deps.enqueueFront ?? {}) };
 
   const judged = validatePayload(raw);
   if (!judged.ok) {
@@ -1393,8 +1809,14 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         break;
       }
       const req = filled.req;
-      // The failed-jobs re-run (header): its fences on the run and its pull, judged HERE on the reads before the POST — refused, NOT SENT.
-      const pre = req.rerunFailed ? await rerunFailedPreflight(req, payload, api, t) : null;
+      // The failed-jobs re-run and the mailbox branch delete (header): their fences, judged HERE on the reads before the write — refused, NOT SENT.
+      const pre = req.rerunFailed
+        ? await rerunFailedPreflight(req, payload, api, t)
+        : req.enqueueFront
+          ? await enqueueFrontPreflight(req, payload, api, t)
+          : req.mailboxBranch
+            ? await mailboxBranchPreflight(req, payload, api, t)
+            : null;
       if (pre?.fail) {
         const why = scrub(pre.fail, [token]);
         rows.push({ action: i + 1, op: action.op, call: `${req.verb} ${req.path}`, status: 'not sent', result: `FAILED: ${why}` });
@@ -1442,8 +1864,25 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         }
         continue;
       }
+      // The listing (header): its gate, its walks, its projection, pad and seal — and nothing of it printed, not even a count.
+      if (req.advisoryList) {
+        const call = advisoryListCall(payload.repo);
+        const listed = await advisoryListAction(req, { payload, index: i + 1, api, t, ...(deps.advisoryList ?? {}) });
+        rows.push({ action: i + 1, op: action.op, call, status: listed.status, result: listed.ok ? scrub(listed.result, [token]) : `FAILED: ${scrub(listed.why, [token])}` });
+        if (!listed.ok) {
+          stoppedAt = { action: i + 1, op: action.op, why: scrub(listed.why, [token]) };
+          log(`  ✗ action ${i + 1} ${action.op}: ${call} -> ${stoppedAt.why}`);
+          break;
+        }
+        log(`  ✓ action ${i + 1} ${action.op}: ${call} -> HTTP ${listed.status} · ${rows[rows.length - 1].result}`);
+        for (const note of listed.notes) {
+          annotations.push(note);
+          log(annotationCommand(note));
+        }
+        continue;
+      }
       // The advisory PATCHes (header): the advisory's fences, judged HERE on its own GET before the PATCH — refused, NOT SENT.
-      const adv = req.advisoryCollaborators || req.advisoryState ? await advisoryPreflight(req, payload, api, t) : null;
+      const adv = req.advisoryCollaborators || req.advisoryVersions || req.advisoryState ? await advisoryPreflight(req, payload, api, t) : null;
       if (adv?.fail) {
         const why = scrub(adv.fail, [token]);
         rows.push({ action: i + 1, op: action.op, call: `${req.verb} ${req.path}`, status: 'not sent', result: `FAILED: ${why}` });
@@ -1459,8 +1898,8 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         continue;
       }
       // The body is the child's id from its own answer, the advisory's merged login list or the one state asked for —
-      // the op table spells none of the three.
-      let body = sub ? { sub_issue_id: sub.childId } : adv?.plan ? { collaborating_users: adv.plan.merged } : adv ? { state: req.advisoryState.to } : (req.body ?? null);
+      // the op table spells none of the three — or, for the versions, the table's own entries, sent after the fences.
+      let body = sub ? { sub_issue_id: sub.childId } : adv?.plan ? { collaborating_users: adv.plan.merged } : adv && req.advisoryState ? { state: req.advisoryState.to } : (req.body ?? null);
       if (req.graphql) {
         const resolved = await graphqlVariables(req, payload, api, t);
         if (resolved.fail) {
@@ -1479,15 +1918,20 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       // The failed-jobs re-run is confirmed by reading the run back (header): attempt 2, its failed jobs queued or in progress.
       // The hierarchy link is confirmed by reading the parent's list back (header): the child's id listed, or no longer.
       // The advisory rows are confirmed by their own answer (header): an id, every login sent, the state asked for — never by resultOf.
+      // The mailbox branch delete is confirmed by reading the ref back (header): absent, or it is FAILED.
       const landed = req.updateBranch
         ? await confirmUpdateBranch(req, r, payload, api, t, ub)
         : req.rerunFailed
           ? await confirmRerunFailed(req, r, pre, payload, api, t, rr)
-          : sub
-            ? await confirmSubIssue(req, r, sub, payload, api, t, si)
-            : adv || req.advisoryReport || req.advisoryCreate
-              ? confirmAdvisory(req, r, adv)
-              : requestLanded(req, r);
+          : req.enqueueFront
+            ? await confirmEnqueueFront(req, r, pre, payload, api, t, ef)
+            : req.mailboxBranch
+              ? await confirmMailboxBranch(req, r, payload, api, t)
+              : sub
+                ? await confirmSubIssue(req, r, sub, payload, api, t, si)
+                : adv || req.advisoryReport || req.advisoryCreate
+                  ? confirmAdvisory(req, r, adv)
+                  : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
       rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
       if (!landed.ok) {
@@ -1516,7 +1960,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         rows.push({ action: i + 1, op: action.op, call: 'GET …/pulls/{number}/files', status: 'not sent', result: `FAILED: ${scrub(why, [token])}` });
         followed = { fail: why };
       } else {
-        followed = await requestGovernedReview({ index: i + 1, op: action.op, pull, payload, api, t, log, rows });
+        followed = await requestGovernedReview({ index: i + 1, op: action.op, pull, payload, api, t, log, rows, git: deps.git ?? null });
       }
       if (followed.fail) {
         stoppedAt = { action: i + 1, op: action.op, why: scrub(followed.fail, [token]) };
@@ -1557,16 +2001,24 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the release.yml refresh: ONE POST to its dispatch endpoint carrying { ref: main, inputs: { refresh_version_pr: "true" } } under the App token, landing as accepted; force, false, absent, a string or any other input refused with ZERO requests, exit 2': 9,
   "the batch gap on the runner: a stroke carrying DEFAULT_BATCH_THRESHOLD or more content-creating actions is announced as ONE rule ⑤ batch before its first write — on an injected clock every write through the last content-creating one leaves a full DEFAULT_BATCH_GAP_MS after the one before, and the pacing is exactly what the seat budgets; below the threshold, after the batch and on a landing stroke rule ①'s gap; a stroke the job cannot hold refused with ZERO requests; an announcement the log cannot record refused before the first write": 10,
   // 29 → 30 as the follow-up left the draft open: three pr_create NEGATIVE pins (no read, no request, no assignee) replace the create-side runs.
-  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 30,
+  // 30 → 36 with the workflows split read on the relay: the plan with a reading, a Tier S workflow pull requesting no one, an H reading,
+  // six unreadable readings in one case, a mixed pull and an objectui workflow pull — every one but S requesting as the path-only plan.
+  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 36,
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
+  "the pr_enqueue_front: the pull's own GET, its whole file list and its base's queue read immediately before ONE enqueuePullRequest mutation with jump true and the expected head — open, ready, its head, not Version Packages, no governed path, at most the human-merge line count, a queue read whole with no jumped entry; each fence refused with the mutation not sent; GraphQL errors FAILED naming the missing grant; the 200 confirmed only by reading the queue back with the pull jumped and nothing ahead; queued without the jump or behind another is FAILED, never re-sent; the queue read unpaced; no annotation": 20,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
-  "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 32,
+  "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 41,
+  "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
+  "an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the platform refuses it with a message quoting either — the row keeps the status, withholds that message and prints one that quotes nothing —, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone": 8,
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
+  "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 22,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
-// hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 22;
+// hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
+// branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's, 25 → 26 with
+// pr_enqueue_front's: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 26;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1776,7 +2228,10 @@ export async function selfTest() {
       const bare = { verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: 'q', pull: 21 } };
       t('⛔ a pull mutation whose descriptor declares no landed state is never judged landed', requestLanded(bare, { status: 200, json: { data: { enablePullRequestAutoMerge: { pullRequest: { number: 21, autoMergeRequest: { mergeMethod: 'SQUASH' } } } } } }).ok, false);
       // The table half: every pull mutation the op table can issue carries its entry, and selects every field that entry reads.
-      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'] }, REPO).filter((r) => r.graphql?.pull !== undefined).map((r) => [op, r.graphql]));
+      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'], versions: [{ package: 'p', vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }] }, REPO).filter((r) => r.graphql?.pull !== undefined && !r.enqueueFront).map((r) => [op, r.graphql]));
+      // The one pull mutation judged by reading its QUEUE back (header: "The front-of-queue enqueue"): no landed entry.
+      const queueRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'], versions: [{ package: 'p', vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }], expected_head_sha: 'a'.repeat(40) }, REPO).filter((r) => r.enqueueFront).map((r) => [op, r.graphql.landed ?? null]));
+      t('…and the one pull mutation judged by its queue read back instead, pr_enqueue_front, carries no PR_LANDED_STATE entry', queueRows, [['pr_enqueue_front', null]]);
       const selects = (query, field) => new RegExp(`\\b${field}\\b`).test(query.slice(query.indexOf('pullRequest {')));
       t('every pull mutation in the op table carries its PR_LANDED_STATE entry, and its query selects every field that entry reads', [pullRows.map(([op]) => op).sort(), pullRows.every(([op, g]) => g.landed === PR_LANDED_STATE[op] && g.landed.fields.every((f) => selects(g.query, f)))], [Object.keys(PR_LANDED_STATE).sort(), true]);
     }
@@ -1875,7 +2330,7 @@ export async function selfTest() {
     }
 
     // ── the governed-review follow-up ───────────────────────────────────────
-    battery("the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action");
+    battery("the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action");
     {
       const PULLS = `POST /repos/${REPO}/pulls`;
       const N = 25050;
@@ -1955,6 +2410,68 @@ export async function selfTest() {
       const noPull = await run(ready(), { ...allowed, ...tierH, [PULL]: [pullOf(), { status: 503, json: { message: 'down' } }] });
       const noReviews = await run(ready(), { ...allowed, ...tierH, [REVIEWS]: { status: 503, json: { message: 'down' } } });
       t('an unreadable pull or review list on a Tier H hit is FAILED naming the read — never a request sent blind, never a quiet skip', [noPull.exit, noPull.rows[1]?.result.includes('could not be re-read'), noReviews.exit, noReviews.rows[1]?.result.includes('reviews could not be read'), [...noPull.seen, ...noReviews.seen].some((s) => s.call === REQUEST)], [EXIT_ACTION_FAILED, true, EXIT_ACTION_FAILED, true, false]);
+      // The `workflows` split (#31538's ruling C on the relay): the queue guard's own reading, merge base → head, through an injected git seam.
+      const WF = '.github/workflows/ci.yml';
+      const WF_BASE = ['name: CI', 'on:', '  pull_request:', 'jobs:', '  build:', '    name: Build Core', '    runs-on: ubuntu-latest', '    timeout-minutes: 20', '    steps:', '      - uses: actions/checkout@v4', '      - run: pnpm build', ''].join('\n');
+      const [MB, TIP, HEAD_S, HEAD_H] = ['d', 'e', '5', '6'].map((c) => c.repeat(40));
+      const wfTrees = new Map([[MB, { [WF]: WF_BASE }], [TIP, { [WF]: WF_BASE }], [HEAD_S, { [WF]: WF_BASE.replace('timeout-minutes: 20', 'timeout-minutes: 30') }], [HEAD_H, { [WF]: WF_BASE.replace('jobs:\n', 'permissions:\n  contents: write\njobs:\n') }]]);
+      const COMPARE = (head) => `GET /repos/${REPO}/compare/${TIP}...${head}`;
+      const wfPull = (head) => ({ status: 200, json: { ...pullOf().json, head: { sha: head }, base: { sha: TIP } } });
+      const wfAnswers = (head, extra = {}) => ({ ...allowed, ...readied, [PULL]: wfPull(head), [FILES]: files(WF), [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]), [COMPARE(head)]: { status: 200, json: { merge_base_commit: { sha: MB } } }, ...extra });
+      // The checkout: `present` the commits it holds, `fetchable` what a fetch brings; `throwOn` an argv[0] that throws.
+      const fakeGit = (calls, { present = [], fetchable = [...wfTrees.keys()], remote = `https://github.com/${REPO}`, throwOn = null } = {}) => {
+        const held = new Set(present);
+        return (argv) => {
+          calls.push(argv.join(' '));
+          if (argv[0] === throwOn) throw new Error(`fatal: ${throwOn} refused`);
+          if (argv[0] === 'remote') return `${remote}\n`;
+          if (argv[0] === 'cat-file') {
+            if (!held.has(argv[2].replace('^{commit}', ''))) throw new Error('fatal: Not a valid object name');
+            return '';
+          }
+          if (argv[0] === 'fetch') {
+            for (const sha of argv.slice(4)) if (fetchable.includes(sha)) held.add(sha);
+            return '';
+          }
+          if (argv[0] === 'ls-tree') {
+            const tree = held.has(argv[3]) ? wfTrees.get(argv[3]) : null;
+            if (!tree) throw new Error(`fatal: not a tree object: ${argv[3]}`);
+            const dirs = argv.slice(5).map((d) => (d.endsWith('/') ? d : `${d}/`));
+            return Object.keys(tree).filter((p) => dirs.some((d) => p.startsWith(d))).join('\n');
+          }
+          if (argv[0] === 'show') {
+            const at = argv[1].indexOf(':');
+            const text = wfTrees.get(argv[1].slice(0, at))?.[argv[1].slice(at + 1)];
+            if (text === undefined) throw new Error(`fatal: path does not exist: ${argv[1]}`);
+            return text;
+          }
+          throw new Error(`unexpected git ${argv.join(' ')}`);
+        };
+      };
+      const sRead = { measured: true, reason: null, base: MB, head: HEAD_S, files: [{ path: WF, tier: GOVERNED_TIER_S, reasons: [] }] };
+      t('the plan with a reading: a MEASURED S reading moves the workflows row to S; no reading, or an unmeasured one, keeps the path-only H', [governedReviewPlan({ paths: [WF], repo: REPO, workflowDiff: sRead }).tier, governedReviewPlan({ paths: [WF], repo: REPO }).tier, governedReviewPlan({ paths: [WF], repo: REPO, workflowDiff: { measured: false, reason: 'x', files: [] } }).tier], [GOVERNED_TIER_S, GOVERNED_TIER_H, GOVERNED_TIER_H]);
+      const sCalls = [];
+      const wfS = await run(ready(), wfAnswers(HEAD_S), { git: fakeGit(sCalls, { present: [TIP] }) });
+      t('⭐ tier-s-workflow-pull-requests-no-one: a workflow-only pull whose reading (merge base → head) says S — the compare read, the two missing commits fetched by sha at depth 1, NO reviews read, NO request, exit 0, the row naming the reading', [wfS.exit, writes(wfS.seen).map((s) => s.call), wfS.seen.some((s) => s.call === REVIEWS), wfS.seen.filter((s) => s.call === COMPARE(HEAD_S)).length, sCalls.filter((c) => c.startsWith('fetch')), wfS.rows[1]?.result], [EXIT_OK, [GRAPHQL], false, 1, [`fetch --no-tags --depth=1 origin ${MB} ${HEAD_S}`], `governed review: Tier S (\`.github/workflows/**\`×1) lands on a seat's review of record — no review requested · workflow split read (merge base ${MB.slice(0, 12)} → head ${HEAD_S.slice(0, 12)}): \`${WF}\` S`], wfS.logs.join(' | '));
+      const wfH = await run(ready(), wfAnswers(HEAD_H), { git: fakeGit([], { present: [MB, HEAD_H] }) });
+      t('⭐ h-reading-workflow-pull-requests: a reading that says H (a permissions block added) requests both approvers, and the row names the reason', [wfH.exit, writes(wfH.seen).slice(1).map((s) => [s.call, s.body]), wfH.rows[1]?.result.includes(`\`${WF}\` H (a \`permissions:\` block added, changed or removed)`)], [EXIT_OK, [[REQUEST, { reviewers: [A1, A2] }]], true], wfH.rows[1]?.result);
+      const unreadable = {
+        'no checkout': await run(ready(), wfAnswers(HEAD_S)),
+        'a commit the fetch cannot bring': await run(ready(), wfAnswers(HEAD_S), { git: fakeGit([], { fetchable: [MB] }) }),
+        'git throwing': await run(ready(), wfAnswers(HEAD_S), { git: fakeGit([], { throwOn: 'remote' }) }),
+        'a fetch that throws': await run(ready(), wfAnswers(HEAD_S), { git: fakeGit([], { throwOn: 'fetch' }) }),
+        'a checkout of another repository': await run(ready(), wfAnswers(HEAD_S), { git: fakeGit([], { remote: 'https://github.com/objectstack-ai/objectui.git' }) }),
+        'a refused compare': await run(ready(), wfAnswers(HEAD_S, { [COMPARE(HEAD_S)]: { status: 404, json: { message: 'Not Found' } } }), { git: fakeGit([], { present: [MB, HEAD_S] }) }),
+      };
+      t('⛔ unreadable-workflow-pull-requests: no checkout, a commit missing after the fetch, git throwing, a fetch that throws, a checkout of another repository or a refused compare — each requests BOTH approvers exactly as today, and its row says UNREAD with the fail-closed words', Object.entries(unreadable).map(([k, r]) => [k, r.exit, writes(r.seen).map((s) => s.call), r.rows[1]?.result.includes('workflow split UNREAD') && r.rows[1]?.result.includes('fail closed, the path-only tier H stands')]), Object.keys(unreadable).map((k) => [k, EXIT_OK, [GRAPHQL, REQUEST], true]), Object.values(unreadable).map((r) => r.rows[1]?.result).join(' | '));
+      const mixedCalls = [];
+      const mixed = await run(ready(), wfAnswers(HEAD_S, { [FILES]: files(WF, '.claude/agents/os-dev.md') }), { git: fakeGit(mixedCalls, { present: [MB, HEAD_S] }) });
+      t('⛔ mixed-workflow-pull-requests: a workflow edit beside another governed row (.claude/**) is never split — no compare, no git, both requested, the row naming the other row', [mixed.exit, mixed.seen.some((s) => s.call.includes('/compare/')), mixedCalls.length, writes(mixed.seen).map((s) => s.call), mixed.rows[1]?.result.endsWith('· workflow split not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], mixed.rows[1]?.result);
+      const UI = 'objectstack-ai/objectui';
+      const uiN = (p) => p.replace(REPO, UI);
+      const uiCalls = [];
+      const ui = await run({ ...ready(), repo: UI }, { [uiN(PERM)]: allowed[PERM], ...readied, [uiN(PULL)]: wfPull(HEAD_S), [uiN(FILES)]: files(WF), [uiN(REVIEWS)]: reviewsBy(), [uiN(REQUEST)]: requestedAnswer([A1, A2]) }, { git: fakeGit(uiCalls, { present: [MB, HEAD_S] }) });
+      t('⛔ objectui-workflow-pull-requests: a workflow pull on a repository outside split.repos (objectui; cloud alike) is not read — no compare, no git, both requested, the row naming split.repos', [ui.exit, ui.seen.some((s) => s.call.includes('/compare/')), uiCalls.length, writes(ui.seen).map((s) => s.call), ui.rows[1]?.result.endsWith('· workflow split not read: objectui is not in the row\'s split.repos (objectstack), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, uiN(REQUEST)], true], ui.rows[1]?.result);
       t('no annotation is emitted for the follow-up — pr_ready is not an annotated op', [both.annotations, authored.logs.some((l) => l.startsWith('::notice'))], [[], false]);
     }
 
@@ -2121,6 +2638,72 @@ export async function selfTest() {
       t('⛔ the validator is the executor\'s gate too: beside another action, or with run_id a string, refused with ZERO requests, exit 2', [[beside.exit, beside.seen.length], [stringId.exit, stringId.seen.length]], [[EXIT_REFUSED, 0], [EXIT_REFUSED, 0]]);
     }
 
+    // ── the front-of-queue enqueue ──────────────────────────────────────────
+    battery("the pr_enqueue_front: the pull's own GET, its whole file list and its base's queue read immediately before ONE enqueuePullRequest mutation with jump true and the expected head — open, ready, its head, not Version Packages, no governed path, at most the human-merge line count, a queue read whole with no jumped entry; each fence refused with the mutation not sent; GraphQL errors FAILED naming the missing grant; the 200 confirmed only by reading the queue back with the pull jumped and nothing ahead; queued without the jump or behind another is FAILED, never re-sent; the queue read unpaced; no annotation");
+    {
+      const PULL = 3686;
+      const HEAD = '6f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c';
+      const MOVED = '0a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3';
+      const PULL_GET = `GET /repos/${REPO}/pulls/${PULL}`;
+      const FILES = `GET /repos/${REPO}/pulls/${PULL}/files`;
+      const GQL = 'POST /graphql';
+      const pullAt = (patch = {}) => ({ status: 200, json: { number: PULL, node_id: 'PR_kwDOjump', state: 'open', draft: false, title: 'fix(objectos): case timeout', additions: 40, deletions: 6, head: { sha: HEAD, ref: 'claude/issue-3656-pin' }, base: { ref: 'main' }, ...patch } });
+      const filesOf = (...names) => ({ status: 200, json: names.map((filename) => ({ filename })) });
+      const entry = (number, position, jump = false) => ({ position, jump, state: 'AWAITING_CHECKS', pullRequest: { number } });
+      const queueOf = (nodes, hasNextPage = false) => ({ status: 200, json: { data: { repository: { mergeQueue: { entries: { totalCount: nodes.length, pageInfo: { hasNextPage }, nodes } } } } } });
+      const before = queueOf([entry(3730, 1), entry(3732, 2), entry(PULL, 3)]);
+      const after = queueOf([entry(PULL, 1, true), entry(3730, 2), entry(3732, 3)]);
+      const enqueued = { status: 200, json: { data: { enqueuePullRequest: { mergeQueueEntry: entry(PULL, 1, true) } } } };
+      const stroke = base([{ op: 'pr_enqueue_front', pull: PULL, expected_head_sha: HEAD }]);
+      const happy = { ...allowed, [PULL_GET]: pullAt(), [FILES]: filesOf('apps/objectos/test/mcp-build-sample-cleanup.e2e.test.ts'), [GQL]: [before, enqueued, after] };
+      let clock = 0;
+      const timing = { sleep: async (ms) => { clock += ms; }, now: () => clock };
+      const mutations = (seen) => seen.filter((s) => s.call === GQL && s.body?.query?.startsWith('mutation'));
+
+      const ok = await run(stroke, happy, timing);
+      t('⭐ every fence holds: the sender gate, the pull, its files and its base queue — then the node id, ONE mutation, the queue read back; exit 0', [ok.exit, ok.seen.map((s) => s.call)], [EXIT_OK, [PERM, PULL_GET, FILES, GQL, PULL_GET, GQL, GQL]], ok.logs.join(' | '));
+      t('…the queue read names the pull\'s base, and the mutation sends jump true, the node id and the expected head', [ok.seen[3].body.variables, mutations(ok.seen).map((m) => [m.body.query.includes('jump: true'), m.body.query.includes('expectedHeadOid: $head'), m.body.variables])], [{ owner: REPO.split('/')[0], name: REPO.split('/')[1], branch: 'main' }, [[true, true, { id: 'PR_kwDOjump', head: HEAD }]]]);
+      t('…the row lands on the read-back: the pull at the front, jumped, with the queue it read', [ok.rows[0]?.call, ok.rows[0]?.result], [`${GQL} enqueuePullRequest`, `#${PULL} at the front of the merge queue · position 1 · jump true · AWAITING_CHECKS · 3 entr(ies) queued`]);
+      t('…no annotation, and only the mutation was paced as a write: the two queue reads are unpaced', [ok.annotations, ok.pace ? readFileSync(ok.pace.file, 'utf8').trim().split('\n').filter(Boolean).length : null], [[], 1]);
+      // Each fence, refused HERE: the mutation is NOT SENT.
+      const fenced = async (answers) => {
+        const r = await run(stroke, { ...happy, ...answers });
+        return [r.exit, mutations(r.seen).length, r.rows[0]?.status, /REFUSED at the relay's fence/.test(r.rows[0]?.result ?? '')];
+      };
+      const refused = [EXIT_ACTION_FAILED, 0, 'not sent', true];
+      const named = async (answers, words) => (await run(stroke, { ...happy, ...answers })).rows[0]?.result.includes(words);
+      t('⛔ fence open, ready and head, refused HERE: a closed pull, a draft, a head pushed since the ACCEPT — the mutation never sent, the fence named', [await fenced({ [PULL_GET]: pullAt({ state: 'closed' }) }), await fenced({ [PULL_GET]: pullAt({ draft: true }) }), await fenced({ [PULL_GET]: pullAt({ head: { sha: MOVED, ref: 'claude/issue-3656-pin' } }) }), await named({ [PULL_GET]: pullAt({ head: { sha: MOVED, ref: 'x' } }) }, 'fence `head`: the relay read "head 0a1b2c3d4e, expected 6f1e2d3c4b"')], [refused, refused, refused, true]);
+      t('⛔ fence release, refused HERE: the Version Packages pull, by its changeset-release head and by its title', [await fenced({ [PULL_GET]: pullAt({ head: { sha: HEAD, ref: 'changeset-release/main' } }) }), await fenced({ [PULL_GET]: pullAt({ title: 'chore: version packages' }) })], [refused, refused]);
+      t('⛔ fence governed, refused HERE: a workflow file and AGENTS.md (Tier H), a .claude/** file (Tier S) — the path named', [await fenced({ [FILES]: filesOf('src/a.ts', '.github/workflows/ci.yml') }), await fenced({ [FILES]: filesOf('AGENTS.md') }), await fenced({ [FILES]: filesOf('.claude/agents/os-dev.md') }), await named({ [FILES]: filesOf('.github/workflows/ci.yml') }, '1 governed path(s): .github/workflows/ci.yml')], [refused, refused, refused, true]);
+      t('⛔ fence size, refused HERE: one line over the human-merge threshold; exactly at it passes', [await fenced({ [PULL_GET]: pullAt({ additions: 2990, deletions: 11 }) }), (await run(stroke, { ...happy, [PULL_GET]: pullAt({ additions: 2990, deletions: 10 }) }, timing)).exit], [refused, EXIT_OK]);
+      t('⛔ fence queue, refused HERE: a base with no merge queue, and an entry list read truncated', [await fenced({ [GQL]: { status: 200, json: { data: { repository: { mergeQueue: null } } } } }), await fenced({ [GQL]: queueOf([entry(3730, 1)], true) })], [refused, refused]);
+      t('⛔ fence one-jump, refused HERE: another pull already jumped and still queued, and this pull already jumped — one per repository', [await fenced({ [GQL]: queueOf([entry(3730, 1, true), entry(PULL, 2)]) }), await fenced({ [GQL]: queueOf([entry(PULL, 1, true)]) }), await named({ [GQL]: queueOf([entry(3730, 1, true)]) }, 'jumped: #3730')], [refused, refused, true]);
+      t('…a pull not yet queued may be jumped: an empty queue passes the fences', (await run(stroke, { ...happy, [GQL]: [queueOf([]), enqueued, queueOf([entry(PULL, 1, true)])] }, timing)).exit, EXIT_OK);
+      const unread = await run(stroke, { ...happy, [FILES]: { status: 502, json: { message: 'Bad Gateway' } } });
+      const qUnread = await run(stroke, { ...happy, [GQL]: { status: 200, json: { data: null, errors: [{ message: 'Something went wrong' }] } } });
+      t('⛔ an unread file list or queue leaves the fences unjudged: the mutation never sent, the read named', [[unread.exit, mutations(unread.seen).length, unread.rows[0]?.result.includes('whole file list could not be read')], [qUnread.exit, mutations(qUnread.seen).length, qUnread.rows[0]?.result.includes('the merge queue could not be read')]], [[EXIT_ACTION_FAILED, 0, true], [EXIT_ACTION_FAILED, 0, true]]);
+      // The answer and the read-back.
+      const denied = await run(stroke, { ...happy, [GQL]: [before, { status: 200, json: { data: { enqueuePullRequest: null }, errors: [{ message: 'Resource not accessible by integration' }] } }] });
+      t('⛔ GraphQL errors on the mutation (the grant missing) are a FAILED action naming the remedy, and nothing is read back after it', [denied.exit, denied.rows[0]?.result.includes('Merge queues: write'), denied.seen.filter((s) => s.call === GQL).length], [EXIT_ACTION_FAILED, true, 2]);
+      clock = 0;
+      const unjumped = await run(stroke, { ...happy, [GQL]: [before, enqueued, before] }, timing);
+      t('⛔ an answer that leaves the pull queued without the jump is FAILED at once — it IS queued, ⛔ never re-sent', [unjumped.exit, ['IS in the merge queue at position 3', 'jump false', 'do not re-send'].every((w) => unjumped.rows[0]?.result.includes(w)), mutations(unjumped.seen).length], [EXIT_ACTION_FAILED, true, 1]);
+      const behind = await run(stroke, { ...happy, [GQL]: [before, enqueued, queueOf([entry(3730, 1, true), entry(PULL, 2, true)])] }, timing);
+      t('⛔ an entry jumped but behind another is FAILED, naming the pull ahead', [behind.exit, behind.rows[0]?.result.includes('behind #3730')], [EXIT_ACTION_FAILED, true]);
+      clock = 0;
+      const late = await run(stroke, { ...happy, [GQL]: [before, enqueued, queueOf([entry(3730, 1), entry(3732, 2)]), after] }, timing);
+      t('an entry the queue lists on a later read lands, read again at the interval', [late.exit, clock], [EXIT_OK, ENQUEUE_FRONT_POLL_MS]);
+      clock = 0;
+      const never = await run(stroke, { ...happy, [GQL]: [before, enqueued, queueOf([entry(3730, 1)])] }, timing);
+      t('⛔ a read-back that never lists the pull is FAILED, UNCONFIRMED, after the window', [never.exit, never.rows[0]?.result.includes('UNCONFIRMED'), clock], [EXIT_ACTION_FAILED, true, ENQUEUE_FRONT_WINDOW_MS]);
+      // The pure pieces.
+      t('mergeQueueOf: no repository is null, no queue is present false, a truncated list is complete false', [mergeQueueOf({ data: {} }), mergeQueueOf({ data: { repository: { mergeQueue: null } } }), mergeQueueOf(queueOf([entry(1, 1)], true).json).complete], [null, { present: false, complete: true, entries: [] }, false]);
+      t('enqueueFrontReadBack reads the lowest position as the front, whatever the numbering base', [enqueueFrontReadBack({ pull: 5, queue: { present: true, entries: [{ number: 5, position: 0, jump: true }, { number: 6, position: 1, jump: false }] } }).ok, enqueueFrontReadBack({ pull: 5, queue: { present: true, entries: [{ number: 6, position: 0, jump: false }, { number: 5, position: 1, jump: true }] } }).ahead], [true, [6]]);
+      const beside = await run(base([{ op: 'pr_enqueue_front', pull: PULL, expected_head_sha: HEAD }, { op: 'comment', issue: 1, body: 'x' }]), happy);
+      const short = await run(base([{ op: 'pr_enqueue_front', pull: PULL, expected_head_sha: HEAD.slice(0, 7) }]), happy);
+      t('⛔ the validator is the executor\'s gate too: beside another action, or with a short head, refused with ZERO requests, exit 2', [[beside.exit, beside.seen.length], [short.exit, short.seen.length]], [[EXIT_REFUSED, 0], [EXIT_REFUSED, 0]]);
+    }
+
     // ── the hierarchy link ──────────────────────────────────────────────────
     battery("the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops");
     {
@@ -2233,6 +2816,42 @@ export async function selfTest() {
       t('…and the scrubbed spelling is what appears instead', everything.includes('<redacted>'));
       const thrown = await run(base([{ op: 'comment', issue: 1, body: 'a' }]), { ...allowed, [`POST /repos/${REPO}/issues/1/comments`]: { throws: `socket hung up sending ${TOKEN}` } });
       t('a transport error that echoed the token is scrubbed too', [thrown.summary, ...thrown.logs].join('\n').includes(TOKEN), false);
+    }
+
+    // ── an issue body on a private repository ───────────────────────────────
+    // This run's log is public while the issue it files may sit on a private repository and hold a security
+    // mechanism (pm-dispatch `references/security-findings.md`). The battery pins the four channels where the
+    // title and body never surface; on a refusal `requestLanded` withholds a platform message that quotes the body
+    // sent, as the advisory rows do (`advisoryRefusalCause`), and keeps the status and a message that quotes nothing.
+    battery("an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the platform refuses it with a message quoting either — the row keeps the status, withholds that message and prints one that quotes nothing —, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone");
+    {
+      // Spaces and punctuation: prose, never an id's, a label's or a login's shape.
+      const MARKER = 'ISSUE MARKER: how the flaw is reached, never to be logged';
+      const PRIVATE = 'objectstack-ai/cloud';
+      const privatePerm = `GET /repos/${PRIVATE}/collaborators/os-support-ai/permission`;
+      const privateAllowed = { [privatePerm]: allowed[PERM] };
+      const filed = (extra = {}) => ({ request_id: 'fw-test-1', repo: PRIVATE, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ', actions: [{ op: 'issue_create', title: `${MARKER} — the title`, body: `${MARKER} — the body`, labels: ['security'], ...extra }] });
+      const CREATE = `POST /repos/${PRIVATE}/issues`;
+      const issueUrl = (repo, n) => `https://github.test/${repo}/issues/${n}`;
+      const surfaced = (r) => [r.summary ?? '', ...(r.logs ?? []), ...(r.rows ?? []).map((row) => JSON.stringify(row)), ...(r.annotations ?? []).map((a) => JSON.stringify(a))].join('\n');
+      // The platform's answer echoes the title and body back, as GitHub's does.
+      const landed = await run(filed(), { ...privateAllowed, [CREATE]: { status: 201, json: { number: 41, html_url: issueUrl(PRIVATE, 41), title: MARKER, body: MARKER } } });
+      t('positive control: the marker rides the request the platform receives, so the sweep below looks for text that is there', [landed.exit, writes(landed.seen)[0]?.body?.body?.includes(MARKER), writes(landed.seen)[0]?.body?.title?.includes(MARKER)], [EXIT_OK, true, true]);
+      t('⛔ a landed issue_create — its answer echoing the title and body — prints neither in any log line, row, step summary or annotation: the row and the notice carry the number and the url alone', [surfaced(landed).includes('ISSUE MARKER'), landed.rows.map((r) => r.result), landed.annotations], [false, [`#41 ${issueUrl(PRIVATE, 41)}`], [{ action: 1, op: 'issue_create', number: 41, url: issueUrl(PRIVATE, 41), repo: PRIVATE }]], surfaced(landed).slice(0, 300));
+      // A refusal whose message quotes the title or the body, the case a 422 on a malformed issue can answer.
+      const quoting = await run(filed(), { ...privateAllowed, [CREATE]: { status: 422, json: { message: `Validation Failed: body "${MARKER} — the body" is invalid`, errors: [{ message: MARKER }] } } });
+      t('⛔ a refusal whose message quotes the body is a FAILED action that keeps the status and prints neither the title nor the body in any log line, row, step summary or annotation', [quoting.exit, surfaced(quoting).includes('ISSUE MARKER'), quoting.rows.map((r) => [r.status, r.result])], [EXIT_ACTION_FAILED, false, [[422, "FAILED: HTTP 422 — the platform's message is not printed: it quotes the body sent, and no row prints that"]]], surfaced(quoting).slice(0, 300));
+      // Every 16-character run of this title holds a pipe, so only the flattened comparison can find it in the slashed message.
+      const flattened = await run(filed({ title: 'one | two | three | four | five | six' }), { ...privateAllowed, [CREATE]: { status: 422, json: { message: 'title: one / two / three / four / five / six' } } });
+      t('⛔ …and a quoted run that straddles a pipe flattened to a slash is caught whichever side was rewritten', [flattened.exit, surfaced(flattened).includes('three / four'), flattened.rows[0]?.result], [EXIT_ACTION_FAILED, false, "FAILED: HTTP 422 — the platform's message is not printed: it quotes the body sent, and no row prints that"], surfaced(flattened).slice(0, 300));
+      const plain = await run(filed(), { ...privateAllowed, [CREATE]: { status: 410, json: { message: 'Issues are disabled for this repo' } } });
+      t('…a refusal whose message quotes nothing of the body is printed as the platform gives it, beside its status', [plain.exit, plain.rows[0]?.result, surfaced(plain).includes('ISSUE MARKER')], [EXIT_ACTION_FAILED, 'FAILED: HTTP 410 — Issues are disabled for this repo', false]);
+      const severed = await run(filed(), { ...privateAllowed, [CREATE]: { throws: `socket hung up sending ${MARKER}` } });
+      t('⛔ a transport failure whose text quotes the body is a FAILED action that prints neither the title nor the body', [severed.exit, surfaced(severed).includes('ISSUE MARKER')], [EXIT_ACTION_FAILED, false], surfaced(severed).slice(0, 300));
+      const overCap = await run(filed({ body: `${MARKER} ${'x'.repeat(60_000)}` }), privateAllowed);
+      t('⛔ an over-cap body is refused before any write, naming the key and the byte count — never the text', [overCap.exit, writes(overCap.seen).length, surfaced(overCap).includes('ISSUE MARKER'), surfaced(overCap).includes('actions[0].body is 60058 bytes, over its cap of 60000')], [EXIT_REFUSED, 0, false, true], surfaced(overCap).slice(0, 300));
+      const illTyped = await run(filed({ body: [MARKER] }), privateAllowed);
+      t('⛔ an ill-typed body is refused before any write, naming the key and the shape — never the text', [illTyped.exit, writes(illTyped.seen).length, surfaced(illTyped).includes('ISSUE MARKER'), surfaced(illTyped).includes('actions[0].body')], [EXIT_REFUSED, 0, false, true], surfaced(illTyped).slice(0, 300));
     }
 
     // ── the batch gap on the runner ─────────────────────────────────────────
@@ -2426,8 +3045,52 @@ export async function selfTest() {
       t('⛔ the parser is the reader\'s, imported — this file spells no pattern for the message of its own', [readReal(SELF_PATH, 'utf8').includes(['number=', '(['].join('')), typeof parseRelayAnnotation], [false, 'function']);
     }
 
-    // ── the four advisory rows ──────────────────────────────────────────────
-    battery("the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation");
+    // ── the mailbox branch delete ───────────────────────────────────────────
+    battery("the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE");
+    {
+      const PR = 30141;
+      const BR = 'claude/mailbox-ui-3';
+      const PULL = `GET /repos/${REPO}/pulls/${PR}`;
+      const OPEN = `GET /repos/${REPO}/pulls`;
+      const DEL = `DELETE /repos/${REPO}/git/refs/heads/${BR}`;
+      const BACK = `GET /repos/${REPO}/git/ref/heads/${BR}`;
+      const HEAD = 'a'.repeat(40);
+      const at = (sha) => ({ status: 200, json: { ref: `refs/heads/${BR}`, object: { sha, type: 'commit' } } });
+      const box = (o = {}) => ({ number: PR, state: 'closed', labels: [{ name: 'pm:mailbox' }, { name: 'pinned' }], head: { ref: BR, sha: HEAD, repo: { full_name: REPO } }, ...o });
+      const good = { ...allowed, [PULL]: { status: 200, json: box() }, [OPEN]: { status: 200, json: [] }, [DEL]: { status: 204, json: null }, [BACK]: [at(HEAD), { status: 404, json: { message: 'Not Found' } }] };
+      const drop = base([{ op: 'mailbox_branch_delete', pull: PR, branch: BR }]);
+      const ok = await run(drop, good);
+      t("the good case: the pull, the open pulls on its head, the ref at the pull's head, then ONE DELETE of the ref under the App token, then the ref read back absent — exit 0, the row naming it deleted", [ok.exit, ok.seen.slice(1).map((s) => s.call), writes(ok.seen).map((s) => [s.call, s.body, s.auth]), ok.rows[0].result, ok.annotations], [EXIT_OK, [PULL, OPEN, BACK, DEL, BACK], [[DEL, null, `Bearer ${TOKEN}`]], `deleted ${BR} (read back absent)`, []]);
+      const urls = [];
+      await mailboxBranchPreflight(OPS.mailbox_branch_delete.requests({ op: 'mailbox_branch_delete', pull: PR, branch: BR }, REPO)[0], { repo: REPO }, 'https://api.test', { token: TOKEN, fetch: async (url) => (urls.push(url), { status: 200, headers: new Headers(), json: async () => [] }) });
+      t("the open-pulls read is filtered to this repository's owner and the branch — an unfiltered or mis-owned read would answer for other heads", urls[1], `https://api.test/repos/${REPO}/pulls?state=open&head=objectstack-ai%3Aclaude%2Fmailbox-ui-3`);
+      const fences = [
+        [{ [PULL]: { status: 200, json: box({ state: 'open' }) } }, 'the pull is open, not closed'],
+        [{ [PULL]: { status: 200, json: box({ labels: [{ name: 'pinned' }] }) } }, 'does not carry pm:mailbox'],
+        [{ [PULL]: { status: 200, json: box({ head: { ref: 'claude/mailbox-ui-2', sha: HEAD, repo: { full_name: REPO } } }) } }, "the pull's head is claude/mailbox-ui-2, not claude/mailbox-ui-3"],
+        [{ [PULL]: { status: 200, json: box({ head: { ref: BR, sha: HEAD, repo: { full_name: 'someone/objectstack' } } }) } }, "head lives on someone/objectstack, not objectstack-ai/objectstack"],
+        [{ [BACK]: at('b'.repeat(40)) }, `${BR} is at bbbbbbbbbbbb, not the pull's head aaaaaaaaaaaa — a commit pushed after the close is not the mailbox's`],
+        [{ [BACK]: { status: 503, json: { message: 'down' } } }, 'the ref claude/mailbox-ui-3 could not be read'],
+        [{ [OPEN]: { status: 200, json: [{ number: 30999 }] } }, 'open pull(s) #30999 have claude/mailbox-ui-3 as head — the DELETE would close them'],
+        [{ [PULL]: { status: 404, json: { message: 'Not Found' } } }, 'the pull could not be read'],
+        [{ [OPEN]: { status: 503, json: { message: 'down' } } }, 'the open pulls on claude/mailbox-ui-3 could not be read'],
+      ];
+      const fenced = await Promise.all(fences.map(async ([over, phrase]) => { const r = await run(drop, { ...good, ...over }); return [r.exit, writes(r.seen).length, r.rows[0]?.status, r.rows[0]?.result.includes(phrase)]; }));
+      t('⛔ each fence refuses with the DELETE NOT SENT and names itself: an open pull, no pm:mailbox, another head, a forked head, an open pull on the head, a ref moved past the head, an unread ref, an unread pull, an unread open-pulls list', fenced, fences.map(() => [EXIT_ACTION_FAILED, 0, 'not sent', true]));
+      const kept = await run(drop, { ...good, [BACK]: at(HEAD) });
+      t('⛔ a 204 whose ref still reads back is a FAILED action, never a landing', [kept.exit, kept.rows[0].status, kept.rows[0].result.includes('the branch is still there')], [EXIT_ACTION_FAILED, 204, true]);
+      const gone = await run(drop, { ...good, [BACK]: { status: 404, json: { message: 'Not Found' } }, [DEL]: { status: 422, json: { message: 'Reference does not exist' } } });
+      t('a ref already gone — absent before (no sha to fence), the DELETE answering 422, absent after — is an idempotent landing', [gone.exit, gone.rows[0].result], [EXIT_OK, 'already absent (idempotent)']);
+      const { planClose } = await import('../mailbox-open.mjs');
+      const closing = { ...good, [`POST /repos/${REPO}/issues/${PR}/comments`]: { status: 201, json: { id: 9 } }, [`PATCH /repos/${REPO}/issues/${PR}`]: { status: 200, json: { number: PR, state: 'closed' } } };
+      const closed = await run(base(planClose({ repo: REPO, pull: PR, head: BR }).actions), closing);
+      t("⭐ after close, no branch: mailbox-open's close stroke sends the comment, the close and then the DELETE, reads the pull only after closing it, and ends on the ref read back absent — exit 0", [closed.exit, writes(closed.seen).map((s) => s.call), closed.seen.map((s) => s.call).indexOf(PULL) > closed.seen.map((s) => s.call).indexOf(`PATCH /repos/${REPO}/issues/${PR}`), closed.seen.at(-1).call, closed.rows.at(-1).result], [EXIT_OK, [`POST /repos/${REPO}/issues/${PR}/comments`, `PATCH /repos/${REPO}/issues/${PR}`, DEL], true, BACK, `deleted ${BR} (read back absent)`]);
+      const other = await run(base(planClose({ repo: REPO, pull: PR, head: 'claude/project-thread-mvsts5' }).actions), closing);
+      t('…while a head outside claude/mailbox-* — a thread branch the seat still works on — is closed and left: no DELETE, nothing under /git/', [other.exit, writes(other.seen).map((s) => s.call), other.seen.some((s) => s.call.includes('/git/'))], [EXIT_OK, [`POST /repos/${REPO}/issues/${PR}/comments`, `PATCH /repos/${REPO}/issues/${PR}`], false]);
+    }
+
+    // ── the advisory rows that write ────────────────────────────────────────
+    battery("the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation");
     {
       // A made-up id: the fixture names no real advisory.
       const GHSA = 'GHSA-abcd-2345-wxyz';
@@ -2546,30 +3209,71 @@ export async function selfTest() {
       const closes = [];
       for (const from of ['triage', 'draft']) {
         const r = await advRun([move('closed')], { ...allowed, [A_GET]: advisory({ state: from }), [A_PATCH]: advisory({ state: 'closed' }) });
-        closes.push([r.exit, writes(r.seen).map((s) => s.body), r.rows[0]?.result]);
+        closes.push([r.exit, writes(r.seen).map((s) => s.body), r.rows[0]?.result, r.annotations]);
       }
-      t('⭐ close: from triage and from draft, ONE PATCH of { state: closed } each', closes, [[EXIT_OK, [{ state: 'closed' }], `${GHSA} · state triage → closed`], [EXIT_OK, [{ state: 'closed' }], `${GHSA} · state draft → closed`]]);
+      t('⭐ close: from triage and from draft, ONE PATCH of { state: closed } each — and no annotation: only a publish names its id', closes, [[EXIT_OK, [{ state: 'closed' }], `${GHSA} · state triage → closed`, []], [EXIT_OK, [{ state: 'closed' }], `${GHSA} · state draft → closed`, []]]);
+      const reopened = await advRun([move('draft')], { ...allowed, [A_GET]: advisory({ state: 'closed' }), [A_PATCH]: advisory({ state: 'draft' }) });
+      t("⭐ reopen — a publish's first stroke: a closed advisory read, then ONE PATCH whose body is exactly { state: draft }; the row names the move; exit 0, no annotation", [reopened.exit, reopened.seen.map((s) => s.call), writes(reopened.seen).map((s) => s.body), reopened.rows[0]?.result, reopened.annotations], [EXIT_OK, [PERM, A_GET, A_PATCH], [{ state: 'draft' }], `${GHSA} · state closed → draft`, []], reopened.logs.join(' | '));
+      // An entry as the platform answers one, in the versions row's spelling — the advisory's prose stays in its marker.
+      const WIRE = Object.freeze({ package: { ecosystem: 'npm', name: '@objectstack/rest' }, vulnerable_version_range: '<= 18.2.0', patched_versions: '18.3.0', vulnerable_functions: [] });
+      const ready = (extra = {}) => advisory({ vulnerabilities: [WIRE], ...extra });
       const illegal = [];
-      for (const [to, from] of [['draft', 'draft'], ['draft', 'closed'], ['draft', 'published'], ['draft', 'withdrawn'], ['closed', 'closed'], ['closed', 'published'], ['closed', 'withdrawn']]) {
-        illegal.push([`${from}→${to}`, ...notSent(await advRun([move(to)], { ...allowed, [A_GET]: advisory({ state: from }) }))]);
+      for (const [to, from] of [['draft', 'draft'], ['draft', 'published'], ['draft', 'withdrawn'], ['closed', 'closed'], ['closed', 'published'], ['closed', 'withdrawn'], ['published', 'triage'], ['published', 'closed'], ['published', 'published'], ['published', 'withdrawn']]) {
+        const r = await advRun([move(to)], { ...allowed, [A_GET]: ready({ state: from }) });
+        illegal.push([`${from}→${to}`, ...notSent(r), /fence `state`/.test(r.rows[0]?.result ?? '')]);
       }
-      t('⛔ each illegal transition sends NO PATCH: draft from anything but triage, closed from closed, published or withdrawn — refused at the state fence, not sent, exit 5', illegal, illegal.map(([m]) => [m, EXIT_ACTION_FAILED, 0, 'not sent', true]));
+      t('⛔ each illegal transition sends NO PATCH: draft from draft, published or withdrawn; closed from closed, published or withdrawn; published from anything but draft — refused at the state fence, its versions set or not, not sent, exit 5', illegal, illegal.map(([m]) => [m, EXIT_ACTION_FAILED, 0, 'not sent', true, true]));
+
+      // ── the publish: draft → published, through the versions fence, read back with the versions it was sent
+      const pub = await advRun([move('published')], { ...allowed, [A_GET]: ready(), [A_PATCH]: ready({ state: 'published' }) });
+      t('⭐ publish: a draft whose versions are set read first, then ONE PATCH whose body is exactly { state: published }; the row names the move and the count of entries read back; exit 0', [pub.exit, pub.seen.map((s) => s.call), writes(pub.seen).map((s) => s.body), pub.rows[0]?.result], [EXIT_OK, [PERM, A_GET, A_PATCH], [{ state: 'published' }], `${GHSA} · state draft → published · 1 entry, each with its versions`], pub.logs.join(' | '));
+      t("…and ONE notice annotation names the published id — public once published, which is the point — which the reader's own parser reads back", [pub.annotations, pub.logs.filter((l) => l.startsWith('::')), parseRelayAdvisoryAnnotation(relayAdvisoryAnnotationMessage(pub.annotations[0] ?? {}))], [[{ action: 1, op: 'advisory_state', ghsaId: GHSA }], [`::notice title=fleet-write advisory_state::fleet-write action=1 op=advisory_state ghsa_id=${GHSA}`], { action: 1, op: 'advisory_state', ghsaId: GHSA }]);
+      const unversioned = [];
+      for (const vulnerabilities of [[], [{ ...WIRE, vulnerable_version_range: null, patched_versions: null }], [{ ...WIRE, vulnerable_version_range: MARKER }], [{ ...WIRE, patched_versions: '18.2.0' }]]) {
+        const r = await advRun([move('published')], { ...allowed, [A_GET]: advisory({ vulnerabilities }) });
+        unversioned.push([...notSent(r), /fence `versions`/.test(r.rows[0]?.result ?? ''), r.annotations]);
+      }
+      t('⛔ a publish of a draft whose versions are not set sends NO PATCH: none listed, none set (a draft as created), one spelled otherwise, a patched version inside its range — refused at the versions fence, not sent, exit 5, no annotation', unversioned, [0, 1, 2, 3].map(() => [EXIT_ACTION_FAILED, 0, 'not sent', true, true, []]));
+      const publishLost = await advRun([move('published')], { ...allowed, [A_GET]: ready(), [A_PATCH]: ready({ state: 'published', vulnerabilities: [] }) });
+      const publishStill = await advRun([move('published')], { ...allowed, [A_GET]: ready(), [A_PATCH]: ready() });
+      t('⛔ a publish answer that lost the versions, or still reads draft, fails the action — ONE write, no annotation, ⛔ never re-sent', [publishLost.exit, writes(publishLost.seen).length, publishLost.rows[0]?.result, publishLost.annotations, publishStill.exit, publishStill.rows[0]?.result, publishStill.annotations], [EXIT_ACTION_FAILED, 1, 'FAILED: HTTP 200, the answer reads state published, but it lists 0 entries — 1 of the 1 entry read before the publish missing, 0 other — read the advisory before anything else, ⛔ do not re-send', [], EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer reads state draft, not published — read the advisory before anything else, ⛔ do not re-send', []]);
+      const publishRefused = await advRun([move('published')], { ...allowed, [A_GET]: ready(), [A_PATCH]: refusal(403, 'Resource not accessible by integration') });
+      const publishInvalid = await advRun([move('published')], { ...allowed, [A_GET]: ready(), [A_PATCH]: refusal(422, 'Invalid state transition from `closed` to `published`.') });
+      t('⛔ a refused publish is a FAILED action naming its cause and the remedy — a token that cannot publish goes to the maintainer, never a wider grant — and earns no annotation', [publishRefused.exit, publishRefused.rows[0]?.result, publishRefused.annotations, publishInvalid.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 403; ${cause('Resource not accessible by integration')}; ${ADVISORY_ACCESS_REMEDY}`, [], `FAILED: HTTP 422; ${cause("Invalid state transition from 'closed' to 'published'.")}; ${ADVISORY_ACCESS_REMEDY}`]);
+
+      // ── advisory_versions
+      const VERSION = Object.freeze({ package: '@objectstack/rest', vulnerable_version_range: '<= 18.2.0', patched_versions: '18.3.0' });
+      const LINE_17 = Object.freeze({ package: '@objectstack/rest', vulnerable_version_range: '>= 17.0.0, < 17.9.4', patched_versions: '17.9.4' });
+      const setv = (versions = [VERSION], extra = {}) => ({ op: 'advisory_versions', ghsa_id: GHSA, versions, ...extra });
+      const asCreated = [{ package: { ecosystem: 'npm', name: '@objectstack/rest' }, vulnerable_version_range: null, patched_versions: null, vulnerable_functions: [] }];
+      const both = advisoryVersionsOnTheWire([VERSION, LINE_17]);
+      const set = await advRun([setv([VERSION, LINE_17])], { ...allowed, [A_GET]: advisory({ vulnerabilities: asCreated }), [A_PATCH]: advisory({ vulnerabilities: [both[1], both[0]].map((v) => ({ ...v, vulnerable_functions: [] })) }) });
+      t('⭐ versions: the draft read first, then ONE PATCH whose body is exactly { vulnerabilities } — per entry the npm ecosystem, the name and the two strings, nothing else; landed on an answer listing the same entries in another order; the row names the id, the state and counts alone; exit 0, no annotation', [set.exit, set.seen.map((s) => s.call), writes(set.seen).map((s) => s.body), set.rows[0]?.result, set.annotations], [EXIT_OK, [PERM, A_GET, A_PATCH], [{ vulnerabilities: both }], `${GHSA} · state draft · versions set: 2 entries across 1 package`, []], set.logs.join(' | '));
+      const vFenced = [];
+      for (const [state, vulnerabilities] of [['closed', asCreated], ['published', [WIRE]], ['triage', asCreated], ['draft', [...asCreated, { ...asCreated[0], package: { ecosystem: 'npm', name: 'hotcrm' } }]], ['draft', [{ ...WIRE, vulnerable_functions: [MARKER] }]], ['draft', [{ package: { ecosystem: 'pip', name: MARKER } }]]]) {
+        vFenced.push(notSent(await advRun([setv()], { ...allowed, [A_GET]: advisory({ state, vulnerabilities }) })));
+      }
+      t('⛔ versions send NO PATCH unless the advisory is a draft whose whole list they may replace: closed (reopen first), published and triage refused at the state fence; a listed package the action does not name, an entry carrying vulnerable_functions and one of another ecosystem at the versions fence — not sent, exit 5', vFenced, [0, 1, 2, 3, 4, 5].map(() => [EXIT_ACTION_FAILED, 0, 'not sent', true]));
+      const vLost = await advRun([setv([VERSION, LINE_17])], { ...allowed, [A_GET]: advisory({ vulnerabilities: asCreated }), [A_PATCH]: ready() });
+      const vRefused = await advRun([setv()], { ...allowed, [A_GET]: advisory({ vulnerabilities: asCreated }), [A_PATCH]: refusal(422, MARKER) });
+      const vQuoted = await advRun([setv()], { ...allowed, [A_GET]: advisory({ vulnerabilities: asCreated }), [A_PATCH]: refusal(422, 'Invalid range <= 18.2.0 for the package @objectstack/rest') });
+      t('⛔ a versions answer lacking an entry sent fails the action in counts alone, ⛔ never re-sent; a refused one names its cause — withheld when it quotes the advisory or the entries sent — with the remedy', [vLost.exit, vLost.rows[0]?.result, vRefused.rows[0]?.result, vQuoted.rows[0]?.result], [EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer lists 1 entry — 1 of the 2 entries sent missing or answered in another spelling, 0 other — read the advisory before anything else, ⛔ do not re-send', `FAILED: HTTP 422; ${WITHHELD}; ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 422; ${WITHHELD}; ${ADVISORY_ACCESS_REMEDY}`]);
       const wrongState = await advRun([move('draft')], { ...allowed, [A_GET]: advisory({ state: 'triage' }), [A_PATCH]: advisory({ state: 'triage' }) });
       const stateRefused = await advRun([move('closed')], { ...allowed, [A_GET]: advisory(), [A_PATCH]: refusal(422, MARKER) });
       t('⛔ a PATCH answer that does not show the state asked for fails the action, naming what it shows; a refused one whose message quotes the ADVISORY the preflight read is withheld, with the remedy', [wrongState.exit, wrongState.rows[0]?.result, stateRefused.exit, stateRefused.rows[0]?.result], [EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer reads state triage, not draft — read the advisory before anything else, ⛔ do not re-send', EXIT_ACTION_FAILED, `FAILED: HTTP 422; ${WITHHELD}; ${ADVISORY_ACCESS_REMEDY}`]);
 
       // ── the validator's gate, inside the executor: zero requests
       const gated = [];
-      for (const actions of [[add(['os-dev-b'], { ghsa_id: `${GHSA}/cve` })], [move('published')], [report(), { op: 'comment', issue: 1, body: 'x' }], [report({ vulnerabilities: [MARKER] })], [report({ description: `${MARKER} ${'x'.repeat(60_000)}` })], [draft({ packages: [MARKER] })], [draft({ vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER } }] })], [draft({ state: 'published' })], [draft(), report()]]) {
+      for (const actions of [[add(['os-dev-b'], { ghsa_id: `${GHSA}/cve` })], [move('withdrawn')], [setv([{ ...VERSION, package: MARKER }])], [setv([{ ...VERSION, vulnerable_version_range: MARKER }])], [setv([VERSION], { summary: MARKER })], [setv(), move('published')], [report(), { op: 'comment', issue: 1, body: 'x' }], [report({ vulnerabilities: [MARKER] })], [report({ description: `${MARKER} ${'x'.repeat(60_000)}` })], [draft({ packages: [MARKER] })], [draft({ vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER } }] })], [draft({ state: 'published' })], [draft(), report()]]) {
         const r = await advRun(actions, { ...allowed });
         gated.push([r.exit, r.seen.length]);
       }
-      t('⛔ refused before ANY request, the sender gate included: a malformed id, published, a report beside another action, an unknown vulnerabilities key, an over-cap description, a package that is no npm name, a draft carrying its own vulnerabilities or a state, and a draft beside a report — exit 2', gated, [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => [EXIT_REFUSED, 0]));
+      t('⛔ refused before ANY request, the sender gate included: a malformed id, a state the relay names no move to, a versions entry whose package or range is prose, a summary beside the versions, the versions beside the publish, a report beside another action, an unknown vulnerabilities key, an over-cap description, a package that is no npm name, a draft carrying its own vulnerabilities or a state, and a draft beside a report — exit 2', gated, Array.from({ length: 13 }, () => [EXIT_REFUSED, 0]));
 
       // ── ⛔ the marker sweep: every run above, every channel this file emits on
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), JSON.stringify(r.annotations ?? []), ...paceLines].join('\n'));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
-      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, created, unconfirmed, wrong-state and refused drafts, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [46, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, created, unconfirmed, wrong-state and refused drafts, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, landed, unversioned, lost and refused publishes, set, fenced, lost and refused versions, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [73, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
       // Positive controls: the marker was there to leak, and the needle finds it where it is.
       t('…positive control: every answer served carried the marker, the report\'s and the draft\'s POST carried it to the platform — where it belongs — and the fenced runs made their GET', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') || Object.keys(answers).length === 1), JSON.stringify(writes(filed.seen)[0]?.body).includes('ADVISORY MARKER') && JSON.stringify(writes(drafted.seen)[0]?.body).includes('ADVISORY MARKER'), [other, unread, ...[added, kept, present]].every((r) => r.seen.some((s) => s.call === A_GET))], [true, true, true]);
       t('…positive control: the generic row printer, given the same answer, WOULD print it — the advisory rows never reach it', resultOf({}, advisory().json).includes('ADVISORY MARKER'), true);
@@ -2664,7 +3368,7 @@ export async function selfTest() {
       })();
       t('⭐ the seat\'s key opens the parts to the GET answer BYTE FOR BYTE — the summary, the description and the vulnerabilities as the platform answered them, CJK, an emoji, a newline, a quote and a backslash among them', [opened === picked(served.json), Buffer.compare(Buffer.from(opened, 'utf8'), Buffer.from(picked(served.json), 'utf8')), ['summary', 'description', 'vulnerabilities'].map((f) => JSON.stringify(openedJson?.[f]) === JSON.stringify(served.json[f])), Object.keys(openedJson ?? {})], [true, 0, [true, true, true], [...ADVISORY_READ_FIELDS]]);
       const parsedBack = notices(landed).map((l) => parseRelayAdvisoryReadAnnotation(l.slice(l.indexOf('::', 2) + 2)));
-      t("the parts are notice commands titled `fleet-write advisory_read`, the reader's own parser reads back exactly what was emitted, and each message is inside the runner's 4,096-character cut", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, notices(landed).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), ADVISORY_READ_OPS], [['::notice title=fleet-write advisory_read::'], landed.annotations, true, ['advisory_read']]);
+      t("the parts are notice commands titled `fleet-write advisory_read`, the reader's own parser reads back exactly what was emitted, and each message is inside the runner's 4,096-character cut", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, notices(landed).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), ADVISORY_READ_OPS], [['::notice title=fleet-write advisory_read::'], landed.annotations, true, ['advisory_read', 'advisory_list']]);
       const sealedText = sealedOf(landed);
       t('⛔ the sealed answer ALONE carries none of the marker — not in its characters, not in its decoded bytes — though the text it opens to does (the positive control)', [sealedText.includes('ADVISORY'), Buffer.from(sealedText, 'base64url').includes(Buffer.from('ADVISORY MARKER')), opened.includes('ADVISORY MARKER')], [false, false, true]);
       t("⛔ it opens for the seat's key and THIS read alone: another key pair, another action index and another advisory id are each refused", [opens(landed, { key: pair().privateKey }), opens(landed, { action: 2 }), opens(landed, { ghsaId: OTHER })].map((x) => x.startsWith('refused: ')), [true, true, true]);
@@ -2739,6 +3443,163 @@ export async function selfTest() {
       t("⛔ …and the real processes: the validator accepting a read — its output minting repository-advisories READ, actions nothing — and refusing one, and the executor stopping at its prerequisite and its refusal, print neither the marker nor the id NOWHERE — stdout, stderr, GITHUB_OUTPUT or the step summary", [cliRuns.map((r) => [r.status, r.text.includes('ADVISORY MARKER'), r.text.includes(GHSA)]), cliRuns[0].output.includes('permission_repository_advisories=read\n'), cliRuns[0].output.includes('permission_actions=\n')], [[[EXIT_OK, false, false], [EXIT_REFUSED, false, false], [EXIT_PREREQUISITE, false, false], [EXIT_REFUSED, false, false]], true, true], cliRuns.map((r) => r.text.slice(0, 200)).join(' | '));
     }
 
+    // ── advisory_list ───────────────────────────────────────────────────────
+    battery("advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count");
+    {
+      const { generateKeyPairSync } = await import('node:crypto');
+      // Spaces and punctuation: prose, never an id's, a state's or a cursor's shape.
+      const MARKER = 'ADVISORY MARKER: how the flaw is reached, never to be logged';
+      // A made-up cursor, in the base64 alphabet a platform cursor may use: it must reach no output.
+      const CURSOR = 'Y3Vyc29yOnYyOpK0+Zm9v/YmFy==';
+      const API = 'https://api.test';
+      const CALL = advisoryListCall(REPO);
+      const pair = () => {
+        const k = generateKeyPairSync('x25519');
+        return { privateKey: k.privateKey, spki: k.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
+      };
+      const SEAT = pair();
+      const list = (extra = {}) => ({ op: 'advisory_list', public_key: SEAT.spki, ...extra });
+      const pageKey = (state, after = null) => `GET ${advisoryListPagePath(REPO, state, after)}`;
+      // Made-up ids: `GHSA-<k in base 36>-2345-wxyz`, naming no real advisory.
+      const idOf = (k) => `GHSA-${k.toString(36).padStart(4, '0')}-2345-wxyz`;
+      // A listed advisory carrying the marker in every field but the five that cross.
+      const item = (k, state, extra = {}) => ({
+        ghsa_id: idOf(k), state, severity: 'high', created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-02T00:00:00Z',
+        cve_id: MARKER, summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, html_url: `https://github.test/${REPO}/security/advisories/${idOf(k)}#${MARKER}`,
+        vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER }, vulnerable_version_range: MARKER }], credits: [{ login: 'os-dev-z', type: MARKER }],
+        collaborating_users: [{ login: 'os-dev-z', name: MARKER }], private_fork: { full_name: MARKER },
+        ...extra,
+      });
+      const items = (from, n, state) => Array.from({ length: n }, (_, j) => item(from + j, state));
+      const pageOf = (json, link = null) => ({ status: 200, json, ...(link ? { headers: { link } } : {}) });
+      const nextLink = (state, after) => `<${API}/repos/${REPO}/security-advisories?state=${state}&per_page=100&after=${encodeURIComponent(after)}>; rel="next"`;
+      const empty = Object.fromEntries(ADVISORY_LIST_STATES.map((st) => [pageKey(st), pageOf([])]));
+      const sealedOf = (r) => (r.annotations ?? []).filter((n) => n.op === 'advisory_list').sort((a, b) => a.part - b.part).map((n) => n.sealed).join('');
+      const opens = (r, { key = SEAT.privateKey, aad = advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_list' }) } = {}) => {
+        try {
+          return openAdvisoryRead({ sealed: sealedOf(r), privateKey: key, aad });
+        } catch (e) {
+          return `refused: ${e.message}`;
+        }
+      };
+      const notices = (r) => r.logs.filter((l) => l.startsWith('::notice '));
+      // This battery's platform keys an answer by its path AND query: the listing's pages differ by query alone.
+      const queried = (answers, seen) => {
+        const served = new Map();
+        return async (url, init) => {
+          const u = new URL(url);
+          const call = `${init?.method ?? 'GET'} ${u.pathname}${u.search}`;
+          seen.push({ call, body: init?.body ? JSON.parse(init.body) : null, auth: init?.headers?.authorization ?? '' });
+          const declared = answers[call];
+          const nth = served.get(call) ?? 0;
+          served.set(call, nth + 1);
+          const a = (Array.isArray(declared) ? declared[Math.min(nth, declared.length - 1)] : declared) ?? { status: 404, json: { message: 'Not Found' } };
+          if (a.throws) throw new Error(a.throws);
+          return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999', ...(a.headers ?? {}) }), json: async () => a.json };
+        };
+      };
+      const swept = [];
+      const listRun = async (actions, answers, { sender = 'os-support-ai', ...extra } = {}) => {
+        const seen = [];
+        const logs = [];
+        const paceLines = [];
+        const file = join(dir, `pace-list-${paceCase++}.jsonl`);
+        const r = await executeFleetWrite({ payload: base(actions), sender, token: TOKEN, api: API }, { fetch: queried(answers, seen), pace: { ...paceFor(file), log: (l) => paceLines.push(l) }, log: (l) => logs.push(l), ...extra });
+        const out = { ...r, seen, logs };
+        swept.push({ r: out, paceLines, answers });
+        return out;
+      };
+      // ⭐ Landed: three walks, one short page each.
+      const served = { ...allowed, [pageKey('triage')]: pageOf(items(1, 2, 'triage')), [pageKey('draft')]: pageOf(items(3, 3, 'draft')), [pageKey('closed')]: pageOf([]) };
+      const landed = await listRun([list()], served);
+      t("⭐ a listing is the sender gate, then ONE GET per listed state under the App token — triage, draft, closed, each its own page path — ZERO writes, exit 0; its row prints the call with the states in braces, status 200 and the one fixed landed sentence", [landed.exit, landed.seen.map((s) => s.call), landed.seen.every((s) => s.auth === `Bearer ${TOKEN}`), writes(landed.seen).length, landed.rows.map((x) => [x.op, x.call, x.status, x.result])], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('closed')], true, 0, [['advisory_list', CALL, 200, ADVISORY_LIST_LANDED]]]);
+      const opened = opens(landed);
+      const openedJson = (() => {
+        try {
+          return JSON.parse(opened);
+        } catch {
+          return null;
+        }
+      })();
+      t("⭐ the seat's key opens the parts to the padded listing, exactly the channel's size: the count beside every advisory in walk order, each exactly the five fields as the platform answered them — and the marker NOWHERE in it; the display alone trims the pad", [Buffer.byteLength(opened, 'utf8'), openedJson?.count, openedJson?.advisories?.map((a) => Object.keys(a).join(',')), openedJson?.advisories?.map((a) => a.ghsa_id), opened.includes('ADVISORY MARKER'), JSON.stringify(openedJson) === advisoryListDisplay(opened)], [ADVISORY_LIST_PADDED_BYTES, 5, Array.from({ length: 5 }, () => ADVISORY_LIST_FIELDS.join(',')), [1, 2, 3, 4, 5].map(idOf), false, true]);
+      const parsedBack = notices(landed).map((l) => parseRelayAdvisoryReadAnnotation(l.slice(l.indexOf('::', 2) + 2)));
+      t("the parts are exactly ten notice commands titled `fleet-write advisory_list`, each 4,000 characters, numbered 1..10 of 10, read back exactly by the reader's own parser", [notices(landed).length, [...new Set(notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)))], landed.annotations.map((n) => n.sealed.length), landed.annotations.map((n) => `${n.part}/${n.of}`), parsedBack], [ADVISORY_READ_MAX_PARTS, ['::notice title=fleet-write advisory_list::'], Array.from({ length: 10 }, () => 4000), Array.from({ length: 10 }, (_, k) => `${k + 1}/10`), landed.annotations]);
+      t("⛔ it opens for the seat's key and THIS listing alone: another key pair, another action index, and a read's associated data are each refused", [opens(landed, { key: pair().privateKey }), opens(landed, { aad: advisorySealAad({ requestId: 'fw-test-1', action: 2, op: 'advisory_list' }) }), opens(landed, { aad: advisoryReadAad({ requestId: 'fw-test-1', action: 1, ghsaId: idOf(1) }) })].map((x) => x.startsWith('refused: ')), [true, true, true]);
+      // The walk on the platform's cursor.
+      const paged = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', CURSOR)), [pageKey('draft', CURSOR)]: pageOf(items(110, 5, 'draft')) });
+      t("⭐ a full page whose Link names this collection's next page is followed on its cursor alone, re-spelled on the relay's own path — and the walk ends on the short page: 105 listed", [paged.exit, paged.seen.map((s) => s.call), JSON.parse(opens(paged)).count], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('draft', CURSOR), pageKey('closed')], 105]);
+      const exact = await listRun([list()], { ...allowed, ...empty, [pageKey('closed')]: pageOf(items(10, 100, 'closed')) });
+      t('a full page whose Link names no next page ends its walk too: 100 listed, no second GET', [exact.exit, exact.seen.map((s) => s.call), JSON.parse(opens(exact)).count], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('closed')], 100]);
+      const shortNext = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 5, 'draft'), nextLink('draft', CURSOR)), [pageKey('draft', CURSOR)]: pageOf(items(15, 5, 'draft')) });
+      t('⛔ a SHORT page whose Link still names a next page is FAILED — the walk cannot end on a page the platform says is not the last — no second page asked, the next state never asked, nothing sealed, no part', [shortNext.exit, shortNext.seen.filter((s) => s.call.includes('state=draft')).length, shortNext.seen.some((s) => s.call.includes('state=closed')), shortNext.annotations.length, notices(shortNext).length, shortNext.rows[0]?.result], [EXIT_ACTION_FAILED, 1, false, 0, 0, `FAILED: ${ADVISORY_LIST_SHORT_PAGE_NEXT}`]);
+      const upper = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', CURSOR).replace('rel="next"', 'REL="Next"')), [pageKey('draft', CURSOR)]: pageOf(items(110, 5, 'draft')) });
+      t('a next relation in another case is the same relation (RFC 8288): REL="Next" is followed on its cursor — 105 listed', [upper.exit, upper.seen.map((s) => s.call), JSON.parse(opens(upper)).count], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('draft', CURSOR), pageKey('closed')], 105]);
+      // ⛔ A field that crosses is only ever its declared value: a nested severity carrying the marker, a number for a date.
+      const fieldRuns = [];
+      for (const extra of [{ severity: { level: MARKER } }, { severity: 'catastrophic' }, { created_at: 1730000000 }, { updated_at: `${MARKER}` }, { created_at: null }]) {
+        const r = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf([item(1, 'draft'), item(2, 'draft', extra)]) });
+        fieldRuns.push(r);
+      }
+      t("⛔ an advisory whose severity is not one of the platform's four or null (a nested object carrying the marker, a made-up word), or whose created_at or updated_at is not an ISO-8601 string (a number, prose carrying the marker, null), is FAILED at the page fence — status 200, nothing sealed, no part — and the value is echoed nowhere", [fieldRuns.map((r) => [r.exit, r.annotations.length, notices(r).length, r.rows[0]?.status, r.rows[0]?.result]), fieldRuns.some((r) => [...r.logs, r.summary ?? '', JSON.stringify(r.rows)].join('\n').match(/ADVISORY MARKER|catastrophic|1730000000/))], [fieldRuns.map(() => [EXIT_ACTION_FAILED, 0, 0, 200, `FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — ${advisoryListPageFailure({ status: 200, json: [item(2, 'draft', { severity: 'catastrophic' })] }, 'draft')}`]), false]);
+      // ⭐ One sealed size whatever the count — the row and the log read the same.
+      const none = await listRun([list()], { ...allowed, ...empty });
+      const many = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), nextLink('triage', CURSOR)), [pageKey('triage', CURSOR)]: pageOf(items(110, 50, 'triage')) });
+      const unnoticed = (r) => [...r.logs.filter((l) => !l.startsWith('::notice ')), JSON.stringify(r.rows), r.summary].join('\n');
+      t("⭐ zero, five and 150 advisories seal to ONE length in ten parts each — and every line, row and summary but the ciphertext is byte-identical across the three: nothing on the run says how many", [[none, landed, many].map((r) => [r.exit, sealedOf(r).length, r.annotations.length, JSON.parse(opens(r)).count]), unnoticed(none) === unnoticed(landed) && unnoticed(none) === unnoticed(many)], [[[EXIT_OK, 40000, 10, 0], [EXIT_OK, 40000, 10, 5], [EXIT_OK, 40000, 10, 150]], true]);
+      // ⛔ The page cap, the cursor's fences, a repeated advisory, the channel's cap.
+      const capped = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', 'AAAA')), [pageKey('draft', 'AAAA')]: pageOf(items(110, 100, 'draft'), nextLink('draft', 'BBBB')), [pageKey('draft', 'BBBB')]: pageOf(items(210, 100, 'draft'), nextLink('draft', 'CCCC')), [pageKey('draft', 'CCCC')]: pageOf(items(310, 1, 'draft')) });
+      t('⛔ a walk still pending after its 3-page cap is FAILED — exactly 3 pages of that state read, the next state never asked, nothing sealed, no part — never a truncated listing', [capped.exit, capped.seen.filter((s) => s.call.includes('state=draft')).length, capped.seen.some((s) => s.call.includes('state=closed')), capped.annotations.length, notices(capped).length, capped.rows[0]?.result], [EXIT_ACTION_FAILED, ADVISORY_LIST_PAGE_CAP, false, 0, 0, `FAILED: ${ADVISORY_LIST_CAP_HIT}`]);
+      const offLinks = [`<https://evil.test/repos/${REPO}/security-advisories?state=draft&per_page=100&after=${encodeURIComponent(CURSOR)}>; rel="next"`, `<${API}/repositories/1/security-advisories?state=draft&per_page=100&after=${encodeURIComponent(CURSOR)}>; rel="next"`, nextLink('closed', CURSOR), nextLink('draft', `${CURSOR} ${MARKER}`)];
+      const off = [];
+      for (const link of offLinks) {
+        const r = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), link) });
+        off.push([r.exit, r.seen.filter((s) => s.call.includes('state=draft')).length, r.annotations.length, r.rows[0]?.result]);
+      }
+      t("⛔ a next link off this API's collection — another host, the numeric repository path, another state, a cursor outside its shape — is FAILED with the one sentence: no second page asked, nothing sealed, no part", off, offLinks.map(() => [EXIT_ACTION_FAILED, 1, 0, `FAILED: ${ADVISORY_LIST_CURSOR_REFUSED}`]));
+      const twice = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', CURSOR)), [pageKey('draft', CURSOR)]: pageOf(items(109, 5, 'draft')) });
+      t('⛔ an advisory listed twice across the pages is FAILED — the walk is not one listing — nothing sealed, no part', [twice.exit, twice.annotations.length, twice.rows[0]?.result], [EXIT_ACTION_FAILED, 0, `FAILED: ${ADVISORY_LIST_REPEATED}`]);
+      const huge = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), nextLink('triage', 'AAAA')), [pageKey('triage', 'AAAA')]: pageOf(items(110, 100, 'triage'), nextLink('triage', 'BBBB')), [pageKey('triage', 'BBBB')]: pageOf(items(210, 50, 'triage')) });
+      t("⛔ a listing over the channel's cap (250 advisories) is FAILED with the cap sentence alone — every page read, nothing sealed, no part, ⛔ never a cut list", [huge.exit, huge.seen.length, huge.annotations.length, notices(huge).length, huge.rows[0]?.result], [EXIT_ACTION_FAILED, 6, 0, 0, `FAILED: ${ADVISORY_LIST_OVER_CAP}`]);
+      // ⛔ A page's fences, and a GET that never reached the platform.
+      const forbidden = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: { status: 403, json: { message: 'Resource not accessible by integration', documentation_url: MARKER } } });
+      const stranger = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf([item(1, 'draft'), item(2, 'published')]) });
+      const notList = await listRun([list()], { ...allowed, ...empty, [pageKey('closed')]: pageOf({ message: MARKER }) });
+      t('⛔ fence page: a 403 (the platform\'s known message and the read remedy, no further page), an advisory in another state, and an answer that is no list — each FAILED, naming the status alone, nothing sealed, no part', [[forbidden, stranger, notList].map((r) => [r.exit, r.annotations.length, r.rows[0]?.status]), forbidden.seen.length, forbidden.rows[0]?.result, stranger.rows[0]?.result, notList.rows[0]?.result], [[[EXIT_ACTION_FAILED, 0, 403], [EXIT_ACTION_FAILED, 0, 200], [EXIT_ACTION_FAILED, 0, 200]], 2, `FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — a page of the listing answered HTTP 403 (the platform: Resource not accessible by integration); ${ADVISORY_LIST_ACCESS_REMEDY}`, "FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — a page of the listing lists an item that is not an advisory in the state the page asked for", "FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — a page of the listing answered HTTP 200 with no list"]);
+      const unreached = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: { throws: `fetch failed for ${advisoryListPagePath(REPO, 'draft', CURSOR)} holding ${MARKER}` } });
+      const unreachedText = [...unreached.logs, unreached.summary ?? '', JSON.stringify(unreached.rows)].join('\n');
+      t("⛔ a page that never reached the platform is FAILED saying so — status `not reached`, no grant remedy, nothing sealed, and the exception's message (its path, its cursor, the marker) printed nowhere", [unreached.exit, unreached.rows.map((x) => [x.status, x.result]), unreached.annotations.length, unreachedText.includes('fetch failed'), unreachedText.includes(ADVISORY_LIST_ACCESS_REMEDY)], [EXIT_ACTION_FAILED, [[ADVISORY_READ_UNREACHED_STATUS, `FAILED: ${ADVISORY_LIST_UNREACHED}`]], 0, false, false]);
+      // ⛔ The row's gate: judged before the first GET.
+      const gates = [];
+      for (const senderGate of ['anyone', 'collaborator', 'toString', '']) {
+        const r = await listRun([list()], { ...allowed, ...empty }, { advisoryList: { senderGate } });
+        gates.push([r.exit, r.seen.map((s) => s.call), r.annotations.length, r.rows[0]?.result]);
+      }
+      t('⛔ any gate but target-write is refused BEFORE the first GET — a made-up one, the retired collaborator, a prototype key, empty: the permission read alone, nothing sealed, no part', gates, gates.map(() => [EXIT_ACTION_FAILED, [PERM], 0, `FAILED: ${ADVISORY_LIST_SENDER_REFUSED}`]));
+      const PERM_B = `GET /repos/${REPO}/collaborators/os-dev-b/permission`;
+      const triageB = await listRun([list()], { [PERM_B]: { status: 200, json: { permission: 'read', role_name: 'triage', user: { login: 'os-dev-b' } } }, ...empty }, { sender: 'os-dev-b' });
+      t("⛔ …and the stroke's own gate first: a sender with triage on the target is refused before any listing GET — exit 4, no row, no part", [triageB.exit, triageB.seen.map((s) => s.call), triageB.rows.length, (triageB.annotations ?? []).length], [EXIT_SENDER_REFUSED, [PERM_B], 0, 0]);
+      // ⛔ A failed seal.
+      const seals = [];
+      for (const seal of [() => { throw new Error(`seal blew up holding ${MARKER}`); }, ({ plaintext }) => plaintext, () => 'A'.repeat(4000), () => 'A'.repeat(40_001)]) {
+        const r = await listRun([list()], served, { advisoryList: { seal } });
+        seals.push([r.exit, r.annotations.length, notices(r).length, r.rows[0]?.result]);
+      }
+      t("⛔ a seal that throws, hands back the plaintext, or returns ciphertext of any length but the channel's is FAILED with the one fixed sentence — no part, no notice, the exception's message printed nowhere", seals, seals.map(() => [EXIT_ACTION_FAILED, 0, 0, `FAILED: ${ADVISORY_READ_SEAL_FAILED}`]));
+      // ⛔ Refused before any request.
+      const gated = [];
+      for (const actions of [[list({ state: 'published' })], [list({ ghsa_id: idOf(1) })], [list({ after: CURSOR })], [list({ public_key: MARKER })], [list(), { op: 'comment', issue: 1, body: 'x' }], [list(), list({ public_key: pair().spki })], [{ op: 'advisory_list' }]]) {
+        const r = await listRun(actions, served);
+        gated.push([r.exit, r.seen.length]);
+      }
+      t('⛔ refused before ANY request, the sender gate included: a state, an advisory id, a cursor, a key that is prose, a listing beside a comment, two listings, and a listing with no key — exit 2', gated, gated.map(() => [EXIT_REFUSED, 0]));
+      // ⛔ The sweep: every run above, every channel this file emits on.
+      const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
+      const ids = Array.from({ length: 400 }, (_, k) => idOf(k));
+      const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') || ids.some((id) => text.includes(id)) || text.includes(CURSOR) || text.includes(encodeURIComponent(CURSOR)) ? i : null)).filter((i) => i !== null);
+      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, short-with-next, any-case relation, field-fenced, empty and large, capped, off-link, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [39, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
+      t('…positive control: the answers served carried the marker, the ids and the cursor, the cursor reached the platform on the second page — where it belongs — and the generic row printer, given a served item, WOULD print the marker and its id', [JSON.stringify(served).includes('ADVISORY MARKER') && JSON.stringify(served).includes(idOf(1)), paged.seen.some((s) => s.call.includes(encodeURIComponent(CURSOR))), resultOf({}, item(1, 'draft')).includes('ADVISORY MARKER') && resultOf({}, item(1, 'draft')).includes(idOf(1))], [true, true, true]);
+    }
+
     // ── the CLI ─────────────────────────────────────────────────────────────
     battery('the CLI: the event file, environment inputs, the payload refusal, the exit ladder');
     {
@@ -2807,11 +3668,14 @@ export async function selfTest() {
       'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, an assignees leg sent to the number the create answered and landing only when its answer lists every login sent, ' +
       'a governed-review follow-up after pr_ready alone (the draft open summons nobody — a human is asked at the seat\'s hand-off) that reads the pull\'s whole file list and, on a Tier H hit alone, requests every GOVERNED_APPROVERS account not already covered (the author assigned instead), zero writes when covered and a FAILED action when the list cannot be read whole, a transfer gated on both repositories and landing only on its target, ' +
       "a failed-jobs re-run fenced on the run and its pull's own current head, read just before its one POST (zero writes on any fence), and landing only when attempt 2 reads back with its failed jobs queued or in progress, " +
+      "a front-of-queue enqueue fenced on the pull, its whole file list and its base's queue (one jumped pull per repository), read just before its one mutation, and landing only when the queue reads the pull back jumped with nothing ahead, " +
       "an issue-hierarchy link fenced on its two cards, sent as the child's REST id and landing only when the parent's list reads it back, " +
-      "the payload read from the event file, four advisory rows — a report landed on the id it was given, a draft on its id reading state draft, collaborators and a state fenced on the advisory's own read and landed on the PATCH answer — " +
+      "the payload read from the event file, five advisory rows — a report landed on the id it was given, a draft on its id reading state draft, collaborators, versions and a state fenced on the advisory's own read and landed on the PATCH answer, a publish only through the versions fence, read back with its versions and annotated with its id — " +
       'whose marker in a summary, a description and a vulnerability reached no log line, row, summary or annotation, ' +
       "an advisory read fenced on its GET — its sender held to write on the target, by the maintainer's ruling — and sealed to the seat's one-time key, its notice parts opening byte for byte " +
-      'for that key and read alone, no part on a failed seal, the marker and the id on no public surface and the marker not in the sealed answer, one summary row per request, ' +
+      'for that key and read alone, no part on a failed seal, the marker and the id on no public surface and the marker not in the sealed answer, ' +
+      "an advisory listing gated before its first GET, walked per state on the platform's own cursor under a page cap, projected to five fields, padded and sealed as exactly ten parts, " +
+      'every failure emitting nothing and no id, count or cursor on any public surface, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +
       'token that came back out of NO summary, log or error.',
@@ -2892,7 +3756,8 @@ export async function main(argv) {
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
   const sender = process.env[SENDER_ENV] ?? '';
   const api = String(process.env.OS_FLEET_API_URL ?? '').trim().replace(/\/+$/, '') || DEFAULT_API;
-  const result = await executeFleetWrite({ payload, sender, token, api }, { log: (l) => (isRefusalLine(l) ? console.error(l) : console.log(l)) });
+  const git = checkoutGit(fileURLToPath(new URL('../../..', import.meta.url)));
+  const result = await executeFleetWrite({ payload, sender, token, api }, { git, log: (l) => (isRefusalLine(l) ? console.error(l) : console.log(l)) });
   const summaryFile = process.env.GITHUB_STEP_SUMMARY;
   if (summaryFile) {
     try {

@@ -131,6 +131,9 @@ export const VARIABLE_NAME_CONFIG_KEYS = ['iteratorVariable', 'indexVariable', '
  */
 const ASSIGNMENT_NODE_TYPE = 'assignment';
 
+/** The node type whose resume binds its declared fields' names ({@link collectScreenFieldNames}). */
+const SCREEN_NODE_TYPE = 'screen';
+
 /**
  * The keys an `assignments` ARRAY entry may name its target with — the three
  * `logic-nodes.ts` reads, in its precedence order. Exported so the guard can
@@ -245,6 +248,36 @@ export function collectFlowVariableNames(
     }
   }
 
+  return names;
+}
+
+/**
+ * [#30025] Every `screen` node's field `name`, across every graph of the flow:
+ * the names a resume binds. A screen's collected inputs land under their plain
+ * names (`applyResumeSignal`, the resume bag's `variables`), over whatever the
+ * run flattened there, so downstream of the screen a bare read of one holds the
+ * collected value, not the record's field. {@link collectFlowVariableNames}
+ * does not collect them (its consumers predate the screen row), so a caller
+ * that needs every name a bare read can hold instead of the field unions both.
+ *
+ * Only the names a screen DECLARES: a screen with no input contract folds any
+ * bag, which no reader can enumerate — `flowCelRootScope` reports such a flow
+ * as not provable, and that is the caller's other half.
+ */
+export function collectScreenFieldNames(graphs: readonly FlowGraphLike[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const graph of graphs) {
+    for (const flowNode of recordsOf(graph.nodes)) {
+      if (flowNode.type !== SCREEN_NODE_TYPE) continue;
+      const rawConfig = flowNode.config;
+      if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig)) continue;
+      const fields = (rawConfig as AnyRec).fields;
+      if (!Array.isArray(fields)) continue;
+      for (const field of recordsOf(fields)) {
+        if (typeof field.name === 'string' && field.name) names.add(field.name);
+      }
+    }
+  }
   return names;
 }
 

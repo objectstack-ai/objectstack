@@ -41,6 +41,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import { ObjectGrid } from '../ObjectGrid';
+import { resetUndeclaredActionNamesWarnings } from '../undeclaredActionNames';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider } from '@object-ui/react';
 
@@ -80,16 +81,24 @@ function renderGrid(opts: {
   handlers?: Record<string, any>;
   /** Override the seed records — e.g. to give a `visible` predicate something to bite on. */
   rows?: Array<Record<string, unknown>>;
+  /** `'absent'`: the data source has no `getObjectSchema`; `'fails'`: it rejects. */
+  schemaRead?: 'absent' | 'fails';
+  /** Mount under React StrictMode, as the Console does. */
+  strict?: boolean;
 }) {
   const rows = opts.rows ?? ROWS;
   const dataSource: any = {
     find: vi.fn(async () => ({ data: rows.map(r => ({ ...r })), total: rows.length, hasMore: false, pageSize: 50 })),
-    getObjectSchema: async (name: string) => ({
+  };
+  if (opts.schemaRead === 'fails') {
+    dataSource.getObjectSchema = async () => { throw new Error('schema read refused'); };
+  } else if (opts.schemaRead !== 'absent') {
+    dataSource.getObjectSchema = async (name: string) => ({
       name,
       fields: { id: { type: 'text' }, name: { type: 'text', label: 'Name' }, done: { type: 'boolean' } },
       ...(opts.objectActions ? { actions: opts.objectActions } : {}),
-    }),
-  };
+    });
+  }
   const schema: any = {
     type: 'object-grid',
     objectName: OBJECT,
@@ -97,11 +106,13 @@ function renderGrid(opts: {
     pagination: { pageSize: 50 },
     ...opts.schema,
   };
-  render(
+  const tree = (
     <ActionProvider handlers={opts.handlers ?? {}}>
       <ObjectGrid schema={schema} dataSource={dataSource} />
-    </ActionProvider>,
+    </ActionProvider>
   );
+  const result = render(opts.strict ? <React.StrictMode>{tree}</React.StrictMode> : tree);
+  dataSource.unmount = result.unmount;
   return dataSource;
 }
 
@@ -117,6 +128,7 @@ async function renderAndSelectAll(opts: Parameters<typeof renderGrid>[0]) {
 }
 
 beforeEach(() => {
+  resetUndeclaredActionNamesWarnings();
   fetchMock = vi.fn().mockResolvedValue({
     ok: true,
     status: 200,
@@ -210,10 +222,11 @@ describe('view-declared bulk actions (objectui#3002)', () => {
     await waitFor(() => expect(screen.getAllByTestId('bulk-action-push_down')).toHaveLength(1));
   });
 
-  it('keeps an unresolvable name alongside the promoted defs', async () => {
-    // A name the object never declared may still have a runner handler
-    // registered under it; hiding it because some OTHER def exists dropped
-    // half the bar's buttons.
+  it('draws no button for a name the object does not declare, even with a runner handler under it (objectstack#30169)', async () => {
+    // Trigger objectstack#30169. The spec says a bare `bulkActions` name "names
+    // an action the object declares", and lint `action-name-undefined` refuses
+    // any other. A runner handler registered under the name is client code,
+    // not a declaration, so it does not bring the button back.
     const handler = vi.fn(async () => ({ success: true }));
     await renderAndSelectAll({
       objectActions: [PUSH_DOWN],
@@ -222,9 +235,126 @@ describe('view-declared bulk actions (objectui#3002)', () => {
     });
 
     expect(await screen.findByTestId('bulk-action-push_down')).toBeInTheDocument();
-    const legacy = await screen.findByTestId('bulk-action-crm_only_handler');
-    fireEvent.click(legacy);
-    await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('bulk-action-crm_only_handler')).not.toBeInTheDocument();
+    expect(handler).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#30169 — the selection bar and a disabled package. With the
+ * package disabled the server withholds its actions: they leave the served
+ * object's `actions`, exactly as if never declared. The view still names one
+ * in `bulkActions` as a bare string (the spec accepts it). Before the fix the
+ * bar drew it anyway, under its humanized name ("Create Campaign"), and the
+ * click toasted "not executable". Now the bar draws only what the object
+ * declares: withheld, no button and one development warning naming it;
+ * served, the button under the action's own label.
+ */
+describe('a bulk action a disabled package withholds (objectstack#30169)', () => {
+  /** The package's action. Its label is NOT the humanized name, on purpose. */
+  const CREATE_CAMPAIGN = {
+    name: 'create_campaign',
+    label: 'Add to Campaign',
+    type: 'api',
+    target: '/api/v1/campaigns/add',
+  };
+  const VIEW = { bulkActions: ['push_down', 'create_campaign'] };
+
+  const bulkActionWarnings = (warn: { mock: { calls: unknown[][] } }) =>
+    warn.mock.calls
+      .map((args) => String(args[0]))
+      .filter((line) => line.includes('ObjectGrid bulkActions'));
+
+  it('withheld: the served object lacks it, so the bar draws no button and warns once naming it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await renderAndSelectAll({ objectActions: [PUSH_DOWN], schema: VIEW });
+
+      // The declared sibling is drawn, so the bar is up and populated.
+      expect(await screen.findByTestId('bulk-action-push_down')).toBeInTheDocument();
+      expect(screen.queryByTestId('bulk-action-create_campaign')).not.toBeInTheDocument();
+      expect(screen.queryByText('Create Campaign')).not.toBeInTheDocument();
+      await waitFor(() => expect(bulkActionWarnings(warn)).toHaveLength(1));
+      expect(bulkActionWarnings(warn)[0]).toContain("'create_campaign'");
+      expect(bulkActionWarnings(warn)[0]).not.toContain("'push_down'");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('served: the same view draws it under the action label, and stays quiet', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await renderAndSelectAll({ objectActions: [PUSH_DOWN, CREATE_CAMPAIGN], schema: VIEW });
+
+      expect(await screen.findByTestId('bulk-action-create_campaign')).toHaveTextContent('Add to Campaign');
+      expect(bulkActionWarnings(warn)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('an object named only through `data.object` waits for that object, and the warning names it', async () => {
+    // The grid's object is `resolveRecordSourceObjectName(schema, data)`, not
+    // `schema.objectName`. Keyed on the top-level key, readiness was true on
+    // the first render, before the schema landed, so the DECLARED `push_down`
+    // was reported too, under "no objectName".
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await renderAndSelectAll({
+        objectActions: [PUSH_DOWN],
+        schema: { ...VIEW, objectName: undefined, data: { provider: 'object', object: OBJECT } },
+      });
+
+      expect(await screen.findByTestId('bulk-action-push_down')).toBeInTheDocument();
+      await waitFor(() => expect(bulkActionWarnings(warn)).toHaveLength(1));
+      expect(bulkActionWarnings(warn)[0]).toContain(`objectName: '${OBJECT}'`);
+      expect(bulkActionWarnings(warn)[0]).toContain("'create_campaign'");
+      expect(bulkActionWarnings(warn)[0]).not.toContain("'push_down'");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    ['has no getObjectSchema', 'absent'],
+    ['rejects the schema read', 'fails'],
+  ] as const)('inline rows whose data source %s still report the names, as unread', async (_label, schemaRead) => {
+    // Nothing will ever land, so nothing is awaited: the names are reported,
+    // and the message says the object's actions are unknown rather than that
+    // the names are undeclared. Before, readiness never flipped and the drop
+    // was silent.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // (No wait on the rows: with a failed read their columns stay masked,
+      // objectui#10657, so 'Plan A' is never drawn in the `fails` leg.)
+      renderGrid({ schemaRead, schema: { ...VIEW, data: { provider: 'value', items: ROWS } } });
+
+      await waitFor(() => expect(bulkActionWarnings(warn)).toHaveLength(1));
+      expect(bulkActionWarnings(warn)[0]).toContain('could not be read');
+      expect(bulkActionWarnings(warn)[0]).toContain("'push_down', 'create_campaign'");
+      expect(screen.queryByTestId('bulk-action-create_campaign')).not.toBeInTheDocument();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('warns once under StrictMode and across a remount of the same list', async () => {
+    // StrictMode runs every mount effect setup → cleanup → setup; this shape is
+    // ready on its first render, so an effect-only guard said it twice.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const opts = { schemaRead: 'absent', strict: true, schema: { ...VIEW, data: { provider: 'value', items: ROWS } } } as const;
+      const ds = renderGrid(opts);
+      await waitFor(() => expect(screen.getByText('Plan A')).toBeInTheDocument());
+      await waitFor(() => expect(bulkActionWarnings(warn).length).toBeGreaterThan(0));
+      ds.unmount();
+      renderGrid(opts);
+      await waitFor(() => expect(screen.getByText('Plan A')).toBeInTheDocument());
+      expect(bulkActionWarnings(warn)).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

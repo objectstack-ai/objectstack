@@ -8,6 +8,8 @@
 import { describe, it, expect } from 'vitest';
 import {
     ObjectSchemaMaskEvaluationError,
+    actionObjectOverrideTargets,
+    actionServedWithoutOwnObject,
     applyObjectSchemaMask,
     foldVisibilityFingerprintIntoEtag,
     isObjectSchemaMaskExempt,
@@ -426,5 +428,32 @@ describe('[#22250] the D4 exemption covers the definition, not the runtime view'
             objectName: 'account', context: CLASSES['platform admin'], security: undefined, enabled: true,
         });
         expect(noService).toEqual({ kind: 'passthrough', reason: 'exempt' });
+    });
+});
+
+describe('[ADR-0106 D1] an action with no own-object definition — its objectOverride params judged on the object each names', () => {
+    const RATE = { field: 'rate', objectOverride: 'vendor' };
+    const ACTION = { name: 'quote', params: [RATE, { field: 'name', objectOverride: 'vendor' }, { field: 'code', objectOverride: 'region' }, { name: 'note' }] };
+
+    it('names every other object a param reads, once each, in declaration order', () => {
+        expect(actionObjectOverrideTargets(ACTION)).toEqual(['vendor', 'region']);
+        expect(actionObjectOverrideTargets(ACTION, 'vendor')).toEqual(['region']);
+        expect(actionObjectOverrideTargets({ name: 'plain', params: [{ name: 'note' }] })).toEqual([]);
+    });
+
+    it('serves the action only when every bound field is readable on the object it names', () => {
+        const readable = new Map([['vendor', new Set(['rate', 'name'])], ['region', new Set(['code'])]]);
+        expect(actionServedWithoutOwnObject(ACTION, undefined, readable)).toBe(true);
+        const rateDenied = new Map([['vendor', new Set(['name'])], ['region', new Set(['code'])]]);
+        expect(actionServedWithoutOwnObject(ACTION, undefined, rateDenied)).toBe(false);
+    });
+
+    it('withholds the action when a named object\'s readable set is undetermined (fail closed)', () => {
+        expect(actionServedWithoutOwnObject(ACTION, undefined, new Map([['vendor', new Set(['rate', 'name'])]]))).toBe(false);
+        expect(actionServedWithoutOwnObject(ACTION, undefined, new Map([['vendor', new Set(['rate', 'name'])], ['region', undefined]]))).toBe(false);
+    });
+
+    it('an action binding no other object is served as declared', () => {
+        expect(actionServedWithoutOwnObject({ name: 'plain', params: [{ name: 'note' }] }, undefined, new Map())).toBe(true);
     });
 });

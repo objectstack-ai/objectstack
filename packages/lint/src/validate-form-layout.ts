@@ -66,7 +66,7 @@ import {
   sectionGroupRefs,
 } from './object-field-groups.js';
 import { formViewSites, viewObjectName } from './view-walk.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, recordsOf } from './object-graph.js';
 
 export const FORM_FIELD_UNKNOWN = 'form-field-unknown';
 /**
@@ -138,16 +138,32 @@ function fieldNameOf(entry: unknown): string | null {
 export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
   const findings: FormLayoutFinding[] = [];
 
-  // object name → its field-name set, for reference checking.
+  // object name → its field-name set, for reference checking. [#30608] Over
+  // the objects as SERVED (`objectsAsServed`, the package's one fold), as the
+  // renderer reads the merged object: a section naming a field an
+  // `objectExtensions` entry of the same artifact adds renders, so it is not
+  // reported, and a field no body declares or extends still is. Existence
+  // never asks which definition wins, so a field two packages tie on is a
+  // known name. An object nothing extends keeps its declared read exactly
+  // (map-shaped `fields` only); `served[i]` is the served form of
+  // `declared[i]` (the fold's contract), and is a new record only for an
+  // extended object, whose served `fields` is the fold's list. An object that
+  // declares no field was judged against the empty set on `main` (every
+  // section field reported), so an extension adding to it only takes its own
+  // names out of that report: no verdict moves toward a refusal.
   const objectFields = new Map<string, Set<string>>();
-  for (const obj of recordsOf(stack.objects)) {
+  const declared = recordsOf(stack.objects);
+  const served = objectsAsServed(stack).objects;
+  declared.forEach((obj, i) => {
     const name = typeof obj.name === 'string' ? obj.name : undefined;
-    if (!name) continue;
-    const fields = (obj.fields && typeof obj.fields === 'object' && !Array.isArray(obj.fields))
-      ? Object.keys(obj.fields as AnyRec)
-      : [];
+    if (!name) return;
+    const fields = served[i] !== obj
+      ? recordsOf(served[i].fields).map((f) => f.name).filter((n): n is string => typeof n === 'string')
+      : (obj.fields && typeof obj.fields === 'object' && !Array.isArray(obj.fields))
+        ? Object.keys(obj.fields as AnyRec)
+        : [];
     objectFields.set(name, new Set(fields));
-  }
+  });
   // [#13855] object name → its declared field-group keys, for `section.group`.
   const objectFieldGroups = indexObjectFieldGroups(stack);
 

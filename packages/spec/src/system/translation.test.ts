@@ -5,11 +5,15 @@ import { TEXT_SLOT_TEMPLATE_REFUSAL } from '../automation/flow-text-slot-templat
 import { FlowSchema } from '../automation/flow.zod';
 import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
 import { ALL_CONVERSIONS } from '../conversions/registry';
+import { applyConversionsToStoredItem } from '../conversions/stored';
+import { SeedSchema } from '../data/seed.zod';
+import { SeedLoaderConfigSchema } from '../data/seed-loader.zod';
 import {
   TranslationDataSchema,
   TranslationBundleSchema,
   PlatformTranslationDataSchema,
   PlatformTranslationBundleSchema,
+  ServedTranslationDataSchema,
   defineTranslationBundle,
   LocaleSchema,
   FieldTranslationSchema,
@@ -47,7 +51,7 @@ describe('LocaleSchema', () => {
     });
   });
 
-  it.each(['en', 'zh-CN', 'zh-Hans-CN', 'es-419', 'yue-HK', 'zh-cn'])('accepts the tag %j (case is not judged)', (locale) => {
+  it.each(['en', 'zh-CN', 'zh-Hans-CN', 'es-419', 'yue-HK', 'zh-cn'])('accepts the tag %j (case is corrected, never refused)', (locale) => {
     expect(LocaleSchema.safeParse(locale).success).toBe(true);
   });
 
@@ -117,6 +121,125 @@ describe('LocaleSchema', () => {
       stack.translations[1],
       { 'ja-JP': { messages: { x: 'c' } } },
     ]);
+  });
+});
+
+// #28993: a translation saved under `zh-cn` answered 200 and never reached a
+// `zh-CN` session, because a resolver answers one locale, exact match first,
+// and the stock `zh-CN` bundle won. The parse now corrects a tag's case.
+describe('LocaleSchema corrects a tag to its BCP-47 case (#28993)', () => {
+  it.each([
+    ['zh-cn', 'zh-CN'],
+    ['ZH-CN', 'zh-CN'],
+    ['zh-hans-cn', 'zh-Hans-CN'],
+    ['ZH-HANS-cn', 'zh-Hans-CN'],
+    ['EN', 'en'],
+    ['en-us', 'en-US'],
+    ['yue-hk', 'yue-HK'],
+    ['sr-LATN-rs', 'sr-Latn-RS'],
+    ['es-419', 'es-419'],
+    ['de-1996', 'de-1996'],
+    // Every subtag after a singleton is lower case (RFC 5646 §2.1.1).
+    ['en-US-u-CA-Gregory', 'en-US-u-ca-gregory'],
+    ['en-x-US', 'en-x-us'],
+  ])('%j parses to %j', (input, canonical) => {
+    expect(LocaleSchema.parse(input)).toBe(canonical);
+  });
+
+  it.each(['en', 'zh-CN', 'zh-Hans-CN', 'es-419', 'pt-BR', 'en-US-u-ca-gregory'])('a canonical tag %j is returned unchanged', (locale) => {
+    expect(LocaleSchema.parse(locale)).toBe(locale);
+  });
+
+  it('folds case only: no legacy-subtag replacement, and no throw on a tag the shape accepts', () => {
+    // `Intl.getCanonicalLocales` answers `he`, `fil` and `zh` for these, which
+    // would move a translation to a locale its author never named.
+    expect(LocaleSchema.parse('iw')).toBe('iw');
+    expect(LocaleSchema.parse('TL')).toBe('tl');
+    expect(LocaleSchema.parse('cmn-cn')).toBe('cmn-CN');
+    // ...and throws on this one, which the shape accepts.
+    expect(LocaleSchema.parse('zh-hans-hans')).toBe('zh-Hans-Hans');
+  });
+
+  it('every reader of LocaleSchema sees the canonical spelling', () => {
+    // The item door: `defineTranslation` and the metadata save door's parse.
+    expect(TranslationItemSchema.parse({ name: 'zh_cn', locale: 'zh-cn', messages: { x: 'y' } }).locale).toBe('zh-CN');
+    expect(defineTranslation({ name: 'zh_cn', locale: 'ZH-cn', messages: { x: 'y' } }).locale).toBe('zh-CN');
+    // The stack's i18n configuration.
+    expect(TranslationConfigSchema.parse({ defaultLocale: 'EN', supportedLocales: ['en', 'zh-cn'], fallbackLocale: 'en-us' }))
+      .toEqual({ defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en-US' });
+    // A seed dataset's locale scope and the seed loader's own locale.
+    expect(SeedSchema.parse({ object: 'crm_lead', locale: ['zh-cn'], records: [] }).locale).toEqual(['zh-CN']);
+    expect(SeedLoaderConfigSchema.parse({ locale: 'zh-cn' }).locale).toBe('zh-CN');
+  });
+
+  it('a bundle\'s locale keys are folded, in authored order, values untouched', () => {
+    const data = { messages: { commonSave: '保存' } };
+    const parsed = TranslationBundleSchema.parse({ 'zh-cn': data, en: { messages: { commonSave: 'Save' } } });
+    expect(Object.keys(parsed)).toEqual(['zh-CN', 'en']);
+    expect(parsed['zh-CN']).toEqual(data);
+    expect(Object.keys(defineTranslationBundle({ 'ja-jp': data }))).toEqual(['ja-JP']);
+    expect(Object.keys(PlatformTranslationBundleSchema.parse({ 'zh-hans-cn': data }))).toEqual(['zh-Hans-CN']);
+  });
+
+  it.each([
+    ['TranslationBundleSchema', TranslationBundleSchema],
+    ['PlatformTranslationBundleSchema', PlatformTranslationBundleSchema],
+  ] as const)('%s refuses two keys that fold to one tag, naming both, instead of dropping one', (_name, schema) => {
+    const result = schema.safeParse({
+      'zh-cn': { messages: { commonSave: '保存(lower)' } },
+      'zh-CN': { messages: { commonSave: '保存' } },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['custom', 'zh-CN']]);
+    const message = result.error!.issues[0]!.message;
+    expect(message).toContain('`zh-cn`');
+    expect(message).toContain('`zh-CN`');
+  });
+
+  it('CONTROL: distinct tags in one bundle, and one tag across two bundles, are both accepted', () => {
+    // Distinct after the fold: nothing collides.
+    const bundle = { 'zh-CN': { messages: { x: 'a' } }, 'zh-TW': { messages: { x: 'b' } }, 'zh-hans-cn': { messages: { x: 'c' } } };
+    expect(Object.keys(TranslationBundleSchema.parse(bundle))).toEqual(['zh-CN', 'zh-TW', 'zh-Hans-CN']);
+    // Two bundles of `stack.translations` are separate records; the runtime
+    // deep-merges them per locale, so `zh-cn` in one and `zh-CN` in the other
+    // is not a collision, it is one locale.
+    expect(TranslationBundleSchema.safeParse({ 'zh-cn': { messages: { x: 'a' } } }).success).toBe(true);
+    expect(TranslationBundleSchema.safeParse({ 'zh-CN': { messages: { x: 'b' } } }).success).toBe(true);
+  });
+
+  it('data at rest: a stored row under `zh-cn` is read back as `zh-CN` by the stored-row seam', () => {
+    // `applyConversionsToStoredItem` is what every rehydration seam replays,
+    // the runtime-authored translation sync included, before it keys the row
+    // by its locale. The save door stores the authored body, so this is the
+    // seam that carries the fold to a stored row.
+    const row = { name: 'zh_cn', locale: 'zh-cn', objects: { project: { label: '项目(lower)' } } };
+    expect(applyConversionsToStoredItem('translation', row)).toEqual({ ...row, locale: 'zh-CN' });
+    // Canonical rows come back untouched: the pass is idempotent.
+    const canonical = { name: 'zh_cn', locale: 'zh-CN', messages: { x: 'y' } };
+    expect(applyConversionsToStoredItem('translation', canonical)).toEqual(canonical);
+    // An underscore spelling is made a tag by the entry before and folded by
+    // the case entry after it: the order is what takes `zh_cn` to `zh-CN`.
+    const underscored = { name: 'zh_cn', locale: 'zh_cn', messages: { x: 'y' } };
+    expect(applyConversionsToStoredItem('translation', underscored)).toEqual({ ...underscored, locale: 'zh-CN' });
+  });
+
+  it('data at rest: the case entry reports a case collision instead of guessing, and merges an identical twin', () => {
+    const conversion = ALL_CONVERSIONS.find((c) => c.id === 'translation-locale-tag-case-folded')!;
+    expect(conversion.retiredAfter).toBe('18.2.0');
+    const todos: { path: string }[] = [];
+    const notices: { path: string }[] = [];
+    const stack = {
+      translations: [
+        // `zh-cn` is `zh-CN` in another case, which the entry already holds with other strings.
+        { 'zh-cn': { messages: { x: 'a' } }, 'zh-CN': { messages: { x: 'b' } } },
+        // An identical twin is merged: nothing is lost.
+        { 'ja-jp': { messages: { x: 'c' } }, 'ja-JP': { messages: { x: 'c' } } },
+      ],
+    };
+    const out = conversion.apply(stack, (n) => notices.push(n), { reportTodo: (t) => todos.push(t) });
+    expect(todos.map((t) => t.path)).toEqual(['translations[0].zh-cn']);
+    expect(notices.map((n) => n.path)).toEqual(['translations[1].ja-jp']);
+    expect(out.translations).toEqual([stack.translations[0], { 'ja-JP': { messages: { x: 'c' } } }]);
   });
 });
 
@@ -1711,6 +1834,81 @@ describe('translation unknown-key strictness', () => {
       // and stays on the platform's.
       expect(() => PlatformTranslationDataSchema.parse({ settings })).not.toThrow();
       expect(() => PlatformTranslationBundleSchema.parse({ 'zh-CN': { settings } })).not.toThrow();
+    });
+
+    it("carries a toggle's turn-off question beside its label on the platform face (#30418)", () => {
+      // The manifest key `confirmOffText` is translated at the toggle's own
+      // address, as its `label` is; a strict `keys` entry that did not declare
+      // the leaf would refuse that bundle here, and `tsc` would refuse the
+      // service's `PlatformTranslationData`-typed bundle literals.
+      const withConfirm = { auth: { keys: { email_password_enabled: { label: 'Login', confirmOffText: 'Sure?' } } } };
+      const result = PlatformTranslationDataSchema.safeParse({ settings: withConfirm });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect(result.data?.settings?.auth?.keys?.email_password_enabled?.confirmOffText).toBe('Sure?');
+    });
+
+    describe("a map setting's column headers (#31453)", () => {
+      // Spelled as the `map` specifier spells them: `keyColumn` is the key
+      // column, `columns` the value columns keyed by column `name`; each
+      // carries the column's `label` and its `description` as `help`.
+      const keys = (entry: Record<string, unknown>) => ({ lifecycle: { keys: { retention_overrides: entry } } });
+      const issuesOf = (entry: Record<string, unknown>) =>
+        PlatformTranslationDataSchema.safeParse({ settings: keys(entry) }).error?.issues ?? [];
+
+      it('carries the key column and each value column beside the setting label', () => {
+        const entry = {
+          label: '保留期覆盖',
+          keyColumn: { label: '对象', help: '要覆盖的对象' },
+          columns: { maxAge: { label: '保留时长' }, expireAfter: { label: '过期时长', help: '行过期前的时长' } },
+        };
+        const result = PlatformTranslationDataSchema.safeParse({ settings: keys(entry) });
+        expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+        const parsed = result.data?.settings?.lifecycle?.keys?.retention_overrides;
+        expect(parsed?.keyColumn).toEqual({ label: '对象', help: '要覆盖的对象' });
+        expect(parsed?.columns?.expireAfter).toEqual({ label: '过期时长', help: '行过期前的时长' });
+        // The served document and the platform bundle read the same shape.
+        expect(ServedTranslationDataSchema.safeParse({ settings: keys(entry) }).success).toBe(true);
+        expect(PlatformTranslationBundleSchema.safeParse({ 'zh-CN': { settings: keys(entry) } }).success).toBe(true);
+      });
+
+      it.each([
+        ['headers', 'columns'],
+        ['columnLabels', 'columns'],
+        ['keyHeader', 'keyColumn'],
+      ])('refuses `%s` on the setting entry, naming `%s`', (wrong, right) => {
+        const issue = issuesOf({ [wrong]: {} }).find((i) => i.code === 'unrecognized_keys');
+        expect(issue?.message).toContain(`\`${wrong}\` → \`${right}\``);
+      });
+
+      it('is strict on a column, as the setting entry is: an undeclared leaf is refused', () => {
+        const inColumn = issuesOf({ columns: { maxAge: { label: 'Keep', description: 'x' } } })
+          .find((i) => i.code === 'unrecognized_keys');
+        expect(inColumn?.message).toContain('`description` → `help`');
+        expect(inColumn?.path).toEqual(['settings', 'lifecycle', 'keys', 'retention_overrides', 'columns', 'maxAge']);
+        const inKey = issuesOf({ keyColumn: { title: 'Object' } }).find((i) => i.code === 'unrecognized_keys');
+        expect(inKey?.message).toContain('`title` → `label`');
+        expect(inKey?.path).toEqual(['settings', 'lifecycle', 'keys', 'retention_overrides', 'keyColumn']);
+      });
+
+      it('refuses a bare string where a column entry is an object', () => {
+        // A column header is two strings, not one: a plain string would leave
+        // no place for its `help`, so the shape refuses it rather than coerce.
+        const at = ['settings', 'lifecycle', 'keys', 'retention_overrides'];
+        expect(issuesOf({ keyColumn: 'Object' }).map((i) => [i.code, i.path]))
+          .toEqual([['invalid_type', [...at, 'keyColumn']]]);
+        expect(issuesOf({ columns: { maxAge: 'Keep rows for' } }).map((i) => [i.code, i.path]))
+          .toEqual([['invalid_type', [...at, 'columns', 'maxAge']]]);
+      });
+
+      it("refuses a specifier column pasted in whole, saying where its `name` goes instead of renaming it", () => {
+        // `name` is the record key, never the header: a rename to `label`
+        // would tell the author to overwrite the header with the identifier.
+        const issue = issuesOf({ columns: { maxAge: { name: 'maxAge', label: '保留时长', kind: 'duration' } } })
+          .find((i) => i.code === 'unrecognized_keys');
+        expect(issue?.message).toContain('`columns.<name>`');
+        expect(issue?.message).toContain('the `map` specifier declares it');
+        expect(issue?.message).not.toContain('`name` → `label`');
+      });
     });
   });
 

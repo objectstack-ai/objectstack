@@ -1,6 +1,6 @@
 # ADR-0069: Enterprise authentication hardening — password policy, enforced MFA, SSO, session controls, network gating, and anti-brute-force, all enforcement-wired
 
-**Status**: Accepted — **P1 + P2 implemented** (2026-07-04); P3 partially landed (see Addendum). Original proposal 2026-06-24. Session-of-record question settled 2026-08-04 (#4785): sessions live in `sys_session`; the kernel `cache` service backs D2's rate-limit counters only. · **Amended** (2026-10-14, ruling C′ on [#23287](https://github.com/objectstack-ai/objectstack/issues/23287), [`6159450584`](https://github.com/objectstack-ai/objectstack/issues/23287#issuecomment-6159450584), maintainer 「同意」) — D3 states what the gate holds for an API key, for password expiry and for a forced reset; see the note under D3. · **Amended** (2026-10-20, PR [#24795](https://github.com/objectstack-ai/objectstack/pull/24795), no decision changes) — D5's client-address mechanism follows the shared `server.trustProxy` rule; see the note under D5.
+**Status**: Accepted — **P1 + P2 implemented** (2026-07-04); P3 partially landed (see Addendum). Original proposal 2026-06-24. Session-of-record question settled 2026-08-04 (#4785): sessions live in `sys_session`; the kernel `cache` service backs D2's rate-limit counters only. · **Amended** (2026-10-14, ruling C′ on [#23287](https://github.com/objectstack-ai/objectstack/issues/23287), [`6159450584`](https://github.com/objectstack-ai/objectstack/issues/23287#issuecomment-6159450584), maintainer 「同意」) — D3 states what the gate holds for an API key, for password expiry and for a forced reset; see the note under D3. · **Amended** (2026-10-20, PR [#24795](https://github.com/objectstack-ai/objectstack/pull/24795), no decision changes) — D5's client-address mechanism follows the shared `server.trustProxy` rule; see the note under D5. · **Amended in place** (2026-11-06, ruling record [`6692407743`](https://github.com/objectstack-ai/objectstack/issues/30922#issuecomment-6692407743) on [#30922](https://github.com/objectstack-ai/objectstack/issues/30922), maintainer, verbatim: 「修订 ADR 写明存放位置（推荐）」; implemented by PR [#31013](https://github.com/objectstack-ai/objectstack/pull/31013)) — per-organization overrides live in the settings tenant rung (the tenant-scoped `access_policy` namespace, one `sys_setting` row per organization), not in `sys_organization.*` columns, and D3's `mfa_required` is three levels, `off` / `administrators` / `everyone`, at the deployment (the default and the floor) and per organization (ruling G2 on [objectstack-ai/cloud#3668](https://github.com/objectstack-ai/cloud/issues/3668#issuecomment-6684194038), record `6684194038`, maintainer, verbatim: 「可以，按三档做（推荐）」); the tighten-only rule is unchanged and no other decision changes (TL;DR 6, D3, D5, D7); see the note under D7.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (**the governing constraint** — a security property that isn't enforced at runtime is forbidden; no toggle may be a "false surface"), [ADR-0007](./0007-settings-manifest-and-kv-store.md) (settings manifest + cascade KV store), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (`sys_role` is platform-native, decoupled from better-auth; org scoping), [ADR-0066](./0066-unified-authorization-model.md) (capability/assignment split), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (`current_user` contract, built-in roles)
 **Consumers**: `@objectstack/plugin-auth` (better-auth wiring, `bindAuthSettings`/`applyConfigPatch`, auth route middleware), `@objectstack/service-settings` (`auth.manifest.ts`), `@objectstack/platform-objects` (identity objects `sys_user`/`sys_session`/`sys_account`), `@objectstack/rest` (auth request middleware seam), `../objectui` (settings UI rendering)
@@ -16,7 +16,7 @@
 3. **[new]** Add the identity fields that back enforcement: `sys_user.{password_changed_at, failed_login_count, locked_until, last_login_at, last_login_ip, mfa_required_at}`, `sys_session.{last_activity_at, revoked_at, revoke_reason}`, `sys_account.previous_password_hashes`. Without these there is nothing to enforce against.
 4. **[ruled]** **SAML is out of better-auth core** (1.6.x exposes `genericOAuth` + `oidcProvider`, no `saml` plugin) -> scope SAML as **P3 / external** (assess `@better-auth/sso` or a custom plugin); ship **generic OIDC** (already wired via `genericOAuth`) as the v1 enterprise-SSO answer.
 5. **[ruled]** Phased delivery: **P1** password policy + account lockout + enforced MFA; **P2** session controls + IP allowlist + rate-limit tuning; **P3** SSO expansion (OIDC trust-list UI, SAML assessment). SCIM/bulk-provisioning is a **separate** ADR (directory sync != auth hardening).
-6. **[ruled]** Settings scope follows ADR-0007: security knobs are **`global`** scope, `manage_platform_settings` read/write; per-org overrides (`sys_organization.*`) are explicit and additive (an org can only *tighten*, never loosen, the global floor).
+6. **[ruled]** Settings scope follows ADR-0007: security knobs are **`global`** scope, `manage_platform_settings` read/write; per-org overrides are explicit and additive (an org can only *tighten*, never loosen, the global floor) and live in the settings **tenant rung**: the tenant-scoped `access_policy` namespace, one `sys_setting` row per organization *(store amended 2026-11-06; this item named `sys_organization.*` columns — see the note under D7)*.
 
 ---
 
@@ -80,9 +80,9 @@ Legend: **[native]** = a better-auth config/plugin does the enforcing; **[custom
 
 | Setting | Default | Seam | Mechanism |
 |---|---|---|---|
-| `mfa_required` (global toggle) | off | post-`/sign-in` session gate | **[custom]** `twoFactor` plugin already provides TOTP + backup codes (opt-in via `sys_user.two_factor_enabled` + `sys_two_factor`). When `mfa_required`, a session for a user with `two_factor_enabled = false` is marked **un-stepped-up** and gated out of all protected resources until enrollment + verification |
+| `mfa_required` (deployment level: `off` / `administrators` / `everyone`) *(levels amended 2026-11-06; was a global toggle — see the status line)* | off | post-`/sign-in` session gate | **[custom]** `twoFactor` plugin already provides TOTP + backup codes (opt-in via `sys_user.two_factor_enabled` + `sys_two_factor`). When the level covers the user (`everyone`: every user; `administrators`: the tenant-level, organization-level and delegated administrators of [ADR-0090](./0090-permission-model-v2-concept-convergence.md) D12), a session for a user with `two_factor_enabled = false` is marked **un-stepped-up** and gated out of all protected resources until enrollment + verification |
 | `mfa_grace_period_days` | 7 | same | **[custom]+[field]** `sys_user.mfa_required_at`; allow a grace window to enroll before hard-blocking |
-| `sys_organization.require_mfa` (per-org) | — | `customSession` org resolution | **[custom]** an org may *require* MFA above the global floor |
+| `access_policy.mfa_required` (per-org, settings tenant rung) *(store amended 2026-11-06; was `sys_organization.require_mfa`, now retired — see the note under D7)* | — | `customSession` org resolution | **[custom]** an org may *require* MFA above the global floor, on the same three levels: `off` (nothing beyond the deployment's) or a level at least as strong as the deployment's, never a weaker one (`off`, then `administrators`, then `everyone`) *(levels amended 2026-11-06 — see the status line)* |
 
 > better-auth makes MFA *available*; making it *required* is the missing enforcement. Gate at the session-validation seam so a half-authenticated (password-only) session cannot read data.
 >
@@ -132,7 +132,7 @@ Legend: **[native]** = a better-auth config/plugin does the enforcing; **[custom
 
 | Setting | Default | Seam | Mechanism |
 |---|---|---|---|
-| `sys_organization.allowed_ip_ranges` (CIDR[]) | — | auth request middleware (Hono, **before** the better-auth handler in `plugin-auth` route registration) | **[custom]** extract client IP (`x-forwarded-for` / `cf-connecting-ip`, trust-proxy aware); reject login/session outside the org's ranges with `IP_NOT_ALLOWED` *(client-address mechanism amended 2026-10-20 — see the note below)* |
+| `access_policy.allowed_ip_ranges` (CIDR[], per-org, settings tenant rung) *(store amended 2026-11-06; was `sys_organization.allowed_ip_ranges` — see the note under D7)* | — | auth request middleware (Hono, **before** the better-auth handler in `plugin-auth` route registration) | **[custom]** extract client IP (`x-forwarded-for` / `cf-connecting-ip`, trust-proxy aware); reject login/session outside the org's ranges with `IP_NOT_ALLOWED` *(client-address mechanism amended 2026-10-20 — see the note below)* |
 | `sys_user.allowed_ip_ranges` (optional override) | — | same | **[custom]** per-user override, evaluated before org |
 | `require_ip_match` (toggle) | off | session refresh | **[custom]** detect `request IP != session.ip_address` (already captured) -> re-verify or revoke |
 
@@ -167,11 +167,29 @@ Legend: **[native]** = a better-auth config/plugin does the enforcing; **[custom
 - `sys_user`: `password_changed_at`, `failed_login_count`, `locked_until`, `last_login_at`, `last_login_ip`, `mfa_required_at`
 - `sys_session`: `last_activity_at`, `revoked_at`, `revoke_reason`
 - `sys_account`: `previous_password_hashes` (bounded)
-- `sys_organization`: `require_mfa`, `allowed_ip_ranges`
+- per-organization overrides: no `sys_organization` field — they live in the `access_policy` settings namespace *(amended 2026-11-06; this line named `sys_organization`: `require_mfa`, `allowed_ip_ranges` — see the note below)*
 
 Plus admin-facing surface: a `sys_user` list-view filter for locked accounts + an **Unlock** action; a "force password reset" action.
 
 **Implementation status (2026-07-04):** all `sys_user` (incl. `last_login_at`/`last_login_ip`), `sys_session`, `sys_account`, and `sys_organization.require_mfa` fields are landed, plus the `unlock_user` admin action. `last_login_at`/`last_login_ip` are stamped on every successful `/sign-in/email` by `AuthManager.stampLastLogin` (after-hook, independent of lockout config). **Not landed:** a per-record `sys_organization.allowed_ip_ranges` (and optional `sys_user.allowed_ip_ranges` override) — the IP allow-list currently exists only as the **global** `auth.allowed_ip_ranges` setting (D5); per-org/per-user IP scoping is tracked as remaining P2 work.
+
+> **Where per-organization overrides live (amended 2026-11-06: ruling record
+> [`6692407743`](https://github.com/objectstack-ai/objectstack/issues/30922#issuecomment-6692407743) on
+> [#30922](https://github.com/objectstack-ai/objectstack/issues/30922), maintainer, verbatim: 「修订 ADR 写明存放位置（推荐）」;
+> implemented by PR [#31013](https://github.com/objectstack-ai/objectstack/pull/31013)).** TL;DR 6, D3, D5 and this
+> section named `sys_organization.*` columns as the per-organization store. The store is the settings **tenant rung**
+> instead (ADR-0007's cascade at scope `tenant`; ADR-0131 (organization ownership is total: each such row is owned by
+> its organization, and only the settings global rung leaves `sys_setting`)): a tenant-scoped settings namespace, `access_policy`, one
+> `sys_setting` row per organization, carrying the organization's allowed IP ranges, its idle, absolute and concurrent
+> session limits, and its MFA requirement. The deployment's `auth` values (scope `global`) are the default and the floor.
+> The rule is unchanged: an organization may only *tighten*, never loosen, the deployment's floor.
+>
+> Why the settings rung and not columns: only a settings write predicate receives the saving request's transport, which
+> the per-organization self-lock-out save guard needs (an organization's IP list must still admit the request that saves
+> it), and it is the store organization administrators already write. `sys_organization.require_mfa` is retired — readonly,
+> each `true` value migrated into `access_policy.mfa_required` as the requirement for every member (`everyone`) — and no
+> `sys_organization.allowed_ip_ranges` field is added. No other decision changes; the dated implementation-status
+> snapshots above and under *Phasing* are left as written.
 
 ---
 

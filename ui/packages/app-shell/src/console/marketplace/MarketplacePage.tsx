@@ -4,6 +4,10 @@
  * Card-grid catalog of public packages, fetched from the tenant runtime's
  * `/api/v1/marketplace/packages` proxy (which forwards to the configured
  * cloud control plane). Click-through opens the package detail page.
+ *
+ * The catalog is read one page at a time: the search text and the facet
+ * selection travel with the read, and the server filters before it pages, so
+ * the page filters nothing itself.
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -26,7 +30,8 @@ import {
   Package, Search, Store, AlertCircle, CheckCircle2, Settings, Loader2, ChevronDown, Copy, Check,
 } from 'lucide-react';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useDisplayLocale, useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { useAdapter } from '@object-ui/react';
 import { PackageIcon } from './PackageIcon.js';
 import { MarketplaceAccessDenied } from './MarketplaceAccessDenied.js';
@@ -40,6 +45,7 @@ import {
   listInstalledPackages,
   installPackage,
   installLocal,
+  type MarketplaceListParams,
   type MarketplacePackageSummary,
   type LocalInstallEntry,
   type OrgPackageSummary,
@@ -47,12 +53,26 @@ import {
 import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { PageHeader } from '../../layout/PageHeader.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { appRouteSegment, filterActiveApps, resolveKeyedI18nLabel } from '../../utils/index.js';
+import { appRouteSegment, filterActiveApps } from '../../utils/index.js';
 import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { splitPackageSuffix } from './middleTruncate.js';
 import { useDependencyMissingText } from './dependencyMissing.js';
+import { useProtocolCheckSkippedText } from './protocolCheckSkipped.js';
+import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import { packagesHref } from '../../views/metadata-admin/packageSource.js';
+import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
+import { MarketplaceFacetFilters } from './MarketplaceFacetFilters.js';
+import { CardLanguagesLine } from './MarketplaceLanguages.js';
+import {
+  EMPTY_FACET_SELECTION,
+  NO_SERVED_FACETS,
+  facetListParams,
+  readListingTaxonomy,
+  widenServedFacets,
+  type FacetSelection,
+  type ServedFacets,
+} from './marketplaceTaxonomy.js';
 
 /**
  * The card grid's track (objectui#12616): a card is never narrower than 240px,
@@ -289,6 +309,15 @@ const SLOW_MS = 10_000;
 type LoadPhase = 'skeleton' | 'line' | 'slow';
 
 /**
+ * Listings per catalog page. The list door caps a page at 100; a page is a
+ * whole number of rows of the card grid at two, three, four and six columns.
+ */
+export const CATALOG_PAGE_SIZE = 24;
+
+/** How long the search box waits after the last keystroke before it reads. */
+export const SEARCH_DEBOUNCE_MS = 300;
+
+/**
  * objectui#12097 — an org install on a cloud-managed environment, from the
  * install answering until the runtime serves the package's app, or the wait
  * expires: the three states the package page draws for the same install
@@ -303,13 +332,26 @@ type OrgDeployState =
   | { phase: 'served'; manifestId: string; version: string | undefined; name: string; app: ServedApp | null }
   | { phase: 'timeout'; manifestId: string; version: string | undefined; name: string };
 
+/**
+ * The page under the frame that fetches its strings first — the
+ * `marketplace` namespace (`MarketplaceNamespaceGate.tsx` says why).
+ */
 export function MarketplacePage() {
+  return (
+    <MarketplaceNamespaceGate>
+      <MarketplacePageBody />
+    </MarketplaceNamespaceGate>
+  );
+}
+
+function MarketplacePageBody() {
   const navigate = useNavigate();
   const { appName } = useParams();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
   const { t, language } = useObjectTranslation();
   const dependencyMissingText = useDependencyMissingText();
-  const { appLabel } = useObjectLabel();
+  const protocolCheckSkippedText = useProtocolCheckSkippedText();
+  const { appLabel } = useServedAppLabel();
   // The adapter `MetadataProvider` reads through: the deploy wait asks the
   // same `GET /meta/app` the cache would, without the cache persisting it.
   const adapter = useAdapter();
@@ -343,7 +385,20 @@ export function MarketplacePage() {
     phaseTimers.current = [];
   };
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<string>('');
+  // The search text the catalog read sends: the box's text once typing pauses
+  // for `SEARCH_DEBOUNCE_MS`, trimmed.
+  const [searchText, setSearchText] = useState('');
+  const [facets, setFacets] = useState<FacetSelection>(EMPTY_FACET_SELECTION);
+  // The first listing of the page on screen; a new search or selection reads
+  // from the first page again.
+  const [offset, setOffset] = useState(0);
+  // The listings the catalog holds under the current search and selection.
+  const [total, setTotal] = useState(0);
+  // The facets some answered listing carried (`ServedFacets`).
+  const [servedFacets, setServedFacets] = useState<ServedFacets>(NO_SERVED_FACETS);
+  // Whether a read has settled the side loads (installs, org packages); a
+  // read for another page or selection then reads the catalog alone.
+  const sideLoaded = useRef(false);
   const [installed, setInstalled] = useState<LocalInstallEntry[]>([]);
   // ADR-0007 step ②: the org's own packages (visibility org/private), shown in
   // a "Your organization" section and installable inline (no public listing).
@@ -355,6 +410,8 @@ export function MarketplacePage() {
     ok: boolean;
     text: string;
     credentials?: { packageId: string; note?: string };
+    // objectstack#30326 — the answer's `protocolCheckSkipped`, drawn.
+    protocolNote?: string;
   } | null>(null);
   const [orgDeploy, setOrgDeploy] = useState<OrgDeployState | null>(null);
   const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
@@ -368,7 +425,27 @@ export function MarketplacePage() {
     return m;
   }, [installed]);
 
-  const load = async () => {
+  // The catalog read the page is showing: search, selection and page window.
+  // `catalogRequestKey` is its spelling, and the read effect's dependency.
+  const facetParams = facetListParams(facets);
+  const catalogRequest: MarketplaceListParams = {
+    ...(searchText ? { q: searchText } : {}),
+    ...facetParams,
+    limit: CATALOG_PAGE_SIZE,
+    offset,
+  };
+  const catalogRequestKey = JSON.stringify(catalogRequest);
+  // Whether the read narrows the catalog: an empty answer then means "nothing
+  // matches", not "nothing is listed".
+  const filtering = searchText !== '' || Object.keys(facetParams).length > 0;
+
+  /**
+   * Read the catalog page `request` names. `withSideLoads` reads the installs
+   * and the org's packages with it — the first read, Refresh, Retry and the
+   * read after an install; turning a page or changing the selection reads the
+   * catalog alone.
+   */
+  const load = async (request: MarketplaceListParams = catalogRequest, withSideLoads = true) => {
     const seq = ++loadSeq.current;
     const current = () => loadSeq.current === seq;
     clearPhaseTimers();
@@ -380,33 +457,41 @@ export function MarketplacePage() {
     setLoading(true);
     setError(null);
     try {
-      const [catalog, installs, org, cloudInstalled] = await Promise.all([
+      const [catalog, sides] = await Promise.all([
         // Settled here rather than left to reject the batch. The three side
         // loads each answer "nothing" on their own failure, so the catalog is
         // the only one that can fail, and its failure must not discard what
         // they loaded: the org section and the installed count (objectui#11688).
-        listMarketplacePackages({ limit: 100 }).then(
+        listMarketplacePackages(request).then(
           (resp) => ({ resp, failure: null }),
           (e: unknown) => ({ resp: null, failure: toLoadFailure(e) }),
         ),
-        listLocalInstalls(),
-        listOrgPackages(),
-        listInstalledPackages(),
+        withSideLoads
+          ? Promise.all([listLocalInstalls(), listOrgPackages(), listInstalledPackages()])
+          : null,
       ]);
       if (!current()) return;
-      setInstalled(installs);
-      setOrgItems(org.items ?? []);
-      const ids = new Set<string>();
-      const disabled = new Set<string>();
-      for (const e of installs) ids.add(e.manifestId);
-      for (const e of cloudInstalled.items) (e.disabled ? disabled : ids).add(e.manifestId);
-      setInstalledIds(ids);
-      setDisabledIds(disabled);
+      if (sides !== null) {
+        const [installs, org, cloudInstalled] = sides;
+        setInstalled(installs);
+        setOrgItems(org.items ?? []);
+        const ids = new Set<string>();
+        const disabled = new Set<string>();
+        for (const e of installs) ids.add(e.manifestId);
+        for (const e of cloudInstalled.items) (e.disabled ? disabled : ids).add(e.manifestId);
+        setInstalledIds(ids);
+        setDisabledIds(disabled);
+        sideLoaded.current = true;
+      }
       if (catalog.failure !== null) {
         setError(catalog.failure);
         setItems([]);
+        setTotal(0);
       } else {
-        setItems(catalog.resp.items ?? []);
+        const page = catalog.resp.items ?? [];
+        setItems(page);
+        setTotal(typeof catalog.resp.total === 'number' ? catalog.resp.total : page.length);
+        setServedFacets((served) => widenServedFacets(served, page.map(readListingTaxonomy)));
       }
     } catch (e: unknown) {
       if (!current()) return;
@@ -425,14 +510,32 @@ export function MarketplacePage() {
     // a guaranteed 404 in the network log and leave the page spinning
     // before it settled on the disabled state.
     if (!marketplaceEnabled) return;
-    void load();
-    // Unmount retires whatever read is pending and its phase timers
-    // (objectui#12710).
+    void load(catalogRequest, !sideLoaded.current);
+    // Unmount, or a new search, selection or page, retires whatever read is
+    // pending and its phase timers (objectui#12710): only the newest read
+    // settles the page.
     return () => {
       loadSeq.current += 1;
       clearPhaseTimers();
     };
-  }, [marketplaceEnabled]);
+  }, [marketplaceEnabled, catalogRequestKey]);
+
+  // The search box reads once typing pauses, from the first page.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const next = query.trim();
+      if (next === searchText) return;
+      setSearchText(next);
+      setOffset(0);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [query]);
+
+  // A new selection reads from the first page.
+  const selectFacets = (next: FacetSelection) => {
+    setFacets(next);
+    setOffset(0);
+  };
 
   /**
    * objectui#12097 — wait until this environment serves the installed org
@@ -490,6 +593,8 @@ export function MarketplacePage() {
     try {
       if (getRuntimeConfig().features.installLocal) {
         const result = await installLocal({ packageId: pkg.manifest_id || pkg.id, versionId: 'latest' });
+        // objectstack#30326 — installed, its platform protocol range unchecked.
+        const protocolNote = protocolCheckSkippedText(result);
         // objectui#12098 — `hotLoaded: false` is the runtime's lenient path
         // (objectstack#22695): installed, loaded at its next restart. Nothing
         // of it is served until then, so the strip says so and nothing is
@@ -500,6 +605,7 @@ export function MarketplacePage() {
             ? t('marketplace.org.installed', { defaultValue: `Installed ${pkg.display_name}`, name: pkg.display_name })
             : t('marketplace.install.localLoadsAtRestart', { version: result.version, name: pkg.display_name }),
           ...(result.hotLoaded ? { credentials: { packageId: result.manifestId, note: result.credentialNote } } : {}),
+          ...(protocolNote ? { protocolNote } : {}),
         });
         await load();
         // On `hotLoaded` the runtime registered the package before it answered,
@@ -527,32 +633,10 @@ export function MarketplacePage() {
     }
   };
 
-  const categories = useMemo(() => {
-    const s = new Set<string>();
-    for (const it of items) {
-      if (it.category) s.add(it.category);
-    }
-    return Array.from(s).sort();
-  }, [items]);
-
-  // Translate a category enum value via the i18n bundle; fall back to the
-  // raw value (lowercased) so unknown publisher categories still render.
-  const categoryLabel = (cat: string): string => {
-    const key = `marketplace.category.${cat}`;
-    const translated = t(key, { defaultValue: cat });
-    return translated === key ? cat : translated;
-  };
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return items.filter((it) => {
-      if (category && it.category !== category) return false;
-      if (!q) return true;
-      const loc = localizePackage(it, language);
-      const hay = `${loc.displayName} ${it.manifest_id} ${loc.description ?? ''}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [items, query, category, language]);
+  // The page the server answered, already searched, filtered and paged.
+  const shown = useMemo(() => items.map((it) => ({ it, taxonomy: readListingTaxonomy(it) })), [items]);
+  const pageCount = Math.max(1, Math.ceil(total / CATALOG_PAGE_SIZE));
+  const pageNumber = Math.floor(offset / CATALOG_PAGE_SIZE) + 1;
 
   // Ahead of the `!isAdmin` guard below deliberately (objectui#5557): on a
   // runtime that mounts no marketplace, "there is no marketplace here" is true
@@ -619,8 +703,8 @@ export function MarketplacePage() {
           <Button size="sm" onClick={() => navigate(`/apps/${appRouteSegment(orgDeployApp)}`)}>
             {t('marketplace.install.openApp', {
               name: appLabel({
+                ...orgDeployApp,
                 name: String(orgDeployApp.name ?? appRouteSegment(orgDeployApp)),
-                label: resolveKeyedI18nLabel(orgDeployApp.label, t),
               }),
             })}
           </Button>
@@ -670,7 +754,7 @@ export function MarketplacePage() {
       />
     <div className="flex flex-col gap-6 p-4 sm:p-6">
 
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex flex-col gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
           <Input
@@ -681,27 +765,7 @@ export function MarketplacePage() {
             aria-label={t('marketplace.searchAria')}
           />
         </div>
-        {categories.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            <Button
-              size="sm"
-              variant={category === '' ? 'default' : 'outline'}
-              onClick={() => setCategory('')}
-            >
-              {t('marketplace.all')}
-            </Button>
-            {categories.map((cat) => (
-              <Button
-                key={cat}
-                size="sm"
-                variant={category === cat ? 'default' : 'outline'}
-                onClick={() => setCategory(cat)}
-              >
-                {categoryLabel(cat)}
-              </Button>
-            ))}
-          </div>
-        )}
+        <MarketplaceFacetFilters served={servedFacets} selection={facets} onChange={selectFacets} />
       </div>
 
       {/* objectui#12710 — a catalog read still pending once the skeleton's
@@ -737,6 +801,7 @@ export function MarketplacePage() {
           {orgMsg && (
             <div className={`whitespace-pre-wrap rounded-md border p-3 text-sm ${orgMsg.ok ? 'border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400' : 'border-destructive/30 bg-destructive/5 text-destructive'}`}>
               {orgMsg.text}
+              {orgMsg.protocolNote ? <ProtocolCheckSkippedNote text={orgMsg.protocolNote} /> : null}
               {orgMsg.ok && orgMsg.credentials ? (
                 <ConnectorCredentialsStep
                   packageId={orgMsg.credentials.packageId}
@@ -871,13 +936,15 @@ export function MarketplacePage() {
             </Button>
           </div>
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-sm text-muted-foreground">
-          {items.length === 0 ? t('marketplace.noApprovedYet') : t('marketplace.noMatchFilters')}
+      ) : shown.length === 0 ? (
+        <div className="text-center py-12 text-sm text-muted-foreground" data-testid="marketplace-empty">
+          {filtering ? t('marketplace.noMatchFilters') : t('marketplace.noApprovedYet')}
         </div>
       ) : (
+        <>
         <div className={CARD_GRID}>
-          {filtered.map((pkg) => {
+          {shown.map(({ it: pkg, taxonomy }) => {
+            const primaryFunction = taxonomy.businessFunctions[0];
             const localEntry = installedByManifestId.get(pkg.manifest_id);
             const loc = localizePackage(pkg, language);
             return (
@@ -909,6 +976,10 @@ export function MarketplacePage() {
                   <p className="text-sm text-muted-foreground line-clamp-2">
                     {loc.description || t('marketplace.noDescription')}
                   </p>
+                  {/* The languages the latest version ships, with coverage
+                      (`MarketplaceLanguages.tsx`); nothing on a catalog that
+                      does not serve them. */}
+                  <CardLanguagesLine version={pkg.latest_version} />
                   <div className="flex items-center gap-2 mt-auto pt-2 flex-wrap">
                     {/* objectui#11760 — a local install this runtime refused to
                         load at startup (the listing's `notLoaded` marker) is not
@@ -939,8 +1010,17 @@ export function MarketplacePage() {
                         {t('marketplace.versionBadge', { version: pkg.latest_version.version })}
                       </Badge>
                     )}
-                    {pkg.category && (
-                      <Badge variant="outline" className="text-xs">{categoryLabel(pkg.category)}</Badge>
+                    {/* The primary business function — the first the
+                        listing names — and Beta for a beta package. */}
+                    {primaryFunction && (
+                      <Badge variant="outline" className="text-xs" data-testid="marketplace-card-function">
+                        {t(`marketplace.businessFunction.${primaryFunction}`)}
+                      </Badge>
+                    )}
+                    {taxonomy.beta && (
+                      <Badge variant="secondary" className="text-xs" data-testid="marketplace-card-beta">
+                        {t('marketplace.maturity.beta')}
+                      </Badge>
                     )}
                     {pkg.latest_version?.published_at && (
                       <span className="text-xs text-muted-foreground ml-auto">
@@ -953,6 +1033,36 @@ export function MarketplacePage() {
             );
           })}
         </div>
+        {pageCount > 1 && (
+          <nav
+            aria-label={t('table.pageInfo', { current: pageNumber, total: pageCount })}
+            className="flex items-center justify-center gap-3 text-sm"
+            data-testid="marketplace-pager"
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pageNumber <= 1 || loading}
+              onClick={() => setOffset(Math.max(0, offset - CATALOG_PAGE_SIZE))}
+              data-testid="marketplace-pager-previous"
+            >
+              {t('common.previous')}
+            </Button>
+            <span className="tabular-nums text-muted-foreground" data-testid="marketplace-pager-info">
+              {t('table.pageInfo', { current: pageNumber, total: pageCount })}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pageNumber >= pageCount || loading}
+              onClick={() => setOffset(offset + CATALOG_PAGE_SIZE)}
+              data-testid="marketplace-pager-next"
+            >
+              {t('common.next')}
+            </Button>
+          </nav>
+        )}
+        </>
       )}
     </div>
     </div>

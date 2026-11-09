@@ -11,10 +11,21 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { APPROVAL_REVISE_NODE_TYPE, templateSlotSource } from '@objectstack/spec/automation';
-import { ApprovalService, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS, SLA_ACTOR_ID } from './approval-service.js';
+import {
+  ApprovalService, ApproverDirectoryUnreadableError, REMIND_COOLDOWN_MS, ESCALATION_ENABLED_FLIP_CUTOFF_MS, SLA_ACTOR_ID,
+} from './approval-service.js';
 import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
+import { filterApproversWhoCanRead } from './approver-org-scope.js';
 import { celEngine } from '@objectstack/formula';
+import { SchemaRegistry, resolvePackageScopedName, type PackageScopedRefusal, type PackageScopedRegistry } from '@objectstack/objectql';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
+
+// [#29604] A pass-through spy on the ADR-0105 D9 read filter, so one describe
+// below can make it reject. Every other case runs the real filter through it.
+vi.mock('./approver-org-scope.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./approver-org-scope.js')>();
+  return { ...actual, filterApproversWhoCanRead: vi.fn(actual.filterApproversWhoCanRead) };
+});
 
 interface FakeRow { [k: string]: any }
 
@@ -2166,10 +2177,14 @@ describe('ApprovalService (node era)', () => {
     const reminders = emitted.filter(e => e.topic === 'approval.reminder');
     expect(reminders.map(r => r.audience)).toEqual([['u9'], ['ada@example.com']]);
     for (const r of reminders) {
-      // Messaging stores the payload it is handed: no link, no token, in any field.
-      expect(Object.keys(r.payload).sort()).toEqual(['actionUrl', 'body', 'title']);
+      // Messaging stores the payload it is handed: no action link, no token, in
+      // any field. [#30509] `approvalUrl` is the e-mail's link to the request
+      // page (relative here: this service has no public origin).
+      expect(Object.keys(r.payload).sort()).toEqual(['actionUrl', 'approvalUrl', 'body', 'title']);
       expect(JSON.stringify(r)).not.toMatch(/token=|\/approvals\/act/);
       expect(r.payload.actionUrl).toBe(`/system/approvals?request=${reqId}`);
+      expect(r.payload.approvalUrl).toBe(`/system/approvals?request=${reqId}`);
+      expect(r.channels).toEqual(['inbox', 'email']);
     }
     // A reminder mints nothing: a token minted here could only travel in the stored payload.
     expect((engine._tables['sys_approval_token'] ?? []).length).toBe(minted);
@@ -3057,6 +3072,25 @@ describe('ApprovalService — org-filtered read-back refuses loudly (#12769)', (
     await expect(svc.comment(req.id, { actorId: 'u9', comment: 'reviewing' }, ORG_APPROVER))
       .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     expect((await svc.getRequest(req.id, SYS))?.status).toBe('pending');
+    expect(await svc.listActions(req.id, SYS)).toHaveLength(actionsBefore);
+  });
+
+  it('an org-scoped submitter does not read the org-less row either, so recall, remind, resubmit and comment answer it as a missing id — before any write', async () => {
+    const req = await openOrgless();
+    // The same person who submitted it, now acting inside organization 't1'.
+    const ORG_SUBMITTER = { userId: 'u1', tenantId: 't1', positions: [], permissions: [] } as any;
+    expect(await svc.getRequest(req.id, ORG_SUBMITTER)).toBeNull();
+    const before = { ...(engine._tables['sys_approval_request'] ?? []).find((r: any) => r.id === req.id) };
+    const actionsBefore = (await svc.listActions(req.id, SYS)).length;
+    await expect(svc.recall(req.id, { actorId: 'u1' }, ORG_SUBMITTER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    await expect(svc.remind(req.id, { actorId: 'u1' }, ORG_SUBMITTER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    await expect(svc.resubmit(req.id, { actorId: 'u1' }, ORG_SUBMITTER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    await expect(svc.comment(req.id, { actorId: 'u1', comment: 'any news?' }, ORG_SUBMITTER))
+      .rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
+    expect((engine._tables['sys_approval_request'] ?? []).find((r: any) => r.id === req.id)).toEqual(before);
     expect(await svc.listActions(req.id, SYS)).toHaveLength(actionsBefore);
   });
 
@@ -4147,7 +4181,7 @@ describe('ApprovalService — a queue approver routes to the queue\'s members (A
     const req = await svc.openNodeRequest(queueInput('billing'), CTX) as any;
 
     expect(req.pending_approvers).toEqual(['u7', 'u8']);
-    expect(asked).toEqual([['billing', 't1', { purpose: 'addressing' }]]);
+    expect(asked).toEqual([['billing', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]]);
     expect(warnings.filter(([msg]) => String(msg).includes('expanded to nobody'))).toEqual([]);
     // A member decides it under their own id.
     const decided = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u8' }, SYS);
@@ -4186,6 +4220,472 @@ describe('ApprovalService — a queue approver routes to the queue\'s members (A
     const hit = warnings.find(([msg]) => String(msg).includes("approver 'queue:billing' expanded to nobody"));
     expect(String(hit?.[0])).toContain('no ownership-queue service is registered');
   });
+});
+
+// [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] A
+// directory read behind a `team`, `position` or `queue` approver that FAILS is
+// not an empty slate: the node refuses to open under every `onEmptyApprovers`
+// policy, on its own retryable error class, naming the read — and writes
+// nothing. Before, the slot fell back to its literal and the policy acted on a
+// slate missing the people who could not be read.
+describe('ApprovalService — a team, position or queue approver whose directory read fails refuses the node (ADR-0142 D6)', () => {
+  const POLICIES = ['admin_rescue', 'auto_approve', 'fail', 'fallback'] as const;
+
+  /** A service over `engine` whose reads of `failing` throw, as a driver outage does. */
+  const outage = (failing: string[], queues?: () => any) => {
+    const engine = makeFakeEngine();
+    engine._tables['sys_team_member'] = [{ id: 'tm1', team_id: 't_ops', user_id: 'u5' }];
+    engine._tables['sys_user_position'] = [{ id: 'up1', position: 'cfo', user_id: 'u9', organization_id: 't1' }];
+    const real = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      if (failing.includes(object)) throw new Error(`SQLITE_IOERR: disk I/O error reading ${object}`);
+      return real(object, options);
+    };
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+      ...(queues ? { ownershipQueues: queues } : {}),
+    });
+    return { engine, svc, warnings };
+  };
+  const node = (approvers: any[], configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    config: { approvers, behavior: 'first_response' as const, lockRecord: false, ...configExtra },
+  });
+  const policy = (p: (typeof POLICIES)[number]) => (
+    p === 'fallback' ? { onEmptyApprovers: p, fallbackApprovers: [{ type: 'user', value: 'u_backstop' }] } : { onEmptyApprovers: p }
+  );
+  const refusalOf = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e);
+  const nothingWritten = (engine: ReturnType<typeof makeFakeEngine>) => {
+    expect(engine._tables['sys_approval_request'] ?? []).toEqual([]);
+    expect(engine._tables['sys_approval_approver'] ?? []).toEqual([]);
+    expect(engine._tables['sys_approval_action'] ?? []).toEqual([]);
+  };
+
+  for (const [type, value, table] of [['team', 't_ops', 'sys_team_member'], ['position', 'cfo', 'sys_user_position']] as const) {
+    for (const p of POLICIES) {
+      it(`a ${type} approver whose ${table} read fails: onEmptyApprovers '${p}' opens nothing and approves nothing`, async () => {
+        const { engine, svc } = outage([table]);
+        const refusal = await refusalOf(svc.openNodeRequest(node([{ type, value }], policy(p)), CTX));
+
+        expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+        expect(refusal).toMatchObject({ approverType: type, approverValue: value, retryable: true });
+        expect((refusal as Error).message).toMatch(new RegExp(`^APPROVER_DIRECTORY_UNREADABLE: approver '${type}:${value}'`));
+        expect((refusal as ApproverDirectoryUnreadableError).failedRead).toMatch(/SQLITE_IOERR/);
+        expect((refusal as Error).message).not.toMatch(/NO_APPROVERS|expanded to nobody/);
+        nothingWritten(engine);
+      });
+    }
+  }
+
+  it('beside a staffed person, the node still refuses: no slate shortened to the people who could be read', async () => {
+    const { engine, svc } = outage(['sys_team_member']);
+    const refusal = await refusalOf(svc.openNodeRequest(
+      node([{ type: 'user', value: 'u2' }, { type: 'team', value: 't_ops' }]), CTX,
+    ));
+
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    nothingWritten(engine);
+  });
+
+  it('a fallback slate whose directory read fails refuses too, rather than degrade to the administrators', async () => {
+    // The primary slate reads fine and is empty (an unstaffed position); the
+    // declared fallback names a team whose read fails.
+    const { engine, svc } = outage(['sys_team_member']);
+    const refusal = await refusalOf(svc.openNodeRequest(node([{ type: 'position', value: 'nobody_holds_this' }], {
+      onEmptyApprovers: 'fallback', fallbackApprovers: [{ type: 'team', value: 't_ops' }],
+    }), CTX));
+
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(refusal).toMatchObject({ approverType: 'team', approverValue: 't_ops' });
+    nothingWritten(engine);
+  });
+
+  it('a queue whose expansion fails refuses before its "expanded to nobody" answer', async () => {
+    const { engine, svc, warnings } = outage([], () => ({
+      expandMembers: async () => { throw new Error('ownership-queue read failed'); },
+    }));
+    const refusal = await refusalOf(svc.openNodeRequest(node([{ type: 'queue', value: 'billing' }]), CTX));
+
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(refusal).toMatchObject({ approverType: 'queue', approverValue: 'billing' });
+    expect(warnings.some(([msg]) => String(msg).includes("approver 'queue:billing' expanded to nobody"))).toBe(false);
+    nothingWritten(engine);
+  });
+
+  it('control — the readable slate opens as before', async () => {
+    const { svc } = outage([]);
+    const req = await svc.openNodeRequest(node([{ type: 'team', value: 't_ops' }, { type: 'position', value: 'cfo' }]), CTX) as any;
+
+    expect(req.status).toBe('pending');
+    expect([...req.pending_approvers].sort()).toEqual(['u5', 'u9']);
+  });
+
+  it('control — a department read that fails is not named by the ruling: the node still opens, as before', async () => {
+    const { engine, svc } = outage(['sys_business_unit', 'sys_business_unit_member']);
+    const outcome = await refusalOf(svc.openNodeRequest(
+      node([{ type: 'department', value: 'bu_x' }], { onEmptyApprovers: 'fallback', fallbackApprovers: [{ type: 'user', value: 'u_backstop' }] }),
+      CTX,
+    ));
+
+    expect(outcome).toBeNull();
+    expect(engine._tables['sys_approval_request']).toHaveLength(1);
+  });
+
+  it("decide's pre-snapshot re-resolution keeps the literal: a recorded decision is never failed by the outage", async () => {
+    // A unanimous request opened while the directory read, then stripped of
+    // its open-time snapshot as a request opened before the snapshot existed.
+    const failing: string[] = [];
+    const { engine, svc } = outage(failing);
+    const req = await svc.openNodeRequest(
+      node([{ type: 'user', value: 'u2' }, { type: 'team', value: 't_ops' }], { behavior: 'unanimous' }), CTX,
+    ) as any;
+    const row = engine._tables['sys_approval_request'].find((r: any) => r.id === req.id)!;
+    const config = JSON.parse(row.node_config_json);
+    delete config.__approverGroups;
+    row.node_config_json = JSON.stringify(config);
+
+    failing.push('sys_team_member');
+    const decided = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u2' }, SYS);
+    expect(decided.decision).toBe('approve');
+  });
+});
+
+// [ADR-0142 D2 as amended, D6; #29604] The queue arm asks the ownership-queue
+// service for its refusal (`onFailedRead: 'refuse'`), beside the ADDRESSING
+// purpose. The registered service (`@objectstack/plugin-sharing`) answers a
+// failed member read with nobody unless asked, so before the arm asked, a
+// queue whose team or position read failed added no slot and the node's
+// `onEmptyApprovers` policy opened, rescued or approved on a slate missing its
+// people. The double below gives the contract's two answers as that service
+// does: a rejection naming the read under `'refuse'`, `[]` under `'nobody'`.
+describe('ApprovalService — a queue approver asks the queue service to refuse a failed read, and the node refuses with it (ADR-0142 D6)', () => {
+  const POLICIES = ['admin_rescue', 'auto_approve', 'fail', 'fallback'] as const;
+  const READ = "[queue] queue 'billing' in organization 't1' does not answer its members, because a read behind it failed: "
+    + "the members of team 't_night' could not be read: SQLITE_IOERR: disk I/O error.";
+
+  const withFailingQueue = () => {
+    const engine = makeFakeEngine();
+    const asked: unknown[] = [];
+    const warnings: any[] = [];
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: (msg: any, meta: any) => warnings.push([msg, meta]) },
+      ownershipQueues: () => ({
+        expandMembers: async (name: string, org: string | null, options?: { purpose?: string; onFailedRead?: string }) => {
+          asked.push([name, org, options]);
+          if (options?.onFailedRead === 'refuse') throw new Error(READ);
+          return [];
+        },
+      }),
+    });
+    return { engine, svc, asked, warnings };
+  };
+  const node = (configExtra: Record<string, any>) => ({
+    ...openInput([]),
+    config: { approvers: [{ type: 'queue' as const, value: 'billing' }], behavior: 'first_response' as const, lockRecord: false, ...configExtra },
+  });
+
+  for (const p of POLICIES) {
+    it(`a queue whose member read fails: onEmptyApprovers '${p}' opens nothing and approves nothing`, async () => {
+      const { engine, svc, asked, warnings } = withFailingQueue();
+      const refusal = await svc.openNodeRequest(node(
+        p === 'fallback' ? { onEmptyApprovers: p, fallbackApprovers: [{ type: 'user', value: 'u_backstop' }] } : { onEmptyApprovers: p },
+      ), CTX).then(() => null, (e: unknown) => e);
+
+      expect(asked).toEqual([['billing', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]]);
+      expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+      expect(refusal).toMatchObject({ approverType: 'queue', approverValue: 'billing', retryable: true, failedRead: READ });
+      expect((refusal as Error).message).toMatch(/^APPROVER_DIRECTORY_UNREADABLE: approver 'queue:billing' could not be expanded in organization 't1'/);
+      expect(warnings.some(([msg]) => String(msg).includes("approver 'queue:billing' expanded to nobody"))).toBe(false);
+      expect(engine._tables['sys_approval_request'] ?? []).toEqual([]);
+      expect(engine._tables['sys_approval_approver'] ?? []).toEqual([]);
+      expect(engine._tables['sys_approval_action'] ?? []).toEqual([]);
+    });
+  }
+});
+
+// [ADR-0150 D3] An approval step is written in the flow body the engine runs,
+// so the queue a `queue` approver names is read from that body's package — the
+// automation engine's `armedFlowPackage`: the shipping package for its own
+// body, none for an environment-authored override of it — passed to the queue
+// service as `callerPackageId`. The double stands in for `@objectstack/plugin-sharing`'s
+// service (not a dependency of this package): the ONE resolver,
+// `resolvePackageScopedName`, over the holders the listing serves (a disabled
+// package's left out, as plugin-sharing's `listedHoldersView` does), and under
+// `onFailedRead: 'refuse'` a refused name rejects with the refusal, as the
+// contract says.
+describe('ApprovalService — a queue approver reads its queue name from the package of the flow body that runs (ADR-0150 D3)', () => {
+  const P = 'com.acme.p';
+  const D = 'com.acme.d';
+  const U = 'com.acme.u';
+  /** Who staffs each holder's `support` queue in t1 (`environment`: the item authored in the environment). */
+  const STAFF: Record<string, string[]> = { [D]: ['u_d'], [U]: ['u_u'], environment: ['u_env'] };
+
+  const manifest = (id: string, deps: string[] = []) => ({
+    id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+    ...(deps.length > 0 ? { dependencies: Object.fromEntries(deps.map((dep) => [dep, '^1.0.0'])) } : {}),
+  }) as never;
+
+  /** Install the packages (`[id, deps]`, in order) and declare queue `support` in each holder. */
+  const registryOf = (packages: Array<[string, string[]]>, holders: string[]) => {
+    const registry = new SchemaRegistry();
+    for (const [id, deps] of packages) registry.installPackage(manifest(id, deps), 'code');
+    for (const holder of holders) registry.registerItem('queue', { name: 'support', label: 'Support', members: [], _packageId: holder }, 'name', holder);
+    return registry;
+  };
+
+  /**
+   * `flowPackage`: the package that ships `deal_approval`. `overridden`: the
+   * body armed under the name is an environment-authored override of it (a
+   * declared `.custom` override), so the engine answers no package for the
+   * body that runs while `packagedFlowOwner` still names the shipping one.
+   */
+  const setup = (registry: SchemaRegistry, flowPackage: string | undefined, overridden = false) => {
+    const engine = makeFakeEngine();
+    const asked: unknown[] = [];
+    const refusals: PackageScopedRefusal[] = [];
+    const listed = {
+      getPackage: (id: string) => registry.getPackage(id),
+      getAllPackages: () => registry.getAllPackages(),
+      packageScopedHoldersOf: (type: string, name: string) =>
+        registry.packageScopedHoldersOf(type, name).filter((id) => !registry.isPackageDisabled(id)),
+      getPackageScopedItem: (type: string, name: string, packageId: string, member?: string) => registry.getPackageScopedItem(type, name, packageId, member),
+      getEnvironmentScopedItem: (type: string, name: string, member?: string) => registry.getEnvironmentScopedItem(type, name, member),
+    } as PackageScopedRegistry;
+    let n = 0;
+    const svc = new ApprovalService({
+      engine,
+      clock: { now: () => new Date(1757000000000 + (n++) * 1000) },
+      logger: { warn: () => {} },
+      ownershipQueues: () => ({
+        expandMembers: async (name: string, org: string | null, options?: { onFailedRead?: string; callerPackageId?: string | null }) => {
+          asked.push([name, org, options]);
+          const resolution = resolvePackageScopedName(listed, { type: 'queue', name, callerPackageId: options?.callerPackageId || null });
+          if (resolution.status === 'refused') {
+            refusals.push(resolution);
+            if (options?.onFailedRead === 'refuse') {
+              throw Object.assign(new Error(resolution.message), { code: 'RESOURCE_CONFLICT', status: 409, refusal: resolution });
+            }
+            return [];
+          }
+          if (resolution.status !== 'resolved' || org !== 't1') return [];
+          return [...(STAFF[resolution.holder.kind === 'package' ? resolution.holder.packageId : resolution.holder.kind] ?? [])];
+        },
+      }),
+    });
+    svc.attachAutomation({
+      packagedFlowOwner: (flow: string) => (flow === 'deal_approval' ? flowPackage : undefined),
+      armedFlowPackage: (flow: string) => (flow === 'deal_approval' && !overridden ? flowPackage : undefined),
+    } as any);
+    return { engine, svc, asked, refusals };
+  };
+  const queueNode = (configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    config: { approvers: [{ type: 'queue' as const, value: 'support' }], behavior: 'first_response' as const, lockRecord: false, ...configExtra },
+  });
+
+  it('a step in P\'s flow naming `support`, held by P\'s dependency D and by unrelated U, opens on D\'s members', async () => {
+    const { svc, asked, refusals } = setup(registryOf([[D, []], [U, []], [P, [D]]], [D, U]), P);
+    const req = await svc.openNodeRequest(queueNode(), CTX) as any;
+    expect(req.pending_approvers).toEqual(['u_d']);
+    expect(asked).toEqual([['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse', callerPackageId: P }]]);
+    expect(refusals).toEqual([]);
+  });
+
+  it('two holders in P\'s closure: the node refuses to open, naming both — nothing is written', async () => {
+    const { engine, svc, refusals } = setup(registryOf([[D, []], [U, []], [P, [D, U]]], [D, U]), P);
+    const refusal = await svc.openNodeRequest(queueNode(), CTX).then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(refusal).toMatchObject({ approverType: 'queue', approverValue: 'support' });
+    expect((refusal as Error).message).toContain(D);
+    expect((refusal as Error).message).toContain(U);
+    expect((refusal as any).cause).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    // A refused name is not a failed read: worded as the refusal, with its remedy, and not retryable.
+    const message = (refusal as Error).message;
+    expect(message).toContain("approver 'queue:support' could not be expanded in organization 't1', because its name was refused (ADR-0150 D3, ambiguous-in-closure)");
+    expect(message).toContain(
+      `Running the flow again changes nothing until the name resolves from package '${P}': declare a dependency on the `
+      + `package whose queue it means, enable that package if it is disabled, or ship the queue in package '${P}'.`,
+    );
+    expect(message).not.toContain('a read behind it failed');
+    expect(message).not.toContain('once the directory can be read');
+    expect(refusal).toMatchObject({ retryable: false });
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({
+      reason: 'ambiguous-in-closure',
+      callerPackageId: P,
+      candidates: [{ kind: 'package', packageId: D }, { kind: 'package', packageId: U }],
+    });
+    expect(engine._tables['sys_approval_request'] ?? []).toEqual([]);
+  });
+
+  it('D disabled, unrelated U holding `support`: the node refuses as outside P\'s closure, naming U — U\'s members are never asked', async () => {
+    const registry = registryOf([[D, []], [U, []], [P, [D]]], [D, U]);
+    registry.disablePackage(D);
+    const { engine, svc, refusals } = setup(registry, P);
+    const refusal = await svc.openNodeRequest(queueNode(), CTX).then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect((refusal as Error).message).toContain(U);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toMatchObject({ reason: 'outside-closure', callerPackageId: P, candidates: [{ kind: 'package', packageId: U }] });
+    expect(engine._tables['sys_approval_request'] ?? []).toEqual([]);
+  });
+
+  it('an environment-authored override of P\'s flow reads environment-wide, as on main: its step reaches the environment\'s queue P cannot reach', async () => {
+    const registry = registryOf([[P, []]], []);
+    registry.registerItem('queue', { name: 'support', label: 'Support', members: [] }, 'name');
+    // CONTROL: from P the name is refused outside P's closure — so a step read from P would not open.
+    expect(resolvePackageScopedName(registry as never, { type: 'queue', name: 'support', callerPackageId: P }))
+      .toMatchObject({ status: 'refused', reason: 'outside-closure' });
+    const { engine, svc, asked, refusals } = setup(registry, P, true);
+    const req = await svc.openNodeRequest(queueNode(), CTX) as any;
+    expect(req.pending_approvers).toEqual(['u_env']);
+    expect(asked).toEqual([['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]]);
+    expect(refusals).toEqual([]);
+
+    // The decide-time tally of a request opened before the slate snapshot reads the same body's package.
+    const tallied = await svc.openNodeRequest({
+      ...queueNode({ approvers: [{ type: 'user', value: 'u2' }, { type: 'queue', value: 'support' }], behavior: 'unanimous' }),
+      recordId: 'opp2', runId: 'run_2', record: { id: 'opp2', amount: 100 },
+    }, CTX) as any;
+    const row = engine._tables['sys_approval_request'].find((r: any) => r.id === tallied.id)!;
+    const config = JSON.parse(row.node_config_json);
+    delete config.__approverGroups;
+    row.node_config_json = JSON.stringify(config);
+    const decided = await svc.decideNode(tallied.id, { decision: 'approve', actorId: 'u2' }, SYS);
+    expect(decided.finalized).toBe(false);
+    expect(asked.at(-1)).toEqual(['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]);
+    expect(engine._tables['sys_approval_request'].find((r: any) => r.id === tallied.id)!.pending_approvers).toBe('u_env');
+    expect(refusals).toEqual([]);
+  });
+
+  it('the fallback slate of an environment-authored override reads environment-wide too', async () => {
+    const registry = registryOf([[P, []]], []);
+    registry.registerItem('queue', { name: 'support', label: 'Support', members: [] }, 'name');
+    const { svc, asked, refusals } = setup(registry, P, true);
+    const fallen = await svc.openNodeRequest(queueNode({
+      approvers: [{ type: 'user', value: 'u_gone' }],
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'queue', value: 'support' }],
+    }), CTX) as any;
+    expect(fallen.pending_approvers).toEqual(['u_env']);
+    expect(asked.at(-1)).toEqual(['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]);
+    expect(refusals).toEqual([]);
+  });
+
+  it('CONTROL — a flow authored in this deployment reads environment-wide, as before: the same two holders are refused, naming both', async () => {
+    const { svc, asked, refusals } = setup(registryOf([[D, []], [U, []], [P, [D]]], [D, U]), undefined);
+    const refusal = await svc.openNodeRequest(queueNode(), CTX).then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+    expect(asked).toEqual([['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse' }]]);
+    expect((refusal as Error).message).toContain('because its name was refused (ADR-0150 D3, ambiguous-in-environment)');
+    expect((refusal as Error).message).not.toContain('once the directory can be read');
+    expect(refusals[0]).toMatchObject({
+      reason: 'ambiguous-in-environment',
+      candidates: [{ kind: 'package', packageId: D }, { kind: 'package', packageId: U }],
+    });
+  });
+
+  it('the fallback slate and decide\'s pre-snapshot re-resolution read the same package', async () => {
+    const { engine, svc, asked } = setup(registryOf([[D, []], [U, []], [P, [D]]], [D, U]), P);
+    // A slate of nobody falls back to the declared fallback, which names the queue.
+    const fallen = await svc.openNodeRequest(queueNode({
+      approvers: [{ type: 'user', value: 'u_gone' }],
+      onEmptyApprovers: 'fallback',
+      fallbackApprovers: [{ type: 'queue', value: 'support' }],
+    }), CTX) as any;
+    expect(fallen.pending_approvers).toEqual(['u_d']);
+    expect(asked.at(-1)).toEqual(['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse', callerPackageId: P }]);
+
+    // A unanimous request stripped of its open-time snapshot, as one opened
+    // before the snapshot existed: the tally re-resolves the slate from the flow's package.
+    const req = await svc.openNodeRequest({
+      ...queueNode({ approvers: [{ type: 'user', value: 'u2' }, { type: 'queue', value: 'support' }], behavior: 'unanimous' }),
+      recordId: 'opp2', runId: 'run_2', record: { id: 'opp2', amount: 100 },
+    }, CTX) as any;
+    expect(req.pending_approvers).toEqual(['u2', 'u_d']);
+    const row = engine._tables['sys_approval_request'].find((r: any) => r.id === req.id)!;
+    const config = JSON.parse(row.node_config_json);
+    delete config.__approverGroups;
+    row.node_config_json = JSON.stringify(config);
+    const decided = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u2' }, SYS);
+    expect(decided.finalized).toBe(false);
+    expect(asked.at(-1)).toEqual(['support', 't1', { purpose: 'addressing', onFailedRead: 'refuse', callerPackageId: P }]);
+    expect(engine._tables['sys_approval_request'].find((r: any) => r.id === req.id)!.pending_approvers).toBe('u_d');
+  });
+});
+
+// [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The
+// ADR-0105 D9 cross-organization read filter is a read behind a `position` or
+// `team` approver as much as the directory expansion is. When it fails, the
+// node refuses, naming THAT read, on the static resolver (its `bounded`
+// filter) and on an `expression` approver's `resolveAs` values alike.
+// `filterApproversWhoCanRead` answers its own failed `sys_member` read by
+// keeping the slate, so the pass-through spy above is how it is made to fail.
+// The scenario is `approver-cross-org.integration.test.ts`'s: a Plant A
+// request routed to the group CFO.
+describe('ApprovalService — a failed cross-organization read filter refuses the node, named as that read (ADR-0142 D6)', () => {
+  const PLANT_CTX = { userId: 'u_submitter', organizationId: 'o_plant', positions: [], permissions: [] } as any;
+  const FILTER_READ = /^the cross-organization read filter \(who among the people of organization 'o_group' can read this request of organization 'o_plant'\) could not be read: membership read filter down\.$/;
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+  let n = 0;
+
+  beforeEach(() => {
+    vi.mocked(filterApproversWhoCanRead).mockClear();
+    engine = makeFakeEngine();
+    engine._tables['sys_user'].push({ id: 'u_cfo' });
+    engine._tables['sys_organization'] = [
+      { id: 'o_group', slug: 'acme-group', parent_organization_id: null },
+      { id: 'o_plant', slug: 'acme-plant-a', parent_organization_id: 'o_group' },
+    ];
+    engine._tables['sys_user_position'] = [{ id: 'up1', user_id: 'u_cfo', position: 'cfo', organization_id: 'o_group' }];
+    engine._tables['sys_member'] = [{ id: 'm1', user_id: 'u_cfo', organization_id: 'o_plant', role: 'member' }];
+    n = 0;
+    svc = new ApprovalService({
+      engine: engine as any,
+      clock: { now: () => new Date(1767000000000 + (n++) * 1000) },
+      tenancyPosture: () => 'group',
+    });
+  });
+
+  const node = (approver: Record<string, unknown>) => ({
+    object: 'purchase_order',
+    recordId: 'po1',
+    runId: 'run_1',
+    nodeId: 'group_signoff',
+    flowName: 'po_approval',
+    config: { approvers: [approver as any], behavior: 'unanimous' as const, lockRecord: false, onEmptyApprovers: 'admin_rescue' as const },
+    record: { id: 'po1', signoff_position: 'cfo' },
+  });
+  const refusalOf = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => e);
+
+  for (const [label, approver] of [
+    ['a static position approver', { type: 'position', value: 'cfo', organization: '$root' }],
+    ['an expression approver resolving as position', { type: 'expression', value: 'trigger.signoff_position', resolveAs: 'position', organization: '$root' }],
+  ] as const) {
+    it(`control — ${label} reaches the group CFO through the filter`, async () => {
+      const req = await svc.openNodeRequest(node(approver), PLANT_CTX) as any;
+      expect(req.pending_approvers).toEqual(['u_cfo']);
+      expect(filterApproversWhoCanRead).toHaveBeenCalledTimes(1);
+    });
+
+    it(`${label}: the filter's failure refuses the node and names the filter's read`, async () => {
+      vi.mocked(filterApproversWhoCanRead).mockRejectedValueOnce(new Error('membership read filter down'));
+      const refusal = await refusalOf(svc.openNodeRequest(node(approver), PLANT_CTX));
+
+      expect(refusal).toBeInstanceOf(ApproverDirectoryUnreadableError);
+      expect(refusal).toMatchObject({ approverType: 'position', approverValue: 'cfo', retryable: true });
+      expect((refusal as ApproverDirectoryUnreadableError).failedRead).toMatch(FILTER_READ);
+      expect(engine._tables['sys_approval_request'] ?? []).toEqual([]);
+    });
+  }
 });
 
 // #3807 follow-up: `queue` was not the only way to end up with a slot nobody
@@ -6273,6 +6773,150 @@ describe('ApprovalService — the act doors answer an unreadable request as a mi
     const bySystem = await open(svc, engine);
     const out = await svc.decideNode(bySystem.id, { decision: 'reject', actorId: SLA_ACTOR_ID } as any, SYS);
     expect(out.request.status).toBe('rejected');
+  });
+});
+
+describe('ApprovalService — a request with no submitter is recalled, reminded or resubmitted only by the system or the override actor', () => {
+  /** A run whose trigger resolved no user: a system context in organization 't1', and no submitter. */
+  const NO_USER_TRIGGER = { isSystem: true, tenantId: 't1', positions: [], permissions: [] } as any;
+  const WITH_SUBMITTER = CTX; // u1, tenant t1
+  const APPROVER = asUser('u2');
+  /** Same tenant, on no slate: reads the request through the record-reader tier alone. */
+  const READER = asUser('u5');
+  /** The administrator of 't1': the override actor on its pending requests. */
+  const TENANT_ADMIN = { userId: 'adm_t1', tenantId: 't1', positions: [], permissions: [], posture: 'TENANT_ADMIN' } as any;
+  /** A system context acting in 't1' — it names the actor it acts under. */
+  const SYSTEM = { isSystem: true, tenantId: 't1', positions: [], permissions: [] } as any;
+  const SYSTEM_ACTOR = 'sys_job';
+
+  let seq = 0;
+  const setup = () => {
+    const engine = makeFakeEngine();
+    let n = 0;
+    const svc = new ApprovalService({
+      engine: engine as any, clock: { now: () => new Date(1758000000000 + (n++) * 1000) },
+      recordReaderVisibleObjects: ['opportunity'],
+    });
+    // A flow whose approval node declares the `revise` out-edge send-back needs.
+    svc.attachAutomation({
+      async resume() { /* resumed */ },
+      async cancelRun() { /* handed back */ },
+      async getFlow() {
+        return {
+          name: 'deal_approval',
+          nodes: [{ id: 'approve_step', type: 'approval' }, { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE }],
+          edges: [{ id: 'e_rev', source: 'approve_step', target: 'wait_revision', label: 'revise' }],
+        };
+      },
+    } as any);
+    return { engine, svc };
+  };
+  const open = async (
+    svc: ApprovalService, engine: ReturnType<typeof makeFakeEngine>, submitted: boolean,
+  ) => {
+    const recordId = `nosub_${++seq}`;
+    (engine._tables['opportunity'] ??= []).push({ id: recordId, amount: 100 });
+    const out: any = await svc.openNodeRequest({
+      object: 'opportunity', recordId, runId: `run_nosub_${seq}`, nodeId: 'approve_step',
+      flowName: 'deal_approval', config: nodeConfig(['u2'], { lockRecord: false }), record: { id: recordId, amount: 100 },
+      ...(submitted ? {} : { submitterId: null }),
+    }, submitted ? WITH_SUBMITTER : NO_USER_TRIGGER);
+    expect(out.organization_id).toBe('t1');
+    expect(out.submitter_id ?? null).toBe(submitted ? 'u1' : null);
+    return out as { id: string };
+  };
+  const sendBack = async (svc: ApprovalService, id: string) => {
+    const out = await svc.sendBack(id, { actorId: 'u2', comment: 'rework' }, APPROVER);
+    expect(out.request.status).toBe('returned');
+  };
+  const refusalOf = (p: Promise<unknown>) => p.then(() => 'ADMITTED', (err: Error) => err.message);
+  const snapshot = (engine: ReturnType<typeof makeFakeEngine>, id: string) => ({
+    row: { ...(engine._tables['sys_approval_request'] ?? []).find((r) => r.id === id) },
+    actions: (engine._tables['sys_approval_action'] ?? []).length,
+  });
+  /** The submitter's three doors, each as the REST door calls it: the actor is the caller. */
+  const recall = (svc: ApprovalService, id: string, ctx: any) => svc.recall(id, {} as any, ctx);
+  const remind = (svc: ApprovalService, id: string, ctx: any) => svc.remind(id, {} as any, ctx);
+  const resubmit = (svc: ApprovalService, id: string, ctx: any) => svc.resubmit(id, {} as any, ctx);
+
+  it('a caller who can read it but did not submit it — a pending approver, a record reader — is refused recall, remind and resubmit with the refusal a non-submitter gets, and nothing is written', async () => {
+    const { engine, svc } = setup();
+    const pending = await open(svc, engine, false);
+    const returned = await open(svc, engine, false);
+    await sendBack(svc, returned.id);
+    // The yardstick: the same callers on a request that HAS a submitter.
+    const submittedPending = await open(svc, engine, true);
+    const submittedReturned = await open(svc, engine, true);
+    await sendBack(svc, submittedReturned.id);
+
+    for (const [who, ctx] of [['the pending approver', APPROVER], ['a record reader', READER]] as const) {
+      // Precondition: they can read both requests — the read door serves them.
+      expect(await svc.getRequest(pending.id, ctx), `${who} reads the pending request`).not.toBeNull();
+      expect(await svc.getRequest(returned.id, ctx), `${who} reads the returned request`).not.toBeNull();
+      const before = { pending: snapshot(engine, pending.id), returned: snapshot(engine, returned.id) };
+
+      const cases: Array<[string, () => Promise<unknown>, () => Promise<unknown>]> = [
+        ['recall · pending', () => recall(svc, pending.id, ctx), () => recall(svc, submittedPending.id, ctx)],
+        ['recall · returned', () => recall(svc, returned.id, ctx), () => recall(svc, submittedReturned.id, ctx)],
+        ['remind', () => remind(svc, pending.id, ctx), () => remind(svc, submittedPending.id, ctx)],
+        ['resubmit', () => resubmit(svc, returned.id, ctx), () => resubmit(svc, submittedReturned.id, ctx)],
+      ];
+      for (const [door, noSubmitter, withSubmitter] of cases) {
+        const refused = await refusalOf(noSubmitter());
+        expect(refused, `${door} · ${who}`).toMatch(/^FORBIDDEN: /);
+        expect(refused, `${door} · ${who}: the refusal a non-submitter gets`).toBe(await refusalOf(withSubmitter()));
+      }
+      expect(snapshot(engine, pending.id), `${who}: nothing written on the pending request`).toEqual(before.pending);
+      expect(snapshot(engine, returned.id), `${who}: nothing written on the returned request`).toEqual(before.returned);
+    }
+    // The refusals, named — the door's own, unchanged.
+    expect(await refusalOf(remind(svc, pending.id, APPROVER))).toBe('FORBIDDEN: only the submitter may send reminders');
+    expect(await refusalOf(resubmit(svc, returned.id, READER))).toBe('FORBIDDEN: only the submitter may resubmit');
+  });
+
+  it('the override actor still recalls it while pending, and is refused where the door never admitted it — remind, resubmit, recall of a returned one', async () => {
+    const { engine, svc } = setup();
+    const pending = await open(svc, engine, false);
+    const returned = await open(svc, engine, false);
+    await sendBack(svc, returned.id);
+    expect(await refusalOf(remind(svc, pending.id, TENANT_ADMIN))).toBe('FORBIDDEN: only the submitter may send reminders');
+    expect(await refusalOf(resubmit(svc, returned.id, TENANT_ADMIN))).toBe('FORBIDDEN: only the submitter may resubmit');
+    expect(await refusalOf(recall(svc, returned.id, TENANT_ADMIN))).toMatch(/^FORBIDDEN: /);
+    expect((await svc.getRequest(returned.id, SYS))?.status).toBe('returned');
+
+    const out = await recall(svc, pending.id, TENANT_ADMIN);
+    expect((out as any).request.status).toBe('recalled');
+  });
+
+  it('a system context still recalls and reminds it while pending, and resubmits it once returned', async () => {
+    const { engine, svc } = setup();
+    const toRemind = await open(svc, engine, false);
+    const reminded = await svc.remind(toRemind.id, { actorId: SYSTEM_ACTOR }, SYSTEM);
+    expect(reminded.notified).toBeGreaterThanOrEqual(0);
+    expect((engine._tables['sys_approval_action'] ?? []).some((a) => a.request_id === toRemind.id && a.action === 'remind')).toBe(true);
+
+    const toRecall = await open(svc, engine, false);
+    const recalled = await svc.recall(toRecall.id, { actorId: SYSTEM_ACTOR }, SYSTEM);
+    expect(recalled.request.status).toBe('recalled');
+
+    const toResubmit = await open(svc, engine, false);
+    await sendBack(svc, toResubmit.id);
+    await svc.resubmit(toResubmit.id, { actorId: SYSTEM_ACTOR }, SYSTEM);
+    expect((engine._tables['sys_approval_action'] ?? []).some((a) => a.request_id === toResubmit.id && a.action === 'resubmit')).toBe(true);
+  });
+
+  it('control: a request that has a submitter is recalled, reminded and resubmitted by that submitter, as before', async () => {
+    const { engine, svc } = setup();
+    const toRemind = await open(svc, engine, true);
+    await svc.remind(toRemind.id, {} as any, WITH_SUBMITTER);
+    const toRecall = await open(svc, engine, true);
+    expect((await svc.recall(toRecall.id, {} as any, WITH_SUBMITTER)).request.status).toBe('recalled');
+    const toResubmit = await open(svc, engine, true);
+    await sendBack(svc, toResubmit.id);
+    await svc.resubmit(toResubmit.id, {} as any, WITH_SUBMITTER);
+    const kinds = (engine._tables['sys_approval_action'] ?? [])
+      .filter((a) => [toRemind.id, toRecall.id, toResubmit.id].includes(a.request_id)).map((a) => a.action);
+    expect(kinds).toEqual(expect.arrayContaining(['remind', 'recall', 'resubmit']));
   });
 });
 

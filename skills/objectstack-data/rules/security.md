@@ -9,14 +9,13 @@ Grant CRUD access per object with boolean bits on a permission set:
 import { definePermissionSet } from '@objectstack/spec';
 
 export const salesUser = definePermissionSet({
-  name: 'sales_user',
+  name: 'crm_sales_user',
   objects: {
     account: { allowRead: true, allowCreate: true, allowEdit: true },
     contact: { allowRead: true },
   },
 });
 
-// Register it on the stack root under `permissions`:
 // defineStack({ permissions: [salesUser], ... })
 ```
 
@@ -24,7 +23,6 @@ export const salesUser = definePermissionSet({
 - Bits: `allowCreate` / `allowRead` / `allowEdit` / `allowDelete`, plus
   `allowTransfer` (ownership change), `viewAllRecords` / `modifyAllRecords`
   (super-user, bypass sharing).
-- Source: `node_modules/@objectstack/spec/src/security/permission.zod.ts`
 - **`isDefault: true` = the `everyone` baseline (ADR-0090 D5).** A published package
   declares **exactly one**, anchor-safe: `describeAnchorForbiddenBits(set, 'everyone')`
   (`@objectstack/spec/security`) returns `null`, else lint
@@ -36,7 +34,7 @@ export const salesUser = definePermissionSet({
 ## Assigning a permission set to a user
 
 Declaring a set grants nobody anything — an assignment is **data**: one row in
-the join object **`sys_user_permission_set`** (`@objectstack/plugin-security`),
+the join object **`sys_user_permission_set`**,
 carrying `user_id`, `permission_set` (the set's machine **`name`**) and an
 optional `organization_id` (`null` = every org context). Optional `valid_from` /
 `valid_until` bound a half-open window; `granted_by` is stamped by the gate on
@@ -58,7 +56,7 @@ enforcing code path (explaining another user needs `manage_users`).
 ## Row-Level Security (RLS)
 
 The **enforced** RLS surface is a list of `rowLevelSecurity` policies on a
-**permission set / profile** (`PermissionSetSchema.rowLevelSecurity`), *not* a
+**permission set / profile**, *not* a
 CEL predicate on the object. Each policy's `using` and/or `check` is a **string**
 predicate. `using` admits rows: what a `select` policy lets the
 caller read, and the existing rows an `update`/`delete` policy lets it change
@@ -69,7 +67,7 @@ operation: when any applicable policy declares `check`, only those decide
 (OR-combined); else each applicable `using` stands in. A non-blank `check` on a
 `select`/`delete` policy is refused. Default deny, among the policies that
 apply: a row none admits is denied, an unevaluable policy fails closed; when
-none applies the policies restrict nothing (the tenant wall still applies) — an
+none applies the policies restrict nothing — an
 `update`/`delete` target with no write-class `using` is bounded by the caller's
 `select` policies.
 
@@ -80,8 +78,8 @@ rowLevelSecurity: [
     name: 'own_records',
     object: 'account',                       // REQUIRED per policy
     operation: 'all',                        // singular: select|insert|update|delete|all
-    using: 'owner_id == current_user.id',    // rows readable / targetable
-    check: 'owner_id == current_user.id',    // every row written
+    using: 'owner_id == current_user.id',
+    check: 'owner_id == current_user.id',
   },
   {
     name: 'org_isolation',
@@ -96,8 +94,7 @@ Predicates are **canonical CEL** (ADR-0058): `field == current_user.<prop>`,
 `field == 'literal'`, `field in current_user.<array>`, comparisons (`>`/`<`/`>=`/`<=`),
 `&&`/`||`/`!`, and `== null` checks all lower to a pushdown filter. **No** cross-object
 traversal or subqueries — those are a compile error (ADR-0055), never silently dropped.
-A legacy SQL-style `=` / `IN (...)` predicate still compiles via a **deprecated**
-bridge (warns). The compiler resolves these
+The compiler resolves these
 `current_user.*` placeholders:
 
 | Placeholder | Resolves to |
@@ -105,21 +102,18 @@ bridge (warns). The compiler resolves these
 | `current_user.id` | the caller's user id (ownership) |
 | `current_user.email` | the caller's email (ADR-0056) |
 | `current_user.organization_id` | the caller's tenant |
-| `current_user.org_user_ids` | ids of users in the same org (for `IN`) |
-| `current_user.positions` | the caller's positions (for `IN`; ADR-0090 D3) |
-| `current_user.queues` | the ownership queues the caller sits in (for `IN`; ADR-0142 D3) |
-| `current_user.KEY` | the set an object's `membershipKeys.KEY` declares (for `IN`) |
+| `current_user.org_user_ids` | ids of users in the same org |
+| `current_user.positions` | the caller's positions (ADR-0090 D3) |
+| `current_user.queues` | the ownership queues the caller sits in (ADR-0142 D3) |
+| `current_user.KEY` | the set an object's `membershipKeys.KEY` declares |
 
-- Source: `node_modules/@objectstack/spec/src/security/rls.zod.ts`.
 - Prefer the built-in `member_default` owner scoping (`owner_only_writes` /
   `owner_only_deletes`) and the object's `sharingModel` (ADR-0056 D1) over
   hand-written policies for the common cases.
 
 ## Membership keys — a `current_user.KEY` set the roster object declares
 
-Rows keyed on a **named record** (an account, a supplier) rather than on a
-person or a position: declare the set on the **roster** object whose rows
-define it, not one policy per record.
+Declare the set on the **roster** object, not one policy per record.
 
 <!-- os:check -->
 ```typescript
@@ -141,16 +135,23 @@ export default ObjectSchema.create({
 ```
 
 ```typescript
-// in the portal permission set — a policy reads the set with `in`
+// in a permission set — a policy reads the set with `in`
 rowLevelSecurity: [
   { name: 'portal_orders', object: 'order', operation: 'select', using: 'account in current_user.portal_account_ids' },
+  // the person is a record: roster `employee` declares
+  // my_employee_ids: { userField: 'user', valueField: 'id' }
+  { name: 'own_leave', object: 'leave_request', operation: 'select', using: 'employee in current_user.my_employee_ids' },
 ]
 ```
 
 - `userField`: the roster's user column (`user`, or a lookup to `sys_user`);
-  `valueField`: the reference column whose values form the set (never the
-  same column); `filter`: optional canonical CEL over the roster's own
+  `valueField`: the reference column whose values form the set, or `id`
+  (`membership-key-value-field-invalid`; never the same column);
+  `filter`: optional canonical CEL over the roster's own
   columns, no `current_user.*`.
+- With `id` the set is the ids of the caller's own roster rows; it grants
+  nothing by itself. Tested against a column not referencing the roster, or another
+  object's `id`, it is refused (`rls-predicate-membership-key-target`).
 - One name per stack: a key on two objects, a kernel name (`id`,
   `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`,
   `email`, `queues`) and a key on an object extension are refused.
@@ -158,23 +159,43 @@ rowLevelSecurity: [
   read on the roster needed), at most 1,000 values; more, a failed read or a
   `filter` that does not compile matches **no rows**. Whoever writes roster
   rows grants the key.
-- **Choose by what the rows are keyed on:** the person → owner scoping; a
-  position → `positions` on the policy; a named record → a membership key;
+- **Choose by what the rows are keyed on:** the user → owner scoping; a
+  position → `positions` on the policy; a named record (the caller's own
+  roster row too) → a membership key;
+  a parent's owner, parent optional → an optional master (relationships.md);
   one record, once → a sharing rule or a manual share; a team's records → a
   sharing rule whose `sharedWith: { type: 'queue', value: '<queue name>' }`
   reaches an ownership queue's members (SKILL.md § Ownership queues).
+- A package's rule reads `value` as its package's queue, else the one
+  holder in its declared `dependencies` closure plus `sys`, else (none
+  declares it) an org's `sys_queue` row. Else it grants no one new, warned
+  `RESOURCE_CONFLICT`: `outside-closure` (only a non-dependency
+  or an environment item holds `support`),
+  `ambiguous-in-closure` (two dependencies do), `ambiguous-in-environment`
+  (the one it reaches and a non-dependency do).
 
 ## Positions grant only what they name; portal users are `external`
 
 - A position distributes **only** the sets its `permissionSets` names
-  (ADR-0131 D3/D4): `{ name: 'sales_rep', label: 'Sales Rep', permissionSets:
-  ['sales_user'] }`. A set that merely shares the position's name is reported,
-  never granted; a name matching no set confers nothing.
+  (ADR-0131 D3/D4): `{ name: 'crm_sales_rep', label: 'Sales Rep', permissionSets:
+  ['crm_sales_user'] }`. A set that merely shares the position's name is reported,
+  never granted; a name matching no set, or refused below, confers nothing.
+- A package's position reads each name as its package's set, else the one holder
+  in its declared `dependencies` closure plus `sys`; else it is refused. It
+  still loads; the boot's catalog reference report logs each refusal with every
+  candidate, and the position grants nothing through that name (its other sets
+  still do). `outside-closure`: only a non-dependency holds it (`com.acme.crm`
+  naming `com.acme.helpdesk`'s `hd_agent`, undeclared) or only the environment
+  (a set authored in Setup). `ambiguous-in-closure`: two holders it reaches
+  (dependencies `hr` and `ops` both hold `auditor`; a second package shipping a
+  name is refused at install first). Fix: declare the dependency. Stored grants,
+  environment-authored positions, admin overlays of a package position and the
+  `everyone`/`guest` anchors resolve environment-wide.
 - A portal or partner user is an organization member on the `external`
   membership tier (closed list `owner`, `admin`, `delegated_admin`, `member`,
   `external`, one per member —
   https://objectstack.ai/docs/permissions/authentication#membership-tiers-are-a-closed-list).
-  The `everyone` baseline (`isDefault` sets) does not reach it, it sees no
+  The `everyone` baseline does not reach it, it sees no
   member directory and holds no business unit, and every org-wide default is
   owner-only for it: rows reach it **only** through the explicit grants above.
 
@@ -212,8 +233,7 @@ fields: {
 `maskingRule` is **live** (FieldMasker). Two more channels:
 
 **Encrypted-at-rest values — `type: 'secret'` (ADR-0100).** Ciphertext lives in
-`sys_secret`, only an opaque ref on the row. **Fail-closed:** with no crypto
-provider, writes throw rather than persist cleartext.
+`sys_secret`, only an opaque ref on the row.
 
 **Query a credential only for presence.** A `secret` / `password` column is
 never a filter, sort, group-by or import `matchFields` key (`400 INVALID_FIELD`;
@@ -242,8 +262,6 @@ fields: {
   },
 }
 ```
-
-- Source: `node_modules/@objectstack/spec/src/data/field.zod.ts`
 
 ## Multi-tenancy
 
@@ -286,7 +304,7 @@ none — e.g. identity tables a plugin writes via its own adapter
 **Recipe — env-global, admin-only object that admins can fully see:**
 
 ```typescript
-tenancy: { enabled: false }, // not a tenant object → Layer 0 contributes nothing
+tenancy: { enabled: false },
 requiredPermissions: ['manage_platform_settings'], // capability AND-gate → members get 403
 ```
 
@@ -295,8 +313,7 @@ requiredPermissions: ['manage_platform_settings'], // capability AND-gate → me
 > wildcard (`'*'`) read grant — the shipped `viewer_readonly`, an app-declared
 > default profile, a customer-authored set; not `member_default`, which is
 > explicit-allow — reads every row env-wide. `requiredPermissions` alone leaves a
-> tenant object whose untagged rows the wall denies to everyone (above); it is
-> the half that holds however permissive the grants. Posture model: ADR-0066.
+> tenant object whose untagged rows the wall denies to everyone (above). Posture model: ADR-0066.
 
 ## Renaming or removing a shipped access item
 

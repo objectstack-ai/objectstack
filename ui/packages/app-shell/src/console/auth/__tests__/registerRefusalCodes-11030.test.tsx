@@ -82,7 +82,7 @@ async function submitRefused(code: string, message: string): Promise<string> {
     </I18nProvider>,
   );
 
-  const r = builtInLocales.zh.auth.register;
+  const r = builtInLocales['zh-Hans'].auth.register;
   await userEvent.type(await screen.findByLabelText(r.nameLabel), 'Wang Wei');
   await userEvent.type(screen.getByLabelText(r.emailLabel), 'someone@example.com');
   await userEvent.type(screen.getByLabelText(r.passwordLabel), 'hunter2hunter2');
@@ -103,7 +103,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const zhErrors = builtInLocales.zh.auth.register.errors;
+const zhErrors = builtInLocales['zh-Hans'].auth.register.errors;
 const enErrors = builtInLocales.en.auth.register.errors;
 
 const EXPECTED: Record<RefusalCode, string> = {

@@ -72,7 +72,9 @@ import { STORAGE_ROUTE_LEDGER } from '../../../services/service-storage/src/stor
 import { I18N_ROUTE_LEDGER } from '../../../services/service-i18n/src/i18n-route-ledger.js';
 import { SETTINGS_ROUTE_LEDGER } from '../../../services/service-settings/src/settings-route-ledger.js';
 import { PRINT_ROUTE_LEDGER } from '../../../services/service-print/src/print-route-ledger.js';
+import { MESSAGING_ROUTE_LEDGER } from '../../../services/service-messaging/src/messaging-route-ledger.js';
 import { PERSONAL_VIEW_ROUTE_LEDGER } from '../../../plugins/plugin-auth/src/personal-view-route-ledger.js';
+import { SHARING_ROUTE_LEDGER } from '../../../plugins/plugin-sharing/src/sharing-route-ledger.js';
 
 /** One ledger row, normalized to a wire pattern this gate can probe. */
 interface LedgerRow {
@@ -109,9 +111,12 @@ function collectLedgerRows(): LedgerRow[] {
   for (const r of I18N_ROUTE_LEDGER) add('service-i18n/i18n-route-ledger.ts', r.route, '');
   for (const r of SETTINGS_ROUTE_LEDGER) add('service-settings/settings-route-ledger.ts', r.route, '');
   for (const r of PRINT_ROUTE_LEDGER) add('service-print/print-route-ledger.ts', r.route, '');
+  for (const r of MESSAGING_ROUTE_LEDGER) add('service-messaging/messaging-route-ledger.ts', r.route, '');
   // [#29443] AuthPlugin's own-row delete door for a personal view, mounted on
   // the IHttpServer port (unlike its raw-app `/auth/*` catch-all above).
   for (const r of PERSONAL_VIEW_ROUTE_LEDGER) add('plugin-auth/personal-view-route-ledger.ts', r.route, '');
+  // [#30209] SharingServicePlugin's shareable-objects list, on the IHttpServer port.
+  for (const r of SHARING_ROUTE_LEDGER) add('plugin-sharing/sharing-route-ledger.ts', r.route, '');
   return rows;
 }
 
@@ -210,7 +215,7 @@ describe('route ledger ↔ live mount parity (#7526)', () => {
     stack = await bootShowcase({
       // Boot as WIDE as this gate can, so as few rows as possible have to be
       // pinned: every plugin added here converts a pin into a measurement.
-      // `StorageServicePlugin` alone converts ten — the whole storage ledger,
+      // `StorageServicePlugin` alone converts twelve — the whole storage ledger,
       // which the lean default boot leaves entirely unobserved.
       //
       // NOT `automation: true`, and the reason is worth writing down: the

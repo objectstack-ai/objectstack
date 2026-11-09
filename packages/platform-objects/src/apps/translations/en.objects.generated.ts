@@ -39,7 +39,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       banned: {
         label: "Banned",
-        help: "When true, the user cannot sign in. Toggle via Ban User / Unban User actions."
+        help: "When on, the user cannot sign in. Use the Ban User / Unban User actions to change it."
       },
       ban_reason: {
         label: "Ban Reason"
@@ -70,7 +70,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "Must Change Password",
-        help: "When true, the user is blocked (403 PASSWORD_RESET_REQUIRED) until they change their password. Stamped by the admin user-management routes; system-managed."
+        help: "When on, the user must change their password before they can continue. Turned on when an administrator creates or imports the account, or resets its password; system-managed."
       },
       mfa_required_at: {
         label: "MFA Required At",
@@ -87,6 +87,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       ai_access: {
         label: "AI Access",
         help: "Whether this user holds an AI seat. A seat grants the `ai_seat` capability, which opens the AI assistants in the app (build and ask). How many users can hold one is limited by the seats your license includes."
+      },
+      principal_kind: {
+        label: "Principal Kind",
+        help: "Whether this user is a person or an AI service account. An AI service account never signs in and acts only through its own API keys. Set when the user is created; it never changes.",
+        options: {
+          human: "Person",
+          agent: "AI Service Account"
+        }
+      },
+      accountable_user_id: {
+        label: "Accountable Owner",
+        help: "For an AI service account, the person accountable for it. Empty for a person. The owner's own permissions never pass to the account."
       },
       image: {
         label: "Profile Image"
@@ -159,7 +171,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out and unable to sign in until unbanned.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.",
         successMessage: "User banned",
         params: {
           banReason: {
@@ -252,6 +264,43 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Close",
           fields: {
             entries: "Platform administrators"
+          }
+        }
+      },
+      register_service_account: {
+        label: "Register AI Service Account",
+        description: "Register an AI service account in this organization: an identity of its own for an agent that runs without a person, acting only through API keys created for it. It can do nothing until it is granted permission sets, and it never holds administrator access.",
+        successMessage: "AI service account registered",
+        params: {
+          name: {
+            label: "Name",
+            helpText: "What the agent is and what it is for. This name is how the account is recognised in the user list and the audit trail."
+          },
+          ownerId: {
+            label: "Accountable Owner",
+            helpText: "The person accountable for this account, a member of this organization. Leave empty to be the owner yourself."
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "Create API Key",
+        description: "Create an API key for this AI service account. The key acts as the account, with the account's own grants, in the account's organization.",
+        params: {
+          name: {
+            label: "Key Name"
+          },
+          expires_at: {
+            label: "Expires At",
+            helpText: "Leave empty for the default lifetime set under Setup → Authentication → API keys (Default key lifetime, 90 days unless changed). A date later than the Maximum key lifetime there is refused."
+          }
+        },
+        resultDialog: {
+          title: "API key created",
+          description: "Copy the key now — it is shown only once and cannot be recovered. If it leaks, revoke it and create a new one.",
+          acknowledge: "I have saved the key",
+          fields: {
+            key: "API Key",
+            expires_at: "Expires At"
           }
         }
       },
@@ -369,7 +418,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
       active_organization_id: {
         label: "Active Organization"
@@ -556,8 +605,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON-serialized organization metadata"
       },
       require_mfa: {
-        label: "Require Multi-Factor Auth",
-        help: "When true, every member of this organization must enroll an authenticator app to access data."
+        label: "Require Multi-Factor Auth (retired)",
+        help: "Retired. Set this organization's multi-factor requirement in Settings → Access policy. A value that was on here was moved there as \"everyone\" and cleared."
       },
       timezone: {
         label: "Timezone",
@@ -565,11 +614,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "Parent Organization",
-        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference."
+        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference. Meaningful only where the deployment runs several organizations."
       },
       sort_order: {
         label: "Sort Order",
-        help: "Display order among sibling organizations. Presentation only."
+        help: "Display order among sibling organizations. Presentation only. Meaningful only where the deployment runs several organizations."
       },
       id: {
         label: "Organization ID"
@@ -633,6 +682,20 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Leave Organization",
         confirmText: "Leave this organization? You will lose access to its environments and members.",
         successMessage: "You have left the organization"
+      }
+    },
+    _sections: {
+      identity: {
+        label: "Identity"
+      },
+      branding: {
+        label: "Branding"
+      },
+      configuration: {
+        label: "Configuration"
+      },
+      group_structure: {
+        label: "Group Structure"
       }
     }
   },
@@ -984,7 +1047,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "Business Unit",
     pluralLabel: "Business Units",
-    description: "Your company structure — divisions, departments, regions and offices — used to scope data and reports.",
+    description: "Your company structure — divisions, departments, regions and offices. Sharing rules can share records with a unit, or a unit and the units under it: members get that access, and lose it when they leave. Letting a permission set read every record of a unit (read scope 'unit') needs the enterprise edition.",
     fields: {
       name: {
         label: "Name"
@@ -995,7 +1058,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       kind: {
         label: "Kind",
-        help: "Categorisation hint — does not change graph semantics.",
+        help: "For grouping and reporting only; it does not change where the unit sits in the organization or who it covers.",
         options: {
           company: "Company",
           division: "Division",
@@ -1006,11 +1069,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "Parent Business Unit",
-        help: "Self-reference for the org tree. Null = root of tenant. A unit that still has child units cannot be deleted until they are re-parented or deleted."
+        help: "The unit this one sits under. Leave empty for a top-level unit. A unit that still has units under it cannot be deleted until they are moved under another unit or deleted."
       },
       timezone: {
         label: "Timezone",
-        help: "IANA time zone (e.g. Asia/Shanghai) date boundaries are computed in for this unit. Leave unset to inherit the parent unit's zone, then the organization's, then UTC."
+        help: "IANA time zone (e.g. Asia/Shanghai) kept for this unit; leave it empty to take the parent unit's, then the organization's. It does not change any date calculation today: formulas, reports and displayed dates use Settings → Localization → Default timezone."
       },
       organization_id: {
         label: "Organization",
@@ -1022,19 +1085,19 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "Active",
-        help: "When false, members are not expanded by graph queries."
+        help: "Turn off to retire the unit: sharing and other access given to this unit, or to a unit above it, no longer reaches its members or the units under it."
       },
       effective_from: {
         label: "Effective From",
-        help: "When this business unit came into existence (HRIS sync)."
+        help: "When this business unit came into existence. Usually filled in by a sync from your HR system."
       },
       effective_to: {
         label: "Effective To",
-        help: "When this business unit was retired (HRIS sync)."
+        help: "When this business unit was retired. Usually filled in by a sync from your HR system."
       },
       external_ref: {
         label: "External Reference",
-        help: "ID in upstream HRIS (Workday / SAP HR / 北森)."
+        help: "The unit's ID in your HR system (such as Workday, SAP HR or 北森), used to match it on each sync."
       },
       id: {
         label: "Business Unit ID"
@@ -1146,9 +1209,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Revoke Reason",
-        help: "Set when an administrator's forced password reset revoked this key. Only a platform administrator can restore such a key; its owner creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.",
+        help: "Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Suspended by an administrator: a platform administrator revoked a key that is not theirs, and only a platform administrator can restore it. Cleared when the key is restored. Empty for a key its owner revoked from the API Keys list.",
         options: {
-          admin_password_reset: "Administrator password reset"
+          admin_password_reset: "Administrator password reset",
+          organization_membership_ended: "Organization membership ended",
+          administrator_suspended: "Suspended by an administrator"
         }
       },
       key: {
@@ -1859,6 +1924,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Updated At"
+      },
+      last_used_at: {
+        label: "Last Used At",
+        help: "Start of the most recent hour in which the client made a verified MCP call under this consent; empty when none has been recorded"
       }
     }
   },
@@ -2029,6 +2098,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML Config",
         help: "JSON: entryPoint, cert, identifierFormat, mapping (managed by better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Allow IdP-Initiated Sign-In",
+        help: "Accept a sign-in that starts at the identity provider (an unsolicited SAML response, or an OIDC callback with no state) instead of at this system. Off by default: an IdP-initiated SAML response is not bound to any request this system made. Change it with “Edit Sign-In Options”."
+      },
+      allow_jit: {
+        label: "Allow Just-in-Time Provisioning",
+        help: "Under the invite-only audience posture, create an account for a person who signs in through this provider without an account or an invitation. Off by default: such a person is refused. Other postures provision as before. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Registered By",
         help: "User who registered this provider"
@@ -2095,6 +2172,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             label: "Map: Name claim",
             helpText: "Optional. Claim mapped to display name. Defaults to \"name\".",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "Map: Groups claim",
+            helpText: "Optional. Claim that carries the user’s groups, e.g. \"groups\". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            placeholder: "groups"
           }
         }
       },
@@ -2125,6 +2207,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID Format",
             helpText: "Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "Map: Groups attribute",
+            helpText: "Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.",
+            placeholder: "groups"
           }
         }
       },
@@ -2149,6 +2236,39 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Delete SSO Provider",
         description: "Delete this SSO provider? Users from its domain will no longer be able to sign in through it.",
         successMessage: "SSO provider deleted"
+      },
+      edit_sso_sign_in_options: {
+        label: "Edit Sign-In Options",
+        successMessage: "Sign-in options saved"
+      },
+      show_sso_groups_claim: {
+        label: "Show Groups Claim",
+        resultDialog: {
+          title: "Groups claim",
+          description: "The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.",
+          acknowledge: "Done",
+          fields: {
+            groupsClaim: "Groups claim"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "Edit Groups Claim",
+        params: {
+          groupsClaim: {
+            label: "Groups claim",
+            helpText: "The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "Groups claim saved",
+          description: "The groups claim this provider now reads at each sign-in. Empty means it maps no groups.",
+          acknowledge: "Done",
+          fields: {
+            groupsClaim: "Groups claim"
+          }
+        }
       }
     }
   },
@@ -2263,6 +2383,49 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       all: {
         label: "All"
+      }
+    },
+    _actions: {
+      mint_scim_credential: {
+        label: "Mint Credential",
+        description: "Mint a bearer credential for a SCIM connection. Give it to the identity provider as the SCIM token; it is shown once.",
+        params: {
+          connectionId: {
+            label: "Connection ID",
+            helpText: "The SCIM connection this credential authenticates, e.g. \"okta-prod\". At most 246 characters. To rotate, mint a second credential for the same connection, move the identity provider to it, then revoke the old one."
+          },
+          label: {
+            label: "Label",
+            helpText: "Optional. A name for this credential, e.g. \"rotation 2026-Q3\"."
+          },
+          organizationId: {
+            label: "Organization",
+            helpText: "Optional. The organization that owns the connection. Leave empty for the Default Organization."
+          },
+          provisioningDomainId: {
+            label: "Provisioning Domain",
+            helpText: "Optional. The boundary that receives the provisioned users and groups. Leave empty to use the connection ID."
+          },
+          expiresAt: {
+            label: "Expires At",
+            helpText: "Optional. After this time the credential is refused. Leave empty for a credential that does not expire."
+          }
+        },
+        resultDialog: {
+          title: "SCIM credential minted",
+          description: "Copy the token now — it is shown only once and cannot be recovered. Paste it into the identity provider as the SCIM bearer token. If it leaks, revoke it and mint a new one.",
+          acknowledge: "I have saved the token",
+          fields: {
+            token: "Token",
+            connectionId: "Connection ID",
+            expiresAt: "Expires At"
+          }
+        }
+      },
+      revoke_scim_credential: {
+        label: "Revoke Credential",
+        confirmText: "Revoke this SCIM credential? The identity provider using it is refused from its next request on. This cannot be undone: to restore provisioning, mint a new credential.",
+        successMessage: "SCIM credential revoked"
       }
     }
   },
@@ -2575,6 +2738,55 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "IdP Group Mapping",
+    pluralLabel: "IdP Group Mappings",
+    description: "Maps an identity provider group to the permission set its members are granted",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Source Kind",
+        help: "What sends the group: a SCIM connection, or an SSO provider at sign-in.",
+        options: {
+          scim: "SCIM Connection",
+          sso: "SSO Provider"
+        }
+      },
+      source_id: {
+        label: "Source ID",
+        help: "The SCIM connection ID or the SSO provider ID the group arrives through, e.g. \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "Group External ID",
+        help: "The group's externalId as the identity provider sends it. Set this or the display name, not both."
+      },
+      group_display_name: {
+        label: "Group Display Name",
+        help: "The group's displayName, matched exactly. Used when the mapping names no external ID."
+      },
+      permission_set: {
+        label: "Permission Set",
+        help: "The permission set a member of the group is granted. Administrator sets are refused."
+      },
+      organization_id: {
+        label: "Organization",
+        help: "The organization the grant is made in: the organization that owns the SCIM connection or the SSO provider."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
   sys_notification: {
     label: "Notification Event",
     pluralLabel: "Notification Events",
@@ -2777,6 +2989,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       name: {
         label: "Name",
         help: "Dotted snake_case identifier (e.g. auth.password_reset)"
+      },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
       },
       label: {
         label: "Label",
@@ -3388,7 +3604,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "Namespace",
-        help: "Manifest namespace (e.g. mail, branding, feature_flags)."
+        help: "Manifest namespace (e.g. mail, branding, storage)."
       },
       key: {
         label: "Key",
@@ -3443,6 +3659,54 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       all_settings: {
         label: "All"
+      }
+    }
+  },
+  sys_platform_setting: {
+    label: "Platform Setting",
+    pluralLabel: "Platform Settings",
+    description: "Deployment-wide settings values: the global rung of the settings cascade.",
+    fields: {
+      id: {
+        label: "Setting ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      },
+      namespace: {
+        label: "Namespace",
+        help: "Manifest namespace (e.g. mail, storage, ai)."
+      },
+      key: {
+        label: "Key",
+        help: "Specifier key inside the namespace (snake_case)."
+      },
+      value: {
+        label: "Value",
+        help: "JSON-encoded value. Null when encrypted=true (see value_enc)."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "When true, the value is stored encrypted-at-rest in value_enc; value column is null."
+      },
+      locked: {
+        label: "Locked",
+        help: "When true, tenant and user rows cannot override this value; writes against those scopes return 409."
+      },
+      locked_reason: {
+        label: "Lock Reason",
+        help: "Human-readable explanation surfaced in the UI tooltip when locked=true."
+      },
+      value_enc: {
+        label: "Encrypted Value",
+        help: "Handle of the sys_secret row holding the ciphertext. Set only when encrypted=true."
+      },
+      updated_by: {
+        label: "Updated By",
+        help: "Last actor who wrote this row through the settings service."
       }
     }
   },
@@ -3518,6 +3782,84 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         options: {
           tenant: "Tenant",
           user: "User"
+        }
+      },
+      action: {
+        label: "Action",
+        help: "Mutation kind.",
+        options: {
+          set: "Set",
+          reset: "Reset",
+          lock: "Lock",
+          unlock: "Unlock",
+          rotate: "Rotate"
+        }
+      },
+      actor_id: {
+        label: "Actor",
+        help: "User who performed the mutation; null for system jobs."
+      },
+      source: {
+        label: "Source",
+        help: "Mutation entry-point.",
+        options: {
+          ui: "UI",
+          api: "API",
+          migration: "Migration",
+          import: "Import",
+          system: "System"
+        }
+      },
+      reason: {
+        label: "Reason",
+        help: "Free-text justification provided by the actor (optional)."
+      },
+      old_hash: {
+        label: "Old Hash",
+        help: "Digest of the previous value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null when previously unset, or for a secret with no keyed digest."
+      },
+      new_hash: {
+        label: "New Hash",
+        help: "Digest of the new value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null on reset, or for a secret with no keyed digest."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "True when the field carries secret material (rotation is interesting)."
+      },
+      request_id: {
+        label: "Request ID",
+        help: "Correlates with sys_audit_log / tracing."
+      }
+    },
+    _views: {
+      recent: {
+        label: "Recent"
+      }
+    }
+  },
+  sys_platform_setting_audit: {
+    label: "Platform Setting Audit Entry",
+    pluralLabel: "Platform Setting Audit",
+    description: "Append-only audit trail for SettingsService mutations of global-scope keys.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      created_at: {
+        label: "Created At",
+        help: "When the mutation was recorded."
+      },
+      namespace: {
+        label: "Namespace"
+      },
+      key: {
+        label: "Key"
+      },
+      scope: {
+        label: "Scope",
+        help: "Cascade layer the row was written to — always the global rung here.",
+        options: {
+          global: "Global"
         }
       },
       action: {

@@ -90,6 +90,21 @@ function engine(packages: Record<string, { manifest: Record<string, unknown> }>)
 
 const WAREHOUSE = { [PACKAGE_ID]: { manifest: { id: PACKAGE_ID, namespace: 'wh' } } };
 
+/**
+ * [#30469 item 2] The `'protocol'` service of a deployment where the
+ * datasource's package is WRITABLE (an org's own package), so an import lands
+ * in it under its namespace and the ensure door is never asked.
+ */
+function writableProtocol(saveMetaItem: ReturnType<typeof vi.fn>) {
+  return {
+    saveMetaItem,
+    isWritablePackage: () => true,
+    ensureCustomizationPackage: vi.fn(async () => {
+      throw new Error('a writable package is never paired');
+    }),
+  };
+}
+
 function harness() {
   const services = new Map<string, unknown>();
   services.set('data', { introspectDatasource: vi.fn(async () => remoteSchema()) });
@@ -139,7 +154,7 @@ describe('the namespace comes from the engine registry\'s package record', () =>
   it('an explicit import name without the prefix is refused with ADR-0028\'s message, and nothing is saved', async () => {
     const { h, service } = await startOrdering();
     const saveMetaItem = vi.fn(async () => ({ success: true }));
-    h.services.set('protocol', { saveMetaItem });
+    h.services.set('protocol', writableProtocol(saveMetaItem));
 
     const outcome = await service
       .importObject('warehouse', 'customers', { name: 'ext_customers' })
@@ -156,7 +171,7 @@ describe('the namespace comes from the engine registry\'s package record', () =>
   it('control: a prefixed import name is saved under that name', async () => {
     const { h, service } = await startOrdering();
     const saveMetaItem = vi.fn(async () => ({ success: true }));
-    h.services.set('protocol', { saveMetaItem });
+    h.services.set('protocol', writableProtocol(saveMetaItem));
 
     const result = await service.importObject('warehouse', 'customers', { name: 'wh_ext_customers' });
 
@@ -167,7 +182,7 @@ describe('the namespace comes from the engine registry\'s package record', () =>
   it('control: an import with no name override saves the prefixed name the draft derives', async () => {
     const { h, service } = await startOrdering();
     const saveMetaItem = vi.fn(async () => ({ success: true }));
-    h.services.set('protocol', { saveMetaItem });
+    h.services.set('protocol', writableProtocol(saveMetaItem));
 
     const result = await service.importObject('warehouse', 'customers');
 
@@ -227,7 +242,7 @@ describe('⛔ one store, one id: nothing else resolves a namespace', () => {
   it('a package that declares no namespace resolves nothing, and an unprefixed import name is accepted', async () => {
     const { h, service } = await startOrdering({ packages: { [PACKAGE_ID]: { manifest: { id: PACKAGE_ID } } } });
     const saveMetaItem = vi.fn(async () => ({ success: true }));
-    h.services.set('protocol', { saveMetaItem });
+    h.services.set('protocol', writableProtocol(saveMetaItem));
 
     expect((await service.generateObjectDraft('warehouse', 'customers')).name).toBe('customers');
     expect((await service.importObject('warehouse', 'customers', { name: 'ext_customers' })).name).toBe('ext_customers');
@@ -242,5 +257,208 @@ describe('⛔ one store, one id: nothing else resolves a namespace', () => {
 
     expect(draft.name).toBe('customers');
     expect(draft.source).toContain('TODO(namespace)');
+  });
+});
+
+/**
+ * [#30469 item 2] Where an import is saved: ruling B (recorded 6660988968).
+ *
+ * The placement follows the datasource's `_packageId`: no package → a
+ * package-less row, as before; a writable package → that package; a read-only
+ * installed base → its customization package `<base>.custom`, obtained from
+ * the ensure door and named in the pair's namespace (measured on a booted
+ * showcase: the save door refuses `showcase_customers` in
+ * `com.example.showcase.custom` with `NAMESPACE_PREFIX` and accepts
+ * `showcase_custom_customers`). Under a walled posture the import never creates
+ * the pair. None of these lands package-less as a fallback.
+ */
+describe('[#30469 item 2] an import lands in the package of its datasource', () => {
+  const PAIR_ID = `${PACKAGE_ID}.custom`;
+  const PAIR = { [PAIR_ID]: { manifest: { id: PAIR_ID, namespace: 'wh_custom', dependencies: { [PACKAGE_ID]: '^1' } } } };
+
+  /** A protocol whose doors answer for a READ-ONLY base, and record the order they were asked in. */
+  function readOnlyBase(opts: { writable?: (id: string) => boolean } = {}) {
+    const calls: string[] = [];
+    const saveMetaItem = vi.fn(async (request: { name: string; packageId?: string }) => {
+      calls.push(`save:${request.packageId ?? '-'}:${request.name}`);
+      return { success: true };
+    });
+    const ensureCustomizationPackage = vi.fn(async (request: { basePackageId: string }) => {
+      calls.push(`ensure:${request.basePackageId}`);
+      return { basePackageId: request.basePackageId, packageId: PAIR_ID, namespace: 'wh_custom', dependencyRange: '^1', created: true, writable: true };
+    });
+    const isWritablePackage = vi.fn(opts.writable ?? ((id: string) => id === PAIR_ID));
+    return { protocol: { saveMetaItem, ensureCustomizationPackage, isWritablePackage }, saveMetaItem, ensureCustomizationPackage, calls };
+  }
+
+  /** The `startOrdering` composition, plus a kernel whose `tenancy` service answers `posture`. */
+  async function compose(opts: {
+    datasource?: Record<string, unknown>;
+    packages?: Record<string, { manifest: Record<string, unknown> }>;
+    posture?: 'single' | 'group' | 'isolated';
+    doors?: ReturnType<typeof readOnlyBase>;
+  } = {}) {
+    const h = harness();
+    const introspect = vi.fn(async () => remoteSchema());
+    h.services.set('data', { introspectDatasource: introspect });
+    if (opts.posture) {
+      const tenancy = { posture: opts.posture, isolationActive: opts.posture !== 'single' };
+      (h.ctx as unknown as { getKernel: () => unknown }).getKernel = () => ({
+        getServiceAsync: async (name: string) => {
+          if (name === 'tenancy') return tenancy;
+          throw new Error(`Service '${name}' not found`);
+        },
+      });
+    }
+    const service = await federation(h);
+    h.services.set('metadata', metadataService(opts.datasource ?? stamped()));
+    h.services.set('objectql', engine(opts.packages ?? WAREHOUSE).service);
+    const doors = opts.doors ?? readOnlyBase();
+    h.services.set('protocol', doors.protocol);
+    return { service, introspect, ...doors };
+  }
+
+  it('control: a datasource no package declares saves a package-less row, and the ensure door is not asked', async () => {
+    const { service, saveMetaItem, ensureCustomizationPackage } = await compose({
+      datasource: { name: 'warehouse', schemaMode: 'external', origin: 'runtime' },
+    });
+
+    const result = await service.importObject('warehouse', 'customers');
+
+    expect(result.name).toBe('customers');
+    expect(saveMetaItem).toHaveBeenCalledTimes(1);
+    expect(Object.keys((saveMetaItem.mock.calls[0] as unknown[])[0] as object).sort()).toEqual(['item', 'name', 'type', 'writeFace']);
+    expect(ensureCustomizationPackage).not.toHaveBeenCalled();
+  });
+
+  it('control: the `sys_metadata` sentinel is no package, so that row stays package-less too', async () => {
+    const { service, saveMetaItem, ensureCustomizationPackage } = await compose({
+      datasource: stamped({ _packageId: 'sys_metadata' }),
+    });
+
+    await service.importObject('warehouse', 'customers');
+
+    expect('packageId' in ((saveMetaItem.mock.calls[0] as unknown[])[0] as object)).toBe(false);
+    expect(ensureCustomizationPackage).not.toHaveBeenCalled();
+  });
+
+  it('a writable package\'s datasource saves into that package, named in its namespace', async () => {
+    const doors = readOnlyBase({ writable: () => true });
+    const { service, saveMetaItem, ensureCustomizationPackage } = await compose({ doors });
+
+    const result = await service.importObject('warehouse', 'customers');
+
+    expect(result.name).toBe('wh_customers');
+    expect(saveMetaItem).toHaveBeenCalledWith(expect.objectContaining({ name: 'wh_customers', packageId: PACKAGE_ID }));
+    expect(ensureCustomizationPackage).not.toHaveBeenCalled();
+  });
+
+  it('a read-only base\'s datasource saves into `<base>.custom`, obtained from the ensure door first, named in the pair\'s namespace', async () => {
+    const { service, saveMetaItem, ensureCustomizationPackage, calls } = await compose();
+
+    const result = await service.importObject('warehouse', 'customers');
+
+    expect(result.name).toBe('wh_custom_customers');
+    expect(result.definition).toMatchObject({ name: 'wh_custom_customers', datasource: 'warehouse', external: { remoteName: 'customers' } });
+    expect(ensureCustomizationPackage).toHaveBeenCalledTimes(1);
+    expect(ensureCustomizationPackage).toHaveBeenCalledWith({ basePackageId: PACKAGE_ID });
+    expect(saveMetaItem).toHaveBeenCalledWith({
+      type: 'object',
+      name: 'wh_custom_customers',
+      item: result.definition,
+      writeFace: 'external-import',
+      packageId: PAIR_ID,
+    });
+    expect(calls).toEqual([`ensure:${PACKAGE_ID}`, `save:${PAIR_ID}:wh_custom_customers`]);
+  });
+
+  it('an explicit name in the BASE\'s namespace is refused with the validator\'s message for the pair, before the pair is made', async () => {
+    const { service, saveMetaItem, ensureCustomizationPackage, introspect } = await compose();
+
+    const outcome = await service.importObject('warehouse', 'customers', { name: 'wh_customers' }).catch((e: unknown) => e);
+
+    expect(outcome).toMatchObject({ code: 'EXTERNAL_IMPORT_ERROR', status: 400 });
+    expect((outcome as Error).message).toBe(validateObjectNamespacePrefix('wh_customers', 'wh_custom'));
+    expect(ensureCustomizationPackage).not.toHaveBeenCalled();
+    expect(saveMetaItem).not.toHaveBeenCalled();
+    expect(introspect).not.toHaveBeenCalled();
+  });
+
+  it('a refused draft (no such remote table) makes no pair and saves nothing', async () => {
+    const { service, saveMetaItem, ensureCustomizationPackage } = await compose();
+
+    await expect(service.importObject('warehouse', 'no_such_table')).rejects.toThrow(/not found/);
+
+    expect(ensureCustomizationPackage).not.toHaveBeenCalled();
+    expect(saveMetaItem).not.toHaveBeenCalled();
+  });
+
+  it('an ensure-door refusal refuses the import with that refusal, and nothing is saved package-less', async () => {
+    const doors = readOnlyBase();
+    const refusal = Object.assign(new Error('the base declares no namespace'), { status: 409 });
+    doors.ensureCustomizationPackage.mockImplementationOnce(async () => {
+      throw refusal;
+    });
+    const { service, saveMetaItem } = await compose({ doors });
+
+    await expect(service.importObject('warehouse', 'customers')).rejects.toBe(refusal);
+
+    expect(saveMetaItem).not.toHaveBeenCalled();
+  });
+
+  for (const posture of ['group', 'isolated'] as const) {
+    it(`${posture}: a walled posture never creates the pair from an import, and refuses it naming the platform operator`, async () => {
+      const { service, saveMetaItem, ensureCustomizationPackage, introspect } = await compose({ posture });
+
+      const outcome = await service.importObject('warehouse', 'customers').catch((e: unknown) => e);
+
+      expect(outcome).toMatchObject({ code: 'EXTERNAL_IMPORT_ERROR', status: 400 });
+      expect((outcome as Error).message).toContain('platform operator');
+      expect((outcome as Error).message).toContain(`/api/v1/packages/${PACKAGE_ID}/ensure-customization`);
+      expect(ensureCustomizationPackage).not.toHaveBeenCalled();
+      expect(saveMetaItem).not.toHaveBeenCalled();
+      expect(introspect).not.toHaveBeenCalled();
+    });
+
+    it(`${posture}: a pair that already exists receives the import, and the ensure door is not asked`, async () => {
+      const { service, saveMetaItem, ensureCustomizationPackage } = await compose({
+        posture,
+        packages: { ...WAREHOUSE, ...PAIR },
+      });
+
+      const result = await service.importObject('warehouse', 'customers');
+
+      expect(result.name).toBe('wh_custom_customers');
+      expect(saveMetaItem).toHaveBeenCalledWith(expect.objectContaining({ packageId: PAIR_ID, name: 'wh_custom_customers' }));
+      expect(ensureCustomizationPackage).not.toHaveBeenCalled();
+    });
+  }
+
+  it('control: under `single` the pair is ensured as without a tenancy service', async () => {
+    const { service, ensureCustomizationPackage } = await compose({ posture: 'single' });
+
+    expect((await service.importObject('warehouse', 'customers')).name).toBe('wh_custom_customers');
+    expect(ensureCustomizationPackage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a protocol that cannot judge writability or ensure a pair refuses the import of a packaged datasource, and saves nothing', async () => {
+    const h = harness();
+    const service = await federation(h);
+    h.services.set('metadata', metadataService(stamped()));
+    h.services.set('objectql', engine(WAREHOUSE).service);
+    const saveMetaItem = vi.fn(async () => ({ success: true }));
+    h.services.set('protocol', { saveMetaItem });
+
+    const outcome = await service.importObject('warehouse', 'customers').catch((e: unknown) => e);
+
+    expect(outcome).toMatchObject({ code: 'EXTERNAL_IMPORT_ERROR', status: 400 });
+    expect(saveMetaItem).not.toHaveBeenCalled();
+  });
+
+  it('control: the draft door still names the object in the datasource\'s own package namespace', async () => {
+    const { service, ensureCustomizationPackage } = await compose();
+
+    expect((await service.generateObjectDraft('warehouse', 'customers')).name).toBe('wh_customers');
+    expect(ensureCustomizationPackage).not.toHaveBeenCalled();
   });
 });

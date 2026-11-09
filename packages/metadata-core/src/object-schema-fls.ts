@@ -697,6 +697,39 @@ export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskP
 }
 
 /**
+ * [ADR-0106 D1] The objects an action entry's params name through
+ * `objectOverride` — every object other than `ownerName` — once each, in
+ * declaration order. These are the objects {@link actionServedWithoutOwnObject}
+ * judges against.
+ */
+export function actionObjectOverrideTargets(action: unknown, ownerName?: string): string[] {
+    const document = ownerName === undefined ? { actions: [action] } : { name: ownerName, actions: [action] };
+    return [...new Set(objectOverrideReads(document).map((read) => read.object))];
+}
+
+/**
+ * [ADR-0106 D1] Does the `/meta` object door's projection keep this action,
+ * for an action with no own-object definition to project: an object-less
+ * (`global`) action, or one whose `objectName` names no object?
+ *
+ * Such an action carries no field of its own object, so nothing of it is
+ * denied there; each param bound through `objectOverride` is judged on the
+ * object it names, against `related` (the caller's readable fields on that
+ * object; a missing or `undefined` entry withholds the action, fail closed).
+ * It is the object door's own rule — {@link maskDeniedFieldReferences} on the
+ * action as a document's only `actions` entry — not a second one.
+ */
+export function actionServedWithoutOwnObject(
+    action: unknown,
+    ownerName: string | undefined,
+    related: ReadonlyMap<string, ReadonlySet<string> | undefined>,
+): boolean {
+    const document = ownerName === undefined ? { actions: [action] } : { name: ownerName, actions: [action] };
+    const served = maskDeniedFieldReferences(document, new Set(), related);
+    return Array.isArray(served.actions) && served.actions.length === 1;
+}
+
+/**
  * A stable hash of the caller's **denied** field set for one object (ADR-0106
  * D3) — the ETag dimension that keeps `304` semantics correct per permission
  * cohort without putting a caller dimension in the cache key.

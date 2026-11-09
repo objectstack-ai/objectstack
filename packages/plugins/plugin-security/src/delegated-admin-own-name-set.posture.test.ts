@@ -21,16 +21,18 @@
  * the gate meet: the gate admits exactly what the resolver grants.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
+import type { EngineAggregateOptions, EngineQueryOptions, FilterCondition } from '@objectstack/spec/data';
 import { SysUser, SysMember, SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { defaultPermissionSets } from './objects/index.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const SYS = { isSystem: true } as const;
 const ORG_A = 'org_a';
@@ -43,6 +45,9 @@ const eastScope = (allow: string[]) => ({
   assignablePermissionSets: allow,
 });
 const CRUD = { sys_user_position: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } };
+/** [#29029] A plain object whose `unit` lookup names a business unit. */
+const UNIT_NOTE = 'qa_unit_note';
+const NOTE_CRUD = { allowRead: true, allowCreate: true, allowEdit: true };
 
 /**
  * The catalog. `field_rep` and `field_lead` each list only `field_user`, and
@@ -60,7 +65,13 @@ const PERMISSIONS = [
   // Carries an adminScope equal to the wide delegate's own: not strictly contained by it.
   { name: 'field_lead', label: 'Field lead (own name)', objects: CRUD, adminScope: eastScope(['field_user', 'field_rep', 'field_lead']) },
   // Narrow: allowlists the sets the positions LIST, not their own-name sets.
-  { name: 'east_admin', label: 'East delegate', objects: CRUD, adminScope: eastScope(['field_user']) },
+  // [#30758] It may not read `external_ref`, so the aggregate field guard (step 2.5b) has a field to refuse.
+  {
+    name: 'east_admin', label: 'East delegate', objects: { ...CRUD, [UNIT_NOTE]: NOTE_CRUD }, adminScope: eastScope(['field_user']),
+    fields: { 'sys_business_unit.external_ref': { readable: false } },
+  },
+  // [#29029] A writer of the unit note with no admin scope at all.
+  { name: 'note_writer', label: 'Note writer', objects: { [UNIT_NOTE]: NOTE_CRUD } },
   // Wide: also allowlists the own-name sets.
   { name: 'east_admin_wide', label: 'East delegate (wide)', objects: CRUD, adminScope: eastScope(['field_user', 'field_rep', 'field_lead']) },
 ];
@@ -74,8 +85,10 @@ const POSITIONS = [
 type Posture = 'single' | 'group' | 'isolated';
 const POSTURES: Posture[] = ['single', 'group', 'isolated'];
 
+/** The users of `ORG_A`, as the runtime resolves them onto every session's context from `sys_member`. */
+const ORG_USER_IDS = ['u_delegate', 'u_delegate_wide', 'u_target', 'u_writer', 'u_org_admin'];
 const delegateCtx = (userId: string, set: string) =>
-  ({ userId, positions: [], permissions: [set], tenantId: ORG_A, accessible_org_ids: [ORG_A] });
+  ({ userId, positions: [], permissions: [set], tenantId: ORG_A, accessible_org_ids: [ORG_A], org_user_ids: ORG_USER_IDS });
 const NARROW = delegateCtx('u_delegate', 'east_admin');
 const WIDE = delegateCtx('u_delegate_wide', 'east_admin_wide');
 
@@ -87,7 +100,22 @@ afterEach(async () => {
   }
 });
 
-async function boot(posture: Posture) {
+/**
+ * `defaultOrganization`: also give the engine the organization object holding the
+ * Default Organization, as every real `single` install has — so a write whose
+ * context names no organization is stamped with it instead of being refused for
+ * having none (`default-organization.testkit.ts`).
+ *
+ * `positions` / `permissions`: catalog entries one describe adds on top of the
+ * shared catalog, so a describe that needs its own entry does not change what
+ * the others enumerate.
+ */
+async function boot(
+  posture: Posture,
+  opts: { defaultOrganization?: boolean; positions?: Array<Record<string, unknown>>; permissions?: Array<Record<string, unknown>> } = {},
+) {
+  const positions: Array<Record<string, unknown>> = [...POSITIONS, ...(opts.positions ?? [])];
+  const permissions: Array<Record<string, unknown>> = [...PERMISSIONS, ...(opts.permissions ?? [])];
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
@@ -100,11 +128,23 @@ async function boot(posture: Posture) {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysUserPosition, SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember],
+    // [#29029] `sys_user` provisioned: an assignment's `user_id` names a user
+    // the caller must be able to read, so the table the read door asks exists.
+    objects: [
+      SysUser, SysUserPosition, SysUserPermissionSet, SysMember, SysBusinessUnit, SysBusinessUnitMember,
+      {
+        name: UNIT_NOTE,
+        label: 'Unit note',
+        sharingModel: 'public_read_write',
+        fields: {
+          name: { name: 'name', type: 'text' },
+          unit: { name: 'unit', type: 'lookup', reference: 'sys_business_unit' },
+        },
+      },
+    ],
   } as any);
   await engine.syncSchemas();
-  // `sys_user` registered and unprovisioned, as in the sibling posture suite.
-  if (!engine.registry.getObject(SysUser.name)) engine.registry.registerObject(SysUser as never, 'qa.delegated-own-name');
+  if (opts.defaultOrganization) await installDefaultOrganization(engine as any);
   engines.push(engine);
 
   const services: Record<string, unknown> = {
@@ -112,11 +152,11 @@ async function boot(posture: Posture) {
     objectql: engine,
     metadata: {
       get: async (type: string, name: string) =>
-        (type === 'position' ? POSITIONS.find((p) => p.name === name)
-          : type === 'permission' ? PERMISSIONS.find((p) => p.name === name)
+        (type === 'position' ? positions.find((p) => p.name === name)
+          : type === 'permission' ? permissions.find((p) => p.name === name)
           : type === 'capability' ? undefined
           : engine.getSchema(name)) ?? null,
-      list: async (type: string) => (type === 'position' ? POSITIONS : type === 'permission' ? PERMISSIONS : []),
+      list: async (type: string) => (type === 'position' ? positions : type === 'permission' ? permissions : []),
     },
     ...(posture === 'single' ? {} : { 'org-scoping': { name: 'com.objectstack.org-scoping' }, tenancy: { posture } }),
   };
@@ -140,12 +180,16 @@ async function boot(posture: Posture) {
     { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq', organization_id: ORG_A },
     { id: 'bu_east_field', name: 'east_field', parent_business_unit_id: 'bu_east', organization_id: ORG_A },
   ], sys);
-  for (const userId of ['u_delegate', 'u_delegate_wide', 'u_target']) {
-    await engine.insert('sys_member', { id: `m_${userId}`, user_id: userId, organization_id: ORG_A, role: 'member' }, sys);
+  for (const userId of ORG_USER_IDS) {
+    await engine.insert('sys_user', { id: userId, email: `${userId}@example.test`, name: userId }, sys);
+    const role = userId === 'u_org_admin' ? 'admin' : 'member';
+    await engine.insert('sys_member', { id: `m_${userId}`, user_id: userId, organization_id: ORG_A, role }, sys);
   }
   await engine.insert('sys_business_unit_member',
     { id: 'bum_target', user_id: 'u_target', business_unit_id: 'bu_east_field', organization_id: ORG_A }, sys);
-  return { engine, plugin };
+  // The `security` service the plugin registered: the object `GET /api/v1/security/my-delegable-scope` answers through.
+  const security = (ctx.registerService as any).mock.calls.find(([name]: [string]) => name === 'security')?.[1];
+  return { engine, plugin, security };
 }
 
 async function outcome(run: () => Promise<unknown>): Promise<{ status: number; code?: string; message?: string }> {
@@ -232,6 +276,994 @@ describe('[ADR-0090 D12, amended 2026-10-17; #24757] a delegate is judged on exa
             }
           }
         }
+      });
+    });
+  }
+});
+
+/** [#29029] Every unit id `context` reads, sorted, or the refusal's status and code. */
+async function unitsRead(h: Awaited<ReturnType<typeof boot>>, context: ReturnType<typeof delegateCtx>): Promise<string[] | { status: number; code?: string }> {
+  try {
+    const rows = await h.engine.find('sys_business_unit', { context });
+    return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.id)).sort();
+  } catch (e) {
+    const r = resolveThrownHttpError(e);
+    return { status: r.status, code: r.code };
+  }
+}
+
+/** [#29029] A unit note naming `unit`, written as `context`: the outcome, and the refused field's code. */
+async function noteNaming(h: Awaited<ReturnType<typeof boot>>, context: any, unit: string) {
+  try {
+    await h.engine.insert(UNIT_NOTE, { name: `note on ${unit}`, unit }, { context } as any);
+    return { status: 200 };
+  } catch (e) {
+    const r = resolveThrownHttpError(e);
+    const fields = ((e as any)?.fields ?? []) as Array<{ field?: string; code?: string }>;
+    return { status: r.status, code: r.code, fields: fields.map((f) => `${f.field}:${f.code}`) };
+  }
+}
+
+async function storedNotes(h: Awaited<ReturnType<typeof boot>>): Promise<string[]> {
+  const rows = await h.engine.find(UNIT_NOTE, { context: SYS });
+  return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.unit)).sort();
+}
+
+describe('[ADR-0090 D12, ruling of record 6663849489; #29029] a delegate reads the business units its scope covers, and no other — three postures', () => {
+  const WRITER = delegateCtx('u_writer', 'note_writer');
+  const ORG_ADMIN = delegateCtx('u_org_admin', 'organization_admin');
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it('the delegate reads exactly the units its scope covers: the scope root and its subtree, not the unit above it', async () => {
+        const h = await boot(posture);
+        expect(await unitsRead(h, NARROW)).toEqual(['bu_east', 'bu_east_field']);
+        const above = await h.engine.findOne('sys_business_unit', { where: { id: 'bu_hq' }, context: NARROW });
+        expect(above ?? null).toBeNull();
+        expect(await h.engine.count('sys_business_unit', { context: NARROW })).toBe(2);
+      });
+
+      it('the delegate assigns a position in a unit its scope covers, and the assignment is stored', async () => {
+        const h = await boot(posture);
+        expect(await assign(h, NARROW, 'field_rep')).toEqual({ status: 200 });
+        expect(await storedPositions(h)).toEqual(['field_rep']);
+      });
+
+      it('a unit outside the scope is a unit the delegate cannot read: a reference to it answers reference_not_found, and one inside is admitted', async () => {
+        const h = await boot(posture);
+        expect(await noteNaming(h, NARROW, 'bu_hq')).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['unit:reference_not_found'] });
+        expect(await noteNaming(h, NARROW, 'bu_east_field')).toEqual({ status: 200 });
+        expect(await storedNotes(h)).toEqual(['bu_east_field']);
+      });
+
+      it('CONTROL: a caller holding no scope still reads no unit, and cannot name one', async () => {
+        const h = await boot(posture);
+        expect(await unitsRead(h, WRITER)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(await noteNaming(h, WRITER, 'bu_east')).toEqual({ status: 400, code: 'VALIDATION_FAILED', fields: ['unit:reference_not_found'] });
+        expect(await storedNotes(h)).toEqual([]);
+      });
+
+      it('CONTROL: an organization administrator reads and names every unit of its organization, as before', async () => {
+        const h = await boot(posture);
+        expect(await unitsRead(h, ORG_ADMIN)).toEqual(['bu_east', 'bu_east_field', 'bu_hq']);
+        expect(await noteNaming(h, ORG_ADMIN, 'bu_hq')).toEqual({ status: 200 });
+      });
+    });
+  }
+});
+
+/** [#30758] The unit ids the system context reads under `filter` — what a door that compiles its own statement returns. */
+async function unitsUnder(h: Awaited<ReturnType<typeof boot>>, filter: Record<string, unknown> | null | undefined): Promise<string[]> {
+  const query: EngineQueryOptions = { ...(filter ? { where: filter as FilterCondition } : {}), context: SYS };
+  const rows = await h.engine.find('sys_business_unit', query);
+  return (Array.isArray(rows) ? rows : []).map((r: any) => String(r.id)).sort();
+}
+
+/** [#30758] An aggregate of `sys_business_unit` as `context`: the group names it counts, or the refusal. */
+async function unitAggregate(
+  h: Awaited<ReturnType<typeof boot>>,
+  context: any,
+  query: { where?: FilterCondition; groupBy: string[] },
+): Promise<string[] | { status: number; code?: string; forbiddenFields?: unknown }> {
+  try {
+    const aggregate: EngineAggregateOptions = { ...query, aggregations: [{ function: 'count', alias: 'n' }] };
+    const rows = await h.engine.aggregate('sys_business_unit', aggregate, { context });
+    return (Array.isArray(rows) ? rows : []).map((r: any) => `${String(r[query.groupBy[0]])}:${Number(r.n)}`).sort();
+  } catch (e) {
+    const r = resolveThrownHttpError(e);
+    return { status: r.status, code: r.code, forbiddenFields: (e as any)?.details?.forbiddenFields };
+  }
+}
+
+const layerOf = (decision: any, layer: string) => decision.layers.find((l: any) => l.layer === layer);
+
+describe('[ADR-0090 D12, ruling of record 6663849489; #30758] canReadObject and security/explain answer the delegated business-unit read as the read door does — three postures', () => {
+  const WRITER = delegateCtx('u_writer', 'note_writer');
+  const ORG_ADMIN = delegateCtx('u_org_admin', 'organization_admin');
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it('canReadObject admits the delegate, and getReadFilter scopes a bypassing door to exactly the units the read door returns', async () => {
+        const h = await boot(posture);
+        const door = await unitsRead(h, NARROW);
+        expect(door).toEqual(['bu_east', 'bu_east_field']);
+        expect(await h.plugin.canReadObject('sys_business_unit', NARROW)).toBe(true);
+        expect(await unitsUnder(h, await h.plugin.getReadFilter('sys_business_unit', NARROW))).toEqual(door);
+      });
+
+      it('security/explain read: allowed, the object grant names the delegated scope, and its readFilter returns exactly the read door\'s units', async () => {
+        const h = await boot(posture);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, NARROW);
+        expect(d.allowed).toBe(true);
+        expect(layerOf(d, 'object_crud').verdict).toBe('grants');
+        expect(await unitsUnder(h, d.readFilter)).toEqual(await unitsRead(h, NARROW));
+      });
+
+      it('security/explain of one unit: the units the scope covers are visible, the unit above it is not — asked by the delegate and by its organization administrator', async () => {
+        const h = await boot(posture);
+        await h.engine.insert('sys_user_permission_set',
+          { id: 'ups_delegate', user_id: 'u_delegate', permission_set: 'east_admin', organization_id: ORG_A }, { context: { isSystem: true, tenantId: ORG_A } });
+        for (const [asker, request] of [
+          ['delegate', (recordId: string) => h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read', recordId }, NARROW)],
+          ['organization administrator', (recordId: string) =>
+            h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read', userId: 'u_delegate', recordId }, ORG_ADMIN)],
+        ] as const) {
+          for (const unit of ['bu_east', 'bu_east_field']) {
+            const d: any = await request(unit);
+            expect(d.record?.visible, `${asker} · ${unit}`).toBe(true);
+          }
+          const above: any = await request('bu_hq');
+          expect(above.record?.visible, `${asker} · bu_hq`).toBe(false);
+        }
+      });
+
+      it('aggregate is the read door too: inside the scope it counts the covered units, outside it counts none, and the field guard still refuses an unreadable field', async () => {
+        const h = await boot(posture);
+        expect(await unitAggregate(h, NARROW, { groupBy: ['name'] })).toEqual(['east:1', 'east_field:1']);
+        expect(await unitAggregate(h, NARROW, { where: { id: 'bu_hq' }, groupBy: ['name'] })).toEqual([]);
+        expect(await unitAggregate(h, NARROW, { groupBy: ['external_ref'] }))
+          .toEqual({ status: 403, code: 'PERMISSION_DENIED', forbiddenFields: ['external_ref'] });
+        // CONTROL: the organization administrator counts every unit; a caller with no scope is refused the object.
+        expect(await unitAggregate(h, ORG_ADMIN, { groupBy: ['name'] })).toEqual(['east:1', 'east_field:1', 'hq:1']);
+        expect(await unitAggregate(h, WRITER, { groupBy: ['name'] })).toEqual({ status: 403, code: 'PERMISSION_DENIED', forbiddenFields: undefined });
+      });
+
+      it('CONTROL: a caller holding no scope is still refused by the door, canReadObject and explain alike', async () => {
+        const h = await boot(posture);
+        expect(await unitsRead(h, WRITER)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(await h.plugin.canReadObject('sys_business_unit', WRITER)).toBe(false);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, WRITER);
+        expect(d.allowed).toBe(false);
+        expect(layerOf(d, 'object_crud').verdict).toBe('denies');
+      });
+
+      it('a context naming no organization holds nothing: the door, canReadObject, getReadFilter and explain answer its delegated read as they answer a caller holding no scope', async () => {
+        const h = await boot(posture);
+        // A context that names no organization holds nothing.
+        const noOrganization: any = { userId: 'u_delegate', positions: [], permissions: ['east_admin'] };
+        expect(await unitsRead(h, noOrganization)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(await h.plugin.canReadObject('sys_business_unit', noOrganization)).toBe(false);
+        // No delegated unit scope reaches the row filter: under `single` there is
+        // none, as for a caller holding no scope; under a wall, Layer 0's deny
+        // sentinel reads nothing (ADR-0123 D2).
+        const filter = await h.plugin.getReadFilter('sys_business_unit', noOrganization);
+        if (posture === 'single') expect(filter).toEqual(await h.plugin.getReadFilter('sys_business_unit', WRITER));
+        else expect(await unitsUnder(h, filter)).toEqual([]);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, noOrganization);
+        expect(d.allowed).toBe(false);
+        expect(layerOf(d, 'object_crud').verdict).toBe('denies');
+      });
+
+      it('CONTROL: an organization administrator\'s answers are unchanged — every unit, granted by its own set', async () => {
+        const h = await boot(posture);
+        expect(await h.plugin.canReadObject('sys_business_unit', ORG_ADMIN)).toBe(true);
+        expect(await unitsUnder(h, await h.plugin.getReadFilter('sys_business_unit', ORG_ADMIN))).toEqual(['bu_east', 'bu_east_field', 'bu_hq']);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, ORG_ADMIN);
+        expect(d.allowed).toBe(true);
+        expect(layerOf(d, 'object_crud').contributors.map((c: any) => c.name)).toContain('organization_admin');
+      });
+
+      it('CONTROL: the delegated read is the caller\'s own — acting on behalf of another user, even one who reads every unit, no answer admits it, as the door does not', async () => {
+        const h = await boot(posture);
+        const onBehalf = { ...NARROW, principalKind: 'agent', onBehalfOf: { userId: 'u_org_admin' } };
+        expect(await unitsRead(h, onBehalf as any)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        expect(await h.plugin.canReadObject('sys_business_unit', onBehalf)).toBe(false);
+        const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read' }, onBehalf);
+        expect(d.allowed).toBe(false);
+      });
+
+      it('CONTROL: the delegated scope grants a read and nothing else — explain still denies create and export, as their doors do', async () => {
+        const h = await boot(posture);
+        for (const operation of ['create', 'export'] as const) {
+          const d: any = await h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation }, NARROW);
+          expect(d.allowed, operation).toBe(false);
+        }
+        expect(await h.plugin.canExport('sys_business_unit', NARROW)).toBe(false);
+      });
+    });
+  }
+});
+
+/**
+ * [ADR-0090 D12, ruling of record 6663849489] The subtree a delegated scope
+ * covers is ONE organization's, whether or not the caller's context names an
+ * organization: a unit stamped with another organization is outside it even
+ * where its parent link names a unit inside the scope, and so is everything
+ * below it. Every answer that reads the subtree is asked — the gate's covered
+ * units (what the read door confines a delegated read to), the delegable-scope
+ * report, the explain coverage of a user, the write gate — and the read and
+ * write doors themselves.
+ *
+ * [ADR-0123 D1/D2] A context that names no organization holds no subtree at
+ * all: every one of those answers is empty, the write gate refuses naming the
+ * missing active organization, and a context naming its organization keeps
+ * every answer.
+ */
+describe('[ADR-0090 D12, ruling of record 6663849489] a delegated business-unit subtree never crosses an organization boundary, whether or not the caller\'s context names an organization — three postures', () => {
+  const ORG_B = 'org_b';
+  /** The delegate's context with no organization on it at all. */
+  const NO_ORGANIZATION: any = { userId: 'u_delegate', positions: [], permissions: ['east_admin'] };
+  /** The same, carrying the users it may name — an assignment's `user_id` is a reference it must read. */
+  const NO_ORGANIZATION_NAMING_USERS: any = { ...NO_ORGANIZATION, org_user_ids: ORG_USER_IDS };
+  const IN_SCOPE = ['bu_east', 'bu_east_field'];
+
+  /** Another organization's unit whose parent link names the scope root `bu_east`, a unit below it, and a member of it. */
+  async function linkOtherOrganization(h: Awaited<ReturnType<typeof boot>>) {
+    const asOrgB = { context: { isSystem: true, tenantId: ORG_B } } as any;
+    await h.engine.insert('sys_business_unit', [
+      { id: 'bu_b_linked', name: 'b_linked', parent_business_unit_id: 'bu_east', organization_id: ORG_B },
+      { id: 'bu_b_linked_child', name: 'b_linked_child', parent_business_unit_id: 'bu_b_linked', organization_id: ORG_B },
+    ], asOrgB);
+    await h.engine.insert('sys_user', { id: 'u_b_member', email: 'u_b_member@example.test', name: 'u_b_member' }, asOrgB);
+    await h.engine.insert('sys_business_unit_member',
+      { id: 'bum_b_member', user_id: 'u_b_member', business_unit_id: 'bu_b_linked', organization_id: ORG_B }, asOrgB);
+  }
+
+  /** What the gate itself answers for `context`: covered units, placeable units, and whether it covers a member of the scope and the other organization's member. */
+  async function gateAnswers(h: Awaited<ReturnType<typeof boot>>, context: any) {
+    const security = h.plugin as any;
+    const sets = await security.resolvePermissionSetsForContext(context);
+    const gate = security.delegatedAdminGate;
+    return {
+      covered: [...(await gate.scopedBusinessUnitIds(sets, context)) as Set<string>].sort(),
+      placeable: [...(await gate.describeDelegableScope(sets, context)).placeableBusinessUnitIds as string[]].sort(),
+      coversMember: await gate.scopesCoverUser(sets, 'u_target', context),
+      coversOtherMember: await gate.scopesCoverUser(sets, 'u_b_member', context),
+    };
+  }
+
+  /** The write gate's verdict on an insert of `data` into `object` as `context`. */
+  const gateInsert = (h: Awaited<ReturnType<typeof boot>>, context: any, object: string, data: Record<string, unknown>) =>
+    outcome(() => (h.plugin as any).delegatedAdminGate.assert({ object, operation: 'insert', data, context }));
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it("ground truth: the store holds another organization's units under a parent link that names the scope root", async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        const rows = await h.engine.find('sys_business_unit', { where: { organization_id: ORG_B }, context: SYS });
+        expect((Array.isArray(rows) ? rows : []).map((r: any) => [r.id, r.parent_business_unit_id]).sort())
+          .toEqual([['bu_b_linked', 'bu_east'], ['bu_b_linked_child', 'bu_b_linked']]);
+      });
+
+      it("the gate covers the scope's own organization's units only for a context naming its organization, and nothing for a context naming no organization", async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        expect(await gateAnswers(h, NARROW)).toEqual({ covered: IN_SCOPE, placeable: IN_SCOPE, coversMember: true, coversOtherMember: false });
+        // A context that names no organization holds nothing.
+        expect(await gateAnswers(h, NO_ORGANIZATION)).toEqual({ covered: [], placeable: [], coversMember: false, coversOtherMember: false });
+      });
+
+      it('the read door returns no unit to a context naming no organization: it refuses the read, as for a caller holding no scope', async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        // A context that names no organization holds nothing: its scope admits
+        // no read, so the read is refused as it is for a caller holding no
+        // scope at all (the CONTROL of the describe above).
+        expect(await unitsRead(h, NO_ORGANIZATION)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+        // CONTROL: the context naming its organization reads its scope, as before.
+        expect(await unitsRead(h, NARROW)).toEqual(IN_SCOPE);
+      });
+
+      it("the write gate refuses an assignment anchored in, and a direct grant to a member of, another organization's unit — and admits one inside the scope — for a context naming its organization", async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        for (const unit of ['bu_b_linked', 'bu_b_linked_child']) {
+          const r = await gateInsert(h, NARROW, 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: unit });
+          expect([r.status, r.code], `${unit}: ${r.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+        }
+        const grant = await gateInsert(h, NARROW, 'sys_user_permission_set', { user_id: 'u_b_member', permission_set: 'field_user' });
+        expect([grant.status, grant.code], `grant: ${grant.message}`).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+        // CONTROL: the gate has not gone dark — inside the scope it admits.
+        const inside = await gateInsert(h, NARROW, 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: 'bu_east_field' });
+        expect(inside).toEqual({ status: 200 });
+      });
+
+      it("a tenant-level administrator's delegable-scope report offers its own organization's units only, and no unit to a context naming no organization", async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        const naming = delegateCtx('u_org_admin', 'admin_full_access');
+        const report = await h.security.describeDelegableScope(naming);
+        expect([report.isTenantAdmin, [...report.placeableBusinessUnitIds].sort()]).toEqual([true, ['bu_east', 'bu_east_field', 'bu_hq']]);
+        // A context that names no organization holds nothing — a tenant-level administrator's included.
+        const unnamed = await h.security.describeDelegableScope({ userId: 'u_org_admin', positions: [], permissions: ['admin_full_access'] });
+        expect([unnamed.isTenantAdmin, unnamed.scopes, unnamed.placeableBusinessUnitIds]).toEqual([true, [], []]);
+        // CONTROL: the positions it may assign are listed for both contexts, unchanged.
+        expect([...unnamed.assignablePositions].sort()).toEqual([...report.assignablePositions].sort());
+        expect(report.assignablePositions.length).toBeGreaterThan(0);
+      });
+
+      it('the write gate refuses every write of a context naming no organization — inside the scope too — naming the missing active organization', async () => {
+        const h = await boot(posture);
+        await linkOtherOrganization(h);
+        // A context that names no organization holds nothing.
+        const writes: Array<[string, string, Record<string, unknown>]> = [
+          ['another organization\'s unit', 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: 'bu_b_linked' }],
+          ['a member of another organization', 'sys_user_permission_set', { user_id: 'u_b_member', permission_set: 'field_user' }],
+          ['inside the scope', 'sys_user_position', { user_id: 'u_target', position: 'field_rep', business_unit_id: 'bu_east_field' }],
+          ['a member inside the scope', 'sys_user_permission_set', { user_id: 'u_target', permission_set: 'field_user' }],
+        ];
+        for (const [label, object, data] of writes) {
+          const r = await gateInsert(h, NO_ORGANIZATION, object, data);
+          expect([r.status, r.code], `${label}: ${r.message}`).toEqual([403, 'PERMISSION_DENIED']);
+          expect(r.message, label).toMatch(/no active organization/);
+        }
+      });
+    });
+  }
+
+  it("posture 'single' with its Default Organization: the write door stores nothing for a context naming no organization, inside the scope or outside it, and stores the assignment inside the scope for a context naming its organization", async () => {
+    const h = await boot('single', { defaultOrganization: true });
+    await linkOtherOrganization(h);
+    const assignAt = (unit: string, context: any) => outcome(() => h.engine.insert('sys_user_position',
+      { user_id: 'u_target', position: 'field_rep', business_unit_id: unit }, { context } as any));
+    // A context that names no organization holds nothing.
+    for (const unit of ['bu_b_linked', 'bu_east_field']) {
+      const refused = await assignAt(unit, NO_ORGANIZATION_NAMING_USERS);
+      expect([refused.status, refused.code], `${unit}: ${refused.message}`).toEqual([403, 'PERMISSION_DENIED']);
+      expect(refused.message, unit).toMatch(/no active organization/);
+    }
+    expect(await storedPositions(h)).toEqual([]);
+    // CONTROL: the same door and position, for a context naming its organization.
+    expect(await assignAt('bu_east_field', NARROW)).toEqual({ status: 200 });
+    expect(await storedPositions(h)).toEqual(['field_rep']);
+  });
+});
+
+/**
+ * [ADR-0105 D6, red line 2; ADR-0091 D3 rule 4b] A delegated business-unit walk
+ * never starts at a unit outside the caller's organization. A self-delegation's
+ * anchor must fall inside the delegator's own range for the position — the
+ * subtree of its direct holding's anchor, or of its own member units when that
+ * holding is unanchored — and every subtree of that range is the caller's
+ * organization's, its root included: a business unit of another organization is
+ * never a root of it, whether the delegator is a member of that unit or a
+ * holding names it as its anchor. So an anchor at such a unit is answered
+ * exactly as an anchor outside the range is.
+ */
+describe("[ADR-0105 D6; ADR-0091 D3] a delegated business-unit walk never starts at a unit outside the caller's organization — three postures", () => {
+  const ORG_B = 'org_b';
+  const DUTY = 'field_duty';
+  const DELEGATOR = 'u_delegator';
+  /** A unit of the other organization, with a unit below it. */
+  const FOREIGN = 'bu_b_desk';
+  const FOREIGN_CHILD = 'bu_b_desk_field';
+  const DUTY_POSITIONS = [{ name: DUTY, label: 'Field duty', permissionSets: ['field_user'], delegatable: true }];
+  /** Writes assignments and reads business units, so the data door lets it name one: no admin scope. */
+  const DUTY_PERMISSIONS = [{ name: 'duty_writer', label: 'Duty writer', objects: { ...CRUD, sys_business_unit: { allowRead: true } } }];
+  /** Active in `ORG_A`; a member of both organizations, which is what `group` unions its reads over (ADR-0105 D2). */
+  const DELEGATOR_CTX = {
+    userId: DELEGATOR, positions: [DUTY], permissions: ['duty_writer'], tenantId: ORG_A,
+    accessible_org_ids: [ORG_A, ORG_B], org_user_ids: [...ORG_USER_IDS, DELEGATOR],
+  };
+  const FUTURE = () => new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+  /** A delegation of the duty to `u_target`, anchored at `unit` (none: unanchored). */
+  const delegation = (unit: string | null) => ({
+    user_id: 'u_target', position: DUTY, delegated_from: DELEGATOR, valid_until: FUTURE(), reason: 'cover',
+    ...(unit ? { business_unit_id: unit } : {}),
+  });
+
+  /**
+   * The delegator: a member of `ORG_A` and of `ORG_B`, a member of the unit
+   * `bu_east` in its own organization and of {@link FOREIGN} in the other, and
+   * a DIRECT holder of the duty in `ORG_A`, anchored at `holdingAnchor`.
+   */
+  async function bootDelegator(posture: Posture, holdingAnchor: string | null) {
+    const h = await boot(posture, { positions: DUTY_POSITIONS, permissions: DUTY_PERMISSIONS });
+    const asOrgA = { context: { isSystem: true, tenantId: ORG_A } } as any;
+    const asOrgB = { context: { isSystem: true, tenantId: ORG_B } } as any;
+    await h.engine.insert('sys_business_unit', [
+      { id: FOREIGN, name: 'b_desk', parent_business_unit_id: null, organization_id: ORG_B },
+      { id: FOREIGN_CHILD, name: 'b_desk_field', parent_business_unit_id: FOREIGN, organization_id: ORG_B },
+    ], asOrgB);
+    await h.engine.insert('sys_user', { id: DELEGATOR, email: `${DELEGATOR}@example.test`, name: DELEGATOR }, asOrgA);
+    await h.engine.insert('sys_member', { id: 'm_delegator_a', user_id: DELEGATOR, organization_id: ORG_A, role: 'member' }, asOrgA);
+    await h.engine.insert('sys_member', { id: 'm_delegator_b', user_id: DELEGATOR, organization_id: ORG_B, role: 'member' }, asOrgB);
+    await h.engine.insert('sys_business_unit_member',
+      { id: 'bum_delegator_a', user_id: DELEGATOR, business_unit_id: 'bu_east', organization_id: ORG_A }, asOrgA);
+    await h.engine.insert('sys_business_unit_member',
+      { id: 'bum_delegator_b', user_id: DELEGATOR, business_unit_id: FOREIGN, organization_id: ORG_B }, asOrgB);
+    await h.engine.insert('sys_user_position',
+      { id: 'h_delegator', user_id: DELEGATOR, position: DUTY, business_unit_id: holdingAnchor, organization_id: ORG_A }, asOrgA);
+    return h;
+  }
+
+  /** The write gate's answer to the delegation anchored at `unit`, its anchor spelled out of the message. */
+  async function gateAnswer(h: Awaited<ReturnType<typeof boot>>, unit: string | null) {
+    const r = await outcome(() => (h.plugin as any).delegatedAdminGate.assert({
+      object: 'sys_user_position', operation: 'insert', data: delegation(unit), context: DELEGATOR_CTX,
+    }));
+    return { ...r, ...(r.message !== undefined && unit ? { message: r.message.split(`'${unit}'`).join("'ANCHOR'") } : {}) };
+  }
+
+  /** The data door's answer to the same delegation, and the anchors of the delegations it stored. */
+  async function doorAnswer(h: Awaited<ReturnType<typeof boot>>, unit: string | null) {
+    let answer: { status: number; code?: string; fields?: string[] } = { status: 200 };
+    try {
+      await h.engine.insert('sys_user_position', delegation(unit), { context: DELEGATOR_CTX } as any);
+    } catch (e) {
+      const r = resolveThrownHttpError(e);
+      const fields = ((e as any)?.fields ?? []) as Array<{ field?: string; code?: string }>;
+      answer = { status: r.status, code: r.code, ...(fields.length ? { fields: fields.map((f) => `${f.field}:${f.code}`) } : {}) };
+    }
+    const rows = await h.engine.find('sys_user_position', { where: { user_id: 'u_target', position: DUTY }, context: SYS });
+    return { ...answer, stored: (Array.isArray(rows) ? rows : []).map((row: any) => row.business_unit_id ?? null) };
+  }
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it("ground truth: the delegator is a member of a unit of another organization, and the store holds a unit below it", async () => {
+        const h = await bootDelegator(posture, null);
+        const memberships = await h.engine.find('sys_business_unit_member', { where: { user_id: DELEGATOR }, context: SYS });
+        expect((Array.isArray(memberships) ? memberships : []).map((m: any) => m.business_unit_id).sort()).toEqual([FOREIGN, 'bu_east'].sort());
+        const unit = await h.engine.find('sys_business_unit', { where: { id: FOREIGN_CHILD }, context: SYS });
+        expect((Array.isArray(unit) ? unit : []).map((u: any) => [u.parent_business_unit_id, u.organization_id])).toEqual([[FOREIGN, ORG_B]]);
+      });
+
+      it("an unanchored holding's range is the delegator's member units of its own organization: an anchor at a member unit of another organization is answered as an anchor outside the range", async () => {
+        const h = await bootDelegator(posture, null);
+        const outside = await gateAnswer(h, 'bu_hq');
+        expect([outside.status, outside.code], outside.message).toEqual([403, 'PERMISSION_DENIED']);
+        for (const unit of [FOREIGN, FOREIGN_CHILD, 'bu_no_such_unit']) {
+          expect(await gateAnswer(h, unit), unit).toEqual(outside);
+        }
+        // CONTROL: inside the range, and unanchored, the same delegation is admitted.
+        expect(await gateAnswer(h, 'bu_east_field')).toEqual({ status: 200 });
+        expect(await gateAnswer(h, null)).toEqual({ status: 200 });
+      });
+
+      it("a holding anchored at a unit of another organization makes no unit an admitted anchor: that unit is answered as an anchor outside the range", async () => {
+        const h = await bootDelegator(posture, FOREIGN);
+        // Ground truth: the holding is the caller's organization's, its anchor the other's unit.
+        const holding = await h.engine.find('sys_user_position', { where: { id: 'h_delegator' }, context: SYS });
+        expect((Array.isArray(holding) ? holding : []).map((r: any) => [r.organization_id, r.business_unit_id])).toEqual([[ORG_A, FOREIGN]]);
+        const outside = await gateAnswer(h, 'bu_hq');
+        expect([outside.status, outside.code], outside.message).toEqual([403, 'PERMISSION_DENIED']);
+        for (const unit of [FOREIGN, FOREIGN_CHILD, 'bu_east_field']) {
+          expect(await gateAnswer(h, unit), unit).toEqual(outside);
+        }
+        // CONTROL: unanchored, the delegation is admitted, as before.
+        expect(await gateAnswer(h, null)).toEqual({ status: 200 });
+      });
+
+      it("CONTROL: a holding anchored at a unit of the caller's organization keeps its subtree as the range", async () => {
+        const h = await bootDelegator(posture, 'bu_east');
+        for (const unit of ['bu_east', 'bu_east_field']) {
+          expect(await gateAnswer(h, unit), unit).toEqual({ status: 200 });
+        }
+        const outside = await gateAnswer(h, 'bu_hq');
+        expect([outside.status, outside.code], outside.message).toEqual([403, 'PERMISSION_DENIED']);
+        expect(await gateAnswer(h, FOREIGN)).toEqual(outside);
+        expect(await gateAnswer(h, null)).toEqual({ status: 200 });
+      });
+
+      it('the data door stores no delegation anchored at a unit of another organization, and stores one inside the range', async () => {
+        const h = await bootDelegator(posture, null);
+        const outside = await doorAnswer(h, 'bu_hq');
+        expect(outside).toEqual({ status: 403, code: 'PERMISSION_DENIED', stored: [] });
+        expect(await doorAnswer(h, FOREIGN)).toEqual(outside);
+        // CONTROL: the same door, context and position, inside the range.
+        expect(await doorAnswer(h, 'bu_east_field')).toEqual({ status: 200, stored: ['bu_east_field'] });
+      });
+    });
+  }
+});
+
+/**
+ * [ADR-0090 D12; ruling on #26059, Q3] A delegated answer about a user the
+ * caller cannot read does not depend on that user's existence or memberships.
+ * One subject id in four states — no user; a user holding no business-unit
+ * membership; a user whose unit is outside the delegate's scope; a user whose
+ * unit is inside it whom the delegate cannot read — asked of every delegated
+ * door that judges a target user: the write gate's four direct-grant shapes
+ * (an insert, an update pointing a stored grant at the subject, an update of
+ * the subject's stored grant leaving its `user_id` as stored, a removal of
+ * it), `security/explain` for the subject, and the subject's effective access.
+ * Every state answers exactly what the id naming no user answers; the CONTROL,
+ * a user inside the scope whom the delegate reads, is served at every door.
+ *
+ * A user the delegate cannot read is one its context may not read: `sys_user`'s
+ * row scope (`id == current_user.id || id in current_user.org_user_ids`), the
+ * same in every posture. The write shapes are asked of the gate itself, as
+ * `gateInsert` above asks it: the delegate holds no read of
+ * `sys_user_permission_set`, so for a stored grant the write door would answer
+ * the read door's refusal instead (`readDoorAnswerForGateRefusal`).
+ *
+ * Revocation does not leave the organization: a tenant-level administrator and
+ * the organization administrator still remove the stored grant of the subject
+ * the delegate cannot read, through the write door itself.
+ */
+describe("[ADR-0090 D12] a delegated answer about a user the caller cannot read does not depend on that user's existence or memberships — three postures", () => {
+  const SUBJECT = 'u_subject';
+  const STATES = [
+    'an id naming no user',
+    'a user with no business-unit membership',
+    'a user whose business unit is outside the scope',
+    'a user with a business unit inside the scope whom the delegate cannot read',
+  ] as const;
+  const UNREADABLE_INSIDE = STATES[3];
+  const CONTROL = 'a user with a business unit inside the scope whom the delegate reads';
+  type State = (typeof STATES)[number] | typeof CONTROL;
+
+  /** The delegate's context: the subject is among the users it may read exactly when the subject is a user it reads. */
+  const delegateFor = (state: State) => ({
+    ...NARROW,
+    org_user_ids: state === 'an id naming no user' || state === UNREADABLE_INSIDE ? ORG_USER_IDS : [...ORG_USER_IDS, SUBJECT],
+  });
+
+  /** A fresh rig with the subject in `state`, its stored grant `g_subject`, and `g_target`, a grant of a user inside the scope. */
+  async function bootWith(posture: Posture, state: State) {
+    const h = await boot(posture);
+    const sys = { context: { isSystem: true, tenantId: ORG_A } } as any;
+    if (state !== 'an id naming no user') {
+      await h.engine.insert('sys_user', { id: SUBJECT, email: `${SUBJECT}@example.test`, name: SUBJECT }, sys);
+      await h.engine.insert('sys_member', { id: `m_${SUBJECT}`, user_id: SUBJECT, organization_id: ORG_A, role: 'member' }, sys);
+    }
+    const unit = state === 'a user whose business unit is outside the scope' ? 'bu_hq'
+      : state === UNREADABLE_INSIDE || state === CONTROL ? 'bu_east_field'
+        : null;
+    if (unit) {
+      await h.engine.insert('sys_business_unit_member',
+        { id: 'bum_subject', user_id: SUBJECT, business_unit_id: unit, organization_id: ORG_A }, sys);
+    }
+    await h.engine.insert('sys_user_permission_set', [
+      { id: 'g_subject', user_id: SUBJECT, permission_set: 'field_user', organization_id: ORG_A },
+      { id: 'g_target', user_id: 'u_target', permission_set: 'field_user', organization_id: ORG_A },
+    ], sys);
+    return h;
+  }
+
+  /** Everything a caller is told: the envelope both HTTP doors answer with, the class, the message and the details. */
+  async function answerOf(run: () => Promise<unknown>) {
+    try {
+      await run();
+      return { status: 200 };
+    } catch (e: any) {
+      const r = resolveThrownHttpError(e);
+      return { status: r.status, code: r.code, class: e?.constructor?.name, message: e?.message, details: e?.details };
+    }
+  }
+
+  /** Every delegated door's answer about the subject, asked by the delegate. */
+  async function answersFor(posture: Posture, state: State) {
+    const h = await bootWith(posture, state);
+    const caller = delegateFor(state);
+    const gate = (h.plugin as any).delegatedAdminGate;
+    const write = (operation: string, data: Record<string, unknown> | undefined, id?: string) =>
+      answerOf(() => gate.assert({
+        object: 'sys_user_permission_set', operation, data, ...(id ? { options: { where: { id } } } : {}), context: caller,
+      }));
+    return {
+      insert: await write('insert', { user_id: SUBJECT, permission_set: 'field_user' }),
+      'update pointing a stored grant at the subject': await write('update', { id: 'g_target', user_id: SUBJECT }),
+      "update of the subject's stored grant, its user_id left as stored": await write('update', { id: 'g_subject', reason: 'renewed' }),
+      "removal of the subject's stored grant": await write('delete', undefined, 'g_subject'),
+      'security/explain for the subject': await answerOf(() =>
+        h.plugin.explainAccessForCaller({ object: 'sys_business_unit', operation: 'read', userId: SUBJECT }, caller)),
+      "the subject's effective access": await answerOf(() => h.plugin.describeEffectiveAccess(SUBJECT, caller)),
+    };
+  }
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      // Every state boots a rig of its own, so each state is an `it` of its own: its own
+      // time budget and its own failure line. Asked in one `it`, the states shared the
+      // default 5 s budget, which a loaded CI shard used up.
+      describe('ground truth: the delegate reads the subject exactly in the states where it is a user the delegate may read', () => {
+        it.each([...STATES, CONTROL] as State[])('%s', async (state) => {
+          const h = await bootWith(posture, state);
+          const rows = await h.engine.find('sys_user', { where: { id: SUBJECT }, fields: ['id'], context: delegateFor(state) });
+          const reads = (Array.isArray(rows) ? rows : []).some((r: any) => r.id === SUBJECT);
+          expect(reads, state).toBe(state !== 'an id naming no user' && state !== UNREADABLE_INSIDE);
+        });
+      });
+
+      // The same split, for the same reason: one `it` per state. The reference, the id
+      // naming no user, is asked once, and every other state is compared to it.
+      describe(`the ${STATES.length} states get, at every door, the answer the id naming no user gets`, () => {
+        let reference: Awaited<ReturnType<typeof answersFor>> | undefined;
+        beforeAll(async () => {
+          reference = await answersFor(posture, STATES[0]);
+        });
+
+        it(`${STATES[0]}: the write gate's scope violation, and each explain door's refusal of a user the caller may not describe`, () => {
+          expect(reference).toBeDefined();
+          const none = reference!;
+          for (const [door, answer] of Object.entries(none)) {
+            const expected = door.startsWith('security/explain') || door.startsWith("the subject's effective")
+              ? [403, 'PERMISSION_DENIED', 'PermissionDeniedError']
+              : [403, 'DELEGATION_SCOPE_VIOLATION', 'DelegationScopeViolationError'];
+            expect([answer.status, (answer as any).code, (answer as any).class], door).toEqual(expected);
+          }
+          expect((none['security/explain for the subject'] as any).details)
+            .toEqual({ object: 'sys_business_unit', operation: 'read', targetUserId: SUBJECT });
+          expect((none["the subject's effective access"] as any).details).toBeUndefined();
+        });
+
+        it.each(STATES.slice(1))(`%s: every door answers exactly what ${STATES[0]} gets`, async (state) => {
+          expect(reference).toBeDefined();
+          expect(await answersFor(posture, state), state).toEqual(reference);
+        });
+      });
+
+      it('CONTROL: the same subject with a business unit inside the scope, read by the delegate, is served at every door', async () => {
+        const answers = await answersFor(posture, CONTROL);
+        for (const [door, answer] of Object.entries(answers)) expect(answer, door).toEqual({ status: 200 });
+      });
+
+      // One rig per remover, so one `it` per remover (the split above, for the same reason).
+      describe("CONTROL: a tenant-level administrator and the organization administrator still remove the stored grant of the subject the delegate cannot read, through the write door", () => {
+        it.each([
+          ['tenant-level administrator', delegateCtx('u_org_admin', 'admin_full_access')],
+          ['organization administrator', delegateCtx('u_org_admin', 'organization_admin')],
+        ] as const)('%s', async (who, context) => {
+          const h = await bootWith(posture, UNREADABLE_INSIDE);
+          const removed = await answerOf(() => h.engine.delete('sys_user_permission_set', { where: { id: 'g_subject' }, context }));
+          expect(removed, who).toEqual({ status: 200 });
+          const left = await h.engine.find('sys_user_permission_set', { where: { id: 'g_subject' }, context: SYS });
+          expect(Array.isArray(left) ? left : [], who).toEqual([]);
+        });
+      });
+    });
+  }
+});
+
+/**
+ * [ADR-0090 D12; ruling on #26059, Q3] A delegate can neither capture nor
+ * evict a direct grant beyond its subtree. An update that points a stored
+ * grant at another user touches two holders — the user it takes the grant
+ * from and the user it gives the grant to — and each is judged as the gate
+ * judges every target user (the describe above): through the delegate's own
+ * read, inside the scope only through one of the scope's units.
+ *
+ * The delegate here administers direct grants: its set carries CRUD on
+ * `sys_user_permission_set` beside its scope, so its update reaches the gate
+ * through the write door itself and its own read returns the grants it edits.
+ * Two grants of one set: `g_subject`, the subject's (the subject in the four
+ * states above), and `g_target`, held by `u_target`, a user inside the scope
+ * whom the delegate reads. Moving `g_subject` to `u_peer`, another such user,
+ * takes a grant FROM the subject; moving `g_target` to the subject gives one
+ * TO it. A holder outside
+ * the scope, at either end, gets the one scope-violation answer, the same
+ * whichever end it is, and the grant stays where it is; the CONTROL moves at
+ * either end. A delegate that cannot read the stored grant is told the same
+ * refusal without the holder's name (ruling of record 6649064874).
+ *
+ * The other administrators are untouched: a tenant-level administrator still
+ * moves the grant; an organization administrator, whose right creates and
+ * removes a grant and never edits one in place, gets the answer it always got.
+ */
+describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant beyond its subtree: an update that points a stored grant at another user is judged on both holders — three postures', () => {
+  const SUBJECT = 'u_subject';
+  /** A second user inside the scope whom the delegate reads, holding no grant: where the FROM end moves the subject's grant. */
+  const PEER = 'u_peer';
+  /** The two ends of the move, as the update's payload: FROM the subject, and TO it. */
+  const ENDS = {
+    from: { id: 'g_subject', user_id: PEER },
+    to: { id: 'g_target', user_id: SUBJECT },
+  } as const;
+  type End = keyof typeof ENDS;
+  const STATES = [
+    'an id naming no user',
+    'a user with no business-unit membership',
+    'a user whose business unit is outside the scope',
+    'a user with a business unit inside the scope whom the delegate cannot read',
+  ] as const;
+  const UNREADABLE_INSIDE = STATES[3];
+  const CONTROL = 'a user with a business unit inside the scope whom the delegate reads';
+  type State = (typeof STATES)[number] | typeof CONTROL;
+
+  const GRANT_ADMIN = 'east_grant_admin';
+  const GRANT_CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+  /** A delegate over `east` that administers direct grants of the set the rig's grants hold. */
+  const GRANT_ADMIN_SET = {
+    name: GRANT_ADMIN, label: 'East grant delegate',
+    objects: { sys_user_permission_set: GRANT_CRUD }, adminScope: eastScope(['field_user']),
+  };
+
+  /** The delegate's context, `set` its one permission set: the subject is among the users it may read exactly when the subject is a user it reads. */
+  const delegateFor = (state: State, set = GRANT_ADMIN) => ({
+    ...delegateCtx('u_delegate', set),
+    org_user_ids: state === 'an id naming no user' || state === UNREADABLE_INSIDE
+      ? [...ORG_USER_IDS, PEER]
+      : [...ORG_USER_IDS, PEER, SUBJECT],
+  });
+
+  /**
+   * A fresh rig with the subject in `state`, the peer, and the stored grant
+   * each of `ends` moves: `g_subject`, the subject's, for `from`; `g_target`,
+   * `u_target`'s, for `to`. A move through the write door boots its own end
+   * alone: moved onto the subject, `g_target` would duplicate `g_subject`.
+   */
+  async function bootWith(posture: Posture, state: State, ends: readonly End[] = ['from', 'to']) {
+    const h = await boot(posture, { permissions: [GRANT_ADMIN_SET] });
+    const sys = { context: { isSystem: true, tenantId: ORG_A } } as any;
+    await h.engine.insert('sys_user', { id: PEER, email: `${PEER}@example.test`, name: PEER }, sys);
+    await h.engine.insert('sys_member', { id: `m_${PEER}`, user_id: PEER, organization_id: ORG_A, role: 'member' }, sys);
+    await h.engine.insert('sys_business_unit_member',
+      { id: 'bum_peer', user_id: PEER, business_unit_id: 'bu_east_field', organization_id: ORG_A }, sys);
+    if (state !== 'an id naming no user') {
+      await h.engine.insert('sys_user', { id: SUBJECT, email: `${SUBJECT}@example.test`, name: SUBJECT }, sys);
+      await h.engine.insert('sys_member', { id: `m_${SUBJECT}`, user_id: SUBJECT, organization_id: ORG_A, role: 'member' }, sys);
+    }
+    const unit = state === 'a user whose business unit is outside the scope' ? 'bu_hq'
+      : state === UNREADABLE_INSIDE || state === CONTROL ? 'bu_east_field'
+        : null;
+    if (unit) {
+      await h.engine.insert('sys_business_unit_member',
+        { id: 'bum_subject', user_id: SUBJECT, business_unit_id: unit, organization_id: ORG_A }, sys);
+    }
+    await h.engine.insert('sys_user_permission_set', [
+      ...(ends.includes('from') ? [{ id: 'g_subject', user_id: SUBJECT, permission_set: 'field_user', organization_id: ORG_A }] : []),
+      ...(ends.includes('to') ? [{ id: 'g_target', user_id: 'u_target', permission_set: 'field_user', organization_id: ORG_A }] : []),
+    ], sys);
+    return h;
+  }
+
+  /** Everything a caller is told: the envelope both HTTP doors answer with, the class, the message and the details. */
+  async function answerOf(run: () => Promise<unknown>) {
+    try {
+      await run();
+      return { status: 200 };
+    } catch (e: any) {
+      const r = resolveThrownHttpError(e);
+      return { status: r.status, code: r.code, class: e?.constructor?.name, message: e?.message, details: e?.details };
+    }
+  }
+
+  /** The gate's answer to `end`, asked by `context`. */
+  const atGate = (h: Awaited<ReturnType<typeof bootWith>>, end: End, context: any) =>
+    answerOf(() => (h.plugin as any).delegatedAdminGate.assert({
+      object: 'sys_user_permission_set', operation: 'update', data: { ...ENDS[end] }, context,
+    }));
+  /** The write door's answer to `end`, asked by `context`. */
+  const throughWriteDoor = (h: Awaited<ReturnType<typeof bootWith>>, end: End, context: any) =>
+    answerOf(() => h.engine.update('sys_user_permission_set', { ...ENDS[end] } as any, { context } as any));
+  /** Who holds `id` now, as stored. */
+  async function holderOf(h: Awaited<ReturnType<typeof bootWith>>, id: string): Promise<unknown> {
+    const rows = await h.engine.find('sys_user_permission_set', { where: { id }, context: SYS });
+    return (Array.isArray(rows) ? rows : []).map((r: any) => r.user_id)[0];
+  }
+
+  /** The one answer a holder outside the scope gets at the gate, at either end of the move: one sentence, one class, one set of details. */
+  const OUTSIDE_ANSWER = {
+    status: 403,
+    code: 'DELEGATION_SCOPE_VIOLATION',
+    class: 'DelegationScopeViolationError',
+    message: "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — target user 'u_subject' is outside the delegated subtree (scope from 'east_grant_admin').",
+    details: { operation: 'update', object: 'sys_user_permission_set', permissionSet: 'field_user' },
+  };
+  type Rig = Awaited<ReturnType<typeof bootWith>>;
+  /** Both grants are where the rig booted them: nothing a refused pin sent moved either. */
+  async function expectUnmoved(h: Rig) {
+    expect(await holderOf(h, 'g_subject')).toBe(SUBJECT);
+    expect(await holderOf(h, 'g_target')).toBe('u_target');
+  }
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      // Every pin under a state is a refusal and moves nothing (each re-reads
+      // both grants to show it), so the subject in each state boots ONE rig that
+      // serves them all — a boot is what a pin here costs. The CONTROLs that
+      // move a grant, below, boot their own.
+      for (const state of STATES) {
+        describe(`the subject is ${state}`, () => {
+          let h: Rig;
+          beforeAll(async () => {
+            h = await bootWith(posture, state);
+            // Kept past the file's per-test teardown (`engines`); destroyed by this describe's afterAll.
+            engines.splice(engines.indexOf(h.engine), 1);
+          });
+          afterAll(async () => {
+            try { await h?.engine.destroy(); } catch { /* noop */ }
+          });
+
+          it('moving a grant FROM the subject TO a holder inside the scope is refused with the one answer, at the gate and through the write door, and the grant stays', async () => {
+            expect(await atGate(h, 'from', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
+            expect(await throughWriteDoor(h, 'from', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
+            await expectUnmoved(h);
+          });
+
+          it('moving a grant TO the subject is refused with the one answer, as before', async () => {
+            expect(await atGate(h, 'to', delegateFor(state))).toEqual(OUTSIDE_ANSWER);
+            await expectUnmoved(h);
+          });
+
+          it('the refusal is the same whichever end the subject is at: status, code, class, message and details', async () => {
+            expect(await atGate(h, 'from', delegateFor(state))).toEqual(await atGate(h, 'to', delegateFor(state)));
+            await expectUnmoved(h);
+          });
+
+          it("a delegate that cannot read the stored grant is told the same refusal without the stored holder's name", async () => {
+            // `east_admin` holds no read of `sys_user_permission_set`: the stored
+            // grant's values are ones it may not be told (ruling of record 6649064874).
+            const { message: fromMessage, ...from } = await atGate(h, 'from', delegateFor(state, 'east_admin')) as any;
+            const { message: toMessage, ...to } = await atGate(h, 'to', delegateFor(state, 'east_admin')) as any;
+            expect(from).toEqual(to);
+            expect([from.status, from.code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+            expect(fromMessage).toBe(
+              "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — the grant's target user is outside the delegated subtree (scope from 'east_admin').",
+            );
+            expect(toMessage).toMatch(/target user 'u_subject' is outside the delegated subtree/);
+            await expectUnmoved(h);
+          });
+
+          it('CONTROL: an organization administrator gets the answer it always got at either end, an edit in place being no part of its right', async () => {
+            const organization = delegateCtx('u_org_admin', 'organization_admin');
+            for (const end of Object.keys(ENDS) as End[]) {
+              const answer = await throughWriteDoor(h, end, organization);
+              expect([answer.status, (answer as any).code], end).toEqual([403, 'PERMISSION_DENIED']);
+              expect((answer as any).message, end).toMatch(/'update' is not part of the right — an assignment row is created and removed, never edited in place/);
+            }
+            await expectUnmoved(h);
+          });
+        });
+      }
+
+      for (const end of Object.keys(ENDS) as End[]) {
+        const which = end === 'from' ? 'FROM' : 'TO';
+        it(`CONTROL: moving a grant ${which} a holder inside the scope whom the delegate reads is admitted at the gate and through the write door, and the grant moves`, async () => {
+          const h = await bootWith(posture, CONTROL, [end]);
+          expect(await atGate(h, end, delegateFor(CONTROL))).toEqual({ status: 200 });
+          expect(await throughWriteDoor(h, end, delegateFor(CONTROL))).toEqual({ status: 200 });
+          expect(await holderOf(h, ENDS[end].id)).toBe(ENDS[end].user_id);
+        });
+
+        // One rig per subject state, so one `it` per state: its own time budget and failure line.
+        describe(`CONTROL: a tenant-level administrator still moves the grant ${which} a holder outside the scope, through the write door`, () => {
+          it.each(['a user whose business unit is outside the scope', UNREADABLE_INSIDE] as const)('%s', async (state) => {
+            const tenant = delegateCtx('u_org_admin', 'admin_full_access');
+            const h = await bootWith(posture, state, [end]);
+            expect(await throughWriteDoor(h, end, tenant), state).toEqual({ status: 200 });
+            expect(await holderOf(h, ENDS[end].id), state).toBe(ENDS[end].user_id);
+          });
+        });
+      }
+    });
+  }
+});
+
+/**
+ * [ADR-0090 D12] … and on the set axis. An update that re-names a stored
+ * direct grant's set takes that set away from its holder, so the set it takes
+ * away is judged exactly as the removal of that grant judges it, with the same
+ * reasons, sentences and details, and named only when the delegate reads it
+ * (ruling of record 6649064874); the set it re-names the grant TO is judged as
+ * before. A grant the delegate could not remove it cannot re-name either.
+ *
+ * The delegate administers direct grants (CRUD on `sys_user_permission_set`
+ * beside a scope over `east` allowlisting `field_user` and `field_rep`), so its
+ * update reaches the gate through the write door and its own read returns the
+ * grants it edits. Each pin boots the grants it moves, all held by `u_target`,
+ * a user inside the scope whom the delegate reads: `g_audit` of `field_audit`,
+ * which the scope does not allowlist, and `g_user` of `field_user`.
+ */
+describe('[ADR-0090 D12] a delegate can neither capture nor evict a direct grant beyond its scope: an update that re-names a stored grant is judged on the set it takes away as the removal of that grant is — three postures', () => {
+  const RENAMER = 'east_grant_renamer';
+  const GRANT_CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+  const RENAMER_SET = {
+    name: RENAMER, label: 'East grant delegate (re-names)',
+    objects: { sys_user_permission_set: GRANT_CRUD }, adminScope: eastScope(['field_user', 'field_rep']),
+  };
+  const GRANTS = {
+    g_audit: { id: 'g_audit', user_id: 'u_target', permission_set: 'field_audit', organization_id: ORG_A },
+    g_user: { id: 'g_user', user_id: 'u_target', permission_set: 'field_user', organization_id: ORG_A },
+  } as const;
+  type GrantId = keyof typeof GRANTS;
+
+  /** A fresh rig holding the stored grants `ids`. */
+  async function bootWith(posture: Posture, ids: readonly GrantId[]) {
+    const h = await boot(posture, { permissions: [RENAMER_SET] });
+    await h.engine.insert('sys_user_permission_set', ids.map((id) => ({ ...GRANTS[id] })),
+      { context: { isSystem: true, tenantId: ORG_A } } as any);
+    return h;
+  }
+
+  /** Everything a caller is told: the envelope both HTTP doors answer with, the class, the message and the details. */
+  async function answerOf(run: () => Promise<unknown>) {
+    try {
+      await run();
+      return { status: 200 };
+    } catch (e: any) {
+      const r = resolveThrownHttpError(e);
+      return { status: r.status, code: r.code, class: e?.constructor?.name, message: e?.message, details: e?.details };
+    }
+  }
+  /** An answer with its operation word spelled out of it: what a re-name and a removal must share. */
+  const operationFree = (answer: unknown) =>
+    JSON.parse(JSON.stringify(answer).replace(/'(update|delete)'/g, "'OP'").replace(/"(update|delete)"/g, '"OP"'));
+
+  type Rig = Awaited<ReturnType<typeof bootWith>>;
+  const gateOf = (h: Rig) => (h.plugin as any).delegatedAdminGate;
+  const renameAtGate = (h: Rig, id: GrantId, to: string, context: any) =>
+    answerOf(() => gateOf(h).assert({ object: 'sys_user_permission_set', operation: 'update', data: { id, permission_set: to }, context }));
+  const removeAtGate = (h: Rig, id: GrantId, context: any) =>
+    answerOf(() => gateOf(h).assert({ object: 'sys_user_permission_set', operation: 'delete', options: { where: { id } }, context }));
+  const renameThroughWriteDoor = (h: Rig, id: GrantId, to: string, context: any) =>
+    answerOf(() => h.engine.update('sys_user_permission_set', { id, permission_set: to } as any, { context } as any));
+  const removeThroughWriteDoor = (h: Rig, id: GrantId, context: any) =>
+    answerOf(() => h.engine.delete('sys_user_permission_set', { where: { id }, context } as any));
+  /** The set grant `id` holds now, as stored. */
+  async function setOf(h: Rig, id: GrantId): Promise<unknown> {
+    const rows = await h.engine.find('sys_user_permission_set', { where: { id }, context: SYS });
+    return (Array.isArray(rows) ? rows : []).map((r: any) => r.permission_set)[0];
+  }
+
+  const RENAMER_CTX = delegateCtx('u_delegate', RENAMER);
+
+  for (const posture of POSTURES) {
+    describe(`posture '${posture}'`, () => {
+      it('re-naming a grant FROM a set outside the allowlist TO an allowlisted one is refused with the answer the removal of that grant gets, at the gate and through the write door, and the grant keeps its set', async () => {
+        const h = await bootWith(posture, ['g_audit']);
+        const gate = await renameAtGate(h, 'g_audit', 'field_user', RENAMER_CTX);
+        expect([gate.status, (gate as any).code, (gate as any).class]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION', 'DelegationScopeViolationError']);
+        expect((gate as any).message).toBe(
+          "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — permission set 'field_audit' is not in the scope's allowlist (scope from 'east_grant_renamer').",
+        );
+        expect((gate as any).details).toEqual({ operation: 'update', object: 'sys_user_permission_set', permissionSet: 'field_audit' });
+        expect(operationFree(gate)).toEqual(operationFree(await removeAtGate(h, 'g_audit', RENAMER_CTX)));
+
+        const door = await renameThroughWriteDoor(h, 'g_audit', 'field_user', RENAMER_CTX);
+        expect(operationFree(door)).toEqual(operationFree(await removeThroughWriteDoor(h, 'g_audit', RENAMER_CTX)));
+        expect([door.status, (door as any).code, (door as any).message]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION', (gate as any).message]);
+        expect(await setOf(h, 'g_audit')).toBe('field_audit');
+      });
+
+      it('a delegate that cannot read the stored grant is told the same refusal without the set it takes away, as the removal is', async () => {
+        // `east_admin` holds no read of `sys_user_permission_set`, and allowlists `field_user` alone.
+        const h = await bootWith(posture, ['g_audit']);
+        const renamed = await renameAtGate(h, 'g_audit', 'field_user', NARROW);
+        expect([renamed.status, (renamed as any).code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+        expect((renamed as any).message).toBe(
+          "[Security] Outside your delegated scope: delegated 'update' on sys_user_permission_set rejected — the grant's permission set is not in the scope's allowlist (scope from 'east_admin').",
+        );
+        expect((renamed as any).details).toEqual({ operation: 'update', object: 'sys_user_permission_set' });
+        expect(operationFree(renamed)).toEqual(operationFree(await removeAtGate(h, 'g_audit', NARROW)));
+      });
+
+      it('re-naming a grant TO a set outside the allowlist is refused, as before, and the grant keeps its set', async () => {
+        const h = await bootWith(posture, ['g_user']);
+        const door = await renameThroughWriteDoor(h, 'g_user', 'field_audit', RENAMER_CTX);
+        expect([door.status, (door as any).code]).toEqual([403, 'DELEGATION_SCOPE_VIOLATION']);
+        expect((door as any).message).toMatch(/permission set 'field_audit' is not in the scope's allowlist/);
+        expect(await setOf(h, 'g_user')).toBe('field_user');
+      });
+
+      it('CONTROL: re-naming a grant between two allowlisted sets is admitted at the gate and through the write door, and the grant is re-named', async () => {
+        const h = await bootWith(posture, ['g_user']);
+        expect(await renameAtGate(h, 'g_user', 'field_rep', RENAMER_CTX)).toEqual({ status: 200 });
+        expect(await renameThroughWriteDoor(h, 'g_user', 'field_rep', RENAMER_CTX)).toEqual({ status: 200 });
+        expect(await setOf(h, 'g_user')).toBe('field_rep');
+      });
+
+      // One rig per re-naming, so one `it` per re-naming: its own time budget and failure line.
+      describe('CONTROL: a tenant-level administrator re-names a grant freely, FROM a set outside the allowlist and TO one, through the write door', () => {
+        it.each([['g_audit', 'field_user'], ['g_user', 'field_audit']] as const)('%s → %s', async (id, to) => {
+          const tenant = delegateCtx('u_org_admin', 'admin_full_access');
+          const h = await bootWith(posture, [id]);
+          expect(await renameThroughWriteDoor(h, id, to, tenant), `${id} → ${to}`).toEqual({ status: 200 });
+          expect(await setOf(h, id), `${id} → ${to}`).toBe(to);
+        });
       });
     });
   }

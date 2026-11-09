@@ -23,17 +23,22 @@
  * Driven through the real `HonoHttpServer`.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { classifyAdmissionTenancyPosture } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
-import { ExternalDatasourceService } from '@objectstack/service-datasource';
+import { ExternalDatasourceService, type ExternalDatasourceServiceConfig } from '@objectstack/service-datasource';
 import { registerExternalDatasourceRoutes } from './external-datasource-routes.js';
 
-/** `warehouse` exists and is managed: it declares no `schemaMode`. */
+/**
+ * `warehouse` exists and is managed: it declares no `schemaMode`. `lake` is a
+ * federation source.
+ */
 const DEFINITIONS: Record<string, { name: string; schemaMode?: 'managed' | 'external' }> = {
   warehouse: { name: 'warehouse' },
+  lake: { name: 'lake', schemaMode: 'external' },
 };
 
-function mount() {
+function mount(overrides: Partial<ExternalDatasourceServiceConfig> = {}) {
   const service = new ExternalDatasourceService({
     introspect: async () => {
       throw new Error('introspect must not be reached');
@@ -44,6 +49,7 @@ function mount() {
     persistObject: async () => {
       throw new Error('persistObject must not be reached');
     },
+    ...overrides,
   });
   const server = new HonoHttpServer(0);
   registerExternalDatasourceRoutes(
@@ -159,5 +165,59 @@ describe('POST …/external/validate on a name that resolves no saved datasource
       status: 200,
       data: { ok: true, results: [] },
     });
+  });
+});
+
+/**
+ * [#30609] The import on a `tenancy` service outage. The import's landing
+ * reads the effective tenancy posture (`classifyAdmissionTenancyPosture`, the
+ * read `service-datasource`'s plugin makes), and a registered `tenancy`
+ * service that cannot answer throws `AuthzStoreUnavailableError` there:
+ * declared `503` / `SERVICE_UNAVAILABLE`. The catch answered it `400
+ * EXTERNAL_IMPORT_ERROR`, a malformed request, where the admin routes and the
+ * MCP `import_object` tool relay the outage. The ruling these pins hold: the
+ * outage is relayed as `503 SERVICE_UNAVAILABLE` and nothing is saved; a plain
+ * refusal from the same landing keeps the door's `400` and code.
+ */
+describe('POST …/external/tables/:remote/import on a tenancy service outage', () => {
+  /** A `tenancy` service registered through a factory that fails. */
+  const outageLanding = async () => {
+    await classifyAdmissionTenancyPosture(() => Promise.reject(new Error('tenancy factory failed')));
+    throw new Error('the posture read must not answer');
+  };
+
+  it('answers 503 SERVICE_UNAVAILABLE and saves nothing', async () => {
+    const persistObject = vi.fn(async () => undefined);
+    const call = mount({ resolveImportLanding: outageLanding, persistObject });
+
+    const answer = await call('POST', '/lake/external/tables/orders/import');
+
+    expect({
+      status: answer.status,
+      success: answer.body.success,
+      code: answer.body.error?.code,
+    }).toEqual({ status: 503, success: false, code: 'SERVICE_UNAVAILABLE' });
+    expect(answer.body.error.message).toContain('(failed read: `tenancy`)');
+    expect(answer.body).not.toHaveProperty('data');
+    expect(persistObject).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a plain landing refusal 400 EXTERNAL_IMPORT_ERROR', async () => {
+    const persistObject = vi.fn(async () => undefined);
+    const call = mount({
+      resolveImportLanding: async () => {
+        throw new Error('no package to be saved into');
+      },
+      persistObject,
+    });
+
+    const answer = await call('POST', '/lake/external/tables/orders/import');
+
+    expect({ status: answer.status, code: answer.body.error?.code, message: answer.body.error?.message }).toEqual({
+      status: 400,
+      code: 'EXTERNAL_IMPORT_ERROR',
+      message: 'no package to be saved into',
+    });
+    expect(persistObject).not.toHaveBeenCalled();
   });
 });

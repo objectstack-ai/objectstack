@@ -45,6 +45,24 @@ export interface DrillNavigationValue {
    * (objectui#9022).
    */
   openRecordList?: (objectName: string, filter?: Record<string, unknown>) => void;
+  /**
+   * Whether the host's list route can say `filter` EXACTLY. The drill drawers
+   * offer "Open in list →" and take `drillDown.target: 'navigate'` only when
+   * `openRecordList` exists and this answers `true` (or is absent); on `false`
+   * the drill stays in the drawer, the same fallback as a host with no
+   * `openRecordList`.
+   *
+   * It exists because a list route's URL grammar is narrower than a drill
+   * filter: a bucket AND a measure's drill scope can put two conditions on one
+   * field, or a scope can carry `$in`, and a route that keeps one of the two
+   * (or drops the `$in`) opens a WIDER list than the number the user clicked.
+   * No destination is better than a wrong one. The host answers after resolving
+   * placeholders, with the same scope `openRecordList` resolves them with.
+   *
+   * Absent ⇒ the host claims every filter it is handed has an exact
+   * destination, which is how a host behaved before this member existed.
+   */
+  canOpenRecordList?: (objectName: string, filter?: Record<string, unknown>) => boolean;
 }
 
 export const DrillNavigationContext = createContext<DrillNavigationValue>({});

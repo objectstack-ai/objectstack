@@ -62,7 +62,8 @@
  * ## The rows
  *
  *   - `sqlite` (better-sqlite3), `sqlite-wasm` (sql.js): real drivers.
- *     `postgres` and `mysql`: real `driver-sql` instances, never connected;
+ *     `postgres`, `mysql` and `oracle` (federation-only): real `driver-sql`
+ *     instances, never connected;
  *     their dialect and bucket expression answer from the client config alone,
  *     and the spied doors mean no statement is sent.
  *   - `memory`, by code path: `InMemoryDriver` declares `supports = {}`, so
@@ -265,6 +266,14 @@ const DRIVER_ROWS = {
       release: releaseKnex,
     },
   ],
+  oracle: [
+    {
+      face: 'driver-sql, oracledb, never connected',
+      build: () =>
+        new SqlDriver({ client: 'oracledb', connection: { connectString: '127.0.0.1/unconnected' }, schemaMode: 'external', pool: { min: 0 } } as any) as unknown as EnumeratedDriver,
+      release: releaseKnex,
+    },
+  ],
   mongodb: [{ face: 'driver-mongodb, by code path', build: mongodbByCodePath }],
   turso: [
     { face: 'driver-turso local face, by code path', build: sqliteDriver, release: releaseKnex },
@@ -280,6 +289,20 @@ const DRIVER_ROWS = {
       release: releaseKnex,
       printsWhileEngineBucketsInMemory:
         'it advertises no granularity, and inherits the SQLite expression, which libSQL runs and which answers the face\'s keys and rows',
+    },
+  ],
+  // [#31327] SQL Server is federation-only and advertises no native date
+  // granularity, so every bucket is the engine's in-memory one over `find`. The
+  // real driver-sql face on the `mssql` client, never connected (no server in
+  // this suite): its doors are spied like every unseeded face's, every other
+  // member is the driver's own — including the `supports` that sends the
+  // engine in-memory.
+  mssql: [
+    {
+      face: 'driver-sql, mssql, never connected',
+      build: () =>
+        new SqlDriver({ client: 'mssql', connection: { server: '127.0.0.1', database: 'unconnected' }, pool: { min: 0 } } as any) as unknown as EnumeratedDriver,
+      release: releaseKnex,
     },
   ],
 } satisfies Record<BuiltinDriverId, readonly DriverFace[]>;

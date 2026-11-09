@@ -253,9 +253,11 @@ describe('#7527 §2 — every parameter the route really reads still works', () 
     it('every name in the closed set is accepted — none of them is refused', async () => {
         // Asserts against the exported array rather than a hand-copied list, so
         // the pin cannot drift away from what the route actually declares.
+        // `status` is sent a declared status: since #29880 its VALUE is read
+        // against `sys_approval_request.status`, and `'1'` is not one.
         for (const name of APPROVAL_REQUEST_LIST_PARAMS) {
             const { drive } = boot();
-            const answer = await drive({ [name]: '1' });
+            const answer = await drive({ [name]: name === 'status' ? 'pending' : '1' });
             expect(answer.status, `"${name}" is declared supported but was refused`).toBe(200);
         }
     });

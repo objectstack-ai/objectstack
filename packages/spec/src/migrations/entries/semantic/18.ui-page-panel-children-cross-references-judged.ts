@@ -22,7 +22,7 @@ export const entry: SemanticMigration = {
   replacement: 'what the same component is held to at region level: an inline `type: \'modal\'` '
     + 'action\'s `target` names a page the stack declares and a `type: \'flow\'` action\'s `target` a '
     + 'flow it declares; an identity-only column over a `currency` field of the child object carries '
-    + 'no `scale` — delete the key, nothing replaces it, the currency\'s ISO 4217 minor unit decides. '
+    + 'no `scale` — delete the key, nothing replaces it, the currency\'s CLDR fraction digits decide. '
     + 'The panel, its items and their keys do not change.',
   reason: '`defineStack` judges a page\'s components through one traversal, shared by its '
     + 'inline-action target check and its inline grid column check. The traversal descended an '

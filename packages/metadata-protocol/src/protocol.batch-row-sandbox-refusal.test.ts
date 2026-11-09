@@ -11,7 +11,8 @@
  * created.')`:
  *
  * - `POST /api/v1/data/:object`, `/createMany` and `/import` answered the
- *   sentence (`400 VALIDATION_ERROR` on the first two, the row's `error` on the
+ *   sentence (`400 VALIDATION_ERROR` on the first two — `HOOK_ABORTED` since
+ *   #27597, and on the batch row since #29894 — the row's `error` on the
  *   third);
  * - `POST /api/v1/data/:object/batch` answered `200` with the row
  *   `{ code: 'INTERNAL_ERROR', message: 'The create of this record failed. The
@@ -179,13 +180,15 @@ async function batchCreate(error: Error): Promise<any> {
 // ─── §1 ──────────────────────────────────────────────────────────────────────
 
 describe('[#24561] §1 the card: a sandboxed refusal on a batch create reads as the hook\'s sentence', () => {
-    it('the row carries the sentence and the 400 floor code, and no withhold warning is written', async () => {
+    // [#29894] The code is `HOOK_ABORTED` (#27597's ledgered code for an undeclared
+    // hook abort), not the 400 floor `VALIDATION_ERROR` the row used to derive.
+    it('the row carries the sentence and HOOK_ABORTED, and no withhold warning is written', async () => {
         const warn = captureWarn();
         try {
             const res = await batchCreate(sandboxRefusal());
 
             expect(res.results[0].success).toBe(false);
-            expect(res.results[0].errors).toEqual([{ code: 'VALIDATION_ERROR', message: SENTENCE }]);
+            expect(res.results[0].errors).toEqual([{ code: 'HOOK_ABORTED', message: SENTENCE }]);
             // No `httpStatus`: the body declared none, and the limb reports only a
             // declared status (#8570). The row's shape is what it was.
             expect(res.results[0].errors[0]).not.toHaveProperty('httpStatus');
@@ -197,14 +200,16 @@ describe('[#24561] §1 the card: a sandboxed refusal on a batch create reads as 
         }
     });
 
-    it('the row agrees with the data door: the same sentence, and the code the door\'s status names', async () => {
+    it('the row agrees with the data door: the same sentence, and the same code', async () => {
         const refusal = sandboxRefusal();
         const door = mapDataError(refusal, OBJECT);
         const res = await batchCreate(refusal);
 
         expect(door.status).toBe(400);
         expect(res.results[0].errors[0].message).toBe(door.body.error);
-        expect(res.results[0].errors[0].code).toBe(standardErrorCodeForHttpStatus(door.status));
+        // [#29894] The door's own code, not the code its status derives.
+        expect(door.body.code).toBe('HOOK_ABORTED');
+        expect(res.results[0].errors[0].code).toBe(door.body.code);
     });
 });
 
@@ -225,7 +230,7 @@ describe('[#24561] §2 every loop that shares the row sink answers the same way'
         const warn = captureWarn();
         try {
             const res = await run(refusing());
-            expect(res.results[0].errors).toEqual([{ code: 'VALIDATION_ERROR', message: SENTENCE }]);
+            expect(res.results[0].errors).toEqual([{ code: 'HOOK_ABORTED', message: SENTENCE }]);
             expect(JSON.stringify(res)).not.toMatch(WRAPPER_RE);
             expect(withholdCalls(warn)).toHaveLength(0);
         } finally {

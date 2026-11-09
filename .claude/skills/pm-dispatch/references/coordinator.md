@@ -29,7 +29,7 @@
 ## 四、effort 与档位按难度(coordinator 开线程时读;席位请线程时读)
 
 - 档位与 effort 的定法住 `execution-duties.md` 派发节:档位引 `dispatch-gates --tier`,effort 按卡难度。
-- 改技能(协议语义面)的卡恒契约复审档 `CONTRACT_REVIEW_TIER`;⛔ 不抄模型名。
+- 改协议语义面卡恒 `CONTRACT_REVIEW_TIER`,⛔ 不抄模型名;隔离子代理照 `--brief-template` 复核。
 
 ## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位写分析时读)
 

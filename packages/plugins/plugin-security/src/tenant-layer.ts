@@ -75,7 +75,13 @@ export interface TenantLayer0Facts {
   /** The execution context: `tenantId` and `accessible_org_ids` are read. */
   context: { tenantId?: unknown; accessible_org_ids?: unknown } | null | undefined;
   /** The object's security posture, as `getObjectSecurityMeta` answers it. */
-  meta: { isPrivate: boolean; tenancyDisabled: boolean; isBetterAuthManaged: boolean; tenantAnchorIsPhantom: boolean };
+  meta: {
+    isPrivate: boolean;
+    tenancyDisabled: boolean;
+    isBetterAuthManaged: boolean;
+    tenantAnchorIsPhantom: boolean;
+    externalOrganizationScopeUndeclared: boolean;
+  };
   /** The object's declared columns; `null` when the schema is not loadable. */
   objectFields: ReadonlySet<string> | null;
   /** The object opted out of tenancy (the plugin's cache or the posture's own flag). */
@@ -112,6 +118,13 @@ export function tenantLayer0InputOf(facts: TenantLayer0Facts): TenantLayer0Input
     objectHasOrgIdField: objectFields
       ? objectFields.has('organization_id') && !meta.tenantAnchorIsPhantom
       : undefined,
+    // [ADR-0015 §10] …and a federated object whose anchor IS the platform's
+    // has stated nothing about its scope unless it opted out of tenancy. Under
+    // a wall that is not "no tenant column, contribute nothing": it is DENIED
+    // (`external-organization-scope.ts`), the shape the owner anchor takes when
+    // no owner is provable. The boot refuses such an object by name; this is
+    // the verdict for one registered after the boot.
+    externalOrganizationScopeUndeclared: meta.externalOrganizationScopeUndeclared,
     tenancyDisabled: facts.tenancyDisabled,
     posturePermitsCrossTenant: meta.isPrivate || meta.tenancyDisabled || meta.isBetterAuthManaged,
     isPlatformAdmin: facts.isPlatformAdmin,

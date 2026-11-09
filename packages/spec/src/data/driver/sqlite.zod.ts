@@ -44,6 +44,61 @@ const sqliteHistory =
   + 'accepted in silence and the database silently became an ephemeral `:memory:` one, so the '
   + 'data was gone on the next boot with nothing having reported a problem.';
 
+/** The one name SQLite opens as an ephemeral, fileless database. */
+const IN_MEMORY_FILENAME = ':memory:';
+
+/**
+ * Why a SQLite `filename` names no database at all, or `undefined` when it
+ * names one: exactly `:memory:`, or a file path.
+ *
+ * Two values are refused, both judgeable from the string alone:
+ *
+ *   - `''` — no name, no file.
+ *   - a name that starts with `:` and is not exactly `:memory:` — the New
+ *     datasource dialog's prefilled `:memory:` with a path typed after it,
+ *     `:memory:/srv/data/parts.db`. Every layer reads a leading `:` as
+ *     fileless (driver-sql's `sqliteFilename`, its absent-file probe, the wasm
+ *     driver's ephemeral check), so no file is ever opened: native sqlite opens
+ *     the name as a relative path whose directory does not exist and every
+ *     statement fails, and sqlite-wasm opens a throwaway in-memory database
+ *     whose writes are gone at the next connect.
+ *
+ * Whether a path can be opened or created is NOT judged here: the schema cannot
+ * touch the file system. The datasource admin doors add that judgement at
+ * runtime (`@objectstack/service-datasource`'s `sqlite-database-filename.ts`),
+ * after this parse, and read these two arms from here rather than restating
+ * them.
+ */
+function sqliteFilenameRefusal(value: string): string | undefined {
+  if (value === IN_MEMORY_FILENAME) return undefined;
+  if (value === '') {
+    return `'' is empty and names no database file. Use '${IN_MEMORY_FILENAME}' for an ephemeral `
+      + 'in-memory database, or the path of a database file.';
+  }
+  if (value.startsWith(':')) {
+    return `'${value}' is neither '${IN_MEMORY_FILENAME}' nor a file path. `
+      + `A name that starts with ':' is not read as a file, so this datasource would store nothing: `
+      + `use exactly '${IN_MEMORY_FILENAME}' for an ephemeral in-memory database, or the path of a database file `
+      + 'with nothing in front of it.';
+  }
+  return undefined;
+}
+
+/**
+ * The `filename` key both SQLite drivers share: placeholder-free (#8336), and
+ * naming a database ({@link sqliteFilenameRefusal}). Defaults to `:memory:`.
+ */
+function sqliteFilename() {
+  return placeholderFree(z.string(), 'filename')
+    .superRefine((value, ctx) => {
+      const refusal = sqliteFilenameRefusal(value);
+      if (refusal) ctx.addIssue({ code: 'custom', message: refusal });
+    })
+    .default(IN_MEMORY_FILENAME)
+    .describe('Database file path, or ":memory:" for an ephemeral database')
+    .meta({ title: 'Filename' });
+}
+
 const IN_MEMORY_GUIDANCE =
   '`memory` is not a sqlite key. An ephemeral database is `filename: \':memory:\'`; for the '
   + 'mingo in-memory engine (a different driver entirely) set `driver: \'memory\'`.';
@@ -69,10 +124,10 @@ export const SqliteConfigSchema = lazySchema(() => strictObject(
    * Placeholder-free since #8336: an unresolved `${DATA_DIR}` would silently
    * create and open a literal `./${DATA_DIR}/…` path — a database in the
    * wrong place with every signal saying it is configured.
+   * Empty, or `:`-prefixed other than exactly `:memory:`, is refused (#30400):
+   * see {@link sqliteFilenameRefusal}.
    */
-  filename: placeholderFree(z.string(), 'filename').default(':memory:')
-    .describe('Database file path, or ":memory:" for an ephemeral database')
-    .meta({ title: 'Filename' }),
+  filename: sqliteFilename(),
 
   /** Dev-only, loosen-only schema self-heal (#2186). */
   autoMigrate: SqlAutoMigrateSchema.optional().meta({ title: 'Auto-migrate schema' }),
@@ -116,11 +171,10 @@ export const SqliteWasmConfigSchema = lazySchema(() => strictObject(
   /**
    * Database file path, or `:memory:` for an ephemeral in-process database.
    * A file-backed wasm database persists according to {@link SqliteWasmPersistModeSchema}.
-   * Placeholder-free since #8336, same as the native sqlite `filename`.
+   * Placeholder-free since #8336, and refused empty or `:`-prefixed other
+   * than exactly `:memory:` (#30400), same as the native sqlite `filename`.
    */
-  filename: placeholderFree(z.string(), 'filename').default(':memory:')
-    .describe('Database file path, or ":memory:" for an ephemeral database')
-    .meta({ title: 'Filename' }),
+  filename: sqliteFilename(),
 
   /**
    * Flush policy for a file-backed database. Defaults to `on-write` when a

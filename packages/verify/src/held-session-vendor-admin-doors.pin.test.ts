@@ -37,6 +37,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+// The harness loads these two inside a function body; paid at collection, so
+// no clocked window carries their first load (`check:test-source-alias`).
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
 import { bootStack } from './harness.js';
 
 const app = {
@@ -255,12 +259,14 @@ const HELD_STATES: readonly HeldState[] = [
   {
     code: 'MFA_REQUIRED',
     async arm() {
-      auth.applyConfigPatch({ mfaRequired: true, mfaGracePeriodDays: 0 });
+      // Two-factor with it, as the `auth.mfa_required` setting applies them: the
+      // gate holds a user for MFA only while they can enroll.
+      auth.applyConfigPatch({ mfaRequirement: 'everyone', mfaGracePeriodDays: 0, plugins: { twoFactor: true } });
       const lapsed = new Date(Date.now() - 10 * DAY_MS);
       for (const id of everyone()) await ql.update('sys_user', { id, mfa_required_at: lapsed }, SYS);
     },
     async disarm() {
-      auth.applyConfigPatch({ mfaRequired: false });
+      auth.applyConfigPatch({ mfaRequirement: 'off' });
     },
   },
   {
@@ -330,11 +336,25 @@ for (const state of HELD_STATES) {
 
 describe("a hold only the session's organization declares (MFA required by the organization)", () => {
   let organizationId: string | undefined;
+  let twoFactorBefore: boolean | undefined;
+  let previousPolicySource: unknown;
 
   beforeAll(async () => {
     organizationId = (await sessionOf(await stack.signIn())).organizationId;
     if (!organizationId) throw new Error('the platform admin session operates in no organization');
-    await ql.update('sys_organization', { id: organizationId, require_mfa: true }, SYS);
+    // Two-factor on, by this block itself: an organization cannot require MFA
+    // while nobody can enroll (the write is refused), and the gate holds no one
+    // then. Not inherited from whichever held state ran before.
+    twoFactorBefore = auth.isTwoFactorEnabled();
+    auth.applyConfigPatch({ plugins: { twoFactor: true } });
+    // The organization's multi-factor level is its access policy
+    // (`access_policy.mfa_required`): served here for this one organization.
+    previousPolicySource = auth.orgAccessPolicySource;
+    const required = organizationId;
+    auth.setOrganizationAccessPolicySource({
+      read: async (id: string) => (id === required ? { mfa_required: 'everyone' } : {}),
+      anyOrganizationRequiresMfa: async () => true,
+    });
     // The 60-second "does any organization require MFA" cache, primed as the
     // background refresh would after this write.
     auth._orgMfaCache = { value: true, at: Date.now() };
@@ -344,8 +364,9 @@ describe("a hold only the session's organization declares (MFA required by the o
   }, 60_000);
 
   afterAll(async () => {
-    if (organizationId) await ql.update('sys_organization', { id: organizationId, require_mfa: false }, SYS);
+    auth.setOrganizationAccessPolicySource(previousPolicySource);
     auth._orgMfaCache = { value: false, at: Date.now() };
+    if (twoFactorBefore === false) auth.applyConfigPatch({ plugins: { twoFactor: false } });
   });
 
   it('holds the admin in that organization and in no other reading (the floor holds no one)', async () => {

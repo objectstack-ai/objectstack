@@ -11,6 +11,11 @@
  * or one the same artifact delivers: a patch reaches the owner's own fields
  * only, so a field another installed extension adds is not one it can name.
  * A patch that matches installs.
+ *
+ * Step 2e' sits beside it in this harness: an `objectExtensions[].fields`
+ * entry that re-declares an owner's field, refused `422 VALIDATION_ERROR` when
+ * it changes anything outside the display-property whitelist, admitted when
+ * it changes only display properties.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -222,6 +227,55 @@ describe('install-local 2e — the field-patch target check (ADR-0146 D10)', () 
         const h = await mount(dir);
         const res = await h.install({
             manifest: extensionPackage({ industry: { label: 'Sector', options: { tech: { label: 'Technology' } } } }),
+        });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(h.installRegistrations()).toHaveLength(1);
+    });
+});
+
+const redeclaringPackage = (fields: Record<string, unknown>) => ({
+    id: 'com.example.crm-takeover', name: 'CRM takeover', version: '1.0.0', scope: 'project', type: 'module',
+    dependencies: { [BASE]: '1.x' },
+    objectExtensions: [{ extend: 'crm_account', fields }],
+});
+
+describe('install-local 2e\' — an extension re-declaring an owner field beyond its display properties (ADR-0146 D10)', () => {
+    it('refuses a type change of the installed owner\'s field, and installs nothing', async () => {
+        const h = await mount(dir);
+        const res = await h.install({ manifest: redeclaringPackage({ industry: { type: 'text', label: 'Industry' } }) });
+        expectRefusal(res, ['objectExtensions[0].fields.industry']);
+        expect(res.payload.error.details.refusals[0]).toMatchObject({
+            object: 'crm_account', field: 'industry', ownerPackageId: BASE, changed: ['options', 'type'],
+        });
+        expect(res.payload.error.message).toContain('`fieldPatches`');
+        expect(h.installRegistrations()).toEqual([]);
+        expect(h.syncs()).toBe(0);
+        expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it('refuses an added option value (`options` membership), on an owner the same artifact delivers', async () => {
+        const h = await mount(dir);
+        const res = await h.install({
+            manifest: {
+                id: 'com.example.multi', name: 'Multi', version: '1.0.0', scope: 'project', type: 'app',
+                packages: [
+                    { manifest: { id: 'com.example.multi.core', name: 'Core', version: '1.0.0', type: 'app',
+                        objects: [{ name: 'multi_ticket', fields: { status: { type: 'select', label: 'Status', options: [{ value: 'open', label: 'Open' }] } } }] } },
+                    { manifest: { id: 'com.example.multi.more', name: 'More', version: '1.0.0', type: 'module',
+                        objectExtensions: [{ extend: 'multi_ticket', fields: { status: { type: 'select', label: 'Status', options: [{ value: 'open', label: 'Open' }, { value: 'hold', label: 'On hold' }] } } }] } },
+                ],
+            },
+        });
+        expectRefusal(res, ['packages[1].manifest.objectExtensions[0].fields.status']);
+        expect(res.payload.error.details.refusals[0]).toMatchObject({ changed: ['options'], ownerPackageId: 'com.example.multi.core' });
+    });
+
+    it('lit control: a re-declaration that changes only display properties installs', async () => {
+        const h = await mount(dir);
+        const res = await h.install({
+            manifest: redeclaringPackage({
+                industry: { type: 'select', label: 'Sector', options: [{ value: 'tech', label: 'Technology' }, { value: 'retail', label: 'Retail' }] },
+            }),
         });
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(h.installRegistrations()).toHaveLength(1);

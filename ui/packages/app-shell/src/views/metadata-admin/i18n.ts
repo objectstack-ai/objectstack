@@ -58,13 +58,14 @@
  * `ui/scripts/__tests__/check-i18n-dead-keys.test.ts`.
  */
 
-import { useObjectTranslation } from '@object-ui/i18n';
+import { resolveBuiltInLanguage, useObjectTranslation } from '@object-ui/i18n';
 // The designer strings' new home. Its `en` catalogue is resident; its other
 // catalogues are fetched on demand, and `useMetadataLocale()` re-renders its
 // caller when one lands. ⚠️ `ui/scripts/check-i18n-dead-keys.mjs` reads the
 // namespace's catalogues as this module's engine strings BECAUSE this module
 // imports it: drop the import and the gates stop reading them.
 import { studioString, useStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+import { isZhLocale } from './schema-field-label.js';
 // Type-only (erased at build): the overlay-scope and lock-state label tables
 // below are keyed by their producer's own union rather than by hand — see
 // `LAYER_SCOPE_ZH` and `LOCK_STATE_ZH`.
@@ -73,7 +74,15 @@ import type {
   MetadataOverlayScope,
 } from '@object-ui/data-objectstack';
 
-export type SupportedLocale = 'en-US' | 'zh-CN';
+/**
+ * The designer locale. `'zh-Hant'` is a Traditional Chinese session: Studio
+ * reads and writes the Traditional entry of an inline label in it, and its
+ * chrome strings fall back to the namespace's `zh` (Simplified) catalogue,
+ * which is the only Chinese one it ships (`resolveStudioLanguage`). Compare a
+ * value with `isZhLocale`, never `=== 'zh-CN'`, when the question is "Chinese
+ * chrome?".
+ */
+export type SupportedLocale = 'en-US' | 'zh-CN' | 'zh-Hant';
 
 const TYPE_LABELS_EN: Record<string, string> = {
   // Data
@@ -134,7 +143,7 @@ const TYPE_LABELS_ZH: Record<string, string> = {
   hook: '钩子',
   view: '视图',
   page: '页面',
-  dashboard: '仪表板',
+  dashboard: '仪表盘',
   app: '应用',
   action: '操作',
   report: '报表',
@@ -193,10 +202,9 @@ const DOMAIN_LABELS_ZH: Record<string, string> = {
   other: '其他',
 };
 
-/** Whether a locale resolves to Chinese (the only non-English catalog). */
-export function isZhLocale(locale?: SupportedLocale | string): boolean {
-  return (locale ?? '').toLowerCase().startsWith('zh');
-}
+// `isZhLocale` and the raw schema-field labels live in the leaf
+// `./schema-field-label.ts`; re-exported here so every existing import keeps working.
+export { isZhLocale, translateSchemaFieldLabel, translateSchemaFieldHelp } from './schema-field-label.js';
 
 /** zh-CN overrides for one flow-node config field. English is the fallback. */
 interface FlowFieldZh {
@@ -478,6 +486,24 @@ const FLOW_FIELD_ZH: Record<string, Record<string, FlowFieldZh>> = {
     // forms now write; the `url` spelling is the converted alias.
     actionUrl: { label: '链接 URL', help: '显式的点击跳转 URL;覆盖默认值。会渲染 {{ }} 占位。' },
     payload: { label: '附加数据', help: '合并进模板输入的额外数据。' },
+    // The engine-published descriptor's `template` / `templateData` carry no
+    // title and a developer-length description; these rows say what the author
+    // decides.
+    template: {
+      label: '邮件模板',
+      help: '要发送的邮件模板名称。按每位收件人自己的语言选取模板内容（未设置时用部署默认语言）。与内联的标题/内容二选一。',
+    },
+    templateData: {
+      label: '模板数据',
+      help: '填入模板 {{变量}} 占位的值：每个值是字面量，或每次运行时求值的 CEL 表达式。只能与邮件模板一起使用。',
+    },
+  },
+  // The engine-published `save_notice` descriptor's one field.
+  save_notice: {
+    message: {
+      label: '提示内容',
+      help: '保存记录的人看到的那句话，可使用 {{ }} 占位（如：已将 {{ record.name }} 提交给你的经理审批）。只用于由记录创建或更新启动的流程，并且要放在任何会暂停运行的节点之前。',
+    },
   },
   boundary_event: {
     'boundaryConfig.attachedToNodeId': { label: '附加到', help: '此边界事件所监视的宿主节点。' },
@@ -755,63 +781,6 @@ export function translateEnumOption(
   return value;
 }
 
-/**
- * Generic zh-CN labels for raw JSON-Schema fields the metadata SchemaForm
- * renders without a client `fieldSpec.label` — chiefly the flow edge/node
- * sub-forms (Source / Target / Condition / …). Names here have one unambiguous
- * meaning across metadata types, so the zh label is universally correct; English
- * (and any name not listed) keeps the schema's own title. Applied only as a
- * fallback UNDER `fieldSpec.label`, so curated top-level forms are untouched.
- */
-const SCHEMA_FIELD_LABEL_ZH: Record<string, string> = {
-  id: 'ID',
-  name: '名称',
-  label: '标签',
-  type: '类型',
-  description: '描述',
-  source: '源节点',
-  target: '目标节点',
-  condition: '条件',
-  isDefault: '默认',
-  nodes: '节点',
-  edges: '连线',
-  config: '配置',
-  outputVariable: '输出变量',
-};
-
-/** zh-CN help text for the unambiguous (edge-specific) raw schema fields. */
-const SCHEMA_FIELD_HELP_ZH: Record<string, string> = {
-  source: '源节点 ID',
-  target: '目标节点 ID',
-  condition: '用于分支的 CEL 布尔表达式',
-  isDefault: '当没有其他条件匹配时,将此连线标记为默认路径',
-};
-
-/** Localized label for a raw schema field (falls back to the schema title). */
-export function translateSchemaFieldLabel(
-  name: string,
-  fallback: string | undefined,
-  locale?: SupportedLocale | string,
-): string | undefined {
-  if (isZhLocale(locale)) {
-    const v = SCHEMA_FIELD_LABEL_ZH[name];
-    if (v) return v;
-  }
-  return fallback;
-}
-
-/** Localized help for a raw schema field (falls back to the schema description). */
-export function translateSchemaFieldHelp(
-  name: string,
-  fallback: string | undefined,
-  locale?: SupportedLocale | string,
-): string | undefined {
-  if (isZhLocale(locale)) {
-    const v = SCHEMA_FIELD_HELP_ZH[name];
-    if (v) return v;
-  }
-  return fallback;
-}
 
 export function t(key: string, locale?: SupportedLocale | string): string {
   return lookupString(key, locale) ?? key;
@@ -844,7 +813,7 @@ export function tOptional(
 /**
  * Format a translated string with `{token}` placeholders.
  *
- *   tFormat('engine.directory.description', 'zh-CN', { count: 28, writable: 4 })
+ *   tFormat('engine.directory.itemCountTooltip', 'zh-CN', { count: 28 })
  */
 export function tFormat(
   key: string,
@@ -971,8 +940,22 @@ export function detectLocale(): SupportedLocale {
 }
 
 /**
+ * The designer locale for an i18n `language` — {@link useMetadataLocale}'s
+ * answer, as a pure function.
+ */
+export function designerLocaleOf(language: string | undefined): SupportedLocale {
+  if (!/^zh/i.test(language ?? '')) return 'en-US';
+  return resolveBuiltInLanguage(language ?? '') === 'zh-Hant' ? 'zh-Hant' : 'zh-CN';
+}
+
+/**
  * React hook — the Studio/metadata-admin locale derived from the app's ACTIVE
- * i18n language, collapsed to one of the two locales this catalog ships.
+ * i18n language: `'zh-Hant'` for a session the console serves in Traditional
+ * Chinese (`zh-Hant`, `zh-TW`, `zh-HK`, … through `resolveBuiltInLanguage`,
+ * the console's own resolution), `'zh-CN'` for every other Chinese session,
+ * `'en-US'` otherwise. The Traditional value exists for the label entries an
+ * author reads and edits (the nav designer shows and renames the entry the
+ * sidebar shows); its chrome strings are the Simplified ones.
  *
  * Prefer this over {@link detectLocale} in components: `detectLocale()` reads
  * `navigator.language`, which never changes when the user switches languages
@@ -983,7 +966,7 @@ export function detectLocale(): SupportedLocale {
  *
  * ⛔ Never hand this value to `Intl` (`Intl.*Format`, `toLocale*String`) as the
  * locale a date, time or number is formatted in. It picks one of this file's
- * TWO string tables, so it is `'en-US'` for every language that is not zh — a
+ * string tables, so it is `'en-US'` for every language that is not zh — a
  * de-DE session would read its faces in US English (objectui#10232). Faces
  * format with `useDisplayLocale()` from `@object-ui/i18n`, the channel every
  * date and number renderer resolves through; keep this value for `t()` /
@@ -991,7 +974,7 @@ export function detectLocale(): SupportedLocale {
  */
 export function useMetadataLocale(): SupportedLocale {
   const { language } = useObjectTranslation();
-  const locale: SupportedLocale = /^zh/i.test(language) ? 'zh-CN' : 'en-US';
+  const locale = designerLocaleOf(language);
   // Starts the fetch of the `studio` namespace catalogue this locale reads and
   // re-renders the caller when it lands, so a moved key does not stay on the
   // `en` answer the first render gave.

@@ -10,6 +10,8 @@
  * - Listing, submission, review, search and install request/response shapes (`marketplace.zod`)
  * - The listing-localisation resolver shared by every surface (`package-l10n`)
  * - The on-disk `objectstack.manifest.json` template descriptor (`template-manifest.zod`)
+ * - The marketplace taxonomy — business function, industry, solution type —
+ *   and the maturity flag, defined once for every surface (`taxonomy.zod`)
  *
  * Until #16325 these five modules lived under `./cloud` beside the cloud
  * control plane's own row contracts (environments, tenants, the developer
@@ -26,3 +28,4 @@ export * from './package.zod';
 export * from './package-l10n';
 export * from './package-version.zod';
 export * from './template-manifest.zod';
+export * from './taxonomy.zod';

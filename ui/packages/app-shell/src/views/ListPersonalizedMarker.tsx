@@ -9,6 +9,10 @@
  * (`useObjectViewListUrlState`'s `handleResetView`). Nothing here is
  * configurable: no metadata key or option reaches it.
  *
+ * On one of the reader's own views (objectstack#30073) it also offers 保存
+ * (`onSave`): the list on screen becomes the view's stored body. Edits not
+ * saved stay the reader's temporary list state, never written to the view.
+ *
  * Below `sm` the trigger is an icon alone (named by its `aria-label`), so on a
  * narrow row it never pushes the view name out.
  */
@@ -17,7 +21,7 @@ import { useState } from 'react';
 import { Button, Popover, PopoverContent, PopoverTrigger, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import type { ListViewProps } from '@object-ui/plugin-list';
-import { RotateCcw, UserPen } from 'lucide-react';
+import { RotateCcw, Save, UserPen } from 'lucide-react';
 
 /** One part of a list that can differ from its view (`ListView`'s vocabulary). */
 export type ListPersonalizationPart = Parameters<NonNullable<ListViewProps['onPersonalizationChange']>>[0][number];
@@ -40,10 +44,13 @@ const LIST_PERSONALIZATION_PART_ORDER: readonly ListPersonalizationPart[] = [
 export function ListPersonalizedMarker({
   parts,
   onReset,
+  onSave,
   className,
 }: {
   parts: ReadonlyArray<ListPersonalizationPart>;
   onReset: () => void;
+  /** Save the list on screen into the open view; offered only for a view the reader owns and may update. */
+  onSave?: () => void;
   className?: string;
 }) {
   const { t } = useObjectTranslation();
@@ -97,6 +104,21 @@ export function ListPersonalizedMarker({
             </li>
           ))}
         </ul>
+        {onSave ? (
+          <Button
+            type="button"
+            size="sm"
+            className="mt-3 w-full gap-1.5"
+            data-testid="list-personalized-save"
+            onClick={() => {
+              setOpen(false);
+              onSave();
+            }}
+          >
+            <Save className="h-4 w-4" aria-hidden="true" />
+            {t('common.save')}
+          </Button>
+        ) : null}
         <p className="mt-3 text-xs text-muted-foreground">{t('console.objectView.resetViewTitle')}</p>
         <Button
           type="button"

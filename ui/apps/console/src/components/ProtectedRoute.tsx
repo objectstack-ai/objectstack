@@ -12,7 +12,7 @@
 
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
-import { AuthGuard } from '@object-ui/auth';
+import { AuthGuard, useAuth } from '@object-ui/auth';
 import {
   ConnectedShell,
   RequireOrganization,
@@ -29,15 +29,25 @@ import {
  * every embedded deployment, so a window-derived path would carry the `/_console`
  * mount into a value that `LoginPage` then re-prefixes with it (objectui#4168).
  *
- * It never carries the list's `uf_*` state (objectstack#29174). Whoever signs in
- * on that page may not be the person whose session just ended, and a filter
- * value can be sensitive; this guard cannot tell a sign-out from an expiry, so
- * it drops the state for both. The path and every other param are kept, byte
- * for byte when there was no list state, and the list then opens on the
- * signing-in user's own stored state or the view's default.
+ * After an explicit sign-out it carries no return link at all
+ * (objectstack#30125): the person left, so whoever signs in next is nobody in
+ * particular and lands on their own home, not on the page the previous person
+ * had open (a Setup page a new member may not open, say). `AuthProvider` tells
+ * the two apart with `sessionEndedBySignOut`.
+ *
+ * Otherwise (the session expired or was revoked under the person, or a
+ * signed-out visitor followed a deep link) the path and its params are kept, so
+ * the person signs back in where they were. Even then it never carries the
+ * list's `uf_*` state (objectstack#29174): whoever signs in after an expiry may
+ * still be someone else, and a filter value can be sensitive. The
+ * path and every other param are kept, byte for byte when there was no list
+ * state, and the list then opens on the signing-in user's own stored state or
+ * the view's default.
  */
 export function LoginRedirect() {
   const location = useLocation();
+  const { sessionEndedBySignOut } = useAuth();
+  if (sessionEndedBySignOut) return <RedirectWithSplash to="/login" replace />;
   const params = new URLSearchParams(location.search);
   const kept = withoutListStateParams(params).toString();
   const returnSearch = kept === params.toString() ? location.search : kept ? `?${kept}` : '';

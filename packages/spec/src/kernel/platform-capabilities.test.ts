@@ -360,3 +360,29 @@ describe("package-registry carve-out — its persistence is always-on core, spli
     expect(absent.provider?.package).toBe('@objectstack/service-package');
   });
 });
+
+// Mobile push — the `push` token is the door `requires: ['push']` opens for
+// `PushServicePlugin`, built from the stack's `push` key. Its provider is an
+// open-edition package the CLI depends on (the CLI's
+// `serve-capability-vocabulary.test.ts` holds the serve resolver to the same
+// package), and it is requested, never appended to every app: its default
+// configuration is the not-yet-served relay, which the boot refuses.
+describe('push — the mobile push capability', () => {
+  it('is a vocabulary token, provided by @objectstack/service-push in the open edition', () => {
+    expect(PLATFORM_CAPABILITY_TOKENS).toContain('push');
+    expect(isKnownPlatformCapability('push')).toBe(true);
+    expect(PLATFORM_CAPABILITY_PROVIDERS.push).toEqual({ package: '@objectstack/service-push', edition: 'open' });
+  });
+
+  it('is requested, never on the always-on slate', () => {
+    expect(PLATFORM_ALWAYS_ON_CAPABILITIES).not.toContain('push');
+  });
+
+  it('classifies as an installable open package when absent, and ok when installed', () => {
+    expect(classifyRequiredCapability('push', () => false)).toMatchObject({
+      status: 'installable',
+      provider: { package: '@objectstack/service-push', edition: 'open' },
+    });
+    expect(classifyRequiredCapability('push', (pkg) => pkg === '@objectstack/service-push').status).toBe('ok');
+  });
+});

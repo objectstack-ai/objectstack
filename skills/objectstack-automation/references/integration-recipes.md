@@ -6,17 +6,14 @@ the fields the answer lands in, a flow dispatching `connector_action`) and the
 one thing the **customer's administrator** supplies: the value behind
 `auth.credentialRef` — an environment variable of that name (wins), or a
 value set in the running app at `PUT /api/v1/automation/connectors/credential-refs/:ref`;
-an unset ref leaves its instance degraded until set. A spec is not a
-secret and ships in the package; an `api` flow's hook secret goes to the
-deployment and to the sender. Keep `automation` in `requires` whenever a
-connector is declared. Full guide: https://objectstack.ai/docs/automation/connectors.
+an unset ref leaves its instance degraded until set. Keep `automation` in
+`requires` whenever a connector is declared. Full guide: https://objectstack.ai/docs/automation/connectors.
 
 ## Holds on every recipe
 
 - Actions come from the upstream (an OpenAPI `operationId`, an MCP tool name,
   the `rest` provider's single `request`) — authored on the entry, they are refused.
-- `connectorConfig.input` is a value-slot map (SKILL.md's `connector_action`
-  row): a top-level CEL envelope is evaluated, any other value kept as written,
+- `connectorConfig.input` is a value-slot map: a top-level CEL envelope is evaluated, any other value kept as written,
   so a value from the record is a CEL envelope. The pre-dispatch `inputSchema`
   judgement honours OpenAPI `nullable`, reads `null` on an optional parameter
   as absent and names each breached path. Text is never converted: cast a
@@ -24,13 +21,13 @@ connector is declared. Full guide: https://objectstack.ai/docs/automation/connec
 - The answer lands as `<nodeId>.<key>` (`rest` / `openapi`: `{ status, ok, body }`;
   `mcp`: `{ ok, content, structuredContent? }`), read from a later node's value slot.
 - `auth`, each variant with a `credentialRef`: `bearer`; `api-key` (`headerName`,
-  or `paramName` for a query-string key); `basic` (`username`
-  stays in metadata); `signed` on `openapi` / `rest` (`scheme`
+  or `paramName` for a query-string key); `basic`;
+  `signed` on `openapi` / `rest` (`scheme`
   `aliyun-acs3-hmac-sha256`, `tencentcloud-tc3-hmac-sha256` or `alipay-v3`,
   `keyId`) signs each request — WeChat Pay has no scheme yet: blocked;
   `oauth2` / `app-credential`: recipe 6. A secret in a url path has no variant — use a
   token-authenticated connector. `authentication: { token }` is refused at `os validate`.
-- `defineConnector`: `@objectstack/spec/integration`; `defineFlow`: `@objectstack/spec`; both register in `defineStack`.
+- `defineConnector` and `defineFlow` register in `defineStack`.
 
 ## 1 · OpenAPI document, static key — Stripe balance, nightly
 
@@ -43,7 +40,7 @@ export const StripeConnector = defineConnector({
 });
 // crm_account gains `stripe_available` (currency) and `stripe_synced_at` (datetime).
 export const StripeBalanceSweep = defineFlow({
-  name: 'stripe_balance_sweep', label: 'Stripe balance → house account',
+  name: 'crm_stripe_balance_sweep', label: 'Stripe balance → house account',
   type: 'schedule', runAs: 'system',
   nodes: [
     { id: 'start', type: 'start', label: 'Nightly 03:00',
@@ -61,7 +58,7 @@ export const StripeBalanceSweep = defineFlow({
 });
 ```
 
-`requires: ['automation', 'triggers', 'job']`. Convert Swagger 2.0 or YAML and
+`requires: ['automation', 'triggers']`. Convert Swagger 2.0 or YAML and
 dereference every `$ref` offline, in-document ones included: the loader skips a
 `$ref` parameter, request body or response and the derived schema silently
 loses it. `providerConfig.include` allowlists operation keys as the
@@ -113,7 +110,9 @@ export const WarehouseApi = defineConnector({
 
 ## 4 · Vendor callback — an `api` flow with `secretRef`
 
+<!-- os:check -->
 ```ts
+import { defineFlow } from '@objectstack/spec';
 export const CarrierCallback = defineFlow({
   name: 'carrier_callback', label: 'Carrier status callback', type: 'api',
   runAs: 'system',
@@ -129,14 +128,16 @@ export const CarrierCallback = defineFlow({
 });
 ```
 
-`requires: ['automation', 'triggers', 'queue']`. The sender signs each post
-under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). The door verifies no
-other scheme: a vendor whose webhook signs its own header cannot post here
-today — poll its status (recipe 1's shape) until vendor schemes verify.
+`requires: ['automation', 'triggers']`. The sender signs each post
+under `CARRIER_HOOK_SECRET` (SKILL.md *Signature* bullet). A vendor signing
+its own header adds, keyed by that ref, `signature: { signs: 'body', header:
+'X-DocuSign-Signature-1', algorithm: 'hmac-sha256', encoding: 'base64' }`.
 
 ## 5 · Vendor with no machine-readable spec — write the document by hand
 
+<!-- os:check -->
 ```ts
+import { defineConnector } from '@objectstack/spec';
 export const LegacyErp = defineConnector({
   name: 'legacy_erp', label: 'Legacy ERP', type: 'api', provider: 'openapi',
   providerConfig: { spec: {
@@ -155,24 +156,31 @@ export const LegacyErp = defineConnector({
 ## 6 · OAuth or vendor-app token — the server runs the grant
 
 Recipe 1's shape with a grant-bearing `auth`, served on `rest`, `openapi` and
-`mcp` (`http` only; a `stdio` server's credentials ride `transport.env`): the
-token is fetched per dispatch; no metadata key holds it.
+`mcp` (`http` only; a `stdio` server takes a static `auth: { type: 'bearer',
+credentialRef }` in the variable `transport.credentialEnv` names, never a
+literal in `transport.env`): the token is fetched per dispatch; no metadata
+key holds it.
 
 ```ts
-// A user grants access once (PKCE always on); the ref is the client secret, omitted for a public client.
+// PKCE always on; the ref is the client secret, omitted for a public client.
 auth: { type: 'oauth2', grant: 'authorization_code', authorizationUrl: 'https://account.docusign.com/oauth/auth',
         tokenUrl: 'https://account.docusign.com/oauth/token', scopes: ['signature'],
         clientId: 'objectstack-prod', credentialRef: 'DOCUSIGN_CLIENT_SECRET' }
+// Or clientSource: 'installer' in place of clientId + credentialRef.
 // Server to server: grant: 'client_credentials' with tokenUrl, clientId, credentialRef (`resource` optional).
 // Vendor app id + app secret (`vendor`: `feishu` / `dingtalk` / `wecom`):
 auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialRef: 'FEISHU_APP_SECRET' }
 ```
 
-`client_credentials` and `app-credential` dispatch once the ref is set.
 `authorization_code` is degraded "not connected" until an administrator holding
 `manage_connector_connections` connects it, once per organization, from a
 signed-in session (an agent or API key is refused):
 `POST /api/v1/automation/connectors/:name/connection` answers `{ authorizationUrl }`;
 the vendor redirects to `GET …/connectors/oauth/callback`. An `authorization_code`
 instance on `mcp` may omit the `https://` endpoints and `clientId`, discovered at connect.
+Name `clientId` for an app its publisher deploys; `clientSource: 'installer'` for one installed
+on deployments the publisher never sees: the administrator registers a client with the vendor
+against the `redirectUri` that `GET …/:name/connection` answers, then connects with `{ clientId, clientSecret }`
+(no secret for a public client; a reconnect naming no client keeps it). The connection keeps it
+encrypted; a read shows `client: { source: 'installer', clientId, hasSecret }`.
 Still never park a short-lived token behind a `bearer` ref.

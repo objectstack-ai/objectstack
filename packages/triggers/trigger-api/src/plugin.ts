@@ -35,14 +35,15 @@ const TRIGGER_API_SLOT = 'trigger-api';
 
 /**
  * [#22774] The slice of a Hono context the inbound-hook door reads and answers
- * through, and nothing more: the raw body as text, two request headers, and
- * `json(body, status)`.
+ * through, and nothing more: the raw body as text, request headers by name
+ * (`x-objectstack-signature`, `x-idempotency-key`, and the header a hook's
+ * `config.signature` declares), and `json(body, status)`.
  *
  * Both faces of the door hand {@link serveInboundHook} one of these. The
  * self-hosted mount hands it the real Hono context, so its answers are the ones
  * it always gave. The `trigger-api` service's `handleInboundHook` hands it
  * {@link requestDoorContext} over a web-standard `Request`. So both faces run
- * ONE copy of the door: one body read, one pair of header names, one
+ * ONE copy of the door: one body read, one header read, one
  * {@link ApiTrigger.handleRequest} (the hook match, the secret read, the
  * verifier and every status), and one way of answering.
  */
@@ -97,6 +98,10 @@ async function serveInboundHook<R>(
         hookId: hook.hookId,
         rawBody,
         signatureHeader: c.req.header('x-objectstack-signature'),
+        // A hook that declares its sender's scheme (`config.signature`) reads
+        // its declared header through this, by name, on both faces alike:
+        // `Headers.get`, so a repeated field is its one joined value.
+        readHeader: (name) => c.req.header(name),
         idempotencyKey: c.req.header('x-idempotency-key') || undefined,
     });
     return c.json(out.body, out.status);
@@ -116,7 +121,9 @@ async function serveInboundHook<R>(
  *    web-standard `Request`, for a kernel with no raw app;
  *  - validates hookId + HMAC signature (`x-objectstack-signature`, the
  *    timestamped `t=…,v1=…` form only, constant-time) against the flow's
- *    start-node config;
+ *    start-node config, or, for a hook whose start node declares its sender's
+ *    own scheme (`config.signature`), that scheme INSTEAD, in its declared
+ *    header, under the key `config.secretRef` names;
  *  - **enqueues** the payload (`queue` service) and ACKs 202 — flow
  *    execution happens on the queue consumer, never in-band with the
  *    inbound request (ADR-0041 §5: boundary triggers must not let a slow

@@ -1336,9 +1336,13 @@ describe('create-user: an optional permission set, granted under the caller\'s o
   it('a name the catalog does not hold: 400 VALIDATION_FAILED with its fields, and the account rolls back', async () => {
     const g = makeGrantSeam();
     const m = makeDeps({ createGrant: g.seam });
-    const fields = [{ field: 'permission_set', code: 'reference_not_found', message: 'no such set' }];
+    // The grant's name check speaks for itself (plugin-security's
+    // `grant-permission-set-name.ts`, pinned there); this route only says, first,
+    // that no user was created, and then hands the reason on unchanged.
+    const reason = "There is no permission set named 'nope': choose one from the list.";
+    const fields = [{ field: 'permission_set', code: 'reference_not_found', message: reason }];
     m.engineCreate.mockImplementation((async (object: string) => {
-      if (object === 'sys_user_permission_set') throw validationFailure('no permission set is named nope', fields);
+      if (object === 'sys_user_permission_set') throw validationFailure(reason, fields);
       return {};
     }) as any);
     const res = await runAdminCreateUser(
@@ -1348,8 +1352,10 @@ describe('create-user: an optional permission set, granted under the caller\'s o
     );
     expect(res.status).toBe(400);
     expect(res.body.error?.code).toBe('VALIDATION_FAILED');
+    expect(res.body.error?.message).toBe(`The permission set was not assigned, so no user was created. ${reason}`);
     expect(res.body.error?.fields).toEqual(fields);
     expect(g.outcomes).toEqual(['rolled back']);
+    expect(res.body.data).toBeUndefined();
   });
 
   it('a host that wires no seam refuses 501 before any account exists', async () => {
@@ -1392,7 +1398,10 @@ describe('create-user: an optional permission set, granted under the caller\'s o
   it('the Create User dialog offers it as an optional INLINE param, never field-backed on another package\'s object', () => {
     const action = (SysUser.actions ?? []).find((a) => a.name === 'create_user');
     const param = (action?.params ?? []).find((p) => p.name === 'permissionSet');
-    expect(param).toMatchObject({ type: 'text', required: false });
+    // Picked, never typed: `widget: 'permission-ref'` draws the grant column's
+    // own picker (ADR-0131 D4), a searchable list of the catalog's sets by
+    // label that submits the chosen set's NAME, a `text` value as before.
+    expect(param).toMatchObject({ type: 'text', widget: 'permission-ref', required: false });
     // A field-backed param on plugin-security's object is refused by the
     // console dialog whenever that object's metadata is not loaded.
     expect(param).not.toHaveProperty('field');
@@ -1590,5 +1599,31 @@ describe('create-user in multi-org mode: the new user joins the administrator\'s
   it('the Create User dialog asks for no organization', () => {
     const action = (SysUser.actions ?? []).find((a) => a.name === 'create_user');
     expect((action?.params ?? []).map((p) => p.name ?? p.field)).not.toContain('organizationId');
+  });
+});
+
+describe("create-user: the must_change_password stamp names the administrator the route's scope carries", () => {
+  // `auth-plugin.ts` runs this door inside `runAttributedToUser(actor, …)`; the
+  // stamp builds its context with `authSystemWriteContext()`, so the
+  // `sys_user` write carries the administrator on the attribution channel
+  // (plugin-audit's `user_id` / `actor`) and still authorizes as the system.
+  it('inside the scope: attributed, still the system; outside it: the system alone', async () => {
+    const { runAttributedToUser } = await import('./auth-actor-attribution.js');
+    const stampContext = (m: ReturnType<typeof makeDeps>) => {
+      const stamp = callsOf(m.engineUpdate).filter(([object, row]) => object === 'sys_user' && 'must_change_password' in row);
+      expect(stamp).toHaveLength(1);
+      return (stamp[0] as unknown as [string, unknown, { context: Record<string, unknown> }])[2].context;
+    };
+
+    const scoped = makeDeps();
+    const res = await runAttributedToUser(ACTOR, () =>
+      runAdminCreateUser(scoped.deps, makeRequest({ email: 'new.user@example.com', generatePassword: true }), ACTOR),
+    );
+    expect(res.status).toBe(200);
+    expect(stampContext(scoped)).toEqual({ isSystem: true, positions: [], permissions: [], attributedUserId: ACTOR.id });
+
+    const bare = makeDeps();
+    expect((await runAdminCreateUser(bare.deps, makeRequest({ email: 'new.user@example.com', generatePassword: true }), ACTOR)).status).toBe(200);
+    expect(stampContext(bare)).toEqual({ isSystem: true, positions: [], permissions: [] });
   });
 });

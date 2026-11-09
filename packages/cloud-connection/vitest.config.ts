@@ -100,6 +100,41 @@ export default defineConfig({
         find: /^@objectstack\/observability$/,
         replacement: path.resolve(__dirname, '../observability/src/index.ts'),
       },
+      // [#30323] The sample-data count door refuses an unknown query parameter
+      // with REST's shared sentence (`unknownQueryParamRefusalMessage`), so the
+      // suites that drive it judge THIS checkout's sentence, not a
+      // `rest/dist` that may be behind it. Anchored like the entries above.
+      {
+        find: /^@objectstack\/rest$/,
+        replacement: path.resolve(__dirname, '../rest/src/index.ts'),
+      },
+      // [#31554] The shared binding credential suites run the ledger over a
+      // real engine: a SQL driver, the `sys_secret` object the engine seals
+      // into, and the local crypto provider. Each judges THIS checkout's
+      // driver, object and cipher, not a `dist` that may be behind them.
+      // Anchored like the entries above (`@objectstack/platform-objects`
+      // exports subpaths).
+      {
+        find: /^@objectstack\/driver-sql$/,
+        replacement: path.resolve(__dirname, '../drivers/driver-sql/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/platform-objects$/,
+        replacement: path.resolve(__dirname, '../platform-objects/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/service-settings$/,
+        replacement: path.resolve(__dirname, '../services/service-settings/src/index.ts'),
+      },
+      // [#31554] The plugin picks its credential store with the cluster
+      // service's own multi-replica predicate (`declaresMultiNode`,
+      // `isInProcessClusterDriver`), so the suites judge THIS checkout's
+      // predicate, not a `service-cluster/dist` that may be behind it.
+      // Anchored: `@objectstack/service-cluster` exports `./testing`.
+      {
+        find: /^@objectstack\/service-cluster$/,
+        replacement: path.resolve(__dirname, '../services/service-cluster/src/index.ts'),
+      },
     ],
   },
   // Discovery is untouched — but this file is NOT "the alias and nothing else".

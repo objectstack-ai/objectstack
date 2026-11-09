@@ -66,7 +66,7 @@ vi.mock('lucide-react', async (importOriginal) => ({
   Globe: () => <span />,
 }));
 
-import { LocaleSwitcher } from '../../layout/LocaleSwitcher';
+import { LocaleSwitcher, localeLabel } from '../../layout/LocaleSwitcher';
 import { useSignedInUserLocale, pickRenderableLocale } from '../useUserLocale';
 
 /**
@@ -215,13 +215,14 @@ describe('the globe writes the column', () => {
 
     mount();
 
-    fireEvent.click(screen.getByText('中文'));
+    // The menu offers the platform locale table's tags (objectstack#30511).
+    fireEvent.click(screen.getByText(localeLabel('zh-Hans')));
 
-    await waitFor(() => expect(shownLanguage()).toBe('zh'));
+    await waitFor(() => expect(shownLanguage()).toBe('zh-Hans'));
     expect(adapter.update).not.toHaveBeenCalled();
     expect(adapter.findOne).not.toHaveBeenCalled();
     // The device slot is this visitor's own setting, exactly as before.
-    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh');
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-Hans');
   });
 });
 
@@ -243,5 +244,109 @@ describe('pickRenderableLocale', () => {
 
   it('waits while the deployment’s locale list is still in flight', () => {
     expect(pickRenderableLocale('ja', null)).toBeNull();
+  });
+});
+
+/**
+ * The console resolves a stored tag on the platform's one locale ladder,
+ * `resolveLocaleAmong` (exact → case → platform table language → base
+ * language → variant), the server's `resolveLocale` order, so a legacy
+ * mis-cased row and a tag the deployment offers only as a variant no longer
+ * render English.
+ */
+/**
+ * objectstack#30511: before the base-language step, the platform locale
+ * table's reading. A row stored as `zh-TW` is Traditional, and the first `zh`
+ * variant a list offers is not necessarily so.
+ */
+describe('pickRenderableLocale reads a stored tag as the platform locale table does', () => {
+  // The renderer's own list when no deployment list is wired: the table's tags.
+  const builtIn = ['en', 'zh-Hans', 'zh-Hant', 'es', 'ar', 'fr', 'pt-BR', 'ru', 'de', 'ja', 'ko'];
+
+  it('renders a Traditional row Traditional, whichever spelling it was stored in', () => {
+    for (const stored of ['zh-TW', 'zh-HK', 'zh-MO', 'zh-Hant', 'zh-Hant-TW', 'ZH-tw']) {
+      expect(pickRenderableLocale(stored, builtIn), stored).toBe('zh-Hant');
+    }
+  });
+
+  it('renders a Simplified row Simplified', () => {
+    for (const stored of ['zh', 'zh-CN', 'zh-SG', 'zh-Hans', 'zh-Hans-CN']) {
+      expect(pickRenderableLocale(stored, builtIn), stored).toBe('zh-Hans');
+    }
+  });
+
+  it('reads the old `pt` code as the pt-BR pack', () => {
+    expect(pickRenderableLocale('pt', builtIn)).toBe('pt-BR');
+  });
+
+  it('finds the same language under a deployment\'s own spelling of it', () => {
+    expect(pickRenderableLocale('zh-HK', ['en', 'zh-CN', 'zh-TW'])).toBe('zh-TW');
+    expect(pickRenderableLocale('zh', ['en', 'zh-TW', 'zh-CN'])).toBe('zh-CN');
+  });
+
+  it('CONTROL: a deployment that offers no Traditional spelling falls through to the base language order', () => {
+    expect(pickRenderableLocale('zh-TW', ['en', 'zh-CN'])).toBe('zh-CN');
+  });
+});
+
+describe('pickRenderableLocale follows the server resolveLocale order', () => {
+  // What a deployment's locale endpoint answers: full BCP-47 tags.
+  const served = ['en', 'zh-CN', 'ja-JP'];
+
+  it('folds case to the offered spelling (a legacy mis-cased row)', () => {
+    expect(pickRenderableLocale('zh-cn', served)).toBe('zh-CN');
+    expect(pickRenderableLocale('ZH-CN', served)).toBe('zh-CN');
+  });
+
+  it('expands a bare language to the offered variant', () => {
+    expect(pickRenderableLocale('zh', served)).toBe('zh-CN');
+    expect(pickRenderableLocale('ja', served)).toBe('ja-JP');
+  });
+
+  it('reaches the offered variant through a script-tagged tag', () => {
+    expect(pickRenderableLocale('zh-Hans-CN', served)).toBe('zh-CN');
+  });
+
+  it('falls back to the base language for an unoffered region', () => {
+    expect(pickRenderableLocale('en-GB', served)).toBe('en');
+    expect(pickRenderableLocale('EN-gb', served)).toBe('en');
+  });
+
+  it('prefers the base language over a sibling variant', () => {
+    expect(pickRenderableLocale('pt-PT', ['en', 'pt', 'pt-BR'])).toBe('pt');
+  });
+
+  it('takes the first offered variant when several share a base', () => {
+    expect(pickRenderableLocale('es', ['en', 'es-MX', 'es-AR'])).toBe('es-MX');
+  });
+
+  it('takes the variant the platform locale table reads as the language before the first variant', () => {
+    // `es-ES` is a read alias of the table's `es`, so the table step answers
+    // it ahead of the variant step, as the server's ladder does.
+    expect(pickRenderableLocale('es', ['en', 'es-MX', 'es-ES'])).toBe('es-ES');
+  });
+
+  it('still matches nothing for a language nobody offers', () => {
+    expect(pickRenderableLocale('th-TH', served)).toBeNull();
+    expect(pickRenderableLocale('xx-YY', served)).toBeNull();
+    expect(pickRenderableLocale('zh', [])).toBeNull();
+  });
+
+  it('renders the offered variant for a bare column, end to end', async () => {
+    const adapter = fakeUserAdapter('zh');
+    session.user = { id: 'usr_1' };
+    session.adapter = adapter;
+
+    render(
+      <I18nProvider
+        config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}
+        loadLocales={async () => ['en', 'zh-CN']}
+      >
+        <Probe />
+      </I18nProvider>,
+    );
+
+    // The offered entry is the platform locale table tag since objectstack#30514.
+    await waitFor(() => expect(shownLanguage()).toBe('zh-Hans'));
   });
 });

@@ -52,9 +52,11 @@
  */
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
+import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context';
 import { audiencePermitsSelfRegistration } from '@objectstack/spec/system';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
+import { withLockoutRefusal } from './sign-in-lockout-refusal.js';
 import { resolveEmailVerificationRequirement } from './audience-posture.js';
 import { globalAfterHook, type AfterHookHost } from './auth-manager-after-hook.js';
 import { globalBeforeHook, type BeforeHookHost } from './auth-manager-before-hook.js';
@@ -68,6 +70,48 @@ import {
 import { vendorClientAddressOptions } from './client-address-vendor.js';
 import { PLATFORM_IDP_PROVIDER_ID, refuseImplicitAccountLink } from './implicit-account-linking.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
+import { isVisitorResendInEndpointContext } from './visitor-verification-resend.js';
+import { createBetterAuthLogSink } from './sso-oidc-refusal-cause.js';
+
+/** The path better-auth declares for the email sign-up endpoint. */
+const SIGN_UP_EMAIL_PATH = '/sign-up/email';
+
+/**
+ * `send`, with two of its calls handed to {@link sendAfterResponseOnPublicDoor}:
+ *
+ *  - the one the sign-up endpoint makes: a sign-up answers without waiting for
+ *    any mail send, whether or not the address already has an account;
+ *  - the one the `/send-verification-email` resend makes for a visitor who is
+ *    not signed in: that resend answers the same whatever the send does
+ *    (`visitor-verification-resend.ts` states the rule).
+ *
+ * Their failure is logged on the server, never handed to the caller. Every
+ * other call is `send` itself, awaited exactly as before — a signed-in
+ * caller's resend among them, which reports a send that failed to its caller.
+ *
+ * The endpoint is the one better-auth runs the call inside, read by its
+ * declared path from the endpoint context (as the hooks read `ctx.path`),
+ * never from the request's URL; whether the caller is signed in is the session
+ * that endpoint resolved before it called. Outside any endpoint context the
+ * call is awaited.
+ */
+function sendAfterResponseOnSignUpAndVisitorResend<D>(
+  send: (data: D, request?: unknown) => Promise<unknown>,
+  onFailure: (error: unknown) => void,
+): (data: D, request?: unknown) => Promise<void> {
+  const afterResponse = sendAfterResponseOnPublicDoor(send, onFailure);
+  return (data, request) => {
+    let answersFirst = false;
+    try {
+      const endpoint = tryGetCurrentAuthEndpointContext();
+      answersFirst = endpoint?.path === SIGN_UP_EMAIL_PATH || isVisitorResendInEndpointContext(endpoint);
+    } catch {
+      answersFirst = false;
+    }
+    return answersFirst ? afterResponse(data, request) : (send(data, request) as Promise<void>);
+  };
+}
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -78,7 +122,7 @@ import { isPlaceholderEmail } from './placeholder-email.js';
  * through getters.
  */
 export interface AuthInstanceHost {
-  assertAccountNotLocked: AuthManager['assertAccountNotLocked'];
+  admitSignInAttempt: AuthManager['admitSignInAttempt'];
   assertActorNotHeld: AuthManager['assertActorNotHeld'];
   assertAdminRevokeUserSessionIdentifiesRecord: AuthManager['assertAdminRevokeUserSessionIdentifiesRecord'];
   assertOrganizationDeletable: AuthManager['assertOrganizationDeletable'];
@@ -87,8 +131,10 @@ export interface AuthInstanceHost {
   assertPhoneOtpSendAllowed: AuthManager['assertPhoneOtpSendAllowed'];
   assertRemoveMemberPermitted: AuthManager['assertRemoveMemberPermitted'];
   assertRevokeSessionIdentifiesRecord: AuthManager['assertRevokeSessionIdentifiesRecord'];
+  assertSsoProviderDeletable: AuthManager['assertSsoProviderDeletable'];
   auditRefusedSignIn: AuthManager['auditRefusedSignIn'];
   buildPluginList: AuthManager['buildPluginList'];
+  clearSignInLockout: AuthManager['clearSignInLockout'];
   composeDatabaseHooks: AuthManager['composeDatabaseHooks'];
   readonly config: AuthManager['config'];
   configuredBasePath: AuthManager['configuredBasePath'];
@@ -112,8 +158,8 @@ export interface AuthInstanceHost {
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
   isSsoWired: AuthManager['isSsoWired'];
   linkingContext: AuthManager['linkingContext'];
+  logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
-  recordSignInOutcome: AuthManager['recordSignInOutcome'];
   resolveActor: AuthManager['resolveActor'];
   resolveAuthSecret: AuthManager['resolveAuthSecret'];
   resolvePasswordChangeUserId: AuthManager['resolvePasswordChangeUserId'];
@@ -121,6 +167,7 @@ export interface AuthInstanceHost {
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   sendExistingAccountSignUpNotice: AuthManager['sendExistingAccountSignUpNotice'];
+  settleSignInAttempt: AuthManager['settleSignInAttempt'];
   signUpForcedOff: AuthManager['signUpForcedOff'];
   ssoDiscoveryTrustedOrigins: AuthManager['ssoDiscoveryTrustedOrigins'];
   stampLastLogin: AuthManager['stampLastLogin'];
@@ -137,7 +184,10 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
   const { betterAuth } = await import('better-auth');
   const { createAuthMiddleware, setShouldSkipSessionRefresh } = await import('better-auth/api');
   const plugins = await this.buildPluginList();
-  const passwordHasher = await this.resolvePasswordHasher();
+  // ADR-0069 D2: the verifier refuses a locked account by better-auth's own
+  // wrong-password path; the WebContainer hasher, when there is one, is the
+  // pair it wraps (`sign-in-lockout-refusal.ts`).
+  const passwordHasher = await withLockoutRefusal(await this.resolvePasswordHasher());
   const betterAuthConfig: BetterAuthOptions = {
     // Base configuration
     secret: this.resolveAuthSecret(),
@@ -162,6 +212,12 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
     // issuer only when the instance is rebuilt (a config patch or a
     // restart), while auth emails call `getAppName()` on every send.
     appName: this.getAppName(),
+
+    // better-auth's own log lines go to this manager's logger, level for level,
+    // instead of the console. The sink is also where an enterprise OIDC
+    // callback's refused ID token is classified, because the vendor hands that
+    // error object to its logger and nowhere else (`sso-oidc-refusal-cause.ts`).
+    logger: createBetterAuthLogSink(() => this.config.logger),
 
     // Database adapter configuration
     database: await this.createDatabaseConfig(),
@@ -240,7 +296,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       //   approval gate the ruling refuses, not a way to notify.
       //
       // The notice is consequently sent by the framework, from the global
-      // `after` hook on `/change-email` (search `__osChangeEmailFrom`), using
+      // `after` hook on `/change-email` (`auth-manager-after-hook.ts`), using
       // the `auth.email_change_notice` template. It is failure-isolated by
       // construction: it runs after better-auth has already produced the
       // response, and its own errors are swallowed, so a dead mailbox cannot
@@ -355,7 +411,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         : (disableSignUpFromEnv ?? this.config.emailAndPassword?.disableSignUp);
       return {
         enabled: this.config.emailAndPassword?.enabled ?? true,
-        ...(passwordHasher ? { password: passwordHasher } : {}),
+        password: passwordHasher,
         ...(effectiveDisableSignUp != null
           ? { disableSignUp: effectiveDisableSignUp } : {}),
         // [#11739] Invariant: a posture that permits self-registration
@@ -382,17 +438,36 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           ? { resetPasswordTokenExpiresIn: this.config.emailAndPassword.resetPasswordTokenExpiresIn } : {}),
         ...(this.config.emailAndPassword?.autoSignIn != null
           ? { autoSignIn: this.config.emailAndPassword.autoSignIn } : {}),
-        ...(this.config.emailAndPassword?.revokeSessionsOnPasswordReset != null
-          ? { revokeSessionsOnPasswordReset: this.config.emailAndPassword.revokeSessionsOnPasswordReset } : {}),
+        // A completed password reset ends the account's other sessions, on
+        // every reset door, always — not a deployment option. This is
+        // better-auth's own option, set here and never read from the host
+        // configuration: the spec key of the same name is retired, and the
+        // manager refuses it at entry at any value.
+        // `password-reset-ends-sessions.ts` holds the rule and the wiring.
+        revokeSessionsOnPasswordReset: true,
+        // ADR-0069 D2: a completed reset clears the sign-in lockout, so the
+        // new password signs in at once. better-auth runs this on every reset
+        // door after the new password is written (`clearSignInLockout`).
+        onPasswordReset: async ({ user }: { user: { id?: unknown } }) => {
+          if (typeof user?.id === 'string' && user.id) await this.clearSignInLockout(user.id);
+        },
       // #14319 — better-auth calls this as `sendResetPassword(data, ctx.request)`.
       // [#23598] better-auth CATCHES what this callback throws
       // (`runInBackgroundOrAwait`) and still answers `{ status: true }`, so a
       // failed send can never reach the identity import that asked for it.
       // `settleImportResetDelivery` settles the import's own delivery receipt
-      // with the outcome (and re-raises it unchanged); a call that carries a
-      // `Request` — the public door — is handed straight through.
+      // with the outcome (and re-raises it unchanged).
       // `account-invitation-marker.ts` holds the legs that keep it server-only.
-      sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => settleImportResetDelivery(user.email, request, async () => {
+      //
+      // A reset request answers the same way for any address, answers at once
+      // and does not wait on the send: a call that carries a `Request` — the
+      // public door — resolves immediately, and the mail is built and sent
+      // after the response
+      // (`sendAfterResponseOnPublicDoor`); what the send does is logged on
+      // the server and never reaches the caller. The identity import's own
+      // server-side call (no `Request`) still awaits its send, because it
+      // reads the delivery receipt the send settles.
+      sendResetPassword: sendAfterResponseOnPublicDoor(async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => settleImportResetDelivery(user.email, request, async () => {
         // #2766 V1.5 — placeholder addresses (phone-only users) are never
         // real recipients. Refuse loudly instead of "sending" into the void;
         // the reset path for these users is phone sign-in / an admin
@@ -488,21 +563,33 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
             `${invitation ? 'Account-invitation' : 'Password-reset'} email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
           );
         }
-      }),
+      }), (error) => logAfterResponseSendFailure(this.config.logger, 'password-reset email', error)),
       // [#25060, ruling 1B on #25040] The mail half of "a sign-up for an
       // address that already has an account answers like a success". The
       // vendor calls this only when the address already has a row AND its
       // anti-enumeration shield is on, after its timing-equalizing password
-      // hash, and awaits it inline (no background-task handler is set);
-      // what it throws is caught and logged by the vendor, and the answer is
-      // its generic success either way (better-auth 1.7.12
+      // hash; what it throws is caught and logged by the vendor, and the
+      // answer is its generic success either way (better-auth 1.7.12
       // `routes/sign-up.mjs`, re-read for #25060). So the DECISION cannot
       // live here: it is made first, in the `/sign-up/email` before-hook,
       // which keeps the explicit refusal wherever this mail could not be
       // promised. This hands over the existing row, which is what the
       // recipient's stored-locale rung needs.
-      onExistingUserSignUp: async ({ user }: { user: { id: string; email: string; name?: string | null } }) =>
-        this.sendExistingAccountSignUpNotice(user),
+      //
+      // A sign-up answers without waiting for any mail send, whether or not
+      // the address already has an account: the vendor hands this callback
+      // the request (`onExistingUserSignUp(data, request)`, the same
+      // routes/sign-up.mjs), so a call that carries one — the public door —
+      // resolves at once and the notice is built and sent after the response
+      // (`sendAfterResponseOnPublicDoor`), as the verification mail of a new
+      // address's sign-up is (`sendVerificationEmail` below). A server-side
+      // call (no request) still awaits it. The notice reports its own failed
+      // send at error level and never throws; `onFailure` logs anything else.
+      onExistingUserSignUp: sendAfterResponseOnPublicDoor(
+        async ({ user }: { user: { id: string; email: string; name?: string | null } }) =>
+          this.sendExistingAccountSignUpNotice(user),
+        (error) => logAfterResponseSendFailure(this.config.logger, 'sign-up notice email', error),
+      ),
       };
     })(),
 
@@ -518,14 +605,28 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         ...(this.config.emailVerification?.expiresIn != null
           ? { expiresIn: this.config.emailVerification.expiresIn } : {}),
         // #14319 — better-auth calls this as `sendVerificationEmail(data, ctx.request)`.
-        sendVerificationEmail: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
+        //
+        // A sign-up answers without waiting for any mail send, whether or not
+        // the address already has an account: the call the sign-up endpoint
+        // makes, carrying its request, resolves at once and the mail is built
+        // and sent after the response, as the notice to an address that
+        // already has an account is (`onExistingUserSignUp` above); its
+        // failure is logged on the server. The `/send-verification-email`
+        // resend of a visitor who is not signed in is sent the same way, so
+        // it answers the same whatever the send does
+        // (`visitor-verification-resend.ts`). Every other call is awaited as
+        // before (`sendAfterResponseOnSignUpAndVisitorResend`) — a signed-in
+        // caller's resend among them.
+        sendVerificationEmail: sendAfterResponseOnSignUpAndVisitorResend(async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
           const email = this.getEmailService();
           if (!email) {
             // Verification is enabled (this callback only exists when it is)
             // but no email transport is wired — a misconfiguration, not a
-            // transient blip. THROW so the explicit `/send-verification-email`
-            // resend endpoint (which awaits this) surfaces a real error
-            // instead of a false "email sent" success. Sign-up stays
+            // transient blip. THROW so a signed-in caller's
+            // `/send-verification-email` resend (which awaits this) surfaces a
+            // real error instead of a false "email sent" success; a visitor's
+            // resend is refused before it gets here while no transport is
+            // live (`EMAIL_SERVICE_REQUIRED`, the before-hook). Sign-up stays
             // resilient regardless: better-auth runs the sendOnSignUp call
             // through `runInBackgroundOrAwait`, which logs (never rethrows)
             // a failure, so the account is still created and the user lands
@@ -539,7 +640,8 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           const ttlSec = this.config.emailVerification?.expiresIn ?? 60 * 60;
           // Let send failures propagate (see above): sendTemplate THROWS on
           // template/loader errors, and returns status:'failed' on transport
-          // errors — surface both so resend is honest and signup stays
+          // errors — surface both so a signed-in caller's resend is honest
+          // (a visitor's is logged on the server instead) and signup stays
           // resilient via better-auth's background-task error handling.
           // commit 35e94c96b — the stored rung, same ladder as the reset above. An
           // admin re-triggering verification for a user is the same
@@ -567,7 +669,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
               `Verification email could not be sent to ${user.email}: ${result.error ?? 'delivery failed'}`,
             );
           }
-        },
+        }, (error) => logAfterResponseSendFailure(this.config.logger, 'verification email', error)),
       },
     } : {}),
 
@@ -689,7 +791,7 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       before: createAuthMiddleware((ctx: any) => {
         const readConfig = () => this.config;
         const host: BeforeHookHost = {
-          assertAccountNotLocked: (...a) => this.assertAccountNotLocked(...a),
+          admitSignInAttempt: (...a) => this.admitSignInAttempt(...a),
           assertActorNotHeld: (...a) => this.assertActorNotHeld(...a),
           assertAdminRevokeUserSessionIdentifiesRecord: (...a) => this.assertAdminRevokeUserSessionIdentifiesRecord(...a),
           assertOrganizationDeletable: (...a) => this.assertOrganizationDeletable(...a),
@@ -698,11 +800,13 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           assertPhoneOtpSendAllowed: (...a) => this.assertPhoneOtpSendAllowed(...a),
           assertRemoveMemberPermitted: (...a) => this.assertRemoveMemberPermitted(...a),
           assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
+          assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
           get config() { return readConfig(); },
           existingAddressSignUpAnswersSuccess: (...a) => this.existingAddressSignUpAnswersSuccess(...a),
           hasExistingUserFor: (...a) => this.hasExistingUserFor(...a),
           isAuthGateActive: (...a) => this.isAuthGateActive(...a),
           isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
+          isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
           isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
           isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
           resolveActor: (...a) => this.resolveActor(...a),
@@ -720,10 +824,11 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
           externalDirectoryDoorDeps: (...a) => this.externalDirectoryDoorDeps(...a),
           isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
+          logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
           recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
-          recordSignInOutcome: (...a) => this.recordSignInOutcome(...a),
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+          settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
           stampLastLogin: (...a) => this.stampLastLogin(...a),
           stampPasswordChangedAt: (...a) => this.stampPasswordChangedAt(...a),
         };

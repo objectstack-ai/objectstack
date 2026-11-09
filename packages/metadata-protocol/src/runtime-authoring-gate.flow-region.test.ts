@@ -82,8 +82,9 @@ describe('[#29233] the publish gate refuses the regions the engine refuses, thro
         expect(issues).toEqual([{
             severity: 'error',
             rule: RULE,
-            where: "flow 'rgnprobe_loop'",
-            path: 'flows[0]',
+            // [#29558] Anchored on the container the engine names, not the flow.
+            where: "flow 'rgnprobe_loop' › node 'lp'",
+            path: 'flows[0].nodes[1]',
             message: refusedAt('rgnprobe_loop', sentence),
             hint: expect.any(String),
         }]);
@@ -92,7 +93,7 @@ describe('[#29233] the publish gate refuses the regions the engine refuses, thro
     it('a parallel block with one branch is refused', () => {
         const flow = flowOf('one_branch', [{ id: 'fan', type: 'parallel', label: 'Fan', config: { branches: [oneStep('only')] } }]);
         expect(regionIssues(flow).issues).toEqual([
-            expect.objectContaining({ path: 'flows[0]', message: refusedAt('one_branch', engineRefusal(flow)) }),
+            expect.objectContaining({ path: 'flows[0].nodes[1]', message: refusedAt('one_branch', engineRefusal(flow)) }),
         ]);
     });
 
@@ -120,7 +121,7 @@ describe('[#29233] the publish gate refuses the regions the engine refuses, thro
         const sentence = engineRefusal(flow)!;
         expect(sentence).toMatch(/^try_catch 'guard' try → loop 'inner' body: /);
         expect(regionIssues(flow).issues).toEqual([
-            expect.objectContaining({ path: 'flows[0]', message: refusedAt('nested', sentence) }),
+            expect.objectContaining({ path: 'flows[0].nodes[1].config.try.nodes[0]', message: refusedAt('nested', sentence) }),
         ]);
     });
 

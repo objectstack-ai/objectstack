@@ -153,7 +153,8 @@ describe('the first step asks only for a name (objectstack#27833)', () => {
 
   it('a name that derives no id opens Advanced by itself, at the line that says why', () => {
     const f = openCreate();
-    fireEvent.change(f.name(), { target: { value: '工单中心' } });
+    // A Japanese name: a Chinese one derives through its pinyin (objectstack#29690).
+    fireEvent.change(f.name(), { target: { value: 'チケットセンター' } });
 
     expect(f.submit()).toBeDisabled();
     expect(f.toggle()).toHaveAttribute('aria-expanded', 'true');

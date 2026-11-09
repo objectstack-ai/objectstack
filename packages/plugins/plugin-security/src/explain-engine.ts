@@ -26,6 +26,7 @@ import {
   readDisabledCatalogNames,
   resolveUserAuthzGrants,
   securityCatalogReaderOf,
+  storedPermissionSetScope,
   vetOrganizationClaim,
 } from '@objectstack/core';
 import {
@@ -44,6 +45,7 @@ import type {
   ControlledByParentWriteUnresolvedReason,
 } from '@objectstack/spec/contracts';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
+import { controlledByParentMasterOf } from '@objectstack/spec/data';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type {
   AuthzPosture,
@@ -371,6 +373,24 @@ export interface ExplainEngineDeps {
    * error.
    */
   tenancyPosture: TenancyPosture;
+  /**
+   * [ADR-0090 D12, ruling of record 6663849489] The one admission the read
+   * door makes beside the CRUD grant, for an operation the principal's sets do
+   * NOT grant: a delegate reads the business units its admin scopes cover.
+   * The middleware's own judgment (`delegatedUnitReadAdmission`), answering the
+   * scope `id IN <the covered units>` the read is confined to, or null.
+   *
+   * Optional: a deps bag wired without it explains such a read as refused —
+   * the answer from before the read was ruled, which over-refuses and never
+   * widens. The plugin's own wiring passes it.
+   */
+  delegatedUnitReadScope?: (
+    sets: PermissionSet[],
+    object: string,
+    engineOperation: string,
+    context: any,
+    delegatorSets: PermissionSet[] | null,
+  ) => Promise<Record<string, unknown> | null>;
 
   // ── [C2 / ADR-0095] Record-grained deps. All OPTIONAL: absent → the engine
   // stays object-level and byte-compatible. Present → the sharing / rls / owd /
@@ -683,7 +703,9 @@ async function collectGrantProvenance(
       const held = new Set<string>();
       for (const g of [...expiredRows, ...activeRows]) {
         const n = grantSetNameOf(g) as string;
-        if (!held.has(n) && catalog && (await catalog.resolve('permission', n))) held.add(n);
+        // [ADR-0150 D8 R1] Asked as the resolver asks it: the package the
+        // grant names, else no caller (`storedPermissionSetScope`).
+        if (!held.has(n) && catalog && (await catalog.resolve('permission', n, storedPermissionSetScope((g as any).permission_set_package)))) held.add(n);
       }
       for (const g of expiredRows) {
         const n = grantSetNameOf(g) as string;
@@ -781,6 +803,9 @@ export async function buildContextForUser(
     // [Ruling of record 6355206139] The population stamp the resolver made, so
     // the explained context is floored at the OWD seam as enforcement is.
     ...(grants.audience ? { audience: grants.audience } : {}),
+    // [ADR-0151 D3] An AI service account is explained as the agent it is: its
+    // own grants under the agent ceiling, with no one it acts for.
+    ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
     droppedGrants,
     delegatedPositions,
     // [ADR-0068 D2] Not a second derivation: `derivePosture` returns
@@ -1135,7 +1160,8 @@ const MASTER_DENIAL_LEG_DETAIL: Record<ControlledByParentWriteDenialLeg, string>
 const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, { condition: string; answer: string }> = {
   master_detail_relation_missing: {
     condition:
-      'the object declares controlled_by_parent without exactly one required master_detail field to derive access from',
+      'the object declares controlled_by_parent without one master_detail field to derive access from (exactly ' +
+      'one declared required: true, or, with none, its only master_detail declared required: false)',
     answer: '422 INVALID_METADATA',
   },
   record_not_found: { condition: 'the record does not exist', answer: '404 RECORD_NOT_FOUND' },
@@ -1144,6 +1170,28 @@ const MASTER_UNRESOLVED_DETAIL: Record<ControlledByParentWriteUnresolvedReason, 
 
 const MASTER_DERIVED = 'Write access to this record derives from its master (controlled_by_parent, ADR-0055)';
 const MASTER_READ_DERIVED = 'Read access to this record derives from its master (controlled_by_parent, ADR-0055)';
+
+/**
+ * [ADR-0055 §1 and §2 as amended · #30905 ruling A] The master reference key
+ * of `record` when `object`'s master is OPTIONAL and that reference is empty —
+ * the record the read leaf's null-master arm reads — else `undefined`. The
+ * master is judged on the registry's schema by the spec's own resolver
+ * (`controlledByParentMasterOf`), the one the security plugin's relation
+ * resolver picks an optional master with. Empty is `null` or absent, what the
+ * arm's `{ fk: null }` matches.
+ */
+function nullMasterReferenceOf(
+  deps: Pick<ExplainEngineDeps, 'ql'>,
+  object: string,
+  record: Record<string, unknown> | null | undefined,
+): string | undefined {
+  if (record == null) return undefined;
+  let schema: any;
+  try { schema = deps.ql?.getSchema?.(object) ?? null; } catch { schema = null; }
+  const master = controlledByParentMasterOf(schema?.fields);
+  if (!master?.optional) return undefined;
+  return record[master.field] == null ? master.field : undefined;
+}
 
 /**
  * [ADR-0055] The record-grained writes whose verdict on a `controlled_by_parent`
@@ -1164,10 +1212,10 @@ const MASTER_READ_DERIVED = 'Read access to this record derives from its master 
  * served member computes for an update is the answer step 2.8 gives each of
  * these writes, and the engine asks it for each.
  *
- * `restore` and `purge` are refused at the object gate for every principal
- * until their grants return, so the object-level CRUD layer decides their
- * record verdict first. They are listed because step 2.8 lists them, so the
- * report stays the door's on the day they can be granted.
+ * `restore` and `purge` are listed because step 2.8 lists them. [#30237] Their
+ * object gate reads the recycle bin's grants (`allowRestoreOwnDeleted`,
+ * `manageRecycleBin`); the by-id `purge` (the permanent delete) is the one of
+ * them that addresses a row.
  */
 const MASTER_CHECKED_BY_ID_WRITES: ReadonlySet<string> = new Set(['update', 'delete', 'transfer', 'restore', 'purge']);
 
@@ -1189,12 +1237,28 @@ const MASTER_CHECKED_BY_ID_WRITES: ReadonlySet<string> = new Set(['update', 'del
 function masterWriteCheckRefusal(
   outcome: ControlledByParentWriteOutcome,
   verb: string,
+  /**
+   * [ADR-0055 §3 as amended · #30905 ruling A] The record's master reference
+   * key when its OPTIONAL master is empty ({@link nullMasterReferenceOf}):
+   * the check then judged the record by its owner rule, not by a master, and
+   * its `master_chain` refusal is narrated as that rule.
+   */
+  nullMasterFk?: string,
 ): { outcome: ExplainRecordAttribution['outcome']; detail: string } | undefined {
   switch (outcome?.outcome) {
     case 'allow':
     case 'not_applicable':
       return undefined;
     case 'deny':
+      if (nullMasterFk !== undefined && outcome.leg === 'master_chain') {
+        return {
+          outcome: 'excluded',
+          detail: `${MASTER_DERIVED} when it names one, and it names none: its master reference '${nullMasterFk}' is ` +
+            `empty, so the master-detail write check the by-id ${verb} runs admits only its owner and a holder of ` +
+            `Modify All on the object, and refuses this ${verb} on its 'master_chain' leg. ` +
+            `The ${verb} answers 403 PERMISSION_DENIED.`,
+        };
+      }
       return {
         outcome: 'excluded',
         detail: `${MASTER_DERIVED}: the master-detail write check the by-id ${verb} runs refuses this ${verb} on its ` +
@@ -1673,6 +1737,13 @@ interface RecordAttributionContext {
    * so the record verdict of an `update` or a `delete` composes it too.
    */
   delegator?: { sets: PermissionSet[]; context: any };
+  /**
+   * [ADR-0090 D12] The delegated business-unit read's confinement, when the
+   * object-level pass admitted the read through it and no set's grant: the
+   * read door ANDs `id IN <the covered units>` into the find, so a unit
+   * outside it is a unit the principal does not read.
+   */
+  delegatedUnitScope?: Record<string, unknown>;
 }
 
 /**
@@ -1729,7 +1800,7 @@ async function applyRecordAttribution(
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
   const {
     deps, object, recordId, engineOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
-    declaredColumns, depthScope, delegator,
+    declaredColumns, depthScope, delegator, delegatedUnitScope,
   } = ra;
   const isRead = engineOp === 'find';
   const posture = derivePosture(context);
@@ -1911,7 +1982,7 @@ async function applyRecordAttribution(
   // members — never deleted, so a delete explanation reports nothing — and a
   // `transfer` of an unowned record by the principal is a CLAIM when the
   // sharing model positively admits them, which needs no transfer grant.
-  if (recordExists && engineOp !== 'delete' && hasOwnerField && (ownerRaw == null || ownerRaw === '') && context?.userId != null) {
+  if (recordExists && rlsOperationForVerb(engineOp) !== 'delete' && hasOwnerField && (ownerRaw == null || ownerRaw === '') && context?.userId != null) {
     const row = record as Record<string, unknown>;
     const sittingIn = typeof row.queue === 'string' && row.queue !== '' ? row.queue : null;
     if (sittingIn && deps.queueMember) {
@@ -1949,7 +2020,10 @@ async function applyRecordAttribution(
   // Write ops: the by-construction verdict is the sharing service's own gate.
   // [ADR-0111 D3] delete has its own narrower gate (an edit share does not
   // confer delete), so a `delete` explanation consults canDelete, not canEdit.
-  const writeGate = engineOp === 'delete' ? deps.canDeleteRecord : deps.canEditRecord;
+  // [#30237] The gate is picked by the write CLASS, as the sharing middleware
+  // picks it (`rlsOperationForVerb`): a `purge` is explained against canDelete.
+  const writeClass = rlsOperationForVerb(engineOp);
+  const writeGate = writeClass === 'delete' ? deps.canDeleteRecord : deps.canEditRecord;
   // A rejected gate is not an absent one: "no gate wired" hands the verdict to
   // ownership and read shares, while the by-id write it explains fails.
   const canEditOrFault = !isRead && writeGate && recordExists
@@ -1964,11 +2038,13 @@ async function applyRecordAttribution(
   // pre-image gate (the `rls` layer below). Asked on that condition alone, so
   // a row the gate admits, abstains on or faulted on is explained as before;
   // every answer but `admit`, and a rejection, keeps the refusal, as at the door.
-  // A transfer's door is the by-id update of `owner_id`, so it is deferred as
-  // an update; restore and purge have no by-id door (the object gate refuses
-  // both), so nothing defers them.
+  // The verb deferred is the write CLASS (`rlsOperationForVerb`), as at the
+  // middleware: a transfer's door is the by-id update of `owner_id`, so it is
+  // deferred as an update, and the permanent delete's by-id `purge` [#30237]
+  // as the delete it is. A `restore` addresses no live row (its record is in
+  // the recycle bin, so `recordExists` is false and nothing reaches here).
   const authoredDeferralVerb: AuthoredRowWriteOperation | undefined =
-    engineOp === 'update' || engineOp === 'transfer' ? 'update' : engineOp === 'delete' ? 'delete' : undefined;
+    writeClass === 'update' || writeClass === 'delete' ? writeClass : undefined;
   const authoredRowWriteAdmits = canEdit === false && authoredDeferralVerb && deps.probeAuthoredRowWrite
     ? (await deps.probeAuthoredRowWrite(object, recordId, authoredDeferralVerb, context).catch(() => 'abstain')) === 'admit'
     : false;
@@ -1987,7 +2063,7 @@ async function applyRecordAttribution(
   const masterFault = masterOrFault === DEPENDENCY_FAULT;
   const masterRefusal = masterOrFault === undefined || masterOrFault === DEPENDENCY_FAULT
     ? undefined
-    : masterWriteCheckRefusal(masterOrFault, engineOp);
+    : masterWriteCheckRefusal(masterOrFault, engineOp, nullMasterReferenceOf(deps, object, record as Record<string, unknown>));
   // [ADR-0055] A record-grained read of a `controlled_by_parent` record meets
   // a master leg too: the read door ANDs the record's master-derived read scope
   // (the master ids the principal can read, the chain included) into the find,
@@ -2008,18 +2084,52 @@ async function applyRecordAttribution(
     ? await settle(deps.recordAbsentToCaller(object, recordId, context))
     : undefined;
   const masterReadFault = masterReadOrFault === DEPENDENCY_FAULT;
+  // [ADR-0055 §2 as amended · #30905 ruling A] A record of an OPTIONAL master
+  // whose master reference is empty names no master: the read door reads it
+  // through the null-master arm (its owner, or View All on the object), never
+  // through a master. Read off the registry by the spec's own resolver, the
+  // one the door's relation resolver picks an optional master with, so the
+  // narration names the arm the door answered on; the verdict is still the
+  // door's own read above.
+  const nullMasterFk = masterReadOrFault === true || masterReadOrFault === false
+    ? nullMasterReferenceOf(deps, object, record as Record<string, unknown>)
+    : undefined;
+  const delegatorComposed = context?.onBehalfOf?.userId != null
+    ? " (on this on-behalf-of read, the delegator's read scope is composed in as well)"
+    : '';
   const masterReadRefusal: { outcome: ExplainRecordAttribution['outcome']; detail: string } | undefined =
     masterReadOrFault === true
       ? {
           outcome: 'excluded',
-          detail: `${MASTER_READ_DERIVED}: the read door, asked by this principal, does not return the record, though ` +
-            "every row-level layer above admits it, so its master is outside the principal's read scope" +
-            (context?.onBehalfOf?.userId != null
-              ? " (on this on-behalf-of read, the delegator's read scope is composed in as well)"
-              : '') +
-            '. The record is reported NOT visible, as the read door answers.',
+          detail: nullMasterFk !== undefined
+            ? `${MASTER_READ_DERIVED} when it names one, and it names none: its master reference '${nullMasterFk}' ` +
+              'is empty, so it is read only by its owner and by a holder of View All on the object. The read door, ' +
+              'asked by this principal, does not return it, though every row-level layer above admits it' +
+              (record != null && (record as Record<string, unknown>)[OWNER_FIELD] == null
+                ? ': it has no owner (a queue row), so View All alone reads it'
+                : '') +
+              delegatorComposed +
+              '. The record is reported NOT visible, as the read door answers.'
+            : `${MASTER_READ_DERIVED}: the read door, asked by this principal, does not return the record, though ` +
+              "every row-level layer above admits it, so its master is outside the principal's read scope" +
+              delegatorComposed +
+              '. The record is reported NOT visible, as the read door answers.',
         }
       : undefined;
+  // The same arm, when the door DOES return such a record: which half of the
+  // null-master arm admitted it. Narration only; the layer's outcome is the
+  // one the rest of this pass computes.
+  const masterReadNullArmAdmits: string | undefined = masterReadOrFault === false && nullMasterFk !== undefined
+    ? `${MASTER_READ_DERIVED} when it names one, and it names none: its master reference '${nullMasterFk}' is ` +
+      'empty, and the read door returns it to this principal through the null-master arm — ' +
+      (vamaEffective
+        ? `View All on the object [${vamaSets.join(', ')}]`
+        : ownerIsMe
+          ? 'the principal owns it'
+          : 'its owner or View All on the object') +
+      delegatorComposed +
+      '. No master is consulted for it.'
+    : undefined;
   // One master leg per verb: the write check for a by-id write, the read
   // door's master scope for a read. At most one of the two is ever asked.
   const masterLegRefusal = masterRefusal ?? masterReadRefusal;
@@ -2037,7 +2147,7 @@ async function applyRecordAttribution(
             'the find fails on the same call — so the record is reported NOT visible (fail closed), never admitted.'
           : undefined)
     : (writeGateFault
-        ? `The sharing service's per-record ${engineOp === 'delete' ? 'delete' : 'update'} gate could not be ` +
+        ? `The sharing service's per-record ${writeClass === 'delete' ? 'delete' : 'update'} gate could not be ` +
           'evaluated: it threw, and the by-id write fails on the same call — so the record is reported NOT ' +
           'writable (fail closed), never admitted.'
         : masterFault
@@ -2096,7 +2206,7 @@ async function applyRecordAttribution(
       rules: shareRules,
       // A fault is only ever recorded against an existing record, and the
       // master leg [ADR-0055] is only ever asked of one.
-      detail: sharingFaultDetail ?? masterLegRefusal?.detail ?? (!recordExists
+      detail: sharingFaultDetail ?? masterLegRefusal?.detail ?? masterReadNullArmAdmits ?? (!recordExists
         ? 'Record not found; sharing not evaluated.'
         : owd.effect !== 'private'
           ? 'Baseline is not private — sharing adds nothing beyond it for this record.'
@@ -2339,6 +2449,10 @@ async function applyRecordAttribution(
   if (capsDeny) { visible = false; decidedBy = 'required_permissions'; }
   else if (!crudAllowed) { visible = false; decidedBy = 'object_crud'; }
   else if (!recordExists) { visible = false; decidedBy = undefined; }
+  // [ADR-0090 D12] A read the object grant admitted only as the delegated
+  // business-unit read reaches the covered units alone: the door's find
+  // answers no other, so the layer that admitted it is the one that withholds it.
+  else if (delegatedUnitScope && matches(delegatedUnitScope) === false) { visible = false; decidedBy = 'object_crud'; }
   else if (tenantExcluded) { visible = false; decidedBy = 'tenant_isolation'; }
   else if (rlsExcluded) { visible = false; decidedBy = 'rls'; }
   // A dependency that threw decides by failing the request, in the order the
@@ -2633,6 +2747,8 @@ interface ObjectPass {
   delegatorContextForRls: any;
   readFilter: Record<string, unknown> | null | undefined;
   allowed: boolean;
+  /** [ADR-0090 D12] The delegated business-unit read's confinement, when the object grant admitted the read through it. */
+  delegatedUnitScope: Record<string, unknown> | null;
 }
 
 async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: ExplainAsker | undefined): Promise<ExplainDecision> {
@@ -2895,7 +3011,15 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   // that layer's grant is computed FROM, and reporting the real cause beats a
   // misleading "no set grants it" when the sets were never the problem.
   const postureUnresolved = secMeta.unresolved === true;
-  const crudAllowed = agentCrud && delegatorCrud && !delegatorRefused && !postureUnresolved;
+  // [ADR-0090 D12, ruling of record 6663849489] The one admission the read
+  // door makes beside the grant, asked as the door asks it: only for an
+  // operation the principal's sets do not grant, and through the door's own
+  // judgment ({@link ExplainEngineDeps.delegatedUnitReadScope}). A delegated
+  // (on-behalf-of) principal is never admitted by it.
+  const delegatedUnitScope = !agentCrud && !postureUnresolved && !delegatorRefused && deps.delegatedUnitReadScope
+    ? await deps.delegatedUnitReadScope(sets, object, engineOp, context, delegatorSets).catch(() => null)
+    : null;
+  const crudAllowed = (agentCrud || delegatedUnitScope !== null) && delegatorCrud && !delegatorRefused && !postureUnresolved;
   const granting = postureUnresolved
     ? []
     : sets
@@ -2905,8 +3029,12 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
     layer: 'object_crud',
     verdict: crudAllowed ? 'grants' : 'denies',
     detail: crudAllowed
-      ? `${operation} on '${object}' is granted by [${granting.join(', ')}]` +
-        (delegatorSets ? ' AND by the delegator (D10 intersection).' : '.')
+      ? delegatedUnitScope !== null
+        ? `No resolved permission set grants ${operation} on '${object}'; the business units the principal's ` +
+          `delegated admin scope covers are read as delegated administration (ADR-0090 D12), and no other ` +
+          `(see readFilter).`
+        : `${operation} on '${object}' is granted by [${granting.join(', ')}]` +
+          (delegatorSets ? ' AND by the delegator (D10 intersection).' : '.')
       : postureUnresolved
         // [#10401] One wording, shared with the middleware's own throw, so
         // explanation and enforcement cannot drift into telling a reader two
@@ -3145,7 +3273,10 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
       delegatorFilter = { id: DENY_ALL_SENTINEL_ID };
     }
   }
-  const filterParts = [agentFilter, delegatorFilter].filter(Boolean) as Record<string, unknown>[];
+  // [ADR-0090 D12] The delegated business-unit read is confined as the door
+  // confines it: `id IN <the covered units>`, ANDed beside the row-level
+  // security at step 3.
+  const filterParts = [agentFilter, delegatorFilter, delegatedUnitScope].filter(Boolean) as Record<string, unknown>[];
   // [#20604] A composed filter the find cannot run is refused here, as
   // enforcement refuses it, and never published as the filter a read runs
   // under. Before the record-grained pass, so a record id no row carries is
@@ -3178,6 +3309,7 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
       : readFilter
         ? 'Row-level security narrows the row set (see readFilter for the composed predicate)' +
           (delegatorFilter ? ' — intersection of agent + delegator filters (D10).' : '.') +
+          (delegatedUnitScope ? ' The delegated business-unit read is confined to the units the delegated admin scope covers (ADR-0090 D12).' : '') +
           (objectDefaults.length > 0 ? objectDefaultRowScopeSource(object, objectDefaults) : '')
         : 'No RLS policy applies.') +
       (membershipKeys.length > 0 ? await membershipKeySource(deps, membershipKeys) : ''),
@@ -3189,6 +3321,7 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   return {
     object, operation, context, dataOp, rlsOp, layers, sets, setNames, positions, owd, capsDeny, crudAllowed,
     vamaEffective, vamaSets, declaredColumns, scope, delegatorSets, delegatorContextForRls, readFilter, allowed,
+    delegatedUnitScope,
   };
 }
 
@@ -3205,7 +3338,7 @@ async function explainRecordOnPass(
 ): Promise<{ record: NonNullable<ExplainDecision['record']>; posture: AuthzPosture }> {
   const {
     object, operation, context, dataOp, rlsOp, layers, sets, owd, capsDeny, crudAllowed, vamaEffective, vamaSets,
-    declaredColumns, scope, delegatorSets, delegatorContextForRls,
+    declaredColumns, scope, delegatorSets, delegatorContextForRls, delegatedUnitScope,
   } = pass;
   let recordVerdict: NonNullable<ExplainDecision['record']>;
   const readQuestion = deps.recordAbsentToCaller;
@@ -3244,8 +3377,8 @@ async function explainRecordOnPass(
   // ({@link rlsOperationForVerb}), never the verb as asked: keyed on the raw
   // verb, a transfer of a row the caller cannot read was reported visible
   // beside the transfer door's 404. `restore` and `purge` map the same way
-  // and are refused at the object gate first, so the question never reaches
-  // them while their grants are retired.
+  // ([#30237] the by-id `purge`, the permanent delete, is a delete of the
+  // addressed row).
   //
   // [#22761] The WHOLE record story answers it, not the record verdict
   // alone. The question is asked before the row story is written.
@@ -3276,6 +3409,7 @@ async function explainRecordOnPass(
     object, recordId, engineOp: dataOp, rlsOp, context, sets, layers, owd, capsDeny, crudAllowed,
     vamaEffective, vamaSets, declaredColumns, depthScope: scope,
     ...(delegatorSets && delegatorContextForRls ? { delegator: { sets: delegatorSets, context: delegatorContextForRls } } : {}),
+    ...(delegatedUnitScope ? { delegatedUnitScope } : {}),
   });
   recordVerdict = out.record;
   if (principalCannotRead) {

@@ -129,9 +129,9 @@
  *   from it. The getter reads the field the handler read, when it read it:
  *   slice 2's batch shape, unbound, per the seat's provider ruling (no shipped
  *   provider reads `this`).
- * - The masker, the protocol, the read gate, the schema mask and the metadata
- *   service are each resolved per request by a METHOD of the class, and every
- *   method goes as a closure.
+ * - The masker, the protocol, the read gate, the schema mask, the metadata
+ *   service and [#30218] the request's environment are each resolved per
+ *   request by a METHOD of the class, and every method goes as a closure.
  * - The door names the requested type through the private static
  *   `metaTypeSingular`, which it used to call as
  *   `RestServer.metaTypeSingular(…)`; for the reason the section above gives,
@@ -170,7 +170,7 @@ import type { AuditMetaItemRequest, HistoryMetaItemRequest, PublishMetaItemReque
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { handleRouteError, sendFieldVisibilityFault, thrownAnswerIsBareNotFound } from './error-response.js';
 import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collection-routes.js';
-import { META_ITEM_MEMBER_PARAM, META_ITEM_PUBLISHED_PARAMS, metaMemberSelector } from './meta-item-read-gate.js';
+import { META_ITEM_MEMBER_PARAM, META_ITEM_PUBLISHED_PARAMS, metaMemberSelector, projectMetaActionItem } from './meta-item-read-gate.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import {
@@ -1092,7 +1092,10 @@ export interface MetaItemPublishedRouteHost {
     metaItemReadGate: RestServer['metaItemReadGate'];
     maskObjectDocument: RestServer['maskObjectDocument'];
     readonly objectQLProvider: RestServer['objectQLProvider'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveMetadataService: RestServer['resolveMetadataService'];
+    /** [ADR-0106 D1] The `object` list read the `action` projection reads its objects from. */
+    metaListSource: RestServer['metaListSource'];
 }
 
 /**
@@ -1245,6 +1248,25 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                         } else if (publishedMaskPosture.kind === 'undetermined') {
                             res.header('Cache-Control', 'private, no-store');
                         }
+                        // [ADR-0106 D1] An `action` is served as the object
+                        // door's projection serves it to this caller, as the
+                        // plain read serves it; a withheld one is this door's
+                        // answer for a name with nothing published behind it.
+                        if (publishedMetaType === 'action') {
+                            const projected = await projectMetaActionItem({
+                                ...this.metaListSource(gateProtocol, environmentId),
+                                resolveObjectMasker: () => this.resolveObjectMasker(environmentId, req, 'object'),
+                            }, served);
+                            if (projected.kind === 'withhold') {
+                                res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Not found' } });
+                                return;
+                            }
+                            if (projected.kind === 'fault') {
+                                sendFieldVisibilityFault(res, projected.object);
+                                return;
+                            }
+                            if (projected.cacheControl) res.header('Cache-Control', projected.cacheControl);
+                        }
                         res.json(served);
                     };
                     // [#20156] The overlay found is SERVED outside the
@@ -1265,9 +1287,11 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                     let withheld = false;
                     if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
                         && typeof publishedProtocol?.getMetaItem === 'function') {
+                        // [#30218] The REQUEST's environment's engine,
+                        // through the shared resolver, never the host's.
                         const ql = await wiredEngineOrLoud(
                             Boolean(this.objectQLProvider),
-                            () => this.objectQLProvider!(environmentId),
+                            async () => this.objectQLProvider!(await this.resolveRequestEnvironmentId(environmentId, req)),
                         );
                         const registry = (ql as any)?.registry;
                         if (typeof registry?.isPackageDisabled === 'function') {

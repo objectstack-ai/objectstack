@@ -52,6 +52,7 @@
  * | `accessToken` | `'carry'`: the dispatcher and the storage download door. `'withhold'`: REST and the `/auth/me` endpoints |
  * | `oauth` | the dispatcher's `/mcp` face, which alone speaks the OAuth scope vocabulary; `undefined` elsewhere |
  * | `onAdmission` | the dispatcher, whose gate needs the credential the envelope does not carry; `undefined` elsewhere |
+ * | `transport` | [#31821 · #31898] the transport's peer address, for the `credential_use` row an admitted API key writes: `{ remoteAddress }` from every door that opens the API-key door; `undefined` from the `'session-only'` doors, which write no such row. Never read for any verdict |
  *
  * ## What stays at the door
  *
@@ -78,12 +79,13 @@ import {
 } from './assemble-execution-context.js';
 import { normalizeAuthGate, userAuthGateSourceOf, type AuthGate } from './auth-gate.js';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
+import { credentialUseClientFor, type CredentialUseClientInput } from './credential-use-client.js';
 import { resolveAuthzContext, resolveLocalizationContext, type ResolvedAuthzContext } from './resolve-authz-context.js';
 
 /** The slice of the kernel's `auth` service this composition reads. */
 export type RequestAuthService = Pick<
   IAuthService,
-  'api' | 'getApi' | 'isAuthGateActive' | 'resolveUserAuthGates' | 'resolveApiKeyLifecyclePolicy'
+  'api' | 'getApi' | 'isAuthGateActive' | 'resolveUserAuthGates' | 'resolveApiKeyLifecyclePolicy' | 'resolveClientAddress'
 >;
 
 /**
@@ -163,6 +165,33 @@ export interface RequestExecutionContextInput {
   oauth: OAuthTokenProvenance | undefined;
   /** Told which credential admitted the principal; not called for an anonymous request. */
   onAdmission: ((admission: RequestAdmission) => void) | undefined;
+  /**
+   * [#31821 · #31898] The transport's own peer address
+   * (`IHttpRequest.remoteAddress`, or a raw-app context's socket), `undefined`
+   * inside when the transport exposes none. The auth service establishes the
+   * client address from it and the headers under the deployment's trust rule
+   * (`credentialUseClientFor`), for the `credential_use` row an admitted API
+   * key's use stamp writes. Never read for any verdict.
+   *
+   * REQUIRED, like every other key: a door that opens the API-key door hands
+   * its peer; a `'session-only'` door, which reads no key and so writes no such
+   * row, states `undefined`. The door census
+   * (`credential-use-client-doors.pin.test.ts`) holds the first half.
+   */
+  transport: { remoteAddress: string | undefined } | undefined;
+}
+
+/**
+ * [#31821] The client facts a door handed over, for the key-admission seam,
+ * through the one helper that asks the trust rule; `undefined` for a door that
+ * states no transport.
+ */
+function credentialUseClientInputOf(input: RequestExecutionContextInput): CredentialUseClientInput | undefined {
+  if (!input.transport) return undefined;
+  return credentialUseClientFor(input.authService, {
+    headers: input.headers,
+    remoteAddress: input.transport.remoteAddress,
+  });
 }
 
 /** `.api` (the legacy direct mount) or `getApi()` (the lazy plugin). */
@@ -259,6 +288,7 @@ export async function resolveRequestExecutionContext(
     guestEntry: input.anonymous === 'guest' ? true : undefined,
     userAuthGates: userAuthGateSourceOf(authService),
     apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
+    client: credentialUseClientInputOf(input),
   });
   if (authz.userId && authz.credential) {
     input.onAdmission?.({ credential: authz.credential, authGate: authz.authGate });

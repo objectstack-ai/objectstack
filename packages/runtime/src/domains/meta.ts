@@ -9,7 +9,7 @@
  */
 
 import {
-    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+    shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, PackageScopedNameRefusedError,
 } from '@objectstack/core';
 // [commit 67ceb9aef] `canonicalMetaUrlType` is the FOLD this transport was missing.
 import { canonicalMetaUrlType, pluralToSingular } from '@objectstack/spec/shared';
@@ -44,7 +44,7 @@ import {
 import type { MetadataProtocol } from '@objectstack/spec/api';
 // [#21002, #21986] The implementation class, for the ONE member it declares
 // that this domain asks (`declinesStoredRow`) — `Pick`ed below, never restated.
-import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { META_ITEM_SUBRESOURCE_SEGMENTS, type MetaItemAddress, type ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 // [#20193] THE per-caller read gate of a `/meta/:type/:name` document — the one
 // `RestServer` asks, published by `@objectstack/rest` so this transport asks it
 // too instead of a second audience resolver (ruling `5793362670` item 1).
@@ -81,15 +81,19 @@ import {
     createMetaLayeredAnswer,
     createMetaListAnswer,
     isPublicAudienceRead,
+    metaDraftsQueryRefusal,
     metaItemLayersDeprecationHeaders,
     metaItemPackageBinding,
     metaItemQueryRefusal,
+    metaListNames,
+    metaListQueryRefusal,
     metaMemberSelector,
     metaQueryArityRefusal,
     metaRequestLocale,
     metaSaveRequestOptions,
     metaTypeReadRefusal,
     metaTypeWriteRefusal,
+    projectMetaActionItem,
     projectMetaObjectSchema,
     refuseUnknownMetaListType,
     STORED_VERSION_DOOR_POLICY,
@@ -183,7 +187,8 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
 export type MetaDomainProtocol =
     Partial<Pick<MetadataProtocol,
         'getMetaTypes' | 'getMetaItems' | 'getMetaItem' | 'saveMetaItem' | 'getMetaItemLayered'>>
-    & Partial<Pick<ObjectStackProtocolImplementation, 'declinesStoredRow' | 'getMetaItemsForExecution' | 'packagelessLayeredReadRefusal'>>
+    & Partial<Pick<ObjectStackProtocolImplementation, 'declinesStoredRow' | 'getMetaItemsForExecution' | 'packagelessLayeredReadRefusal'
+        | 'resolveMetaItemAddress' | 'admitEnvironmentQualifier'>>
     & {
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         listDrafts?(request: any): Promise<any>;
@@ -404,12 +409,16 @@ function fieldVisibilityFaultResponse(deps: DomainHandlerDeps, objectName: strin
  * Resolved once per request and asked per object name, so the `/metadata` list
  * read pays one context + service resolution for the whole page.
  *
+ * Exported for the MCP bridge (`domains/mcp.ts`), whose object-schema reads
+ * (`describe_object`, `list_objects`) answer the same caller through this same
+ * masker, so the two doors cannot disagree about which fields exist.
+ *
  * [#20408] `metaType` is the FOLDED type the masker serves, as on `RestServer`:
  * every type but `object` is answered the not-applicable passthrough without
  * resolving anything, so an exit that serves every type (the item read) can
  * resolve its posture unconditionally, before its fetch.
  */
-async function resolveObjectMasker(
+export async function resolveObjectMasker(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     metaType: string,
@@ -448,7 +457,7 @@ async function resolveObjectMasker(
  * without it — the schema was served with no cache header at all, where
  * `RestServer` answers `private, no-store`.
  */
-async function maskObjectSchema(
+export async function maskObjectSchema(
     masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
     objectName: string,
     document: any,
@@ -553,6 +562,23 @@ function metaItemReadGateSources(
         ...(typeof protocol?.packagelessLayeredReadRefusal === 'function'
             ? { packagelessLayeredReadRefusal: (item: { type: string; name: string; member?: string }) => protocol.packagelessLayeredReadRefusal!(item) }
             : {}),
+        // [#30797] The deployment's `errors.permission_denied` override, as
+        // `RestServer.resolveMessageTranslator` hands it: the request's i18n
+        // service's `t`, or `undefined` when there is none. A service that
+        // cannot be resolved answers `undefined` — the refusal's wording must
+        // never turn its 403 into a 500 (a throwing `t` is caught by
+        // `renderOperationMessage` itself).
+        resolveMessageTranslator: async () => {
+            let i18n: { t?: unknown } | null | undefined;
+            try {
+                i18n = await deps.resolveService(context, 'i18n');
+            } catch {
+                return undefined;
+            }
+            if (!i18n || typeof i18n.t !== 'function') return undefined;
+            const t = i18n.t as (key: string, locale: string, params?: Record<string, unknown>) => string;
+            return (key, locale, params) => t.call(i18n, key, locale, params);
+        },
     };
 }
 
@@ -740,6 +766,8 @@ async function answerMetaItem(
         // [#22250] `runtimeDocument` — the caller's runtime view, which `sortability` derives from.
         translateEnvelope: (itemEnvelope, document, runtimeDocument) =>
             translateMetaEnvelope(translation, request.metaType, itemEnvelope, document, runtimeDocument),
+        // [ADR-0106 D1] The `action` item step's masker, the list chain's own.
+        resolveObjectMasker: () => resolveObjectMasker(deps, context, 'object'),
     };
     let answer: MetaItemAnswer;
     try {
@@ -855,6 +883,17 @@ function requestedItemPath(context: HttpProtocolContext): string | undefined {
 type MetaLayeredProtocol = MetaDomainProtocol & Required<Pick<MetaDomainProtocol, 'getMetaItemLayered'>>;
 
 /**
+ * [#29814] The layered read with its draft option — the implementation's
+ * (`@objectstack/metadata-protocol`) second parameter, which the spec's
+ * one-parameter declaration leaves out because it is no part of the request a
+ * client sends: the transport decides it from the caller's draft-read admission.
+ */
+type LayeredReadWithDraft = (
+    request: Parameters<MetaLayeredProtocol['getMetaItemLayered']>[0],
+    opts: { withDraft?: boolean },
+) => ReturnType<MetaLayeredProtocol['getMetaItemLayered']>;
+
+/**
  * [#20478] Answer the layered view — `GET /meta/:type/:name/layers`, and the
  * deprecated `?layers=` flag on the item read: read the protocol's
  * `getMetaItemLayered` exactly as `RestServer`'s layered read reads it, hand the
@@ -897,16 +936,26 @@ async function answerMetaLayered(
 ): Promise<HttpDispatcherResult> {
     const { type, name, packageId, maskPosture, memberSelector = {} } = request;
     const mayWriteItem = saveVerdict().allowed;
+    // [#29814] The pending draft layer, asked for only when this caller may
+    // read pending drafts ({@link mayReadPendingDrafts}, admitted in its own
+    // declaration as every draft switch in this domain is). A caller it does
+    // not admit is answered the layers without a `draft` key, byte-identical to
+    // a read that never asked, as `RestServer`'s layered read answers.
+    const layeredOptions = { withDraft: mayReadPendingDrafts(context.executionContext) };
     let answer: MetaLayeredAnswer;
     try {
-        const layered = await protocol.getMetaItemLayered({
+        const layered = await (protocol as { getMetaItemLayered: LayeredReadWithDraft }).getMetaItemLayered({
             type,
             name,
             ...(packageId ? { packageId } : {}),
             ...memberSelector,
-        });
+        }, layeredOptions);
         answer = await createMetaLayeredAnswer(
-            metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+            {
+                ...metaItemReadGateSources(deps, context, protocol, mayWriteItem),
+                // [ADR-0106 D1] The `action` layers step's masker, the list chain's own.
+                resolveObjectMasker: () => resolveObjectMasker(deps, context, 'object'),
+            },
             // [#28337] The member the layers were read at, for step 1c.
             { metaType: pluralToSingular(type), name, ...(packageId ? { packageId } : {}), ...memberSelector, maskPosture },
         )(layered);
@@ -953,6 +1002,17 @@ async function answerMetaLayered(
  * The sibling `domains/packages.ts` already decodes its own id segments the
  * same way; this domain was the outlier.
  */
+/**
+ * [ADR-0150 D3/D5] Whether a thrown value is the package-scoped rule's refusal
+ * (`PackageScopedNameRefusedError`, `409 RESOURCE_CONFLICT` with its
+ * candidates) — the read's answer, never a miss.
+ */
+function isPackageScopedRefusal(e: unknown): boolean {
+    if (e instanceof PackageScopedNameRefusedError) return true;
+    const thrown = e as { code?: unknown; refusal?: { status?: unknown } } | null | undefined;
+    return thrown?.code === 'RESOURCE_CONFLICT' && thrown.refusal?.status === 'refused';
+}
+
 function decodeMetaNameSegment(segment: string): string {
     try {
         return decodeURIComponent(segment);
@@ -981,7 +1041,72 @@ function queryRefusalAnswer(
  * Fallback for backward compat: /metadata (all objects), /metadata/:objectName (get object)
  */
 export async function handleMetadataRequest(deps: DomainHandlerDeps, path: string, _context: HttpProtocolContext, method?: string, body?: any, query?: any): Promise<HttpDispatcherResult> {
-    const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+    let parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+
+    // [ADR-0150 D5, epic #31527 child G1] The qualified by-name read,
+    // `GET /meta/:type/:ns/:name` and `GET /meta/:type/_env/:name`, read here,
+    // ONCE, before any gate: it is the item read `GET /meta/:type/:name` with
+    // the package named exactly (`?package=` the namespace's holder) or the
+    // environment named exactly, so every gate and branch below judges it as
+    // that read. D5's order: a sub-resource literal in the last position keeps
+    // its route (`/meta/app/crm/history` is the app `crm`'s history, ruling Q1
+    // on #31691); then `_env`; then an installed namespace
+    // (`resolveMetaItemAddress`); else nothing changes and the path answers
+    // what it answered before. `RestServer` reads the same path the same way.
+    //
+    // An anonymous caller is never rewritten: `RestServer`'s anonymous gate
+    // judges the route the request names, and its public-audience exemption
+    // names no qualified shape, so the qualified read is denied there before
+    // its handler runs. Here the path stays three segments and the deny below
+    // judges it the same way, before the address is read.
+    //
+    // Nor is a caller the type-level read admission refuses (#21087, below):
+    // `RestServer` asks it before any `/meta` handler runs, the qualified one
+    // included, so reading the address first would tell that caller what the
+    // admission withholds — that the name exists, and who holds it (a two-holder
+    // shareable namespace's 409) — or answer the two-qualifier 400 the other
+    // transport never reaches. The path stays three segments, and the
+    // admission answers it as `RestServer` does.
+    const anonymous = shouldDenyAnonymous({
+        userId: (_context.executionContext as any)?.userId,
+        isSystem: (_context.executionContext as any)?.isSystem,
+    });
+    let environmentQualified = false;
+    if (!anonymous && (!method || method.toUpperCase() === 'GET') && parts.length === 3
+        && !metaTypeReadRefusal('GET', parts[0], _context.executionContext)
+        && parts[0] !== 'types' && !parts[0].startsWith('_')
+        && !META_ITEM_SUBRESOURCE_SEGMENTS.includes(parts[2])) {
+        const qualifierProtocol = await resolveProtocol(deps, _context);
+        let address: MetaItemAddress | undefined;
+        try {
+            address = typeof qualifierProtocol?.resolveMetaItemAddress === 'function'
+                ? qualifierProtocol.resolveMetaItemAddress({ type: parts[0], segment: parts[1], name: decodeMetaNameSegment(parts[2]) })
+                : undefined;
+        } catch (e) {
+            // A shareable namespace whose owners both hold the name (ADR-0150
+            // D2): the address names no one item — the refusal's own 409,
+            // naming each, answered here like the item read's.
+            if (isPackageScopedRefusal(e)) return { handled: true, response: deps.errorFromThrown(e, 409) };
+            throw e;
+        }
+        if (address) {
+            // Two qualifiers on one read name two addresses; neither is picked.
+            if (query?.package !== undefined) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `The path names its ${address.kind === 'environment' ? 'environment' : `namespace '${parts[1]}'`} `
+                        + 'as the exact qualifier, so `?package=` cannot name another one. Send one of the two (ADR-0150 D5).',
+                        400,
+                        { code: 'VALIDATION_ERROR' },
+                    ),
+                };
+            }
+            parts = [parts[0], parts[2]];
+            if (address.kind === 'namespace') query = { ...(query ?? {}), package: address.packageId };
+            else environmentQualified = true;
+        }
+    }
 
     // [#12702 · #20320] May this caller SAVE `:type/:name` on THIS transport?
     // The admission of the item branch's `PUT`, spelled ONCE: that door asks
@@ -1020,10 +1145,6 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     const anonymousDeny = (): HttpDispatcherResult => ({
         handled: true,
         response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
-    });
-    const anonymous = shouldDenyAnonymous({
-        userId: (_context.executionContext as any)?.userId,
-        isSystem: (_context.executionContext as any)?.isSystem,
     });
     if (anonymous && !isPublicAudienceRead(method, metaReadRouteOf(parts), parts[0])) return anonymousDeny();
 
@@ -1300,6 +1421,19 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 served = masked.document;
                 // [#20408] ADR-0106 D6 tier 2 — as `RestServer`'s `/published`.
                 cacheControl = masked.cacheControl;
+            }
+            // [ADR-0106 D1] An `action` is served as the object door's
+            // projection serves it to this caller, as `RestServer`'s
+            // `/published` serves it; a withheld one is this door's answer for
+            // a name with nothing published behind it.
+            if (publishedType === 'action') {
+                const projected = await projectMetaActionItem({
+                    ...metaItemReadGateSources(deps, _context, protocol),
+                    resolveObjectMasker: () => resolveObjectMasker(deps, _context, 'object'),
+                }, served);
+                if (projected.kind === 'withhold') return { handled: true, response: deps.error('Not found', 404) };
+                if (projected.kind === 'fault') return fieldVisibilityFault(deps, projected.object);
+                cacheControl = projected.cacheControl;
             }
             return successWithHeaders(deps, served, { 'Cache-Control': cacheControl });
         };
@@ -1798,6 +1932,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (queryRefusal) return queryRefusalAnswer(deps, queryRefusal);
 
         try {
+            // [ADR-0150 D5, child G1] `/meta/:type/_env/:name`: the
+            // environment's own item, or `409` naming every holder — judged
+            // here, after the gates above, then read as a caller with no
+            // package (the resolver answers that caller environment-first).
+            if (environmentQualified) {
+                const qualifierProtocol = await resolveProtocol(deps, _context);
+                qualifierProtocol?.admitEnvironmentQualifier?.({ type: singularType, name, ...memberSelector });
+            }
+
             // [#5882 · #20478] The DEPRECATED spelling of the layered view,
             // `?layers=<any non-empty value>` — the parse `RestServer`'s item
             // read asks (`wantsMetaItemLayers`), answered FIRST, before either
@@ -1988,6 +2131,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // outer `catch` as `RestServer` renders it — never a
                     // fall-through to the name-keyed `MetadataService` below.
                     if (memberNamed) throw e;
+                    // [ADR-0150 D3/D5, child G1] …and so is the package-scoped
+                    // rule's refusal: `409` naming every holder, never a miss
+                    // for the by-name service read below to answer with
+                    // whichever item it finds first.
+                    if (isPackageScopedRefusal(e)) throw e;
                  }
             }
             if (found) return serveItem(protocol, found);
@@ -2029,7 +2177,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         }
     }
     
-    // GET /metadata/_drafts?packageId=&type=  (ADR-0033 pending-changes list)
+    // GET /metadata/_drafts?package=&type=  (ADR-0033 pending-changes list)
     // Surfaces draft-state metadata the active-only `getMetaItems` list hides,
     // so the console can show what an AI authored but nobody published yet.
     // `_drafts` is intercepted before the generic `:type` handler below so it
@@ -2064,8 +2212,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // [#23214] One package and one type narrow the list: a repeat would
             // reach `listDrafts` as an array. Asked where `RestServer` asks it,
             // after the capability gate and the capability probe.
-            const arity = metaQueryArityRefusal('drafts', query);
-            if (arity) return queryRefusalAnswer(deps, arity);
+            // [#31490] …after recognition: a name outside `_drafts`' closed
+            // set (the retired `packageId` among them) is refused, as
+            // `RestServer`'s door refuses it, rather than dropped.
+            const refusal = metaDraftsQueryRefusal(query);
+            if (refusal) return queryRefusalAnswer(deps, refusal);
             try {
                 // [#29180] A `type` naming no metadata type is refused by the
                 // list branch's verdict, as `RestServer`'s `_drafts` asks it,
@@ -2075,8 +2226,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 if (draftsType) await refuseUnknownMetaListType(protocol, draftsType);
                 // [ADR-0131 D6] No organization, as `RestServer`'s `_drafts`:
                 // every draft is saved environment-wide.
+                // [#31490] `?package=`, through the list branch's binding.
                 const data = await protocol.listDrafts({
-                    packageId: query?.packageId || undefined,
+                    packageId: metaItemPackageBinding(query?.package),
                     type: draftsType,
                 });
                 return { handled: true, response: deps.success(data) };
@@ -2174,10 +2326,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
     if (parts.length === 1) {
         const typeOrName = parts[0];
         // [#23214] Before any read of the list's query, as `RestServer`'s list
-        // asks it: `package`, `preview`, `object`, `include` and `id` are each
-        // one value, and a repeat would scope nothing, select no view, or drop
-        // a filter and answer the whole list.
-        const arity = metaQueryArityRefusal('list', query);
+        // asks it: `package`, `preview`, `object`, `include`, `id` and
+        // [#29236] `names` are each one value, and a repeat would scope
+        // nothing, select no view, or drop a filter and answer the whole list.
+        // [#29236] …and, first, RECOGNITION over the list's closed set
+        // (`META_LIST_QUERY_PARAMS`): a name the list does not read is a
+        // located 400, never the whole list with a 200. One decision for both
+        // transports (`metaListQueryRefusal`).
+        const listType = pluralToSingular(typeOrName);
+        const arity = metaListQueryRefusal(listType, query);
         if (arity) return queryRefusalAnswer(deps, arity);
         // Extract optional package filter from query string.
         // [#22188] `RestServer`'s reading: `all`, the list's "show everything"
@@ -2207,7 +2364,6 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // the store does not know, and a chain fault must be answered as itself
         // — never fall through to the next store as though the first had not
         // answered.
-        const listType = pluralToSingular(typeOrName);
 
         // [#9488 · #20408] A segment that names no metadata type is REFUSED —
         // `400 INVALID_REQUEST`, the one refusal `RestServer`'s list answers —
@@ -2236,13 +2392,26 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             && mayReadPendingDrafts(_context.executionContext);
         const answerList = (data: any) =>
             answerMetaList(deps, _context, protocol, listType, query, previewDrafts, data);
+        // [#29236] `?names=a,b`, read as `RestServer`'s list reads it — an
+        // empty one refused before any store read — and pushed down to the
+        // protocol's list read, so it filters before it decorates. The chain
+        // narrows by the same reading, which also holds the answer of the
+        // metadata service and registry exits below, which take no names.
+        let names: readonly string[] | undefined;
+        try {
+            names = metaListNames(query);
+        } catch (e: any) {
+            return { handled: true, response: deps.errorFromThrown(e, 400) };
+        }
 
         let listed: any;
         if (protocol && typeof protocol.getMetaItems === 'function') {
             try {
                 // [ADR-0131 D6] No organization: environment → code, the
                 // partition `RestServer`'s list reads.
-                const data = await protocol.getMetaItems({ type: typeOrName, packageId, previewDrafts });
+                const data = await protocol.getMetaItems({
+                    type: typeOrName, packageId, previewDrafts, ...(names ? { names: [...names] } : {}),
+                });
                 // Return any valid response from protocol (including empty items arrays)
                 if (data && (data.items !== undefined || Array.isArray(data))) listed = data;
             } catch (e: any) {

@@ -544,3 +544,24 @@ describe('[#26546] the refusal reads the comparator direction, so an exclusive b
     });
   });
 });
+
+describe('[#30326] assertProtocolCompat answers the verdict it admitted the package under', () => {
+  it('no-range: the handshake\'s own verdict, naming the protocol the package loads under unchecked', () => {
+    expect(assertProtocolCompat({ id: 'p' }, RT, () => {})).toEqual({
+      status: 'no-range', runtimeMajor: 11, protocolVersion: RT,
+    });
+  });
+
+  it('unparsed-range: the verdict with the range and its source', () => {
+    expect(assertProtocolCompat({ id: 'p', engines: { protocol: '???' } }, RT, () => {})).toEqual({
+      status: 'unparsed-range', runtimeMajor: 11, protocolVersion: RT, requiredRange: '???', source: 'engines.protocol',
+    });
+  });
+
+  it('ok: the checked verdict, equal to checkProtocolCompat\'s for the same manifest', () => {
+    const manifest = { id: 'p', engines: { protocol: '^11' } };
+    const admitted = assertProtocolCompat(manifest, RT, () => {});
+    expect(admitted.status).toBe('ok');
+    expect(admitted).toEqual(checkProtocolCompat(manifest, RT));
+  });
+});

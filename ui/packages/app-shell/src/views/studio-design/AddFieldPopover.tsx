@@ -13,8 +13,9 @@
  * creates nothing.
  *
  * The api name is derived from the label, as the field inspector derives it,
- * and shown under the Label before Create. When the label yields none (a
- * label with no Latin letters, a Chinese one say) or yields one another field
+ * and shown under the Label before Create; a Chinese label derives through its
+ * pinyin (`romanizeHan`: `客户等级` → `kehu_dengji`). When the label yields
+ * none (a Japanese one, say) or yields one another field
  * already holds, the popover asks for the api name instead of letting the
  * host fall back to a positional `field_<N>` the author never saw, which is
  * permanent once published (objectui#13389).
@@ -45,6 +46,7 @@ import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import { FieldTypePicker } from '../metadata-admin/inspectors/FieldTypePicker.js';
 import { t, tFormat, useMetadataLocale, type SupportedLocale } from '../metadata-admin/i18n.js';
 import { toFieldNameLoose } from '../metadata-admin/previews/object-fields-io.js';
+import { romanizeHan, romanizerPending, useHanRomanizer } from '../metadata-admin/romanizeHan.js';
 import { extensionFieldName } from './StudioCustomizeControls.js';
 
 /**
@@ -123,15 +125,19 @@ export function AddFieldPopover({
   };
 
   const trimmed = label.trim();
+  useHanRomanizer(trimmed);
+  // The pinyin dictionary is still on its way: the name is about to derive, so
+  // neither ask for one nor allow Create yet.
+  const pending = romanizerPending(trimmed);
   const suffixed = (name: string) => (extensionField ? extensionFieldName(name) : name);
-  const derived = suffixed(toFieldNameLoose(trimmed).replace(/_+$/, ''));
+  const derived = suffixed(toFieldNameLoose(romanizeHan(trimmed)).replace(/_+$/, ''));
   const derivedTaken = !!derived && takenNames.includes(derived);
   // The label alone cannot name the field: the author types the api name.
-  const asksName = !!trimmed && (!derived || derivedTaken);
+  const asksName = !!trimmed && !pending && (!derived || derivedTaken);
   const typed = suffixed(apiName.replace(/_+$/, ''));
   const typedRefusal = fieldNameTakenRefusal(typed, takenNames, locale);
   const typedTaken = !!typedRefusal;
-  const canCreate = !!trimmed && (!asksName || (!!typed && !typedTaken));
+  const canCreate = !!trimmed && !pending && (!asksName || (!!typed && !typedTaken));
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canCreate) return;
@@ -188,7 +194,7 @@ export function AddFieldPopover({
               data-testid="add-field-label-input"
               className="h-8 text-sm"
             />
-            {trimmed && !asksName && (
+            {trimmed && !asksName && !pending && (
               <p className="text-xs text-muted-foreground" data-testid="add-field-api-name-preview">
                 {t('designer.field.apiName', locale)}: <span className="font-mono text-foreground">{derived}</span>
               </p>

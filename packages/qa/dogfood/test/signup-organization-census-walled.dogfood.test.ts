@@ -40,7 +40,7 @@
 // derivable), never on row isolation, so the stand-in's lack of a row wall
 // measures nothing away. `OS_TENANCY_POSTURE` selects `group`.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import crmStack from '@objectstack/example-crm';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
@@ -112,6 +112,13 @@ for (const posture of ['group', 'isolated'] as const) {
       });
       expect(signedUp.status, `sign-up ${email}: ${await signedUp.clone().text()}`).toBe(200);
       const id = await userIdOf(email);
+      // The sign-up answers before its verification mail is sent; the journey
+      // goes on once the mail row that send persists has landed — bounded,
+      // never assumed — so every later read sees the whole sign-up.
+      await vi.waitFor(async () => {
+        const mails = await ql.find('sys_identity_email', { where: { related_object: 'sys_user', related_id: id }, ...SYS });
+        expect(mails.length, `${email}: the verification mail sent after the sign-up answer landed`).toBeGreaterThan(0);
+      }, { timeout: 15_000 });
       await ql.update('sys_user', { id, email_verified: true }, SYS);
       return { id, token: await stack.signIn(email, PASSWORD) };
     };

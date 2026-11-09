@@ -194,7 +194,8 @@ describe('audit record pages and lists — the type half never draws as text (#2
 
   it('control: config_changes is still declared with its filter, and the pair stays declared', () => {
     const view = SysAuditLog.listViews?.config_changes as { filter?: unknown; columns?: unknown } | undefined;
-    expect(view?.filter).toEqual([{ field: 'action', operator: 'in', value: ['config_change', 'import'] }]);
+    // [#30955] `export` joined `import` here: both are run-level rows with no `record_id`.
+    expect(view?.filter).toEqual([{ field: 'action', operator: 'in', value: ['config_change', 'import', 'export'] }]);
     expect(view?.columns).toEqual(['created_at', 'action', 'user_id']);
     expect((SysAuditLog.fields as Record<string, Record<string, unknown>>).record_id.referenceVia).toBe('object_name');
   });

@@ -172,7 +172,7 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
     const sw = await ledgerSwitch();
     // The definition reads `obsolete`; the ledger reads enabled.
     expect(sw).toHaveAttribute('aria-checked', 'true');
-    expect(sw).toHaveTextContent('On for this deployment');
+    expect(sw).toHaveTextContent('Switched on for this deployment');
     expect(sw).toBeEnabled();
     const statusReads = calls('/automation/_status').length;
 
@@ -182,7 +182,7 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
     expect(init?.method).toBe('POST');
     expect(JSON.parse(String(init?.body))).toEqual({ enabled: false });
     await waitFor(() => expect(screen.getByTestId('auto-ledger-switch')).toHaveAttribute('aria-checked', 'false'));
-    expect(screen.getByTestId('auto-ledger-switch')).toHaveTextContent('Off for this deployment');
+    expect(screen.getByTestId('auto-ledger-switch')).toHaveTextContent('Switched off for this deployment');
     // The runtime is read again: the answer carries the flag alone.
     await waitFor(() => expect(calls('/automation/_status').length).toBeGreaterThan(statusReads));
     expect(mockClient.save).not.toHaveBeenCalled();
@@ -196,10 +196,10 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
     const sw = await ledgerSwitch();
     expect(sw).toHaveAttribute('aria-checked', 'false');
     expect(sw).toHaveAttribute('data-reading', 'off');
-    expect(sw).toHaveTextContent('Off for this deployment');
-    // One switch, and not the definition's: no "Enabled" word, no read-only hint.
+    expect(sw).toHaveTextContent('Switched off for this deployment');
+    // One switch, and not the definition's: not its bare "Switched on" word, no read-only hint.
     expect(screen.getAllByRole('switch')).toHaveLength(1);
-    expect(sw).not.toHaveTextContent('Enabled');
+    expect(sw).not.toHaveTextContent(/^Switched on$/);
     expect(document.body).not.toHaveTextContent('switch to or create a writable package');
   });
 
@@ -210,7 +210,7 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
     const sw = await ledgerSwitch();
     expect(sw).toHaveAttribute('aria-checked', 'true');
     expect(sw).toHaveAttribute('data-reading', 'not-running');
-    expect(sw).toHaveTextContent('On for this deployment, not running here');
+    expect(sw).toHaveTextContent('Switched on for this deployment, not running here');
     expect(screen.getByTestId('auto-ledger-not-running-reason')).toHaveTextContent(reason);
     expect(sw.getAttribute('aria-describedby')).toContain(screen.getByTestId('auto-ledger-not-running-reason').id);
   });
@@ -291,7 +291,7 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
     mount(false);
     expect(await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 })).toHaveTextContent('Approval');
     const sw = await screen.findByRole('switch');
-    expect(sw).toHaveTextContent('Disabled');
+    expect(sw).toHaveTextContent(/^Switched off$/);
     expect(screen.queryByTestId('auto-ledger-switch')).toBeNull();
     // The definition switch never reaches the ledger door.
     fireEvent.click(sw);

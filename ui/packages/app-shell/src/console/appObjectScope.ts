@@ -40,7 +40,17 @@
  * (`usePageAssignment`'s choice). A record route with no declared record page,
  * or a slotted one, reads the whole registry: its synthesized page derives
  * the related lists from every object that points at the record's object, in
- * any package.
+ * any package. objectstack#29552 — except for an object the app's navigation
+ * reaches: the app bundle holds every object that points at it
+ * (`BundledReads.objectsReferencing`), so the route reads those by name, with
+ * the object's own names, instead (measured on a production Console: the
+ * registry was 553 KB of a console-created app's 888 KB record route).
+ * objectstack#29681 — a packaged app reads them through its package scope, as
+ * its object routes read their names: the package list, then by name each
+ * name it does not hold, an object of another package pointing at the record's
+ * among them (the registry was 561 KB of `crm_app`'s 1.58 MB record route).
+ * Until the bundle has answered it waits; an object outside the navigation, no
+ * bundle, or draft preview reads the registry as before.
  *
  * Everywhere else the route reads the whole registry, as before. For the
  * related lists' reason a record overlay (`?recordId=`, `?form=`) reads the
@@ -72,12 +82,13 @@
 
 import { useEffect } from 'react';
 import { matchRoutes, useLocation } from 'react-router-dom';
-import { isRecordPageOf, useAdapter, useMetadata, type MetadataContextValue } from '@object-ui/react';
+import { isRecordPageOf, useAdapter, useMetadata, type AnsweredLoadFailure, type MetadataContextValue } from '@object-ui/react';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { APP_ROUTE_METADATA_READS } from './appRouteMetadataReads.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
 import { COMMAND_PALETTE_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_PARAM } from '../urlParams.js';
 import type { ReadNamesWithoutViews } from '../hooks/useObjectPresence.js';
+import type { BundledRead } from '../providers/bundledReads.js';
 
 type ReadObjectScope = NonNullable<MetadataContextValue['readObjectScope']>;
 export type AppObjectScope = ReturnType<ReadObjectScope>;
@@ -89,15 +100,31 @@ export type AppObjectScope = ReturnType<ReadObjectScope>;
  * (reported once nothing else is in flight; `settled` stays false for them),
  * and `refused`, each refused name in `missing` with its ADR-0112 code. A
  * provider that does not carry them (a test double, a host's own) reads as
- * none, which is the behaviour before this card.
+ * none, which is the behaviour before this card. objectstack#29728 —
+ * `answers`, each failed name a server DID answer, with its code and sentence.
  */
 interface ScopeReadOutcomes {
   failed?: readonly string[];
   refused?: Readonly<Record<string, string>>;
+  answers?: Readonly<Record<string, AnsweredLoadFailure>>;
 }
 
 function failedNamesOf(scope: AppObjectScope): readonly string[] {
   return (scope as AppObjectScope & ScopeReadOutcomes).failed ?? [];
+}
+
+/**
+ * objectstack#29728 — what the server said for the route's failed reads: the
+ * answer of the first failed name a server answered, or `null` when none was
+ * (the route keeps its network sentence).
+ */
+function failedAnswerOf(scope: AppObjectScope): AnsweredLoadFailure | null {
+  const answers = (scope as AppObjectScope & ScopeReadOutcomes).answers;
+  if (!answers) return null;
+  for (const name of failedNamesOf(scope)) {
+    if (answers[name]) return answers[name];
+  }
+  return null;
 }
 
 function refusalOf(scope: AppObjectScope, name: string | undefined): AppObjectScopeRead['routeObjectRefusal'] {
@@ -252,7 +279,7 @@ export function readPageObjectScope(
   app: Record<string, any> | undefined,
   page: unknown,
   extraNames: readonly string[] = [],
-): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[] } {
+): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[]; failedAnswer: AnsweredLoadFailure | null } {
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
   const read = (names: readonly string[]): AppObjectScope =>
     packageId ? readObjectScope({ packageId, names }) : names.length > 0 ? readObjectScope({ names }) : NO_OBJECT_SCOPE;
@@ -266,6 +293,7 @@ export function readPageObjectScope(
     scope: lookups.length > 0 ? read([...new Set([...names, ...lookups])]) : first,
     ready,
     failedNames: failedNamesOf(boundRead),
+    failedAnswer: failedAnswerOf(boundRead),
   };
 }
 
@@ -322,7 +350,7 @@ export function readDashboardObjectScope(
   app: Record<string, any> | undefined,
   dashboard: unknown,
   extraNames: readonly string[] = [],
-): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[] } {
+): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[]; failedAnswer: AnsweredLoadFailure | null } {
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
   const widgetRead = readDashboardWidgetObjects(readObjectScope, app, dashboard);
   const names = [...new Set([...dashboardObjectNames(dashboard), ...extraNames])];
@@ -331,7 +359,12 @@ export function readDashboardObjectScope(
     : names.length > 0
       ? readObjectScope({ names })
       : NO_OBJECT_SCOPE;
-  return { scope, ready: routeReadDone(widgetRead), failedNames: failedNamesOf(widgetRead) };
+  return {
+    scope,
+    ready: routeReadDone(widgetRead),
+    failedNames: failedNamesOf(widgetRead),
+    failedAnswer: failedAnswerOf(widgetRead),
+  };
 }
 
 /** The dashboard a dashboard route resolves to, and whether it is known yet (objectstack#28784). */
@@ -446,6 +479,13 @@ export interface AppObjectScopeRead {
    */
   failedNames: readonly string[];
   /**
+   * objectstack#29728 — what the server said for those failed reads, when one
+   * answered them (a 5xx, a 404 with a code this build does not know): its
+   * code and sentence, which the failed-read state draws in place of the
+   * network sentence. `null` when no server answered, or nothing failed.
+   */
+  failedAnswer: AnsweredLoadFailure | null;
+  /**
    * objectui#13052 — the ADR-0112 code the server refused the route's own
    * object with, when it answered with a refusal rather than a plain absence
    * (`OBJECT_PACKAGE_DISABLED`); `null` otherwise.
@@ -453,7 +493,7 @@ export interface AppObjectScopeRead {
   routeObjectRefusal: { objectName: string; code: string } | null;
 }
 
-const NOT_READ = { failedNames: [] as readonly string[], routeObjectRefusal: null };
+const NOT_READ = { failedNames: [] as readonly string[], failedAnswer: null, routeObjectRefusal: null };
 
 /**
  * The object scope the route at `subPath` (below `/apps/:appName`) reads, in
@@ -468,6 +508,7 @@ export function readAppObjectScope(
   readPage?: (pageName: string) => PageRead,
   readPages?: () => PagesRead,
   readDashboard?: (dashboardName: string) => DashboardRead,
+  readObjectsReferencing?: (objectName: string) => BundledRead<readonly string[]>,
 ): AppObjectScopeRead {
   const route = matchObjectScopeRoute(subPath, hostPaths);
   const candidate = !!route && !!readObjectScope && !hasRecordFormOverlay(search);
@@ -499,7 +540,24 @@ export function readAppObjectScope(
     const pagesRead = readPages?.();
     if (!pagesRead?.settled) return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
     const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName, typeof app.name === 'string' ? app.name : undefined);
-    if (!page) return { candidate, scope: null, ready: false, ...NOT_READ };
+    if (!page) {
+      // objectstack#29552 — the synthesized page: its related lists are
+      // derived from every object that points at the record's object, which
+      // the app bundle holds for an object the app's navigation reaches. Those
+      // are read by name with the route's own names (a bundled object is
+      // answered from the bundle, asked of no route). objectstack#29681 — a
+      // packaged app reads them through its package scope: the package list,
+      // then by name each one it does not hold (an object of another package
+      // that points at the record's). A bundle that cannot say reads the
+      // registry.
+      const referencing = readObjectsReferencing?.(route.objectName);
+      if (referencing?.state === 'pending') return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
+      if (referencing?.state !== 'hit') return { candidate, scope: null, ready: false, ...NOT_READ };
+      return {
+        candidate,
+        ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId, referencing.value, true),
+      };
+    }
     const extra = [route.objectName, ...appRequiredObjectNames(app)];
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
       extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
@@ -555,7 +613,13 @@ export function readAppObjectScope(
  * root), the objects the app's own navigation and area entries require (the
  * sidebar's capability gate answers from this scope), the navigation's objects
  * while the command palette is open, and the route object's lookup targets.
- * Only the route's object holds the route.
+ * Only the route's object holds the route. `relatedNames` (objectstack#29552:
+ * the objects that point at a record's object, whose related lists its
+ * synthesized page draws) are asked with the route's names, and the route
+ * waits for them as it waits for its own object. `synthesizedRecordPage`
+ * (objectstack#29878): the route is a record route with no declared record
+ * page, whose synthesized page also reads the objects its record streams need
+ * ({@link recordStreamObjectNames}); the route waits for those too.
  */
 function readObjectRouteNames(
   readObjectScope: ReadObjectScope,
@@ -563,32 +627,91 @@ function readObjectRouteNames(
   objectName: string | undefined,
   search: string,
   packageId: string | undefined,
+  relatedNames: readonly string[] = [],
+  synthesizedRecordPage = false,
 ): Omit<AppObjectScopeRead, 'candidate'> {
   // With no package and no name, nothing: the provider reads an empty
   // names-only ask as the whole registry (objectstack#29552, an app's root).
   const read = (names: readonly string[]): AppObjectScope =>
     packageId ? readObjectScope({ packageId, names }) : names.length > 0 ? readObjectScope({ names }) : NO_OBJECT_SCOPE;
   const routeRead = read(objectName ? [objectName] : []);
-  const ready = routeReadDone(routeRead);
-  const routeOutcome = { failedNames: failedNamesOf(routeRead), routeObjectRefusal: refusalOf(routeRead, objectName) };
+  const ready =
+    routeReadDone(routeRead) &&
+    (relatedNames.length === 0 || routeReadDone(read([...(objectName ? [objectName] : []), ...relatedNames])));
+  const routeOutcome = {
+    failedNames: failedNamesOf(routeRead),
+    failedAnswer: failedAnswerOf(routeRead),
+    routeObjectRefusal: refusalOf(routeRead, objectName),
+  };
   const names = appRequiredObjectNames(app);
   if (objectName) names.push(objectName);
+  names.push(...relatedNames);
   if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
     names.push(...navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
   }
-  const first = read(names);
+  const asked = read(names);
+  const first = relatedNames.length > 0 ? inRelatedOrder(asked, relatedNames) : asked;
   const routeDef = objectName ? first.objects.find((o: any) => o?.name === objectName) : undefined;
   const lookups = routeDef ? lookupTargetNames(routeDef) : [];
-  if (lookups.length === 0) return { scope: first, ready, ...routeOutcome };
+  const streamNames = synthesizedRecordPage && routeDef ? recordStreamObjectNames(routeDef) : [];
+  if (lookups.length === 0 && streamNames.length === 0) return { scope: first, ready, ...routeOutcome };
   // The lookup targets are asked without views, through the same scope as the
   // route's names: a lookup cell links and names its target and reads none of
   // its views, and a target outside the app bundle (`sys_user`) composed with
   // them read the whole `/meta/view` list (objectstack#29551). They join the
   // scope's objects as they land; the route's names keep their views.
   const readWithoutViews = readObjectScope as ReadNamesWithoutViews;
-  if (packageId) readWithoutViews({ packageId, names: lookups, views: false });
-  else readWithoutViews({ names: lookups, views: false });
-  return { scope: first, ready, ...routeOutcome };
+  const readNames = (names: readonly string[]) =>
+    packageId ? readWithoutViews({ packageId, names, views: false }) : readWithoutViews({ names, views: false });
+  if (lookups.length > 0) readNames(lookups);
+  if (streamNames.length === 0) return { scope: first, ready, ...routeOutcome };
+  // objectstack#29878 — the stream objects are asked the same way, once the
+  // route's object says it needs them, and the route waits for them: the
+  // record view reads them on its first render, where the page payload's ask
+  // goes out (`fieldChanges`). A refused, absent or failed read settles the
+  // wait without the object, so the stream it feeds stays off and the page is
+  // drawn; it is not the route's failure (`routeOutcome` reads the route's own
+  // object only).
+  const streamRead = readNames(streamNames);
+  return { scope: first, ready: ready && routeReadDone(streamRead), ...routeOutcome };
+}
+
+/**
+ * objectstack#29878 — the objects a synthesized record page's streams read
+ * off the route's object list, beyond the record's own object and its
+ * related ones: the audit log, whose field-change lines the record's timeline
+ * draws when the object declares `enable.trackHistory` (`RecordDetailView`'s
+ * `historyEnabled` asks the list whether it holds `sys_audit_log`). The
+ * registry held it; the route's scoped read holds only what is asked.
+ */
+const RECORD_HISTORY_OBJECT = 'sys_audit_log';
+function recordStreamObjectNames(routeDef: { name?: unknown; enable?: { trackHistory?: unknown } }): string[] {
+  if (routeDef.name === RECORD_HISTORY_OBJECT) return [];
+  return routeDef.enable?.trackHistory === true ? [RECORD_HISTORY_OBJECT] : [];
+}
+
+/**
+ * objectstack#29552 — a scope whose objects that `relatedNames` names come in
+ * that order. A record page synthesized for an object draws its related lists
+ * in the order of the objects it is handed (`deriveRelatedLists`), and the
+ * registry hands them in the object list's order. A names-only scope holds its
+ * names in the order they landed, across every reader of the shared entry (an
+ * app's `requiresObject` names land first), so the related objects are put in
+ * the order the bundle lists them. One array per (scope objects, names), so a
+ * reader's memo on it holds.
+ */
+const RELATED_ORDER = new WeakMap<readonly unknown[], WeakMap<readonly string[], AppObjectScope['objects']>>();
+function inRelatedOrder(scope: AppObjectScope, relatedNames: readonly string[]): AppObjectScope {
+  let byNames = RELATED_ORDER.get(scope.objects);
+  if (!byNames) RELATED_ORDER.set(scope.objects, (byNames = new WeakMap()));
+  let objects = byNames.get(relatedNames);
+  if (!objects) {
+    const rank = (o: { name?: unknown } | null | undefined) => relatedNames.indexOf(o?.name as string);
+    // Stable: the objects outside `relatedNames` keep their places ahead of them.
+    objects = [...scope.objects].sort((a, b) => rank(a) - rank(b));
+    byNames.set(relatedNames, objects);
+  }
+  return { ...scope, objects } as AppObjectScope;
 }
 
 /** An adapter that loads app metadata bundles (`ObjectStackAdapter.loadAppBundle`). */

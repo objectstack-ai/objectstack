@@ -63,11 +63,16 @@ function matchesWhere(row: any, where: any): boolean {
   return true;
 }
 
-/** `sys_api_key` holds `rows`, matched by `where` and bounded by `limit`. */
+/**
+ * `sys_api_key` holds `rows`, matched by `where` and bounded by `limit`;
+ * `sys_user` holds the owners `rows` name (an API key authenticates only as an
+ * owner who exists), matched the same way.
+ */
 function qlWithKeyRows(rows: any[]) {
+  const owners = [...new Set(rows.map((r) => r.user_id).filter((id) => typeof id === 'string' && id))].map((id) => ({ id }));
   return {
     find: async (object: string, q: any = {}) => {
-      const table = object === 'sys_api_key' ? rows : [];
+      const table = object === 'sys_api_key' ? rows : object === 'sys_user' ? owners : [];
       const found = table.filter((r) => matchesWhere(r, q?.where));
       return typeof q?.limit === 'number' ? found.slice(0, q.limit) : found;
     },

@@ -104,9 +104,18 @@ WORKDIR /srv/app
 RUN chown node:node /srv/app
 USER node
 
+# OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED makes `os start` refuse to boot unless
+# OS_DATABASE_URL, OS_AUTH_SECRET and OS_SECRET_KEY are set explicitly, naming
+# the missing ones. A container's disk is what gets replaced: without them the
+# data would be a SQLite file in the container layer and both secrets would be
+# generated there, all lost with the container. An explicit
+# OS_DATABASE_URL=file:/path/on/a/volume/app.db passes, so SQLite on a mounted
+# volume stays a choice. Outside this image `os start` keeps booting and prints
+# a warning block instead (packages/cli/src/commands/start.ts).
 ENV NODE_ENV=production \
     OS_ARTIFACT_PATH=/srv/app/objectstack.json \
-    OS_PORT=8080
+    OS_PORT=8080 \
+    OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true
 EXPOSE 8080
 
 # Liveness: /api/v1/health. For orchestrated readiness use /api/v1/ready.
@@ -115,5 +124,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=15s \
   CMD node -e "fetch('http://localhost:'+(process.env.OS_PORT||8080)+'/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
 # OS_DATABASE_URL, OS_AUTH_SECRET, and OS_SECRET_KEY are injected at runtime —
-# never bake them into an image.
+# never bake them into an image. Without them `os start` refuses to boot (see
+# OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED above).
 CMD ["os", "start"]

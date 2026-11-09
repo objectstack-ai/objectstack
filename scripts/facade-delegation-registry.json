@@ -1,0 +1,74 @@
+{
+  "facades": [
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "class": "ObjectStackProtocolImplementation",
+      "card": "#29985"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
+      "card": "#29986"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectRepository",
+      "card": "#30052"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ScopedContext",
+      "card": "#30052"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "class": "SqlDriver",
+      "card": "#30105"
+    }
+  ],
+  "exceptions": [
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "publishPackageDrafts",
+      "card": "#30020",
+      "reason": "state-owning: closed-set, a bare `this` (not `this.<member>`) hands the instance itself on (#29985 report)"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "triggerAutomation",
+      "card": "#30147",
+      "reason": "accepted terminal exception (ruling 6687801899): accepted exception (#30147 phase 3): its body is one `throw` (no shorter than a stub), and its section (Batch and *Many data) has no facet module; the codemod's members pass adds to a written facet and never starts one, so a facet for one statement would be the only reason to start it"
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.ts",
+      "member": "applySeedBodies",
+      "card": "#30020",
+      "reason": "state-owning: gate reading, a hand-series host slot computes (optional-call service lookup); the hand-series host rule is #30020's"
+    },
+    {
+      "file": "packages/objectql/src/engine.ts",
+      "class": "ObjectQL",
+      "member": "update",
+      "card": "#30020",
+      "reason": "state-owning: bare-this, the body hands the instance itself on (#29986 report: stays on the class)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "constructor",
+      "card": "#30020",
+      "reason": "state-owning: gate reading, constructor logic (strips the ObjectStack options off the config, branches on fileColumnsMoved, builds Knex; the state is the instance's)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "static DIALECT_CONNECT_TIMEOUT",
+      "card": "#30147",
+      "reason": "accepted terminal exception (ruling 6687801899): codemod limit: a static initializer runs while the class itself is evaluated, so a call into a facet module there could meet that module in its temporal dead zone (MOVED_FIELD_DEFAULTS takes instance fields only, #30147 phase 2a)"
+    },
+    {
+      "file": "packages/drivers/driver-sql/src/sql-driver.ts",
+      "member": "get supports",
+      "card": "#30147",
+      "reason": "accepted terminal exception (ruling 6687801899): codemod limit: inferred-return-type, a get accessor whose object type the base leaves inferred, with a docblock on each key (MOVED_ACCESSORS moves a getter whose type is written, #30147 phase 2a)"
+    }
+  ]
+}

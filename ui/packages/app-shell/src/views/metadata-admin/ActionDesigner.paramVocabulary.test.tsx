@@ -55,7 +55,7 @@ vi.mock('./useMetadata', () => ({
   useMetadataClient: () => state.metadataClient,
 }));
 
-import { paramDegradesWithoutTarget } from '../../utils/paramToField.js';
+import { paramDegradesWithoutTarget, paramToField } from '../../utils/paramToField.js';
 import { resolveParamWidgetType } from '@object-ui/fields';
 import { ActionPreview } from './previews/ActionPreview';
 import { ActionDefaultInspector, PARAM_TYPE_OPTS } from './inspectors/ActionDefaultInspector';
@@ -273,6 +273,48 @@ describe('Action designer — the preview draws what the runtime dialog will dra
     expect(drawnControl(withOptions)).toBe('select');
     cleanup();
     expect(drawnControl(renderPreviewWith({ field: 'status' }))).toBe('input:text');
+  });
+});
+
+describe('Action preview — an authored `widget` previews as the widget the dialog draws (#30117)', () => {
+  // `ActionParamSchema.widget` names a registered field widget that draws the
+  // param instead of its `type` default, and `paramToField` draws it in the
+  // dialog. Create User's `permissionSet` is the first producer: a `text`
+  // param with `widget: 'permission-ref'`, which the dialog draws as the
+  // permission-set picker (a searchable list of the catalog's sets by label).
+  // The preview reads the same adapter, so it draws a picker there too.
+  const permissionSet: ActionParam = {
+    name: 'permissionSet',
+    label: 'Permission Set',
+    type: 'text',
+    widget: 'permission-ref',
+  };
+
+  it('the dialog\'s adapter draws the permission-set picker for it (the runtime answer this preview must match)', () => {
+    expect(paramToField({ name: 'permissionSet', label: '', type: 'text', widget: 'permission-ref' }).type).toBe(
+      'permission-ref',
+    );
+  });
+
+  it('previews a `text` param that names `permission-ref` as the picker, not a text box', () => {
+    const container = renderPreviewWith(permissionSet);
+    const picker = screen.getByTestId('action-preview-permission-ref');
+    expect(picker).toHaveAttribute('role', 'combobox');
+    expect(picker).toBeDisabled();
+    expect(picker).toHaveTextContent('Select Permission Set');
+    expect(container.querySelector('input, textarea')).toBeNull();
+  });
+
+  it('CONTROL: the same param with no widget previews as the text box the dialog draws', () => {
+    const { widget: _omitted, ...plain } = permissionSet;
+    expect(drawnControl(renderPreviewWith(plain))).toBe('input:text');
+    expect(screen.queryByTestId('action-preview-permission-ref')).toBeNull();
+  });
+
+  it('an unregistered widget name degrades to the `type` control, as the dialog degrades it', () => {
+    const container = renderPreviewWith({ ...permissionSet, widget: 'no_such_widget' });
+    expect(paramToField({ name: 'p', label: '', type: 'text', widget: 'no_such_widget' }).type).toBe('text');
+    expect(drawnControl(container)).toBe('input:text');
   });
 });
 

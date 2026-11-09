@@ -514,7 +514,7 @@ function QuickActionButton({
             <span id={reasonId} className="sr-only">{disabledReason}</span>
           </span>
         </TooltipTrigger>
-        <TooltipContent>{disabledReason}</TooltipContent>
+        <TooltipContent className="max-w-xs">{disabledReason}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

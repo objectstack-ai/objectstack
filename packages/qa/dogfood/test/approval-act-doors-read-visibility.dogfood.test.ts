@@ -56,6 +56,14 @@
 // organization A) is refused `403 FORBIDDEN`, the approver (a member of A)
 // decides, and A's own administrator decides through the override.
 //
+// And one rule on the submitter's own verbs: a request with no submitter (a run
+// whose trigger resolved no user) is recalled, reminded or resubmitted only by the
+// system or the override actor. A pending approver and a record reader, who read
+// it, are refused `403 FORBIDDEN` with the refusal any non-submitter gets; a plain
+// member, who does not, gets `404`; the request is unchanged. Controls: a system
+// context reminds and resubmits it, the administrator recalls it while pending,
+// and a request with a submitter is reminded and recalled by its submitter.
+//
 // The service-level half — including the tenancy wall, the platform
 // administrator's cross-organization override and the system context — is
 // pinned in `packages/plugins/plugin-approvals/src/approval-service.test.ts`.
@@ -466,6 +474,129 @@ describe('behind the organization wall (isolated posture), the act doors answer 
         const overridden = await act(ownerAToken, overrideOnly.id, 'approve', {});
         expect(overridden.status, JSON.stringify(overridden.body)).toBe(200);
         expect((await stored(overrideOnly.id))?.status).toBe('approved');
+      } finally {
+        await stack.stop();
+      }
+    },
+    180_000,
+  );
+});
+
+describe('a request with no submitter is recalled, reminded or resubmitted only by the system or the override actor, at the HTTP door', () => {
+  /** Reads every row of the fixture object, so the record-reader tier serves them its requests. */
+  const READER = 'actvis-nosub-reader@verify.test';
+  /** A plain member: the baseline only, on no slate. */
+  const MEMBER = 'actvis-nosub-member@verify.test';
+  const NOSUB_SUBMITTER = 'actvis-nosub-submitter@verify.test';
+
+  /** The reader's widening: read every row of the fixture object, edit none it does not own. */
+  const readAllSet: PermissionSet = PermissionSetSchema.parse({
+    name: 'actvis_read_all',
+    label: 'Act Visibility Read All — every row of the fixture object, read only',
+    objects: { [SHEET]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false, viewAllRecords: true } },
+  });
+
+  it(
+    'refuses a pending approver, a record reader and a plain member on recall, remind and resubmit and leaves the request as it was, while the system, the override actor and a submitted request act as before',
+    async () => {
+      const scene = await bootScene({
+        security: new SecurityPlugin({
+          defaultPermissionSets: [...securityDefaultPermissionSets, baselineSet, readAllSet],
+          fallbackPermissionSet: baselineSet.name,
+        }),
+        // The opt-in record-reader tier, on for the fixture object: a reader of the record reads its requests.
+        extraPlugins: [new RecordChangeTriggerPlugin(), new ApprovalsServicePlugin({ recordReaderVisibleObjects: [SHEET] })],
+      });
+      const { stack, ql, idOf, act, read, open, stored, snapshot } = scene;
+      try {
+        const adminToken = await stack.signIn();
+        const submitterToken = await stack.signUp(NOSUB_SUBMITTER);
+        const approverToken = await stack.signUp(APPROVER);
+        const readerToken = await stack.signUp(READER);
+        const memberToken = await stack.signUp(MEMBER);
+        await ql.insert('sys_user_permission_set', { user_id: await idOf(READER), permission_set: readAllSet.name }, SYS);
+        const memberId = await idOf(MEMBER);
+
+        // The organization the members act in: the one a member's own request lands in.
+        const submitted = await open(submitterToken, 'nosub-yardstick');
+        const org = (await stored(submitted.id))?.organization_id ?? null;
+
+        /**
+         * Open one request the way a run whose trigger resolved no user does: the
+         * record is written by a system context (in the members' organization),
+         * so the flow it starts has no user, and its approval no submitter.
+         */
+        const openWithoutSubmitter = async (name: string) => {
+          const record = await ql.insert(SHEET, { name }, { context: { isSystem: true, ...(org ? { tenantId: org } : {}) } });
+          const recordId = String((record as { id?: string })?.id ?? '');
+          const [request] = await ql.find('sys_approval_request', {
+            where: { object_name: SHEET, record_id: recordId, status: 'pending' }, context: SYS.context,
+          });
+          expect(request, `the flow opened a pending request on ${name}`).toBeTruthy();
+          expect(request.submitter_id ?? null, `${name}: nobody submitted it`).toBeNull();
+          expect(request.organization_id ?? null, `${name}: it is in the members' organization`).toBe(org);
+          return request as { id: string };
+        };
+        const sendBack = async (id: string) => {
+          const sent = await act(approverToken, id, 'revise', { comment: 'rework' });
+          expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+          expect((await stored(id))?.status).toBe('returned');
+        };
+
+        const pending = await openWithoutSubmitter('nosub-pending');
+        const returned = await openWithoutSubmitter('nosub-returned');
+        await sendBack(returned.id);
+
+        // The scene: the approver and the reader read both requests; the plain member reads neither.
+        for (const id of [pending.id, returned.id]) {
+          expect((await read(approverToken, id)).status, 'the approver reads it').toBe(200);
+          expect((await read(readerToken, id)).status, 'the record reader reads it').toBe(200);
+          expect((await read(memberToken, id)).status, 'the plain member does not').toBe(404);
+        }
+
+        // ⭐ Every caller who is not the system or the override actor is refused
+        // all three verbs, and nothing is written.
+        const before = { pending: await snapshot(pending.id), returned: await snapshot(returned.id) };
+        const verbs: Array<[string, string]> = [
+          ['recall', pending.id], ['recall', returned.id], ['remind', pending.id], ['resubmit', returned.id],
+        ];
+        for (const [who, token, expected] of [
+          ['the pending approver', approverToken, 403],
+          ['a record reader', readerToken, 403],
+          ['a plain member', memberToken, 404],
+        ] as const) {
+          for (const [verb, id] of verbs) {
+            const answer = await act(token, id, verb, {});
+            const label = `${who} · ${verb} · ${id === pending.id ? 'pending' : 'returned'} → ${JSON.stringify(answer.body)}`;
+            expect(answer.status, label).toBe(expected);
+            expect(codeOf(answer), label).toBe(expected === 403 ? 'FORBIDDEN' : 'REQUEST_NOT_FOUND');
+          }
+        }
+        expect(await snapshot(pending.id), 'nothing was written on the pending request').toEqual(before.pending);
+        expect(await snapshot(returned.id), 'nothing was written on the returned request').toEqual(before.returned);
+        // The refusal is the one a non-submitter gets on a request that has a submitter.
+        const yardstick = await act(approverToken, submitted.id, 'remind', {});
+        const refused = await act(approverToken, pending.id, 'remind', {});
+        expect(withoutId(refused, pending.id)).toEqual(withoutId(yardstick, submitted.id));
+
+        // Control — a system context still reminds and resubmits it…
+        const svc: any = await stack.kernel.getServiceAsync('approvals');
+        await svc.remind(pending.id, { actorId: 'sys_job' }, { isSystem: true, ...(org ? { tenantId: org } : {}) });
+        expect((await scene.historyOf(pending.id)).some((a: any) => a.action === 'remind')).toBe(true);
+        await svc.resubmit(returned.id, { actorId: 'sys_job' }, { isSystem: true, ...(org ? { tenantId: org } : {}) });
+        expect((await scene.historyOf(returned.id)).some((a: any) => a.action === 'resubmit')).toBe(true);
+        // …and the override actor (the administrator, on no slate) recalls it while pending.
+        const recalled = await act(adminToken, pending.id, 'recall', {});
+        expect(recalled.status, JSON.stringify(recalled.body)).toBe(200);
+        expect((await stored(pending.id))?.status).toBe('recalled');
+
+        // Control — a request that has a submitter: the submitter reminds and recalls it.
+        const reminded = await act(submitterToken, submitted.id, 'remind', {});
+        expect(reminded.status, JSON.stringify(reminded.body)).toBe(200);
+        const ownRecall = await act(submitterToken, submitted.id, 'recall', {});
+        expect(ownRecall.status, JSON.stringify(ownRecall.body)).toBe(200);
+        expect((await stored(submitted.id))?.status).toBe('recalled');
+        expect(memberId, 'the plain member is provisioned').toBeTruthy();
       } finally {
         await stack.stop();
       }

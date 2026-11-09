@@ -23,9 +23,15 @@
  *
  * ## Which children are judged — the universe the caller hands over
  *
- * The children are the stack's `objects` (map or array form) with the fields
- * their `objectExtensions` add merged in by name, since an extension can be
- * the one that adds the FK.
+ * The children are the stack's `objects` (map or array form) as the registry
+ * serves them, since an extension can be the one that adds the FK: every
+ * `objectExtensions` field folded in through the package's one fold
+ * (`objectsAsServed`, #30383). A field record is read by name in either
+ * `fields` shape. An object the stack does not declare is not a child here
+ * even when an extension targets it: its own declaration, and so the FKs it
+ * declares, may live in a package this stack does not carry (the per-package
+ * leg of `os build` holds one body's objects), so its extensions alone are not
+ * its field set, and it falls to the rule for an unknown child below.
  *
  *  - A named child that IS in the stack but carries no such FK is refused on
  *    every surface: that child's fields are known.
@@ -58,7 +64,7 @@
  */
 
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from '@objectstack/spec/data';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, recordsOf } from './object-graph.js';
 
 /** A related-list entry that matches no inbound relationship of its object. */
 export const RELATED_LIST_REF_UNKNOWN = 'related-list-ref-unknown';
@@ -123,22 +129,22 @@ export function validateRelatedListRefs(stack: AnyRec, options?: RelatedListRefO
   const objects = recordsOf(stack.objects);
   if (objects.length === 0) return findings;
 
-  // Child object name → its fields (declaration and extensions merged by name).
-  const fieldsByObject = new Map<string, AnyRec>();
-  for (const obj of objects) {
-    if (typeof obj.name !== 'string') continue;
-    fieldsByObject.set(obj.name, { ...fieldsByObject.get(obj.name), ...(isRec(obj.fields) ? obj.fields : {}) });
-  }
-  for (const ext of recordsOf(stack.objectExtensions)) {
-    if (typeof ext.extend !== 'string') continue;
-    fieldsByObject.set(ext.extend, { ...fieldsByObject.get(ext.extend), ...(isRec(ext.fields) ? ext.fields : {}) });
+  // Child object name → its fields by name, as served (see the header).
+  const fieldsByObject = new Map<string, Map<string, AnyRec>>();
+  const merge = (child: string, fields: AnyRec[]): void => {
+    const byName = fieldsByObject.get(child) ?? new Map<string, AnyRec>();
+    for (const f of fields) if (typeof f.name === 'string') byName.set(f.name, f);
+    fieldsByObject.set(child, byName);
+  };
+  for (const obj of objectsAsServed(stack).objects) {
+    if (typeof obj.name === 'string') merge(obj.name, recordsOf(obj.fields));
   }
 
   // Parent name → its inbound relationships, in child then field order.
   const inbound = new Map<string, NamedInboundRelationship[]>();
   for (const [child, fields] of fieldsByObject) {
-    for (const [field, def] of Object.entries(fields)) {
-      if (!isRec(def) || (def.type !== 'lookup' && def.type !== 'master_detail')) continue;
+    for (const [field, def] of fields) {
+      if (def.type !== 'lookup' && def.type !== 'master_detail') continue;
       if (typeof def.reference !== 'string' || AUDIT_FKS.has(field)) continue;
       const list = inbound.get(def.reference) ?? [];
       list.push({ child, field, def });

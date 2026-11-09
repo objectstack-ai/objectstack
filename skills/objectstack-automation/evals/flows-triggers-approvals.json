@@ -24,7 +24,7 @@
     {
       "id": 2,
       "prompt": "When an opportunity reaches stage `closed_won`, send the account owner an inbox notification with the deal name.",
-      "expected_output": "A `record_change` flow bound on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'`; a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`; `requires` lists `automation`, `triggers`, `messaging`, else notify reports success with `skipped: true`.",
+      "expected_output": "A `record_change` flow bound on the `start` node `config`: `objectName: 'opportunity'`, `triggerType: 'record-after-update'`, bare-CEL `condition` `previous.stage != 'closed_won' && record.stage == 'closed_won'`; a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, `title: 'Won: {{ record.name }}'`, `channels: ['inbox']`; `requires` lists `automation`, `triggers`: `messaging` is always-on, listed only under `--preset minimal` (else notify reports success with `skipped: true`).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -33,7 +33,6 @@
           "previous.",
           "notify",
           "recipients",
-          "messaging",
           "{{"
         ],
         "must_not_contain": [
@@ -43,8 +42,8 @@
     },
     {
       "id": 3,
-      "prompt": "Build an autolaunched flow `budget_approval` on `project`: when `budget` increases past 100000, route to a manager who can approve, reject, or send it back to the submitter for revision; a resubmission returns to the manager. Cap it at two send-backs.",
-      "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection).",
+      "prompt": "Build an autolaunched flow `crm_budget_approval` on `project`: when `budget` increases past 100000, route to a manager who can approve, reject, or send it back to the submitter for revision; a resubmission returns to the manager. Cap it at two send-backs.",
+      "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'crm_manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -120,8 +119,8 @@
     },
     {
       "id": 7,
-      "prompt": "An expense approval only holders of `expense.approve_request` may start; route to the `finance_manager` position; the submitter must never approve their own expense.",
-      "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']`, checked at every door that starts the flow (never a run-user positions check inside it); the `approval` node names `approvers: [{ type: 'position', value: 'finance_manager' }]` with `excludeSubmitter: true`, and `onEmptyApprovers` is anything but `auto_approve`, refused beside it.",
+      "prompt": "An expense approval only holders of `expense.approve_request` may start; route to the `crm_finance_manager` position; the submitter must never approve their own expense.",
+      "expected_output": "Flow-level `requiredPermissions: ['expense.approve_request']`, checked at every door that starts the flow (never a run-user positions check inside it); the `approval` node names `approvers: [{ type: 'position', value: 'crm_finance_manager' }]` with `excludeSubmitter: true`, and `onEmptyApprovers` is anything but `auto_approve`, refused beside it.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -155,7 +154,7 @@
     },
     {
       "id": 9,
-      "prompt": "Build a screen flow `convert_lead` that asks for a company name and a contact name, creates a `crm_account` and a linked `crm_contact`, and ends on a screen linking to both new records.",
+      "prompt": "Build a screen flow `crm_convert_lead` that asks for a company name and a contact name, creates a `crm_account` and a linked `crm_contact`, and ends on a screen linking to both new records.",
       "expected_output": "A `type: 'screen'` flow: a `screen` collecting `company_name` and `contact_name`; two `create_record` nodes with `outputVariable` (`account`, `contact`), the contact linked by `account: { dialect: 'cel', source: 'account.id' }`; a last `screen` of two `type: 'record_link'` fields with `reference` (`crm_account`, `crm_contact`) and `defaultValue: { dialect: 'cel', source: 'account.id' }` / `'contact.id'`, no `required`, `placeholder` or `options`. The `end` carries no `message` (refused when completed), the `description` no markdown link — the links are the `record_link` fields, never the object field type.",
       "files": [],
       "assertions": {
@@ -190,7 +189,7 @@
     },
     {
       "id": 11,
-      "prompt": "When a `contractor` is marked `onboarded`, grant its linked user (`contractor.user_id`) the `contractor_portal` permission set; run the flow as system so the grant always lands.",
+      "prompt": "When a `contractor` is marked `onboarded`, grant its linked user (`contractor.user_id`) the `crm_contractor_portal` permission set; run the flow as system so the grant always lands.",
       "expected_output": "Not as system: a system-context insert into `sys_user_permission_set` (as into `sys_user_position`, `sys_invitation` or `sys_member`) is refused with `PERMISSION_DENIED` — elevation does not lift a governed identity write, a system subflow included. The flow runs `runAs: 'user'`: its `create_record` on `sys_user_permission_set` is judged by the delegated-administration gate as the user whose write fired it, recorded as `granted_by`; a user the gate would not let grant the set is refused — the rule, not a defect.",
       "files": [],
       "assertions": {
@@ -210,7 +209,7 @@
     {
       "id": 12,
       "prompt": "Spread new `crm_case` records evenly across the support team; a `refund_requested` case needs sign-off from the support-leads queue.",
-      "expected_output": "An assignment rule, not a flow or hook: `defineAssignmentRule({ name: 'case_intake', object: 'crm_case', entries: [{ name: 'all', assignTo: { type: 'queue', value: 'support_team' }, strategy: 'round_robin' }] })` in `assignmentRules` — evaluated once per insert on a still-ownerless row, never on update; no counter field. The sign-off is an `approval` node (`type: 'approval'`) with `approvers: [{ type: 'queue', value: 'support_leads' }]`: the queue's members join the slate at node entry; an empty queue adds nobody.",
+      "expected_output": "An assignment rule, not a flow or hook: `defineAssignmentRule({ name: 'crm_case_intake', object: 'crm_case', entries: [{ name: 'all', assignTo: { type: 'queue', value: 'crm_support_team' }, strategy: 'round_robin' }] })` in `assignmentRules` — evaluated once per insert on a still-ownerless row, never on update; no counter field. The sign-off is an `approval` node (`type: 'approval'`) with `approvers: [{ type: 'queue', value: 'crm_support_leads' }]`: the queue's members join the slate at node entry; an empty queue adds nobody.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -240,6 +239,154 @@
         "must_not_contain": [
           "_copy",
           "beforeUpdate"
+        ]
+      }
+    },
+    {
+      "id": 14,
+      "prompt": "When a `crm_case`'s `priority` becomes `urgent`, send its owner an inbox notification; clicking the notification should open that case.",
+      "expected_output": "A `record_change` flow bound on the `start` node `config` (`objectName: 'crm_case'`, `triggerType: 'record-after-update'`, condition `previous.priority != 'urgent' && record.priority == 'urgent'`) and a `notify` node with `recipients: { dialect: 'cel', source: 'record.owner_id' }`, an inline `title`, `channels: ['inbox']`, and no `sourceObject` / `sourceId` / `actionUrl`: a notify that writes none of the three links to the run's trigger record, here the case. An explicit pair or `actionUrl` is only for linking elsewhere and wins when written; half a pair is dropped, never defaulted; a run with no trigger record (a schedule tick) links nowhere. `requires` lists `automation`, `triggers` (`messaging` is always-on).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "record-after-update",
+          "notify",
+          "recipients",
+          "trigger record"
+        ],
+        "must_not_contain": [
+          "sourceObject:",
+          "actionUrl:"
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "prompt": "Email the opportunity owner and the sales manager when an opportunity has sat in one stage for 30 days; the subject must show the `stage` as its label, in each recipient's own language.",
+      "expected_output": "The notify node names a mail `template` (never inline `title` / `message`, which are one text for every recipient), and the template's subject prints the stage with the mail formatter `{{ stage | option:opportunity.stage }}` — the argument a bare `object.field`, no quotes — so the renderer prints that recipient's label from the field's option list in the recipient's locale. Not `label()` in `templateData`: the map is evaluated once per run, before recipients fan out, so it cannot differ per recipient; and `option` is mail-only, refused in an inline `title` / `message`. The stage value itself reaches the template as stored (`stage` in `templateData`).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "option:opportunity.stage",
+          "template",
+          "once per run"
+        ],
+        "must_not_contain": [
+          "source: 'label(",
+          "| label"
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "prompt": "When a saved `deal` record's `status` is changed to `submitted`, route it to the sales manager for approval, and tell the person who clicked Save \"Sent {{ record.name }} to your manager for approval\" on the save toast, in their own language.",
+      "expected_output": "A flow whose start node binds `objectName: 'deal'` with `triggerType: 'record-after-update'` and the condition `previous.status != 'submitted' && record.status == 'submitted'` (on update `previous` is bound), then a `save_notice` node (`config.message: 'Sent {{ record.name }} to your manager for approval'`) placed BEFORE the approval node (`type: 'approval'`): the run is still inside the write there, while a `save_notice` reachable after the approval (or a `wait`) is refused at parse. The translation lives under `flows.<flow>.notices.<node_id>.message`, read in the saver's locale. Not a `notify` node to the saver (an inbox message, not the save answer), not a page banner component (shown whenever the record's state says so, not for this save), and not in a subflow the trigger flow calls (a child run holds no save, so the node refuses by name).",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "save_notice",
+          "triggerType",
+          "notices.",
+          "type: 'approval'"
+        ],
+        "must_not_contain": [
+          "type: 'record:alert'"
+        ]
+      }
+    },
+    {
+      "id": 17,
+      "prompt": "`customer.status` 的选项是 `{ value: 'active', label: '活跃' }` 和 `{ value: 'lost', label: '已流失' }`。当客户状态变成「已流失」时，自动创建一条 `followup_task`：标题是「流失回访: 」加客户名，`customer` 指回这个客户，负责人是该客户的负责人。",
+      "expected_output": "A `record_change` flow bound on the `start` node `config` (`objectName: 'customer'`, `triggerType: 'record-after-update'`) whose bare-CEL condition compares the option VALUE the field stores — `previous.status != 'lost' && record.status == 'lost'` — never the label the request speaks; one `create_record` on `followup_task` whose `fields` are CEL value envelopes: `subject: { dialect: 'cel', source: \"'流失回访: ' + record.name\" }`, `customer: { dialect: 'cel', source: 'record.id' }`, `owner_id: { dialect: 'cel', source: 'record.owner_id' }` — never a single-brace token over the record, which is refused at save; `edges` start → create → end.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "record-after-update",
+          "previous.",
+          "== 'lost'",
+          "dialect: 'cel'",
+          "create_record"
+        ],
+        "must_not_contain": [
+          "== '已流失'",
+          "status: '已流失'",
+          "{record."
+        ]
+      }
+    },
+    {
+      "id": 18,
+      "prompt": "Every morning at 9, Shanghai time, send the `crm_sales` queue's members an inbox digest of `opportunity` records whose `close_date` falls this week.",
+      "expected_output": "A `type: 'schedule'` flow, `runAs: 'system'` (a schedule run has no trigger user), the cadence on the START node's `config.schedule` written as the request said it, with its IANA zone: `{ type: 'cron', expression: '0 9 * * *', timezone: 'Asia/Shanghai' }` — never the hour converted to UTC by hand: a bare expression runs in UTC and records no zone, so the next reader takes the converted hour as the intended one; a `get_record` over `opportunity` with a `close_date` window and a `notify` to the queue's members.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "type: 'schedule'",
+          "timezone: 'Asia/Shanghai'",
+          "0 9 * * *",
+          "runAs: 'system'",
+          "notify"
+        ],
+        "must_not_contain": [
+          "0 1 * * *",
+          "UTC+8"
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "prompt": "Our `invoice` approval flow mirrors its outcome onto `invoice.approval_status`. When that field becomes `approved`, create a `payment_task` for the finance queue. Should this reacting flow run as system?",
+      "expected_output": "No. The mirror write is elevated but attributed to the person who decided, so a `record_change` flow on `invoice` (`triggerType: 'record-after-update'`, condition `previous.approval_status != 'approved' && record.approval_status == 'approved'`) stays `runAs: 'user'` and runs with the approver's own grants; its `create_record` on `payment_task` is judged as them. Only an SLA `escalation` auto-decision or the release of a record whose run died carries no user — a flow that must react to those too declares `runAs: 'system'`.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "runAs: 'user'",
+          "record-after-update",
+          "approval_status == 'approved'",
+          "create_record"
+        ],
+        "must_not_contain": [
+          "type: 'approval'",
+          "sys_approval_request"
+        ]
+      }
+    },
+    {
+      "id": 20,
+      "prompt": "Our package `acme.billing` ships the flow `billing_invoice_paid`. When it runs it should call the `notify_owner` flow that the installed package `acme.crm` ships. Write the node and anything else the package needs.",
+      "expected_output": "A `subflow` node with `config: { flowName: 'notify_owner' }` in `billing_invoice_paid`, plus `acme.billing`'s manifest declaring `dependencies: { 'acme.crm': '^1.0.0' }` (any range). A package flow's bare child name resolves to its own package's flow, else the one holder in its declared dependency closure plus `sys`; without the dependency the flow still passes `os validate`, and the node fails at run time (`outside-closure`, naming `acme.crm`). No copy of `notify_owner` into `acme.billing` or into the environment, and no package-qualified flow name.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "type: 'subflow'",
+          "flowName: 'notify_owner'",
+          "dependencies",
+          "'acme.crm'"
+        ],
+        "must_not_contain": [
+          "dependencies: {}",
+          "acme.crm/notify_owner",
+          "acme.crm:notify_owner"
+        ]
+      }
+    },
+    {
+      "id": 21,
+      "prompt": "Our package `acme.helpdesk` should route every new `helpdesk_ticket` into the `crm_support_intake` queue that the installed package `acme.crm` declares, round-robin. Write the assignment rule and anything else the package needs.",
+      "expected_output": "A `defineAssignmentRule` on `helpdesk_ticket` with an entry `assignTo: { type: 'queue', value: 'crm_support_intake' }` and `strategy: 'round_robin'`, plus `acme.helpdesk`'s manifest declaring `dependencies: { 'acme.crm': '^1.0.0' }` (any range). A packaged rule's queue resolves to its own package's queue, else the one holder in its declared dependency closure plus `sys`; without the dependency the name is refused (`outside-closure`, naming `acme.crm`) and every ticket is written ownerless, in no queue, with a server-log warning. No copy of the queue into `acme.helpdesk` or the environment, no package-qualified queue name, and no `beforeInsert` hook picking an owner.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "defineAssignmentRule",
+          "type: 'queue'",
+          "value: 'crm_support_intake'",
+          "dependencies",
+          "'acme.crm'"
+        ],
+        "must_not_contain": [
+          "dependencies: {}",
+          "acme.crm/crm_support_intake",
+          "acme.crm:crm_support_intake"
         ]
       }
     }

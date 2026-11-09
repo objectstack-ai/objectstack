@@ -115,3 +115,36 @@ describe('clearLocalized — paired with setLocalized', () => {
     expect(clearLocalized(stored, 'en')).toEqual({ 'zh-CN': '收入', bogus: 42 });
   });
 });
+
+describe('clearLocalized — a script-split language clears the entry of its own script (#30910)', () => {
+  it('a zh-Hant clear removes zh-TW and keeps the Simplified entry, in either authoring order', () => {
+    expect(clearLocalized({ en: 'Customer', 'zh-CN': '客户', 'zh-TW': '客戶' }, 'zh-Hant')).toEqual({
+      en: 'Customer',
+      'zh-CN': '客户',
+    });
+    expect(clearLocalized({ en: 'Customer', 'zh-TW': '客戶', 'zh-CN': '客户' }, 'zh')).toEqual({
+      en: 'Customer',
+      'zh-TW': '客戶',
+    });
+  });
+});
+
+/**
+ * #31074 — a clear in a script the map lacks removes nothing: the box showed
+ * the other script's text as a borrowed fallback, and clearing a borrowed
+ * string must not delete the locale it was borrowed from.
+ */
+describe('clearLocalized — a clear in a script the map lacks keeps the other script (#31074)', () => {
+  it.each([
+    [{ en: 'Customer', zh: '客户' }, 'zh-Hant'],
+    [{ en: 'Customer', 'zh-CN': '客户' }, 'zh-TW'],
+    [{ en: 'Customer', 'zh-TW': '客戶' }, 'zh-CN'],
+  ] as const)('%j cleared in %s is returned unchanged', (map, language) => {
+    expect(clearLocalized(map, language)).toEqual(map);
+  });
+
+  it('an entry of the editor\'s own script is still cleared', () => {
+    expect(clearLocalized({ en: 'Customer', zh: '客户' }, 'zh-CN')).toEqual({ en: 'Customer' });
+    expect(clearLocalized({ en: 'Customer', 'zh-TW': '客戶' }, 'zh-HK')).toEqual({ en: 'Customer' });
+  });
+});

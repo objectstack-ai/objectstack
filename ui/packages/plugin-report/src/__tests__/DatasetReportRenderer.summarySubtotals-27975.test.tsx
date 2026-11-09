@@ -29,6 +29,7 @@ type Result = {
   dimensionFields?: Record<string, string>;
   drillRawRows?: Rows;
   drillRanges?: Array<Record<string, { field: string; gte: unknown; lt: unknown }>>;
+  drillScopes?: Record<string, Record<string, unknown>>;
   totals?: Array<{ dimensions: string[]; rows: Rows }>;
 };
 
@@ -276,6 +277,7 @@ describe('summary report subtotals (objectstack-ai/objectstack#27975)', () => {
     const DRILLABLE: Result = {
       ...TWO_LEVEL,
       object: 'opportunity',
+      drillScopes: { amount: {} },
       dimensionFields: { owner: 'owner_id', stage: 'stage' },
       drillRawRows: [
         { owner: 'usr_amy', stage: 'negotiation' },
@@ -316,6 +318,7 @@ describe('summary report subtotals (objectstack-ai/objectstack#27975)', () => {
           { owner: 'Amy Chen', month: '2026-03', amount: 2 },
         ],
         object: 'opportunity',
+        drillScopes: { amount: {} },
         dimensionFields: { owner: 'owner_id' },
         drillRawRows: [{ owner: 'usr_amy' }, { owner: 'usr_amy' }],
         drillRanges: [
@@ -351,6 +354,7 @@ describe('summary report subtotals (objectstack-ai/objectstack#27975)', () => {
           { owner: 'Amy Chen', month: null, amount: 2 },
         ],
         object: 'opportunity',
+        drillScopes: { amount: {} },
         dimensionFields: { owner: 'owner_id' },
         drillRawRows: [{ owner: 'usr_amy' }, { owner: 'usr_amy' }],
         drillRanges: [{ month: { field: 'close_date', gte: '2026-01-01', lt: '2026-02-01' } }, {}],

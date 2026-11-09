@@ -26,6 +26,20 @@ curl -c cookies.txt -X POST http://localhost:3000/api/v1/auth/sign-in/email \
 curl -b cookies.txt "http://localhost:3000/api/v1/data/<your_object>"
 ```
 
+## The sample `note` object
+
+`src/objects/note.object.ts` is a **sample**, there so a blank project has one
+object to boot, query and test on day one. It is not part of your app: until
+you remove it, it ships in every build, is served over REST, and is listed to
+any MCP client next to your own objects. Delete or replace it once your own
+objects exist:
+
+1. Delete `src/objects/note.object.ts` and its export line in
+   `src/objects/index.ts`.
+2. Point `note.test.ts` at one of your own objects (rename the file to match).
+   It imports `Note`, so it stops compiling until you do.
+3. Run `pnpm validate` and `pnpm test`.
+
 ## The Console — this starter ships no app
 
 `pnpm dev` also serves the admin Console at `http://localhost:3000/_console/`,
@@ -67,9 +81,11 @@ for OAuth, API keys, and which objects/actions become tools.
 
 - `objectstack.config.ts` — environment manifest (objects, API, plugins), and
   the wiring for every directory below
-- `src/objects/` — object definitions (one file per object)
+- `src/objects/` — object definitions (one file per object); `note.object.ts`
+  is the sample described [above](#the-sample-note-object)
 - `src/views/`, `src/actions/`, `src/flows/`, `src/dashboards/`, `src/apps/`,
-  `src/skills/`, `src/picklists/` — empty to start. Each directory's `index.ts`
+  `src/skills/`, `src/picklists/`, `src/security/` (permission sets),
+  `src/datasets/` (analytics datasets) — empty to start. Each directory's `index.ts`
   exports what it holds and `objectstack.config.ts` hands those exports to the
   stack, so `objectstack generate flow NAME` (or `view`, `action`, …) adds a
   file and one export line, and the item is loaded, and counted by
@@ -151,6 +167,27 @@ curl -fsS http://localhost:8080/api/v1/health
 
 Bare Node, Kubernetes, reverse-proxy wiring, and the required secrets are
 covered in [Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-hosting).
+
+### A Studio change is not in the image
+
+The image carries what `src/` builds into, and nothing else. A change you save
+in Studio, in the Console `pnpm dev` serves, is stored in that environment's
+database (locally, `.objectstack/data/`) as an item of the package
+`<this app's package id>.custom`. It is never written to `src/`, so
+`pnpm build`, the `Dockerfile` and `docker compose` leave it behind.
+
+- To make it part of the app, make the same change in `src/`: that is what is
+  validated, reviewed and deployed. Ask your coding agent to do it in code, not
+  in Studio.
+- To keep it as a customization, take it out as a package while `pnpm dev`
+  runs: `npx os login --url http://localhost:3000` once, then
+  `npx os package export --url http://localhost:3000`, writes every package the database holds that
+  `src/` does not register, the `.custom` package among them, to
+  `objectstack-export/NN-ID/objectstack.json`. Commit that directory, and once
+  the deployment is up install each file into it in the numbered order with
+  `npx os package install objectstack-export/NN-ID/objectstack.json --url URL`.
+
+`pnpm build` prints a notice when your local dev database holds such a change.
 
 ## Next steps
 

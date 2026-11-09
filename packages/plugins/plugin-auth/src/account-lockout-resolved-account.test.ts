@@ -21,6 +21,11 @@
 // The account events (`login_failed` / `account_locked`) name the account the
 // same resolution names, so the ledger and the lock never disagree.
 //
+// Only a refused CREDENTIAL moves the counter. A sign-in whose password passed
+// and that a policy then refused (the organization's allowed IP ranges, judged
+// when the session is scoped to it; a ban; an address the deployment requires
+// verified) neither counts nor clears: the last two `describe`s below.
+//
 // ## Why the server here is the real one
 //
 // "Which account does this identifier name" is answered by the credential
@@ -56,7 +61,8 @@ const PASSWORD = 'Corr3ct!Horse-Battery';
 const WRONG_PASSWORD = 'Wr0ng!Guess-Zebra-7731';
 const THRESHOLD = 3;
 
-function deployment() {
+/** `extra` is merged into the manager's config (a plugin switch, an e-mail rule). */
+function deployment(extra: Record<string, unknown> = {}) {
   const engine = createMemoryEngine();
   const events: AuthSessionAuditEventInput[] = [];
   const manager = new AuthManager({
@@ -65,6 +71,7 @@ function deployment() {
     dataEngine: engine,
     lockoutThreshold: THRESHOLD,
     lockoutDurationMinutes: 15,
+    ...extra,
     getAuditSink: () => ({
       recordAuthEvent: async (event: AuthSessionAuditEventInput) => {
         events.push(event);
@@ -74,18 +81,19 @@ function deployment() {
   return { engine, manager, events };
 }
 
-const post = (manager: AuthManager, path: string, body: unknown) =>
+const post = (manager: AuthManager, path: string, body: unknown, remoteAddress?: string) =>
   manager.handleRequest(
     new Request(`${BASE}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+    remoteAddress ? { remoteAddress } : undefined,
   );
 
 async function signUp(manager: AuthManager): Promise<void> {
-  inviteForAudienceGate(manager, EMAIL);
-  const res = await post(manager, '/sign-up/email', { email: EMAIL, password: PASSWORD, name: 'Holder' });
+  const invitationId = await inviteForAudienceGate(manager, EMAIL);
+  const res = await post(manager, '/sign-up/email', { email: EMAIL, password: PASSWORD, name: 'Holder', invitationId });
   expect(res.status, await res.clone().text()).toBe(200);
 }
 
@@ -99,7 +107,15 @@ async function outcome(res: Response): Promise<{ status: number; code: string | 
 }
 
 const REFUSED = { status: 401, code: 'INVALID_EMAIL_OR_PASSWORD' };
-const LOCKED = { status: 403, code: 'ACCOUNT_LOCKED' };
+/**
+ * A locked account's refusal: the wrong-password answer itself (ADR-0069 D2,
+ * `sign-in-lockout-refusal.ts`). The cases below tell a lock from a wrong
+ * password by submitting the CORRECT password, and by the reason the account's
+ * `login_failed` row carries.
+ */
+const LOCKED = REFUSED;
+/** The explicit refusal a deployment opts into with `lockoutRefusal: 'explicit'`. */
+const LOCKED_EXPLICIT = { status: 403, code: 'ACCOUNT_LOCKED' };
 
 function accountRow(engine: any): any {
   const row = ((engine.tables.get('sys_user') ?? []) as any[]).find((r) => r.email === EMAIL);
@@ -225,4 +241,281 @@ describe('ADR-0069 D2: the lockout counts and holds the account the credential c
     // …and the real account still signs in.
     expect((await signIn(manager, EMAIL, PASSWORD)).status).toBe(200);
   });
+});
+
+/** The organization the account belongs to, and the one network its own list admits. */
+const ORGANIZATION = 'org_lockout_policy';
+const INSIDE = '10.1.0.7';
+const OUTSIDE = '10.2.0.7';
+const NOT_ADMITTED = { status: 403, code: 'IP_NOT_ALLOWED' };
+
+/**
+ * {@link deployment}, with the account a member of an organization whose own
+ * allowed IP ranges admit only 10.1.0.0/16. The deployment sets no list of its
+ * own, so the organization's list is judged where the sign-in's session is
+ * scoped to it — after the password passed.
+ */
+async function organizationListDeployment() {
+  const { engine, manager, events } = deployment();
+  await signUp(manager);
+  const userId = String(accountRow(engine).id);
+  // Whatever membership the sign-up settled is replaced by the one under test.
+  engine.tables.set('sys_member', (engine.tables.get('sys_member') ?? []).filter((m: any) => m.user_id !== userId));
+  await engine.insert('sys_member', { user_id: userId, organization_id: ORGANIZATION, role: 'member', created_at: new Date() });
+  manager.setOrganizationAccessPolicySource({
+    read: async (id) => (id === ORGANIZATION ? { allowed_ip_ranges: '10.1.0.0/16' } : {}),
+    anyOrganizationRequiresMfa: async () => false,
+  });
+  return { engine, manager, events };
+}
+
+const signInFrom = (manager: AuthManager, password: string, remoteAddress: string) =>
+  post(manager, '/sign-in/email', { email: EMAIL, password }, remoteAddress);
+
+describe('ADR-0069 D2: a correct password the organization\'s IP list refuses neither counts nor clears', () => {
+  it('refusals past the threshold lock nothing, and the account signs in from inside the list', async () => {
+    const { engine, manager, events } = await organizationListDeployment();
+    events.length = 0;
+
+    for (let i = 0; i < THRESHOLD; i++) {
+      expect(await outcome(await signInFrom(manager, PASSWORD, OUTSIDE)), `attempt ${i + 1}`).toEqual(NOT_ADMITTED);
+      expect(Number(accountRow(engine).failed_login_count ?? 0), `attempt ${i + 1}`).toBe(0);
+    }
+    expect(isLocked(accountRow(engine))).toBe(false);
+    expect(events.some((e) => e.action === 'account_locked')).toBe(false);
+
+    const home = await signInFrom(manager, PASSWORD, INSIDE);
+    expect(home.status, await home.clone().text()).toBe(200);
+    expect(Number(accountRow(engine).failed_login_count ?? 0)).toBe(0);
+  });
+
+  it('the refusal leaves a count earned by wrong passwords where it stands', async () => {
+    const { engine, manager } = await organizationListDeployment();
+    for (let i = 0; i < THRESHOLD - 1; i++) {
+      expect(await outcome(await signInFrom(manager, WRONG_PASSWORD, INSIDE))).toEqual(REFUSED);
+    }
+    expect(Number(accountRow(engine).failed_login_count)).toBe(THRESHOLD - 1);
+
+    expect(await outcome(await signInFrom(manager, PASSWORD, OUTSIDE))).toEqual(NOT_ADMITTED);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(THRESHOLD - 1);
+    expect(isLocked(accountRow(engine))).toBe(false);
+  });
+
+  it('a wrong password counts from either side of the list, and a correct one from inside clears', async () => {
+    const { engine, manager } = await organizationListDeployment();
+
+    // From outside the credential refuses first: the list is judged only once a session is created.
+    expect(await outcome(await signInFrom(manager, WRONG_PASSWORD, OUTSIDE))).toEqual(REFUSED);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(1);
+    expect(await outcome(await signInFrom(manager, WRONG_PASSWORD, INSIDE))).toEqual(REFUSED);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(2);
+
+    expect((await signInFrom(manager, PASSWORD, INSIDE)).status).toBe(200);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(0);
+
+    for (let i = 0; i < THRESHOLD; i++) {
+      expect(await outcome(await signInFrom(manager, WRONG_PASSWORD, OUTSIDE))).toEqual(REFUSED);
+    }
+    expect(isLocked(accountRow(engine))).toBe(true);
+    expect(await outcome(await signInFrom(manager, PASSWORD, INSIDE))).toEqual(LOCKED);
+  });
+});
+
+describe('ADR-0069 D2: a correct password refused for a ban or an unverified address neither counts nor clears', () => {
+  it('a banned account: wrong passwords count, the correct one is refused BANNED_USER and moves nothing', async () => {
+    const { engine, manager, events } = deployment({ plugins: { admin: true } });
+    await signUp(manager);
+    accountRow(engine).banned = true;
+    for (let i = 0; i < THRESHOLD - 1; i++) {
+      expect(await outcome(await signIn(manager, EMAIL, WRONG_PASSWORD))).toEqual(REFUSED);
+    }
+    expect(Number(accountRow(engine).failed_login_count)).toBe(THRESHOLD - 1);
+    events.length = 0;
+
+    for (let i = 0; i < THRESHOLD; i++) {
+      expect(await outcome(await signIn(manager, EMAIL, PASSWORD)), `attempt ${i + 1}`)
+        .toEqual({ status: 403, code: 'BANNED_USER' });
+      expect(Number(accountRow(engine).failed_login_count), `attempt ${i + 1}`).toBe(THRESHOLD - 1);
+    }
+    expect(isLocked(accountRow(engine))).toBe(false);
+    expect(events.some((e) => e.action === 'account_locked')).toBe(false);
+
+    // Lifted, the ban leaves no lock behind: the correct password signs in and clears the count.
+    accountRow(engine).banned = false;
+    expect((await signIn(manager, EMAIL, PASSWORD)).status).toBe(200);
+    expect(Number(accountRow(engine).failed_login_count)).toBe(0);
+  });
+
+  it('an unverified address: wrong passwords count, the correct one is refused EMAIL_NOT_VERIFIED and moves nothing', async () => {
+    const { engine, manager } = deployment({ emailAndPassword: { enabled: true, requireEmailVerification: true } });
+    await signUp(manager);
+    accountRow(engine).email_verified = false;
+    for (let i = 0; i < THRESHOLD - 1; i++) {
+      expect(await outcome(await signIn(manager, EMAIL, WRONG_PASSWORD))).toEqual(REFUSED);
+    }
+    expect(Number(accountRow(engine).failed_login_count)).toBe(THRESHOLD - 1);
+
+    for (let i = 0; i < THRESHOLD; i++) {
+      expect(await outcome(await signIn(manager, EMAIL, PASSWORD)), `attempt ${i + 1}`)
+        .toEqual({ status: 403, code: 'EMAIL_NOT_VERIFIED' });
+      expect(Number(accountRow(engine).failed_login_count), `attempt ${i + 1}`).toBe(THRESHOLD - 1);
+    }
+    expect(isLocked(accountRow(engine))).toBe(false);
+
+    // One more wrong password still reaches the threshold and locks.
+    expect(await outcome(await signIn(manager, EMAIL, WRONG_PASSWORD))).toEqual(REFUSED);
+    expect(isLocked(accountRow(engine))).toBe(true);
+  });
+});
+
+/** Status, headers that describe the body, and the body itself, byte for byte. */
+async function wholeAnswer(res: Response): Promise<{ status: number; contentType: string | null; body: string }> {
+  return { status: res.status, contentType: res.headers.get('content-type'), body: await res.clone().text() };
+}
+
+/** The answer to `send`, and how many password derivations it ran (the work behind the answer). */
+async function measured(send: () => Promise<Response>) {
+  const before = scrypt.counts();
+  const answer = await wholeAnswer(await send());
+  const after = scrypt.counts();
+  return { answer, derivations: after.derived + after.answered - before.derived - before.answered };
+}
+
+describe('ADR-0069 D2: a locked account is answered exactly as a wrong password is', () => {
+  it('the same status and body, after the same one password check, whatever password it is sent', async () => {
+    const { engine, manager } = deployment();
+    await signUp(manager);
+    const wrongWhileOpen = await measured(() => signIn(manager, EMAIL, WRONG_PASSWORD));
+    const unknown = await measured(() => signIn(manager, 'nobody.lockout-account@example.com', WRONG_PASSWORD));
+    for (let i = 1; i < THRESHOLD; i++) await signIn(manager, EMAIL, WRONG_PASSWORD);
+    expect(isLocked(accountRow(engine))).toBe(true);
+
+    const correctWhileLocked = await measured(() => signIn(manager, EMAIL, PASSWORD));
+    const wrongWhileLocked = await measured(() => signIn(manager, EMAIL, WRONG_PASSWORD));
+
+    expect(wrongWhileOpen.answer.status).toBe(401);
+    expect(JSON.parse(wrongWhileOpen.answer.body)).toMatchObject({ code: 'INVALID_EMAIL_OR_PASSWORD' });
+    for (const locked of [correctWhileLocked, wrongWhileLocked]) {
+      expect(locked.answer).toEqual(wrongWhileOpen.answer);
+      expect(locked.derivations).toBe(wrongWhileOpen.derivations);
+    }
+    // …and the same as an address that names no account at all.
+    expect(unknown.answer).toEqual(wrongWhileOpen.answer);
+    expect(unknown.derivations).toBe(wrongWhileOpen.derivations);
+    expect(wrongWhileOpen.derivations).toBe(1);
+  });
+
+  it('a request the endpoint refuses before any password check is refused the same way for a locked account', async () => {
+    const { engine, manager } = deployment();
+    await signUp(manager);
+    const malformed = [
+      { email: EMAIL, password: 'x'.repeat(4096) },
+      { email: EMAIL },
+    ];
+    const open = [];
+    for (const body of malformed) open.push(await wholeAnswer(await post(manager, '/sign-in/email', body)));
+    // Those refusals counted as attempts; reset the count before locking.
+    accountRow(engine).failed_login_count = 0;
+    for (let i = 0; i < THRESHOLD; i++) await signIn(manager, EMAIL, WRONG_PASSWORD);
+    expect(isLocked(accountRow(engine))).toBe(true);
+
+    for (const [i, body] of malformed.entries()) {
+      const answer = await wholeAnswer(await post(manager, '/sign-in/email', body));
+      expect(answer.status, JSON.stringify(Object.keys(body))).toBeGreaterThanOrEqual(400);
+      expect(answer, JSON.stringify(Object.keys(body))).toEqual(open[i]);
+    }
+  });
+
+  it('no session is issued and the account records the lock as the reason', async () => {
+    const { engine, manager, events } = deployment();
+    await signUp(manager);
+    for (let i = 0; i < THRESHOLD; i++) await signIn(manager, EMAIL, WRONG_PASSWORD);
+    events.length = 0;
+
+    const res = await signIn(manager, EMAIL, PASSWORD);
+    expect(await outcome(res)).toEqual(REFUSED);
+    expect(res.headers.getSetCookie?.() ?? []).toEqual([]);
+    expect(events.some((e) => e.action === 'login')).toBe(false);
+    expect(accountEvents(events)).toEqual([
+      expect.objectContaining({
+        action: 'login_failed',
+        userId: String(accountRow(engine).id),
+        context: { endpoint: '/sign-in/email', reason: 'ACCOUNT_LOCKED' },
+      }),
+    ]);
+  });
+});
+
+describe("ADR-0069 D2: a deployment that opts in answers a locked account 403 ACCOUNT_LOCKED", () => {
+  it('the correct password is refused with the explicit code, and the account records the lock', async () => {
+    const { engine, manager, events } = deployment({ lockoutRefusal: 'explicit' });
+    await signUp(manager);
+    for (let i = 0; i < THRESHOLD; i++) {
+      expect(await outcome(await signIn(manager, EMAIL, WRONG_PASSWORD))).toEqual(REFUSED);
+    }
+    expect(isLocked(accountRow(engine))).toBe(true);
+    const lockedUntil = new Date(accountRow(engine).locked_until).getTime();
+    events.length = 0;
+
+    expect(await outcome(await signIn(manager, EMAIL, PASSWORD))).toEqual(LOCKED_EXPLICIT);
+    expect(await outcome(await signIn(manager, SPELLINGS[0], WRONG_PASSWORD))).toEqual(LOCKED_EXPLICIT);
+    expect(events.some((e) => e.action === 'login')).toBe(false);
+    expect(accountEvents(events).map((e) => e.context?.reason)).toEqual(['ACCOUNT_LOCKED', 'ACCOUNT_LOCKED']);
+    expect(new Date(accountRow(engine).locked_until).getTime()).toBe(lockedUntil);
+    // An address that names no account is still a wrong password.
+    expect(await outcome(await signIn(manager, 'nobody.lockout-account@example.com', PASSWORD))).toEqual(REFUSED);
+  });
+});
+
+describe('ADR-0069 D2: attempts that arrive together reach the credential check at most threshold times', () => {
+  it('of many concurrent wrong passwords, exactly the threshold are checked and the rest meet the lock', async () => {
+    const { engine, manager, events } = deployment();
+    await signUp(manager);
+    events.length = 0;
+    const CONCURRENT = 30;
+
+    const answers = await Promise.all(
+      Array.from({ length: CONCURRENT }, () => signIn(manager, EMAIL, WRONG_PASSWORD).then(outcome)),
+    );
+
+    expect(answers).toEqual(answers.map(() => REFUSED));
+    expect(isLocked(accountRow(engine))).toBe(true);
+    expect(Number(accountRow(engine).failed_login_count)).toBeGreaterThanOrEqual(THRESHOLD);
+    const failed = accountEvents(events).filter((e) => e.action === 'login_failed');
+    expect(failed.filter((e) => e.context?.reason === 'INVALID_EMAIL_OR_PASSWORD')).toHaveLength(THRESHOLD);
+    expect(failed.filter((e) => e.context?.reason === 'ACCOUNT_LOCKED')).toHaveLength(CONCURRENT - THRESHOLD);
+    expect(accountEvents(events).filter((e) => e.action === 'account_locked')).toHaveLength(1);
+    // The lock holds against the correct password.
+    expect(await outcome(await signIn(manager, EMAIL, PASSWORD))).toEqual(LOCKED);
+  });
+});
+
+describe('ADR-0069 D2: an account whose failed_login_count is NULL or absent is counted and cleared like one at 0', () => {
+  const blank: Array<[string, (row: any) => void]> = [
+    ['NULL', (row) => { row.failed_login_count = null; }],
+    ['absent', (row) => { delete row.failed_login_count; }],
+  ];
+  for (const [label, clearCounter] of blank) {
+    it(`${label}: the correct password signs in, and the counter is cleared to 0`, async () => {
+      const { engine, manager } = deployment();
+      await signUp(manager);
+      clearCounter(accountRow(engine));
+      const res = await signIn(manager, EMAIL, PASSWORD);
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(accountRow(engine).failed_login_count).toBe(0);
+      expect(isLocked(accountRow(engine))).toBe(false);
+    });
+
+    it(`${label}: a wrong password counts to 1, and the correct one still signs in after it`, async () => {
+      const { engine, manager } = deployment();
+      await signUp(manager);
+      clearCounter(accountRow(engine));
+      expect(await outcome(await signIn(manager, EMAIL, WRONG_PASSWORD))).toEqual(REFUSED);
+      expect(accountRow(engine).failed_login_count).toBe(1);
+      expect(isLocked(accountRow(engine))).toBe(false);
+      const res = await signIn(manager, EMAIL, PASSWORD);
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(accountRow(engine).failed_login_count).toBe(0);
+    });
+  }
 });

@@ -24,6 +24,12 @@ import { ruleArrayFilterError } from './filter-rule-array';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { PAGE_TYPE_DEFAULT, misplacedDefaultPageRefusal } from './default-record-page';
+import {
+  SAME_ORIGIN_API_PATH_RE as SHARED_SAME_ORIGIN_API_PATH_RE,
+  API_RESPONSE_PATH_RE,
+  API_READ_NO_CREDENTIALS,
+  sameOriginApiPathRefusal,
+} from './same-origin-api-read';
 
 /**
  * Shared history for this file (#4001).
@@ -340,86 +346,16 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
 }));
 
 /**
- * The SAME-ORIGIN API PATH an element's `api` data source reads — one string
- * the parse can judge on its own, so a URL that would leave this deployment's
- * origin is refused in front of the author and never reaches a browser.
- *
- * ## The admitted set
- *
- * A path that opens with ONE `/` (`/api/v1/cloud/home`), whose second
- * character is neither `/` nor a backslash, and that carries no space and no
- * ASCII control character anywhere. Everything else is refused, and the
- * refusal says which of five classes the value fell in:
- *
- * - `scheme` — an absolute URL of ANY scheme (`https:`, `http:`, `mailto:`,
- *   `javascript:`, `data:`, …): it names an origin of its own;
- * - `protocol-relative` — `//host`, which the browser reads as a host name;
- * - `backslash` — `/` then a backslash, or a backslash first: the URL parser
- *   reads a backslash as a slash in a special-scheme URL, so both are `//host`;
- * - `whitespace-or-control` — a tab, line feed or carriage return anywhere (the
- *   parser deletes them before it reads the URL, so `/`+tab+`/host` is
- *   `//host`), or a space or another control character, which the parser strips
- *   from either end (a space before `//host` is `//host`);
- * - `relative` — no leading `/` at all (`./home`, `../home`, `api/v1/home`,
- *   `?q`, an empty string): it resolves against the PAGE's own address, never
- *   the API.
- *
- * The first four are the browser-equivalent spellings of another origin that
- * objectui's `classifyNavigationTarget` (`@object-ui/core`, the one answer its
- * user-click navigations share) refuses for a navigation target. `./relative`,
- * which that classifier admits for a NAVIGATION, is refused HERE on a
- * measurement of the renderer, not by analogy: a read is a `fetch`, and the
- * `apiBase` promotion the console applies to a `url` action
- * (`ActionRunner.navigateTo`; read points recorded in `liveness/page.json`,
- * row `regions`) prefixes a root-relative `/api/…` path only — a `./` path
- * would resolve against the
- * console route the page is mounted on, on the SPA host, and read the wrong
- * thing in the silent direction.
- *
- * ## Why a regex and not a `superRefine`
- *
- * A `.regex()` projects into the published JSON Schema as `pattern`, exactly;
- * a refinement is dropped from it (`dropped-refinements.baseline.json`), so a
- * document a validator accepted would be refused at parse a release later.
- * The pattern IS the rule; {@link elementApiReadUrlRefusal} only names the
- * class a refused value fell in, so the author reads why.
- *
- * Whatever the class, no credential is ever written here: the console reads the
- * endpoint with its own signed-in fetch (the maintainer's ruling: "No
- * credentials in metadata; the console's authenticated fetch is reused").
+ * The same-origin rule an element's `api` data source reads under lives in
+ * `./same-origin-api-read.ts`, shared with an action's `preflight` read so the
+ * two declarations hold ONE rule: the URL regex and the class-naming refusal,
+ * the response-path regex, and the no-credentials guidance. That module's
+ * header carries the admitted set and why the rule is a regex. The names below
+ * are this file's own spellings of those constants; the accept set and every
+ * message are byte-identical to the ones declared here before the move
+ * (`same-origin-api-read.test.ts` pins both).
  */
-const SAME_ORIGIN_API_PATH_RE = /^\/(?:[^/\\\x00-\x20\x7F][^\x00-\x20\x7F]*)?$/;
-
-/** The classes {@link SAME_ORIGIN_API_PATH_RE} refuses, in the order they are asked. */
-const ELEMENT_API_URL_CLASSES: ReadonlyArray<{ test: (url: string) => boolean; why: string }> = [
-  {
-    // whitespace-or-control — asked first: a space before `//host` is `//host`.
-    test: (url) => /[\x00-\x20\x7F]/.test(url),
-    why: 'This value holds a space or an ASCII control character. The browser\'s URL parser deletes a '
-      + 'tab, line feed or carriage return wherever it stands and strips spaces and control characters '
-      + 'from both ends before it reads the URL, so what it fetches is not what was written: a slash, a '
-      + 'tab and then `/host` is read as `//host`, another origin. Percent-encode a space the path '
-      + 'really needs (`%20`).',
-  },
-  {
-    // scheme — any scheme, not only http(s).
-    test: (url) => /^[A-Za-z][A-Za-z0-9+.-]*:/.test(url),
-    why: 'This value is an absolute URL: it opens with a scheme (`https:`, `http:`, `mailto:`, '
-      + '`javascript:`, `data:`, …), so it names an origin of its own.',
-  },
-  {
-    // protocol-relative.
-    test: (url) => url.startsWith('//'),
-    why: 'This value opens with `//`, a protocol-relative URL: the browser reads what follows as a host '
-      + 'name, so it is another origin.',
-  },
-  {
-    // backslash — `/\host` and a leading backslash are both `//host` to the parser.
-    test: (url) => url.startsWith('\\') || url.startsWith('/\\'),
-    why: 'This value puts a backslash where the browser\'s URL parser reads a slash, so it is read as '
-      + '`//host`, another origin.',
-  },
-];
+const SAME_ORIGIN_API_PATH_RE = SHARED_SAME_ORIGIN_API_PATH_RE;
 
 /**
  * The refusal an `api` data source's `read.url` raises — the rule, the
@@ -427,30 +363,14 @@ const ELEMENT_API_URL_CLASSES: ReadonlyArray<{ test: (url: string) => boolean; w
  * URL an author pasted may carry a credential in its user-info or query.
  */
 function elementApiReadUrlRefusal(input: unknown): string | undefined {
-  // A non-string is the type check's to report, in zod's own words.
-  if (typeof input !== 'string') return undefined;
-  const why = ELEMENT_API_URL_CLASSES.find((c) => c.test(input))?.why
-    ?? 'This value does not open with `/`, so it is a relative path: it resolves against the page\'s '
-      + 'own address, never the API.';
-  return '`read.url` of an `api` data source must be a same-origin API path — one that '
-    + 'opens with a single `/`, such as `/api/v1/cloud/home`. ' + why + ' Write the endpoint\'s path '
-    + 'on this deployment\'s own origin. The console reads it with its own signed-in fetch, so a host, '
-    + 'a scheme or a credential is never written in metadata.';
+  return sameOriginApiPathRefusal(input, '`read.url` of an `api` data source');
 }
 
-/**
- * The dotted path an `api` data source selects from the response —
- * `data.environments` in a `{ success, data }` envelope. Segments of letters,
- * digits, `_` and `-`, joined by single dots: no brackets, no leading `$`, no
- * slashes, so a JSONPath or a URL path written here is refused rather than
- * selecting nothing.
- */
-const ELEMENT_API_RESPONSE_PATH_RE = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
+/** The dotted path an `api` data source selects from the response — `data.environments`. */
+const ELEMENT_API_RESPONSE_PATH_RE = API_RESPONSE_PATH_RE;
 
 /** What an author who reached for a credential on an `api` data source is told. */
-const ELEMENT_API_NO_CREDENTIALS =
-  'No credential is written in metadata: the console reads the endpoint with its own signed-in '
-  + 'fetch, so the request already carries the user\'s session. Delete this key.';
+const ELEMENT_API_NO_CREDENTIALS = API_READ_NO_CREDENTIALS;
 
 /**
  * Element API Data Source Schema — the second shape of a page element's
@@ -730,10 +650,11 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * Measured on the renderer (read points recorded in `liveness/page.json`,
    * row `regions`): `buildExpressionScope` builds the ambient scope —
    * `current_user`, `user`, `ctx.user`, `os.user`, `features`, and nothing
-   * else; `configEvaluationScope` composes this surface's evaluator from it,
-   * adding `record` (only when the page has a row — on an app page, once the
-   * renderer mounts the page's `record` binding) and `page`. The one root
-   * added beside those is the `api` data source's `data`, below.
+   * else; `buildNodeEvaluationScope` composes this surface's evaluator from it,
+   * adding `record` (the page's row: the record a record page opens, or the
+   * row an app page's `record` binding reads, `null` when that read finds no
+   * row or is refused as forbidden) and `page`. The one root added beside
+   * those is the `api` data source's `data`, below.
    *
    * ## `data` — only where an `api` data source binds it
    *
@@ -744,9 +665,8 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * predicate only through the predicate-scope channel
    * (`PredicateScopeProvider`), whose ambient feeder, `ExpressionProvider`,
    * publishes no `data`. So on such an element a `data.*` read faults, and a
-   * faulting `visibleWhen` renders the component: `data.total > 0` and
-   * `data.total == 0` both show it, a gate that never gates. The row the page
-   * is about is `record`.
+   * faulting `visibleWhen` withholds the component: `data.total > 0` and
+   * `data.total == 0` both hide it. The row the page is about is `record`.
    *
    * The one `data` this surface has is the API binding's (see
    * {@link ElementApiDataSourceSchema}): on an element whose `dataSource` is
@@ -767,7 +687,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * this surface does not have. See that key's own describe in
    * `component.zod.ts` rather than assuming either environment carries over.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root on an element that no `api` data source binds: there a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record` — the record a record page opens, or the row an app page's `record` binding reads (none without one; a block's own `dataSource` binds no `record` for its siblings). A count or a plan is a field on that row (a `summary` roll-up: `record.environment_count > 1`; `record.plan != 'free'`), never `features.*`, which are the deployment's public auth flags, the same for every organisation. `data` is mounted only on an element whose `dataSource` is an `api` data source (`provider: 'api'`): there, and on every element nested inside it, `data` is the value the binding selects, and the element's `visibleWhen` is decided once the read answers. To gate a component on a system capability, write `current_user.hasCapability('<name>')` with the name the gated action's `requiredPermissions` declares — it answers from the viewer's `systemPermissions`, the list the action gate reads, never a proxy such as `current_user.can('<object>', 'edit')`; a host that binds no capability list makes it fault, and a faulting predicate renders the component. ADR-0066 D4: `visibleWhen` hides, `requiredPermissions` refuses. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root on an element that no `api` data source binds: there a `data.*` read faults and a faulting predicate withholds the component, so `data.total > 0` and `data.total == 0` both hide it; the page's row is `record` — the record a record page opens, or the row an app page's `record` binding reads (none without one; a block's own `dataSource` binds no `record` for its siblings). A count or a plan is a field on that row (a `summary` roll-up: `record.environment_count > 1`; `record.plan != 'free'`), never `features.*`, which are the deployment's public auth flags, the same for every organisation. `data` is mounted only on an element whose `dataSource` is an `api` data source (`provider: 'api'`): there, and on every element nested inside it, `data` is the value the binding selects, and the element's `visibleWhen` is decided once the read answers. To gate a component on a system capability, write `current_user.hasCapability('<name>')` with the name the gated action's `requiredPermissions` declares — it answers from the viewer's `systemPermissions`, the list the action gate reads, never a proxy such as `current_user.can('<object>', 'edit')`; a host that binds no capability list makes it fault, and a faulting predicate withholds the component. ADR-0066 D4: `visibleWhen` hides, `requiredPermissions` refuses. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
   // `visibility` REMOVED at 18 (#23543 F4, ADR-0089 D2): through 17 it was the
   // page component's deprecated spelling of `visibleWhen`, folded onto it at
   // parse by a `.transform` that went with the key. The tombstone carries the
@@ -844,17 +764,22 @@ export const PageComponentSchema = lazySchema(() => strictObject({
  *
  * Semantics are the one-record binding the record blocks take from an element
  * `dataSource`: read the bound set under the caller's identity, take its FIRST
- * row by `sort`, re-read when the bound object is written. Zero rows, or a row
- * the caller may not read, leaves `record` unbound: a predicate reading it
- * faults, and a faulting `visibleWhen` renders the component. There is no
+ * row by `sort`, re-read when the bound object is written. There is no
  * `limit` — the page binds one row by definition.
  *
  * What a predicate wants from the row is a FIELD on it: a count is a
  * `summary` (roll-up) field, a plan or tier is the field the object carries —
  * `record.environment_count > 1`, `record.plan != 'free'`.
  *
- * Planned in the renderer: until the console mounts this binding, `record`
- * stays unbound on an app page, as it was before the key existed.
+ * The console reads the binding once per page open: the first row under
+ * `sort`, under the caller's identity. Every component's `visibleWhen` on the
+ * page sees that row as `record`, and a record block that binds its own row
+ * still provides that row to its own subtree. A page drawn through
+ * `interfaceConfig.source` reads no binding. A predicate sees three states:
+ * pending, where the page body is not drawn until the read settles; no row,
+ * or a read the server refuses as forbidden (403), where `record` is null, so
+ * absent and not-yours read the same; and any other failure, where the page
+ * body is not drawn.
  */
 export const PageRecordBindingSchema = lazySchema(() => strictObject({
   surface: 'this page record binding',
@@ -2000,7 +1925,7 @@ export const PageSchema = lazySchema(() => strictObject({
    * every other page type ({@link checkPageRecordBindingPlacement}).
    */
   record: PageRecordBindingSchema.optional()
-    .describe("The row an app page is about — a one-row query `{ object, view?, filter?, sort? }` whose FIRST row (by `sort`, read under the caller's identity) the page's components read as `record` in `visibleWhen`. A count or a plan is a field on that row: a `summary` roll-up (`record.environment_count > 1`) or the object's own field (`record.plan != 'free'`). No row, no `record`: the predicate faults and the component renders. Only on `type: 'app'` — refused on every other page type (a record page's row is the record it opens). Planned in the renderer: until the console mounts it, `record` stays unbound on an app page."),
+    .describe("The row an app page is about — a one-row query `{ object, view?, filter?, sort? }`. The console reads it once per page open: the FIRST row under `sort`, under the caller's identity. Every component's `visibleWhen` sees that row as `record`; a record block that binds its own row still provides that row to its own subtree. A page drawn through `interfaceConfig.source` reads no binding. A count or a plan is a field on that row: a `summary` roll-up (`record.environment_count > 1`) or the object's own field (`record.plan != 'free'`). Three states: while the read is pending, the page body is not drawn; no row, or a read the server refuses as forbidden (403), binds `record` as null; any other failure draws no page body. Only on `type: 'app'` — refused on every other page type (a record page's row is the record it opens)."),
 
   // recordReview / blankLayout fields removed — the record_review/blank page
   // types have no renderer and were dropped from PageTypeSchema (framework#2265);

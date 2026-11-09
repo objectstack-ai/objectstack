@@ -152,3 +152,27 @@ describe('MetadataResourceEditPage — Save is gated on the block inspector’s 
     await waitFor(() => expect(saveButton()).toBeEnabled(), { timeout: 4000 });
   });
 });
+
+describe('MetadataResourceEditPage — the save-status chip while the inspector holds auto-save (#29901)', () => {
+  // `inspectorBlocking` returns the auto-save effect early exactly as a server
+  // refusal does, so the chip must not promise an auto-save then either.
+  const chipState = () => screen.queryByTestId('save-status')?.getAttribute('data-state') ?? null;
+
+  it('reads the held state on a dangling operator, and the auto-save state once it parses', async () => {
+    const box = await openBlockCel();
+
+    // CONTROL first: a good predicate dirties the draft and reads auto-save.
+    fireEvent.change(box, { target: { value: 'record.amount > 20' } });
+    await waitFor(() => expect(chipState()).toBe('autosave-pending'), { timeout: 4000 });
+
+    fireEvent.change(box, { target: { value: 'record.amount >' } });
+    await waitFor(() => expect(chipState()).toBe('held'), { timeout: 4000 });
+    expect(screen.getByTestId('save-status')).toHaveAttribute(
+      'title',
+      'Fix the issues shown in the inspector before saving.',
+    );
+
+    fireEvent.change(box, { target: { value: 'record.amount > 21' } });
+    await waitFor(() => expect(chipState()).toBe('autosave-pending'), { timeout: 4000 });
+  });
+});

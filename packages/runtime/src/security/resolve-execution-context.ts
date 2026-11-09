@@ -17,7 +17,8 @@
  * and throws `AuthzStoreUnavailableError` (503) for the one class of fault
  * that leaves the answer undetermined: an authorization INPUT that exists and
  * could not be read (a permission-store read that failed, commit 6a180e42d; a `tenancy`
- * service that is registered and failed to build, #13906 decision 1 A). The
+ * service that is registered and failed to build, #13906 decision 1 A; the ban
+ * columns of an OAuth credential's user, `oauth-subject-ban.ts`). The
  * dispatcher's net (`HttpDispatcher.resolveRequestScope`) re-raises exactly
  * that class and degrades everything else to anonymous, as before.
  */
@@ -29,6 +30,7 @@ import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 
 import { resolveRequestExecutionContext, type RequestAdmission } from '@objectstack/core';
 import { presentedForwardCredential, redeemForwardCredential, type ForwardAgentProvenance } from '@objectstack/rest';
+import { isOAuthSubjectBanned } from './oauth-subject-ban.js';
 
 /**
  * [#4127 batch 4] The lookup facade, typed by slot like the ones on
@@ -162,6 +164,11 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // it is read in (`@objectstack/spec/ai`) is MCP-domain knowledge the core
   // package deliberately does not depend on.
   let oauthPrincipal: VerifiedMcpAccessToken | undefined;
+  // [#31211] The verifier's own answer, once this door has not refused it for
+  // a ban: recorded as used (`recordMcpAccessTokenUse`) only after the request
+  // context below resolves. A forward credential is never set here: it is the
+  // in-process continuation of a call that was already recorded.
+  let verifiedTokenPrincipal: VerifiedMcpAccessToken | undefined;
   let oauthBearerPresented = false;
   // [ADR-0090 D10 rule 5, #28367] The second way this door resolves an agent:
   // a forward credential the action door minted for an agent's in-process
@@ -170,7 +177,15 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // principal through the same assembler input: the provenance handed over at
   // the mint, never re-derived from a token. The forward carries no caller
   // header, so nothing else here can answer for it.
-  const forwardAgent = forwardAgentOf(opts.request, headers);
+  //
+  // A banned user's credentials are refused while the ban holds, on both ways
+  // (`isOAuthSubjectBanned`): a forward credential whose agent acts for a
+  // banned user resolves as one that does not redeem, and a verified token
+  // whose subject is banned as one that does not verify. One read of the
+  // user's ban columns per credential resolved; a read that throws is the
+  // branded store outage, and propagates as the class this door re-raises.
+  let forwardAgent = forwardAgentOf(opts.request, headers);
+  if (forwardAgent && await isOAuthSubjectBanned(ql, forwardAgent.userId)) forwardAgent = undefined;
   if (forwardAgent) {
     oauthPrincipal = {
       userId: forwardAgent.userId,
@@ -182,21 +197,25 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     const jwtBearer = extractJwtBearer(headers);
     if (jwtBearer) {
       oauthBearerPresented = true;
+      let verified: Awaited<ReturnType<NonNullable<IAuthService['verifyMcpAccessToken']>>>;
       try {
         // `verifyMcpAccessToken` is declared by `IAuthService` and reached
         // through the slot-typed lookup, so the verified result is read as the
         // contract states it — `organizationId` included.
-        const verified = await authService?.verifyMcpAccessToken?.(jwtBearer);
-        if (verified?.userId && Array.isArray(verified.scopes)) {
-          oauthPrincipal = verified;
-        }
+        verified = await authService?.verifyMcpAccessToken?.(jwtBearer);
       } catch {
         // verification error → fail closed (anonymous), handled below
+      }
+      // Read OUTSIDE the verifier's net: a ban read that throws is the store
+      // outage (503), never a token that did not verify.
+      if (verified?.userId && Array.isArray(verified.scopes) && !(await isOAuthSubjectBanned(ql, verified.userId))) {
+        oauthPrincipal = verified;
+        verifiedTokenPrincipal = verified;
       }
     }
   }
 
-  return resolveRequestExecutionContext({
+  const context = await resolveRequestExecutionContext({
     headers,
     ql,
     authService,
@@ -276,7 +295,43 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     // and every reader of the admission (the API-key gate, the key-management
     // rule) must read it as the agent it is, never as a signed-in session.
     onAdmission: forwardAgent ? undefined : opts.onAdmission,
+    // [#31821] The transport's own peer address, for the `credential_use` row an
+    // admitted API key writes. The auth service applies the trust rule to it and
+    // the headers; this door reads no forwarded header as an address.
+    transport: { remoteAddress: remoteAddressOf(opts.request) },
   });
+
+  // [#31211] Verifying a token is not admitting the call. Only now, after the
+  // ban read above and after the context resolved (a grant-read outage throws
+  // before this line), is the call admitted, so only now is it recorded as a
+  // use of the token's grant: once, with the very object the verifier
+  // answered. A refused call never reaches this line, so it records nothing.
+  // [#31821] With the request's headers and peer address, so the use names where
+  // the call came from: the auth service establishes the address under its own
+  // trust rule.
+  if (verifiedTokenPrincipal) {
+    const remoteAddress = remoteAddressOf(opts.request);
+    authService?.recordMcpAccessTokenUse?.(verifiedTokenPrincipal, {
+      headers: headerRecordOf(headers),
+      ...(remoteAddress ? { remoteAddress } : {}),
+    });
+  }
+  return context;
+}
+
+/** [#31821] The transport's peer address (`IHttpRequest.remoteAddress`), when the request carries one. */
+function remoteAddressOf(request: any): string | undefined {
+  const address = request?.remoteAddress;
+  return typeof address === 'string' && address ? address : undefined;
+}
+
+/** [#31821] Web `Headers` as the plain lower-cased record the auth service's trust rule reads. */
+function headerRecordOf(headers: Headers): Record<string, string> {
+  const out: Record<string, string> = {};
+  headers.forEach((value, name) => {
+    out[name.toLowerCase()] = value;
+  });
+  return out;
 }
 
 /**

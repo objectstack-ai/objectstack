@@ -80,7 +80,7 @@ describe('ObjectGrid — server-streamed export', () => {
   });
 
   it('surfaces export failures in the toolbar', async () => {
-    const exportDownload = vi.fn().mockRejectedValue(new Error('Permission denied'));
+    const exportDownload = vi.fn().mockRejectedValue(Object.assign(new Error('Export timed out'), { status: 504 }));
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:export');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     const ds = makeDataSource(exportDownload);
@@ -90,6 +90,22 @@ describe('ObjectGrid — server-streamed export', () => {
     fireEvent.click(await screen.findByRole('button', { name: /export/i }));
     fireEvent.click(await screen.findByRole('button', { name: /export as csv/i }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Permission denied');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Export timed out');
+  });
+
+  it('an export refusal reads in the Console\'s language, not as the route\'s English sentence (objectstack#30069)', async () => {
+    const exportDownload = vi.fn().mockRejectedValue(Object.assign(new Error("Export is not permitted on object 'task' for this user"), { code: 'EXPORT_NOT_PERMITTED', status: 403 }));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:export');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const ds = makeDataSource(exportDownload);
+
+    renderGrid(ds);
+
+    fireEvent.click(await screen.findByRole('button', { name: /export/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /export as csv/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('You don\u2019t have permission to export these records. Contact your administrator if you think you should be able to.');
+    expect(alert.textContent).not.toContain('Export is not permitted');
   });
 });

@@ -108,12 +108,40 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts'),
       },
       {
+        // [#29041] `notify-push-delivery.integration.test.ts` delivers a
+        // `notify` node through the real APNs and FCM transports of
+        // `@objectstack/service-push` against local mock endpoints. Read from
+        // source for the reason the entries above give. Same anchored-regex rule.
+        find: /^@objectstack\/service-push$/,
+        replacement: path.resolve(__dirname, '../service-push/src/index.ts'),
+      },
+      {
         // The same suite reads the `sys_audit_log` rows the post-decision writes
         // leave (`AuditPlugin`'s writers), so the attribution it pins is the
         // audit trail's own, not only the row's `updated_by`. Read from source
         // for the reason the entries above give. Same anchored-regex rule.
         find: /^@objectstack\/plugin-audit$/,
         replacement: path.resolve(__dirname, '../../plugins/plugin-audit/src/index.ts'),
+      },
+      // `notify-email-field.shared-redis.integration.test.ts` composes a
+      // replica's cache: the cluster plugin with the REAL redis driver, then the
+      // REAL `CacheServicePlugin`, whose adapter choice is the subject. Read from
+      // source for the reason the entries above give. Same anchored-regex rule
+      // (`service-cluster` publishes a `/testing` subpath the anchor must not
+      // swallow). All three through source also keeps ONE instance of
+      // `@objectstack/service-cluster` — the one the driver registers into and
+      // `defineCluster()` reads.
+      {
+        find: /^@objectstack\/service-cache$/,
+        replacement: path.resolve(__dirname, '../service-cache/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/service-cluster$/,
+        replacement: path.resolve(__dirname, '../service-cluster/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/service-cluster-redis$/,
+        replacement: path.resolve(__dirname, '../service-cluster-redis/src/index.ts'),
       },
     ],
   },

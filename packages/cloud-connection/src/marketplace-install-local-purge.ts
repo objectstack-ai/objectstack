@@ -25,8 +25,10 @@
  * The identification is its own pass, {@link matchSeedRows}, and it only reads.
  * The purge deletes what it identifies; the install-local listing asks it
  * whether the caller's scope holds ANY seed row, and answers that as the
- * entry's `withSampleData` (#21775). So "is this package's sample data here?"
- * and "what would a purge delete?" are one answer, read one way.
+ * entry's `withSampleData` (#21775); the sample-data count door asks it HOW
+ * MANY, through {@link countSeedRows}. So "is this package's sample data
+ * here?", "how much of it is left?" and "what would a purge delete?" are one
+ * answer, read one way.
  *
  * ## Scope — the install's own
  *
@@ -68,6 +70,20 @@ export interface PurgeSeedDataset {
     object: string;
     externalId?: unknown;
     records: ReadonlyArray<Record<string, unknown>>;
+}
+
+/**
+ * [#30808] One stored `seed` item of an unmanaged copy's seed receipt, as the
+ * dataset it declares: the members `SeedSchema` declares, and no other — the
+ * served envelope (`_packageId`, `_diagnostics`, …) never reaches the loader
+ * or the matcher. `undefined` for a body that names no object or no records.
+ */
+export function seedDatasetOfReceiptItem(body: unknown): PurgeSeedDataset | undefined {
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) return undefined;
+    const dataset = Object.fromEntries(Object.entries(body).filter(([key]) => key in SeedSchema.shape));
+    return typeof dataset.object === 'string' && Array.isArray(dataset.records)
+        ? dataset as unknown as PurgeSeedDataset
+        : undefined;
 }
 
 /** The per-record outcome counts the purge route answers with. */
@@ -286,6 +302,36 @@ export async function matchSeedRows(input: SeedRowMatchInput): Promise<SeedRowMa
         }
     }
     return match;
+}
+
+/** What {@link countSeedRows} answers: the purge's own reading, before it deletes. */
+export interface SampleDataCount {
+    /**
+     * The rows a purge run now would delete: the seed rows identified in
+     * scope, each once. A user-authored row is not one, and neither is a seed
+     * row whose key field was edited (its key is no longer a seed record's).
+     */
+    count: number;
+    /**
+     * Seed records no row could be identified for (no usable key, a key two
+     * rows carry, an object whose rows could not be read): the purge would
+     * report each in its `errors` and delete none of them.
+     */
+    unidentified: number;
+}
+
+export type SampleDataCountInput = Omit<SeedRowMatchInput, 'firstOnly'>;
+
+/**
+ * Count, READ-ONLY, the rows a purge would delete right now: the full
+ * {@link matchSeedRows} pass {@link purgeSeedRows} runs, with nothing deleted.
+ * One matcher, so the count cannot disagree with the purge that follows it
+ * (save rows the engine then refuses, which the purge reports as `errors`).
+ */
+export async function countSeedRows(input: SampleDataCountInput): Promise<SampleDataCount> {
+    const { engine, datasets, graph, organizationId, report } = input;
+    const match = await matchSeedRows({ engine, datasets, graph, organizationId, report });
+    return { count: match.rows.length, unidentified: match.unidentified };
 }
 
 /** A matcher problem in the purge's own words (its log lines predate the matcher). */

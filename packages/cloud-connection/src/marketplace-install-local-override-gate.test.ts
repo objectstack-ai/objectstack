@@ -13,7 +13,9 @@
  *  - an incoming item the gate refuses stops the install `403
  *    NOT_OVERRIDABLE`, one entry per item in `details.refusals`, before any
  *    write — nothing registered, no ledger entry;
- *  - the base's paired `.custom` installs its admitted declarations;
+ *  - the base's paired `.custom` installs its admitted declarations — into
+ *    its writable pair, each item through the save door (ADR-0146 D3), never
+ *    registered as code;
  *  - an install of a base lists, on its answer (`overrideCollisions`), the
  *    names installed dependents already hold, undeclared, that it now ships —
  *    and omits the key when there are none.
@@ -30,6 +32,7 @@ import '@objectstack/runtime';
 import { judgeOverrideWrite } from '@objectstack/metadata-protocol';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
+import { installedManifestsOf } from '@objectstack/metadata-core';
 
 type Handler = (c: any) => Promise<any>;
 
@@ -42,6 +45,8 @@ const deps = (...ids: string[]) => Object.fromEntries(ids.map((id) => [id, '*'])
 
 /** What each installed package holds, as the protocol's per-package listing answers it. */
 type Holdings = Record<string, Record<string, Array<Record<string, unknown>>>>;
+/** [#30542] The registry's code artifacts (`getArtifactItem`), each under its package's `_packageId`. */
+type Artifacts = Array<{ type: string; item: Record<string, unknown> }>;
 
 function makeRawApp() {
     const routes = new Map<string, Handler>();
@@ -57,10 +62,15 @@ function makeRawApp() {
  * A kernel whose registry holds `installed` (BASE read-only — a code or
  * marketplace package is in `manifests`) and whose protocol lists `holdings`.
  */
-function makeCtx(rawApp: any, installed: Array<{ id: string; dependencies?: Record<string, string> }>, holdings: Holdings) {
+function makeCtx(rawApp: any, installed: Array<{ id: string; dependencies?: Record<string, string> }>, holdings: Holdings, artifacts?: Artifacts) {
     const hooks = new Map<string, any>();
     const registered: any[] = [];
-    const records = installed.map((p) => ({ manifest: { id: p.id, version: '1.0.0', ...(p.dependencies ? { dependencies: p.dependencies } : {}) } }));
+    const saved: Array<[string, string]> = [];
+    // [ADR-0146 D3] BASE declares the namespace its pair's is derived from,
+    // as `customizationPairManifestRefusal` reads it.
+    const records = installed.map((p) => ({
+        manifest: { id: p.id, version: '1.0.0', ...(p.id === BASE ? { namespace: 'crm' } : {}), ...(p.dependencies ? { dependencies: p.dependencies } : {}) },
+    }));
     const services: Record<string, any> = {
         manifest: { register: (m: any) => registered.push({ manifest: m }) },
         auth: installerAuthService(),
@@ -70,6 +80,11 @@ function makeCtx(rawApp: any, installed: Array<{ id: string; dependencies?: Reco
             registry: {
                 getAllPackages: () => [...records, ...registered],
                 getPackage: (id: string) => records.find((r) => r.manifest.id === id),
+                // [#30542] The registry's code artifacts, when the case gives them.
+                ...(artifacts ? {
+                    getArtifactItem: (type: string, name: string, packageId?: string) => artifacts
+                        .find((a) => a.type === type && a.item.name === name && a.item._packageId === packageId)?.item,
+                } : {}),
             },
         }),
         protocol: {
@@ -77,11 +92,17 @@ function makeCtx(rawApp: any, installed: Array<{ id: string; dependencies?: Reco
                 type,
                 items: (holdings[packageId ?? '']?.[type] ?? []).map((i) => ({ ...i, _packageId: packageId })),
             }),
+            // [ADR-0146 D3] The pair's doors: a pair is installed into its
+            // writable pair, each item through the save door.
+            ensureCustomizationPackage: async () => ({ packageId: PAIR, created: true, writable: true }),
+            saveMetaItem: async ({ type, name }: { type: string; name: string }) => { saved.push([type, name]); return { success: true }; },
+            deletePackage: async () => ({ success: true, deletedCount: 0, failedCount: 0 }),
         },
         metadata: { get: async () => undefined },
     };
     return {
         registered,
+        saved,
         ctx: {
             hook: (e: string, h: any) => hooks.set(e, h),
             getService: (name: string) => {
@@ -119,15 +140,16 @@ async function install(
     manifest: Record<string, unknown>,
     installed: Array<{ id: string; dependencies?: Record<string, string> }> = [{ id: BASE }],
     holdings: Holdings = BASE_HOLDINGS,
+    artifacts?: Artifacts,
 ) {
     const rawApp = makeRawApp();
-    const k = makeCtx(rawApp, installed, holdings);
+    const k = makeCtx(rawApp, installed, holdings, artifacts);
     const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
     await plugin.start(k.ctx as any);
     await k.fire();
     const res = await rawApp.routes.get(ROUTE)!(makeC({ manifest }));
     const registered = k.registered.map((r) => r.manifest.id).filter((id) => id === manifest.id);
-    return { res, registered, ledger: readdirSync(dir) };
+    return { res, registered, saved: k.saved, ledger: readdirSync(dir) };
 }
 
 const refusedOf = (res: any) => (res.payload?.error?.details?.refusals ?? []).map((r: any) => [r.type, r.name, r.rule]);
@@ -142,7 +164,7 @@ describe('install-local 2d — the override write gate at the managed install (A
         expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
         const verdict = judgeOverrideWrite(
             { type: 'dashboard', name: 'crm_board', packageId: PARTNER, item },
-            { dependencies: [BASE], shippers: [BASE] },
+            { dependencies: [BASE], shippers: [BASE], installed: installedManifestsOf(undefined) },
         );
         expect(res.payload.error.details.refusals).toEqual([
             { type: 'dashboard', name: 'crm_board', rule: 'undeclared_same_name', message: (verdict as any).message },
@@ -164,38 +186,58 @@ describe('install-local 2d — the override write gate at the managed install (A
 
     it('the paired .custom declaring an object override is refused (objects are extended)', async () => {
         const { res } = await install({
-            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE),
             objects: [{ name: 'crm_account', overrides: { package: BASE, basedOn: '1.0.0' }, fields: {} }],
         });
         expect(res.status).toBe(403);
         expect(refusedOf(res)).toEqual([['object', 'crm_account', 'declared_object']]);
     });
 
-    it('the paired .custom installs its declared override of an item the base ships', async () => {
-        const { res, registered } = await install({
-            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+    it('the paired .custom installs its declared override of an item the base ships, into its writable pair', async () => {
+        const { res, registered, saved } = await install({
+            id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE),
             dashboards: [{ name: 'crm_board', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' } }],
         });
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
-        expect(registered).toEqual([PAIR]);
+        expect(registered).toEqual([]);
+        expect(saved).toEqual([['dashboard', 'crm_board']]);
         expect(res.payload.data).not.toHaveProperty('overrideCollisions');
     });
 
-    it('[#28412] the paired .custom installs its declared FLOW override; a declared action override still waits', async () => {
-        // ADR-0146 D9: flow's conditions are delivered, so the gate admits it.
+    it('[#28412, #30065] the paired .custom installs its declared FLOW and ACTION overrides', async () => {
+        // ADR-0146 D9: flow's and action's conditions are delivered, so the gate admits them.
         const flow = await install({
-            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE),
             flows: [{ name: 'crm_followup', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' } }],
         });
         expect(flow.res.status, JSON.stringify(flow.res.payload)).toBe(200);
-        expect(flow.registered).toEqual([PAIR]);
+        expect(flow.registered).toEqual([]);
+        expect(flow.saved).toEqual([['flow', 'crm_followup']]);
 
         const action = await install({
-            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE),
             actions: [{ name: 'crm_call', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' } }],
         });
-        expect(action.res.status).toBe(403);
-        expect(refusedOf(action.res)).toEqual([['action', 'crm_call', 'declared_type_not_yet_available']]);
+        expect(action.res.status, JSON.stringify(action.res.payload)).toBe(200);
+        expect(action.registered).toEqual([]);
+        expect(action.saved).toEqual([['action', 'crm_call']]);
+    });
+
+    it('[#30065] a declared action override that widens who may run the base\'s action is refused 403, and nothing is written', async () => {
+        const holdings: Holdings = {
+            [BASE]: { action: [{ name: 'crm_call', label: 'Call', requiredPermissions: ['crm_admin'], ai: { exposed: false } }] },
+        };
+        const wider = { name: 'crm_call', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' }, requiredPermissions: ['crm_admin'], ai: { exposed: true } };
+        const { res, registered, saved, ledger } = await install(
+            { id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE), actions: [wider] },
+            [{ id: BASE }],
+            holdings,
+        );
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(refusedOf(res)).toEqual([['action', 'crm_call', 'declared_action_widens_access']]);
+        expect(res.payload.error.details.refusals[0].message).toContain('`ai.exposed: true`');
+        expect([registered, saved, ledger]).toEqual([[], [], []]);
     });
 
     it('CONTROL: a dependent shipping its own names installs, and its answer carries no collision key', async () => {
@@ -243,7 +285,7 @@ describe('install-local 2d — the override write gate at the managed install (A
 
     it('[#28746] the paired .custom declaring an override of a locale the base does not ship is refused 403, and nothing is written', async () => {
         const { res, registered, ledger } = await install({
-            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE),
             emailTemplates: [{ name: 'crm_welcome', locale: 'fr-FR', subject: 'Bienvenue', overrides: { ...DECLARED } }],
         }, [{ id: BASE }], TEMPLATE_HOLDINGS);
         expect(res.status, JSON.stringify(res.payload)).toBe(403);
@@ -254,14 +296,82 @@ describe('install-local 2d — the override write gate at the managed install (A
     });
 
     it('[#28746] CONTROL: the pair overrides the locale the base ships, and adds an undeclared locale of its own', async () => {
-        const { res, registered } = await install({
-            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+        const { res, registered, saved } = await install({
+            id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE),
             emailTemplates: [
                 { name: 'crm_welcome', locale: 'en-US', subject: 'Ours', overrides: { ...DECLARED } },
                 { name: 'crm_welcome', locale: 'fr-FR', subject: 'Bienvenue' },
             ],
         }, [{ id: BASE }], TEMPLATE_HOLDINGS);
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
-        expect(registered).toEqual([PAIR]);
+        expect(registered).toEqual([]);
+        expect(saved).toEqual([['email_template', 'crm_welcome'], ['email_template', 'crm_welcome']]);
+    });
+});
+
+/**
+ * [#30542] A re-install of the pair is judged against the base's code
+ * artifact, as the protocol door judges the save. Once the pair's declared
+ * action override is armed, the protocol's listing of the base serves that
+ * override under the base's envelope (measured on the real engine and
+ * protocol); the registry still holds the base's own action.
+ */
+describe('[#30542] the install door judges a declared action override against the base\'s code artifact', () => {
+    const overrides = { package: BASE, basedOn: '1.0.0' };
+    const BASE_GATES = { requiredPermissions: ['crm_admin'], ai: { requiresConfirmation: true } };
+    // v1, armed: it added a capability to the base's.
+    const armed: Holdings = {
+        [BASE]: { action: [{ name: 'crm_call', label: 'V1', overrides, ...BASE_GATES, requiredPermissions: ['crm_admin', 'crm_auditor'] }] },
+    };
+    const artifacts: Artifacts = [{ type: 'action', item: { name: 'crm_call', label: 'Call', ...BASE_GATES, _packageId: BASE } }];
+    const pairOf = (action: Record<string, unknown>) =>
+        ({ id: PAIR, version: '2.0.0', namespace: 'crm_custom', dependencies: deps(BASE), actions: [action] });
+
+    it('a v2 that relaxes the v1 tightening back to the base\'s own gates installs', async () => {
+        const { res, saved } = await install(pairOf({ name: 'crm_call', label: 'V2', overrides, ...BASE_GATES }), [{ id: BASE }], armed, artifacts);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(saved).toEqual([['action', 'crm_call']]);
+    });
+
+    it('a v2 that drops a gate the base\'s own action carries is still refused 403, and nothing is written', async () => {
+        const wider = { name: 'crm_call', label: 'V2', overrides, ...BASE_GATES, ai: {} };
+        const { res, saved, ledger } = await install(pairOf(wider), [{ id: BASE }], armed, artifacts);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(refusedOf(res)).toEqual([['action', 'crm_call', 'declared_action_widens_access']]);
+        expect([saved, ledger]).toEqual([[], []]);
+    });
+});
+
+/**
+ * [#30623] An `action` is keyed `<objectName>:<name>`: a pair's declared
+ * override of an action its base ships on another object is refused
+ * `declared_package_ships_no_such_item`, and the refusal names both objects
+ * and the base action's `objectName` to keep, in the judge's one sentence.
+ */
+describe('[#30623] the install door names the object a moved action override left', () => {
+    const overrides = { package: BASE, basedOn: '1.0.0' };
+    const holdings: Holdings = { [BASE]: { action: [{ name: 'crm_close', objectName: 'crm_account', label: 'Close' }] } };
+    const pairOf = (action: Record<string, unknown>) =>
+        ({ id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE), actions: [action] });
+    const messageOf = (res: any) => res.payload?.error?.details?.refusals?.[0]?.message as string;
+
+    it('an override of crm_account:crm_close declared on crm_lead names both objects and keeps objectName: crm_account', async () => {
+        const { res, saved, ledger } = await install(pairOf({ name: 'crm_close', objectName: 'crm_lead', label: 'Ours', overrides }), [{ id: BASE }], holdings);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(refusedOf(res)).toEqual([['action', 'crm_close', 'declared_package_ships_no_such_item']]);
+        expect(messageOf(res).split('. ')[0]).toBe(
+            `'action/crm_close' declares an override of '${BASE}' on object 'crm_lead', but '${BASE}' ships its action 'crm_close' on object 'crm_account'`);
+        expect(messageOf(res)).toContain("keep the base action's `objectName: 'crm_account'` in the override");
+        expect([saved, ledger]).toEqual([[], []]);
+    });
+
+    it('CONTROL: a name the base does not ship at all keeps the name sentence', async () => {
+        const { res } = await install(pairOf({ name: 'crm_reopen', objectName: 'crm_account', label: 'Ours', overrides }), [{ id: BASE }], holdings);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(refusedOf(res)).toEqual([['action', 'crm_reopen', 'declared_package_ships_no_such_item']]);
+        expect(messageOf(res).split('. ')[0]).toBe(`'action/crm_reopen' declares an override of '${BASE}', which ships no action named 'crm_reopen'`);
+        expect(messageOf(res)).toContain('or correct the name');
     });
 });

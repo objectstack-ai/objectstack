@@ -784,6 +784,135 @@ export function detectRecordHandoff(result: unknown): RecordHandoff | undefined 
   };
 }
 
+/**
+ * cloud#3565 — the chat's ONE-record write proposal, which the user confirms
+ * on a card before anything is written. `create_record` / `update_record`
+ * queue a HITL pending action in the user's name and answer
+ * `{ status:'pending_approval', pendingActionId, recordWrite:{…} }`: the
+ * approval envelope `detectPendingApproval` already lifts, plus the record the
+ * card draws beside its three buttons (确认 / 打开完整表单 / 取消). An update
+ * carries each field as stored (`current`) beside the proposed value, so the
+ * card reads old → new. `dropped` names what the server refused to propose and
+ * why (a field the user may not write, a lookup it could not resolve).
+ *
+ * The id is what the buttons act on, so an envelope without one is not a card:
+ * `useHitlInChat` would have nothing to approve or reject.
+ */
+export interface RecordWriteField {
+  name: string;
+  label: string;
+  type: string;
+  value: unknown;
+  /** The stored value an update replaces; absent on a create. */
+  current?: unknown;
+}
+
+export interface RecordWrite {
+  operation: 'create' | 'update';
+  objectName: string;
+  objectLabel: string;
+  recordId?: string;
+  label?: string;
+  reason?: string;
+  fields: RecordWriteField[];
+  dropped: Array<{ field: string; reason: string; detail?: string }>;
+}
+
+export function detectRecordWrite(result: unknown): RecordWrite | undefined {
+  const pending = detectPendingApproval(result);
+  if (!pending) return undefined;
+  const raw = pending.raw.recordWrite;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const str = (v: unknown): string | undefined => {
+    const t = typeof v === 'string' ? v.trim() : '';
+    return t.length > 0 ? t : undefined;
+  };
+  const operation = o.operation === 'create' || o.operation === 'update' ? o.operation : undefined;
+  const objectName = str(o.objectName);
+  const recordId = str(o.recordId);
+  if (!operation || !objectName || (operation === 'update' && !recordId)) return undefined;
+  const fields = (Array.isArray(o.fields) ? o.fields : []).flatMap((f): RecordWriteField[] => {
+    const r = (f ?? {}) as Record<string, unknown>;
+    const name = str(r.name);
+    if (!name) return [];
+    return [
+      {
+        name,
+        label: str(r.label) ?? name,
+        type: str(r.type) ?? 'text',
+        value: r.value,
+        ...('current' in r ? { current: r.current } : {}),
+      },
+    ];
+  });
+  // A card with nothing to confirm is not a card: the server refuses to queue
+  // one, so this only guards a hand-made envelope.
+  if (fields.length === 0) return undefined;
+  const dropped = (Array.isArray(o.dropped) ? o.dropped : []).flatMap((d) => {
+    const r = (d ?? {}) as Record<string, unknown>;
+    const field = str(r.field);
+    const reason = str(r.reason);
+    if (!field || !reason) return [];
+    return [{ field, reason, ...(str(r.detail) ? { detail: str(r.detail) } : {}) }];
+  });
+  return {
+    operation,
+    objectName,
+    objectLabel: str(o.objectLabel) ?? objectName,
+    ...(recordId ? { recordId } : {}),
+    ...(str(o.label) ? { label: str(o.label) } : {}),
+    ...(str(o.reason) ? { reason: str(o.reason) } : {}),
+    fields,
+    dropped,
+  };
+}
+
+/**
+ * cloud#3565 — 「清理示例数据」: the chat's `remove_sample_data` queues a HITL
+ * pending action and answers `{ status:'pending_approval', pendingActionId,
+ * sampleDataCleanup:{ tables:[{ objectName, label, count }], total, absent,
+ * edited } }` — the tables and counts the card lists before the user confirms.
+ * Only the seed ledger's rows are counted; the generic Approve / Deny strip
+ * stays the decision. An envelope without the id or without a table is not a
+ * card. The removal cannot be undone (no recycle bin until objectstack#3146),
+ * so the card says so; `absent` and `edited` are each said when above 0.
+ */
+export interface SampleDataCleanup {
+  tables: Array<{ objectName: string; label: string; count: number }>;
+  total: number;
+  /** Recorded rows the user cannot see or that are already gone. */
+  absent: number;
+  /** Recorded rows someone edited since they were seeded: kept, never removed. Absent in an older envelope → 0. */
+  edited: number;
+}
+
+export function detectSampleDataCleanup(result: unknown): SampleDataCleanup | undefined {
+  const pending = detectPendingApproval(result);
+  if (!pending) return undefined;
+  const raw = pending.raw.sampleDataCleanup;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const o = raw as Record<string, unknown>;
+  const str = (v: unknown): string | undefined => {
+    const t = typeof v === 'string' ? v.trim() : '';
+    return t.length > 0 ? t : undefined;
+  };
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  const tables = (Array.isArray(o.tables) ? o.tables : []).flatMap((t) => {
+    const r = (t ?? {}) as Record<string, unknown>;
+    const objectName = str(r.objectName);
+    if (!objectName) return [];
+    return [{ objectName, label: str(r.label) ?? objectName, count: num(r.count) }];
+  });
+  if (tables.length === 0) return undefined;
+  return {
+    tables,
+    total: typeof o.total === 'number' ? num(o.total) : tables.reduce((n, t) => n + t.count, 0),
+    absent: num(o.absent),
+    edited: num(o.edited),
+  };
+}
+
 export function detectProposedChanges(result: unknown): ProposedChanges | undefined {
   const obj = parseResultEnvelope(result);
   if (!obj || obj.status !== 'changes_proposed') return undefined;
@@ -1258,6 +1387,8 @@ function extractToolInvocations(
       const proposedChanges = detectProposedChanges(result);
       const builderHandoff = detectBuilderHandoff(result);
       const recordHandoff = detectRecordHandoff(result);
+      const recordWrite = detectRecordWrite(result);
+      const sampleDataCleanup = detectSampleDataCleanup(result);
       // Promote a dangling `input-*` state to a terminal one so a reloaded
       // conversation never shows "Running" forever (the server doesn't always
       // snapshot the terminal tool state). Two cases:
@@ -1293,6 +1424,8 @@ function extractToolInvocations(
         proposedChanges,
         builderHandoff,
         recordHandoff,
+        recordWrite,
+        sampleDataCleanup,
         replayOutcome,
       } satisfies ChatToolInvocation;
     });

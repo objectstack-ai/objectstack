@@ -4,8 +4,9 @@
 // §6): it gains an optional `vendor`, `appId` and `locale`. Pure widening, so
 // the body every client sends today must keep parsing unchanged, and the new
 // members are optional. The one value the widening refuses is a vendor
-// outside the pair core delivers through (`apns` / `fcm`); other vendors are
-// alternate channel plugins (ADR-0012 §6), not values of this field.
+// outside the pair core delivers through (`apns` / `fcm`); the domestic
+// Android vendors arrive in phase 2 as further values of `PushVendorSchema`,
+// routed by the hosted relay (ADR-0012 §6.1), not as channel plugins.
 
 import { describe, it, expect } from 'vitest';
 import {

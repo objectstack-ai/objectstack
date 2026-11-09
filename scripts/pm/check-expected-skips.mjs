@@ -539,7 +539,14 @@ function gatedReason(workflow, wf, gate, matrix) {
     }
     if (t.kind === 'pr-event') {
       const where = [t.events.includes('pull_request') && 'every PR head', t.events.includes('merge_group') && 'every queue build'].filter(Boolean).join(' and ');
-      return `full battery only: its \`if:\` excludes ${tick(t.events)}, so it skips on ${where} and is answered by main's push and scheduled runs`;
+      // "Full battery only" is said only when BOTH per-PR events are excluded:
+      // since #30461 ci.yml's `dogfood` shards exclude `pull_request` alone and
+      // run on every queue build, so the queue build answers them first.
+      if (PR_EVENTS.every((e) => t.events.includes(e))) {
+        return `full battery only: its \`if:\` excludes ${tick(t.events)}, so it skips on ${where} and is answered by main's push and scheduled runs`;
+      }
+      const answered = t.events.includes('pull_request') ? "the merge-queue build and main's push and scheduled runs" : "every PR head and main's push and scheduled runs";
+      return `its \`if:\` excludes ${tick(t.events)} alone, so it skips on ${where} and is answered by ${answered}`;
     }
     if (t.kind === 'event-action') {
       return `its \`if:\` excludes the ${tick(t.actions)} pull_request event(s); each such event is its own run on the same head, beside the run that concluded`;
@@ -1284,6 +1291,8 @@ function fixtureRun(name, conclusion, suite = 1, extra = {}) {
 const FILTER_WIDENED = (o) => `\${{ github.event_name != 'merge_group' && steps.changes.outputs.${o} || 'true' }}`;
 const CORE_IF = "${{ !cancelled() && needs.filter.outputs.core != 'false' }}";
 const FULL_BATTERY_IF = "${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}";
+// ci.yml's `dogfood` shards since #30461: the queue build runs them, a PR head skips them.
+const QUEUE_AND_FULL_IF = "${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' }}";
 const EVENT_ACTION_IF = "github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.action != 'edited'";
 const optInIf = (label) => `contains(github.event.pull_request.labels.*.name, '${label}') && (github.event.action != 'labeled' || github.event.label.name == '${label}')`;
 const FIXTURE_TREE = Object.freeze({
@@ -1307,7 +1316,7 @@ const FIXTURE_TREE = Object.freeze({
       },
       'test-gate': { name: 'Test Core', needs: ['test', 'filter'], if: 'always()' },
       'temporal-conformance': { name: 'Temporal Conformance (live PG + MySQL)', needs: 'filter', if: FULL_BATTERY_IF },
-      dogfood: { name: 'Dogfood Regression Gate (${{ matrix.shard }}/3)', needs: 'filter', if: FULL_BATTERY_IF, strategy: { matrix: { shard: [1, 2, 3] } } },
+      dogfood: { name: 'Dogfood Regression Gate (${{ matrix.shard }}/3)', needs: 'filter', if: QUEUE_AND_FULL_IF, strategy: { matrix: { shard: [1, 2, 3] } } },
       'dogfood-verify': { name: 'Dogfood Verify CLI', needs: 'filter', if: FULL_BATTERY_IF },
       'dogfood-gate': { name: 'Dogfood Regression Gate', needs: ['dogfood', 'dogfood-verify', 'filter'], if: 'always()' },
       'build-core': { name: 'Build Core', needs: 'filter', if: CORE_IF },
@@ -1531,6 +1540,7 @@ export function selfTest() {
   t('jobGate: …nor always(), an absent if:, a non-string, or two ${{ }} blocks', [jg('always()'), jg(undefined), jg(true), jg("${{ needs.filter.outputs.a != 'false' }} && ${{ needs.filter.outputs.b != 'false' }}")].every((x) => x === null), true);
   t('jobGate: …nor an if: whose parentheses do not balance', jg("!cancelled() && (needs.filter.outputs.core != 'false'"), null);
   t('spelling: a gate renders in one short line', gateTermsSpelling(jg(FULL_BATTERY_IF).terms), 'filter core + pr-event pull_request|merge_group');
+  t('jobGate: the queue-and-full shape (#30461) is one pr-event term excluding pull_request alone', JSON.stringify(jg(QUEUE_AND_FULL_IF)?.terms.find((x) => x.kind === 'pr-event')?.events), JSON.stringify(['pull_request']));
 
   // ---- the derivation, on the frozen fixture tree ----------------------------
   const fx = fixtureRoster();
@@ -1556,6 +1566,9 @@ export function selfTest() {
   t("reason: a queue-widened output says the merge-queue build runs it", fxRow('Build Core')?.reason.includes("merge-queue build widens it to 'true'"), true);
   t("reason: a ui output says the queue reads its own diff", fxRow('Build UI Deps')?.reason.includes("against the queue's base"), true);
   t('reason: a full-battery job says so', fxRow('Dogfood Verify CLI')?.reason.includes('full battery only'), true);
+  const queueRow = fxRow('Dogfood Regression Gate (${{ matrix.shard }}/3)');
+  t('reason: a job excluding pull_request alone is NOT called full battery only (#30461)', queueRow?.reason.includes('full battery only'), false);
+  t('reason: …it says only PR heads skip it and the merge-queue build answers it', queueRow?.reason.includes('skips on every PR head and is answered by the merge-queue build') && !queueRow?.reason.includes('every queue build'), true);
   t('reason: an opt-out label names its label', fxRow('Check Changeset')?.reason.includes('`skip-changeset` label skips it'), true);
   t('reason: a matrix job names its raw template', fxRow('Test Core (${{ matrix.shard }}/6)')?.reason.includes('raw `name:` template'), true);
   t('reason: unread conjuncts are counted, never hidden', fxRow('Build UI Deps')?.reason.includes('1 further condition(s)'), true);

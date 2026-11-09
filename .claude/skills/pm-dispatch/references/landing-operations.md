@@ -25,36 +25,42 @@
 - 红/踢出处置在同一落地窗口内做:机器输入是 merge-queue triage workflow 的分诊评论。
 - 判据唯一来源是签名台账(锚点 issue),优先于现场判断;只有人工能升级台账。
 - 疑似新 flaky 只留提请,⛔ 不自行加表;纯计数不追记,只有改变修法作用域时才记。
-- 四分支:已知 flaky ⇒ 原样重投;已修签名再现 ⇒ ⛔ 不重投,判新问题重新诊断。
-- 基上缺已合修复 ⇒ merge main 推新提交,重跑无效。
+- 四分支,head 未变只凭 flake 重投:已知 flaky ⇒ 原样重投;已修签名再现 ⇒ 判新问题重诊。
+- 基上缺已合修复 ⇒ merge main 推新提交,重跑无效;新语种包落地致翻译门禁红同属此支。
 - 新签名 ⇒ ⛔ 不重投,PR 与其 `Fixes` 卡各留完整签名与初判;下条三事实全立可重投一次。
 - 三事实:失败文件 import 闭包与 diff 不相交、队列基座同 shard 绿、首错是超时非断言。
 - 每次处置留审计评论,重投写签名与台账依据或三行回执;同签名再弹即停,交下一席重诊。
+- 插队(中继 `pr_enqueue_front`)限 ACCEPT 后三因之一,⛔ 不为图快越过同事:
+- (a) 它带着正把**他人** PR 踢出队列的签名之修复;(b) 它是他车道 PR/卡具名前置
+  (`Blocked-by`/串行行),该线经维护者或账户主人定为最高优先;(c) 账户主人点名要它插队。
+- 送出前先在 PR 贴审计评论点名字母与依据;一笔一 PR,同仓同时至多一个插队者在队。
+- 中继另拒 draft、head 已移与 AGENTS.md §7 三类;读回非队首即 FAILED,⛔ 不重发,报维护者。
+- PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
+- 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
+- PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
+- K ≥ 15,或标签 PR 的 PRBASE 后 main 落新语种包(任何 K)⇒ 先 merge main 等重跑绿,`behind` 例外。
+- 标签即 `check-generated-translation-bundles`、`check-no-new-untranslated-declared-labels` 所计显示标签。
 
 ## A. 碰生成物的 PR:入队前先同步 + 整体重生成
 
 - `merge=os-regen` 路径清单当场读 `grep os-regen .gitattributes`,那是唯一权威清单。
 - ⛔ 不把该清单抄进派发令当常量;文档产物同在清单、同样会被吞。
 - 四步序已机械化 `bash scripts/pm/os-regen-merge.sh`,步骤以脚本为权威;⛔ 禁 rebase 与 force-push。
-- ⛔ 永不在 MERGE 状态下跑 `gen:schema`:锚点会静默倒退回旧分叉点且全部门禁放行。
 - 重生成后断言所有兄弟单的条目都还在。
 - 更硬的旁证是查上一单的实现体完好:`git grep` 带引号精确名对 `origin/main` 与实现文件。
-- 锚点断言的正确措辞:断言 `pnpm --filter @objectstack/spec check:authorable-surface` 绿即可。
-- `baseRev` 允许滞后,是一行提示不是错误;⛔ 禁为凑相等手改锚点。
 
 ## B. 跟到 MERGED 为止;入队后的看护归车道 PM 落地窗口
 
 - 车道 PM 的权责三件:验收(复核清单)、首次入队、确认 MERGED;落地执行在案判决,非自批。
 - 首次入队:ACCEPT 后挂 6–9 分钟 flip 定点,到点核门禁 job 结论。
-- 绿即经中继 op `pr_ready` + `automerge_enable` 落地,拼写见 `rest-channel.md`;未绿按阶梯重挂定点。
+- 绿即落地评论与 `pr_ready`+`automerge_enable` 一笔中继:`label-write --land`;未绿按阶梯重挂定点。
 - 写节流拒(exit 10) ⇒ 待 `node scripts/pm/write-pace.mjs --status` 现空槽再重试。
 - CI success webhook 不可靠:⛔ 不坐等,也 ⛔ 不忙轮询;定点文本照定时器写法纪律。
-- undraft 撞 429 ⇒ 落地入等 `resets at` 态:该刻记卡,到点一次重试;⛔ 不报阻塞、不自定节奏。
+- undraft 429 ⇒ 卡记 `resets at`,到点一次重试裸 op(`rest-channel.md`),⛔ 不重发评论、不报阻塞。
 - 落地遭分类器拒 ⇒ 停手、报维护者、卡上记命令与拒因;⛔ 不换拼法、不退回 ccr 绕过。
 - 落地评论 = 两个读数的探针表 + 一行状态变更(摘标/关卡/收口),⛔ 不复述 `## 席位核对`。
-- 转 ready/入队前跑 `check-governed-merges.mjs --pr N`:受管面照两层;>3000 行(含生成物)照 Tier H。
+- 转 ready/入队前跑 `check-governed-merges.mjs --pr N`,判定读全文 ⛔ 不 tail/head;四件套照 SKILL.md。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
-- 再读 `mergeable_state`:`dirty` ⇒ 先 merge `origin/main` 再挂;生成物在面上按 A 的固定序。
 - 挂 auto-merge 的同一动作里重测生成物漂移,⛔ 不复用更早的零;非零 ⇒ 按 A 的固定序。
 - ready + 全绿 ≠ 已入队:队列从不主动拉 PR,入队是显式动作。
 - 零 `enqueued` 事件按序查三条:① `mergeable_state` 是否 `dirty`。
@@ -62,7 +68,6 @@
 - ③ PR 碰 `.github/workflows/**`:令牌常驻 `workflows: write`(裁决评论 6104822731),仍拒即授权漂移。
 - 确认 MERGED 同一动作里给 `Part of` 卡收口、`Fixes` 卡代关但标也须摘,⛔ 不拆到下轮巡检。
 - 摘标换回 `pm:queue` 或按剩余物定级,加一条写清交付了什么、剩下归谁的评论。
-- 同刻读相关卡 `closed_by_pull_requests`,确认没有卡被正文闭合关键词误关。
 - 每次合并后重拉一次车道盘点与预期状态对账,⛔ 不留给下轮巡检。
 - 取 open 卡清单对照预期 diff:预期之外从 open 消失的,就是被闭合关键词静默误关的卡。
 - 落地后再核一次落地判据本身:队列的合并同样走 os-regen,A 的静默吞并一样能发生。
@@ -86,9 +91,10 @@
 ## C. 依赖前棒才能转绿的 PR:draft 停放 + 签名级预期红清单
 
 - 这种 PR 停在 draft,正文写精确的预期红清单:逐条失败测试名 + 报错签名。
-- 正文同写解除条件:点名所依赖的那张 PR 合入。
+- 正文同写解除条件:依赖 PR 或锚卡修复合入;因 main 红停放者加行首 `Waits-on: main-red #n`。
 - 每个 CI-failure 事件与清单比对:签名匹配静默跳过,新签名才是真问题。
 - 依赖合入后:末轮同步走中继 `pr_update_branch`(`rest-channel.md`)→ 红清零 → 转 ready → 入队。
+- 收 `Notify: main-green` 即照上行合 `origin/main`、删 `Waits-on:` 行,续走 §C 落地。
 
 ## D. 串行接力:多个已实现 PR 全碰生成物时,一次只放行一个
 

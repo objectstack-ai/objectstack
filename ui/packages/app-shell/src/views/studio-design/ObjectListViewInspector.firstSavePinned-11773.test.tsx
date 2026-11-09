@@ -69,8 +69,12 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
     return json(200, { drafts: [...server.drafts.keys()].map((k) => ({ type: k.split('/')[0], name: k.split('/')[1]!.split('@')[0] })) });
   }
   if (seg.length === 3 && seg[2] === 'layers') {
+    // As the server answers an admitted author (objectstack#30859): a pending draft is served as stored, as `draft`, and an item with only a draft still has layers.
     const row = server.active.get(item);
-    return row ? json(200, { code: null, overlay: row, overlayScope: 'env', effective: row }) : json(404, { error: { code: 'NOT_FOUND' } });
+    const draft = server.drafts.get(`${item}@${q.get('package') ?? ''}`)?.body ?? null;
+    return row || draft
+      ? json(200, { code: null, overlay: row ?? null, overlayScope: row ? 'env' : null, effective: row ?? null, draft })
+      : json(404, { error: { code: 'NOT_FOUND' } });
   }
   const address = `${item}@${q.get('package') ?? ''}`;
   if (method === 'PUT') {

@@ -42,6 +42,14 @@ import {
   // cannot apply by the same verdict those doors refuse it by.
   fieldPatchTargetMisses,
   type FieldPatchTargetMiss,
+  // [ADR-0146 D3 · ruling record 6691022506] The pair of a package, looked up
+  // through the App that carries it — the uninstall refusal's "is its pair
+  // installed?" asks it, over this registry's installed manifests.
+  pairsOf,
+  installedManifestsOf,
+  // [ADR-0150 D3, #28802] The one closure walk: a dependent's bundle addition
+  // under a dependency's name is no holder of that name for a bare read.
+  packageDependencyClosure,
 } from '@objectstack/metadata-core';
 // [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -51,7 +59,7 @@ import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationPackageId } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationBasePackageId, findNamespaceObjectNameClashes, type NamespaceObjectNameClash, type ObjectNameHolder, type NamespaceHolder, validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema, ActionSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -72,6 +80,41 @@ import {
   securityCatalogTypeLabel,
   type SecurityCatalogHolder,
 } from './security-catalog-namespace.js';
+// One name, one package holder for the bare-name types whose consumers resolve
+// without package context — the rule, the holders, the cold boot (module doc).
+import {
+  BUILT_IN_BARE_NAMES,
+  bareNameHolderKey,
+  bareNameReason,
+  bareNameTypeLabel,
+  BARE_NAME_ONE_HOLDER_TYPES,
+  bareNameHoldersMeet,
+  declaredBareNames,
+  describeBareNameHolder,
+  handlerOwnerPackageId,
+  holdsBareName,
+  isBareNameRegistryType,
+  isOverridableBaseline,
+  suggestedBareNameRename,
+  type BareNameColdBootMode,
+  type BareNameHolder,
+  type BareNameOneHolderType,
+} from './bare-name-one-holder.js';
+// [ADR-0150 D3, #31680 child E8] The by-name readers that consult (package, name):
+// `resolveItem` hands the types they cover to the one package-scoped resolver.
+import { isPackageScopedReadType, readPackageScopedItem } from './package-scoped-read.js';
+// [ADR-0150 D2, child N] Inside one namespace, a `(type, name)` of the twelve
+// uncovered bucket 2/3 types has one package holder — the one predicate the
+// package door and `os validate` both ask (module doc).
+import {
+  isNamespaceJudged,
+  namespaceNameConflictMessage,
+  namespaceNameConflicts,
+  namespacePackageOf,
+  type NamespaceNameConflict,
+  type NamespacePackage,
+  type NamespaceUniqueType,
+} from './namespace-co-owner-names.js';
 // One default record page per object per deployment — the holders and the one
 // place a manifest's default record pages are read from (module doc).
 import {
@@ -102,6 +145,7 @@ import {
 // pure, so the registry and the engine plugin's load-time audit read one
 // spelling of each. See the module header.
 import {
+  collectManifestPicklistNames,
   collectPicklistReferences,
   duplicatePicklistValueError,
   findDuplicatePicklistValue,
@@ -109,8 +153,19 @@ import {
   resolvePicklistFieldsOnto,
   type PicklistContribution,
   type PicklistOptionLike,
-  type PicklistReference,
+  type UnresolvedPicklistExtension,
+  type UnresolvedPicklistReference,
 } from './picklist-resolution.js';
+// [ADR-0150 D3, child E6] The ONE answer to "which package's list does this
+// bare picklist name mean, for this referrer" — R's. ⛔ No second closure walk
+// and no first-registered fallback here: every picklist read below asks it.
+import {
+  resolvePackageScopedName,
+  type PackageScopedHolder,
+  type PackageScopedRefusal,
+  type PackageScopedRegistry,
+  type PackageScopedResolution,
+} from './package-scoped-resolver.js';
 import { standaloneActionOwnerKey, isObjectLessActionKey } from './action-governance.js';
 import { recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
 
@@ -532,6 +587,67 @@ function fieldPatchYieldKey(field: string, key: string, option?: string): string
   return option === undefined ? `${field}\u0000${key}` : `${field}\u0000options\u0000${option}\u0000${key}`;
 }
 
+/** A picklist item as the registry stores it: the two keys the merge reads. */
+type PicklistItemLike = { options?: PicklistOptionLike[]; _packageId?: string };
+
+/**
+ * [ADR-0150 D3, child E6] Who wrote one field's picklist reference: every
+ * package whose own layer declares it, in fold order, or `[null]` — one caller
+ * with no package — when no packaged layer does.
+ */
+type PicklistReferrer = (field: string | undefined, picklist: string) => readonly (string | null)[];
+
+/** Every reference is the environment's: a body no packaged layer declares. */
+const NO_PACKAGE_REFERRER: PicklistReferrer = () => [null];
+
+/** Are two package-scoped holders the same one? */
+function sameHolder(a: PackageScopedHolder, b: PackageScopedHolder): boolean {
+  if (a.kind === 'package') return b.kind === 'package' && a.packageId === b.packageId;
+  return a.kind === b.kind;
+}
+
+/** The `picklist` a body's field declares (name-keyed or array-spelled), when it declares one. */
+function declaredPicklistOf(body: unknown, field: string): string | undefined {
+  const fields = isPlainRecord(body) ? body.fields : undefined;
+  let declared: unknown;
+  if (Array.isArray(fields)) {
+    declared = fields.find((f) => isPlainRecord(f) && f.name === field);
+  } else if (isPlainRecord(fields) && Object.prototype.hasOwnProperty.call(fields, field)) {
+    declared = fields[field];
+  }
+  const picklist = isPlainRecord(declared) ? declared.picklist : undefined;
+  return typeof picklist === 'string' && picklist !== '' ? picklist : undefined;
+}
+
+/**
+ * [ADR-0150 D3, child E6] The referrers of each picklist reference a served
+ * body carries, read from the contributors that fold into it: EVERY packaged
+ * layer (the owner, then each extension) whose own declaration names that same
+ * list on that field, each package once. Several layers can write one
+ * reference; none of them is picked over the others (epic seat review on
+ * #31731): the field is served a list only when every one of them reaches the
+ * same holder ({@link SchemaRegistry.resolvePicklistFields}). A reference no
+ * packaged layer writes came from an environment-authored body — a tenant
+ * overlay, a stored row, an object created in this environment — and resolves
+ * as the environment's (`null`), never from the package that body customizes
+ * (D3).
+ */
+function picklistReferrerOf(contributors: readonly ObjectContributor[] | undefined): PicklistReferrer {
+  if (!contributors || contributors.length === 0) return NO_PACKAGE_REFERRER;
+  const packaged = [
+    ...contributors.filter((c) => c.ownership === 'own'),
+    ...contributors.filter((c) => c.ownership === 'extend'),
+  ].filter((c) => !isTenantAuthored(c.definition));
+  return (field, picklist) => {
+    if (field === undefined) return [null];
+    const referrers = new Set<string | null>();
+    for (const c of packaged) {
+      if (declaredPicklistOf(c.definition, field) === picklist) referrers.add(c.packageId ?? null);
+    }
+    return referrers.size > 0 ? [...referrers] : [null];
+  };
+}
+
 /** A field of an object body's name-keyed `fields`, when it is a record. */
 function recordFieldOf(body: unknown, name: string): Record<string, unknown> | undefined {
   const fields = isPlainRecord(body) ? body.fields : undefined;
@@ -722,6 +838,106 @@ function admittedFieldPatches(
 type ServedObjectLayer = 'served' | 'code';
 
 /**
+ * [#29903, #29872] The options that leave `extend` contributions out of an
+ * object fold ({@link SchemaRegistry.getAllObjects}, `listItems`,
+ * `foldObjectExtendersOnto`):
+ *
+ *  - `withoutExtensionsOf` — that package's contributions are left out;
+ *  - `onlyExtensionsOf` — every OTHER package's contributions are left out,
+ *    so only that package's own extensions fold. The protocol's per-package
+ *    layer passes it, naming the listed package.
+ *
+ * Both may be given; a contribution either one leaves out is left out. The
+ * base layer (`own` / `overlay`) is never left out.
+ *
+ * [#30756] `asEnabled` asks the opposite question of a DISABLED package: the
+ * fold as it will serve once that package is enabled, its `extend`
+ * contributions folded in instead of withheld ({@link SchemaRegistry.withholdDisabledExtensions}).
+ * Every other disabled package's stay withheld. The enable door's pre-check
+ * reads it, as the disable door's reads `withoutExtensionsOf`; for a package
+ * that is not disabled it changes nothing.
+ */
+export interface ObjectExtensionFoldOptions {
+  withoutExtensionsOf?: string;
+  onlyExtensionsOf?: string;
+  asEnabled?: string;
+}
+
+/** Whether `options` leaves any contribution out (otherwise the fold is the ordinary one). */
+function leavesExtensionsOut(options: ObjectExtensionFoldOptions | undefined): options is ObjectExtensionFoldOptions {
+  return options?.withoutExtensionsOf !== undefined || options?.onlyExtensionsOf !== undefined;
+}
+
+/** [#29903, #29872] Whether `options` leaves `contributor` out of the fold. */
+function isLeftOutExtension(contributor: ObjectContributor, options: ObjectExtensionFoldOptions): boolean {
+  if (contributor.ownership !== 'extend') return false;
+  if (options.withoutExtensionsOf !== undefined && contributor.packageId === options.withoutExtensionsOf) return true;
+  return options.onlyExtensionsOf !== undefined && contributor.packageId !== options.onlyExtensionsOf;
+}
+
+/**
+ * The `extend` contributions a disable withholds from a served fold, and the
+ * member names only they add ({@link SchemaRegistry.withholdDisabledExtensions}).
+ */
+interface WithheldExtensions {
+  kept: ObjectContributor[];
+  withheldFields: ReadonlySet<string>;
+  withheldRules: ReadonlySet<string>;
+  /** Each withheld index by its structural key ({@link indexKeysOf}). */
+  withheldIndexes: ReadonlySet<string>;
+}
+
+/** The field names a body declares in the record spelling the merge reads. */
+function fieldNamesOf(body: unknown): string[] {
+  const fields = isPlainRecord(body) ? body.fields : undefined;
+  return isPlainRecord(fields) ? Object.keys(fields) : [];
+}
+
+/** The validation rule names a body declares. */
+function ruleNamesOf(body: unknown): string[] {
+  const rules = isPlainRecord(body) ? body.validations : undefined;
+  if (!Array.isArray(rules)) return [];
+  return rules
+    .map((rule) => (isPlainRecord(rule) ? rule.name : undefined))
+    .filter((name): name is string => typeof name === 'string' && name !== '');
+}
+
+/** The indexes a body declares, each by its structural key (the key the fold's index subtraction compares by). */
+function indexKeysOf(body: unknown): string[] {
+  const indexes = isPlainRecord(body) ? body.indexes : undefined;
+  return Array.isArray(indexes) ? indexes.map((index) => stableStringify(index)) : [];
+}
+
+/**
+ * `base` without the fields, rules and indexes a withheld extension alone adds. By
+ * reference when it carries none of them, which is the ordinary case (a base
+ * that was never folded).
+ */
+function withoutWithheldMembers(base: ServiceObject, withheld: WithheldExtensions): ServiceObject {
+  const fields = isPlainRecord((base as { fields?: unknown }).fields) ? (base as { fields: Record<string, unknown> }).fields : undefined;
+  const rules = (base as { validations?: unknown }).validations;
+  const dropFields = fields !== undefined && Object.keys(fields).some((name) => withheld.withheldFields.has(name));
+  const dropRules = Array.isArray(rules)
+    && rules.some((rule) => isPlainRecord(rule) && typeof rule.name === 'string' && withheld.withheldRules.has(rule.name));
+  const indexes = (base as { indexes?: unknown }).indexes;
+  const dropIndexes = Array.isArray(indexes) && indexes.some((index) => withheld.withheldIndexes.has(stableStringify(index)));
+  if (!dropFields && !dropRules && !dropIndexes) return base;
+  const out = { ...base } as ServiceObject & Record<string, unknown>;
+  if (dropFields) {
+    out.fields = Object.fromEntries(Object.entries(fields!).filter(([name]) => !withheld.withheldFields.has(name))) as ServiceObject['fields'];
+  }
+  if (dropRules) {
+    out.validations = (rules as unknown[]).filter(
+      (rule) => !(isPlainRecord(rule) && typeof rule.name === 'string' && withheld.withheldRules.has(rule.name)),
+    ) as ServiceObject['validations'];
+  }
+  if (dropIndexes) {
+    out.indexes = (indexes as unknown[]).filter((index) => !withheld.withheldIndexes.has(stableStringify(index))) as ServiceObject['indexes'];
+  }
+  return out;
+}
+
+/**
  * Deep merge two ServiceObject definitions.
  *
  * The merge set is CLOSED and enumerable — this is NOT "every prop, later
@@ -733,7 +949,9 @@ type ServedObjectLayer = 'served' | 'code';
  *     the tenant's `message` and `active`, never the tenant's condition.
  *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
  *     `description`) are overridden last-writer-wins, subject to the
- *     `tenantAuthored` yield rule below.
+ *     `tenantAuthored` yield rule below. [#30391] A `label` that renames the
+ *     object without a `pluralLabel` beside it also takes the running
+ *     `pluralLabel` off: the plural named the old label.
  *   - `fieldPatches` [ADR-0146 D10, second rule] is APPLIED, never carried:
  *     after the merges above, each patch writes its `BASE_FIELD_DISPLAY_WHITELIST`
  *     keys onto the named field and its option labels onto the options whose
@@ -813,7 +1031,17 @@ function mergeObjectDefinitions(
   // Override scalar props (last writer wins) — [ADR-0029 D9.2a] unless the base has been
   // authored by the tenant, in which case the extender's packaged default yields.
   const yields = (key: ObjectFoldScalarKey): boolean => tenantAuthored?.has(key) === true;
-  if (extension.label !== undefined && !yields('label')) merged.label = extension.label;
+  if (extension.label !== undefined && !yields('label')) {
+    // [#30391] `pluralLabel` is the plural OF `label`: an extension that renames
+    // the object and declares no plural leaves the running plural naming the
+    // old label, so the object is served as one that declares no
+    // `pluralLabel`. A plural the tenant authored stays (the D9.2a yield), and
+    // an extension that repeats the label it extends renames nothing.
+    if (extension.pluralLabel === undefined && extension.label !== merged.label && !yields('pluralLabel')) {
+      delete merged.pluralLabel;
+    }
+    merged.label = extension.label;
+  }
   if (extension.pluralLabel !== undefined && !yields('pluralLabel')) {
     merged.pluralLabel = extension.pluralLabel;
   }
@@ -2647,6 +2875,134 @@ export class SecurityCatalogNameConflictError extends Error {
   }
 }
 
+/** One second holder {@link BareNameConflictError} refused (or a cold boot reported). */
+export interface BareNameConflict {
+  /** The covered type, as the registry keys it. */
+  readonly type: BareNameOneHolderType;
+  /** The name both holders claim. */
+  readonly name: string;
+  /** The package whose registration this refusal stopped (at a cold boot: a later-registered holder). */
+  readonly incomingPackageId: string;
+  /** Who already holds the name. */
+  readonly existingHolder: BareNameHolder;
+  /** The rename that clears it — the incoming package's namespace prefixed — when it has one. */
+  readonly rename?: string;
+}
+
+/** One conflict's line, the same at every door. */
+function bareNameConflictLine(c: BareNameConflict): string {
+  return (
+    `package "${c.incomingPackageId}" declares the ${bareNameTypeLabel(c.type)} "${c.name}", ` +
+    `already held by ${describeBareNameHolder(c.existingHolder)}` +
+    (c.rename ? ` — rename it to "${c.rename}" in "${c.incomingPackageId}"` : '')
+  );
+}
+
+/** Why a second holder is refused, for the types `conflicts` carry (`bareNameReason`). */
+const bareNameReasonFor = (conflicts: readonly BareNameConflict[]): string =>
+  bareNameReason(conflicts.map((c) => c.type));
+
+/** The cold-boot warning for the names two installed packages already hold (`bare-name-one-holder.ts`). */
+export function bareNameColdBootWarning(conflicts: readonly BareNameConflict[]): string {
+  return (
+    `Bare-name conflict at boot: ${conflicts.length === 1 ? 'a second holder' : `${conflicts.length} second holders`} ` +
+    `among the installed packages — ${conflicts.map(bareNameConflictLine).join('; ')}. ${bareNameReasonFor(conflicts)} ` +
+    `The boot continues and changes nothing about which holder each caller is served; a further package ` +
+    `declaring the name is refused at install. Rename the item in one package (its namespace prefixed, as ` +
+    `above), or uninstall one of the two packages. See ADR-0048.`
+  );
+}
+
+/**
+ * Raised when a package registers an item of a covered type (a picklist,
+ * mapping, dataset, API or object-less action) or binds a function whose name
+ * another package (or the platform) already holds — at managed install, at
+ * package registration, at the hook binder's function bind, or, under
+ * `BARE_NAME_COLD_BOOT_MODE = 'refuse'`, at the cold boot
+ * (`bare-name-one-holder.ts` states the rule, the holders, the cold boot, and
+ * what it deliberately does not judge).
+ *
+ * {@link SecurityCatalogNameConflictError}'s sibling, in its shape and for its
+ * reason: the ADR-0112 envelope (`code` + `status: 422`) so a wire door answers
+ * `422`, never the `500` fallback, and the code the namespace gate registers —
+ * the condition is the same one, "a name in a deployment-wide namespace is
+ * already taken", and so is the remedy: rename, or uninstall the other holder.
+ *
+ * Every conflict the registration carries is listed — `conflicts` — and each
+ * names both holders and, when the incoming package declares a namespace, the
+ * rename that clears it. The top-level fields repeat the first.
+ */
+export class BareNameConflictError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** Every second holder this registration would have created, in declaration order. */
+  readonly conflicts: readonly BareNameConflict[];
+  /** The first conflict's type. */
+  readonly itemType: BareNameOneHolderType;
+  /** The first conflict's name. */
+  readonly itemName: string;
+  /** The package whose registration this refusal stopped. */
+  readonly incomingPackageId: string;
+  /** The first conflict's existing holder. */
+  readonly existingHolder: BareNameHolder;
+
+  constructor(conflicts: readonly BareNameConflict[], options: { door?: 'cold-boot' } = {}) {
+    const [first] = conflicts;
+    const remedy = first.existingHolder.kind === 'package'
+      ? `Rename the item in "${first.incomingPackageId}"${first.rename ? ` (to "${first.rename}")` : ''}, ` +
+        `rename it in "${first.existingHolder.packageId}", or uninstall one of the two packages.`
+      : `Rename the item in "${first.incomingPackageId}"${first.rename ? ` (to "${first.rename}")` : ''} — ` +
+        'a built-in name is never available to a package.';
+    super(
+      options.door === 'cold-boot'
+        ? `Bare-name conflict at boot: ${conflicts.map(bareNameConflictLine).join('; ')}. ${bareNameReasonFor(conflicts)} ` +
+          `The boot is refused. Rename the item in one of the packages, or uninstall one of them, then ` +
+          `restart. See ADR-0048.`
+        : `Bare-name conflict: package "${first.incomingPackageId}" cannot register ` +
+          `${conflicts.length === 1 ? 'a name' : `${conflicts.length} names`} another holder already holds — ` +
+          `${conflicts.map(bareNameConflictLine).join('; ')}. ${bareNameReasonFor(conflicts)} ${remedy} See ADR-0048.`,
+    );
+    this.name = 'BareNameConflictError';
+    this.conflicts = conflicts;
+    this.itemType = first.type;
+    this.itemName = first.name;
+    this.incomingPackageId = first.incomingPackageId;
+    this.existingHolder = first.existingHolder;
+  }
+}
+
+/**
+ * The cold boot's half of the bare-name rule (`bare-name-one-holder.ts`, "The
+ * cold boot"): seal the registry — from here on both doors refuse a new holder
+ * at once — and act on every name two installed packages already hold, by
+ * `mode`: `'warn'` logs {@link bareNameColdBootWarning} once and returns the
+ * conflicts; `'refuse'` throws {@link BareNameConflictError} with
+ * `door: 'cold-boot'`. The engine plugin calls it at `kernel:bootstrapped`,
+ * once every package of the boot has registered.
+ *
+ * @throws {BareNameConflictError} under `'refuse'`, when any name is held twice.
+ */
+export function sealBareNameHoldersAtColdBoot(
+  registry: SchemaRegistry,
+  mode: BareNameColdBootMode,
+  logger?: { warn(message: string, meta?: unknown): void },
+): BareNameConflict[] {
+  const conflicts = registry.sealBareNameHolders();
+  if (conflicts.length === 0) return conflicts;
+  if (mode === 'refuse') throw new BareNameConflictError(conflicts, { door: 'cold-boot' });
+  logger?.warn(bareNameColdBootWarning(conflicts), {
+    conflicts: conflicts.map((c) => ({
+      type: c.type,
+      name: c.name,
+      holders: [c.existingHolder.kind === 'package' ? c.existingHolder.packageId : c.existingHolder.kind, c.incomingPackageId],
+      ...(c.rename ? { rename: c.rename } : {}),
+    })),
+  });
+  return conflicts;
+}
+
 /** One second default record page {@link DefaultRecordPageConflictError} refused. */
 export interface DefaultRecordPageConflict {
   /** The object both pages are the default record page of. */
@@ -2976,6 +3332,129 @@ export class ArtifactObjectNameConflictError extends Error {
 }
 
 /**
+ * [ADR-0150 D6, child K] Raised when an install would put a namespace and an
+ * object name on the same string, in either direction, or ships an object
+ * short-named `custom` (`NS_custom`, the namespace the ADR-0146 paired package
+ * of `NS` takes). The predicate is the spec's one
+ * (`findNamespaceObjectNameClashes`, `kernel/namespace-prefix.ts`); every door
+ * that admits an object or a namespace asks it, and each clash's sentence
+ * names both spellings.
+ *
+ * Same envelope and code as {@link NamespaceNameConflictError}: `code:
+ * 'NAMESPACE_CONFLICT'`, `status: 422` — the condition is "a name the
+ * namespace position reads is already taken", and the remedy is a rename. No
+ * code is minted. Every clash is listed (red line 2); the top-level fields
+ * repeat the first.
+ */
+export class NamespaceObjectNameConflictError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** Every clash, in the predicate's order. */
+  readonly clashes: readonly NamespaceObjectNameClash[];
+  /** The first clash's namespace. */
+  readonly namespace: string;
+  /** The first clash's object name. */
+  readonly objectName: string;
+  /** The package whose install this refusal stopped. */
+  readonly incomingPackageId: string;
+
+  constructor(clashes: readonly NamespaceObjectNameClash[], incomingPackageId: string) {
+    const [first] = clashes;
+    super(clashes.map((c) => c.message).join(' '));
+    this.name = 'NamespaceObjectNameConflictError';
+    this.clashes = clashes;
+    this.namespace = first.namespace;
+    this.objectName = first.objectName;
+    this.incomingPackageId = incomingPackageId;
+  }
+}
+
+/**
+ * [ADR-0150 D5, child G1] Raised when a package declares a namespace that
+ * spells a literal segment of the REST address grammar (`trigger`, `hooks`,
+ * `global`, … — `NAMESPACE_REFUSED_LITERALS`, `spec/kernel/address-grammar.ts`).
+ * The router reads a literal before any namespace, so every qualified address
+ * of such a package (`/automation/trigger/<name>` read as the trigger door,
+ * not the namespace `trigger`) would reach something else. The sentence is the
+ * spec's (`validateNamespaceNotAddressLiteral`), naming the literal and the
+ * doors that serve it.
+ *
+ * Same envelope and code as {@link NamespaceObjectNameConflictError}: `code:
+ * 'NAMESPACE_CONFLICT'`, `status: 422` — the namespace position already reads
+ * this string as something else, and the remedy is a rename. No code is minted.
+ */
+export class NamespaceAddressLiteralError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** The namespace the package declared. */
+  readonly namespace: string;
+  /** The package whose install this refusal stopped. */
+  readonly incomingPackageId: string;
+
+  constructor(namespace: string, message: string, incomingPackageId: string) {
+    super(`Package '${incomingPackageId}': ${message}`);
+    this.name = 'NamespaceAddressLiteralError';
+    this.namespace = namespace;
+    this.incomingPackageId = incomingPackageId;
+  }
+}
+
+/**
+ * [ADR-0150 D2, child N] Raised when a package declares an item of one of the
+ * twelve uncovered bucket 2/3 types — sharing rule, queue, assignment rule,
+ * hook, job, app, page, dashboard, report, book, analytics cube, tool — under a
+ * name another package of its namespace already holds, at the package door
+ * (`namespace-co-owner-names.ts` states the rule, the holders and what it does
+ * not judge). `os validate` prints the same sentence for the same predicate.
+ *
+ * {@link ArtifactObjectNameConflictError}'s sibling in placement — it sits
+ * right after the ADR-0130 D3 object check, ahead of every mutation — and
+ * {@link BareNameConflictError}'s in its envelope and code: `code:
+ * 'NAMESPACE_CONFLICT'`, `status: 422`, because the condition is the one the
+ * namespace gate registers that code for, "a name in a namespace is already
+ * taken", and so is the remedy: rename, or leave one package out. No code is
+ * minted.
+ *
+ * Every conflict the install carries is listed — `conflicts` — and each names
+ * EVERY package of the namespace that already holds the name (red line 2:
+ * ambiguity is reported, never guessed). The top-level fields repeat the first.
+ */
+export class NamespaceNameConflictError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** Every `(type, name)` this install would have held twice inside its namespace, in declaration order. */
+  readonly conflicts: readonly NamespaceNameConflict[];
+  /** The namespace. */
+  readonly namespace: string;
+  /** The first conflict's type. */
+  readonly itemType: NamespaceUniqueType;
+  /** The first conflict's name. */
+  readonly itemName: string;
+  /** The package whose install this refusal stopped. */
+  readonly incomingPackageId: string;
+  /** The first conflict's existing holders, every one of them. */
+  readonly existingPackageIds: readonly string[];
+
+  constructor(conflicts: readonly NamespaceNameConflict[]) {
+    const [first] = conflicts;
+    super(namespaceNameConflictMessage(conflicts));
+    this.name = 'NamespaceNameConflictError';
+    this.conflicts = conflicts;
+    this.namespace = first.namespace;
+    this.itemType = first.type;
+    this.itemName = first.name;
+    this.incomingPackageId = first.incomingPackageId;
+    this.existingPackageIds = first.existingPackageIds;
+  }
+}
+
+/**
  * [ADR-0029 D3] The cross-package ownership refusal: a package claims `own`
  * on an object name that a DIFFERENT package already owns. Raised by
  * {@link SchemaRegistry.registerObject} — the single-owner-per-object-name
@@ -3073,8 +3552,9 @@ const EXTENDED_OBJECTS_LISTED = 5;
  * so one answer is the whole way out rather than the first step of several.
  *
  * [#28408, ADR-0146 D3] …and the uninstall refusal of a base whose paired
- * customization package is installed: `<base>.custom`, the id
- * {@link customizationPackageId} derives, held by this registry. That package
+ * customization package is installed and named for it: the App's pair of an
+ * App, or the per-package pair an earlier version created for a package
+ * ({@link pairsOf}), held by this registry. That package
  * holds every customization of the base, so uninstalling the base under it
  * would strand them all, with nothing serving them and nothing saying why.
  * ADR-0146 puts this refusal in this family and this shape, so it is this
@@ -3266,6 +3746,20 @@ function entriesOfMember(
 ): BundleEntry[] {
   const wanted = member.trim() || disc.canonical;
   return entries.filter((e) => (discriminatorValue(e.item, disc.field) || disc.canonical) === wanted);
+}
+
+/**
+ * [#31575] One answer out of bundle `entries` already in tier order, as
+ * {@link SchemaRegistry.getItem} picks it: the named `member`, else the
+ * canonical member, else the first entry.
+ */
+function pickBundleMember<T>(
+  entries: readonly BundleEntry[],
+  disc: { field: string; canonical: string },
+  member: string | undefined,
+): T | undefined {
+  if (member !== undefined) return entriesOfMember(entries, disc, member)[0]?.item as T | undefined;
+  return (entriesOfMember(entries, disc, disc.canonical)[0] ?? entries[0])?.item as T | undefined;
 }
 
 /**
@@ -3589,6 +4083,82 @@ export class SchemaRegistry {
     this.initialDisabledPackageIds = new Set(ids);
   }
 
+  /** See {@link onPackageUninstalled}. */
+  private packageUninstalledListeners = new Set<(packageId: string) => void>();
+
+  /** See {@link onPackageEnabled}. */
+  private packageEnabledListeners = new Set<(packageId: string) => void>();
+
+  /**
+   * [#30377] Be told that {@link enablePackage} has switched a DISABLED package
+   * back on, after its served folds are dropped: never for an enable of a
+   * package that was already enabled (`enableOnInstall: true` on a fresh
+   * install). Returns the unsubscribe.
+   *
+   * For state derived from what a disable withholds, so it is brought current
+   * on every enable door at once (`PATCH /packages/:id/enable`, an install's
+   * `enableOnInstall`, the protocol's install), never per door. The engine is
+   * the one today: a roll-up `summary` a package contributes by extension is
+   * withheld with its package, so the child writes made during the disable
+   * recompute nothing, and the engine recomputes it on enable.
+   */
+  onPackageEnabled(listener: (packageId: string) => void): () => void {
+    this.packageEnabledListeners.add(listener);
+    return () => { this.packageEnabledListeners.delete(listener); };
+  }
+
+  /** Tell every {@link onPackageEnabled} listener. Never throws: the enable has happened, and a failing listener is logged at `error`. */
+  private announcePackageEnabled(id: string): void {
+    for (const listener of this.packageEnabledListeners) {
+      try {
+        listener(id);
+      } catch (err) {
+        console.error(
+          `[Registry] package "${id}" was enabled, but a listener bringing state derived from it current failed `
+            + `(${(err as Error)?.message ?? err}) — that state may still read as it did while the package was disabled.`,
+        );
+      }
+    }
+  }
+
+  /**
+   * [#30215] Be told, once per package, that {@link uninstallPackage} has
+   * withdrawn it — after its record is gone, never for a refused uninstall
+   * (that one removes nothing). Returns the unsubscribe.
+   *
+   * For a holder of state keyed by package id OUTSIDE this registry, so it is
+   * withdrawn on every uninstall door at once (the protocol's `deletePackage`,
+   * `DELETE /packages/:id`, the install-local DELETE), never per door. The
+   * engine is the one today: its manifest map (`registerApp` → `manifests`) is
+   * the code-package signal ADR-0070's `isWritablePackage` reads first, and an
+   * id left in it kept an uninstalled package read-only until a restart.
+   */
+  onPackageUninstalled(listener: (packageId: string) => void): () => void {
+    this.packageUninstalledListeners.add(listener);
+    return () => { this.packageUninstalledListeners.delete(listener); };
+  }
+
+  /**
+   * Tell every {@link onPackageUninstalled} listener. Never throws: the
+   * uninstall has already happened, so a throwing listener must not read as a
+   * refused one to the door that called {@link uninstallPackage}. It is logged
+   * at `error` instead, because that listener's state now disagrees with this
+   * registry while everything looks healthy.
+   */
+  private announcePackageUninstalled(id: string): void {
+    for (const listener of this.packageUninstalledListeners) {
+      try {
+        listener(id);
+      } catch (err) {
+        console.error(
+          `[Registry] package "${id}" was uninstalled, but a listener keeping state keyed by its id failed to drop it `
+            + `(${(err as Error)?.message ?? err}) — that state still names the package until the next restart, `
+            + 'while the registry no longer does. Restart the runtime to bring the two back in line.',
+        );
+      }
+    }
+  }
+
   // ==========================================
   // Restore on refusal
   // ==========================================
@@ -3609,8 +4179,10 @@ export class SchemaRegistry {
    * object's contributor list (an `extend` or overlay layer of another package
    * or a tenant sits in it and is put back unchanged), a namespace's owners,
    * an item slot (the package record included), this package's picklist
-   * extension of one list, and the security catalog and default record page
-   * claims the package door records. Nothing the run does not write is
+   * extension of one list, the security catalog and default record page
+   * claims the package door records, each app's navigation contributions, and
+   * every entry outside the registry a caller records through
+   * {@link recordRestoreOnRefusal}. Nothing the run does not write is
    * recorded or put back. After a restore every merged object is
    * re-resolved, since a fold computed during the run may have read an entry
    * the restore put back.
@@ -3619,7 +4191,9 @@ export class SchemaRegistry {
    * {@link unregisterObject} and the overlay removals are never journaled.
    * Synchronous by contract: `register` must not return a promise, so no
    * other caller's write can land between the run's writes and its restore.
-   * A nested call joins the run that is already open.
+   * A nested call joins the run that is already open: the engine's `manifest`
+   * service registers every package of one artifact (and its residual) in ONE
+   * run, so a refusal of any of them puts back all of them.
    */
   restoringOnRefusal<T>(register: () => T): T {
     if (this.restorePoint) return register();
@@ -3638,6 +4212,31 @@ export class SchemaRegistry {
     } finally {
       this.restorePoint = undefined;
     }
+  }
+
+  /**
+   * Record an entry that lives OUTSIDE this registry — an engine map a package
+   * body writes beside the registry (its manifest, its datasource definitions)
+   * — before the open {@link restoringOnRefusal} run's first write to it, so a
+   * refusal later in the same run puts it back with the registry's own
+   * entries. `capture` reads the entry as it is now and returns how to put it
+   * back; it is called once per `key` per run. Outside a run it records
+   * nothing, as the registry's own entries are not recorded either.
+   */
+  recordRestoreOnRefusal(key: string, capture: () => () => void): void {
+    this.restorePoint?.note(`outside\u0000${key}`, capture);
+  }
+
+  /** Record one app's list of navigation contributions before its first write. */
+  private noteAppNavContributions(app: string): void {
+    this.restorePoint?.note(`navContributions\u0000${app}`, () => {
+      const saved = this.appNavContributions.get(app);
+      const copy = saved ? [...saved] : undefined;
+      return () => {
+        if (copy) this.appNavContributions.set(app, copy);
+        else this.appNavContributions.delete(app);
+      };
+    });
   }
 
   /** Record an object's contributor list (and each contributor's mutable slots) before its first write. */
@@ -3722,6 +4321,23 @@ export class SchemaRegistry {
         if (saved !== undefined) {
           if (!byName) this.securityCatalogClaims.set(type, byName = new Map());
           byName.set(name, saved);
+        } else {
+          byName?.delete(name);
+        }
+      };
+    });
+  }
+
+  /** Record who holds one bare name (`bare-name-one-holder.ts`) before its first write. */
+  private noteBareNameClaim(type: BareNameOneHolderType, name: string): void {
+    this.restorePoint?.note(`bareNameClaim\u0000${type}\u0000${name}`, () => {
+      const saved = this.bareNameClaims.get(type)?.get(name);
+      const copy = saved ? new Set(saved) : undefined;
+      return () => {
+        let byName = this.bareNameClaims.get(type);
+        if (copy !== undefined) {
+          if (!byName) this.bareNameClaims.set(type, byName = new Map());
+          byName.set(name, copy);
         } else {
           byName?.delete(name);
         }
@@ -4237,8 +4853,419 @@ export class SchemaRegistry {
   }
 
   // ==========================================
+  // Bare names — one name, one package holder (`bare-name-one-holder.ts`)
+  // ==========================================
+
+  /**
+   * Covered type → name → the installed packages that declared it, in install
+   * order — recorded by {@link installPackage}, forgotten by
+   * {@link uninstallPackage}, for the reason {@link securityCatalogClaims} is:
+   * the package door registers no item, so the claim is how it remembers a
+   * declared name. A SET, unlike the security catalog's single claimant: a
+   * cold boot registers every package before anything is judged, so two
+   * packages that both declare a name both hold it until one is renamed or
+   * uninstalled.
+   */
+  private bareNameClaims = new Map<BareNameOneHolderType, Map<string, Set<string>>>();
+
+  /**
+   * Set once, by {@link sealBareNameHolders} at the end of the cold boot. Until
+   * then the doors judge nothing (module doc, "The cold boot"); from then on
+   * both refuse a new holder.
+   */
+  private bareNameHoldersSealed = false;
+
+  /** The packages already warned that their namespace spells an address literal. */
+  private readonly addressLiteralNamespaceWarned = new Set<string>();
+
+  /**
+   * [ADR-0150 D5, child G1] Warn, once per package, that an installed
+   * package's namespace spells an address-grammar literal: it keeps booting,
+   * its items are read with `?package=<id>`, and the remedy is a rename.
+   */
+  private warnAddressLiteralNamespaceOnce(packageId: string, refusal: string): void {
+    if (this.addressLiteralNamespaceWarned.has(packageId)) return;
+    this.addressLiteralNamespaceWarned.add(packageId);
+    console.warn(
+      `[Registry] Package '${packageId}' is installed under a namespace the address grammar reads as a route. `
+        + `${refusal} It keeps booting: its items are read with \`?package=${packageId}\`, and a new install `
+        + `of this namespace is refused. Renaming the namespace gives the package its qualified address.`,
+    );
+  }
+
+  /** Has the cold boot sealed the bare-name holders (the doors now refuse)? */
+  get bareNameHoldersAreSealed(): boolean {
+    return this.bareNameHoldersSealed;
+  }
+
+  /**
+   * The packages holding `(type, name)`, in registration order — the item
+   * store's order (whose first is the holder a caller with no package is
+   * served by {@link getItem}), then any holder by claim alone. A package holds
+   * a name through an item registered under it (its composite
+   * `<packageId>:<name>` slot, when the item is one the rule covers —
+   * `holdsBareName`: an action bound to an object holds nothing) or its claim:
+   * recorded at install, or, for a function, at the hook binder's bind
+   * ({@link claimBareNameFunctions}). ⛔ Never the bare slot: that is the
+   * environment catalog (the ADR-0005 overlay), whatever `_packageId` its
+   * hydrated row wears. ⛔ Never a type's overridable baseline
+   * ({@link isOverridableBaseline}): the platform's copies, which the
+   * consumer serves another package's item over by contract. A bundled type's
+   * key carries its member (`pkg:name@locale`, `bundleBaseKey`): the NAME is
+   * what is held, so every member of one package's bundle is that one holder.
+   */
+  private bareNamePackageHolders(type: BareNameOneHolderType, name: string): string[] {
+    const holders = new Set<string>();
+    if (isBareNameRegistryType(type)) {
+      const suffix = `:${name}`;
+      for (const [key, item] of this.metadata.get(type) ?? []) {
+        const base = bundleBaseKey(key);
+        if (base === name || !base.endsWith(suffix) || !holdsBareName(type, item)) continue;
+        const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+        holders.add(typeof stamped === 'string' && stamped !== '' ? stamped : base.slice(0, -suffix.length));
+      }
+    }
+    for (const claimant of this.bareNameClaims.get(type)?.get(name) ?? []) holders.add(claimant);
+    return [...holders].filter((packageId) => !isOverridableBaseline(type, packageId));
+  }
+
+  /**
+   * The rename a refusal carries for `name` in `packageId` — its namespace
+   * prefixed ({@link suggestedBareNameRename}) — read from the manifest the
+   * door holds, else from the installed record. None for a shareable platform
+   * namespace (`base` / `system` / `sys`): it names no one package.
+   */
+  private bareNameRenameFor(packageId: string, name: string, namespace?: string): string | undefined {
+    const ns = namespace ?? this.getPackage(packageId)?.manifest?.namespace;
+    if (!ns || isShareableNamespace(ns)) return undefined;
+    return suggestedBareNameRename(ns, name);
+  }
+
+  /**
+   * [ADR-0150 D2/D9, child B] The namespace a package holder declares — its
+   * installed record's `manifest.namespace` — or `undefined`: no record, or
+   * none declared. What {@link bareNameHoldersMeet} compares for a type whose
+   * rule has narrowed to the namespace.
+   */
+  private bareNameHolderNamespace(packageId: string): string | undefined {
+    const namespace = this.getPackage(packageId)?.manifest?.namespace;
+    return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
+  }
+
+  /**
+   * Every holder `incomingPackageId` would join by holding `(type, name)` —
+   * the ONE predicate both doors ask ({@link refuseBareNameConflicts} at the
+   * package door, the item seam in {@link registerItem}). Empty before the
+   * seal, and empty when `incomingPackageId` already holds the name: a reload,
+   * a re-install or an upgrade of a package that came through the boot beside
+   * another holder is not a new holder (module doc, "The cold boot"). A
+   * built-in name is read only when `builtIns` (the package door), as the
+   * security catalog reads its own. A package holder counts only when it
+   * meets the incoming package under {@link bareNameHoldersMeet}: for a type
+   * narrowed to the namespace, a holder of another namespace does not
+   * (`incomingNamespace`, the namespace the incoming package declares).
+   */
+  private bareNameHoldersOtherThan(
+    type: BareNameOneHolderType,
+    name: string,
+    incomingPackageId: string,
+    opts: { builtIns: boolean; incomingNamespace: string | undefined },
+  ): BareNameHolder[] {
+    if (!this.bareNameHoldersSealed) return [];
+    const packages = this.bareNamePackageHolders(type, name);
+    if (packages.includes(incomingPackageId)) return [];
+    const found = new Map<string, BareNameHolder>();
+    if (opts.builtIns && BUILT_IN_BARE_NAMES[type].has(name)) found.set(bareNameHolderKey({ kind: 'built-in' }), { kind: 'built-in' });
+    for (const packageId of packages) {
+      if (!bareNameHoldersMeet(type, opts.incomingNamespace, this.bareNameHolderNamespace(packageId))) continue;
+      const holder: BareNameHolder = { kind: 'package', packageId };
+      found.set(bareNameHolderKey(holder), holder);
+    }
+    return [...found.values()];
+  }
+
+  /**
+   * The package door's half of the rule: once sealed, refuse a package whose
+   * declared items of a covered registry type bear a name another holder holds,
+   * ahead of every mutation {@link installPackage} makes — the security
+   * catalog's disposition, for its reasons: every conflict collected into one
+   * refusal, no co-owner exemption, no `collisionPolicy` downgrade, and a
+   * package with no identity not judged.
+   *
+   * @throws {BareNameConflictError} ADR-0112 envelope, naming both holders of
+   *   each conflicting name and the rename.
+   */
+  private refuseBareNameConflicts(manifest: ObjectStackManifest, selfId: string | undefined): void {
+    if (selfId === undefined || !this.bareNameHoldersSealed) return;
+    const conflicts: BareNameConflict[] = [];
+    const seen = new Set<string>();
+    const incomingNamespace = typeof manifest.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+    for (const { type, name } of declaredBareNames(manifest)) {
+      // One package declaring one name twice is one holder.
+      const key = `${type}|${name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      for (const existingHolder of this.bareNameHoldersOtherThan(type, name, selfId, { builtIns: true, incomingNamespace })) {
+        conflicts.push({
+          type,
+          name,
+          incomingPackageId: selfId,
+          existingHolder,
+          rename: this.bareNameRenameFor(selfId, name, manifest.namespace),
+        });
+      }
+    }
+    if (conflicts.length > 0) throw new BareNameConflictError(conflicts);
+  }
+
+  /**
+   * Record `packageId`'s bare-name claims — additive, like
+   * {@link recordSecurityCatalogClaims} and for its reasons; released by
+   * {@link uninstallPackage}. Recorded before the seal too: the cold boot reads
+   * them.
+   */
+  private recordBareNameClaims(packageId: string, manifest: ObjectStackManifest): void {
+    for (const { type, name } of declaredBareNames(manifest)) {
+      let byName = this.bareNameClaims.get(type);
+      if (!byName) this.bareNameClaims.set(type, byName = new Map());
+      this.noteBareNameClaim(type, name);
+      let claimants = byName.get(name);
+      if (!claimants) byName.set(name, claimants = new Set());
+      claimants.add(packageId);
+    }
+  }
+
+  /** Drop every bare-name claim `packageId` holds. */
+  private forgetBareNameClaims(packageId: string): void {
+    for (const byName of this.bareNameClaims.values()) {
+      for (const [name, claimants] of byName) {
+        claimants.delete(packageId);
+        if (claimants.size === 0) byName.delete(name);
+      }
+    }
+  }
+
+  /**
+   * The function registry's door (`bare-name-one-holder.ts`): the hook binder
+   * asks this before it registers the functions a package's handlers bring
+   * (`bindHooksToEngine`), with the owner it binds them under — `app:<id>`,
+   * read as the package id ({@link handlerOwnerPackageId}). The function
+   * registry is the engine's and keeps one function per name, the
+   * last-registered, so the holders are the claims recorded here.
+   *
+   * Before the seal it records the claims and refuses nothing — the cold boot
+   * reads them ({@link sealBareNameHolders}). Once sealed it refuses, ahead of
+   * recording anything, a bind that brings a function another package holds,
+   * every conflicting name in one refusal; a package binding its own functions
+   * again is no new holder. An owner-less bind is never judged.
+   *
+   * @throws {BareNameConflictError} once sealed, naming both holders of each
+   *   conflicting function and the rename.
+   */
+  claimBareNameFunctions(owner: string | undefined, names: readonly string[]): void {
+    if (!owner || names.length === 0) return;
+    const packageId = handlerOwnerPackageId(owner);
+    const unique = [...new Set(names.filter((n) => typeof n === 'string' && n !== ''))];
+    if (this.bareNameHoldersSealed) {
+      const conflicts: BareNameConflict[] = [];
+      for (const name of unique) {
+        for (const existingHolder of this.bareNameHoldersOtherThan('function', name, packageId, {
+          builtIns: true,
+          incomingNamespace: this.bareNameHolderNamespace(packageId),
+        })) {
+          conflicts.push({
+            type: 'function', name, incomingPackageId: packageId, existingHolder,
+            rename: this.bareNameRenameFor(packageId, name),
+          });
+        }
+      }
+      if (conflicts.length > 0) throw new BareNameConflictError(conflicts);
+    }
+    let byName = this.bareNameClaims.get('function');
+    if (!byName) this.bareNameClaims.set('function', byName = new Map());
+    for (const name of unique) {
+      let claimants = byName.get(name);
+      if (!claimants) byName.set(name, claimants = new Set());
+      claimants.add(packageId);
+    }
+  }
+
+  /**
+   * The cold boot's seal (`bare-name-one-holder.ts`, "The cold boot"): from
+   * this call on, both doors and the hook binder's function bind refuse a new
+   * holder of a covered name. Answers every name the boot left held twice, as
+   * the conflicts {@link BareNameConflictError} reports — the first-registered
+   * holder as the existing one, each later one as an incoming one with its
+   * rename; for a type narrowed to the namespace, only holders that meet
+   * (`bareNameHoldersMeet`), so two namespaces' holders of one name are no
+   * clash — and a package holding a built-in name. Sorted by type, then name,
+   * so two boots of one deployment report alike. Records and refuses nothing
+   * else: what the boot does with the answer is
+   * {@link sealBareNameHoldersAtColdBoot}'s mode.
+   */
+  sealBareNameHolders(): BareNameConflict[] {
+    this.bareNameHoldersSealed = true;
+    const conflicts: BareNameConflict[] = [];
+    for (const type of BARE_NAME_ONE_HOLDER_TYPES) {
+      const candidates = new Set<string>();
+      if (isBareNameRegistryType(type)) {
+        for (const key of this.metadata.get(type)?.keys() ?? []) {
+          // A bundled type's key ends `@<member>`: the NAME is the candidate.
+          const base = bundleBaseKey(key);
+          const sep = base.lastIndexOf(':');
+          if (sep > 0) candidates.add(base.slice(sep + 1));
+        }
+      }
+      for (const name of this.bareNameClaims.get(type)?.keys() ?? []) candidates.add(name);
+      for (const name of [...candidates].sort()) {
+        if (name === '') continue;
+        const packages = this.bareNamePackageHolders(type, name);
+        if (BUILT_IN_BARE_NAMES[type].has(name)) {
+          for (const packageId of packages) {
+            conflicts.push({
+              type, name, incomingPackageId: packageId, existingHolder: { kind: 'built-in' },
+              rename: this.bareNameRenameFor(packageId, name),
+            });
+          }
+          continue;
+        }
+        // Each later holder against the first earlier one it meets
+        // (`bareNameHoldersMeet`): for a type that has not narrowed, always the
+        // first-registered; for one narrowed to the namespace, the first of its
+        // own namespace, and none when every earlier holder declares another.
+        packages.forEach((packageId, index) => {
+          const namespace = this.bareNameHolderNamespace(packageId);
+          const first = packages
+            .slice(0, index)
+            .find((earlier) => bareNameHoldersMeet(type, namespace, this.bareNameHolderNamespace(earlier)));
+          if (first === undefined) return;
+          conflicts.push({
+            type, name, incomingPackageId: packageId, existingHolder: { kind: 'package', packageId: first },
+            rename: this.bareNameRenameFor(packageId, name),
+          });
+        });
+      }
+    }
+    return conflicts;
+  }
+
+  // ==========================================
   // Object Registration (Ownership Model)
   // ==========================================
+
+  /**
+   * [#29673] Would {@link registerObject} refuse this body, as `ownership`
+   * from `packageId`? The refusal it would throw, or `null` — asked of its own
+   * doors ({@link judgeRegistrationDoors}), so the answer cannot drift from
+   * the throw. Registers nothing, materializes nothing.
+   *
+   * For the metadata doors that make a stored body LIVE (the per-item and the
+   * package publish, the publishing save): the registration runs after the row
+   * is already active, where a refusal can only be logged, so they ask this
+   * first and refuse the publish with the registry's own envelope — the same
+   * shape as the ADR-0029 D9.9 representability refusal they already ask.
+   *
+   * Covers the doors that judge the body ALONE. The record-currency
+   * `summary` door is left out: it judges the body against the registry as it
+   * stands (the pair is judged at whichever registration completes it), so
+   * asked of a draft before its batch registers it answers both ways wrong —
+   * it refuses a draft whose sibling in the same batch takes the child amount
+   * out of record-currency mode, and it passes one whose sibling completes the
+   * pair. It stays the registration's own question. The single-owner rule is
+   * the protocol's (`classifyObjectContribution`), and a code package's action
+   * parse never judges a tenant-authored body.
+   */
+  objectRegistrationRefusal(
+    schema: ServiceObject,
+    packageId?: string,
+    ownership: ObjectOwnership = 'own',
+  ): Error | null {
+    const door = this.judgeRegistrationDoors(schema, packageId, ownership, { bodyOnly: true });
+    return 'refusal' in door ? door.refusal : null;
+  }
+
+  /**
+   * [#29673] The registration doors of {@link registerObject}, moved here
+   * whole so {@link objectRegistrationRefusal} asks exactly what the
+   * registration throws: the refusal, or the body to register (an `extend`
+   * body re-keyed to the object it extends). `bodyOnly` skips the one door
+   * that reads the registry's other objects (see
+   * {@link objectRegistrationRefusal}).
+   */
+  private judgeRegistrationDoors(
+    schema: ServiceObject,
+    packageId: string | undefined,
+    ownership: ObjectOwnership,
+    opts: { bodyOnly?: boolean } = {},
+  ): { refusal: Error } | { schema: ServiceObject } {
+    // [#16319] ⭐ THE FIELD-`type` DOOR — first statement in the method, and
+    // its position is the whole point.
+    //
+    // MAINTAINER RULING 2026-09-10 (director seat batch #111 item 2): 「一个没写
+    // type(或拼错)的字段 应该禁止加载」. This registry is the ONE choke point every
+    // metadata door passes — declared stacks, plugin/package manifests,
+    // `saveMetaItem`, the `sys_metadata` boot rehydration and raw
+    // `registerObject` calls — so one check here closes all of them at once,
+    // which is why the ruling put it here rather than at the four downstream
+    // guesses it also retires.
+    //
+    // ⛔ BEFORE `applySystemFields` and every other materialization below, so
+    // the object and field the refusal names are the AUTHOR's own and never a
+    // platform injection; and ⛔ before the contributor list is opened, so a
+    // refused declaration leaves no half-registered entry behind.
+    //
+    // ⛔ The whole object is refused; the offending field is never dropped on
+    // its own. See {@link ObjectFieldTypeRefusedError}.
+    const fieldTypeRefusal = objectFieldTypeRefusal(schema);
+    if (fieldTypeRefusal) return { refusal: fieldTypeRefusal };
+
+    // [ADR-0142 D3] Beside it, for its reason: an eligible object's own
+    // `queue` field is refused before the injection could be skipped for it —
+    // see {@link ObjectQueueColumnRefusedError}. A base layer only: an `extend`
+    // body is never planned on its own (#24314, below), so its `queue` is
+    // governed in the fold instead ({@link withoutExtensionQueueField}),
+    // whichever order the layers register in.
+    if (ownership !== 'extend') {
+      const queueRefusal = objectQueueColumnRefusal(schema);
+      if (queueRefusal) return { refusal: queueRefusal };
+    }
+
+    // [ADR-0095 D1 note; ruling E′ item 4] An `extend` contribution never sets
+    // the object's default row scope — see
+    // {@link ExtensionDefaultRowScopeRefusedError}. Here, beside the field-`type`
+    // door and for the same reason: before any materialization and before the
+    // contributor list is opened, so a refused contribution leaves nothing behind.
+    // [#25234 ruling A, refusal 10] Nor does it declare a membership key — see
+    // {@link ExtensionMembershipKeysRefusedError}. The same door, for the same
+    // reason, so a refused contribution leaves nothing behind. [#28574] Both
+    // are asked through {@link extendContributionRefusal}, the one copy the
+    // metadata save and publish doors also ask of an `object_extension` item.
+    if (ownership === 'extend') {
+      const extendRefusal = extendContributionRefusal(schema, packageId);
+      if (extendRefusal) return { refusal: extendRefusal };
+      // [#28858] …filed under the key the object it extends is registered
+      // under — see {@link extensionTargetKey}. Every entry that registers an
+      // extension reaches this line: the manifest `objectExtensions` loop and
+      // a stored `object_extension` row ({@link registerObjectExtension}).
+      const target = this.extensionTargetKey(String(schema.name ?? ''), packageId);
+      if (target !== schema.name) schema = { ...schema, name: target };
+    }
+    // [#29673] The pre-flight question stops here: the door below reads the
+    // registry's other objects, not the body alone.
+    if (opts.bodyOnly) return { schema };
+    // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
+    // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
+    // their own currency — is refused here, the door every metadata path
+    // passes, before any materialization: the pair is judged at whichever
+    // registration completes it. See `record-currency-aggregate-door.ts`.
+    const recordCurrencySummary = recordCurrencySummaryRefusal(
+      schema,
+      (name) => this.getObject(name),
+      () => this.getAllObjects(),
+    );
+    if (recordCurrencySummary) return { refusal: recordCurrencySummary };
+    return { schema };
+  }
 
   /**
    * Register an object with ownership semantics.
@@ -4276,69 +5303,16 @@ export class SchemaRegistry {
         ? DEFAULT_OVERLAY_PRIORITY
         : DEFAULT_EXTENDER_PRIORITY
   ): string {
-    // [#16319] ⭐ THE FIELD-`type` DOOR — first statement in the method, and
-    // its position is the whole point.
-    //
-    // MAINTAINER RULING 2026-09-10 (director seat batch #111 item 2): 「一个没写
-    // type(或拼错)的字段 应该禁止加载」. This registry is the ONE choke point every
-    // metadata door passes — declared stacks, plugin/package manifests,
-    // `saveMetaItem`, the `sys_metadata` boot rehydration and raw
-    // `registerObject` calls — so one check here closes all of them at once,
-    // which is why the ruling put it here rather than at the four downstream
-    // guesses it also retires.
-    //
-    // ⛔ BEFORE `applySystemFields` and every other materialization below, so
-    // the object and field the refusal names are the AUTHOR's own and never a
-    // platform injection; and ⛔ before the contributor list is opened, so a
-    // refused declaration leaves no half-registered entry behind.
-    //
-    // ⛔ The whole object is refused; the offending field is never dropped on
-    // its own. See {@link ObjectFieldTypeRefusedError}.
-    const fieldTypeRefusal = objectFieldTypeRefusal(schema);
-    if (fieldTypeRefusal) throw fieldTypeRefusal;
-
-    // [ADR-0142 D3] Beside it, for its reason: an eligible object's own
-    // `queue` field is refused before the injection could be skipped for it —
-    // see {@link ObjectQueueColumnRefusedError}. A base layer only: an `extend`
-    // body is never planned on its own (#24314, below), so its `queue` is
-    // governed in the fold instead ({@link withoutExtensionQueueField}),
-    // whichever order the layers register in.
-    if (ownership !== 'extend') {
-      const queueRefusal = objectQueueColumnRefusal(schema);
-      if (queueRefusal) throw queueRefusal;
-    }
-
-    // [ADR-0095 D1 note; ruling E′ item 4] An `extend` contribution never sets
-    // the object's default row scope — see
-    // {@link ExtensionDefaultRowScopeRefusedError}. Here, beside the field-`type`
-    // door and for the same reason: before any materialization and before the
-    // contributor list is opened, so a refused contribution leaves nothing behind.
-    // [#25234 ruling A, refusal 10] Nor does it declare a membership key — see
-    // {@link ExtensionMembershipKeysRefusedError}. The same door, for the same
-    // reason, so a refused contribution leaves nothing behind. [#28574] Both
-    // are asked through {@link extendContributionRefusal}, the one copy the
-    // metadata save and publish doors also ask of an `object_extension` item.
-    if (ownership === 'extend') {
-      const extendRefusal = extendContributionRefusal(schema, packageId);
-      if (extendRefusal) throw extendRefusal;
-      // [#28858] …filed under the key the object it extends is registered
-      // under — see {@link extensionTargetKey}. Every entry that registers an
-      // extension reaches this line: the manifest `objectExtensions` loop and
-      // a stored `object_extension` row ({@link registerObjectExtension}).
-      const target = this.extensionTargetKey(String(schema.name ?? ''), packageId);
-      if (target !== schema.name) schema = { ...schema, name: target };
-    }
-    // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
-    // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
-    // their own currency — is refused here, the door every metadata path
-    // passes, before any materialization: the pair is judged at whichever
-    // registration completes it. See `record-currency-aggregate-door.ts`.
-    const recordCurrencySummary = recordCurrencySummaryRefusal(
-      schema,
-      (name) => this.getObject(name),
-      () => this.getAllObjects(),
-    );
-    if (recordCurrencySummary) throw recordCurrencySummary;
+    // [#29673] The registration DOORS — every refusal this method answers
+    // before any materialization and before the contributor list is opened —
+    // live in {@link judgeRegistrationDoors}, so the metadata doors that make
+    // a body live can ask the same question BEFORE they promote it
+    // ({@link objectRegistrationRefusal}) instead of meeting the throw after
+    // the row is already active. Still the first statement here, and the
+    // position is still the whole point (the comments inside say why).
+    const door = this.judgeRegistrationDoors(schema, packageId, ownership);
+    if ('refusal' in door) throw door.refusal;
+    schema = door.schema;
 
     // [#25744] A code package's object keeps its own actions as their
     // `ActionSchema` parse — `requiresFeature` / `requiresMembershipReach`
@@ -4605,11 +5579,147 @@ export class SchemaRegistry {
     // registry-direct consumer reads — does not move. Only what the registry
     // REMEMBERS changes: the packaged owner is still here, underneath.
     const baseContrib = contributors.find(c => c.ownership === 'overlay') ?? ownerContrib;
-    const merged = this.foldExtenders(contributors, baseContrib);
+    // A disabled package's `extend` contributions are withheld from the served
+    // fold ({@link withholdDisabledExtensions}); the cache is dropped by every
+    // enable and disable ({@link invalidateAll}).
+    const withheld = this.withholdDisabledExtensions(contributors);
+    const merged = withheld
+      ? this.foldExtendersOntoDefinition(withheld.kept, withoutWithheldMembers(baseContrib.definition, withheld))
+      : this.foldExtenders(contributors, baseContrib);
 
     // Cache the result
     this.mergedObjectCache.set(fqn, merged);
     return merged;
+  }
+
+  /**
+   * An object as the STORAGE layer must see it: every `extend` contribution
+   * folded in, whether or not its package is disabled. Schema sync (the
+   * driver's `syncSchema`, the federated binding) reads this, so a disable
+   * never takes a column, an index or a driver's read coercion away from the
+   * data it keeps: the physical schema follows the full contribution, the
+   * served object ({@link resolveObject}) follows enablement. With no disabled
+   * package among the object's extenders it IS {@link resolveObject}'s answer.
+   *
+   * Accepts a short name or an FQN, as {@link getObject} does.
+   */
+  getStorageObject(name: string): ServiceObject | undefined {
+    const fqn = this.resolveObjectKey(name);
+    return fqn === undefined ? undefined : this.resolveStorageObject(fqn);
+  }
+
+  /** {@link getAllObjects} at the storage layer ({@link getStorageObject}), each tagged with its owner's `_packageId`. */
+  getAllStorageObjects(): ServiceObject[] {
+    // Nothing disabled: the two layers are one answer, read through the one walk.
+    if (!this.hasDisabledPackage()) return this.getAllObjects();
+    const results: ServiceObject[] = [];
+    for (const fqn of this.objectContributors.keys()) {
+      const merged = this.resolveStorageObject(fqn);
+      if (!merged) continue;
+      (merged as any)._packageId = this.getObjectOwner(fqn)?.packageId;
+      results.push(merged);
+    }
+    return results;
+  }
+
+  /** See {@link getStorageObject}. Uncached when it differs from the served fold, as {@link resolveOwnerLayer} is. */
+  private resolveStorageObject(fqn: string): ServiceObject | undefined {
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend' && this.isPackageDisabled(c.packageId))) {
+      return this.resolveObject(fqn);
+    }
+    const ownerContrib = contributors.find(c => c.ownership === 'own');
+    if (!ownerContrib) return this.resolveObject(fqn);
+    return this.foldExtenders(contributors, contributors.find(c => c.ownership === 'overlay') ?? ownerContrib);
+  }
+
+  /**
+   * The `extend` contributions of a DISABLED package are withheld from every
+   * served fold of the object they extend, as the package's own objects,
+   * flows, navigation and actions are: "disabled" means hidden, refused on the
+   * data plane, data kept. The served object loses the fields, rules and
+   * indexes such an extension adds and the patches it makes, so the data
+   * plane's field map (its default projection and its unknown-field refusal)
+   * loses them too; the storage layer keeps them ({@link getStorageObject}).
+   *
+   * `withheldFields` / `withheldRules` / `withheldIndexes` are the members a
+   * withheld extension adds that neither the owner's own declaration nor a
+   * kept extension also declares (indexes compared structurally, as the fold's
+   * own index subtraction compares them). A base body that already carries them (a tenant overlay saved
+   * from a served read, a metadata-service copy seeded from a resolved body)
+   * has them taken off ({@link withoutWithheldMembers}), so where the base
+   * came from does not decide what a disable hides.
+   *
+   * `undefined` when no extension of the object is withheld, so the ordinary
+   * fold runs unchanged.
+   *
+   * [#30756] `asEnabled` names a package whose contributions are kept although
+   * it is disabled: the fold the enable of that package would leave
+   * ({@link ObjectExtensionFoldOptions}).
+   */
+  private withholdDisabledExtensions(contributors: readonly ObjectContributor[], asEnabled?: string): WithheldExtensions | undefined {
+    const withheld = contributors.filter((c) => c.ownership === 'extend'
+      && this.isPackageDisabled(c.packageId)
+      && (asEnabled === undefined || c.packageId !== asEnabled));
+    if (withheld.length === 0) return undefined;
+    const kept = contributors.filter((c) => !withheld.includes(c));
+    const owner = contributors.find((c) => c.ownership === 'own')?.definition;
+    const keptFields = new Set<string>(ownFieldNamesOf(owner) ?? []);
+    const keptRules = new Set<string>(ruleNamesOf(owner));
+    const keptIndexes = new Set<string>(indexKeysOf(owner));
+    for (const c of kept) {
+      if (c.ownership !== 'extend') continue;
+      for (const name of fieldNamesOf(c.definition)) keptFields.add(name);
+      for (const name of ruleNamesOf(c.definition)) keptRules.add(name);
+      for (const key of indexKeysOf(c.definition)) keptIndexes.add(key);
+    }
+    const withheldFields = new Set<string>();
+    const withheldRules = new Set<string>();
+    const withheldIndexes = new Set<string>();
+    for (const c of withheld) {
+      for (const name of fieldNamesOf(c.definition)) if (!keptFields.has(name)) withheldFields.add(name);
+      for (const name of ruleNamesOf(c.definition)) if (!keptRules.has(name)) withheldRules.add(name);
+      for (const key of indexKeysOf(c.definition)) if (!keptIndexes.has(key)) withheldIndexes.add(key);
+    }
+    return { kept, withheldFields, withheldRules, withheldIndexes };
+  }
+
+  /**
+   * [#29903, #29872, ADR-0146 D8 item 3] An object as {@link resolveObject}
+   * resolves it, but with the `extend` contributions `options` names left out
+   * of the fold ({@link ObjectExtensionFoldOptions}), as if those packages had
+   * never extended it: the same base layer (`overlay ?? own`), every other
+   * extender folded in the same order, the same tail. With no such
+   * contribution it IS {@link resolveObject}'s answer (the cached body).
+   * Uncached otherwise, as {@link resolveOwnerLayer} is.
+   *
+   * The reader is the protocol's per-package layer, which serves a package's
+   * objects to the package's own export as the package declares them: never
+   * with an extension another package contributes (its `.custom` pair's, or
+   * any other installed package's). That extension travels in its own
+   * package's export, as its `objectExtensions` entry
+   * ({@link getObjectExtensionsOf}); folded in here too, its field and field
+   * patches travel twice, the second time as if the owner shipped them.
+   */
+  private resolveObjectLeavingExtensionsOut(fqn: string, options: ObjectExtensionFoldOptions | undefined): ServiceObject | undefined {
+    // [#30756] A disabled package folded in as if enabled; one that is not
+    // disabled changes nothing, so it does not leave the cached fold.
+    const asEnabled = options?.asEnabled !== undefined && this.isPackageDisabled(options.asEnabled)
+      ? options.asEnabled
+      : undefined;
+    const contributors = leavesExtensionsOut(options) || asEnabled !== undefined ? this.objectContributors.get(fqn) : undefined;
+    if (!contributors || !contributors.some((c) => isLeftOutExtension(c, options!)
+      || (asEnabled !== undefined && c.ownership === 'extend' && c.packageId === asEnabled))) return this.resolveObject(fqn);
+    const kept = contributors.filter((c) => !isLeftOutExtension(c, options!));
+    const ownerContrib = kept.find(c => c.ownership === 'own');
+    if (!ownerContrib) return undefined;
+    const base = kept.find(c => c.ownership === 'overlay') ?? ownerContrib;
+    // …and a disabled package's, as on every served fold ({@link withholdDisabledExtensions}),
+    // except the one `asEnabled` names.
+    const withheld = this.withholdDisabledExtensions(kept, asEnabled);
+    return withheld
+      ? this.foldExtendersOntoDefinition(withheld.kept, withoutWithheldMembers(base.definition, withheld))
+      : this.foldExtenders(kept, base);
   }
 
   /**
@@ -4716,7 +5826,7 @@ export class SchemaRegistry {
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
-    return this.finishServedObject(merged, layer);
+    return this.finishServedObject(merged, layer, picklistReferrerOf(contributors));
   }
 
   /**
@@ -4878,8 +5988,12 @@ export class SchemaRegistry {
    *    packages' alone: a tenant's action is not something a code package
    *    ships, and `getArtifactItem('object')` answers exactly that question.
    */
-  private finishServedObject<T>(body: T, layer: ServedObjectLayer = 'served'): T {
-    return this.attachBoundActions(this.resolvePicklistFields(body), layer);
+  private finishServedObject<T>(
+    body: T,
+    layer: ServedObjectLayer = 'served',
+    referrerOf: PicklistReferrer = NO_PACKAGE_REFERRER,
+  ): T {
+    return this.attachBoundActions(this.resolvePicklistFields(body, referrerOf), layer);
   }
 
   /**
@@ -5416,7 +6530,7 @@ export class SchemaRegistry {
    * matching {@link resolveObject}, so this narrows nothing the fold was doing
    * on an unfolded base.
    */
-  foldObjectExtendersOnto<T>(name: string, base: T): T {
+  foldObjectExtendersOnto<T>(name: string, base: T, options?: ObjectExtensionFoldOptions): T {
     if (base === null || typeof base !== 'object') return base;
     const fqn = this.resolveObjectKey(name);
     // With nothing to fold, the body still gets its picklist-bound fields
@@ -5424,11 +6538,21 @@ export class SchemaRegistry {
     // registry never saw is served in the one shape every other read uses.
     // By reference when no field names a picklist.
     if (fqn === undefined) return this.finishServedObject(base);
-    const contributors = this.objectContributors.get(fqn);
-    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) return this.finishServedObject(base);
+    // [#29903, #29872] The contributions `options` names are left out, as on
+    // {@link getAllObjects} ({@link ObjectExtensionFoldOptions}).
+    const registered = this.objectContributors.get(fqn);
+    const listed = leavesExtensionsOut(options) ? registered?.filter((c) => !isLeftOutExtension(c, options)) : registered;
+    // A disabled package's `extend` contributions are withheld, and taken off
+    // a base that already carries them, as on {@link resolveObject}.
+    const withheld = listed ? this.withholdDisabledExtensions(listed) : undefined;
+    const contributors = withheld?.kept ?? listed;
+    const served = withheld ? withoutWithheldMembers(base as unknown as ServiceObject, withheld) : base as unknown as ServiceObject;
+    if (!contributors || !contributors.some((c) => c.ownership === 'extend')) {
+      return this.finishServedObject(served as unknown as T, 'served', picklistReferrerOf(contributors));
+    }
     return this.foldExtendersOntoDefinition(
       contributors,
-      this.subtractExtenderContributions(contributors, base as unknown as ServiceObject),
+      this.subtractExtenderContributions(contributors, served),
     ) as unknown as T;
   }
 
@@ -6163,8 +7287,14 @@ export class SchemaRegistry {
    * Get all registered objects (merged).
    * 
    * @param packageId - Optional filter: only objects contributed by this package
+   * @param options - [#29903, #29872] each object is resolved with the `extend`
+   *   contributions these name left out of the fold
+   *   ({@link ObjectExtensionFoldOptions}, {@link resolveObjectLeavingExtensionsOut}):
+   *   `withoutExtensionsOf` one package's, `onlyExtensionsOf` every package's
+   *   but one. The protocol's per-package layer passes `onlyExtensionsOf`,
+   *   naming the listed package.
    */
-  getAllObjects(packageId?: string): ServiceObject[] {
+  getAllObjects(packageId?: string, options?: ObjectExtensionFoldOptions): ServiceObject[] {
     const results: ServiceObject[] = [];
 
     for (const fqn of this.objectContributors.keys()) {
@@ -6175,7 +7305,7 @@ export class SchemaRegistry {
         if (!hasContribution) continue;
       }
 
-      const merged = this.resolveObject(fqn);
+      const merged = this.resolveObjectLeavingExtensionsOut(fqn, options);
       if (merged) {
         // Tag with contributor info for UI
         (merged as any)._packageId = this.getObjectOwner(fqn)?.packageId;
@@ -6191,6 +7321,47 @@ export class SchemaRegistry {
    */
   getObjectContributors(fqn: string): ObjectContributor[] {
     return this.objectContributors.get(fqn) || [];
+  }
+
+  /**
+   * [#29872, ADR-0146 D8 item 3 / D10] Every `extend` contribution `packageId`
+   * makes, as the `objectExtensions` entry it registers from: the inverse of
+   * {@link registerObjectExtension}. One entry per extended object, in
+   * registration order, whichever door registered it: a manifest's
+   * `objectExtensions` (`ObjectQL.registerApp` — a code package, or a package
+   * installed through install-local, which files no `object_extension` item)
+   * or a stored `object_extension` row.
+   *
+   * Each entry is the contribution's body with its address put back: `extend`
+   * is the object it is filed under, `priority` its merge priority (absent when
+   * it is {@link DEFAULT_EXTENDER_PRIORITY}, the value an entry that names none
+   * parses to), and its `name` and every envelope key the registration stamped
+   * (`_packageId`, `_provenance`, …) are left out. A key the registration left
+   * `undefined` is left out too. Shallow: the nested bodies are the
+   * registry's, never to be mutated.
+   *
+   * The reader is the package export: a package's export carries its own
+   * extensions as `objectExtensions`, however they were installed, and the
+   * extended object's owner's export carries none of them
+   * ({@link getAllObjects}'s `onlyExtensionsOf`).
+   */
+  getObjectExtensionsOf(packageId: string): Array<{ extend: string; priority?: number } & Record<string, unknown>> {
+    const out: Array<{ extend: string; priority?: number } & Record<string, unknown>> = [];
+    for (const [fqn, contributors] of this.objectContributors) {
+      const contribution = contributors.find((c) => c.ownership === 'extend' && c.packageId === packageId);
+      if (!contribution) continue;
+      const body: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(contribution.definition)) {
+        if (value === undefined || key === 'name' || key.startsWith('_')) continue;
+        body[key] = value;
+      }
+      out.push({
+        extend: fqn,
+        ...body,
+        ...(contribution.priority !== DEFAULT_EXTENDER_PRIORITY ? { priority: contribution.priority } : {}),
+      });
+    }
+    return out;
   }
 
   /**
@@ -6499,8 +7670,9 @@ export class SchemaRegistry {
    * package is refused exactly when the first such object exists.
    *
    * [#28408, ADR-0146 D3] It also refuses while this registry holds the
-   * package's paired customization package — the id
-   * {@link customizationPackageId} derives from `packageId`, so the pair is
+   * package's paired customization package named for `packageId` — one
+   * of the ids {@link pairsOf} looks up for it (the App's pair is named for
+   * the App, not for a member) — so the pair is
    * found by id alone, whichever door created or installed it. The same
    * refusal, carrying both causes when both hold. Uninstalling the pair itself
    * asks nothing of this kind: a `.custom` id derives no pair of its own. An
@@ -6531,8 +7703,14 @@ export class SchemaRegistry {
         extended.push({ objectName: fqn, extenders: otherExtenders.map(c => String(c.packageId)) });
       }
     }
-    const pair = customizationPackageId(packageId);
-    const installedPair = pair.ok && this.getPackage(pair.value) !== undefined ? pair.value : undefined;
+    // [ADR-0146 D3 · merge questions 11, 12] The installed pair named for
+    // this package: the App's pair when this is the App (a member's
+    // uninstall keeps and marks its overrides in the App's pair, and is not
+    // refused for it), or the per-package pair an earlier version created
+    // for this package.
+    const installedPair = pairsOf(packageId, installedManifestsOf(this)).find(
+      (id) => customizationBasePackageId(id) === packageId && this.getPackage(id) !== undefined,
+    );
     if (extended.length > 0 || installedPair !== undefined) {
       throw new PackageUninstallExtendedError(packageId, extended, installedPair);
     }
@@ -6758,6 +7936,32 @@ export class SchemaRegistry {
       }
     }
 
+    // One name, one package holder for the bare-name registry types (a
+    // picklist, a mapping, a dataset, an API, an object-less action, a flow, a
+    // webhook, a connector, an email template, an agent, a skill, a tool) — the item seam
+    // (`bare-name-one-holder.ts`; ADR-0048 §3.4 narrowed). Once the cold boot
+    // has sealed the holders, a package registering one under a name another
+    // package holds — and that it does not hold itself — is refused BEFORE
+    // anything below stamps or stores it. The package door has already judged
+    // what a manifest declares; this is the seam every OTHER package-bound
+    // registration reaches (a nested plugin's collections, a plugin
+    // registering through the registry directly). ⛔ A registration with no
+    // `packageId` is the environment catalog — the ADR-0005 overlay — and is
+    // never judged; nor is a type's overridable baseline (the email service's
+    // built-in templates), which holds nothing and is refused nothing.
+    if (packageId && isBareNameRegistryType(type) && holdsBareName(type, item) && !isOverridableBaseline(type, packageId)) {
+      const holders = this.bareNameHoldersOtherThan(type, baseName, packageId, {
+        builtIns: false,
+        incomingNamespace: this.bareNameHolderNamespace(packageId),
+      });
+      if (holders.length > 0) {
+        const rename = this.bareNameRenameFor(packageId, baseName);
+        throw new BareNameConflictError(
+          holders.map((existingHolder) => ({ type, name: baseName, incomingPackageId: packageId, existingHolder, rename })),
+        );
+      }
+    }
+
     // One default record page per object per deployment — the item seam
     // (maintainer ruling A on objectstack#23015; `default-record-page.ts`): a
     // package registering a page as the default record page of an object
@@ -6884,7 +8088,11 @@ export class SchemaRegistry {
     // ⚠️ Except for the three security catalog types, refused at the top of this
     // method: an assignment names a position or a permission set with no
     // package context, so there a second holder is an ambiguity no caller can
-    // resolve (maintainer ruling Q4 = A on #15196).
+    // resolve (maintainer ruling Q4 = A on #15196). ⚠️ And except for the
+    // bare-name types, refused (once the cold boot has sealed) at the top of
+    // this method too: a field's picklist, an import's mapping and a dashboard's
+    // dataset are resolved by name with no package (ruling C on #30798;
+    // `bare-name-one-holder.ts`).
     //
     // Same-package re-registration still overwrites (idempotent reload), and a
     // runtime/DB overlay over a packaged item is the sanctioned ADR-0005 path,
@@ -7278,6 +8486,243 @@ export class SchemaRegistry {
     return undefined;
   }
 
+  // ==========================================
+  // Package-scoped addressing (ADR-0150 D3/D4, #31575)
+  // ==========================================
+  //
+  // The registry half of the shared package-scoped resolver
+  // (`package-scoped-resolver.ts`): who holds a name, one package's item of it
+  // with the per-package overlay slot applied, and the environment's own item.
+  // ⛔ Additive and read-only: no reader is switched to these, and {@link getItem}
+  // keeps its bare-slot-first answer for every caller (ADR-0150 Execution plan,
+  // child R: "not wired to any reader yet").
+
+  /**
+   * [ADR-0150 D4, "registry overlay slot (ADR-0005)"] The package a bare-slot
+   * entry of `(type, name)` customizes — the per-package overlay slot.
+   *
+   * The registry still stores ONE bare slot per name (every `sys_metadata`
+   * hydration and write-through writes it, and {@link getItem} serves it first
+   * to every caller). What changes here is what that entry is BOUND to: an
+   * overlay binds to the `(package, name)` it customizes, so a package-scoped
+   * read of another package's same-named item never sees it.
+   *
+   * The binding is the entry's `_packageId` — the stored row's `package_id`
+   * column, or the artifact envelope the hydration grafted onto it (ADR-0010
+   * §3.3; `withRowBinding` drops a body's own stamp for a package-less row) —
+   * read as follows:
+   *
+   *  - none, `''` or the `sys_metadata` sentinel (a package-less row), when no
+   *    package holds the name in a composite slot → `null`: the environment's
+   *    own item (ADR-0150 D1 bucket 4);
+   *  - a package-less row when exactly one package holds the name → that
+   *    package: "a package-less row that bears a package-held name is a
+   *    customization, never a second item" (ADR-0150 D3), the ADR-0005
+   *    overlay of the one holder, read at call time, so a package installed
+   *    after the row was saved makes it that package's overlay;
+   *  - a package-less row when two or more packages hold the name →
+   *    `undefined`: a customization of a name it cannot say whose, so it binds
+   *    to no package and is no environment item either (never a guess);
+   *  - a package that holds the name in its composite slot → that package
+   *    (an ADR-0005 overlay of its item);
+   *  - a paired `<base>.custom` package holding no composite slot of the name,
+   *    whose base does → the base (ADR-0146 D9: the pair's declared override
+   *    customizes its base's item);
+   *  - any other package → that package: its own stored item of the name.
+   *
+   * `holders` is the composite holder set, passed in when the caller already
+   * has it.
+   */
+  private overlaySlotBinding(item: unknown, name: string, collection: Map<string, any>, holders?: ReadonlySet<string>): string | null | undefined {
+    const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    const composite = holders ?? new Set(this.compositeHoldersOf(collection, name));
+    if (typeof stamped !== 'string' || stamped === '' || stamped === 'sys_metadata') {
+      if (composite.size === 0) return null;
+      return composite.size === 1 ? [...composite][0] : undefined;
+    }
+    if (composite.has(stamped)) return stamped;
+    const base = customizationBasePackageId(stamped);
+    if (base !== null && composite.has(base)) return base;
+    return stamped;
+  }
+
+  /**
+   * The packages holding `(type, name)` through a composite
+   * `<packageId>:<name>` slot, in the item store's order — the registry's
+   * identity key (ADR-0150 D2), read off the KEY, as {@link getItem}'s
+   * prefer-local reads it. A bundled type's members are one holder.
+   */
+  private compositeHoldersOf(collection: Map<string, any>, name: string): string[] {
+    const holders = new Set<string>();
+    const suffix = `:${name}`;
+    for (const key of collection.keys()) {
+      const base = bundleBaseKey(key);
+      if (base !== name && base.endsWith(suffix)) holders.add(base.slice(0, -suffix.length));
+    }
+    return [...holders];
+  }
+
+  /**
+   * [ADR-0150 D3] Every package that holds `(type, name)`, in the item store's
+   * order: each composite `<packageId>:<name>` slot, then the package a
+   * bare-slot entry is its own stored item of ({@link overlaySlotBinding}) when
+   * that package holds no composite slot. An overlay of a package's item adds
+   * no holder (it is that package's item), a package-less row over a held name
+   * adds none (ADR-0150 D3: a customization, never a second item), and the
+   * environment's own item is no package holder ({@link getEnvironmentScopedItem}).
+   *
+   * Every package, overridable baselines included: the resolver ranks them
+   * (`package-scoped-resolver.ts`). An object is not addressed by package
+   * (ADR-0150 D1 bucket 1) and answers `[]`.
+   *
+   * [#28802, epic #31527 child R2] A bundle ADDITION holds no name: a
+   * package whose members of a bundled type's name are all members another
+   * holder in its declared dependency closure does not hold (a dependent's
+   * locale its base does not ship, which the write gate admits and which
+   * stays under the dependent) adds to that holder's bundle, so it is no
+   * second holder of the name for a bare read. The addition is still the
+   * dependent's member: {@link getPackageScopedItem} naming the dependent
+   * reads it. A package holding a member its dependency also holds is a
+   * holder (a clash, refused by the resolver, never folded away).
+   *
+   * @param callerPackageId - The package a bare read is made from. Its own
+   *   holding stays in the set even when it is an addition, so its step 1
+   *   (its own item, ADR-0150 D3) answers as before: the addition only stops
+   *   counting toward OTHER callers' ambiguity (epic seat review 6729484996).
+   */
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[] {
+    const collection = this.metadata.get(type);
+    if (!collection) return [];
+    const composite = this.compositeHoldersOf(collection, name);
+    const holders = new Set(composite);
+    const compositeSet = new Set(composite);
+    for (const { item } of this.bareSlotEntriesOf(type, collection, name)) {
+      const bound = this.overlaySlotBinding(item, name, collection, compositeSet);
+      if (typeof bound === 'string') holders.add(bound);
+    }
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (!disc || holders.size < 2) return [...holders];
+    const membersOf = new Map<string, Set<string>>();
+    for (const id of holders) membersOf.set(id, this.bundleMembersHeldBy(type, collection, name, id, compositeSet, disc));
+    return [...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf));
+  }
+
+  /**
+   * [#28802] The members (discriminator values) of `name`'s bundle that
+   * `packageId` holds: its composite group's, and the bare-slot entries that
+   * bind to it ({@link overlaySlotBinding}).
+   */
+  private bundleMembersHeldBy(type: string, collection: Map<string, any>, name: string, packageId: string,
+    holders: ReadonlySet<string>, disc: { field: string; canonical: string }): Set<string> {
+    const { local } = collectBundle(collection, name, disc, packageId);
+    const bound = this.bareSlotEntriesOf(type, collection, name)
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+    return new Set([...local, ...bound].map((e) => discriminatorValue(e.item, disc.field) || disc.canonical));
+  }
+
+  /**
+   * [#28802] Whether `packageId`'s holding of a bundle's name is an addition
+   * to another holder's bundle: some other holder is in `packageId`'s declared
+   * dependency closure (the save door's walk), `packageId` is not in that
+   * holder's, and none of `packageId`'s members is one that holder holds.
+   */
+  private isBundleAddition(packageId: string, membersOf: ReadonlyMap<string, ReadonlySet<string>>): boolean {
+    const own = membersOf.get(packageId)!;
+    const reach = new Set(packageDependencyClosure(packageId, this)?.dependencies ?? []);
+    for (const [base, baseMembers] of membersOf) {
+      if (base === packageId || !reach.has(base)) continue;
+      if (packageDependencyClosure(base, this)?.dependencies.includes(packageId)) continue;
+      if ([...own].some((m) => baseMembers.has(m))) continue;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * [ADR-0150 D3/D4] Package `packageId`'s item of `(type, name)`: the bare-slot
+   * entry when it binds to `packageId` (its ADR-0005 overlay, or its own
+   * stored item — {@link overlaySlotBinding}), else its composite slot. ⛔ Never
+   * another package's overlay and never the environment's own item: overlaying
+   * one package's item never shadows another package's same-named item, which
+   * is the one difference from {@link getItem}'s bare-slot-first answer.
+   *
+   * @param member - As on {@link getItem}: one bundle member, for a type whose
+   *   identity is a pair; omitted, the canonical member first.
+   */
+  getPackageScopedItem<T>(type: string, name: string, packageId: string, member?: string): T | undefined {
+    const collection = this.metadata.get(type);
+    if (!collection) return undefined;
+    const holders = new Set(this.compositeHoldersOf(collection, name));
+    const bound = this.bareSlotEntriesOf(type, collection, name)
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) {
+      const { local } = collectBundle(collection, name, disc, packageId);
+      return pickBundleMember<T>([...bound, ...local], disc, member);
+    }
+    if (bound.length > 0) return bound[0].item as T;
+    return collection.get(`${packageId}:${name}`) as T | undefined;
+  }
+
+  /**
+   * [ADR-0150 D1 bucket 4, D3] The environment's own item of `(type, name)`:
+   * the bare-slot entry when it binds to no package ({@link overlaySlotBinding}
+   * answers `null`) — an item authored in this environment, in the implicit
+   * environment package, under a name no package holds. `undefined` when the
+   * bare slot is empty, holds a package's overlay, or holds a package-less
+   * row over a name packages hold (a customization, never a second item).
+   *
+   * @param member - As on {@link getItem}.
+   */
+  getEnvironmentScopedItem<T>(type: string, name: string, member?: string): T | undefined {
+    const collection = this.metadata.get(type);
+    if (!collection) return undefined;
+    const holders = new Set(this.compositeHoldersOf(collection, name));
+    const unbound = this.bareSlotEntriesOf(type, collection, name)
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === null);
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) return pickBundleMember<T>(unbound, disc, member);
+    return unbound[0]?.item as T | undefined;
+  }
+
+  /**
+   * [ADR-0150 D3, #31680 child E8] Does a by-name read of `type` consult
+   * `(package, name)` — is it one of `PACKAGE_SCOPED_READ_TYPES`
+   * (`package-scoped-read.ts`)? Asked by a reader that picks its path before
+   * it reads, such as the protocol's by-name read.
+   */
+  readsByPackage(type: string): boolean {
+    return isPackageScopedReadType(type);
+  }
+
+  /**
+   * [ADR-0150 D3, #31680 child E8] The by-name read for a caller. A type of
+   * `PACKAGE_SCOPED_READ_TYPES` resolves through the ONE package-scoped
+   * resolver (`readPackageScopedItem` over `resolvePackageScopedName`): the
+   * caller's own item, else the unique holder in its declared closure; for a
+   * caller with no package the environment's own item, else the unique package
+   * holder. Every other type is {@link getItem}'s, unchanged, until its own
+   * child of epic #31527 wires it.
+   *
+   * @param callerPackageId - The package the caller belongs to; omitted or
+   *   `null` is a caller with no package (the whole environment).
+   * @returns the item, or `undefined` when nothing holds the name.
+   * @throws {PackageScopedNameRefusedError} when the resolver refuses — never
+   *   `undefined` for a name that means more than one item, or only items the
+   *   caller may not reach.
+   */
+  resolveItem<T>(type: string, name: string, callerPackageId?: string | null, member?: string): T | undefined {
+    if (!isPackageScopedReadType(type)) return this.getItem<T>(type, name, callerPackageId ?? undefined, member);
+    return readPackageScopedItem<T>(this, { type, name, callerPackageId, member });
+  }
+
+  /** The bare-slot entries of `(type, name)`: one, or a bundle's members, canonical first. */
+  private bareSlotEntriesOf(type: string, collection: Map<string, any>, name: string): BundleEntry[] {
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) return collectBundle(collection, name, disc).bare;
+    return collection.has(name) ? [{ key: name, item: collection.get(name) }] : [];
+  }
+
   /**
    * Artifact-only lookup (ADR-0010 §3.3). Unlike {@link getItem} — which
    * returns the plain-key entry first, so a runtime/DB-rehydrated row
@@ -7528,11 +8973,26 @@ export class SchemaRegistry {
 
   /**
    * Universal List Method
+   *
+   * [#29871] `options.includeDisabledPackages` keeps a disabled package's
+   * items. Only the protocol's per-package layer passes it (the package
+   * export, which carries a package's own items enabled or not); every
+   * served read leaves it unset and hides them.
+   *
+   * [#29903, #29872] `options.withoutExtensionsOf` / `options.onlyExtensionsOf`
+   * resolve each listed object with those `extend` contributions left out of
+   * the fold ({@link getAllObjects}); no other type reads them. The per-package
+   * layer passes `onlyExtensionsOf`, naming the listed package, so a base's
+   * export carries the base's objects unchanged by its `.custom` pair and by
+   * every other package that extends them.
    */
-  listItems<T>(type: string, packageId?: string): T[] {
+  listItems<T>(type: string, packageId?: string, options?: { includeDisabledPackages?: boolean } & ObjectExtensionFoldOptions): T[] {
     // Special handling for 'object' and 'objects' types - use objectContributors
     if (type === 'object' || type === 'objects') {
-      return this.getAllObjects(packageId) as unknown as T[];
+      return this.getAllObjects(packageId, {
+        withoutExtensionsOf: options?.withoutExtensionsOf,
+        onlyExtensionsOf: options?.onlyExtensionsOf,
+      }) as unknown as T[];
     }
 
     const items = Array.from(this.metadata.get(type)?.values() || []) as T[];
@@ -7545,7 +9005,7 @@ export class SchemaRegistry {
     // `package` type itself is never filtered — the Packages page must still
     // list disabled packages so they can be re-enabled. Disable is reversible:
     // items remain registered and reappear on enable.
-    if (type !== 'package') {
+    if (type !== 'package' && options?.includeDisabledPackages !== true) {
       result = result.filter((item: any) => !this.isPackageDisabled((item as any)?._packageId));
     }
     return result;
@@ -7751,6 +9211,51 @@ export class SchemaRegistry {
     // behind — the same disposition the namespace gate above has.
     this.refuseCoOwnedObjectNameCollision(manifest, selfId, coOwners);
 
+    // [ADR-0150 D2, child N] The object rule above, extended to the twelve
+    // bucket 2/3 types phase 1 does not cover: inside one namespace, a
+    // `(type, name)` has one package holder, so that NAMESPACE/NAME names one
+    // item (`namespace-co-owner-names.ts`). Ahead of every mutation, like the
+    // check above; at every install, boot included, like it; with no
+    // `collisionPolicy` downgrade, like the bare-name rule below.
+    this.refuseNamespaceNameConflicts(manifest);
+
+    // [ADR-0150 D5, child G1] A namespace never spells a literal segment of
+    // the REST address grammar: the router reads the literal first, so the
+    // package's qualified addresses would reach another door. Ahead of every
+    // mutation, with no `collisionPolicy` downgrade — at the running install
+    // door only.
+    //
+    // A package the boot registers keeps booting: no release before this rule
+    // refused one, and what the literal costs it is its qualified path alone,
+    // which never existed before the rule did. Two readings name it, the
+    // bare-name rule's (`refuseBareNameConflicts`): until the cold boot seals
+    // the holders, every package registering is one the deployment holds
+    // (installed, or shipped in its code); after it, a package already
+    // registered under its own id AND the same namespace is a reload, a
+    // re-install or an upgrade (the namespace gate's same-package reading
+    // above). An upgrade that MOVES to a literal namespace is a new occupation
+    // of it and is refused. A held package is warned once and installs; it is
+    // read by `?package=`.
+    {
+      const literalRefusal = validateNamespaceNotAddressLiteral(manifest.namespace);
+      if (literalRefusal) {
+        const packageId = selfId ?? manifest.id;
+        const alreadyHeld = !this.bareNameHoldersSealed
+          || this.getPackage(packageId)?.manifest?.namespace === manifest.namespace;
+        if (!alreadyHeld) {
+          throw new NamespaceAddressLiteralError(manifest.namespace as string, literalRefusal, packageId);
+        }
+        this.warnAddressLiteralNamespaceOnce(packageId, literalRefusal);
+      }
+    }
+
+    // [ADR-0150 D6, child K] A namespace never equals an object name, in
+    // either direction, and no object is short-named `custom` — the spec's one
+    // predicate, against what the environment already holds. Ahead of every
+    // mutation, at every install, boot included, with no `collisionPolicy`
+    // downgrade, like the check above.
+    this.refuseNamespaceObjectNameClashes(manifest, selfId);
+
     // The security catalog's one-name-one-holder rule (ADR-0048 §3.4 narrowed
     // for positions, permission sets and capabilities; maintainer ruling Q4 = A
     // on #15196) — also ahead of every mutation, for the same reason. No
@@ -7766,6 +9271,17 @@ export class SchemaRegistry {
     // default for one object leave the record view to registration order
     // exactly as two strangers do.
     this.refuseDefaultRecordPageConflicts(manifest, selfId);
+
+    // One name, one package holder for the bare-name types — a picklist, a
+    // mapping, a dataset, an API, an object-less action, a flow, a webhook, a
+    // connector, an email template: the names their consumers resolve with no
+    // package (ADR-0048 §3.4 narrowed; maintainer ruling C on #30798, phase 1;
+    // `bare-name-one-holder.ts`). Also ahead of every mutation, with no
+    // co-owner exemption and no `collisionPolicy` downgrade, for the security
+    // catalog's reasons. Judged only once the cold boot has sealed the holders:
+    // during a boot every package registers again, and a deployment that
+    // already holds a clash is the cold boot's to report.
+    this.refuseBareNameConflicts(manifest, selfId);
 
     const now = new Date().toISOString();
 
@@ -7844,11 +9360,17 @@ export class SchemaRegistry {
     }
     this.noteItem('package', manifest.id);
     collection.set(manifest.id, pkg);
+    // A row that lands disabled withholds the package's `extend` contributions
+    // from every served fold ({@link withholdDisabledExtensions}), and a fold
+    // cached before the row existed read it as enabled.
+    if (this.isPackageDisabled(manifest.id)) this.invalidateAll();
     // The names this package now holds, recorded whether or not an item store
     // entry will carry them (see `securityCatalogClaims`).
     if (selfId !== undefined) this.recordSecurityCatalogClaims(selfId, manifest);
     // …and the default record pages it declares (see `defaultRecordPageClaims`).
     if (selfId !== undefined) this.recordDefaultRecordPageClaims(selfId, manifest);
+    // …and its bare names of the covered types (see `bareNameClaims`).
+    if (selfId !== undefined) this.recordBareNameClaims(selfId, manifest);
     this.log(`[Registry] Installed package: ${manifest.id} (${manifest.name})`);
     return pkg;
   }
@@ -7968,6 +9490,132 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0150 D2, child N] Refuse an install whose package declares an item of
+   * a covered type under a name another installed package of its namespace
+   * already holds (`namespace-co-owner-names.ts`).
+   *
+   * The sitting holders are the installed package records — their manifests,
+   * as {@link installPackage} recorded them — of the incoming package's
+   * namespace: the record is the one place every door's install lands, so an
+   * uninstall takes its names with it and nothing else is kept. The same
+   * package's own record is never a second holder (a reload, a re-install or
+   * an upgrade).
+   *
+   * @throws {NamespaceNameConflictError} ADR-0112 envelope, naming every holder.
+   */
+  private refuseNamespaceNameConflicts(manifest: ObjectStackManifest): void {
+    this.refuseNamespaceHolderConflicts(namespacePackageOf(manifest));
+  }
+
+  /**
+   * [ADR-0150 D6, child K] Refuse an install whose namespace equals an object
+   * name the environment holds or the package itself ships, whose object name
+   * equals an installed namespace, or whose object is short-named `custom`
+   * (`findNamespaceObjectNameClashes`, `@objectstack/spec/kernel`).
+   *
+   * The incoming side is the package's namespace and the objects it ships
+   * (`manifest.objects` and each nested `plugins[]` entry's, the objects
+   * `registerApp` registers under it). The installed side is every namespace
+   * the namespace gate has recorded and every object the registry holds,
+   * minus what this same package already holds (a reload, a re-install or an
+   * upgrade is never its own clash). A clash already present between two
+   * installed holders is not this install's to report.
+   *
+   * @throws {NamespaceObjectNameConflictError} ADR-0112 envelope, every clash named.
+   */
+  private refuseNamespaceObjectNameClashes(manifest: ObjectStackManifest, selfId: string | undefined): void {
+    const incomingId = selfId ?? manifest.id;
+    const isSelf = (packageId: string | undefined): boolean =>
+      packageId !== undefined && (packageId === incomingId || packageId === manifest.id);
+    const namespace = typeof manifest.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+
+    const incomingObjects: ObjectNameHolder[] = [];
+    const seen = new Set<string>();
+    const shipped = (body: ObjectStackManifest): void => {
+      for (const shortName of declaredOwnedObjectNames(body)) {
+        const name = computeFQN(namespace, shortName);
+        if (seen.has(name)) continue;
+        seen.add(name);
+        incomingObjects.push({ name, ...(namespace ? { namespace } : {}), ...(incomingId ? { packageId: incomingId } : {}) });
+      }
+    };
+    shipped(manifest);
+    const plugins = (manifest as { plugins?: unknown }).plugins;
+    if (Array.isArray(plugins)) {
+      for (const plugin of plugins) if (plugin && typeof plugin === 'object') shipped(plugin as ObjectStackManifest);
+    }
+
+    const installedNamespaces: NamespaceHolder[] = [];
+    for (const [ns, owners] of this.namespaceRegistry) {
+      for (const owner of owners) if (!isSelf(owner)) installedNamespaces.push({ namespace: ns, packageId: owner });
+    }
+    const installedObjects: ObjectNameHolder[] = [];
+    for (const fqn of this.objectContributors.keys()) {
+      const ownerId = this.getObjectOwner(fqn)?.packageId;
+      if (isSelf(ownerId) || seen.has(fqn)) continue;
+      installedObjects.push({ name: fqn, ...(ownerId ? { packageId: ownerId } : {}) });
+    }
+
+    const clashes = findNamespaceObjectNameClashes(
+      { namespaces: namespace ? [{ namespace, ...(incomingId ? { packageId: incomingId } : {}) }] : [], objects: incomingObjects },
+      { namespaces: installedNamespaces, objects: installedObjects },
+    );
+    if (clashes.length > 0) throw new NamespaceObjectNameConflictError(clashes, incomingId ?? '(unnamed package)');
+  }
+
+  /**
+   * [ADR-0150 D2, #31720] The same refusal for a `packages[]` stack's
+   * RESIDUAL — the top-level items no package body declares, which the
+   * `manifest` service registers under the residual's owner id after every
+   * body and never through {@link installPackage}. `residual` is that holder
+   * as the predicate sees it (`residualNamespacePackageOf`): the owner id, the
+   * stack's own `manifest.namespace`, its covered items. Judged against the
+   * installed packages of that namespace — the stack's own bodies included,
+   * once they have installed — exactly as a package is, in the same envelope.
+   * `undefined` (no residual, or none of the covered types) refuses nothing.
+   */
+  refuseResidualNamespaceNameConflicts(residual: NamespacePackage | undefined): void {
+    this.refuseNamespaceHolderConflicts(residual);
+  }
+
+  /**
+   * [#31720] Record a registered residual as a holder of its namespace, so a
+   * package (or another stack's residual) registering AFTER it is judged
+   * against it too: the residual has no package record for the walk below to
+   * read. Called once the stack has registered whole — a refused one records
+   * nothing — and keyed by the residual's owner id, so the same stack
+   * registering again replaces its own entry. `undefined` records nothing.
+   */
+  recordResidualNamespaceHolder(residual: NamespacePackage | undefined): void {
+    if (residual === undefined || !isNamespaceJudged(residual.namespace)) return;
+    this.residualNamespaceHolders.set(residual.packageId, residual);
+  }
+
+  /** The residual holders {@link recordResidualNamespaceHolder} recorded, by owner id. */
+  private readonly residualNamespaceHolders = new Map<string, NamespacePackage>();
+
+  /**
+   * The one walk both refusals above share: `incoming` against every installed
+   * package record of its namespace and every recorded residual holder of it,
+   * read through the same predicate, thrown in one envelope.
+   */
+  private refuseNamespaceHolderConflicts(incoming: NamespacePackage | undefined): void {
+    if (incoming === undefined || !isNamespaceJudged(incoming.namespace) || incoming.names.length === 0) return;
+    const sitting: NamespacePackage[] = [];
+    for (const record of this.metadata.get('package')?.values() ?? []) {
+      const recorded = (record as InstalledPackage | undefined)?.manifest;
+      if (recorded?.namespace !== incoming.namespace) continue;
+      const holder = namespacePackageOf(recorded);
+      if (holder !== undefined) sitting.push(holder);
+    }
+    for (const residual of this.residualNamespaceHolders.values()) {
+      if (residual.namespace === incoming.namespace) sitting.push(residual);
+    }
+    const conflicts = namespaceNameConflicts(incoming, sitting);
+    if (conflicts.length > 0) throw new NamespaceNameConflictError(conflicts);
+  }
+
+  /**
    * Withdraw an installed package: its objects, namespace, items, catalog
    * claims and record (each step's reason is on it below).
    *
@@ -8016,6 +9664,16 @@ export class SchemaRegistry {
     // …and the default record pages it declared, so the next package may
     // declare a default for those objects.
     this.forgetDefaultRecordPageClaims(id);
+    // …and its bare names of the covered types.
+    this.forgetBareNameClaims(id);
+    // [#31720] …and the namespace names a stack's residual holds under this
+    // id: the residual's items are registered under their owner id, so
+    // `unregisterItemsByPackage(id)` above has just withdrawn them (the
+    // owner id is one of the stack's own bodies in the `preserve` shape).
+    this.residualNamespaceHolders.delete(id);
+    // [#30581] …and the navigation entries it put into other packages' apps:
+    // with no row left, the fold's disabled check cannot withhold them.
+    this.setPackageNavContributions(id, []);
 
     // [#18877] The boot seed forgets the id together with the row. A package
     // that no longer exists has no lifecycle state to preserve, so the next
@@ -8037,6 +9695,9 @@ export class SchemaRegistry {
     if (collection) {
       collection.delete(id);
       this.log(`[Registry] Uninstalled package: ${id}`);
+      // …and, last, whoever keeps its own state keyed by this package's id
+      // (the engine's manifest map) drops it, on every uninstall door at once.
+      this.announcePackageUninstalled(id);
       return true;
     }
     return false;
@@ -8046,6 +9707,34 @@ export class SchemaRegistry {
     return this.metadata.get('package')?.get(id) as InstalledPackage | undefined;
   }
 
+  /**
+   * [ADR-0130 D4, epic #31527 R2] The dependencies each residual owner
+   * declared — the id a multi-package stack's top-level items are owned by,
+   * which has no package record. Kept beside the package records, never as
+   * one: `getPackage` / `getAllPackages` do not see it.
+   */
+  private readonly residualOwnerDependencies = new Map<string, readonly string[]>();
+
+  /**
+   * Record the dependencies residual owner `ownerId` declares on its stack's
+   * manifest, as the artifact door registers its residual. The latest record
+   * wins (a reinstall of the stack restates them).
+   */
+  recordResidualOwnerDependencies(ownerId: string, dependencies: readonly string[]): void {
+    this.residualOwnerDependencies.set(ownerId, Object.freeze([...dependencies]));
+  }
+
+  /**
+   * The dependencies residual owner `id` declared, or `undefined` for an id
+   * that is no recorded residual owner. The one closure walk
+   * (`packageDependencyClosure` in `@objectstack/metadata-core`) reads it for
+   * an id {@link getPackage} cannot produce, so a residual reaches what it
+   * declares through every reader of that walk.
+   */
+  residualOwnerDependenciesOf(id: string): readonly string[] | undefined {
+    return this.residualOwnerDependencies.get(id);
+  }
+
   getAllPackages(): InstalledPackage[] {
     return this.listItems<InstalledPackage>('package');
   }
@@ -8053,6 +9742,7 @@ export class SchemaRegistry {
   enablePackage(id: string): InstalledPackage | undefined {
     const pkg = this.getPackage(id);
     if (pkg) {
+      const wasDisabled = this.isPackageDisabled(id);
       pkg.enabled = true;
       pkg.status = 'installed';
       pkg.statusChangedAt = new Date().toISOString();
@@ -8061,6 +9751,7 @@ export class SchemaRegistry {
       // [#24400] A disabled package's bound actions are not attached
       // ({@link boundCodeActions}), so every object's fold is re-derived.
       this.invalidateAll();
+      if (wasDisabled) this.announcePackageEnabled(id);
     }
     return pkg;
   }
@@ -8125,11 +9816,20 @@ export class SchemaRegistry {
     this.registerItem('app', app, 'name', packageId);
   }
 
+  /**
+   * One app by name, with its navigation contributions merged in.
+   *
+   * [ADR-0150 D3, #31680 child E8] Resolved through the one package-scoped
+   * resolver ({@link resolveItem}): `currentPackageId` is the caller's
+   * package (its own app, else the unique holder in its declared closure);
+   * omitted, the caller has no package (the environment's own app, else the
+   * unique package holder). A name two holders make ambiguous, or one the
+   * caller may not reach, is refused naming every candidate.
+   *
+   * @throws {PackageScopedNameRefusedError} when the resolver refuses.
+   */
   getApp(name: string, currentPackageId?: string): any {
-    // ADR-0048 §3.1 — apps are addressed by package id (one app per package).
-    // When the caller knows it (route segment / `_packageId`), resolve
-    // prefer-local; otherwise this is a best-effort by-name lookup.
-    const app = this.getItem('app', name, currentPackageId);
+    const app = this.resolveItem<any>('app', name, currentPackageId);
     if (!app) return app;
     return this.applyNavContributions(app);
   }
@@ -8156,6 +9856,7 @@ export class SchemaRegistry {
     packageId?: string,
   ): void {
     if (!contribution || !contribution.app) return;
+    this.noteAppNavContributions(contribution.app);
     const list = this.appNavContributions.get(contribution.app) ?? [];
     list.push({
       packageId,
@@ -8169,6 +9870,64 @@ export class SchemaRegistry {
         (contribution.group ? `/${contribution.group}` : '') +
         ` (${list[list.length - 1].items.length} items)`,
     );
+  }
+
+  /**
+   * [#30581] Make `contributions` the WHOLE set of navigation contributions
+   * `packageId` holds, in every app: what the package registered before is
+   * replaced, never added to. The door a package BODY takes (`registerApp`'s
+   * manifest step), so registering the same body again (an artifact reload,
+   * whose `metadata:reloaded` re-registers every package of the artifact, a
+   * manifest replay, an upgrade) leaves each entry once, instead of one more
+   * copy of every module's entries per registration until a restart.
+   *
+   * Replaced IN PLACE: an app's list keeps the package's entries where its
+   * first registration put them, so the fold's ties (equal priority, the
+   * common case at the default 200) resolve in the order a fresh boot gives.
+   * An app the package newly contributes to gets them at the end; an app it no
+   * longer names loses them. {@link registerAppNavContribution} stays the
+   * additive verb, for a caller adding one contribution at a time.
+   */
+  setPackageNavContributions(
+    packageId: string,
+    contributions: ReadonlyArray<{ app: string; group?: string; priority?: number; items?: any[] }>,
+  ): void {
+    const incoming = new Map<string, Array<{ packageId?: string; group?: string; priority: number; items: any[] }>>();
+    for (const contribution of contributions) {
+      if (!contribution || !contribution.app) continue;
+      const list = incoming.get(contribution.app) ?? [];
+      list.push({
+        packageId,
+        group: contribution.group,
+        priority: contribution.priority ?? 200,
+        items: Array.isArray(contribution.items) ? contribution.items : [],
+      });
+      incoming.set(contribution.app, list);
+    }
+    for (const [app, list] of this.appNavContributions) {
+      if (list.some((c) => c.packageId === packageId)) this.noteAppNavContributions(app);
+    }
+    for (const app of incoming.keys()) this.noteAppNavContributions(app);
+    for (const [app, list] of [...this.appNavContributions]) {
+      const at = list.findIndex((c) => c.packageId === packageId);
+      if (at === -1) continue;
+      const kept = list.filter((c) => c.packageId !== packageId);
+      kept.splice(at, 0, ...(incoming.get(app) ?? []));
+      incoming.delete(app);
+      if (kept.length > 0) this.appNavContributions.set(app, kept);
+      else this.appNavContributions.delete(app);
+    }
+    for (const [app, list] of incoming) {
+      this.appNavContributions.set(app, [...(this.appNavContributions.get(app) ?? []), ...list]);
+    }
+    for (const c of contributions) {
+      if (!c || !c.app) continue;
+      this.log(
+        `[Registry] Navigation contribution: ${packageId} -> ${c.app}` +
+          (c.group ? `/${c.group}` : '') +
+          ` (${Array.isArray(c.items) ? c.items.length : 0} items)`,
+      );
+    }
   }
 
   /** Contributions registered for an app (empty array when none). */
@@ -8382,19 +10141,94 @@ export class SchemaRegistry {
 
   /**
    * The resolved options of a picklist — its own, then every extension's, in
-   * registration order — or `undefined` when no picklist of that name is
-   * registered. Extensions held for an unregistered list resolve nothing on
-   * their own: a list exists only once its owner declares it.
+   * registration order — or `undefined` when the name reaches no list.
+   * Extensions held for an unregistered list resolve nothing on their own: a
+   * list exists only once its owner declares it.
+   *
+   * [ADR-0150 D3/D4, child E6] The name is resolved by R's package-scoped
+   * resolver from `callerPackageId`, the package that WROTE the reference: its
+   * own list, else the unique holder in its declared dependency closure (plus
+   * `sys`), else nothing — a refusal ({@link picklistReferenceVerdict} says
+   * which). Omitted, `null` or `''` is a caller with no package (an
+   * environment-authored body, a context-free door): the environment's own
+   * list first, else the unique package holder. That is what the bare read
+   * answered while phase 1 keeps one holder per name, so every caller-less
+   * reader keeps its answer.
    */
-  resolvePicklistOptions(name: string): PicklistOptionLike[] | undefined {
-    const contributions = this.picklistContributions(name);
+  resolvePicklistOptions(name: string, callerPackageId?: string | null): PicklistOptionLike[] | undefined {
+    const contributions = this.picklistContributions(name, callerPackageId);
     if (!contributions.some((c) => c.kind === 'picklist')) return undefined;
     return mergePicklistOptions(contributions);
   }
 
   /**
-   * Every field of every packaged object that names a picklist no registered
-   * package declares — the load-time audit's input.
+   * [ADR-0150 D3, child E6] R's verdict on one picklist reference: `resolved`,
+   * `not-found` (nothing holds the name) or `refused` (holders exist and none
+   * is reachable from `callerPackageId`, or more than one is). The audits
+   * below read it, so the boot, the install door and the served field share
+   * one answer.
+   */
+  picklistReferenceVerdict(
+    name: string,
+    callerPackageId?: string | null,
+    pendingManifests?: readonly unknown[],
+  ): PackageScopedResolution<PicklistItemLike> {
+    const registry = pendingManifests && pendingManifests.length > 0 ? this.withPendingManifests(pendingManifests) : this;
+    return resolvePackageScopedName<PicklistItemLike>(registry, { type: 'picklist', name, callerPackageId });
+  }
+
+  /**
+   * The registry as R reads it once `manifests` (an artifact the install door
+   * is judging, not yet registered) are installed: each manifest answers
+   * `getPackage` for its own id — its `dependencies` and `namespace`, which is
+   * all the closure reads — ahead of an installed version of it, and each
+   * `picklist` a manifest declares is held by that manifest's package, next
+   * to the registry's holders. So a reference to a list a sibling in the
+   * artifact declares is judged by R's one rule — reached through the
+   * referrer's declared closure, else refused naming every holder — exactly as
+   * the served field will be once the artifact registers (epic seat review on
+   * #31731). ⛔ No closure is computed here; R computes it from this view.
+   */
+  private withPendingManifests(manifests: readonly unknown[]): PackageScopedRegistry {
+    const pending = new Map<string, InstalledPackage>();
+    const pendingLists = new Map<string, Set<string>>();
+    for (const manifest of manifests) {
+      const id = artifactPackageId(manifest);
+      if (id === undefined) continue;
+      pending.set(id, { manifest } as unknown as InstalledPackage);
+      for (const name of collectManifestPicklistNames(manifest)) {
+        let holders = pendingLists.get(name);
+        if (!holders) pendingLists.set(name, holders = new Set());
+        holders.add(id);
+      }
+    }
+    const pendingHolders = (type: string, name: string): ReadonlySet<string> =>
+      (type === 'picklist' ? pendingLists.get(name) : undefined) ?? new Set();
+    // A residual owner's declared dependencies (ADR-0130 D4) are read by the
+    // one closure walk through the registry it is handed — this view too.
+    const view: PackageScopedRegistry & Pick<SchemaRegistry, 'residualOwnerDependenciesOf'> = {
+      residualOwnerDependenciesOf: (id) => this.residualOwnerDependenciesOf(id),
+      getPackage: (id) => pending.get(id) ?? this.getPackage(id),
+      getAllPackages: () => [
+        ...this.getAllPackages().filter((row) => !pending.has(artifactPackageId(row.manifest) ?? '')),
+        ...pending.values(),
+      ],
+      packageScopedHoldersOf: (type, name) => [
+        ...new Set([...this.packageScopedHoldersOf(type, name), ...pendingHolders(type, name)]),
+      ],
+      getPackageScopedItem: <T>(type: string, name: string, packageId: string, member?: string): T | undefined =>
+        pendingHolders(type, name).has(packageId)
+          ? ({ name, _packageId: packageId } as unknown as T)
+          : this.getPackageScopedItem<T>(type, name, packageId, member),
+      getEnvironmentScopedItem: (type, name, member) => this.getEnvironmentScopedItem(type, name, member),
+    };
+    return view;
+  }
+
+  /**
+   * Every field of every packaged object whose picklist reference reaches no
+   * list from the package that declares the field — the load-time audit's
+   * input, with the resolver's refusal sentence where it refused.
    *
    * Judged over the PACKAGED contributors only (`own` and `extend`), never an
    * `overlay` and never a tenant-authored body: those come out of
@@ -8402,42 +10236,120 @@ export class SchemaRegistry {
    * tenant field naming an unknown list is still never served options and
    * never accepts a value — the fold drops whatever options it carried and
    * the record validator refuses the field.
+   *
+   * ⛔ Leaves out a reference the resolver refuses as held OUTSIDE the
+   * declaring package's dependency closure (ADR-0150 D3 (a), and a package
+   * holder it does not depend on — N1, ruled on #31678):
+   * {@link findOutsideClosurePicklistReferences} names those, and the boot
+   * warns instead of refusing (ruling N2 on the E6 card): the narrowing is a
+   * refused reference, not a refused boot. A name nothing holds, or one the
+   * closure holds more than once, still refuses the boot here.
    */
-  findUnresolvedPicklistReferences(): PicklistReference[] {
-    const unresolved: PicklistReference[] = [];
-    for (const [fqn, contributors] of this.objectContributors) {
-      for (const contributor of contributors) {
-        if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
-        for (const ref of collectPicklistReferences(fqn, contributor.definition, contributor.packageId)) {
-          if (this.resolvePicklistOptions(ref.picklist) === undefined) unresolved.push(ref);
-        }
-      }
-    }
-    return unresolved;
+  findUnresolvedPicklistReferences(): UnresolvedPicklistReference[] {
+    return this.auditPicklistReferences().unresolved;
   }
 
   /**
-   * Every `picklistExtensions` entry whose target list no registered package
-   * declares — the second half of the load-time audit. Held extensions are
-   * legal while the boot fills; once it is sealed, one still held adds its
-   * options to nothing.
+   * Every `picklistExtensions` entry whose target names no list — the second
+   * half of the load-time audit. Held extensions are legal while the boot
+   * fills; once it is sealed, one still held adds its options to nothing.
+   * The target is judged caller-less ({@link picklistContributions} says
+   * why), so a refusal here is only ever an ambiguity, every holder named.
    */
-  findOrphanPicklistExtensions(): Array<{ picklist: string; packageId: string | undefined }> {
-    const orphans: Array<{ picklist: string; packageId: string | undefined }> = [];
+  findOrphanPicklistExtensions(): UnresolvedPicklistExtension[] {
+    const orphans: UnresolvedPicklistExtension[] = [];
     for (const [target, byPackage] of this.picklistExtensionContributions) {
-      if (this.resolvePicklistOptions(target) !== undefined) continue;
-      for (const entry of byPackage.values()) orphans.push({ picklist: target, packageId: entry.packageId });
+      const verdict = this.picklistReferenceVerdict(target, null);
+      if (verdict.status === 'resolved') continue;
+      for (const entry of byPackage.values()) {
+        orphans.push(verdict.status === 'refused'
+          ? { picklist: target, packageId: entry.packageId, refusal: verdict.message }
+          : { picklist: target, packageId: entry.packageId });
+      }
     }
     return orphans;
   }
 
-  /** The owning list's options (when registered) followed by every extension's. */
-  private picklistContributions(name: string): PicklistContribution[] {
-    const contributions: PicklistContribution[] = [];
-    const base = this.getItem<{ options?: PicklistOptionLike[]; _packageId?: string }>('picklist', name);
-    if (base) {
-      contributions.push({ packageId: base._packageId, kind: 'picklist', options: Array.isArray(base.options) ? base.options : [] });
+  /**
+   * [ADR-0150 D3, child E6] The packaged fields whose picklist is held only
+   * OUTSIDE the declaring package's declared dependency closure: by an
+   * environment-authored list (D3 (a)), or by a package it does not depend
+   * on — a same-artifact sibling included (N1, ruled on #31678: the declared
+   * closure only). The resolver refuses them (`outside-closure`, naming every
+   * holder): the field is served with no options and the record validator
+   * refuses its values. The boot names each one (a warning carrying the
+   * refusal's sentence) and the D10 upgrade report lists them; it does not
+   * refuse the boot (ruling N2 on the E6 card: a refused reference, not a
+   * refused boot). The fix is the refusal's own: declare the dependency.
+   */
+  findOutsideClosurePicklistReferences(): UnresolvedPicklistReference[] {
+    return this.auditPicklistReferences().outsideClosure;
+  }
+
+  /** The field half of the audit, split by the resolver's verdict (above). */
+  private auditPicklistReferences(): {
+    unresolved: UnresolvedPicklistReference[];
+    outsideClosure: UnresolvedPicklistReference[];
+  } {
+    const unresolved: UnresolvedPicklistReference[] = [];
+    const outsideClosure: UnresolvedPicklistReference[] = [];
+    for (const [fqn, contributors] of this.objectContributors) {
+      for (const contributor of contributors) {
+        if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
+        for (const ref of collectPicklistReferences(fqn, contributor.definition, contributor.packageId)) {
+          const judged = this.judgePicklistReference(ref.picklist, ref.packageId);
+          if (judged === 'resolved') continue;
+          const entry = judged.refusal ? { ...ref, refusal: judged.refusal.message } : ref;
+          (judged.outsideClosure ? outsideClosure : unresolved).push(entry);
+        }
+      }
     }
+    return { unresolved, outsideClosure };
+  }
+
+  /**
+   * One reference, judged: `'resolved'` when the name reaches a list from
+   * `callerPackageId`, else what it is — the refusal (when the resolver
+   * refused) and whether it refused because every holder is outside the
+   * caller's declared closure.
+   */
+  private judgePicklistReference(
+    name: string,
+    callerPackageId: string | undefined,
+  ): 'resolved' | { refusal?: PackageScopedRefusal; outsideClosure: boolean } {
+    const verdict = this.picklistReferenceVerdict(name, callerPackageId);
+    if (verdict.status === 'resolved') return 'resolved';
+    if (verdict.status !== 'refused') return { outsideClosure: false };
+    return { refusal: verdict, outsideClosure: verdict.reason === 'outside-closure' };
+  }
+
+  /**
+   * The list `name` reaches from `callerPackageId` (its options, when that is
+   * one), followed by every extension of the SAME list.
+   *
+   * [ADR-0150 D3, child E6; epic seat ruling X on the E6 card, #31678] A
+   * `picklistExtensions` entry's `extend` is a CONTRIBUTION to another
+   * package's item, not a reference its package reads: it resolves
+   * caller-less through R — the environment's own list, else the unique
+   * package holder, else a refusal naming every holder — the treatment D3
+   * gives an environment overlay. So an extension adds to the list its target
+   * names environment-wide, and to a field's list only when that is the same
+   * list. Loosens nothing (no first match is picked) and guesses nothing.
+   */
+  private picklistContributions(name: string, callerPackageId?: string | null): PicklistContribution[] {
+    const contributions: PicklistContribution[] = [];
+    const resolution = this.picklistReferenceVerdict(name, callerPackageId);
+    const base = resolution.status === 'resolved' ? resolution : undefined;
+    if (base) {
+      const item = base.item;
+      contributions.push({
+        packageId: item?._packageId,
+        kind: 'picklist',
+        options: Array.isArray(item?.options) ? item.options : [],
+      });
+    }
+    const extended = base ? this.picklistReferenceVerdict(name, null) : undefined;
+    if (base && !(extended?.status === 'resolved' && sameHolder(extended.holder, base.holder))) return contributions;
     for (const entry of this.picklistExtensionContributions.get(name)?.values() ?? []) {
       contributions.push({ packageId: entry.packageId, kind: 'extension', options: [...entry.options.values()] });
     }
@@ -8454,7 +10366,10 @@ export class SchemaRegistry {
     picklist: { options?: PicklistOptionLike[] },
     packageId: string | undefined,
   ): void {
-    const extensions = this.picklistContributions(name).filter((c) => c.kind === 'extension');
+    // The list is not registered yet, so no resolution reaches it: judged
+    // against every extension held for the name, as the additive rule reads.
+    const extensions: PicklistContribution[] = [...(this.picklistExtensionContributions.get(name)?.values() ?? [])]
+      .map((entry) => ({ packageId: entry.packageId, kind: 'extension' as const, options: [...entry.options.values()] }));
     const duplicate = findDuplicatePicklistValue([
       { packageId, kind: 'picklist', options: Array.isArray(picklist?.options) ? picklist.options : [] },
       ...extensions,
@@ -8462,9 +10377,42 @@ export class SchemaRegistry {
     if (duplicate) throw duplicatePicklistValueError(name, duplicate);
   }
 
-  /** Resolve every picklist-bound field of a body (by reference when there is none). */
-  private resolvePicklistFields<T>(body: T): T {
-    return resolvePicklistFieldsOnto(body, (picklist) => this.resolvePicklistOptions(picklist));
+  /**
+   * Resolve every picklist-bound field of a body (by reference when there is
+   * none). [ADR-0150 D3, child E6] Each field's list is resolved from the
+   * package that WROTE that field's reference (`referrerOf`): the packaged
+   * layer whose own declaration carries it, else no package — a reference
+   * only an environment-authored body (a tenant overlay, a stored row) writes
+   * is the environment's reference, never the package's it customizes (D3).
+   */
+  private resolvePicklistFields<T>(body: T, referrerOf: PicklistReferrer = NO_PACKAGE_REFERRER): T {
+    return resolvePicklistFieldsOnto(body, (picklist, field) =>
+      this.resolveFieldPicklistOptions(picklist, referrerOf(field, picklist)));
+  }
+
+  /**
+   * [ADR-0150 D3, child E6; epic seat review on #31731] One field's list, when
+   * several packaged layers write its reference: each referrer's resolution
+   * is R's, and the field is served only when every one of them resolves to
+   * the SAME holder. Any other answer — one of them refused or reaching
+   * nothing, or two reaching different holders — serves no options, so the
+   * record validator refuses the field's values; the boot audit names each
+   * referrer whose own resolution refuses, with R's sentence
+   * ({@link findUnresolvedPicklistReferences}). ⛔ No referrer is preferred by
+   * fold order.
+   */
+  private resolveFieldPicklistOptions(
+    picklist: string,
+    referrers: readonly (string | null)[],
+  ): PicklistOptionLike[] | undefined {
+    const [first, ...others] = referrers;
+    if (others.length > 0) {
+      const verdicts = referrers.map((referrer) => this.picklistReferenceVerdict(picklist, referrer));
+      const [head] = verdicts;
+      if (head.status !== 'resolved') return undefined;
+      if (!verdicts.every((v) => v.status === 'resolved' && sameHolder(v.holder, head.holder))) return undefined;
+    }
+    return this.resolvePicklistOptions(picklist, first ?? null);
   }
 
   /** Drop a package's `picklistExtensions`; `true` when it had any. */
@@ -8528,6 +10476,7 @@ export class SchemaRegistry {
     this.metadata.clear();
     this.appNavContributions.clear();
     this.picklistExtensionContributions.clear();
+    this.residualOwnerDependencies.clear();
     this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }

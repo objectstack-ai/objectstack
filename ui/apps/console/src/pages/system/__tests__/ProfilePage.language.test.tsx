@@ -79,7 +79,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   }),
 }));
 
-vi.mock('@object-ui/providers', async (importOriginal) => ({
+vi.mock('@object-ui/fields', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useUpload: () => ({ upload: async () => ({ url: '' }) }),
 }));
@@ -269,5 +269,39 @@ describe('ProfilePage — my language (objectui#7501)', () => {
     expect(screen.queryByTestId('profile-language-select')).not.toBeInTheDocument();
 
     warn.mockRestore();
+  });
+});
+
+describe('ProfilePage — a stored spelling of a table language (objectstack#30514)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    user.value = { id: 'usr_1', name: 'Ada', email: 'ada@example.com' };
+    writable.value = true;
+    update.mockResolvedValue({});
+  });
+
+  it('reads a stored zh-CN as the offered zh-Hans: one option, nothing to save', async () => {
+    // The provider offers table tags; every first-party account that picked
+    // Chinese before the table existed stores `zh-CN`.
+    offerable.value = ['en', 'zh-Hans'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'zh-CN' });
+    const select = await renderProfile();
+
+    const options = await listed(select);
+    // Deployment default + the two offered entries: no stray 中文（中国）
+    // prepended beside 简体中文.
+    expect(options).toHaveLength(3);
+    expect(options).not.toContain('中文（中国）');
+    expect(select).toHaveTextContent(options[2]);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('still shows a stored tag the table does not name', async () => {
+    offerable.value = ['en', 'zh-Hans'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'th' });
+    const select = await renderProfile();
+
+    expect(await listed(select)).toHaveLength(4);
+    expect(select).toHaveTextContent('ไทย');
   });
 });

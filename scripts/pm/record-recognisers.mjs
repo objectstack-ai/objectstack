@@ -293,11 +293,13 @@ export function recordCarriesDesignJudgment(face, tierName) {
  *
  * Ruling record 6184805932 on #23578 (letter C, maintainer 「同意」): the TIER
  * stays the one the face maps to, but the at-tier review of a mixed diff covers
- * these paths plus every file their hunks make a claim about (a rule and the
- * gate that enforces it are one change, read as one); the rest is the lane
- * seat's ACCEPT at `TIER_DEFAULT`, exactly as a standalone pull request of those
- * files. The record's `Scope:` line lists both halves, and may widen, ⛔ never
- * narrow below this list. Tier H approval and the queue guard stay whole-PR:
+ * these paths plus every file IN THE DIFF that directly implements or enforces
+ * them, reviewed for agreement with the contract (the project owner's order of
+ * 2026-11-07 narrowed "every file their hunks make a claim about" to this; code
+ * outside the diff is read, never reviewed); the rest is the lane seat's ACCEPT
+ * at `TIER_DEFAULT`, exactly as a standalone pull request of those files. The
+ * record's `Scope:` line lists both halves, and may widen, ⛔ never narrow below
+ * this list. Tier H approval and the queue guard stay whole-PR:
  * nothing here is read by the guard.
  *
  * ⭐ Read off `reviewFace`, never a second classification: the same function the
@@ -1028,15 +1030,18 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
  * Who holds this pull request's current head, read off its comment thread:
  *
  *   live        a live claim names the current head -- `holder` is the claim to respect: the earliest
- *               posted, except that a legacy `triage#N` claim yields to any other live claim (`tie` true)
+ *               posted, a review seat's and a lane seat's alike (the rule's 「先贴者持有」, which is what
+ *               keeps two review seats off one head), except that a legacy `triage#N` claim yields to
+ *               any other live claim (`tie` true)
  *   lapsed      claims named the current head, and every one has expired
  *   none        no claim names the current head (claims on earlier heads lapsed when it moved)
  *   unreadable  the thread, the head or the clock could not be read
  *
  * A claim's SIDE is read off its comment's signature line (`readSignatureLine`): a claim signed
  * `triage#N · …` -- posted before triage stopped taking contract reviews -- is the `triage` side,
- * and every other claim -- a lane seat's, a review seat's, a sibling lane seat's, an unsigned one
- * -- is the `lane` side, among which the earliest posted holds. Unreadable claim lines are
+ * one signed `review#N · …` is the `review` side (`lanes/review.md`), and every other claim -- a
+ * lane seat's, a sibling lane seat's, an unsigned one -- is the `lane` side. Between the review
+ * and lane sides there is no precedence: the earliest posted holds. Unreadable claim lines are
  * returned by comment id and hold nothing.
  *
  * @param {{ id?: number, body?: string, created_at?: string }[]} rows  the PR's comment rows
@@ -1061,13 +1066,14 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
     }
     const stamped = Date.parse(row?.created_at ?? '');
     const postedAt = Number.isFinite(stamped) ? stamped : line.at;
-    const side = readSignatureLine(row?.body)?.lane === 'triage' ? 'triage' : 'lane';
+    const signedLane = readSignatureLine(row?.body)?.lane ?? null;
+    const side = signedLane === 'triage' ? 'triage' : signedLane === 'review' ? 'review' : 'lane';
     const lapse = contractReviewClaimLapse(line, { headSha: head, now, postedAt });
     claims.push({ id: row?.id ?? null, session: line.session, head: line.head, time: line.time, postedAt, side, lapse });
   }
   const live = claims.filter((c) => c.lapse === 'live').sort((a, b) => a.postedAt - b.postedAt);
-  const tie = live.some((c) => c.side === 'lane') && live.some((c) => c.side === 'triage');
-  const holder = live.find((c) => c.side === 'lane') ?? live[0] ?? null;
+  const tie = live.some((c) => c.side !== 'triage') && live.some((c) => c.side === 'triage');
+  const holder = live.find((c) => c.side !== 'triage') ?? live[0] ?? null;
   const state = holder !== null ? 'live' : claims.some((c) => c.lapse === 'expired') ? 'lapsed' : 'none';
   return { state, holder, tie, claims, unreadable };
 }
@@ -1262,7 +1268,20 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
  * lanes had already invented off-table; the others are events measured with no
  * doorbell at all. `seat-online` carries the seat's patrol trigger (`patrol
  * TRIGGER_ID`, or `patrol none` for a seat with no patrol by rule), the same
- * value its seat post's `Patrol:` line records.
+ * value its seat post's `Patrol:` line records. The `progress` pair was
+ * admitted by ruling (maintainer 「同意29775 A」, record 6595514258, with the
+ * card's amendments 6595244387 and 6595840476): a nudge is no longer 「不敲」
+ * but a RATE — one `Request: progress` per item per 60 min, read off the
+ * item's own progress, answered with `Notify: progress` naming the record.
+ * `main-green` was admitted on the maintainer's word about PRs a lane parks
+ * while main is red, verbatim and untranslated: 「如果到时候发现有哪个 PR 确实因为
+ * 这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续
+ * 推进。」 — the held PR says what it waits on (a line-leading `Waits-on:
+ * main-red #n` in its body, `landing-operations.md` §C), and when the
+ * anchor card closes triage (the director when triage is absent) rings the
+ * seat of every open PR carrying that line, one knock per PR, in the same
+ * round (`triage-duties.md`); the seat merges `origin/main`, drops the line
+ * and resumes its landing. No gate, label, state or patrol row rides on it.
  *
  * `from` / `to` / `when` are the row in English, for the printout; the rules
  * text is the authority on who rings whom.
@@ -1277,6 +1296,7 @@ export const MAILBOX_KEYS = Object.freeze([
   { id: 'request:urgent-triage', kind: 'Request', key: 'urgent-triage', from: 'any seat', to: 'triage', when: 'a p0 suspect, main red, a deterministic queue red', template: 'Request: urgent-triage · #n · ONE-LINE-CRITERION' },
   { id: 'request:main-red', kind: 'Request', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'triage, or the director when triage is absent', when: 'the anchor card is filed', template: 'Request: main-red · CHECK-NAME · anchor #n · suggested lane X' },
   { id: 'notify:main-red', kind: 'Notify', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'the seat that landed the breaking PR, and the anchor card\'s lane', when: 'the anchor card is filed', template: 'Notify: main-red · anchor #n · breaking PR #m or none' },
+  { id: 'notify:main-green', kind: 'Notify', key: 'main-green', from: 'triage, or the director when triage is absent', to: 'the seat of each open PR whose body carries a line-leading `Waits-on: main-red #n` naming the closed anchor', when: 'the main-red anchor card closes: one knock per held PR, all in the same round, the count in the round record; the seat merges `origin/main`, drops the line and resumes its landing', template: 'Notify: main-green · anchor #n · PR #m' },
   { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the review seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
   { id: 'notify:release-blocker', kind: 'Notify', key: 'release-blocker', from: 'triage', to: 'the lane it is graded into', when: 'a p0/p1 release blocker is graded into a lane', template: 'Notify: release-blocker · #n' },
   { id: 'notify:unblocked', kind: 'Notify', key: 'unblocked', from: 'the seat that moved the card to `pm:queue` (triage or an epic seat)', to: 'the card\'s lane seats', when: 'a p0/p1 card\'s `Blocked-by` target closed', template: 'Notify: unblocked · #n · p0 or p1' },
@@ -1286,7 +1306,9 @@ export const MAILBOX_KEYS = Object.freeze([
   { id: 'notify:seat-online', kind: 'Notify', key: 'seat-online', from: 'the seating session (or a forced takeover, for the walled account)', to: 'the lane\'s sibling seats and triage', when: 'at seating', template: 'Notify: seat-online · LANE#N · LOGIN · mailbox #m · patrol TRIGGER_ID · takes: #a #b …' },
   { id: 'notify:seat-offline', kind: 'Notify', key: 'seat-offline', from: 'the signing-off session', to: 'the lane\'s sibling seats and triage', when: 'at sign-off', template: 'Notify: seat-offline · LANE#N · in-flight: … · stay-behind: … · brief ID' },
   { id: 'notify:split', kind: 'Notify', key: 'split', from: 'a seat of a multi-seat lane', to: 'its sibling seats', when: 'at round open, only when the list changed', template: 'Notify: split · LANE#N · takes: … · leaves: …' },
-  { id: 'notify:security', kind: 'Notify', key: 'security', from: 'the finder — any seat, dev or QA runner', to: 'security#1', when: 'its relay `advisory_create` draft landed; the opaque advisory id ALONE — never a mechanism, a path or an object name', template: 'Notify: security · GHSA-ID' },
+  { id: 'notify:security', kind: 'Notify', key: 'security', from: 'the seat holding the finding (a dev\'s or a QA runner\'s reaches its PM session privately first); triage, for a public card it labelled `security`', to: 'security#1', when: 'the seat\'s relay `advisory_create` draft landed: the opaque advisory id ALONE; or triage labelled a public card `security`: its number ALONE — never a mechanism, a path or an object name, and never a PRIVATE repository\'s card (that repository\'s own lane holds it)', template: 'Notify: security · GHSA-ID or #n' },
+  { id: 'request:progress', kind: 'Request', key: 'progress', from: 'triage', to: 'the claiming seat (or the online sibling an off-shift seat\'s items went to)', when: 'a claimed card or an open PR whose last PROGRESS (its head commit, any non-triage comment, a label change by its seat — never `updated_at`) is 3 h old: at most one per item per 60 min; none while an answered ETA stands, or while the item is parked (`Blocked-by:` / `Resume-from:`) or waits on a decision card; two unanswered ⇒ the round record lists it and the seat reads as possibly down', template: 'Request: progress · #n · idle since TIME' },
+  { id: 'notify:progress', kind: 'Notify', key: 'progress', from: 'the claiming seat', to: 'triage', when: 'answering a progress knock — the record is a comment on #n giving the next act and an ETA, the park (`Blocked-by:` / `Resume-from:`), or the release', template: 'Notify: progress · #n · record ID' },
 ]);
 /** One event, one line: the longest a mailbox line may be, in bytes (the text's 「≤200 字节」). */
 export const MAILBOX_LINE_MAX_BYTES = 200;
@@ -1303,6 +1325,8 @@ const HEAD_REF = /^head `?([0-9a-fA-F]{7,40})`?$/;
 const ANCHOR_REF = /^anchor #([1-9][0-9]*)$/;
 const MAILBOX_REF = /^mailbox #([1-9][0-9]*)$/;
 const RECORD_REF = /^record `?#?([1-9][0-9]*)`?$/;
+/** `idle since TIME` — the item's last progress, a `Z` time in `CLAIM_TIME`'s spelling (the placeholder `TIME` is not one). */
+const IDLE_SINCE_REF = /^idle since `?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?Z)`?$/;
 const BRIEF_REF = /^brief `?#?([1-9][0-9]*)`?$/;
 const LANE_REF = /^suggested lane ([A-Za-z][A-Za-z0-9:_-]*)$/;
 const VERDICT_REF = /^contract-review (PASS|FAIL)$/;
@@ -1316,9 +1340,12 @@ const SERIAL_REF = /^#([1-9][0-9]*) behind #([1-9][0-9]*)$/;
 /** A ruling's option LETTER as the record spells it (`A`, `B′`, `乙`): one short token, never a number reference. */
 const RULING_LETTER_REF = /^[^\s#`]{1,12}$/u;
 /**
- * `GHSA-xxxx-xxxx-xxxx` — a repository security advisory's opaque id, the ONE field `Notify: security` carries
- * (`security-findings.md`: the id alone, never a mechanism, a path or an object name). MIRRORED from the relay's
- * `GHSA_ID_SHAPE` (`fleet-write/ops.mjs`, its reading of the id an advisory write lands) — not imported, so the
+ * `GHSA-xxxx-xxxx-xxxx` — a repository security advisory's opaque id, the ONE field `Notify: security` carries from
+ * the seat holding a finding (`security-findings.md`: the id alone, never a mechanism, a path or an object name);
+ * triage's hand-over of a public card it labelled `security` carries that card's `#n` alone instead (`NUMBER_REF`,
+ * `lanes/security.md`). A PRIVATE repository's `security` card is never rung (`security-findings.md`: that
+ * repository's own lane holds it), so no repository-qualified card reads here. Never two on one line.
+ * MIRRORED from the relay's `GHSA_ID_SHAPE` (`fleet-write/ops.mjs`, its reading of the id an advisory write lands) — not imported, so the
  * patrol graph never loads the relay; the self-test holds the two equal.
  */
 const ADVISORY_ID_REF = /^GHSA(-[0-9a-z]{4}){3}$/;
@@ -1399,6 +1426,13 @@ const MAILBOX_FIELD_READERS = Object.freeze({
     const breaking = pr[1] === undefined ? null : Number(pr[1]);
     return { anchor: Number(anchor[1]), pr: breaking, numbers: breaking === null ? [Number(anchor[1])] : [Number(anchor[1]), breaking] };
   },
+  // The closed anchor and the ONE held PR this knock resumes: a seat holding two PRs is rung twice.
+  'notify:main-green': (p) => {
+    if (p.length !== 3) return null;
+    const anchor = ANCHOR_REF.exec(p[1]);
+    const pr = PR_REF.exec(p[2]);
+    return anchor && pr ? { anchor: Number(anchor[1]), pr: Number(pr[1]), numbers: [Number(anchor[1]), Number(pr[1])] } : null;
+  },
   'notify:release-blocker': (p) => {
     if (p.length !== 2) return null;
     const card = NUMBER_REF.exec(p[1]);
@@ -1430,7 +1464,12 @@ const MAILBOX_FIELD_READERS = Object.freeze({
   'notify:security': (p) => {
     if (p.length !== 2) return null;
     const advisory = ADVISORY_ID_REF.exec(p[1]);
-    return advisory ? { advisory: advisory[0], numbers: [] } : null;
+    if (advisory) return { advisory: advisory[0], numbers: [] };
+    // A public card triage labelled `security` (`lanes/security.md`): its number is already public and names no
+    // mechanism, so it rides the doorbell as the one field — the card, never the card AND an id.
+    // A private repository's card (`OWNER/REPO#N`) is never rung (`security-findings.md`), so it reads unreadable.
+    const card = NUMBER_REF.exec(p[1]);
+    return card ? { card: Number(card[1]), numbers: [Number(card[1])] } : null;
   },
   'notify:contract-review': (p) => {
     if (p.length !== 3) return null;
@@ -1462,6 +1501,20 @@ const MAILBOX_FIELD_READERS = Object.freeze({
     const takes = readList(p[2], 'takes');
     const leaves = readList(p[3], 'leaves');
     return seat && takes && leaves ? { seat, takes, leaves, numbers: [...takes, ...leaves] } : null;
+  },
+  // The item is a claimed card OR an open PR, so its number rides bare (`#n`), as `serial` spells its pair —
+  // never `PR #n`; the time is when its last progress was read, not when the bell rang.
+  'request:progress': (p) => {
+    if (p.length !== 3) return null;
+    const item = NUMBER_REF.exec(p[1]);
+    const since = IDLE_SINCE_REF.exec(p[2]);
+    return item && since ? { item: Number(item[1]), since: since[1], numbers: [Number(item[1])] } : null;
+  },
+  'notify:progress': (p) => {
+    if (p.length !== 3) return null;
+    const item = NUMBER_REF.exec(p[1]);
+    const record = RECORD_REF.exec(p[2]);
+    return item && record ? { item: Number(item[1]), record: Number(record[1]), numbers: [Number(item[1])] } : null;
   },
 });
 
@@ -1592,8 +1645,9 @@ export const RECORD_TEMPLATE_PLACEHOLDERS = Object.freeze({
 /**
  * The two slots of the at-tier record's `Scope:` line (ruling record 6184805932,
  * letter C): the `hits` floor, which `--paths` fills from `reviewScopeHits`, and
- * the files the reviewer read because those hunks make a claim about them,
- * which only the reviewer can name (`none` when there are none).
+ * the files in the diff that directly implement or enforce those hunks (on the
+ * narrowing face, the files its hunks make a claim about), which only the
+ * reviewer can name (`none` when there are none).
  *
  * ⭐ Kept apart from the placeholders above on purpose: those PARSE through the
  * readers that judge a record, and no reader reads `Scope:` — the queue guard is
@@ -1629,7 +1683,7 @@ export const RECORD_SCOPE_PLACEHOLDERS = Object.freeze({
  * `servedTierStands` refuses.
  *
  * ⭐ The at-tier record carries `Scope:` (ruling record 6184805932, letter C):
- * the `hits` floor, then `+` and the files read for those hunks' claims.
+ * the `hits` floor, then `+` and the implementing files in the diff.
  * `scopeHits` fills the floor (`reviewScopeHits`); left out, it is the
  * placeholder. ⛔ Only at `CONTRACT_REVIEW_TIER`: the declaration face has no
  * hits, its whole review is the lane seat's own, and so it has no scope to state.
@@ -1856,19 +1910,24 @@ export function contractReviewTemplateLines(values = {}) {
     '                    the rule was broken for. A record without the line predates it and is not re-judged;',
     '                    a line present that reads neither is refused before the write.',
     `  · Scope           at ${CONTRACT_REVIEW_TIER_NAME} only: first the paths \`reviewFace\` returns as \`hits\` on`,
-    "                    the PR's file list (--paths PATH... prints them filled in), then `+` and every other",
-    '                    file those hunks make a claim about, read in the cited code (`+ none` if none); a rule',
-    '                    and the gate that enforces it are one change, read as one. Widen it freely, ⛔ never',
-    `                    below \`hits\`. The rest of a mixed diff is the lane seat's ACCEPT at ${TIER_DEFAULT_NAME},`,
+    "                    the PR's file list (--paths PATH... prints them filled in), then `+` and every file IN",
+    '                    THE DIFF that directly implements or enforces them, named apart from `hits` (`+ none` if',
+    '                    none): the gate that enforces a rule, the code a jsdoc or schema line describes, the',
+    '                    validator a skill teaches. Code outside the diff is read, never reviewed. Widen it',
+    `                    freely, ⛔ never below \`hits\`. The rest of a mixed diff is the lane seat's ACCEPT at ${TIER_DEFAULT_NAME},`,
     '                    named there; Tier H approval and the queue guard stay whole-PR. On the narrowing',
-    '                    face the floor is every path of the diff outside the prose faces: no path is a remainder.',
+    '                    face the floor is every path of the diff outside the prose faces: no path is a remainder,',
+    '                    and `+` names every file those hunks make a claim about, read in the cited code.',
     '  · ④ Design judgment  on the schema, rules and narrowing faces — the published spec, and the governed register,',
     '                    which holds the skills and ADR surfaces the full-review order names among its rows, and a',
     '                    declared narrowing; the declaration face alone carries no ④. For each `hits` file: does the',
     '                    change hold against the code it cites and the scenario it is accepted against? A skill file',
     "                    against the card's eval prompt and the spec it teaches on `main`; a schema file",
     '                    against the ruling or ADR it implements and its first consumer; an ADR against its',
-    '                    first consumer and its execution plan. On the narrowing face, with no `hits`, the narrowing',
+    '                    first consumer and its execution plan. Each implementing file in the diff: does the code',
+    '                    agree with the contract it implements? Code outside the diff is read, never reviewed. Grade',
+    '                    each finding must-fix, should-fix or nit (a nit has no effect on correctness or the contract).',
+    '                    On the narrowing face, with no `hits`, the narrowing',
     '                    itself against the published spec on `main`: does it take a declared capability away at the',
     "                    consumer, or make the spec's own refusal real? The cited code is READ to judge it, never",
     '                    reviewed; a must-fix found here is a FAIL like any other.',
@@ -1925,6 +1984,20 @@ function templateFace({ face: faceId, paths }) {
   return { face, scopeHits: undefined };
 }
 
+/**
+ * The grades every at-tier ④ judgment closes with, on every face that carries ④ (the owner's
+ * order of 2026-11-07): a nit has no effect on correctness or the contract, only a must-fix or
+ * should-fix earns a delta review, and a nit is never fixed in a commit that moves a reviewed file —
+ * the queue guard carries a record only over a pure-regeneration or prose-only hop.
+ */
+const BRIEF_GRADE_LINES = Object.freeze([
+  '     Grade each finding must-fix, should-fix or nit — a nit has no effect on correctness or the contract.',
+  '     A must-fix is a FAIL; a must-fix or should-fix earns a delta review of its fix; nits alone end the round.',
+  '     A nit is fixed only on the prose faces, or left as an accepted deviation or a follow-up card: a fix',
+  '     anywhere else moves the head, and this record no longer covers it.',
+  "     ⛔ Judge the tree, never the PR body's account of it.",
+]);
+
 /** Where the brief's copyable region starts and ends. */
 export const BRIEF_TEMPLATE_FENCE_START = '----- copy from here; replace every placeholder -----';
 export const BRIEF_TEMPLATE_FENCE_END = '----- to here -----';
@@ -1959,8 +2032,10 @@ export const BRIEF_TEMPLATE_PLACEHOLDERS = Object.freeze({
  * ⭐ At `CONTRACT_REVIEW_TIER` the brief states the review's SCOPE (ruling record
  * 6184805932, letter C): the `hits` floor — filled in when `paths` is given, and
  * then the record command is `--template --paths` over those hits, which reads
- * back the same face and the same floor — plus the files those hunks claim
- * about; widen freely, ⛔ never below `hits`. The declaration face states none.
+ * back the same face and the same floor — plus the files in the diff that
+ * directly implement or enforce them, reviewed for agreement with the contract
+ * (the owner's order of 2026-11-07); widen freely, ⛔ never below `hits`. The
+ * declaration face states none.
  * The narrowing face is at tier with no `hits` (ruling record 6203713500,
  * letter B): its floor is every path of the diff outside the prose faces, and
  * the brief says so instead of handing the reviewer an empty floor and the whole
@@ -1972,13 +2047,18 @@ export const BRIEF_TEMPLATE_PLACEHOLDERS = Object.freeze({
  * against the card's eval prompt and the spec it teaches, a schema file against the ruling or ADR
  * it implements and its first consumer, an ADR against its first consumer and its execution
  * plan), and try to break it — and the surface-file scope rule the owner refined
- * the order with: ④ judges the `hits` files only; lockfiles, generated output, changesets and
- * prose elsewhere in the PR are not reviewed, and the cited code is READ to judge them, never
- * reviewed. The narrowing brief carries ④ in the narrowing's own shape (ruling record 6442046166,
+ * the order with: ④ judges the `hits` files and the diff's own files that implement them, each
+ * implementing file held against the contract; lockfiles, generated output, changesets and
+ * prose elsewhere in the PR are not reviewed, and code outside the diff is READ to judge them,
+ * never reviewed. Each finding is graded must-fix, should-fix or nit (no effect on correctness
+ * or the contract): only a must-fix or should-fix earns a delta review, so a nit-only round is
+ * final (`references/contract-review.md`). The narrowing brief carries ④ in the narrowing's own shape (ruling record 6442046166,
  * letter A): no `hits`, so the judgment is of the narrowing itself against the published spec on
  * `main` — a declared capability taken away at the consumer, or the spec's own refusal made real —
  * over the whole-diff floor; lockfiles, generated output, changesets and prose elsewhere are not
- * reviewed there either.
+ * reviewed there either. The 2026-11-07 order left the narrowing face's ruled floor and ④ shape as
+ * they were (no implementing-file rule: its floor is already the whole diff); it grades on the same
+ * three-grade scale as every face (`BRIEF_GRADE_LINES`), since the rule grades every finding once.
  */
 export function contractReviewBriefLines(values = {}) {
   const { pr, card, headSha, scratchpad } = { ...BRIEF_TEMPLATE_PLACEHOLDERS, ...values };
@@ -2001,18 +2081,23 @@ export function contractReviewBriefLines(values = {}) {
     '',
   ] : [
     `Scope — the paths \`reviewFace\` returns as \`hits\` on this PR's file list: ${scopeHits?.join(', ') ?? RECORD_SCOPE_PLACEHOLDERS.hits};`,
-    '  plus every file those hunks make a claim about, read in the cited code — a rule and the gate that enforces it',
-    "  are one change, read as one. Widen it freely, ⛔ never below `hits`; the record's `Scope:` line lists both.",
-    `  The rest of the diff is the lane seat's ACCEPT at \`${TIER_DEFAULT_NAME}\`, exactly as a standalone PR of those files.`,
+    '  plus every file IN THIS DIFF that directly implements or enforces them — the gate that enforces a rule, the code',
+    '  a jsdoc or schema line describes, the validator a skill teaches — reviewed for agreement with the contract.',
+    "  Widen it freely, ⛔ never below `hits`; the record's `Scope:` line names the implementing files apart from `hits`.",
+    `  The rest of the diff (tests, unrelated modules, lockfiles, generated output, changesets) is the lane seat's`,
+    `  ACCEPT at \`${TIER_DEFAULT_NAME}\`, exactly as a standalone PR of those files.`,
     ...(designJudgment ? [
-      '  ④ judges the `hits` files ONLY: lockfiles, generated output, changesets and prose elsewhere in the PR are',
-      '  not reviewed; the cited code is READ to judge them, never reviewed.',
+      '  ④ judges the `hits` files and those implementing files ONLY:',
+      '  lockfiles, generated output, changesets and prose elsewhere in the PR are not reviewed;',
+      '  code outside the diff is READ to judge them, never reviewed.',
     ] : []),
     '',
   ];
   return [
     'record-recognisers --brief-template — the brief a seat hands its contract reviewer, copyable. The',
     "read-only shape is built in: keep every ⛔ line, they are the review's shape and not advice to it.",
+    "A card thread handing it to its isolated sub-agent posts the filled brief beside the record, for the seat to",
+    'read before it adopts the record (`references/contract-review.md`).',
     '',
     BRIEF_TEMPLATE_FENCE_START,
     `## Contract review brief — PR #${pr} @ \`${headSha}\` (card #${card})`,
@@ -2041,15 +2126,16 @@ export function contractReviewBriefLines(values = {}) {
       '  ④ Design judgment — the narrowing itself, read against the published spec on `main`: does it take a',
       "     declared capability away at the consumer, or make the spec's own refusal real? A capability declared",
       '     and not delivered is an implementation gap, implemented or retired, ⛔ never narrowed at the consumer.',
-      '     Read the spec and the cited code in the live tree, and try to break the design; name each finding',
-      "     must-fix or should-fix. A must-fix is a FAIL. ⛔ Judge the tree, never the PR body's account of it.",
+      '     Read the spec and the cited code in the live tree, and try to break the design.',
+      ...BRIEF_GRADE_LINES,
     ] : designJudgment ? [
       '  ④ Design judgment — for EVERY `hits` file: does the change hold against the code it cites and the',
       "     scenario it is accepted against? A skill file against the card's eval prompt and the spec it teaches",
       '     on `main`; a schema file against the ruling or ADR it implements and its first consumer; an ADR',
-      '     against its first consumer and its execution plan. Read the cited code in the live tree, and',
-      '     try to break the design; name each finding must-fix or should-fix.',
-      "     A must-fix is a FAIL. ⛔ Judge the tree, never the PR body's account of it.",
+      '     against its first consumer and its execution plan. For EVERY implementing file in the diff: does the',
+      '     code agree with the contract, sentence by sentence? Read the cited code in the live tree, and try to',
+      '     break the design.',
+      ...BRIEF_GRADE_LINES,
     ] : []),
     "Sign `Implemented-by:` with the dev's branch and `Reviewed-by:` with your session id — the value is the FIRST",
     'thing after each colon.',
@@ -2200,22 +2286,28 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#18141 · #27979: the head sha sits in a span of ITS OWN on the `Head-sha:` line — the key-in-span spelling and a span in the prose name no head': 14,
   'the `Served-tier:` reading — the tier that SERVED the record (#17915 · #18060 · #18174)': 27,
   '⭐ the 2026-09-20 ruling: a pure-regeneration head move KEEPS the record, decided on the COMMITTED trees': 22,
-  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 29,
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 30,
   '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 17,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
-  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 18,
+  'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 23,
   '⭐ B′ with C: the review tier FOLLOWS THE FACE that made it owed — exact, never a floor': 23,
   '⭐ B′ with C: a PROSE-ONLY head move keeps the record, decided on the COMMITTED trees like a regeneration': 6,
-  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
+  '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 19,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
   '⭐ the `Contract-review-handoff:` line — names the current head ⇒ the named review or sibling seat\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own; `triage` unreadable': 17,
   // Raised 27 → 40 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
   // per new key reading, the patrol and `patrol none` readings, the both-ways table pin that replaced the
   // verbatim-template pin, the placeholder-is-no-event pin, the `--mailbox-keys` printout, the invented
   // keys that stay refused, and the two end-to-end pins through check-half-states H72 (31 → 44 cases).
-  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 40,
+  // Raised 40 → 41 with the `Notify: security · #n` reading (a labelled public card handed to the security seat).
+  // Raised 41 → 42 with the `Notify: main-green` reading (the knock that resumes a PR held for a main red).
+  // Raised 42 → 44 with the `Notify: security · OWNER/REPO#N` reading (a private repository's ordinary `security`
+  // issue) and its unreadable near misses: two pins, two cases.
+  // Held at 44 when the private ring was retired (a private repository's card is never rung): the reading pin
+  // flipped to pin both qualifier spellings UNREADABLE beside the bare `#n` read, the near-miss pin kept, two cases.
+  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 44,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
-  '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 21,
+  '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 24,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
 });
 
@@ -2229,6 +2321,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // registering reds here instead of leaving the ④ lines unmeasured. The per-surface scenario lines
 // and the governed-register wording added one pin to each: 27 → 28 and 16 → 17. Hanging ④ on the narrowing
 // face (ruling record 6442046166, letter A) flipped three pins and added one to each: 28 → 29 and 17 → 18.
+// The owner's 2026-11-07 order (implementing files in the diff reviewed, nit as a third grade) added one
+// template pin (29 → 30), three brief pins (18 → 21: the nit grade, the implementing-file ④ line, the
+// narrowing brief left as ruled) and one scope pin (18 → 19: the named remainder). One grade scale on every ④
+// face, the nit's allowed fixes and the posted brief turned the narrowing pin and added two brief pins (21 → 23).
 // Raised 12 → 13 with the hand-off battery (the maintainer's exhausted-tier rule): one battery, one row.
 // Raised 13 → 14 with the mailbox doorbell battery (the maintainer's per-seat mailbox and its closed
 // vocabulary): one battery, one row.
@@ -2497,7 +2593,8 @@ export async function selfTest() {
   t('…and that record still round-trips: FOUND on its head, and its tier STANDS on the face its paths put it on', (() => { const body = fenced(contractReviewTemplateLines({ paths: MIXED, headSha: SCOPE_HEAD })); const r = locateReviewOfRecord(pairOf({ headSha: SCOPE_HEAD, prComments: [{ id: 3801, created_at: '2026-10-15T10:00:00Z', body }] })); return r.state === 'found' && servedTierStands(r.served, reviewFace(MIXED).tierName); })());
   t('⭐ `paths` with no hit prints the declaration face\'s record, byte-identical to `--face declaration`\'s', fenced(contractReviewTemplateLines({ paths: DECL_PATHS })) === fenced(contractReviewTemplateLines({ face: 'declaration' })));
   t('⛔ `face` and `paths` together are REFUSED, and so is an empty list — never a guess between two answers', (() => { for (const v of [{ face: 'rules', paths: [RULES_PATH] }, { paths: [] }]) { try { contractReviewTemplateLines(v); return false; } catch { /* refused */ } try { contractReviewBriefLines(v); return false; } catch { /* refused */ } } return true; })());
-  t('⭐ the at-tier brief states the scope: `hits`, the claimed files, widen-never-narrow, the remainder\'s ACCEPT tier', (() => { const b = contractReviewBriefLines().join('\n'); return says(b, '`reviewFace` returns as `hits`') && says(b, RECORD_SCOPE_PLACEHOLDERS.hits) && says(b, 'make a claim about') && says(b, 'never below `hits`') && says(b, '`Scope:` line lists both') && says(b, `ACCEPT at \`${TIER_DEFAULT_NAME}\``); })());
+  t('⭐ the at-tier brief states the scope: `hits`, the implementing files IN THE DIFF, widen-never-narrow, the remainder\'s ACCEPT tier', (() => { const b = contractReviewBriefLines().join('\n'); return says(b, '`reviewFace` returns as `hits`') && says(b, RECORD_SCOPE_PLACEHOLDERS.hits) && says(b, 'IN THIS DIFF that directly implements or enforces them') && says(b, 'reviewed for agreement with the contract') && says(b, 'never below `hits`') && says(b, '`Scope:` line names the implementing files apart from `hits`') && says(b, `ACCEPT at \`${TIER_DEFAULT_NAME}\``); })());
+  t('…and the remainder is named — tests, unrelated modules, lockfiles, generated output, changesets — and code outside the diff is READ, never reviewed', (() => { const b = contractReviewBriefLines().join('\n'); return says(b, 'The rest of the diff (tests, unrelated modules, lockfiles, generated output, changesets)') && says(b, 'code outside the diff is READ to judge them, never reviewed') && !says(b, 'make a claim about'); })());
   t('⛔ the declaration-face brief states none', !says(contractReviewBriefLines({ face: 'declaration' }).join('\n'), '`Scope:` line'));
   t('⭐ the brief over `paths` names the hits and hands the reviewer `--template --paths` over THEM — which reads back the same face and floor', (() => { const b = contractReviewBriefLines({ paths: MIXED }).join('\n'); const hits = reviewScopeHits(MIXED); return says(b, `file list: ${hits.join(', ')};`) && says(b, `--template --paths ${hits.join(' ')}\``) && fenced(contractReviewTemplateLines({ paths: hits })) === fenced(contractReviewTemplateLines({ paths: MIXED })); })());
   t('…and over a declaration-only list it hands `--face declaration`, as the face table would', says(contractReviewBriefLines({ paths: DECL_PATHS }).join('\n'), '--template --face declaration`') && contractReviewBriefLines({ paths: DECL_PATHS }).join('\n') === contractReviewBriefLines({ face: 'declaration' }).join('\n'));
@@ -2699,6 +2796,13 @@ export async function selfTest() {
   t('⭐ a legacy `triage#N` claim YIELDS: a triage claim posted FIRST and a lane claim posted later, both live ⇒ the later claim holds, tie named', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.tie === true && r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION; })());
   t('two claims on one side: the EARLIEST posted holds, and no tie is declared', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 2, '2026-10-28T12:30:00Z'), CL_ROW(CL_BODY(null, CL_LINE(CL_SESSION)), 1, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.tie === false; })());
   t('an UNSIGNED claim is the lane side — only a `triage#N` signature makes a claim triage\'s', contractReviewClaims([CL_ROW(CL_BODY(null))], CL_HEAD, { now: CL_NOW }).holder.side === 'lane');
+  const CL_REVIEW_SESSION = 'session_01ReviewSeatFixture7Qx';
+  const CL_REVIEW2_SESSION = 'session_01ReviewSeatTwoFixt9Zz';
+  const CL_REVIEW_SIG = `review#1 · os-zhuang · ${CL_REVIEW_SESSION}`;
+  const CL_REVIEW2_SIG = `review#2 · os-tesla · ${CL_REVIEW2_SESSION}`;
+  t('⭐ a `review#N`-signed claim is the review side, and between a review seat and a lane seat the EARLIEST posted holds with no tie — the review seat first ⇒ the review seat holds', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
+  t('…and the lane seat first ⇒ the lane seat holds: a review seat has no precedence over a lane seat, only over a legacy triage claim', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z'), CL_ROW(CL_BODY(), 3, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION && r.tie === true; })());
+  t('⭐ two review seats on one head: the EARLIEST posted holds, the later withdraws — the rule the review seats share with every other pair, no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW2_SIG, CL_LINE(CL_REVIEW2_SESSION, CL_HEAD, '2026-10-28T12:25Z')), 2, '2026-10-28T12:25:10Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.holder.side === 'review' && r.tie === false && r.claims.every((c) => c.side === 'review'); })());
   t('⭐ the head MOVED past every claim ⇒ none; every claim on this head expired ⇒ lapsed; nothing holds either way', (() => { const moved = contractReviewClaims([CL_ROW(CL_BODY())], 'a'.repeat(40), { now: CL_NOW }); const old = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: Date.parse('2026-10-28T14:19:00Z') }); return moved.state === 'none' && moved.holder === null && old.state === 'lapsed' && old.holder === null && old.claims[0].lapse === 'expired'; })());
   t('an unreadable claim line holds nothing and is returned by comment id', (() => { const r = contractReviewClaims([CL_ROW(`${CL_TRIAGE_SIG}\n${CL_LINE(CL_SESSION, CL_HEAD.slice(0, 8))}`, 77)], CL_HEAD, { now: CL_NOW }); return r.state === 'none' && r.unreadable.length === 1 && r.unreadable[0].id === 77; })());
   t('a thread that is not an array, an abbreviated head, or no clock is a read that could not be made', contractReviewClaims(null, CL_HEAD, { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD.slice(0, 12), { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD, {}).state === 'unreadable' && contractReviewClaims([], CL_HEAD, { now: CL_NOW }).state === 'none');
@@ -2780,12 +2884,15 @@ export async function selfTest() {
     sp: MSG('Notify: split · domain:skills#2 · takes: #27077 #27062 · leaves: #27047', 'domain:skills#1'),
     tq: MSG('Request: triage · #27123 · may it close, or does it route to server?', 'triage'),
     nm: MSG('Notify: main-red · anchor #28622 · breaking PR #28595', 'domain:server#2'),
+    mg: MSG('Notify: main-green · anchor #29426 · PR #29444', 'domain:skills#3'),
     rb: MSG('Notify: release-blocker · #28657', 'domain:devx#1'),
     ub: MSG('Notify: unblocked · #28560 · p1', 'domain:spec#4'),
     ru: MSG('Notify: ruling · #28117 · A · record 6545646924', 'domain:server#2'),
     se: MSG('Notify: serial · #28572 behind #28562', 'domain:ui#5'),
     la: MSG('Notify: landed · #28562', 'domain:ui#5'),
     sec: MSG('Notify: security · GHSA-7q4h-9x2m-5c8v', 'security#1'),
+    rp: MSG('Request: progress · #29420 · idle since 2026-11-03T00:06Z', 'domain:skills#1'),
+    np: MSG('Notify: progress · #29420 · record 6599000001', 'triage'),
   };
   t('⭐ `Request: contract-review` reads the PR, the head (7–40 hex) and the reason — the reason may carry a comma', (() => { const r = readMailboxLine(DB.cr); return r.state === 'read' && r.id === 'request:contract-review' && r.kind === 'Request' && r.key === 'contract-review' && r.pr === 26766 && r.head === HO_HEAD && r.reason === `${CONTRACT_REVIEW_TIER_NAME} refused, HTTP 429` && r.numbers.join() === '26766'; })());
   t('⭐ `Request: urgent-triage` reads the card and the one-line criterion', (() => { const r = readMailboxLine(DB.ut); return r.state === 'read' && r.id === 'request:urgent-triage' && r.card === 27047 && r.criterion === 'main red on the merge group, deterministic' && r.numbers.join() === '27047'; })());
@@ -2798,12 +2905,18 @@ export async function selfTest() {
   t('⭐ `Notify: split` reads the seat and the takes and leaves lists', (() => { const r = readMailboxLine(DB.sp); return r.state === 'read' && r.id === 'notify:split' && r.seat.lane === 'domain:skills' && r.takes.join() === '27077,27062' && r.leaves.join() === '27047' && r.numbers.join() === '27077,27062,27047'; })());
   t('⭐ `Request: triage` reads the card and the one-line question — the question may carry a comma', (() => { const r = readMailboxLine(DB.tq); return r.state === 'read' && r.id === 'request:triage' && r.to === 'triage#1' && r.card === 27123 && r.question === 'may it close, or does it route to server?' && r.numbers.join() === '27123'; })());
   t('⭐ `Notify: main-red` reads the anchor card and the breaking PR — a key of its own beside `Request: main-red`, told apart by its kind', (() => { const r = readMailboxLine(DB.nm); const q = readMailboxLine(DB.mr); return r.state === 'read' && r.id === 'notify:main-red' && r.anchor === 28622 && r.pr === 28595 && r.numbers.join() === '28622,28595' && q.id === 'request:main-red'; })());
+  t('⭐ `Notify: main-green` reads the closed anchor and the ONE held PR it resumes — both in `numbers`; the misspelt variants `maingreen`, `main-grean` and `green` are keys outside the table and REFUSED, while the anchor alone, a bare `#m`, `PR none`, a bare anchor number, a trailing reason and the placeholder stay unreadable', (() => { const r = readMailboxLine(DB.mg); return r.state === 'read' && r.id === 'notify:main-green' && r.kind === 'Notify' && r.key === 'main-green' && r.to === 'domain:skills#3' && r.anchor === 29426 && r.pr === 29444 && r.numbers.join() === '29426,29444' && ['Notify: maingreen · anchor #29426 · PR #29444', 'Notify: main-grean · anchor #29426 · PR #29444', 'Notify: green · anchor #29426 · PR #29444', 'Request: main-green · anchor #29426 · PR #29444'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'refused' && /not a key of the table/.test(u.reason); }) && ['Notify: main-green · anchor #29426', 'Notify: main-green · anchor #29426 · #29444', 'Notify: main-green · anchor #29426 · PR none', 'Notify: main-green · #29426 · PR #29444', 'Notify: main-green · anchor #29426 · PR #29444 · resume now', 'Notify: main-green · anchor #n · PR #m'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
   t('⭐ `Notify: release-blocker` reads the card', (() => { const r = readMailboxLine(DB.rb); return r.state === 'read' && r.id === 'notify:release-blocker' && r.card === 28657 && r.numbers.join() === '28657'; })());
   t('⭐ `Notify: unblocked` reads the card and its priority — p0 and p1 only, the priorities it is owed for', (() => { const r = readMailboxLine(DB.ub); const p0 = readMailboxLine(DB.ub.replace('p1', 'p0')); return r.state === 'read' && r.id === 'notify:unblocked' && r.card === 28560 && r.priority === 'p1' && p0.priority === 'p0' && r.numbers.join() === '28560' && ['p2', 'P1', 'p0 or p1'].every((v) => readMailboxLine(DB.ub.replace('p1', v)).state === 'unreadable'); })());
   t('⭐ `Notify: ruling` reads the card, the letter and the record id — a primed or CJK letter reads, a sentence does not', (() => { const r = readMailboxLine(DB.ru); return r.state === 'read' && r.id === 'notify:ruling' && r.card === 28117 && r.letter === 'A' && r.record === 6545646924 && r.numbers.join() === '28117' && readMailboxLine(DB.ru.replace(' A ', ' B′ ')).letter === 'B′' && readMailboxLine(DB.ru.replace(' A ', ' 乙 ')).letter === '乙' && readMailboxLine(MSG('Notify: ruling · #28117 A (record 6545646924, 「同意」) · your draft #28430')).state === 'unreadable'; })());
   t('⭐ `Notify: serial` reads the waiting card and the card it waits for; `Notify: landed` releases it', (() => { const r = readMailboxLine(DB.se); const l = readMailboxLine(DB.la); return r.state === 'read' && r.id === 'notify:serial' && r.card === 28572 && r.behind === 28562 && r.numbers.join() === '28572,28562' && l.state === 'read' && l.id === 'notify:landed' && l.card === 28562 && l.numbers.join() === '28562' && readMailboxLine(MSG('Notify: serial · #28572 · #28562')).state === 'unreadable'; })());
   t('⭐ `Notify: security` under `To: security#1` reads to the security seat (a bare lane `seatKey` spells) with the advisory\'s opaque id and nothing else — it names no card, so `numbers` is empty', (() => { const r = readMailboxLine(DB.sec); return r.state === 'read' && r.to === 'security#1' && r.id === 'notify:security' && r.kind === 'Notify' && r.key === 'security' && r.advisory === 'GHSA-7q4h-9x2m-5c8v' && r.numbers.length === 0 && readMailboxLine(MSG('Notify: security · GHSA-7q4h-9x2m-5c8v', 'security')).to === 'security#1'; })());
-  t('⛔ `Notify: security` carrying free text, a second field, a card number, an upper-case or short id, or no id at all is unreadable — nothing but the opaque id rides the doorbell', ['Notify: security · see the advisory', 'Notify: security · GHSA-7q4h-9x2m-5c8v · packages/x/src/door.ts', 'Notify: security · GHSA-7q4h-9x2m-5c8v · see the advisory', 'Notify: security · #28001', 'Notify: security · GHSA-7Q4H-9X2M-5C8V', 'Notify: security · GHSA-7q4h-9x2m', 'Notify: security'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'));
+  t('⛔ `Notify: security` carrying free text, a second field, an upper-case or short id, or no id at all is unreadable — nothing but the opaque id, or a labelled card\'s number alone, rides the doorbell', ['Notify: security · see the advisory', 'Notify: security · GHSA-7q4h-9x2m-5c8v · packages/x/src/door.ts', 'Notify: security · GHSA-7q4h-9x2m-5c8v · see the advisory', 'Notify: security · GHSA-7Q4H-9X2M-5C8V', 'Notify: security · GHSA-7q4h-9x2m', 'Notify: security'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'));
+  t('⭐ `Notify: security · #n` — triage handing a public card it labelled `security` to the seat — reads the card ALONE; the card beside an id, a second field, a PR, `#0` and the bare template stay unreadable', (() => { const r = readMailboxLine(MSG('Notify: security · #29761', 'security#1')); return r.state === 'read' && r.to === 'security#1' && r.id === 'notify:security' && r.card === 29761 && r.advisory === undefined && r.numbers.join() === '29761' && ['Notify: security · #29761 · GHSA-7q4h-9x2m-5c8v', 'Notify: security · #29761 · see the card', 'Notify: security · PR #29761', 'Notify: security · #0', 'Notify: security · GHSA-ID or #n'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'); })());
+  t('⛔ `Notify: security · OWNER/REPO#N` — a private repository\'s `security` card — is UNREADABLE: that card is never rung (its own lane holds it), so neither the repository nor the card reads, in either qualifier spelling; the bare `#n` still reads the public card, with no repository', (() => { const qualified = ['Notify: security · objectstack-ai/cloud#412', 'Notify: security · my.org-1/a_b.c-d#7'].map((l) => readMailboxLine(MSG(l, 'security#1'))); const bare = readMailboxLine(MSG('Notify: security · #29761')); return qualified.every((r) => r.state === 'unreadable' && r.repo === undefined && r.card === undefined) && bare.state === 'read' && bare.card === 29761 && bare.repo === undefined && bare.numbers.join() === '29761'; })());
+  t('⛔ a malformed qualifier, or the qualified card beside an id, a public card, a path or free text, stays unreadable — as the qualified card alone now is', ['Notify: security · objectstack-ai#412', 'Notify: security · objectstack-ai/cloud/x#412', 'Notify: security · /cloud#412', 'Notify: security · objectstack-ai/#412', 'Notify: security · .x/cloud#412', 'Notify: security · objectstack-ai/cloud#0', 'Notify: security · objectstack-ai/cloud #412', 'Notify: security · objectstack-ai/cloud#412a', 'Notify: security · OWNER/REPO#N', 'Notify: security · objectstack-ai/cloud#412 · GHSA-7q4h-9x2m-5c8v', 'Notify: security · GHSA-7q4h-9x2m-5c8v · objectstack-ai/cloud#412', 'Notify: security · objectstack-ai/cloud#412 · #29761', 'Notify: security · objectstack-ai/cloud#412 · packages/x/src/door.ts', 'Notify: security · objectstack-ai/cloud#412 · see the card'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'));
+  t('⭐ `Request: progress` reads the item (a card or a PR, bare `#n`) and the time its last progress was read — with seconds too; the placeholder `TIME`, a duration, a date without a time, a local time and `PR #n` stay unreadable', (() => { const r = readMailboxLine(DB.rp); const sec = readMailboxLine(DB.rp.replace('T00:06Z', 'T00:06:30Z')); return r.state === 'read' && r.id === 'request:progress' && r.kind === 'Request' && r.key === 'progress' && r.to === 'domain:skills#1' && r.item === 29420 && r.since === '2026-11-03T00:06Z' && r.numbers.join() === '29420' && sec.state === 'read' && sec.since === '2026-11-03T00:06:30Z' && ['Request: progress · #29420 · idle since TIME', 'Request: progress · #29420 · idle since 3h', 'Request: progress · #29420 · idle since 2026-11-03', 'Request: progress · #29420 · idle since 2026-11-03T00:06', 'Request: progress · #29420 · idle since 2026-11-03T00:06+08:00', 'Request: progress · PR #29420 · idle since 2026-11-03T00:06Z', 'Request: progress · #29420', 'Request: progress · #29420 · idle since 2026-11-03T00:06Z · please answer'].every((l) => { const u = readMailboxLine(MSG(l)); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
+  t('⭐ `Notify: progress` reads the item and the record id (the comment on it with the next act and an ETA, the park, or the release) — `record none`, a sentence and a second field stay unreadable', (() => { const r = readMailboxLine(DB.np); return r.state === 'read' && r.id === 'notify:progress' && r.kind === 'Notify' && r.key === 'progress' && r.to === 'triage#1' && r.item === 29420 && r.record === 6599000001 && r.numbers.join() === '29420' && readMailboxLine(MSG('Notify: progress · #29420 · record #6599000001', 'triage')).record === 6599000001 && ['Notify: progress · #29420 · record none', 'Notify: progress · #29420 · record ID', 'Notify: progress · #29420 · ETA 11:00Z', 'Notify: progress · #29420', 'Notify: progress · #29420 · record 6599000001 · ETA 11:00Z'].every((l) => { const u = readMailboxLine(MSG(l, 'triage')); return u.state === 'unreadable' && /does not spell/.test(u.reason); }); })());
   t('⭐ every key of the table is named, as `Kind: key` in a code span, in the protocol text (`references/project-forms.md` 〈信箱 PR〉), and that section names NO other key — the table in both directions — and points at `--mailbox-keys` for the full spellings', (() => { const forms = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/project-forms.md', import.meta.url), 'utf8'); const at = forms.indexOf('\n## 信箱 PR\n'); const section = at < 0 ? '' : forms.slice(at + 1).split(/\n## /)[0]; const named = new Set([...section.matchAll(/`(Request|Notify): ([a-z-]+)`/g)].map((m) => `${m[1]}: ${m[2]}`)); const table = new Set(MAILBOX_KEYS.map((k) => `${k.kind}: ${k.key}`)); return section !== '' && named.size === table.size && [...table].every((k) => named.has(k)) && section.includes('--mailbox-keys'); })());
   t('⭐ every template, sent VERBATIM, is not an event — a placeholder (`#n`, `SHA`, `LANE#N`, `p0 or p1`, `TRIGGER_ID`, `ID`) never reads as one', MAILBOX_KEYS.every((k) => readMailboxLine(MSG(k.template)).state === 'unreadable'));
   t('⭐ `--mailbox-keys` prints exactly `mailboxKeyLines()` — every template, with its row under it — and exits 0', (() => { const r = faceCli(['--mailbox-keys']); return r.status === 0 && r.stdout === `${mailboxKeyLines().join('\n')}\n` && MAILBOX_KEYS.every((k) => r.stdout.includes(`${k.template}\n    ${k.from} → ${k.to}; ${k.when}\n`)) && usageLines().join('\n').includes('--mailbox-keys'); })());
@@ -2847,7 +2960,7 @@ export async function selfTest() {
     t('⭐ ONE reader: check-half-states H72 judges the REAL reader\'s readings — a free-form question, an off-table key and a five-field `seat-online` are listed, a table key is not, and a bell older than the window has aged out', row.includes('3 comment(s)') && ['comment 7002', 'comment 7003', 'comment 7004'].every((c) => row.includes(c)) && !row.includes('comment 7001') && !row.includes('comment 7005') && hs.h72OffTableMailboxLines(mailboxEvents([rows72[0]]), NOW72) === null);
     t('⭐ …and its population is the OPENER\'s label — an open mailbox touched inside the window owes a page, the same PR without the label does not', hs.h72NeedsThread({ number: 28646, state: 'open', labels: [{ name: MAILBOX_LABEL }], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === true && hs.h72NeedsThread({ number: 28646, state: 'open', labels: [], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === false);
   }
-  t('the roster: fifteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 15 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 15 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 15 && MAILBOX_LINE_MAX_BYTES === 200);
+  t('the roster: eighteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 18 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 18 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 18 && MAILBOX_LINE_MAX_BYTES === 200);
 
   // -- the signature line (#27113) ----------------------------------------------
   //
@@ -2963,6 +3076,7 @@ export async function selfTest() {
   t('⭐ item ④ is prose to every reader — a record carrying it still reads FOUND on its head and its tier STANDS', (() => { const r = tplOn(contractReviewRecordLines({ headSha: TPL_REAL_HEAD, reviewedBy: 'session_01PINFOUR' }).join('\n'), TPL_REAL_HEAD); return r.state === 'found' && r.sha === TPL_REAL_HEAD && servedTierStands(r.served); })());
   t('the notes name the rules face as the governed register, never as three surfaces, and give each surface its scenario: a skill its eval prompt and the spec it teaches, a schema its ruling or ADR and first consumer', ['the published spec, and the governed register,', 'which holds the skills and ADR surfaces the full-review order names', "against the card's eval prompt and the spec it teaches", 'against the ruling or ADR it implements and its first consumer'].every((frag) => says(TPL_TEXT, frag)) && !says(TPL_TEXT, 'the published spec, skills and ADR surfaces'));
   t('the notes explain ④: which faces, judged against the cited code and the accepted scenario, an ADR against its first consumer, the cited code READ never reviewed', ['on the schema, rules and narrowing faces', 'against the code it cites', 'scenario it is accepted', 'first consumer and its execution plan', 'READ to judge it, never', 'the declaration face alone carries no ④'].every((frag) => says(TPL_TEXT, frag)));
+  t('⭐ the notes name the implementing files IN THE DIFF on `Scope:`, review them against the contract, and grade each finding must-fix, should-fix or nit', ['then `+` and every file IN', 'THE DIFF that directly implements or enforces them, named apart from `hits`', 'Code outside the diff is read, never reviewed.', 'Each implementing file in the diff: does the code', 'each finding must-fix, should-fix or nit', 'a nit has no effect on correctness or the contract'].every((frag) => says(TPL_TEXT, frag)) && !says(TPL_TEXT, 'a rule\n') && !says(TPL_TEXT, 'read as one'));
   t('…and name the narrowing face\'s scenario: the narrowing itself against the published spec on `main` — a declared capability taken away at the consumer, or the spec\'s own refusal made real', ['On the narrowing face, with no `hits`, the narrowing', 'against the published spec on `main`', 'declared capability away at the', "spec's own refusal real"].every((frag) => says(TPL_TEXT, frag)) && says(fenced(contractReviewTemplateLines({ face: 'narrowing' })), DJ) && !says(fenced(contractReviewTemplateLines({ face: 'declaration' })), '④'));
   // The branch placeholder is ASSEMBLED in the module body so the derivation
   // does not read it as a dead path population. This pin spells the printed
@@ -3001,11 +3115,16 @@ export async function selfTest() {
   t('⭐ `--brief-template` prints exactly `contractReviewBriefLines()` and exits 0', printedBrief.status === 0 && printedBrief.stdout === `${contractReviewBriefLines().join('\n')}\n`, `status ${printedBrief.status} ${String(printedBrief.stderr).split('\n')[0]}`);
   t('…and the usage names it', usageLines().join('\n').includes('--brief-template'));
   // -- item ④ in the brief: the adversarial design-judgment instruction and the surface-file scope rule --
-  t('⭐ the brief carries the ④ instruction, adversarial: hold against the code it cites and the accepted scenario, an ADR against its first consumer and execution plan, try to break it, a must-fix is a FAIL', ['④ Design judgment', 'against the code it cites', 'scenario it is accepted against', 'first consumer and its execution plan', 'try to break the design', 'must-fix or should-fix', 'A must-fix is a FAIL', 'Judge the tree'].every((frag) => says(BRIEF_BODY, frag)));
+  t('⭐ the brief carries the ④ instruction, adversarial: hold against the code it cites and the accepted scenario, an ADR against its first consumer and execution plan, try to break it, a must-fix is a FAIL', ['④ Design judgment', 'against the code it cites', 'scenario it is accepted against', 'first consumer and its execution plan', 'try to', 'break the design', 'must-fix, should-fix or nit', 'A must-fix is a FAIL', 'Judge the tree'].every((frag) => says(BRIEF_BODY, frag)));
+  t('⭐ nit is the third grade: no effect on correctness or the contract; a must-fix or should-fix earns a delta review, nits alone end the round', ['a nit has no effect on correctness', 'or the contract', 'a must-fix or should-fix earns a delta review of its fix', 'alone end the round'].every((frag) => says(BRIEF_BODY, frag)));
+  t('⭐ ④ holds every implementing file in the diff against the contract it implements', says(BRIEF_BODY, 'For EVERY implementing file in the diff: does the') && says(BRIEF_BODY, 'code agree with the contract, sentence by sentence?'));
   t('…and names the accepted scenario per surface, not for an ADR alone: a skill file against the card\'s eval prompt and the spec it teaches, a schema file against its ruling or ADR and its first consumer', ["A skill file against the card's eval prompt and the spec it teaches", 'a schema file against the ruling or ADR it implements and its first consumer', 'an ADR', 'against its first consumer and its execution plan'].every((frag) => says(BRIEF_BODY, frag)));
-  t('…and the surface-file scope rule: ④ judges the `hits` files ONLY; lockfiles, generated output, changesets and prose elsewhere are not reviewed; the cited code is READ, never reviewed', ['④ judges the `hits` files ONLY', 'lockfiles, generated output, changesets and prose', 'not reviewed', 'READ to judge them, never reviewed'].every((frag) => says(BRIEF_BODY, frag)));
-  t('…on the schema, rules and narrowing faces and over a mixed path list alike', ['schema', 'rules', 'narrowing'].every((id) => contractReviewBriefLines({ face: id }).join('\n').includes('④ Design judgment')) && contractReviewBriefLines({ paths: MIXED }).join('\n').includes('④ judges the `hits` files ONLY'));
+  t('…and the surface-file scope rule: ④ judges the `hits` files and the implementing files ONLY; lockfiles, generated output, changesets and prose elsewhere are not reviewed; code outside the diff is READ, never reviewed', ['④ judges the `hits` files and those implementing files ONLY', 'lockfiles, generated output, changesets and prose', 'not reviewed', 'READ to judge them, never reviewed'].every((frag) => says(BRIEF_BODY, frag)));
+  t('…on the schema, rules and narrowing faces and over a mixed path list alike', ['schema', 'rules', 'narrowing'].every((id) => contractReviewBriefLines({ face: id }).join('\n').includes('④ Design judgment')) && contractReviewBriefLines({ paths: MIXED }).join('\n').includes('④ judges the `hits` files and those implementing files ONLY'));
   t('⭐ the narrowing brief carries ④ in the narrowing\'s own shape — the narrowing itself against the published spec on `main`, over the whole-diff floor, no `hits`-ONLY rule', (() => { const b = contractReviewBriefLines({ face: 'narrowing' }).join('\n'); return ['④ Design judgment — the narrowing itself, read against the published spec on `main`', 'declared capability away at the consumer', "spec's own refusal real", '⛔ never narrowed at the consumer', '④ judges the narrowing itself over that floor', 'A must-fix is a FAIL', 'Judge the tree'].every((frag) => says(b, frag)) && !b.includes('files ONLY') && !b.includes('<') && !b.includes('>') && !isModelIdentifierToken(b); })());
+  t('⭐ …keeps its ruled ④ shape and floor, and grades on the SAME three-grade scale as every other face — one scale per rule', (() => { const b = contractReviewBriefLines({ face: 'narrowing' }).join('\n'); return says(b, 'Read the spec and the cited code in the live tree, and try to break the design.') && BRIEF_GRADE_LINES.every((line) => b.includes(line)) && !says(b, 'name each finding') && !says(b, 'implementing file') && says(b, 'plus every file those hunks make a claim about'); })());
+  t('⭐ every ④ face tells the reviewer where a nit may be fixed — the prose faces, or left as an accepted deviation or a follow-up — since a fix elsewhere moves the head', ['schema', 'rules', 'narrowing'].every((id) => { const b = contractReviewBriefLines({ face: id }).join('\n'); return says(b, 'A nit is fixed only on the prose faces, or left as an accepted deviation or a follow-up card') && says(b, 'moves the head, and this record no longer covers it'); }) && !says(contractReviewBriefLines({ face: 'declaration' }).join('\n'), 'A nit is fixed'));
+  t('⭐ the brief tells a card thread to post the filled brief beside the record, for the seat to read before adopting', says(BRIEF_TEXT, 'posts the filled brief beside the record') && !says(BRIEF_BODY, 'posts the filled brief'));
   t('…and the `hits` faces keep the per-file ④ shape, never the narrowing\'s', ['schema', 'rules'].every((id) => { const b = contractReviewBriefLines({ face: id }).join('\n'); return says(b, 'for EVERY `hits` file') && !says(b, 'the narrowing itself'); }) && !says(BRIEF_BODY, 'the narrowing itself'));
   t('⛔ nor the declaration brief, below tier', !contractReviewBriefLines({ face: 'declaration' }).join('\n').includes('④'));
   t('⛔ the ④ text keeps the brief free of angle brackets, model identifiers and digit-shaped card numbers', !BRIEF_TEXT.includes('<') && !BRIEF_TEXT.includes('>') && !isModelIdentifierToken(BRIEF_TEXT) && !/#\d/.test(BRIEF_BODY));

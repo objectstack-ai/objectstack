@@ -53,6 +53,7 @@
  * pack's automation sentence is kept.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -86,11 +87,12 @@ const descriptionOf = (lang: LocaleCode, v: Variant) => emptyOf(lang)?.[v]?.desc
  */
 const BANNED: Record<LocaleCode, readonly string[]> = {
   en: ['alert', 'remind', 'notif', 'automat', 'workflow', 'trigger', 'schedule', 'approv'],
-  zh: ['提醒', '预警', '警报', '自动', '流转', '流程', '工作流', '通知', '触发', '定时', '审批'],
+  'zh-Hans': ['提醒', '预警', '警报', '自动', '流转', '流程', '工作流', '通知', '触发', '定时', '审批'],
+  'zh-Hant': ['提醒', '預警', '警報', '自動', '流轉', '流程', '工作流', '通知', '觸發', '定時', '審批'],
   de: ['automat', 'erinner', 'warnung', 'alarm', 'benachrichtig', 'workflow', 'auslös', 'ablauf', 'freigabe', 'genehmig'],
   fr: ['automat', 'alerte', 'rappel', 'notifi', 'workflow', 'flux', 'déclench', 'approbation', 'approuv'],
   es: ['automat', 'alerta', 'recordar', 'recordatorio', 'notifi', 'flujo', 'disparador', 'aprob'],
-  pt: ['automa', 'alerta', 'lembr', 'notifi', 'fluxo', 'gatilho', 'aprova'],
+  'pt-BR': ['automa', 'alerta', 'lembr', 'notifi', 'fluxo', 'gatilho', 'aprova'],
   ru: ['автомат', 'оповещ', 'уведомл', 'напомин', 'триггер', 'процесс', 'поток', 'согласован', 'утвержд'],
   ja: ['自動', '通知', 'アラート', 'リマイン', 'ワークフロー', 'フロー', 'トリガー', '承認'],
   ko: ['자동', '알림', '알람', '워크플로', '흐름', '트리거', '승인'],
@@ -99,7 +101,7 @@ const BANNED: Record<LocaleCode, readonly string[]> = {
 
 /** Every banned term this text hits, lower-cased for the case-insensitive scripts. */
 function bannedHits(lang: LocaleCode, text: string): string[] {
-  const haystack = text.toLocaleLowerCase(lang === 'zh' ? 'zh' : undefined);
+  const haystack = text.toLocaleLowerCase(lang === 'zh-Hans' || lang === 'zh-Hant' ? lang : undefined);
   return BANNED[lang].filter((term) => haystack.includes(term.toLocaleLowerCase()));
 }
 
@@ -113,9 +115,13 @@ const RETIRED: Record<LocaleCode, Record<Variant, string>> = {
     build: 'Describe an app or workflow in plain language — I draft the objects, screens and automations, then you review and publish.',
     editApp: 'What would you like to change? I’ll modify this app in place — add a field, object, view or automation, or adjust what’s already there.',
   },
-  zh: {
+  'zh-Hans': {
     build: '用自然语言描述一个应用或流程 —— 我会起草对象、界面和自动化，随后你审阅并发布。',
     editApp: '想改点什么？我会就地修改这个应用 —— 加字段、对象、视图或自动化，或调整已有内容。',
+  },
+  'zh-Hant': {
+    build: '用自然語言描述一個應用或流程 —— 我會起草物件、介面和自動化，隨後你審閱並發布。',
+    editApp: '想改點什麼？我會就地修改這個應用 —— 加欄位、物件、檢視或自動化，或調整已有內容。',
   },
   de: {
     build: 'Beschreiben Sie eine App oder einen Workflow in einfachen Worten — ich entwerfe die Objekte, Bildschirme und Automatisierungen, dann prüfen und veröffentlichen Sie.',
@@ -129,7 +135,7 @@ const RETIRED: Record<LocaleCode, Record<Variant, string>> = {
     build: 'Describa una aplicación o un flujo de trabajo en lenguaje natural — yo redacto los objetos, las pantallas y las automatizaciones, y luego usted revisa y publica.',
     editApp: '¿Qué desea cambiar? Modifico esta aplicación sobre la marcha — añadir un campo, un objeto, una vista o una automatización, o ajustar lo que ya existe.',
   },
-  pt: {
+  'pt-BR': {
     build: 'Descreva um aplicativo ou fluxo de trabalho em linguagem simples — eu rascunho os objetos, telas e automações, e então você revisa e publica.',
     editApp: 'O que você quer mudar? Eu altero este aplicativo no lugar — adicionar um campo, objeto, visão ou automação, ou ajustar o que já existe.',
   },
@@ -153,7 +159,7 @@ const RETIRED: Record<LocaleCode, Record<Variant, string>> = {
 
 describe('maker empty state — every shipped pack carries both descriptions (objectui#8329)', () => {
   it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s defines a non-empty description for both variants', (lang) => {
@@ -210,14 +216,14 @@ describe('maker empty state — the replacement names v1 capabilities (objectui#
     expect(en).toMatch(/describe an app/i);
     expect(en).toContain('sample data');
 
-    const zh = descriptionOf('zh', 'build')!;
+    const zh = descriptionOf('zh-Hans', 'build')!;
     expect(zh).toContain('示例数据');
     expect(zh).not.toContain('或流程');
   });
 
   it('en/zh editApp: offers a dashboard in the slot automation used to hold', () => {
     expect(descriptionOf('en', 'editApp')!).toContain('dashboard');
-    expect(descriptionOf('zh', 'editApp')!).toContain('仪表盘');
+    expect(descriptionOf('zh-Hans', 'editApp')!).toContain('仪表盘');
   });
 
   it('en editApp keeps the in-place framing its own unit test asserts', () => {

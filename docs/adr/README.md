@@ -13,12 +13,12 @@
 
 ## Summary
 
-148 records under `docs/adr/` (143 numbers), 11 under `ui/docs/adr/` (listed separately below).
+153 records under `docs/adr/` (148 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
-| Accepted | 129 |
-| Proposed | 5 |
+| Accepted | 133 |
+| Proposed | 6 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **148** |
+| **Total** | **153** |
 
 ## Shared numbers
 
@@ -98,7 +98,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0025](./0025-plugin-package-distribution.md) | Plugin Package Distribution (Code + Dependencies) | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 4; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0026](./0026-client-ui-plugin-distribution.md) | Client-Side UI Plugin Distribution | Deferred — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
 | [ADR-0027](./0027-metadata-authoring-lifecycle.md) | `@objectstack/metadata-authoring` — Staged Authoring, Publish & Promotion Lifecycle | Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2… | 2026-10-27 | — | — |
-| [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) | Metadata Naming & Namespace Isolation — Derived Physical Names, Namespace-Scoped Identity, and a Single Kerne… | Deferred — 2026-07-16; proposed 2026-06-01 — the target model (namespace a… | 2026-07-16 | ADR-0129 | — |
+| [ADR-0028](./0028-metadata-naming-and-namespace-isolation.md) | Metadata Naming & Namespace Isolation — Derived Physical Names, Namespace-Scoped Identity, and a Single Kerne… | Deferred — 2026-07-16; proposed 2026-06-01 — the target model (namespace a… | 2026-07-16 | ADR-0129 | ADR-0150 |
 | [ADR-0029](./0029-kernel-object-ownership-and-platform-objects-decomposition.md) | Kernel Object Ownership — First-Party Capabilities as Plugins That Own Their Data, and Decomposing the `platf… | Accepted — K0/K1/K2/D7 implemented; K3 (pending ADR-0030/storage) + K4 cle… | 2026-06-01 | — | — |
 | [ADR-0030](./0030-notification-platform-convergence.md) | Notification Platform Convergence (single ingress, layered pipeline) | Accepted — 2026-06-01 — P0–P3b2 shipped (P3b-2 digest collapse landed); cr… | 2026-06-01 | ADR-0012 | — |
 | [ADR-0031](./0031-advanced-flow-node-executors-and-dag.md) | Structured control-flow for flows (loop / parallel / try-catch) — native + AI-authored, BPMN as interop | Accepted — 2026-06-02 — implemented in #1482 (spec + loop), #1489 (paralle… | 2026-06-02 | — | — |
@@ -120,7 +120,7 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0047](./0047-object-ui-run-modes.md) | Two run modes for object UI — data views vs interface pages, user filters, and runtime visualization choice | Accepted — 2026-06-12; revised 2026-06-19; amended 2026-11-02, interface-p… | 2026-06-12 | — | — |
 | [ADR-0048](./0048-cross-package-metadata-collision.md) | Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution | Revised — 2026-06-13 — supersedes the original per-item collision detecti… | 2026-06-13 | — | ADR-0146 |
 | [ADR-0049](./0049-no-unenforced-security-properties.md) | Spec must not declare security properties the runtime does not enforce (enforce-or-remove gate) | Accepted — 2026-06-15 — implemented: fail-closed `DESTRUCTIVEOPERATIONS` (… | 2026-06-15 | — | — |
-| [ADR-0050](./0050-form-layout-vs-presentation.md) | Form layout vs presentation — split the overloaded `FormView.type` | Proposed — 2026-06-15 · Amended (2026-10-20, letter B′ on #24692, ruling r… | 2026-06-15 | — | — |
+| [ADR-0050](./0050-form-layout-vs-presentation.md) | Form layout vs presentation — split the overloaded `FormView.type` | Accepted — 2026-10-28, letter A′ on #27032, ruling record 6464210455 — cut… | 2026-10-28 | — | — |
 | [ADR-0051](./0051-inline-metadata-views-in-docs.md) | Inline metadata views in docs — the ` ```metadata ` fenced block | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0052](./0052-audit-is-not-the-activity-feed.md) | Audit is not the activity feed — decompose collaboration, activity, and audit into bounded contexts | Accepted — 2026-10-28 (ruled on objectstack#26553, ADR batch 2; proposed 2… | 2026-10-28 | — | — |
 | [ADR-0053](./0053-date-and-datetime-semantics.md) | `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone | Accepted — 2026-06-16 — Phase 1 + addendum D-A1 implemented (`sql-driver.t… | 2026-06-16 | — | — |
@@ -215,6 +215,11 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0145](./0145-ui-deprecation-tombstones-retire-on-the-spec-window.md) | A `?: never` tombstone on the ui authoring face retires on the spec's own window — one major after the retire… | Accepted — 2026-10-28, #27251 · Amended (2026-10-28, #27291 — one clause e… | 2026-10-28 | — | — |
 | [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) | Package-level override — every customization of an installed package lives in its paired `.custom` package, t… | Accepted — 2026-10-31 — rewritten in place from the Proposed draft of 2026… | 2026-10-31 | ADR-0126, ADR-0131, ADR-0005, ADR-0048, ADR-0141, ADR-0070 | — |
 | [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) | Membership-scoped RLS (`FIELD in currentuser.orguserids`) lowers to an engine-internal organization-member se… | Proposed — 2026-11-02. `docs/adr/` is Tier H (Prime Directive #14): the re… | 2026-11-02 | — | — |
+| [ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md) | The recycle bin is a separate store — one entry per delete operation, restore under the original ids, retenti… | Accepted — 2026-11-05, recording the maintainer's ruling of 2026-11-04 on… | 2026-11-05 | — | — |
+| [ADR-0149](./0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md) | The AI answers business questions through the dataset semantic layer — synonyms and descriptions on measures… | Accepted — 2026-11-08, recording two rulings of the maintainer: the placem… | 2026-11-08 | — | — |
+| [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) | Behavioural metadata is addressed by (package, name) — objects keep the literal prefix; ADR-0028 re-opened fo… | Proposed — 2026-11-08. `docs/adr/` is Tier H (Prime Directive #14): this r… | 2026-11-08 | ADR-0028 | — |
+| [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) | An AI service account — a headless agent is a registered principal of its own, with its own keys and its own… | Proposed — 2026-11-08 — draft. `docs/adr/` is a Tier H governed surface: t… | 2026-11-08 | — | — |
+| [ADR-0152](./0152-scim-group-grants-only-an-ordinary-permission-set-through-a-per-connection-mapping.md) | A SCIM group grants only an ordinary permission set, through a per-connection mapping row a platform administ… | Accepted — implemented, 2026-11-08, recording the maintainer's ruling of 2… | 2026-11-08 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

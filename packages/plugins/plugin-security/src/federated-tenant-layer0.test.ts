@@ -38,6 +38,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { TENANT_SCOPE_FIELD_DEF } from '@objectstack/metadata-core';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
+import { RLS_DENY_FILTER } from './rls-compiler.js';
 
 /** A member with plain read/write CRUD and NO row-level policies, so the only
  *  thing `getReadFilter` can return is Layer 0 — the layer under test. */
@@ -98,23 +99,42 @@ const federatedSchema = (extra: Record<string, unknown> = {}) => ({
 });
 
 describe('[#7835] Layer 0 vs federated (external) objects', () => {
-  it('federated object with the INJECTED anchor: no organization_id predicate under `isolated`', async () => {
+  it('federated object with the INJECTED anchor and no declared scope: no organization_id predicate — the wall DENIES under `isolated`', async () => {
+    // [ADR-0015 §10] The anchor is the registry's, so no `organization_id = <org>`
+    // predicate is composed (it would name a column the remote lacks). But an
+    // external object that states no organization scope is not read as shared
+    // under a wall: Layer 0 answers the deny sentinel. The boot refuses such an
+    // object by name; this is the verdict for one registered after the boot
+    // (`external-organization-scope.test.ts` pins both doors).
     const plugin = await bootWithSchema(federatedSchema());
     const filter = await (plugin as any).getReadFilter('ext_customer', MEMBER_CTX);
-    // No Layer 1 policies and no Layer 0 contribution → nothing to AND at all.
-    expect(filter).toBeUndefined();
+    expect(filter).toBe(RLS_DENY_FILTER);
   });
 
-  it('federated object with the INJECTED anchor: no organization_id predicate under `group` either', async () => {
+  it('federated object with the INJECTED anchor and no declared scope: the wall DENIES under `group` too', async () => {
     // `group` is the other walled posture (ADR-0105 D2). Its predicate widens to a
-    // membership union; the column it names is just as absent, so the same
-    // suppression must hold — otherwise the fix would cover one posture and leave
-    // the other emitting `organization_id IN (…)` against a table without it.
+    // membership union; the column it names is just as absent, and the scope is
+    // just as unstated — so the same verdict must hold, or the rule would cover
+    // one posture and leave the other emitting `organization_id IN (…)` against a
+    // table without it, or reading the object as shared.
     const plugin = await bootWithSchema(federatedSchema(), { tenancy: { posture: 'group' } });
     const filter = await (plugin as any).getReadFilter('ext_customer', {
       ...MEMBER_CTX,
       accessible_org_ids: ['org-1', 'org-2'],
     });
+    expect(filter).toBe(RLS_DENY_FILTER);
+  });
+
+  it('federated object that DECLARES `tenancy: { enabled: false }`: shared — no predicate at all', async () => {
+    // The declaration the wall reads as "every organization": Layer 0 contributes
+    // nothing, and with no Layer 1 policies there is nothing to AND.
+    const plugin = await bootWithSchema({
+      name: 'ext_customer',
+      external: { remoteName: 'customers' },
+      tenancy: { enabled: false },
+      fields: { ...REMOTE_COLUMNS },
+    });
+    const filter = await (plugin as any).getReadFilter('ext_customer', MEMBER_CTX);
     expect(filter).toBeUndefined();
   });
 
@@ -146,13 +166,23 @@ describe('[#7835] Layer 0 vs federated (external) objects', () => {
     expect(filter).toEqual({ organization_id: 'org-1' });
   });
 
-  it('federated object with NO active org: still fails closed, not open', async () => {
-    // Before the fix a federated read with no active organization got
-    // RLS_DENY_FILTER (0 rows). After it, Layer 0 contributes nothing — which must
-    // not be read as "the fix opens a hole": there is no tenant column to compare,
-    // so there was never isolation here to lose. Object-level CRUD is still the
-    // gate, and a caller without read permission is refused before this point.
+  it('federated object with no declared scope and NO active org: fails closed', async () => {
+    // Two reasons to deny, one verdict: the object states no scope the wall can
+    // enforce, and the caller carries none either.
     const plugin = await bootWithSchema(federatedSchema());
+    const filter = await (plugin as any).getReadFilter('ext_customer', { ...MEMBER_CTX, tenantId: undefined });
+    expect(filter).toBe(RLS_DENY_FILTER);
+  });
+
+  it('federated object declared shared, with NO active org: contributes nothing — there is no tenant column to compare', async () => {
+    // Object-level CRUD is still the gate, and a caller without read permission
+    // is refused before this point.
+    const plugin = await bootWithSchema({
+      name: 'ext_customer',
+      external: { remoteName: 'customers' },
+      tenancy: { enabled: false },
+      fields: { ...REMOTE_COLUMNS },
+    });
     const filter = await (plugin as any).getReadFilter('ext_customer', { ...MEMBER_CTX, tenantId: undefined });
     expect(filter).toBeUndefined();
   });
@@ -172,7 +202,10 @@ describe('[#7835] Layer 0 vs federated (external) objects', () => {
         { name: 'app_region_scope', object: '*', operation: 'all', using: 'region == current_user.organization_id' },
       ],
     } as unknown as PermissionSet;
-    const schema = federatedSchema();
+    // Declared shared (ADR-0015 §10), so Layer 0 contributes nothing and the
+    // authored Layer 1 predicate is the whole filter; an object stating no scope
+    // would AND the deny sentinel in front of it instead.
+    const schema = { ...federatedSchema({ tenancy: { enabled: false } }), fields: { ...REMOTE_COLUMNS } } as Record<string, unknown>;
     (schema.fields as Record<string, unknown>).region = { type: 'text', label: 'Region' };
     const services: Record<string, unknown> = {
       manifest: { register: vi.fn() },

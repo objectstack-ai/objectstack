@@ -26,13 +26,15 @@
  * mouseup → click) left the record's status untouched. Users spent clicks
  * on it before concluding it was decoration.
  *
- * Unless the author opts in with `allowStageChange: true`, nothing on the
- * path writes, so the pixels must not promise a press. Click-to-advance is
- * that opt-in (objectstack#28061, `./recordPathStageChange`): only then, and
- * only for a reader who may edit `statusField` on this record, does each stage
- * other than the current one carry a real `<button>` that asks to move the
- * record there. Everyone else — and every page that does not opt in — gets the
- * readout below, unchanged.
+ * Unless the node carries `allowStageChange: true`, nothing on the path
+ * writes, so the pixels must not promise a press. Click-to-advance is that
+ * opt-in (objectstack#28061, `./recordPathStageChange`): only then, and only
+ * for a reader who may edit `statusField` on this record, does each stage
+ * other than the current one — and that the field's state machine can reach —
+ * carry a real `<button>` that asks to move the record there. The synthesized
+ * default record page writes the opt-in on its path (objectstack#30075); an
+ * authored page keeps what it declared. Everyone else — and every node that
+ * does not opt in — gets the readout below, unchanged.
  *
  * So the presentation below is a PROGRESS RAIL: a thin decorative indicator
  * per stage with the label as plain text beneath it, which is the same
@@ -594,9 +596,10 @@ const RecordPathBody: React.FC<RecordPathRendererProps> = ({
     /** The label's full text as a `title`, for a row whose labels can be cut. */
     labelTitle?: string;
   }) => {
-    // A stage is a press only behind the opt-in, and never the stage the
-    // record already stands on: there is nowhere to move to.
-    const press = stageChange.pressable && o.state !== 'current';
+    // A stage is a press only behind the opt-in, never the stage the record
+    // already stands on (there is nowhere to move to), and never a stage the
+    // field's blocking state machine cannot reach from the stored value.
+    const press = stageChange.pressable && o.state !== 'current' && stageChange.admits(o.stage.value);
     const face = (
       <>
         <span aria-hidden="true" data-stage-rail="" className={railClass(o.state, o.terminal)} />

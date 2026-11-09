@@ -43,6 +43,11 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import {
@@ -87,7 +92,16 @@ export interface MigrationFlagsHost {
   readMigrationFlagVerified: ObjectQL['readMigrationFlagVerified'];
 }
 
-/** The body of `ObjectQL#supplyTenantKeyCertifiedResolver`; the method's docblock there is its contract. */
+/**
+ * [ADR-0131 D1] Hand a freshly-registered driver the question "is this
+ * database certified", the same closure-not-value seam as
+ * {@link supplyFileColumnsMovedResolver} and for the same reason: the answer
+ * is a `sys_migration` row on a store this driver has not connected to yet.
+ * A SQL driver asks it only when a table carries an index an earlier release
+ * built with the NULL-safe `COALESCE(<tenant>, …)` key part, to decide
+ * whether that index already is the plain key new DDL emits. A driver with
+ * no such seam is left alone.
+ */
 export function supplyTenantKeyCertifiedResolver(
   this: Pick<MigrationFlagsHost, 'isOrganizationOwnershipCertified' | 'logger'>,
   driver: IDataDriver,
@@ -135,7 +149,13 @@ export async function isOrganizationOwnershipCertified(
   }
 }
 
-/** The body of `ObjectQL#readFileReferencesFlagRow`; the method's docblock there is its contract. */
+/**
+ * The one memoized read both file-flag questions come off (#15989).
+ *
+ * Written once so the two public readers cannot drift apart in the ARGUMENTS
+ * they pass — the slot and the migration id decide which row is read, and a
+ * second copy of them is a second way to read a different row.
+ */
 export function readFileReferencesFlagRow(
   this: Pick<MigrationFlagsHost, 'readMigrationFlagRowMemoized'>,
 ): Promise<MigrationFlagRead> {
@@ -160,7 +180,21 @@ export async function isValueShapesMigrationVerified(
   );
 }
 
-/** The body of `ObjectQL#readMigrationFlagVerified`; the method's docblock there is its contract. */
+/**
+ * Read one deployment migration flag and answer whether it authorises its
+ * consumers. Shared by both flags so the "every way of not knowing answers
+ * false" rule is written once: no `sys_migration` object registered, no row,
+ * an unreadable table, a malformed row — all `false`. Enforcement derives
+ * from evidence, and absent evidence is not permission.
+ *
+ * `conclusive` says whether the ledger was actually consulted, so the caller
+ * can tell "asked, and the answer is no" from "could not ask" — see
+ * {@link readMigrationFlagMemoized}. It never changes the verdict, only
+ * whether that verdict is worth remembering.
+ *
+ * Costs nothing on a kernel without the platform objects: the registry
+ * lookup short-circuits before any query.
+ */
 export async function readMigrationFlagVerified(
   this: Pick<MigrationFlagsHost, '_registry' | 'findOne' | 'logger'>,
   migrationId: string,

@@ -109,17 +109,21 @@ export const UNMANAGED_INSTALL_KEY_DISPOSITIONS: Readonly<Record<string, Unmanag
   translations: 'converted',
 
   // ── The install door's ──
-  // Seed datasets are data, never metadata items, so a copy of the metadata
-  // cannot carry them; the door states what it did with them.
+  // [#30808] The door, not the import, decides what happens to the seed
+  // datasets. Asked for the sample data (`seedSampleData: true`), the door
+  // has the `importUnmanagedPackage` verb copy each dataset into the base as
+  // one environment `seed` item, the copy's seed receipt, and loads the rows
+  // from it. Not asked, nothing is copied, and when the package declares any
+  // the door's answer says so (`seeded.mode: 'skipped'`).
   data: 'door',
   // Read by the door to judge the requested mode; the base is the
   // environment's own package and makes no promise about how it installs.
   installModes: 'door',
   // [#28640 ruling ③A] The export's list of the maps it withheld whole,
-  // declared ahead of its producer: the server half (#29342) has the door read
-  // it to name each incomplete map in its answer. This row is live today — it
-  // keeps the import from refusing an export that carries the key. It
-  // describes the exchange, not the package, so the base never carries it.
+  // served: the install-local door reads it to name each incomplete map in its
+  // answer, and this row keeps the import from refusing an export that carries
+  // the key. It describes the exchange, not the package, so the base never
+  // carries it.
   withheldMaps: 'door',
   // The export's display label. No manifest the base is installed with
   // declares one (`PackageInstallManifestSchema` is closed and has no
@@ -135,6 +139,7 @@ export const UNMANAGED_INSTALL_KEY_DISPOSITIONS: Readonly<Record<string, Unmanag
   appName: 'deployment',
   email: 'deployment',
   sms: 'deployment',
+  push: 'deployment',
   requires: 'deployment',
   tiers: 'deployment',
   devHint: 'deployment',

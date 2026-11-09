@@ -6,7 +6,6 @@ import { spawn, spawnSync } from 'child_process';
 import crypto from 'crypto';
 import dotenvFlow from 'dotenv-flow';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { printHeader, printKV, printStep, printError } from '../utils/format.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
@@ -23,6 +22,14 @@ import {
 } from '../utils/artifact-precedence.js';
 import { ServeRestartCoordinator } from '../utils/dev-restart.js';
 import { readEnvWithDeprecation } from '@objectstack/types';
+import { writeAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
+import {
+  ceremonyDatabaseUrl,
+  writeCeremonyConnectionChannel,
+  writeCeremonyDatabaseChannel,
+} from '../utils/internal-ceremony-database-channel.js';
+import { applyCryptoKeyFileChannel } from '../utils/internal-crypto-key-file-channel.js';
+import { resolveStartHome } from '../utils/start-home.js';
 // The ONE port contract, shared with `dev` and with the `serve` child this
 // command spawns (#12673). ⛔ Nothing about ports is declared in this file —
 // no range, no reader, no wording; a second copy of the bound is exactly what
@@ -185,7 +192,7 @@ export default class Start extends Command {
     // ── Home directory ──────────────────────────────────────────────
     // Priority: --home > $OS_HOME > <cwd>/.objectstack (project mode)
     //         > ~/.objectstack (global mode)
-    const homeDir = resolveHome(flags.home, { hasProjectConfig, cwd });
+    const homeDir = resolveStartHome(flags.home, { hasProjectConfig, cwd });
     try {
       // Bounded (#23858): a home that can never be made — a name under
       // `/proc` — is refused here, at once, with the OS's code and the path.
@@ -312,9 +319,66 @@ export default class Start extends Command {
     // return 404 and breaks the Console's login flow.
     // Quick-start should "just work" without the user having to
     // export AUTH_SECRET.
-    const authSecret = flags['auth-secret']
-      ?? readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true })
-      ?? readOrCreateAuthSecret(homeDir);
+    //
+    // Where the secret came from travels to the child too: a persisted secret
+    // is not in the operator's shell, so a command the child prints for them
+    // to run (the v18 ownership refusal) has to export it from its file
+    // (`utils/internal-auth-secret-channel.ts`).
+    const operatorAuthSecret = flags['auth-secret']
+      ?? readEnvWithDeprecation('OS_AUTH_SECRET', ['AUTH_SECRET', 'BETTER_AUTH_SECRET'], { silent: true });
+
+    // ── The official image's durability check (ruling A3, record 6634240777) ──
+    // The image (`docker/Dockerfile`) sets `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED`,
+    // because a container's disk is the thing that gets replaced: a SQLite file
+    // in its writable layer and secrets minted there are lost with it. Under the
+    // signal this command refuses unless the database and both secrets are set
+    // explicitly, and names the missing ones. Asked HERE, after the database is
+    // resolved and before anything is generated: the refusal writes no secret
+    // and opens no database. ⛔ Not keyed on `NODE_ENV`: this command forces
+    // `production` when it is unset (below), so the zero-config trial is itself
+    // production mode and a mode-keyed refusal would end it.
+    const durabilityCheck = readDurabilityCheckSignal(process.env);
+    if (durabilityCheck === 'invalid') {
+      printError(
+        `${DURABILITY_CHECK_ENV}="${process.env[DURABILITY_CHECK_ENV]}" is not a switch value — set it to true or false.`,
+      );
+      process.exit(1);
+    }
+    if (durabilityCheck === 'on') {
+      const missing = missingDurableVariables({
+        databaseSource: resolvedDb.source,
+        authSecretSet: operatorAuthSecret !== undefined && operatorAuthSecret.trim().length > 0,
+        secretKeySet: (process.env.OS_SECRET_KEY ?? '').trim().length > 0,
+      });
+      if (missing.length > 0) {
+        const keyFile = await persistedDataKeyFile({
+          env: process.env, cwd, hasProjectConfig, homeFlag: flags.home,
+        });
+        process.stderr.write(`${formatDurabilityRefusal(missing, {
+          authSecretFile: path.join(homeDir, 'auth-secret'),
+          dataKeyFile: keyFile,
+          defaultDatabaseFile: sqliteFileOf(resolvedDb.url),
+          exists: (p) => fs.existsSync(p),
+        })}\n`);
+        process.exit(1);
+      }
+    }
+
+    // ── A declared multi-replica deployment shares ONE sign-in secret ──────
+    // Minting one below is right for a single node and wrong for replicas:
+    // each mints its own into its own home, and a session signed on one is
+    // refused on the others. Asked only when the operator set none, and before
+    // anything is generated, so the refusal writes no secret.
+    if (
+      (operatorAuthSecret === undefined || operatorAuthSecret.trim().length === 0)
+      && await declaresReplicasSharingState(process.env)
+    ) {
+      process.stderr.write(`${MULTI_REPLICA_AUTH_SECRET_REFUSAL}\n`);
+      process.exit(1);
+    }
+
+    const persistedAuthSecret = operatorAuthSecret === undefined ? readOrCreateAuthSecret(homeDir) : undefined;
+    const authSecret = persistedAuthSecret ? persistedAuthSecret.secret : operatorAuthSecret;
 
     // ── Banner ──────────────────────────────────────────────────────
     // `Config:` only when the cwd config takes part in this boot — the same
@@ -454,6 +518,18 @@ export default class Start extends Command {
       ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
       AUTH_SECRET: authSecret,
     };
+    writeAuthSecretFileChannel(localEnv, persistedAuthSecret?.file);
+    // [#31488] A database reached through `-d` or a `--home` home is one the
+    // ceremony the ownership refusal names does not find on its own: the
+    // child names it in both commands, read from the resolution above — the
+    // one this boot serves — never re-resolved.
+    writeCeremonyDatabaseChannel(localEnv, ceremonyDatabaseUrl(resolvedDb, { homeFlag: flags.home }));
+    // [#31547] The driver and the token the two flags above put in the child's
+    // environment only: the commands set them in front, the token by reference.
+    writeCeremonyConnectionChannel(localEnv, {
+      databaseDriver: flags['database-driver'],
+      databaseAuthToken: flags['database-auth-token'],
+    });
     // NODE_ENV is only forced to production when the user has not set it.
     // Allows `NODE_ENV=development objectstack start` to work for debugging.
     //
@@ -474,13 +550,45 @@ export default class Start extends Command {
     // Single-node self-host quickstart: forcing production above would make
     // LocalCryptoProvider refuse to boot without OS_SECRET_KEY, breaking the
     // documented zero-config `os start`. Opt the crypto provider into minting
-    // + persisting a key file (~/.objectstack/dev-crypto-key) so it works out
-    // of the box. A multi-node deploy (OS_CLUSTER_DRIVER set) must provision a
-    // shared OS_SECRET_KEY instead — each node minting its own key would
-    // diverge — so we do NOT opt in there; the provider still fails loud.
+    // + persisting a key file so it works out of the box. A multi-node deploy
+    // (OS_CLUSTER_DRIVER set) must provision a shared OS_SECRET_KEY instead —
+    // each node minting its own key would diverge — so we do NOT opt in
+    // there; the provider still fails loud.
     if (!localEnv.OS_CLUSTER_DRIVER && !localEnv.OS_SECRET_KEY) {
       localEnv.OS_CRYPTO_AUTOKEY = '1';
     }
+    // WHICH key file: the one `os dev` uses for this project
+    // (~/.objectstack/dev-crypto-key, or $OS_HOME's), never a second one under
+    // this command's own home (#29934). `localEnv.OS_HOME` above is this
+    // command's state dir, so the key's location travels on its own channel;
+    // the file an earlier `os start` minted here is still read, and named.
+    const keyFileNotice = await applyCryptoKeyFileChannel(localEnv, {
+      env: process.env,
+      cwd,
+      hasProjectConfig,
+      homeFlag: flags.home,
+    });
+    if (keyFileNotice) console.log(chalk.yellow(`  ⚠ ${keyFileNotice}`));
+
+    // ── What a production boot keeps on this machine's disk (ruling A3) ────
+    // Every `os start` outside the image keeps booting, and says so: one block
+    // for the deployer, naming the database file and the two secrets nobody set,
+    // with what is lost if this disk is not kept. The same facts go to the
+    // `serve` child on the CLI's internal channel, where the settings service
+    // serves them to administrators as the Console's deployment notice (the
+    // data key's file it reads from its own channel, which the line above set).
+    const { KEY_FILE_CHANNEL_ENV } = await import('@objectstack/service-settings');
+    const dataKeyFile = localEnv[KEY_FILE_CHANNEL_ENV];
+    const findings: DeploymentBootFindings | undefined = localEnv.NODE_ENV === 'production'
+      ? {
+        ...(isDefaultedDatabase(resolvedDb.source) ? { databaseFile: sqliteFileOf(databaseUrl) ?? databaseUrl } : {}),
+        ...(persistedAuthSecret ? { authSecretFile: persistedAuthSecret.file ?? null } : {}),
+        ...(dataKeyFile ? { dataKeyFile } : {}),
+      }
+      : undefined;
+    writeDeploymentFindingsChannel(localEnv, findings);
+    const durabilityBlock = findings ? formatDurabilityBootBlock(findings) : undefined;
+    if (durabilityBlock) console.log(chalk.yellow(durabilityBlock));
 
     const binPath = process.argv[1];
 
@@ -579,34 +687,51 @@ export async function resolveStartDatabase(opts: {
   });
 }
 
-function resolveHome(
-  flagValue: string | undefined,
-  opts: { hasProjectConfig: boolean; cwd: string },
-): string {
-  const raw = flagValue ?? process.env.OS_HOME;
-  if (raw && raw.trim().length > 0) {
-    const v = raw.trim();
-    if (v.startsWith('~')) return path.resolve(os.homedir(), v.slice(1).replace(/^[/\\]/, ''));
-    return path.resolve(v);
-  }
-  // Project mode: keep state next to the source so each project is
-  // self-contained and `os start` from another cwd doesn't reuse it.
-  if (opts.hasProjectConfig) {
-    return path.resolve(opts.cwd, '.objectstack');
-  }
-  return path.resolve(os.homedir(), '.objectstack');
+/**
+ * Whether this deployment runs replicas that share state, so must share one
+ * sign-in secret too: several replicas declared (`OS_EXPECT_MULTI_NODE=true` /
+ * `OS_CLUSTER_REPLICAS` > 1, the split-brain guard's `declaresMultiNode`) over
+ * the redis cluster driver. Both are required, the rule every multi-replica
+ * change keeps (cloud#3814 R3): a single node keeps minting into
+ * `<home>/auth-secret`, and a declaration over any other driver keeps the boot
+ * it had.
+ *
+ * ⛔ Not a second copy of that rule. It is asked of the one pre-boot form that
+ * exists, `sharesCloudBindingCredential` (`OS_CLUSTER_DRIVER` in place of the
+ * cluster service's driver, trimmed as the `serve` child trims it before
+ * composing that service), from a package this command already declares. The
+ * CLI declares no cluster package of its own: those ship with the host app
+ * (`serve-cluster-host-resolution.test.ts` says why). Lazy, so oclif's
+ * import-every-command startup does not pay for it.
+ */
+export async function declaresReplicasSharingState(env: NodeJS.ProcessEnv): Promise<boolean> {
+  const { sharesCloudBindingCredential } = await import('@objectstack/cloud-connection');
+  return sharesCloudBindingCredential(env, env.OS_CLUSTER_DRIVER);
 }
+
+/**
+ * The refusal, one line in the data key's shape (`LocalCryptoProvider`): what
+ * is missing, what minting one would break, and how to generate the value.
+ * It names the variable and never a value.
+ */
+export const MULTI_REPLICA_AUTH_SECRET_REFUSAL =
+  '[auth] Refusing to start: several replicas are declared (OS_EXPECT_MULTI_NODE / OS_CLUSTER_REPLICAS>1) ' +
+  'over the redis cluster driver, but OS_AUTH_SECRET is not set — each replica would mint its own sign-in ' +
+  'secret, and a session signed on one would be refused on the others. Fix: generate one and set the same ' +
+  'value on every replica, e.g. OS_AUTH_SECRET=$(openssl rand -hex 32)';
 
 /**
  * Read the persisted AUTH_SECRET from `<home>/auth-secret`, or generate
  * one on first run and persist it so subsequent restarts keep existing
  * sessions valid. Mode 0o600 to keep the secret reasonably private.
+ * `file` is the path only when the file holds the returned secret: a
+ * generated one whose write failed lives in this process alone.
  */
-function readOrCreateAuthSecret(homeDir: string): string {
+function readOrCreateAuthSecret(homeDir: string): { secret: string; file?: string } {
   const secretPath = path.join(homeDir, 'auth-secret');
   try {
     const existing = fs.readFileSync(secretPath, 'utf8').trim();
-    if (existing.length >= 32) return existing;
+    if (existing.length >= 32) return { secret: existing, file: secretPath };
   } catch {
     // file missing or unreadable — fall through to generation
   }
@@ -614,8 +739,229 @@ function readOrCreateAuthSecret(homeDir: string): string {
   try {
     makeDirectorySync(homeDir);
     fs.writeFileSync(secretPath, secret + '\n', { mode: 0o600 });
+    return { secret, file: secretPath };
   } catch {
     // best-effort persist; secret is still returned for this process
   }
-  return secret;
+  return { secret };
+}
+
+// ── Deployment durability (ruling A3, record 6634240777) ─────────────────────
+//
+// Two audiences, one set of facts. The official image refuses to start unless
+// the database and both secrets are set explicitly; every other `os start`
+// boots and prints a block for the deployer; and the same facts reach the
+// `serve` child, whose settings service serves them to administrators as the
+// Console's deployment notice. The facts are this command's own decisions: it
+// resolved the database, it generated the auth secret, and it opted the data
+// key into a persisted file. Nothing below reads `NODE_ENV` to decide the
+// refusal — see the comment at the call site.
+
+/**
+ * The official image's signal (`docker/Dockerfile` sets it to `true`): under
+ * it `os start` refuses to boot unless `OS_DATABASE_URL`, `OS_AUTH_SECRET` and
+ * `OS_SECRET_KEY` are set explicitly. Default off, so a local `os start` keeps
+ * its zero-config boot.
+ */
+export const DURABILITY_CHECK_ENV = 'OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED';
+
+/**
+ * The CLI's INTERNAL channel to its `serve` child: the boot facts the
+ * administrator notice states, as JSON ({@link DeploymentBootFindings}). Same
+ * naming and ownership rule as `OS_INTERNAL_AUTH_SECRET_FILE`
+ * (`utils/internal-auth-secret-channel.ts`): set by this command alone, deleted
+ * when it has nothing to say, so an inherited copy never speaks for this run,
+ * and not an operator setting. The reader is `@objectstack/service-settings`
+ * (`deployment-notice.ts`), which spells the same name: the settings package
+ * publishes no constant for it, and the end-to-end pin
+ * (`test/start-deployment-durability.integration.test.ts`) reads the notice a
+ * real `os start` serves, so a renamed side fails there.
+ */
+export const INTERNAL_DEPLOYMENT_FINDINGS_ENV = 'OS_INTERNAL_DEPLOYMENT_FINDINGS';
+
+/** What a production boot keeps on this machine's disk because nobody set it. */
+export interface DeploymentBootFindings {
+  /** The database is a SQLite file no setting chose: the path, or the URL when it names no file. */
+  databaseFile?: string;
+  /** The auth secret was generated: the file it is kept in, `null` when only this process holds it. */
+  authSecretFile?: string | null;
+  /** The data key is read from (and on a first boot minted into) this file: `OS_SECRET_KEY` is unset. */
+  dataKeyFile?: string;
+}
+
+/** A variable the image requires, in the order the refusal names them. */
+export type DurableVariable = 'OS_DATABASE_URL' | 'OS_AUTH_SECRET' | 'OS_SECRET_KEY';
+
+/**
+ * Read {@link DURABILITY_CHECK_ENV}. `invalid` for a value that is neither a
+ * yes nor a no: a typo must not quietly switch a safety check off.
+ */
+export function readDurabilityCheckSignal(env: NodeJS.ProcessEnv): 'on' | 'off' | 'invalid' {
+  const raw = env[DURABILITY_CHECK_ENV];
+  if (raw === undefined || raw.trim() === '') return 'off';
+  const v = raw.trim().toLowerCase();
+  if (v === 'true' || v === '1') return 'on';
+  if (v === 'false' || v === '0') return 'off';
+  return 'invalid';
+}
+
+/**
+ * Whether the database was chosen by nobody: the unified default file, or the
+ * legacy file read for compatibility. A URL from `--database`, the environment
+ * (`OS_DATABASE_URL` and its legacy names) or the project's declared default
+ * datasource is a choice, an explicit `file:` URL included.
+ */
+export function isDefaultedDatabase(source: ResolvedProjectDatabaseUrl['source']): boolean {
+  return source === 'unified-default' || source === 'legacy-file';
+}
+
+/** The variables the image requires that this boot did not get. */
+export function missingDurableVariables(facts: {
+  databaseSource: ResolvedProjectDatabaseUrl['source'];
+  authSecretSet: boolean;
+  secretKeySet: boolean;
+}): DurableVariable[] {
+  const missing: DurableVariable[] = [];
+  if (isDefaultedDatabase(facts.databaseSource)) missing.push('OS_DATABASE_URL');
+  if (!facts.authSecretSet) missing.push('OS_AUTH_SECRET');
+  if (!facts.secretKeySet) missing.push('OS_SECRET_KEY');
+  return missing;
+}
+
+/** The file a `file:` SQLite URL names, or `undefined` for any other URL. */
+export function sqliteFileOf(url: string): string | undefined {
+  if (!url.startsWith('file:')) return undefined;
+  const rest = url.slice('file:'.length).replace(/^\/\/(?=\/)/, '');
+  return rest.length > 0 ? rest : undefined;
+}
+
+function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * The image's refusal: which variables are missing, what is lost without
+ * them, how to set them, and how a deployment that already ran on values the
+ * image generated carries those values over first.
+ */
+export function formatDurabilityRefusal(
+  missing: readonly DurableVariable[],
+  where: {
+    /** Where this command keeps a generated auth secret. */
+    authSecretFile: string;
+    /** Where the data key file is (`undefined` when an env key would answer). */
+    dataKeyFile?: string;
+    /** The default SQLite file, when the database fell back to it. */
+    defaultDatabaseFile?: string;
+    exists: (file: string) => boolean;
+  },
+): string {
+  const set = new Set(missing);
+  const found = (file: string): string => (where.exists(file) ? ' (present in this container)' : '');
+  const lines: string[] = [
+    `✗ This image does not start without its database and secrets set explicitly: ${joinNames(missing)} ${missing.length === 1 ? 'is' : 'are'} not set.`,
+    '  Without them the data would be a SQLite file inside the container, and the sign-in secret and the key that',
+    '  encrypts saved passwords and API keys would be generated on its disk. Replacing the container loses all of it.',
+    '',
+    '  Set them when you run the container:',
+  ];
+  if (set.has('OS_DATABASE_URL')) {
+    lines.push(
+      '    OS_DATABASE_URL  your database, e.g. postgres://user:pass@db-host:5432/app',
+      '                     (or file:/path/on/a/mounted/volume/app.db to keep SQLite on a volume)',
+    );
+  }
+  if (set.has('OS_AUTH_SECRET')) {
+    lines.push('    OS_AUTH_SECRET   a long random value, the same on every restart, e.g. $(openssl rand -hex 32)');
+  }
+  if (set.has('OS_SECRET_KEY')) {
+    lines.push('    OS_SECRET_KEY    32 random bytes, the same on every restart, e.g. $(openssl rand -hex 32)');
+  }
+  lines.push(
+    '',
+    '  Already running on values this image generated? Carry them over before you set new ones, or every saved',
+    '  credential becomes unreadable and everyone is signed out. Read them from the old container',
+    '  (docker exec <container> cat <file>) or from its volume:',
+  );
+  if (set.has('OS_AUTH_SECRET')) {
+    lines.push(`    OS_AUTH_SECRET   the contents of ${where.authSecretFile}${found(where.authSecretFile)}`);
+  }
+  if (set.has('OS_SECRET_KEY') && where.dataKeyFile) {
+    lines.push(`    OS_SECRET_KEY    the contents of ${where.dataKeyFile}${found(where.dataKeyFile)}`);
+  }
+  if (set.has('OS_DATABASE_URL') && where.defaultDatabaseFile) {
+    lines.push(
+      `    OS_DATABASE_URL  file:${where.defaultDatabaseFile}${found(where.defaultDatabaseFile)}, if your data is that file on a kept volume`,
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
+ * The deployer's block for a production boot outside the image, or
+ * `undefined` when this boot keeps nothing on its disk by default.
+ */
+export function formatDurabilityBootBlock(findings: DeploymentBootFindings): string | undefined {
+  const rows: string[] = [];
+  const vars: DurableVariable[] = [];
+  if (findings.databaseFile !== undefined) {
+    rows.push(`      · Database: a SQLite file, ${findings.databaseFile} (OS_DATABASE_URL is not set)`);
+    vars.push('OS_DATABASE_URL');
+  }
+  if (findings.authSecretFile !== undefined) {
+    rows.push(
+      findings.authSecretFile
+        ? `      · Sign-in secret: generated and kept in ${findings.authSecretFile} (OS_AUTH_SECRET is not set)`
+        : '      · Sign-in secret: generated for this process only (OS_AUTH_SECRET is not set)',
+    );
+    vars.push('OS_AUTH_SECRET');
+  }
+  if (findings.dataKeyFile !== undefined) {
+    rows.push(
+      `      · Data key, which encrypts saved passwords and API keys: kept in ${findings.dataKeyFile} (OS_SECRET_KEY is not set)`,
+    );
+    vars.push('OS_SECRET_KEY');
+  }
+  if (rows.length === 0) return undefined;
+  return [
+    '  ⚠ Production mode, and this server keeps these on its own disk:',
+    ...rows,
+    '    If this disk is not kept (a container replaced, a machine rebuilt), they are lost: the data, every',
+    '    sign-in and every saved credential.',
+    `    To move them off this disk, set ${joinNames(vars)}, carrying the current values over from the files above.`,
+    '    Administrators see this notice in the Console too.',
+  ].join('\n');
+}
+
+/**
+ * Write {@link INTERNAL_DEPLOYMENT_FINDINGS_ENV} into the child env: the
+ * findings as JSON when there are any, otherwise no variable at all.
+ */
+export function writeDeploymentFindingsChannel(
+  env: NodeJS.ProcessEnv,
+  findings: DeploymentBootFindings | undefined,
+): void {
+  if (findings && Object.keys(findings).length > 0) {
+    env[INTERNAL_DEPLOYMENT_FINDINGS_ENV] = JSON.stringify(findings);
+  } else {
+    delete env[INTERNAL_DEPLOYMENT_FINDINGS_ENV];
+  }
+}
+
+/**
+ * The data key file a boot of this command would read, through the ONE
+ * resolution the child is handed (`applyCryptoKeyFileChannel`), applied to a
+ * scratch env so nothing of the real child env is touched.
+ */
+async function persistedDataKeyFile(opts: {
+  env: NodeJS.ProcessEnv;
+  cwd: string;
+  hasProjectConfig: boolean;
+  homeFlag?: string;
+}): Promise<string | undefined> {
+  const { KEY_FILE_CHANNEL_ENV } = await import('@objectstack/service-settings');
+  const scratch: NodeJS.ProcessEnv = {};
+  await applyCryptoKeyFileChannel(scratch, opts);
+  return scratch[KEY_FILE_CHANNEL_ENV];
 }

@@ -1,5 +1,728 @@
 # @objectstack/plugin-approvals
 
+## 18.3.0
+
+### Minor Changes
+
+- a9f654e: feat!: ownership queues: records wait in a queue until a member claims them, and assignment rules route new records (ADR-0142)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered object-queue-field-reserved -->
+  
+  **BREAKING** for one shape only: an object whose records have a user owner (`ownership: 'user'`, the default) can no longer declare its own field named `queue`. The platform now injects a `queue` column on every such object, and `registerObject` refuses the declaration with `422 INVALID_METADATA` (`ObjectQueueColumnRefusedError`), naming the object. An `objectExtensions` entry that declares `queue` on such an object is not refused, because an extension is folded over its object at read time: its `queue` is ignored, the platform's column stands, and a warning names the extension. The remedy: rename the business field (for example `support_queue`) and copy its data across, or, when the object's records have no user owner, declare `ownership: 'business_unit'`, `'org'` or `'none'`. The upgrade guide entry is `object-queue-field-reserved`.
+  
+  Beside that, two enum additions: `ShareRecipientType` gains `queue` (a sharing rule can now name a queue as its recipient), and the `queue` approver type is authorable again (it leaves `NON_AUTHORABLE_APPROVER_TYPES`, so it is no longer marked deprecated). Two metadata types are new: `queue` and `assignment_rule`.
+  
+  - **`@objectstack/spec`**: new `queue` and `assignment_rule` metadata types (`QueueSchema`, `AssignmentRuleSchema`) and the stack keys `queues` and `assignmentRules`. A declared queue's members are positions. New `IOwnershipQueueService` contract, registered under `ownership-queue`. `queue` joins the injected system columns of `ownership: 'user'` objects and `PUBLIC_FORM_SERVER_MANAGED_FIELDS`. `APPROVER_VALUE_BINDINGS.queue` reads both a declared queue and an organization's `sys_queue` row, and `APPROVER_ORG_SCOPED.queue` is `true`. The explain rule kinds `queue_membership` and `queue_claim` are new. `QUEUE_NOT_FOUND` (422) is registered under plugin-security.
+  - **`@objectstack/objectql`**: objects with `ownership: 'user'` get a system-managed `queue` column beside `owner_id`. Declaring your own `queue` field on one is refused at registration (`INVALID_METADATA`), and an extension's own `queue` field on one is ignored with a warning. An update can carry a write precondition: when it no longer matches, the update answers `409 CONCURRENT_UPDATE`. Declared assignment rules run once for each inserted row that has no owner and no queue after the `beforeInsert` hooks. A rule can park the row in a queue, or pick a member by `round_robin` or `least_loaded`. Assignment never refuses an insert. `kernel:ready` refuses to boot a stack that declares queues or assignment rules when no `ownership-queue` service is registered.
+  - **`@objectstack/metadata-core`**: `queue` is classified as an injected system column.
+  - **`@objectstack/metadata`**: the artifact door registers a stack's `queues` and `assignmentRules`, so an artifact-only runtime serves them.
+  - **`@objectstack/plugin-sharing`**: three new objects, `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, and the `ownership-queue` service. The service resolves a queue name from the registry first, then from the organization's own rows, and has one member expander. A record with no owner that sits in a queue can be read and edited by the queue's members, never deleted. The `queue` sharing recipient grants matched records to the queue's members, and its grants are recomputed when membership changes or the queue is switched on or off.
+  - **`@objectstack/plugin-security`**: the owner gate handles `queue`. A **claim** sets `owner_id` from empty to yourself, by id. It is admitted when the sharing model allows you the record, and only one claimant wins: the loser gets `409`. A **release** gives your own record back to its home queue. A **move** to another queue needs the transfer grant, and a queue name that does not resolve is refused with `422 QUEUE_NOT_FOUND`. An insert that names a queue needs the transfer grant or membership of that queue. A guest can supply neither. Explain reports the queue reasons on the sharing layer.
+  - **`@objectstack/plugin-approvals`**: a `queue` approver resolves to the queue's members when the step opens. An empty queue adds nobody and logs a warning. The `queue:<name>` placeholder is never written again.
+  - **`@objectstack/lint`**: a queue-only approval node is reported `approval-approvers-may-resolve-empty`, and the org-axis red line admits the queue recipient. Two new advisory rules come with `os explain` entries: `assignment-rule-user-target` (warning) and `assignment-rule-queue-unstaffed` (info).
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_queue`, `sys_queue_member` and `sys_assignment_cursor`, so `os migrate organization-ownership` plans them instead of refusing.
+  - **`@objectstack/runtime`**: `POST /security/_activation/:type/:name` also switches a declared `queue` or `assignment_rule` on and off.
+  - **`@objectstack/platform-objects`**: the two new metadata types' labels, and the queue recipient option, are translated in zh-CN, ja-JP and es-ES.
+  - **`@object-ui/app-shell`**: the flow designer no longer warns that a queue approver resolves to nobody.
+  - **`@objectstack/skills`**: the platform skill lists `queues` and `assignmentRules` among the stack's top-level keys.
+  
+  What to do: rename any `queue` field on a user-owned object, or in an extension of one, as above. Every other existing stack behaves as before. To use queues, declare `queues` and `assignmentRules` in your stack, and make sure plugin-sharing is installed: it registers the `ownership-queue` service.
+- 6dbff8e: feat(spec,ui)!: the record page's `slots.tabs` is retired — a slotted page fills six slots, and a page that needs its own tab strip is `kind: 'full'`
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`page.slots.tabs` is a tombstone that refuses every value; `slots.related` / `slots.relatedLists` are refused by name instead of being read as `tabs`)
+  
+  <!-- adr-0087: registered page-slots-tabs-removed, page-slots-tabs-retired -->
+  
+  **BREAKING** accept-set narrowing on the record page (`@objectstack/spec`), with the console following it in the same release.
+  
+  The record page composes its tabs and columns from the object's roles and relationship flags. An authored `tabs` slot replaced that whole strip, so a page that used it lost every synthesized related list and its wide-screen columns. The slot is gone; the six live slots (`header`, `actions`, `alerts`, `highlights`, `details`, `discussion`) are unchanged.
+  
+  - **FROM → TO.** `slots: { tabs: … }` on a `kind: 'slotted'` page → delete the key. To change which related lists appear or their order, set `relatedList` / `relatedList: 'primary'` on the child's reference field; to replace the Details body, author `slots.details`; a page that needs its own strip is `kind: 'full'` and authors its header, highlights, `page:tabs` strip and `record:discussion` in `regions`, drawn as authored.
+  - **The one-line fix.** `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` page is converted when it is read (the `page-slots-tabs-removed` conversion): the slot is dropped, and a page whose only slot it was becomes an empty slotted page, which renders the synthesized default. Whether such a page should become `kind: 'full'` is a judgement the conversion cannot make; the upgrade guide entry `page-slots-tabs-retired` lists it.
+  - **What the parse says.** `slots.tabs` is refused with its prescription ("`page.slots.tabs` was removed in @objectstack/spec 18.3.0 (ADR-0085) — …") at `defineStack` as `STACK_SCHEMA_INVALID` / 422, and at the metadata save door. `slots.related` and `slots.relatedLists` are refused by name with the same remedy. TypeScript rejects `tabs` in a `definePage` slot map.
+  - **The pair check.** `checkPageSlotPair` (the `details` + `tabs` refusal) is removed from `@objectstack/spec/ui` with the slot it paired; the `page-slots-details-beside-tabs-refused` upgrade entry is folded into `page-slots-tabs-retired`.
+  
+  The four in-repo pages that authored `slots.tabs` are rebuilt as `kind: 'full'` pages that render the same nodes in the same order: `sys_user_detail` and `sys_organization_detail` (`@objectstack/platform-objects`), `sys_approval_request_detail` (`@objectstack/plugin-approvals`) and the showcase `showcase_project_detail`.
+  
+  The console (`@object-ui/*`): `buildDefaultPageSchema` composes from the six slots only, and `RecordDetailView` lays every slotted page out by width (three columns from 1280 px), since none can opt out with an authored strip any more. `@object-ui/types` drops the pair check from its page schemas and types `PageSlotMap.tabs` as `never`. The Studio slot canvas lists six slots.
+  
+  `@objectstack/skills`: the UI skill says a slotted page has no `tabs` slot and how to shape the strip instead.
+- 3557366: feat!: an object that declares `titleFormat` is refused at save and by `os validate`, with the `nameField` prescription (#29007)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered object-title-format-refused -->
+  
+  **BREAKING** accept-set narrowing on `object.titleFormat`. The key stays in the schema; what changes is which doors accept it.
+  
+  - **Before.** `titleFormat` was deprecated (ADR-0079) and still accepted: a save, a publish and `os validate` all passed, with an advisory `title-format-retired` warning on the CLI only. It titled nothing. An explicit `nameField` outranks it, and the registry stamps a derived `nameField` on every object that authors none, so the record page and the list showed one field however the template was written.
+  - **Now.** `title-format-retired` is an error. An object definition that declares `titleFormat` is refused by `os validate`, `os build` and `os lint`, and at the metadata save gate (`422 INVALID_METADATA`): an active save, a draft promotion and a restore. A draft save still lands, and its `_diagnostics` reads `valid: false` with the refusal its publish gives. The message and the fix line are the prescription the `titleFormat` describe already carried.
+  - **Unchanged.** A stored object that carries `titleFormat` still parses, loads and is served; no conversion drops the key. It is refused only when it is next saved, published or restored. The title order is unchanged: `nameField`, then its alias `displayNameField`, then the derivation.
+  - **The platform's own objects.** The 68 system objects that declared `titleFormat` no longer do. 65 already declared the `nameField` that titles them. `sys_attachment`, `sys_audience_binding_suggestion` and `sys_notification_template` now declare the field the registry already stamped (`file_name`, `permission_set_name`, `subject`), so every record title reads as before.
+  - **`@objectstack/lint`.** `validateTitleFormatRetired` is a new export and a new gating registry entry. `validateRecordTitle` now reports `title-unresolvable` only.
+  
+  **The remedy.** Point `nameField` at the title field and drop `titleFormat`. For a composite title that an import, a sort or a search must match, add a `text` field that declares an `expression` (computed and stored on every write) and point `nameField` at it; a `formula` with `returnType: 'text'` stays legal for a title shown for display only. The upgrade guide entry is `object-title-format-refused`.
+
+### Patch Changes
+
+- a3009cb: fix(plugin-approvals)!: a decision on a request whose flow was deleted while its run was paused is refused 409 `RESUME_TARGET_LOST` before anything is recorded, instead of being recorded and answered 500 `RESUME_FAILED` (#26477)
+  
+  Clause-②: yes (narrowing: an approve, reject or send-back on a request whose paused run can never resume, because its flow was deleted or the node it parked on was edited away, is refused 409 `RESUME_TARGET_LOST` with nothing written, where it was recorded as finalized and answered 500 `RESUME_FAILED`; widened: `@objectstack/service-automation`'s `AutomationEngine` gains the read-only public method `unresumableSuspensionCause(runId)`)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the change is a runtime refusal of a decision that could never take effect; nothing an author writes is renamed or removed, so there is no FROM → TO mapping to register -->
+  
+  A suspended run outlives the flow it belongs to: `DELETE /api/v1/automation/:name`, an uninstall or an overlay removal drops the flow and leaves the parked row. The approvals pre-flight asked only whether a suspension still existed, so it passed such a run, the decision was written and the request flipped to `approved`, and only the resume after it hit the engine's flow-gone exit. The approver got a 500 for a decision that stood, and the flow never continued.
+  
+  What changes:
+  
+  - `@objectstack/service-automation`: `AutomationEngine.unresumableSuspensionCause(runId)` answers why an existing suspension can never be resumed (`Flow 'F' not found for run 'R'`, or `Suspended node 'N' no longer exists in flow 'F'`), or `undefined` when it can continue or no suspension exists. It is the resume's own never-dispatched classification, shared with the resume path, so the two cannot disagree. It is read-only: it settles nothing (the resume still settles a gone-for-good run, as before), and it rejects when the suspended-run store cannot be read, as `hasSuspendedRun` does.
+  - `@objectstack/plugin-approvals`: the decision pre-flight (approve, reject, send back and resubmit) asks that question after the existence check. A run whose flow or parked node is gone answers the same 409 `RESUME_TARGET_LOST` a cancelled run already gets, naming the cause, and nothing is recorded: the request stays `pending` with its approvers. A store that cannot be read still fails open, as the existence check does.
+  
+  **BREAKING** for a caller that relied on the decision being recorded:
+  
+  - **Before.** Approving a request whose flow had been deleted wrote the decision, set the request to `approved`, and answered 500 `RESUME_FAILED` with `finalized: true` and `repairable: false`. The run stayed parked or stranded.
+  - **Now.** The same call answers 409 `RESUME_TARGET_LOST` and writes nothing.
+  - **Fix.** Nothing to change in metadata. To release such a request, recall it (the recall's resume settles the orphaned run), or restore the flow and decide again.
+- 9fab076: feat(spec,plugin-approvals,app-shell): the approvals get serves a request's own route, and both approval step lines draw it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The single request read (`GET /api/v1/approvals/requests/:id`) served one step list, `flow_steps`: the flow's trunk, walked from its start by taking the `approve` edge, else the `true` edge, else the first edge. A request a decision routed off the trunk was not on it. A contract routed from the manager to the finance-only rung was served the manager, the joint legal + finance rung, the executive and the general manager, all upcoming, and not its own rung.
+  
+  What changes:
+  
+  - `ApprovalRequestRow` gains `flow_route`, served on the same single reads as `flow_steps`. Its `steps` are the approval steps the request's flow run has passed (earlier requests of the same run, on another node, approved, in the order the run opened them, one entry per step), then the request's own step, then, for a pending request, the steps ahead that the flow's graph decides on its own when each step approves.
+  - Nothing past an undecided branch is listed. The walk ahead stops at a decision node, a conditioned edge, several out-edges, a loop back, or a node that runs other nodes (`subflow`, `map`, `loop`). `ahead` then reads `undecided`. It reads `end` when the walk reached the flow's end, and `decided` for a request that is already decided, whose route ends at itself.
+  - `flow_steps` is served unchanged. Its doc now says it is the trunk and that a step line never draws it.
+  - The business record's approvals panel draws the pending request's `flow_route`, so a viewer who took no part in an earlier rung now sees it too. Before, the panel rebuilt the line from the request rows the list read served that viewer.
+  - The approval request page draws its request's `flow_route`, at any status, where it had stopped drawing a step line at all.
+  
+  What to do: nothing. A client that reads `flow_steps` reads what it read before. A client that draws a request's progress should draw `flow_route` instead.
+- 58d4ee6: fix(plugin-approvals): a read of `sys_approval_request` through the generic data door serves the flow and step labels in the reader's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setup's approval request list, the request's record page, a lookup's title and the export read `sys_approval_request` through the generic data door, which served the stored `process_label` / `current_step_label` to every reader. A zh-CN user saw "Large Deal Approval" / "Sales Manager Review" there while the approvals inbox showed the same rows translated.
+  
+  - **The same lookup as the approvals door.** The data door now overlays `process_label` and `current_step_label` with the app's language pack entries (`flows.FLOW.label`, `flows.FLOW.approvals.NODE.label`) for the reader's locale (`Accept-Language`, else the workspace `localization` settings), by the same lookup `GET /api/v1/approvals/requests` applies, so both doors serve the same text for the same row.
+  - **Stored text on a miss.** A label the pack does not carry, a locale no pack holds, a read with no locale and a system read are served the stored text, as before.
+  - **Same columns.** A read that selects a label without `process_name` / `current_step` is still served only the columns it selected; no column is added (`step_label` and `object_label` stay approvals-door fields).
+  - **Storage is untouched.** The overlay happens on the rows a read hands back; the stored labels stay the authored text as the request opened with it. Filtering, sorting and grouping on `process_label` / `current_step_label` still compare the stored text.
+- 2dc69d7: fix(plugin-approvals): a `user` approver whose id or email no account carries expands to nobody, warns, and takes the node's `onEmptyApprovers` route instead of opening on a slot no one can take
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `{ type: 'user', value }` approver used to put `value` on the slate as it was written, without asking whether any account carries it. A mistyped id, or the id of a person removed since the flow was authored, opened a request pending on that slot: no one could ever decide it, it appeared in no one's queue, and nothing was logged.
+  
+  Now the value is checked against `sys_user` (by id, or by email for an email-shaped value), with the same predicate the reassign door already uses. When no account carries it:
+  
+  - the approver logs the same `approver 'user:<value>' expanded to nobody` warning the team, department, position and membership-tier approvers log;
+  - it adds no slot to the request;
+  - a slate this leaves empty is decided by the node's `onEmptyApprovers`, by default `admin_rescue`, which opens the request on the organization's administrators;
+  - beside other approvers, only the unresolvable one is dropped, and the others carry the request.
+  
+  Unchanged: a real account keeps its slot, including a banned one and a person from another organization's directory (a `user` approver names a person outright, so no tenancy screen is applied). An out-of-office delegation that routes the approver to a delegate still routes. A failed `sys_user` read keeps the slot, because it does not prove that the account is missing.
+- b13a1ed: fix(plugin-approvals): a `field` approver id, or an out-of-office delegate, that names no account no longer opens a slot no one can take
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  #27397 made a `{ type: 'user' }` approver that names no account expand to nobody. Its two siblings now follow it:
+  
+  - **`type: 'field'`.** Each id the record field holds is a slot only when an account carries it (the same predicate the reassign door asks, with no organization). An id no account carries logs the shared "expanded to nobody" warning, naming the field and the id, and adds no slot, so a slate it leaves empty reaches the node's `onEmptyApprovers`. A failed directory read keeps the slot.
+  - **Out-of-office delegation.** A delegation chain that ends on a delegate no account carries routes the slot back to the original approver, with an "expanded to nobody" warning naming both. It never empties the slate, and no `ooo_substitute` action or notification is recorded for it. A failed read keeps the delegate. A removed delegator whose delegate is live still routes to the delegate, as before.
+- be16c6a: fix(plugin-approvals): an `expression` approver id that names no account no longer opens a slot no one can take
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  #27397 (`user`) and #27752 (`field`, out-of-office delegate) made an approver id that no account carries expand to nobody. The third sibling now follows them: an `expression` approver resolved as users (`resolveAs: 'user'`, the default) keeps a slot for each id its expression yields only when an account carries it. An id no account carries logs the shared "expanded to nobody" warning, naming the id and the expression, and adds no slot, so a slate it leaves empty reaches the node's `onEmptyApprovers`. A failed directory read keeps the slot. A dead out-of-office delegate on an expression id routes back to that id, as it does for `user` and `field`.
+- a426d36: fix(plugin-approvals): a revise-window recall on a batch sign-off item resumes the batch, which records the item as cancelled and goes on
+  
+  Clause-②: no (a batch run that nothing could wake after the recall now continues, in the shape the cancelled-item ruling already set; no schema, accept set, error code or result field changes)
+  Metadata-protocol: none
+  
+  A batch sign-off is a `map` node over the items, and each item's run parks on its own `approval`. When the submitter recalled an item from the revise window, the recall cancelled the item's run with `cancelRun`, which never touches the parent. The batch run stayed parked on that item with no request open for the next one, and nothing woke it short of an operator resuming the batch run by hand.
+  
+  - **Now.** After the cancel, the recall resumes the batch run parked on that item. The map records the item's slot as `{ $status: 'cancelled', $itemRunId }`, leaves it out of `count`, and opens the next item, or runs on past the map when it was the last one.
+  - **Only the built-in `map`.** A run is woken only when it is parked at a `map` node on that item's run. Any other node parked on such a link is left alone, because nothing records the cancelled item for it.
+  - **Failures are told the way the recall tells its own.** A batch resume the engine refuses or strands does not fail the recall: the withdrawal stands, `resumeError` says which run did not move and why, and an engine-stranded batch is reported on `resumeFailure` with code `RESUME_FAILED`.
+  - **Unchanged.** A recall while the request is still `pending` (the item resumes down `reject` and the map records its output), a revise-window recall with no batch above it, and a batch whose items are all decided.
+- 898e439: fix(plugin-approvals): a revise-window recall on a batch item finds its batch run past the first 1000 parked runs
+  
+  Clause-②: no (a recall on a store with more than 1000 parked runs now wakes its batch, as it already does below that; no schema, accept set, error code or result field changes)
+  Metadata-protocol: none
+  
+  The recall found the batch above the item it cancels in `listSuspendedRunsDurable()`. On a database-backed store that listing reads one page of 1000 `paused` rows, and a process adds only the runs it parked itself. So when another replica (or this process before a restart) parked the batch and more than 1000 runs were parked ahead of it, the recall did not find the batch. The batch stayed parked on the cancelled item, and the recall said nothing.
+  
+  - **Now.** Before it cancels the item, the recall asks the engine for the batch through the item's own link to it. The new `AutomationEngine.suspendedMapParentOf(itemRunId)` reads the item's suspension, then its parent's, by id. It answers the parent only while the parent is parked on `map:<itemRunId>` at the `map` node that launched the item. The read comes before `cancelRun` because the cancel removes the item's suspension, and the link with it.
+  - **Unchanged.** Below 1000 parked runs the recall wakes the batch as before. A recall with no batch above it, and a run parked on the item at a node other than the built-in `map`, are left alone as before. A failed lookup is reported in `resumeError` after the cancel, as before.
+- 890c2a6: Clause-②: no
+  Metadata-protocol: none
+  
+  The HTTP and approval flow nodes now describe themselves in business words. The node description and
+  config help are the text the Studio flow palette and node cards show an admin, and the HTTP node's
+  spoke of the messaging outbox, retry / dead-letter, an HMAC-SHA256 secret, "a literal, read as
+  written" and a CEL value envelope; the approval node's said it "suspends the flow". The HTTP node now
+  reads "Send a request to an outside web service: wait for its answer, or hand it off to be delivered
+  in the background with automatic retries", with plain help for the request kind, background delivery,
+  the wait time, the signing secret and what to send; the approval node reads "Ask people to approve or
+  reject a record". The engineer detail moved to code comments beside each entry. No key, type, default,
+  accepted value or behaviour changed.
+- 6212fdc: fix(plugin-approvals): the approval request's `record_id` field is labelled "Record", not "Record ID"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The column shows the target record's name and icon, so the header "Record ID" told an administrator reading Setup › Approval Requests to look for an id that is not there. The new label reads "Record" in every approvals list view and the request's Details tab (its highlights strip leaves `record_id` out), and in the zh-CN (记录), ja-JP (レコード) and es-ES (Registro) packs, matching the approval action's own `record_id` label. Only the label moves: the field name `record_id`, its queries, its seeds and its pointer pair with `object_name` are unchanged.
+- 00a350f: fix(plugin-approvals): re-issuing a restored approval continuation proves the pause past the first 1000 parked runs
+  
+  Clause-②: no (a re-issue on a store with more than 1000 parked runs now proves the pause as it already does below that; no schema, accept set, error code or result field changes)
+  Metadata-protocol: none
+  
+  `continueRestoredRun` proves the pause it continues is the one the request's outcome was issued at, by reading where the run is parked. It read that from `listSuspendedRunsDurable()`. On a database-backed store that listing reads one page of 1000 `paused` rows, and a process adds only the runs it parked itself. So when another replica (or this process before a restart) parked the run and more than 1000 runs were parked ahead of it, the run was on no page. Every re-issue was refused with `INVALID_STATE` "parked at no node this engine can see", every retry read the same page, and the recorded outcome never took effect.
+  
+  - **Now.** The proof asks the engine for that one run. The new `AutomationEngine.suspensionOf(runId)` reads the run's suspension by id, through the same strict, store-authoritative read `hasSuspendedRun` uses, and answers its flow, node and correlation, or `undefined` when it is not suspended. It rejects when the store cannot be read.
+  - **Unchanged.** Below 1000 parked runs the re-issue proceeds as before. A run that is not parked, or is parked at another node, is still refused, and the refusal still names the node. An engine without the read is still refused; the refusal now names `suspensionOf` as the missing read.
+- d3175d5: fix(plugin-approvals)!: an approval decision whose output does not match its declaration is refused before anything is recorded — a single value where `multiple: true` declares a list, a list where it does not (a bare-key or `text` output included), a list naming one entry twice, or a picker value that resolves to no user, department, team or held position
+  
+  Clause-②: no (narrowing) — the approve and reject doors refuse a decision output whose shape does not match its declaration's `multiple` (every output, `text` and bare keys included), or whose `user`, `department`, `team` or `position` value does not resolve, which they admitted before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the already-declared `type` and `multiple` of a decision output are now enforced at the decision. The refusal is a VALIDATION_FAILED naming the output, answered to the approver at the decision, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the approvals decision (`@objectstack/plugin-approvals`), served by `POST /api/v1/approvals/requests/:id/approve` and `/reject` and every door that forwards to them.
+  
+  - **Before.** A typed decision output was checked for presence only (`required`). A `type: 'user'` output naming an id no account carries was recorded as an approval; a stage-2 `expression` approver reading it then resolved nobody, and with `onEmptyApprovers: 'fail'` the run stranded behind a `500 RESUME_FAILED` while the request read `approved`. A bare string was stored for a `multiple: true` output, and a list could name one person twice. Until #29371 the spec documented that the runtime accepts any value shape for a list output, a CSV string (`'u2,u3'`) included; an API caller that sends that CSV string for a `multiple: true` output is now refused and sends a list (`['u2', 'u3']`) instead.
+  - **Now.** Each admitted output is judged against its declaration before any write, on an approve and on a reject alike. `400 VALIDATION_FAILED` names every `outputs.KEY` that does not match; no action row and no output snapshot are written, and the request stays pending for the approver to decide again.
+    - Every output, `text` and every bare-key declaration included: `multiple: true` takes a list and only a list, with no entry twice; `multiple` absent or false takes one value. A bare key (`decisionOutputs: ['note']`) therefore takes one value, as its declaration always said; a list is what an output declared `multiple: true` collects.
+    - `text` is judged on that shape only; its values are free. A picker's values are text and must resolve:
+    - `user`: a record id an account carries (a slot address such as `position:NAME`, or an email, is not one).
+    - `department`: an active department of the request's organization.
+    - `team`: a team that exists and is not another organization's.
+    - `position`: a position machine name someone in the request's organization holds. A `sys_position` record id is refused: the `expression` approver matches holders by name, so an id would route to nobody.
+  - **Unchanged.** A `text` value in the declared shape is accepted whatever it says. A blank value is judged only by `required`. A directory read that fails proves nothing and does not refuse the decision.
+  - **A request already pending.** The judge reads the declaration snapshotted on the request when it opened. A request pending under a bare-key snapshot (`decisionOutputs: ['note']`) takes one value for that key, so its approver sends one value; nothing about the pending request needs changing. That one value may be a comma-separated string (`'u2,u3'`): a bare key is `text`, judged by shape only, and a downstream `expression` approver still splits a string value into a list, so a pending request meant to route to several people is not stranded.
+  - **The Console.** Both decision surfaces send each output in its declared shape: a `text` or untyped output declared `multiple: true` is collected as a list of trimmed, distinct entries and sent as a string array, and a single-value one is sent as one string whose comma is literal (`@object-ui/app-shell`, same release).
+  - **Who sees it.** A caller or decision UI that sent an output its declaration does not describe: a wrong picker id, a scalar for a list (the CSV string included), a list for a scalar (a list sent for a bare key included), or a repeated entry. Also an author who pairs a `department`, `team` or `position` picker output with a stage-2 `expression` approver retargeted by `organization` (ADR-0105 D9): the decision resolves the picked value in the request's organization, not in the approver's directory organization, so a value that exists only in that other organization is refused at the decision.
+  
+  **The remedy.** Send each output in the shape its step declares, with picker values that name a real record (or, for `position`, a held machine name). A bare key takes one value, as its declaration always said; a step that collects several values declares `multiple: true`, and the Console now sends a list for it.
+- 6cbdef1: fix(plugin-approvals): an approver that resolves the same person twice opens one slot for them, so one signature counts once (#28684)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An approval step builds its slate one approver entry at a time, and an entry could name the same person more than once. An `expression` approver yielding `['u2', 'u2']` (for example a lead picking the same reviewer twice for the next step), a `field` approver holding `'u2,u2'`, two ids whose out-of-office delegation routes to the same delegate, or a `resolveAs` expression returning two departments that share a member each opened a slot per occurrence. The request then listed that person twice as pending, and under `behavior: 'per_group'` their one approval counted twice toward `minApprovals`, so a group could finalize on a single signature.
+  
+  Now each approver entry names each resolved person once, after out-of-office delegation, in first-appearance order. Every group the person resolved into is still recorded, and a person tagged into the same group twice (also when two approver entries name them under one group) counts once in that group's tally. Two approver entries that both name one person still give one slot per entry, as before.
+- 2789ba7: fix(plugins)!: a role or membership tier held by more than 10,000 members reaches every holder in sharing and approvals, and a membership read that fails is refused loudly instead of answered with an empty set
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export, type or metadata changes: two expansions read a list they already read, to completion. No author has anything to rewrite; the one new refusal is a membership read that already failed, which used to answer an empty list. -->
+  
+  **BREAKING** only where a `sys_member` read fails: the role expansion in sharing and the membership-tier expansion in approvals used to answer an empty list then, and now refuse.
+  
+  Both expansions read `sys_member` once with a 10,000-row bound and took that read as the whole holder list. They also turned any read error into `[]`.
+  
+  - **Every holder, nobody else.** `TeamGraphService.expandRoleUsers` (plugin-sharing: the `sys_member.role` limb of every `position` sharing recipient, and `expandPrincipal('role')`) and the approvals membership-tier expansion (an `org_membership_level` approver, and the second limb of every `position` approver) now read `sys_member` in pages of 10,000 ordered by id until the holders are exhausted. Past 10,000 holders, a sharing rule used to grant nothing to the holders past the 10,000th row, and an approval used to route without them. Both now reach every holder.
+  - **Smaller roles are unchanged.** A role or tier held by fewer than 10,000 members issues one read, as before, and answers the same set.
+  - **Loud, never short or empty.** A read that fails, or a page the driver returned without honouring the id cursor, now throws instead of answering `[]`.
+    - Sharing: the expansion rejects, so that rule's reconcile or revoke pass fails, its callers log their existing per-rule warning, and the grants it already holds stay as they were. Before, the retired-recipient revoke compared a rule's materialised grants against that empty answer and revoked every one of them.
+    - Approvals: the approver slot falls back to its literal (`position:NAME`, which whoever holds the position can still act on, or `org_membership_level:NAME`), and the warning now reads `could not be expanded — a directory or read-filter lookup failed` and carries its `error`. Before, a `position` approver routed to its assignment-table holders alone, which looked like a complete slate, and an `org_membership_level` approver logged "expanded to nobody".
+  - **The per-record sharing pass now resolves per rule.** `SharingRuleService.evaluateAllForRecord` (the pass a record write runs) used to reject as a whole when any one rule threw. Now a rule whose recipients cannot be read is left out of the returned results, its existing grants stay, and it logs `[sharing-rule] record reconcile failed for rule` with the rule and the error. The record's other rules still reconcile. This matches what `evaluateAllRulesForObject` already did.
+  - **A missing membership object is still no holders.** A stack that never creates or never registers `sys_member` keeps answering `[]`. That is judged by the shared missing-table predicate, or by the engine's `OBJECT_NOT_FOUND` for `sys_member`, rather than by swallowing every error.
+  
+  **The remedy.** None is needed. A refusal means the membership table could not be read: fix that read, and the next expansion succeeds. A failed read is never cached.
+- 9bdfe37: fix(plugins)!: team and position recipients reach every holder past 10,000 rows in sharing and approvals, and a team, position or role holder read that fails is refused loudly instead of answered with nobody
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no metadata changes: the team and position expansions read lists they already read, to completion, and the holder checks refuse a read that already failed. The one new export (isObjectAbsentError in @objectstack/types) is an addition. No author has anything to rewrite. -->
+  
+  **BREAKING** only where a `sys_team_member`, `sys_user_position` or `sys_member` read fails: the team and position expansions and the user-scoped holder checks used to answer nobody (an empty list, or `false`) then, and now refuse.
+  
+  This completes the family the role and membership-tier fix started. The team and position reads still read once with a 10,000-row bound and turned any read error into nobody.
+  
+  - **Every holder, nobody else.** In plugin-sharing, `TeamGraphService.expandUsers` (`sys_team_member`, every `team` sharing recipient) and the assignment limb of `PositionGraphService.expandPositionUsers` (`sys_user_position`, every `position` sharing recipient) now read in pages of 10,000 ordered by id until the holders are exhausted. In plugin-approvals, the `team` approver and the assignment limb of the `position` approver (and every caller of the position expansion: escalation targets, reassign checks, `resolveAs` expressions) do the same. Past 10,000 holders, the holders past the 10,000th row used to get no grant and no approval slot. They now do.
+  - **Smaller groups are unchanged.** A team or position held by fewer than 10,000 people issues one read, as before, and answers the same set.
+  - **Loud, never short or empty.** A read that fails, or a page the driver returned without honouring the id cursor, now throws.
+    - Sharing, whole-rule passes: the expansion rejects, so that rule's reconcile or revoke pass fails, its callers log their existing per-rule warning, and the grants it already holds stay. Before, a failed team read answered `[]`, and a failed assignment read answered the `sys_member.role` holders alone, so the retired-recipient revoke took grants away from people who still held the recipient.
+    - Sharing, per-user recompute (a write to `sys_team_member` or `sys_user_position`): the holder checks `teamHasMember`, `holdsRole` and `PositionGraphService.holdsPosition` now refuse a failed read instead of answering `false`. The recompute logs `recipient membership re-evaluation failed` for that rule and user, and the user's grants stay. Before, an outage revoked that user's grants.
+    - Approvals: the approver slot falls back to its literal (`team:ID` or `position:NAME`) and logs `could not be expanded — a directory or read-filter lookup failed` with its `error`. Before, a failed team read logged "expanded to nobody", and a failed assignment read routed a `position` approver to its membership-tier holders alone, which looked like a complete slate.
+  - **Ownership queues: a position specification now contributes nobody on a `sys_user_position` outage.** A queue team specification whose `sys_team_member` read fails still contributes nobody, as before. A queue position specification whose `sys_user_position` read fails now contributes nobody too, on the expansion and on the queue's holder check alike, where before it contributed that position's `sys_member.role` transition-source holders. That is the posture the queue declares for a failed member-table read, reached here for the first time. Both now log once. Whether a queue should refuse instead is left to a ruling.
+  - **A missing object is still no holders.** A stack that never registers, or never creates, `sys_team_member`, `sys_user_position` or `sys_member` keeps answering no holders through it. That is judged by the new `isObjectAbsentError(error, readObject)` in `@objectstack/types`: the shared missing-table predicate for that object, or the engine's `OBJECT_NOT_FOUND` naming that object. Any other error, including an absence of a different object, stays loud.
+  
+  **The remedy.** None is needed. A refusal means the membership table could not be read: fix that read, and the next expansion succeeds. A failed read is never cached.
+- e0187d0: fix(plugins)!: business-unit recipients and approvers reach every member past 10,000 rows, a failed business-unit member read is refused loudly instead of answered with nobody, and a failed `resolveAs` expansion says so
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no metadata changes: the business-unit expansions and the primary-business-unit backfill read lists they already read, to completion, and refuse a read that already failed. No author has anything to rewrite. -->
+  
+  **BREAKING** only where a `sys_business_unit_member` read fails: the business-unit expansions used to answer nobody (an empty list) then, and now refuse.
+  
+  This extends the family the team, position and role fixes closed to the last membership object, `sys_business_unit_member`. Its reads still read once with a 10,000-row bound and turned any read error into nobody.
+  
+  - **Every member, nobody else.** In plugin-sharing, `BusinessUnitGraphService.expandUnitMembers` (every `business_unit` sharing recipient) and `BusinessUnitGraphService.expandUsers` (every `unit_and_subordinates` recipient) now read in pages of 10,000 ordered by id until the members are exhausted. In plugin-approvals, the `department` / `business_unit` / `bu` approver and an `expression` approver with `resolveAs: 'department'` do the same. Past 10,000 members, the members past the 10,000th row used to get no grant and no approval slot. They now do.
+  - **The primary-business-unit backfill projects every primary membership.** The boot backfill of `sys_user.primary_business_unit_id` used to scan the `is_primary` rows once at the same bound, so users past the 10,000th row were never projected and nothing said so. It now pages to completion. A scan that fails, or a page the driver returned without honouring the id cursor, writes nothing and logs why (a failed scan logged before too, now with the consequence).
+  - **Smaller units are unchanged.** A unit or subtree with fewer than 10,000 members issues one read, as before, and answers the same set.
+  - **Loud, never short or empty.** A member read that fails, or a page the driver returned without honouring the id cursor, now throws.
+    - Sharing, whole-rule passes: the expansion rejects, so that rule's reconcile or revoke pass fails, its callers log their existing per-rule warning, and the grants it already holds stay. Before, a failed read answered `[]`, so the retired-recipient revoke a business-unit graph write triggers took the rule's grants away from every member.
+    - Approvals: the approver slot falls back to its literal (`department:ID`) and logs `could not be expanded — a directory or read-filter lookup failed` with its `error`. Before, a failed read logged "expanded to nobody", indistinguishable from an unstaffed unit.
+    - Ownership queues: a `business_unit` or `unit_and_subordinates` queue specification whose member read fails still contributes nobody, the posture the queue declares for a failed member-table read, and now logs it once.
+  - **A failed `resolveAs` expansion says so.** An `expression` approver whose `resolveAs` value could not be expanded (a `department`, `position` or `team` read failed) kept its `KIND:VALUE` literal slot with no log line. It now logs the same `could not be expanded` warning the static approver types log, with the `error` and the `expression` source.
+  - **A missing object is still no members.** A stack that never registers, or never creates, `sys_business_unit_member` keeps answering no members through it, and the backfill has nothing to project. That is judged by `isObjectAbsentError(error, 'sys_business_unit_member')`; any other error stays loud.
+  
+  **The remedy.** None is needed. A refusal means the membership table could not be read: fix that read, and the next expansion succeeds. A failed read is never cached.
+- 4898162: fix(plugins)!: a failed `sys_business_unit` read refuses instead of answering nobody, and a business unit with more than 1,000 child units keeps every child
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no metadata changes: the business-unit expansions read the unit rows they already read, to completion, and refuse a read that already failed. No author has anything to rewrite. -->
+  
+  **BREAKING** only where a `sys_business_unit` read fails: the business-unit expansions used to answer nobody (an empty list) then, and now refuse.
+  
+  The member reads of a business unit (`sys_business_unit_member`) read to completion and refuse on failure. The reads of the unit table they are keyed by did not: the check that the unit exists and is active, and the read of each unit's child units, still turned any read error into nobody, and the child-unit read stopped at 1,000 rows.
+  
+  - **A failed unit read refuses.** In plugin-sharing, `BusinessUnitGraphService.descendants`, `expandUnitMembers` (every `business_unit` sharing recipient) and `expandUsers` (every `unit_and_subordinates` recipient) now throw when the unit's own row or a child-unit read fails. In plugin-approvals, the `department` / `business_unit` / `bu` approver and an `expression` approver with `resolveAs: 'department'` do the same.
+    - Sharing: the expansion rejects, so that rule's reconcile or revoke pass fails, its callers log their existing per-rule warning, and the grants it already holds stay. Before, a failed unit read answered `[]` and that answer was kept for the rest of the pass, so the recompute a business-unit graph write triggers revoked every grant the rule gave.
+    - Approvals: the approver slot falls back to its literal (`department:ID`) and logs `could not be expanded — a directory or read-filter lookup failed` with its `error`. Before, a failed seed read logged "expanded to nobody", and a failed child-unit read routed to the units that did read, with no signal.
+    - Ownership queues: a `business_unit` or `unit_and_subordinates` queue specification whose unit read fails contributes nobody, the posture the queue declares for a failed expansion, and logs it once.
+  - **Nothing is cached after a failed read.** The next expansion on the same pass reads again.
+  - **Every child unit.** The child units of each unit are read in pages of 1,000 ordered by id until they are exhausted. A unit with more than 1,000 active child units used to lose the children past the 1,000th row, with all their members and descendants. A unit with fewer issues one read, as before.
+  - **A missing object is still nobody.** A stack that never registers, or never creates, `sys_business_unit` keeps answering no members. That is judged by `isObjectAbsentError(error, 'sys_business_unit')`; any other error stays loud.
+  
+  **The remedy.** None is needed. A refusal means the business-unit table could not be read: fix that read, and the next expansion succeeds.
+- 2a1be29: fix(plugin-approvals)!: a request with no submitter is recalled, reminded or resubmitted only by the system or the override actor
+  
+  Clause-②: no (narrowing) — `recall`, `remind` and `resubmit` on a request whose `submitter_id` is empty (a run whose trigger resolved no user) refuse every caller except a system context and the override actor, where each door admits them; they admitted every caller who could read the request before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes: the three submitter doors apply their existing submitter rule to a request that has no submitter. The refusal is each door's existing non-submitter refusal, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at three approval doors (`@objectstack/plugin-approvals`), served by `POST /approvals/requests/:id/recall`, `/remind` and `/resubmit` and the request page's actions that forward to them.
+  
+  - **Before (FROM).** On a request with no submitter, `recall`, `remind` and `resubmit` admitted any caller who could read the request: a pending approver, a past actor, or a reader at the opt-in record-reader level.
+  - **Now (TO).** On such a request, `recall` admits a system context and the override actor on a `pending` request; `remind` and `resubmit` admit a system context. Every other caller gets the door's existing non-submitter refusal: `403 FORBIDDEN`, with the same sentence as before.
+  - **Unchanged.** A request that has a submitter is judged exactly as before. Who may read a request, decide it, send it back, reassign it, ask for information or comment on it is unchanged.
+  
+  **The remedy.** None for a person. A job that has to recall, remind or resubmit a request nobody submitted does it through a system context. An administrator recalls a stuck pending one through the override.
+- 1a42b37: harden(approvals): every door that acts on an approval request answers a request the caller may not read the way the read door does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The doors that act on one approval request now ask the read door's own visibility rule first, before any check that depends on the request.
+  
+  - **What changes.** `approve`, `reject`, `recall`, `revise`, `resubmit`, `reassign`, `remind`, `request-info` and `comment` on `/api/v1/approvals/requests/:id/…` (and `IApprovalService.decide`, `recall`, `sendBack`, `resubmit`, `reassign`, `remind`, `requestInfo`, `comment` for an embedder calling the service) answer a caller who may not read the request — no participant of it, or outside its organization — with `404 REQUEST_NOT_FOUND`, exactly the answer an id that names no request gets. The rule is the one `GET /api/v1/approvals/requests/:id` serves by — the caller's organization, the participant set, the override actor's view and the opt-in record-reader tier — read from one place, not a copy. Nothing is written for such a caller.
+  - **What does not change.** A caller who can read the request keeps the door's own answer: a submitter is still `403 FORBIDDEN` on the approver's verbs, an approver on the submitter's, and a decided request is `409 INVALID_STATE`. Pending approvers decide, submitters recall, remind and resubmit, as before. An administrator's override — the platform administrator's across organizations included — and system contexts (the SLA sweep, the email action link) act as before.
+- Updated dependencies [ce12ad2]
+- Updated dependencies [ea025d3]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [7dd5a2f]
+- Updated dependencies [d9bf777]
+- Updated dependencies [804a2b0]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [76a1275]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [2205863]
+- Updated dependencies [dabe771]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [5bd3d2f]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [c13ef04]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [a8ec04d]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [0bf7aaf]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [119931d]
+- Updated dependencies [f3d2845]
+- Updated dependencies [c946cb9]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [0c64014]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [1e01924]
+- Updated dependencies [2c0a97b]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [8ce974c]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [9b4d193]
+- Updated dependencies [aa46d14]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [e7a6cc7]
+- Updated dependencies [4d278c9]
+- Updated dependencies [76bf6c5]
+- Updated dependencies [1a95c74]
+- Updated dependencies [0c03ce2]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [bc02a77]
+- Updated dependencies [0aaad18]
+- Updated dependencies [67103cc]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [c594e1c]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [7b293c4]
+- Updated dependencies [3fb74b6]
+- Updated dependencies [86fb645]
+- Updated dependencies [c16040d]
+- Updated dependencies [1617b7f]
+- Updated dependencies [b399cb8]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [8d208a4]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [c708de6]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [92b7bbd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [bf03ebb]
+- Updated dependencies [2c3574c]
+- Updated dependencies [1335c6b]
+- Updated dependencies [bdb19ca]
+- Updated dependencies [d8c611d]
+- Updated dependencies [ec0316e]
+- Updated dependencies [8bb2417]
+- Updated dependencies [2ac698b]
+- Updated dependencies [d0df873]
+- Updated dependencies [462b4f9]
+- Updated dependencies [9a0c622]
+- Updated dependencies [138dacf]
+- Updated dependencies [7f4258f]
+- Updated dependencies [1ac1c24]
+- Updated dependencies [97ca257]
+- Updated dependencies [104cd1a]
+- Updated dependencies [f1d795b]
+- Updated dependencies [b3d1415]
+- Updated dependencies [078e581]
+- Updated dependencies [18e4ac1]
+- Updated dependencies [51058ef]
+- Updated dependencies [4df6292]
+- Updated dependencies [f125ce4]
+- Updated dependencies [b16ee8b]
+- Updated dependencies [86d0a8c]
+- Updated dependencies [d089dac]
+- Updated dependencies [3557366]
+- Updated dependencies [29c70ca]
+- Updated dependencies [b5e7ba5]
+- Updated dependencies [38a278b]
+- Updated dependencies [5f7d554]
+- Updated dependencies [6a940d1]
+- Updated dependencies [bb82da1]
+- Updated dependencies [85ea12f]
+- Updated dependencies [85f7a0d]
+- Updated dependencies [e9fb529]
+- Updated dependencies [7b55ea9]
+- Updated dependencies [4138ce8]
+- Updated dependencies [53dda03]
+- Updated dependencies [ba1f164]
+- Updated dependencies [20f052d]
+- Updated dependencies [9467a1b]
+- Updated dependencies [8b65633]
+- Updated dependencies [c268b72]
+- Updated dependencies [d68d129]
+- Updated dependencies [bd68248]
+- Updated dependencies [f72bc9e]
+- Updated dependencies [a20dcae]
+- Updated dependencies [5d46f43]
+- Updated dependencies [c9aaee9]
+- Updated dependencies [3d6f230]
+- Updated dependencies [7eb0b19]
+- Updated dependencies [8e6ab05]
+- Updated dependencies [e756782]
+- Updated dependencies [8209a2f]
+- Updated dependencies [aee9c47]
+- Updated dependencies [0e75081]
+- Updated dependencies [45b4922]
+- Updated dependencies [399df5b]
+- Updated dependencies [31204d1]
+- Updated dependencies [2c881fb]
+- Updated dependencies [1bdf674]
+- Updated dependencies [4b8cbe2]
+- Updated dependencies [5f99582]
+- Updated dependencies [63f962f]
+- Updated dependencies [df8d020]
+- Updated dependencies [6f09464]
+- Updated dependencies [772b356]
+- Updated dependencies [4008e62]
+- Updated dependencies [b64bb72]
+- Updated dependencies [b861525]
+- Updated dependencies [6903c93]
+- Updated dependencies [4b06a54]
+- Updated dependencies [ebbb5b8]
+- Updated dependencies [9bdfe37]
+- Updated dependencies [a81b7cb]
+- Updated dependencies [eeb3117]
+- Updated dependencies [a5fcd06]
+- Updated dependencies [56076fd]
+- Updated dependencies [fdb9a07]
+- Updated dependencies [57958aa]
+- Updated dependencies [59775a0]
+- Updated dependencies [744211f]
+- Updated dependencies [87956dc]
+- Updated dependencies [3482f3d]
+- Updated dependencies [a6a369e]
+- Updated dependencies [601832b]
+- Updated dependencies [5c4e752]
+- Updated dependencies [4ab2e7e]
+- Updated dependencies [589049b]
+- Updated dependencies [d0f308c]
+- Updated dependencies [4dc41e6]
+- Updated dependencies [eb05ea2]
+- Updated dependencies [55a4898]
+- Updated dependencies [f87239a]
+- Updated dependencies [2ae8c89]
+- Updated dependencies [a4daa85]
+- Updated dependencies [b64980a]
+- Updated dependencies [bbb98c4]
+- Updated dependencies [1bb9536]
+- Updated dependencies [2bf71ce]
+- Updated dependencies [c1af99c]
+- Updated dependencies [6f35b74]
+- Updated dependencies [99a6a78]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [3ac22c9]
+- Updated dependencies [ceef714]
+- Updated dependencies [b388cfe]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [cfd237f]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/metadata-core@18.3.0
+  - @objectstack/formula@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

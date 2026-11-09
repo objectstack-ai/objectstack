@@ -24,12 +24,26 @@ import { describe, it, expect } from 'vitest';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { arObjects } from './ar.objects.generated.js';
+import { frObjects } from './fr.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 import { enObjects } from './en.objects.generated.js';
 
 const LOCALES = [
   ['zh-CN', zhCNObjects],
   ['ja-JP', jaJPObjects],
   ['es-ES', esESObjects],
+  ['zh-Hant', zhHantObjects],
+  ['ar', arObjects],
+  ['fr', frObjects],
+  ['pt-BR', ptBRObjects],
+  ['ru', ruObjects],
+  ['de', deObjects],
+  ['ko', koObjects],
 ] as const;
 
 const ACTIONS = ['approval_reject', 'approval_recall'] as const;

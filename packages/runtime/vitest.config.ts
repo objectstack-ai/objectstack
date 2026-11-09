@@ -154,7 +154,8 @@ export default defineConfig({
       { find: /^@objectstack\/lint\/runtime$/, replacement: path.resolve(__dirname, '../lint/src/runtime.ts') },
       // [#29603] The package root: a served view read imports it lazily for the
       // form-layout warnings (metadata-protocol's `loadFormLayoutLint`), and
-      // `meta-write-org-scope.test.ts` pays that load at module top. Both
+      // `meta-write-org-scope.test.ts` pays that load at module top, as the files
+      // importing `src/lint-root-preload.testkit.ts` do (#29627). All of them
       // resolve here, so the read judges the lint rule in the checkout, never `dist/`.
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
       // The MCP bridge (`domains/mcp.ts`) reads "this field declares options"

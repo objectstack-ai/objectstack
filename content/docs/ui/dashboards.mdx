@@ -380,16 +380,19 @@ dateRange: {
 | `last_week` | Previous week |
 | `this_month` | Current month |
 | `last_month` | Previous month |
+| `next_month` | Following month |
 | `this_quarter` | Current quarter |
 | `last_quarter` | Previous quarter |
+| `next_quarter` | Following quarter |
 | `this_year` | Current year |
 | `last_year` | Previous year |
 | `last_7_days` | Rolling 7 days |
 | `last_30_days` | Rolling 30 days |
 | `last_90_days` | Rolling 90 days |
+| `next_30_days` | Today and the 30 days after it |
 | `custom` | User-defined range |
 
-The thirteen named ranges are published as `DATE_RANGE_PRESETS` in
+The named ranges are published as `DATE_RANGE_PRESETS` in
 `@objectstack/spec/ui` — the vocabulary's single source of truth. `custom` is not
 one of them: it selects no window, it opens the picker.
 

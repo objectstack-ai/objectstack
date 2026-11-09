@@ -4,8 +4,8 @@
  *
  * What a user does to a list for themselves — the order of the view tabs, and
  * per view the sort, the Filter panel's conditions, the column order and
- * widths, the row density and the hidden fields (objectui#12474) — is THEIR
- * preference: it follows them to another browser, and it
+ * widths, the row density, the hidden fields (objectui#12474) and the fields
+ * they added as columns (objectstack#30077) — is THEIR preference: it follows them to another browser, and it
  * never changes the view for anyone else. It used to live in two wrong places:
  * the tab order and the filters in this browser's localStorage only, and the
  * sort and the column layout written INTO the shared view (`/meta/view`), so
@@ -19,7 +19,8 @@
  * ```json
  * { "viewOrder": ["<view id>", …],
  *   "perView": { "<view id>": { "sort": […], "filters": {…}, "columnState": {…},
- *                               "rowHeight": "medium", "hiddenFields": ["<field>", …] } } }
+ *                               "rowHeight": "medium", "hiddenFields": ["<field>", …],
+ *                               "addedFields": ["<field>", …] } } }
  * ```
  *
  * The rows are loaded by prefix in the console's ONE preference read per load
@@ -102,6 +103,15 @@ export interface ListViewPreference {
    * absent.
    */
   hiddenFields?: string[];
+  /**
+   * objectstack#30077 — the object's fields this user added to their list as
+   * columns with the Hide Fields popover: an ADDITION to the columns the view
+   * declares (the list draws `columns` plus these, then minus
+   * `hiddenFields`). Only a field the reader may read is offered; a stored
+   * name they can no longer read is kept and draws nothing. An empty list is
+   * "nothing added", the same as absent, so it is not kept.
+   */
+  addedFields?: string[];
 }
 
 /** A user's state for one object: the `ui.list.<object>` row's value. */
@@ -172,6 +182,12 @@ function sanitizeHiddenFields(v: unknown): string[] | undefined {
   return [...new Set(v.filter((x): x is string => typeof x === 'string' && x.length > 0))];
 }
 
+/** The added fields, de-duplicated; an empty list is no part at all. */
+function sanitizeAddedFields(v: unknown): string[] | undefined {
+  const names = sanitizeHiddenFields(v);
+  return names && names.length > 0 ? names : undefined;
+}
+
 function sanitizeView(v: unknown): ListViewPreference | undefined {
   if (!isRecord(v)) return undefined;
   const out: ListViewPreference = {};
@@ -185,6 +201,8 @@ function sanitizeView(v: unknown): ListViewPreference | undefined {
   if (rowHeight) out.rowHeight = rowHeight;
   const hiddenFields = sanitizeHiddenFields(v.hiddenFields);
   if (hiddenFields) out.hiddenFields = hiddenFields;
+  const addedFields = sanitizeAddedFields(v.addedFields);
+  if (addedFields) out.addedFields = addedFields;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -210,7 +228,8 @@ export function sanitizeObjectListPreference(v: unknown): ObjectListPreference {
  * with no order and no width. An empty sort is NOT a clear: `sort: []` is kept,
  * because a user who removed every sort level (the Sort builder emits `[]`)
  * chose "no sort", which is not the view's authored sort. The same holds for
- * `hiddenFields: []` ("show every column"). The ways back to the view's own
+ * `hiddenFields: []` ("show every column"); `addedFields: []` is a clear, since
+ * nothing added is the view's own. The ways back to the view's own
  * are "Reset view" (the whole entry, `resetViewPreference`) and the list's
  * "Reset to view default" for one part, which patches that part to `null`
  * (objectstack#28948) instead of storing the view's value as a choice. A view
@@ -222,9 +241,10 @@ export type ListViewPreferencePatch = {
   columnState?: ListColumnStatePreference | null;
   rowHeight?: RowHeight | null;
   hiddenFields?: readonly string[] | null;
+  addedFields?: readonly string[] | null;
 };
 
-const VIEW_PREFERENCE_PARTS = ['sort', 'filters', 'columnState', 'rowHeight', 'hiddenFields'] as const;
+const VIEW_PREFERENCE_PARTS = ['sort', 'filters', 'columnState', 'rowHeight', 'hiddenFields', 'addedFields'] as const;
 
 /** Apply a patch to one view's entry of an object's state. Pure. */
 export function patchViewPreference(
@@ -251,7 +271,8 @@ export function patchViewPreference(
 
 /**
  * Remove one view's entry — every part of it: the sort, filters, column state,
- * density and hidden fields (objectui#12474). Pure.
+ * density, hidden fields (objectui#12474) and added fields (objectstack#30077).
+ * Pure.
  */
 export function resetViewPreference(state: ObjectListPreference, viewId: string): ObjectListPreference {
   if (!state.perView || !(viewId in state.perView)) return state;
@@ -493,7 +514,7 @@ export interface ObjectListPreferences {
   setViewOrder(ids: readonly string[]): void;
   /** Store (or clear, see {@link ListViewPreferencePatch}) part of one view's state. */
   patchView(viewId: string, patch: ListViewPreferencePatch): void;
-  /** Drop one view's whole entry (sort, filters, columns, density, hidden fields): back to the view's own. */
+  /** Drop one view's whole entry (sort, filters, columns, density, hidden and added fields): back to the view's own. */
   resetView(viewId: string): void;
 }
 

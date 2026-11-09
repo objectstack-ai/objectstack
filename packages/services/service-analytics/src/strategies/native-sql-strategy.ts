@@ -49,7 +49,8 @@ import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
 import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
-import { isJsonStoredShape } from '../contains-membership-sql.js';
+import { declaredCubeFilterMember, declaredCubeMemberKey } from '../cube-member-key.js';
+import { hasJsonMembershipSql, isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { dateRangeWindowBounds } from '../dataset-executor.js';
@@ -59,8 +60,8 @@ import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
 // [#21042] What each aggregate's operand accumulates in, the PostgreSQL
 // boolean-aggregand cast, and the one column-class predicate both read — the
 // operand rule `driver-sql`'s own `aggregate()` applies, defined once in core.
-import { aggregandColumnClass, aggregandOperandSql } from '@objectstack/core';
-import { emptyGroupValueFor } from '@objectstack/spec/data';
+import { aggregandColumnClass, aggregandOperandSql, mssqlWindow, mssqlWindowSql, type AggregandSqlDialect } from '@objectstack/core';
+import { emptyGroupValueFor, isVirtualSearchField } from '@objectstack/spec/data';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
 /**
@@ -214,11 +215,13 @@ export function aggregateOfMeasure(cube: string, member: string, type: unknown):
  * this landed, the same declared skip as the `mysql` arm in
  * `text-match-sql.ts`.
  */
-const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>> = {
+const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<Exclude<AnalyticsSqlDialect, 'mssql'>, string | null>> = {
   sqlite: 'LIMIT -1',
   mysql: 'LIMIT 18446744073709551615',
   postgres: null,
   unknown: 'LIMIT 9223372036854775807',
+  // [#31626] No `mssql` cell: SQL Server has no `LIMIT` at all, and its window
+  // is `@objectstack/core`'s `mssqlWindow` (see {@link windowClauseSql}).
 };
 
 /**
@@ -231,6 +234,16 @@ const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>
  * limit takes the dialect's no-limit spelling ({@link OFFSET_ONLY_LIMIT_SQL})
  * in front of it.
  *
+ * [#31626] SQL Server has no `LIMIT`. Its window is the one `driver-sql`'s
+ * find path runs, decided by `mssqlWindow` in `@objectstack/core` and rendered
+ * by `mssqlWindowSql` there: this clause carries the tail (`ORDER BY (SELECT
+ * NULL)` when the statement is not `ordered` and an offset applies, then
+ * `OFFSET n ROWS`, then `FETCH NEXT n ROWS ONLY`), and a lone limit is the
+ * `TOP (n)` that {@link windowTopSql} puts after `SELECT`. Before, the
+ * dialect took the `unknown` spelling, `LIMIT n`, which SQL Server does not
+ * parse — what the `/analytics/sql` echo printed for a federated SQL Server
+ * object.
+ *
  * Exported so a face that echoes a statement for the same window can render
  * it with the same bytes rather than a second spelling.
  */
@@ -238,7 +251,9 @@ export function windowClauseSql(
   limit: number | undefined,
   offset: number | undefined,
   dialect: AnalyticsSqlDialect,
+  ordered = false,
 ): string {
+  if (dialect === 'mssql') return mssqlWindowSql(mssqlWindow(limit, offset, ordered)).tail;
   let sql = '';
   if (limit != null) {
     sql += ` LIMIT ${limit}`;
@@ -248,6 +263,30 @@ export function windowClauseSql(
   }
   if (offset != null) sql += ` OFFSET ${offset}`;
   return sql;
+}
+
+/**
+ * [#31626] What a statement carries right after `SELECT` for its window:
+ * `'TOP (n) '` on SQL Server when a limit applies with no offset (see
+ * {@link windowClauseSql}), `''` on every other dialect, whose window is all
+ * in the tail.
+ */
+export function windowTopSql(
+  limit: number | undefined,
+  offset: number | undefined,
+  dialect: AnalyticsSqlDialect,
+): string {
+  return dialect === 'mssql' ? mssqlWindowSql(mssqlWindow(limit, offset, true)).top : '';
+}
+
+/**
+ * [#31394] The dialect `@objectstack/core`'s aggregand policies are asked with.
+ * `'mssql'` is named in this package for the text-match arms; the policies
+ * state none for it, so it is handed on as `'unknown'` — aggregated as stored,
+ * exactly as it was while SQL Server still read as `'unknown'` here.
+ */
+function aggregandDialectOf(dialect: AnalyticsSqlDialect): AggregandSqlDialect {
+  return dialect === 'mssql' ? 'unknown' : dialect;
 }
 
 /**
@@ -277,6 +316,8 @@ const NULLS_LAST_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>> = {
   postgres: 'NULLS LAST',
   mysql: null,
   unknown: null,
+  // [#31394] As `unknown`, which SQL Server read as until it was named.
+  mssql: null,
 };
 
 /**
@@ -838,6 +879,21 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     // decline above is: the query routes on, and the service refuses a
     // duration measure no native statement serves, with the reason.
     if (this.durationMeasureOnUnknownDialectIn(query, ctx)) return false;
+    // ── [#29304] DECLINE a grouped dimension over a VIRTUAL field ──────────
+    //
+    // A `formula` is computed on read: no table stores a column for it, so the
+    // `GROUP BY calc` this strategy compiles reached the database as a column
+    // that does not exist and answered `DATABASE_ERROR` / 500, where the engine
+    // refuses the same group key `INVALID_FIELD` / 400 at its position with the
+    // store-the-value remedy (`@objectstack/objectql`'s
+    // `assertGroupByTargetsAreStored`). The mechanism of the declines above:
+    // what this strategy cannot serve as the engine would, the engine serves —
+    // here, refuses — so the query routes to the ObjectQL strategy and every
+    // composition answers one refusal. Only a GROUPED member is judged: a
+    // `dimensions` entry (a bucketed `timeDimensions` entry already declines
+    // above). A stored dimension, and a query that groups by no virtual field,
+    // stay here. See {@link groupsByVirtualField}.
+    if (this.groupsByVirtualField(query, ctx)) return false;
     const caps = ctx.queryCapabilities(query.cube);
     return caps.nativeSql && typeof ctx.executeRawSql === 'function';
   }
@@ -859,6 +915,35 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       ? [...scoped]
       : [this.extractObjectName(cube), ...Object.keys(cube.joins ?? {}).map((alias) => cube.joins?.[alias]?.name ?? alias)];
     return objects.some((object) => findReadableIdsLeaf(ctx.getReadScope!(object)) !== null);
+  }
+
+  /**
+   * [#29304] Does a `dimensions` entry of this query resolve to a column the
+   * host declares VIRTUAL (the spec's `isVirtualSearchField`: `formula`)? See
+   * the decline at {@link canHandle}. Each member resolves to the (object,
+   * column) {@link resolveStorageTarget} gives the compiler — the object a
+   * relationship path's last hop reaches for a dotted one — and is asked of the
+   * host's `declaredFieldType`. An expression `sql`, a member that does not
+   * resolve, and a host that wired no field types are not judged: "cannot
+   * answer, do not block", the tiering every such hook here takes.
+   */
+  private groupsByVirtualField(query: AnalyticsQuery, ctx: StrategyContext): boolean {
+    const declared = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    if (typeof declared !== 'function') return false;
+    const cube = query.cube ? ctx.getCube(query.cube) : undefined;
+    if (!cube) return false;
+    const baseTable = this.extractObjectName(cube);
+    const referenceOf = relationshipReferenceOf(ctx);
+    return (query.dimensions ?? []).some((member) => {
+      let target: { object: string; field: string };
+      try {
+        target = this.resolveStorageTarget(cube, member, baseTable, referenceOf);
+      } catch {
+        return false;
+      }
+      const type = declared.call(ctx, target.object, target.field);
+      return type !== undefined && isVirtualSearchField({ type } as never);
+    });
   }
 
   /**
@@ -934,7 +1019,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     type Target = { object: string; field: string } | undefined;
     const needsJson = (target: Target, op: string): boolean => {
       if (!target || (op !== '$contains' && op !== '$notContains' && op !== '$empty')) return false;
-      if (sqlDialectFor(ctx, target.object) !== 'unknown') return false;
+      if (hasJsonMembershipSql(sqlDialectFor(ctx, target.object))) return false;
       const shape = declaredValueShapeResolver(ctx, target.object)?.(target.field);
       if (op === '$empty') return shape !== undefined && expandEmptyOperator(shape).arm === 'multi_value';
       return isJsonStoredShape(shape);
@@ -1542,7 +1627,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       this.applyReadScope(join.object, alias, ctx, whereClauses, params);
     }
 
-    let sql = `SELECT ${selectClauses.join(', ')} FROM "${tableName}"`;
+    // [#21365] The dialect of the driver `execute()` hands this statement to —
+    // the base object's, the one `executeRawSql` is called with. [#25907] The
+    // order states its NULL placement in it. [#31626] SQL Server's lone limit
+    // is a `TOP (n)` after `SELECT` (`windowTopSql`).
+    const dialect = sqlDialectFor(ctx, this.extractObjectName(cube));
+    let sql = `SELECT ${windowTopSql(query.limit, query.offset, dialect)}${selectClauses.join(', ')} FROM "${tableName}"`;
     if (joins.size > 0) {
       sql += ' ' + Array.from(joins.values(), (join) => join.sql).join(' ');
     }
@@ -1552,12 +1642,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (groupByClauses.length > 0) {
       sql += ` GROUP BY ${groupByClauses.join(', ')}`;
     }
-    // [#21365] The dialect of the driver `execute()` hands this statement to —
-    // the base object's, the one `executeRawSql` is called with. [#25907] The
-    // order states its NULL placement in it.
-    const dialect = sqlDialectFor(ctx, this.extractObjectName(cube));
-    sql += orderClauseSql(query.order, dialect);
-    sql += windowClauseSql(query.limit, query.offset, dialect);
+    const orderSql = orderClauseSql(query.order, dialect);
+    sql += orderSql;
+    sql += windowClauseSql(query.limit, query.offset, dialect, orderSql !== '');
 
     return { sql, params };
   }
@@ -1725,14 +1812,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * Resolve a member reference (dimension, measure, or filter field) to its
    * cube definition.
    *
-   * Accepts three naming conventions:
-   *   1. `<cube>.<field>` — the canonical analytics qualifier (stripped to `<field>`).
-   *   2. `<lookup>.<field>` — a relation traversal (e.g. `account.industry`).
-   *      First tried as the literal key, then as the underscore-flattened
-   *      key (`account_industry`), and finally returned as a synthetic
-   *      definition whose `sql` is the dotted reference so the JOIN
-   *      machinery can pick it up.
-   *   3. `<field>` — a bare field name on the cube's table.
+   * The declared key a spelling names is {@link declaredCubeMemberKey}'s one
+   * rule, which the door's gates read too: the key verbatim (an exact dotted
+   * key included), behind the cube's own qualifier (`<cube>.<field>`,
+   * `<object>.<field>`), or through an underscore-flattened key
+   * (`account_industry`) whose `sql` is that same relationship path. [#31842]
+   * A dotted spelling never names a key by its tail alone: `vendor.region` is
+   * not the base `region`.
+   *
+   * A dotted dimension that names no declared key is a relation traversal
+   * (`account.industry`): it comes back as a synthetic definition whose `sql`
+   * is the dotted reference, so the JOIN machinery picks it up.
    */
   private lookupMember(
     cube: Cube,
@@ -1740,25 +1830,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     kind: 'dimension' | 'measure',
   ): { sql: string; type?: string } | undefined {
     const bag = kind === 'dimension' ? cube.dimensions : cube.measures;
-    // Direct hit on the registered key (handles `cube.field` and exact dotted keys).
-    if (bag[member]) return bag[member];
-    if (member.includes('.')) {
-      const [first, ...rest] = member.split('.');
-      const tail = rest.join('.');
-      // `<cube>.<field>` style.
-      if (first === cube.name && bag[tail]) return bag[tail];
-      // Plain second-segment lookup (legacy behaviour).
-      if (bag[tail]) return bag[tail];
-      // Underscore-flattened relation lookup (e.g. `account_industry`).
-      const flat = member.replace(/\./g, '_');
-      if (bag[flat]) return bag[flat];
-      // Synthetic relation traversal — let qualifyAndRegisterJoin handle it.
-      if (kind === 'dimension') {
-        return { sql: member, type: 'string' };
-      }
-    } else if (bag[member]) {
-      return bag[member];
-    }
+    const key = declaredCubeMemberKey(cube, bag, member);
+    if (key !== undefined) return bag[key];
+    // Synthetic relation traversal — let qualifyAndRegisterJoin handle it.
+    if (kind === 'dimension' && member.includes('.')) return { sql: member, type: 'string' };
     return undefined;
   }
 
@@ -1768,9 +1843,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     parentTable: string,
     joins: StatementJoins,
   ): string {
+    // `lookupMember` answers every dotted member (a declared key, or the
+    // synthetic traversal), so an undeclared one here is a bare base column.
     const dim = this.lookupMember(cube, member, 'dimension');
-    const raw = dim ? dim.sql : (member.includes('.') ? member.split('.')[1] : member);
-    return this.qualifyAndRegisterJoin(raw, parentTable, joins, cube);
+    return this.qualifyAndRegisterJoin(dim ? dim.sql : member, parentTable, joins, cube);
   }
 
   /**
@@ -1846,7 +1922,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           target
             ? aggregandColumnClass(declaredValueShapeResolver(ctx, target.object)?.(target.field))
             : undefined,
-          sqlDialectFor(ctx, parentTable),
+          aggregandDialectOf(sqlDialectFor(ctx, parentTable)),
           column,
         );
 
@@ -1919,21 +1995,34 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     );
   }
 
+  /**
+   * [#31880] The definition a FILTER member resolves to: the declared member
+   * it names across both bags ({@link declaredCubeFilterMember}: dimensions,
+   * then measures, the where gate's order), else — for a dotted one — the
+   * synthetic relation traversal. The declared measure comes first, so
+   * `CUBE.total` reads the measure's column exactly as `total` does instead of
+   * joining a hop named for the cube.
+   */
+  private lookupFilterMember(cube: Cube, member: string): { sql: string; type?: string } | undefined {
+    const declared = declaredCubeFilterMember(cube, member);
+    if (declared) return declared.kind === 'dimension' ? cube.dimensions[declared.key] : cube.measures[declared.key];
+    return this.lookupMember(cube, member, 'dimension');
+  }
+
   private resolveFieldSql(
     cube: Cube,
     member: string,
     parentTable: string,
     joins: StatementJoins,
   ): string {
-    const dim = this.lookupMember(cube, member, 'dimension');
-    if (dim) return this.qualifyAndRegisterJoin(dim.sql, parentTable, joins, cube);
-    const measure = this.lookupMember(cube, member, 'measure');
-    if (measure) return this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
-    const fieldName = member.includes('.') ? member.split('.')[1] : member;
+    const entry = this.lookupFilterMember(cube, member);
+    if (entry) return this.qualifyAndRegisterJoin(entry.sql, parentTable, joins, cube);
     // [#21249] A member the cube does not declare is a base-table column too
     // (`where: { id }`), so it takes the same qualification as a declared one:
     // returned bare it sat beside a joined target's own `id`, ambiguous.
-    return this.qualifyAndRegisterJoin(fieldName, parentTable, joins, cube);
+    // [#31842] Only a bare one reaches here: `lookupMember` answers every
+    // dotted member, so no second segment is ever read as a base column.
+    return this.qualifyAndRegisterJoin(member, parentTable, joins, cube);
   }
 
   /**
@@ -1957,9 +2046,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     baseTable: string,
     referenceOf: HopReference | undefined,
   ): { object: string; field: string } {
-    const dim = this.lookupMember(cube, member, 'dimension');
-    const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
-    const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
+    const rawSql = this.lookupFilterMember(cube, member)?.sql ?? member;
 
     if (rawSql.includes('.')) {
       // Multi-hop (ADR-0071): the column's owning object is the object the

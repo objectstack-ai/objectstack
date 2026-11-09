@@ -4,6 +4,8 @@
 // Studio-authored package answered 404 "No metadata items found" while the
 // package held a published item and a pending draft.
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

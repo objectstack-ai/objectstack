@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -27,7 +27,7 @@
         ]
       },
       "steps": [
-        "boot the showcase on its own port and file DB (dogfood skill §0); sign in as admin; sign up members A and B (fresh emails; invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)) — both hold only the everyone baseline showcase_member_default",
+        "boot the showcase on its own port and file DB (dogfood skill §0); sign in as admin; sign up members A and B (fresh emails; invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address answers the invitation's id, and a sign-up presenting it as invitationId is admitted while the address alone is refused (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)) — both hold only the everyone baseline showcase_member_default",
         "as A: POST /api/v1/data/showcase_private_note {\"title\": \"A note 1\"} and a second note; as B: POST one note — capture the returned ids",
         "as A: GET /api/v1/data/showcase_private_note (list); as B: same; capture both record sets",
         "as A: GET /api/v1/data/showcase_private_note/<B's id> (foreign by-id read); as A: PATCH /api/v1/data/showcase_private_note/<B's id> {\"body\": \"forged\"} (foreign by-id write)",
@@ -148,7 +148,8 @@
           "date": "2026-10-31",
           "change": "acceptance[4].verify names the adopted-row proof. In QA run #27409's `objectstack verify --rls` block, showcase_account's RLS proof rode a seeded row because the sweep's derived admin create was refused 400. Source agrees: packages/verify/src/rls.ts falls back to adopting an existing row when the app's validation rejects the derived body (the #7685 cascade-stopper, RlsResult target 'adopted', report suffix '[target adopted from existing rows — admin create failed (STATUS)]'), so the object and its dependents are probed instead of skipped. The verify text now says the adopted-row verdict stands, asks the run record to name the objects that rode one, and records that the derived-body 400 is not an RLS finding. No assertion is relaxed: summary.holes must still be 0. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488948228",
           "ref": "#27409"
-        }
+        },
+        { "revision": 11, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" }
       ]
     },
     {
@@ -156,7 +157,7 @@
       "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -172,7 +173,7 @@
         ]
       },
       "steps": [
-        "boot the showcase on its own port and DB; admin session + two members Alice and Bob (fresh sign-ups — invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)); resolve their sys_user ids via the data API or objectql",
+        "boot the showcase on its own port and DB; admin session + two members Alice and Bob (fresh sign-ups — invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address answers the invitation's id, and a sign-up presenting it as invitationId is admitted while the address alone is refused (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)); resolve their sys_user ids via the data API or objectql",
         "as admin (contact create is admin-side in the stock matrix): POST /api/v1/data/showcase_contact {\"name\": \"RO probe\", \"email\": \"ro-probe@verify.test\", \"lead_score\": 10} — forging the readonly field on INSERT; GET the row back",
         "PATCH the same contact with {\"lead_score\": 99}; GET again",
         "as Alice: POST /api/v1/data/showcase_private_note {\"title\": \"planted\", \"owner_id\": \"<Bob's id>\"} (insert forge); then POST a note with {\"owner_id\": \"<Alice's own id>\"} (explicit self-owner); then PATCH her own note with {\"owner_id\": \"<Bob's id>\"} (transfer) and with {\"owner_id\": null} (disown)",
@@ -291,7 +292,8 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP): acceptance[0]'s droppedFields advertisement on the INSERT strip (showcase-static-readonly); acceptance[4]'s createMany owner stamping and negative[0]'s admin forge-insert and disown (owner-anchor-and-bulk-writes); acceptance[5]'s mixed updateMany per-row droppedFields and the line's product field, and acceptance[6]'s per-row validation under continueOnError with the default-stop contrast (showcase-readonly-when-parent). automated.ref now maps every clause to its case. No clause or status changed",
           "ref": "#26571"
-        }
+        },
+        { "revision": 9, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" }
       ]
     },
     {
@@ -499,7 +501,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -521,7 +523,7 @@
         ]
       },
       "steps": [
-        "boot the showcase on its own port and DB; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set with one sys_user_permission_set row. A live run writes it as the admin over HTTP: POST /api/v1/data/sys_user_permission_set {\"user_id\": MEMBER_ID, \"permission_set\": SET_NAME} answers 201 and the grant takes effect (QA run #28545; the object declares create among its apiMethods, packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts). The pins insert the same row in system context (showcase-permission-zoo.dogfood.test.ts, showcase-crud-persona-matrix.dogfood.test.ts). ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (a pending sys_invitation row admits the sign-up), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
+        "boot the showcase on its own port and DB; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set with one sys_user_permission_set row. A live run writes it as the admin over HTTP: POST /api/v1/data/sys_user_permission_set {\"user_id\": MEMBER_ID, \"permission_set\": SET_NAME} answers 201 and the grant takes effect (QA run #28545; the object declares create among its apiMethods, packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts). The pins insert the same row in system context (showcase-permission-zoo.dogfood.test.ts, showcase-crud-persona-matrix.dogfood.test.ts). ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (the sign-up presents the id it answers as invitationId; the address alone is refused), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
         "as admin (or a helper member), seed one FOREIGN-owned probe row per object under test (e.g. a showcase_private_note, showcase_inquiry, showcase_invoice + line, showcase_announcement owned by someone other than the persona)",
         "for every row of access-matrix.json drive all four verbs as that persona: POST /api/v1/data/<object> {minimal valid payload}, GET /api/v1/data/<object> + GET /api/v1/data/<object>/<probe id>, PATCH /api/v1/data/<object>/<own or probe id>, DELETE /api/v1/data/<object>/<id> — capture status + the top-level body.code for each cell (acceptance[1])",
         "for rows with viewAllRecords:true (auditor on showcase_inquiry/showcase_invoice/showcase_invoice_line/showcase_private_note): GET the foreign probe by id and list; for the SAME objects re-run as a persona whose row says viewAllRecords:false",
@@ -670,7 +672,8 @@
           "date": "2026-11-01",
           "change": "QA run #28545 (W3-C1R) finding: steps[0] and steps[6] described the set grant only as a system-context insert. steps[0] now names the live door, an admin POST /api/v1/data/sys_user_permission_set {user_id, permission_set} (201, effective, as #28545 drove it; sys-user-permission-set.object.ts declares create), and keeps the pins' system-context insert as theirs. steps[6] adds the delegate's POST /api/v1/data/sys_business_unit_member into bu_field_ops, the membership the pin places beside the grant (showcase-crud-persona-matrix.dogfood.test.ts). No clause changed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
-        }
+        },
+        { "revision": 13, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" }
       ]
     },
     {
@@ -847,7 +850,7 @@
         "requires": [
           "showcase_contributor.fields FLS on showcase_project budget figures (permission-sets.ts — keys are <object>.<field> qualified; bare keys silently enforce nothing, the compile-time lint security-fls-unqualified-key guards that)",
           "a seeded showcase_project row with a non-null budget",
-          "showcase_client_liaison — the STOCK readable:false grant since #9308 fixture 4 (permission-sets.ts): showcase_project { allowRead: true } plus fields { 'showcase_project.budget' | '.spent' | '.budget_remaining': { readable: false, editable: false } }, bound to the client_liaison position. Grant it to a FRESH member and to nobody who also holds showcase_contributor: field permissions merge most-permissive across the sets a caller holds, so contributor's readable:true would legitimately un-mask all three"
+          "showcase_client_liaison — the STOCK readable:false grant since #9308 fixture 4 (permission-sets.ts): showcase_project { allowRead: true } plus fields { 'showcase_project.budget' | '.spent' | '.budget_remaining': { readable: false, editable: false } }, bound to the showcase_client_liaison position. Grant it to a FRESH member and to nobody who also holds showcase_contributor: field permissions merge most-permissive across the sets a caller holds, so contributor's readable:true would legitimately un-mask all three"
         ],
         "knownGaps": [
           "[CLOSED — API half by #9481, the seed gap itself by #9308 fixture 4; the gap text stays because it carries the reason] stock showcase authored NO readable:false FLS grant, so the read-MASKING half (plugin-security/src/field-masker.ts) had no stock fixture and a run had to author a scratch permission set at runtime — which the SERVER half could do (showcase-fls-read-mask-strip.dogfood.test.ts does exactly that) but the UI half could not, because a console render cannot be driven off a permission set that exists only inside a test's stack. showcase_client_liaison is now that grant on stock seeds, so clause 5 is runnable end to end: grant the set to a fresh member, sign in as them, and compare their API body and their console render against the admin's. packages/qa/dogfood/test/showcase-client-liaison-fixtures.dogfood.test.ts pins the server half of the stock grant (by id, in lists, through an explicit $select) with the admin as the entitled contrast.",
@@ -1232,7 +1235,7 @@
         ],
         "knownGaps": [
           "the owner-based rule is [experimental] and skipped per the liveness ledger — exclude it; criteria + position/unit audiences are the live surface",
-          "the POSITION-audience variant is CONFOUNDED on stock and scores no widening clause. The only seeded position rule, share_key_account_qualified_contacts_with_managers, shares Northwind-qualified showcase_contact rows with the manager position, and manager's showcase_manager set reads showcase_contact at readScope 'org'. Measured on main c91af8ed6: a manager-holding member reads all 32 contacts, and POST /api/v1/security/explain answers visible, decidedBy 'depth' on a matching AND a non-matching contact — the sharing layer never decides. So acceptance[0]-[2] are scored on the unit_and_subordinates variant (share_new_inquiries_with_field_ops: a member of bu_field_ops or a descendant unit reads exactly the status='new' inquiry, and its sys_record_share row carries source 'rule'); the position variant records its depth-decided reads as the confound. A position audience without org depth is authored in-run by access-security.sharing-rule-authoring-ui"
+          "the POSITION-audience variant is CONFOUNDED on stock and scores no widening clause. The only seeded position rule, showcase_share_key_account_qualified_contacts_with_managers, shares Northwind-qualified showcase_contact rows with the showcase_manager position, and manager's showcase_manager set reads showcase_contact at readScope 'org'. Measured on main c91af8ed6: a manager-holding member reads all 32 contacts, and POST /api/v1/security/explain answers visible, decidedBy 'depth' on a matching AND a non-matching contact — the sharing layer never decides. So acceptance[0]-[2] are scored on the unit_and_subordinates variant (showcase_share_new_inquiries_with_field_ops: a member of bu_field_ops or a descendant unit reads exactly the status='new' inquiry, and its sys_record_share row carries source 'rule'); the position variant records its depth-decided reads as the confound. A position audience without org depth is authored in-run by access-security.sharing-rule-authoring-ui"
         ]
       },
       "variants": [
@@ -1241,13 +1244,13 @@
         "manual one-off share via the record-shares route"
       ],
       "steps": [
-        "boot the showcase on its own port and file DB (dogfood §0's isolation, RUNNER's canonical boot line) in the stock `single` tenancy posture: no clause needs OS_TENANCY_POSTURE=isolated or any walled boot; add the audience member to bu_west_coast through sys_business_unit_member (fixtures.requires); give a second member the manager position to record the position confound",
-        "the probes are seeded: share_new_inquiries_with_field_ops matches status='new', and the seed ships one new, one contacted and one closed showcase_inquiry (OWD private). Use the new one as the MATCHING probe and a non-new one as the NON-MATCHING probe",
+        "boot the showcase on its own port and file DB (dogfood §0's isolation, RUNNER's canonical boot line) in the stock `single` tenancy posture: no clause needs OS_TENANCY_POSTURE=isolated or any walled boot; add the audience member to bu_west_coast through sys_business_unit_member (fixtures.requires); give a second member the showcase_manager position to record the position confound",
+        "the probes are seeded: showcase_share_new_inquiries_with_field_ops matches status='new', and the seed ships one new, one contacted and one closed showcase_inquiry (OWD private). Use the new one as the MATCHING probe and a non-new one as the NON-MATCHING probe",
         "as the audience member: GET the object list and GET each probe by id",
         "as a member OUTSIDE the audience: same reads",
         "read sys_record_share for the matching record; run /security/explain for the audience member + matching record",
         "manual-share the non-matching inquiry to a specific user via the record-shares route (POST /api/v1/data/showcase_inquiry/<id>/shares); that user re-reads, and a third member re-reads too. The recipient needs object-level read on the object: a share on showcase_contact to a baseline member lands 201 but the member's read answers 403 at the object gate, because the member baseline grants no showcase_contact read — so a manual share is only observable on an object the recipient can already read at object level",
-        "§A13: as admin switch the DECLARED rule off at the activation door — POST /api/v1/security/_activation/sharing_rule/share_new_inquiries_with_field_ops {\"enabled\": false}; re-read the audience member's list and by-id read of the matching inquiry, the rule-sourced sys_record_share rows and the sys_metadata_activation row; restart the server on the same database and re-read; switch it back on ({\"enabled\": true}), re-read, restart once more and re-read. There is no seeded sys_sharing_rule row to edit any more: declared rules are read from the registry (ADR-0131 D2, packages/plugins/plugin-sharing/src/declared-sharing-rules.ts) and GET /api/v1/data/sys_sharing_rule answers total 0 on stock, so the activation switch is the administrator's durable artifact. The materialized share is not editable: PATCH /api/v1/data/sys_record_share/<id> answers 405 OBJECT_API_METHOD_NOT_ALLOWED (allowed get, list, aggregate, search, export)"
+        "§A13: as admin switch the DECLARED rule off at the activation door — POST /api/v1/security/_activation/sharing_rule/showcase_share_new_inquiries_with_field_ops {\"enabled\": false}; re-read the audience member's list and by-id read of the matching inquiry, the rule-sourced sys_record_share rows and the sys_metadata_activation row; restart the server on the same database and re-read; switch it back on ({\"enabled\": true}), re-read, restart once more and re-read. There is no seeded sys_sharing_rule row to edit any more: declared rules are read from the registry (ADR-0131 D2, packages/plugins/plugin-sharing/src/declared-sharing-rules.ts) and GET /api/v1/data/sys_sharing_rule answers total 0 on stock, so the activation switch is the administrator's durable artifact. The materialized share is not editable: PATCH /api/v1/data/sys_record_share/<id> answers 405 OBJECT_API_METHOD_NOT_ALLOWED (allowed get, list, aggregate, search, export)"
       ],
       "acceptance": [
         {
@@ -1275,7 +1278,7 @@
           "evidence": "the two reads"
         },
         {
-          "clause": "§A13 — an administrator's switch on a DECLARED sharing rule survives a restart and is never undone by the boot: switched off at the activation door, share_new_inquiries_with_field_ops withdraws its grant (the audience member is denied, its rule-sourced sys_record_share row is gone, sys_metadata_activation reads active false); a cold restart on the same database leaves it off — the boot neither re-arms it nor re-materializes the grant; switched back on it restores exactly one rule-sourced share, which a second restart keeps. The declared rule is code with no stored row (ADR-0131 D2), so the ledger row IS the administrator's edit; sys_record_share refuses edits (405)",
+          "clause": "§A13 — an administrator's switch on a DECLARED sharing rule survives a restart and is never undone by the boot: switched off at the activation door, showcase_share_new_inquiries_with_field_ops withdraws its grant (the audience member is denied, its rule-sourced sys_record_share row is gone, sys_metadata_activation reads active false); a cold restart on the same database leaves it off — the boot neither re-arms it nor re-materializes the grant; switched back on it restores exactly one rule-sourced share, which a second restart keeps. The declared rule is code with no stored row (ADR-0131 D2), so the ledger row IS the administrator's edit; sys_record_share refuses edits (405)",
           "oracle": "api",
           "verify": "per stage — baseline, off, restart, on, restart — the audience member's list + by-id read of the matching inquiry, the outsider's read, the sys_record_share rows with source 'rule' for the rule (none while off, exactly one while on, the same id after the second restart), and the sys_metadata_activation row (active false/true, updated_at unchanged across each restart). ⛔ GET /api/v1/meta/sharing_rule/NAME keeps answering active: true while the ledger holds the rule off — that read is the DECLARATION, not the effective state, so it is never this clause's oracle",
           "evidence": "the five-stage read table (member, outsider, share rows, ledger row)"
@@ -1340,8 +1343,8 @@
         "requires": [
           "showcase_private_note (sharingModel: private — member_default grants create/read/edit, so a non-owner sees nothing without a share)",
           "three fresh sign-ups (A/B/C) whose sys_user ids are resolved via a system-context read",
-          "the seeded criteria sharing rule share_key_account_qualified_contacts_with_managers on showcase_contact (OWD private) + at least one qualified contact at company Northwind — seeded as Nora West (examples/app-showcase/src/security/sharing-rules.ts) — for the evaluate clause",
-          "a holder of the manager position, so the rule's recipient expansion is non-empty. Since #9237 the STOCK boot already satisfies this — the seeded dev admin holds manager (sys_user_position usp_showcase_admin_manager) and the boot backfill materialises the grant — so an evaluate with no extra assignment answers grantsCreated 0 out of IDEMPOTENCE, not emptiness. Read the gap off expandedUsers/matchedRecords. Assigning the position to one more persona does NOT make a created grant observable on evaluate either: the sys_user_position insert itself re-evaluates every position-recipient rule naming manager for the one user the row names, in the same write path (packages/plugins/plugin-sharing/src/recipient-membership-recompute.ts#bindRecipientMembershipRecompute, bound by sharing-plugin.ts), so that persona's grant is materialised before the insert returns and the evaluate that follows answers grantsCreated 0 again (QA run #27392). The observable is the rule-sourced sys_record_share row for that persona (recipient_id = its sys_user id, source 'rule', source_id = the rule's id), never grantsCreated > 0"
+          "the seeded criteria sharing rule showcase_share_key_account_qualified_contacts_with_managers on showcase_contact (OWD private) + at least one qualified contact at company Northwind — seeded as Nora West (examples/app-showcase/src/security/sharing-rules.ts) — for the evaluate clause",
+          "a holder of the showcase_manager position, so the rule's recipient expansion is non-empty. Since #9237 the STOCK boot already satisfies this — the seeded dev admin holds manager (sys_user_position usp_showcase_admin_manager) and the boot backfill materialises the grant — so an evaluate with no extra assignment answers grantsCreated 0 out of IDEMPOTENCE, not emptiness. Read the gap off expandedUsers/matchedRecords. Assigning the position to one more persona does NOT make a created grant observable on evaluate either: the sys_user_position insert itself re-evaluates every position-recipient rule naming manager for the one user the row names, in the same write path (packages/plugins/plugin-sharing/src/recipient-membership-recompute.ts#bindRecipientMembershipRecompute, bound by sharing-plugin.ts), so that persona's grant is materialised before the insert returns and the evaluate that follows answers grantsCreated 0 again (QA run #27392). The observable is the rule-sourced sys_record_share row for that persona (recipient_id = its sys_user id, source 'rule', source_id = the rule's id), never grantsCreated > 0"
         ]
       },
       "steps": [
@@ -1355,7 +1358,7 @@
         "as B (a non-manager on A's note): POST /api/v1/data/showcase_private_note/<A id>/shares granting themselves — must be refused (creating a share is not a reader's power, ADR-0111 D5)",
         "revoke-scope probe — run it BEFORE the real revoke, while the share still EXISTS: attempt DELETE of the shareId through the SECOND note's path (/data/showcase_private_note/<A second id>/shares/<shareId>) — must be refused (the URL's object/id is the revoke scope, ADR-0111 D4) AND the share must survive the attempt. Ordered after the revoke it proves nothing: the shareId no longer exists by then, so the same refusal comes back for a share that is simply gone",
         "as A: DELETE /api/v1/data/showcase_private_note/<A id>/shares/<shareId> → 204; then as B: GET the note by id again — refused once more",
-        "as admin: assign the manager position to one persona (Setup -> Access Control) — the assignment itself materialises that persona's rule grant (fixtures.requires[3]) — then POST /api/v1/sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate — capture the reconcile result, which answers grantsCreated 0 (idempotent) beside matchedRecords >= 1; read sys_record_share for the matched contact: the rule-sourced row whose recipient_id is the newly assigned persona is the created grant, read off the row and never off grantsCreated"
+        "as admin: assign the showcase_manager position to one persona (Setup -> Access Control) — the assignment itself materialises that persona's rule grant (fixtures.requires[3]) — then POST /api/v1/sharing/rules/showcase_share_key_account_qualified_contacts_with_managers/evaluate — capture the reconcile result, which answers grantsCreated 0 (idempotent) beside matchedRecords >= 1; read sys_record_share for the matched contact: the rule-sourced row whose recipient_id is the newly assigned persona is the created grant, read off the row and never off grantsCreated"
       ],
       "acceptance": [
         {
@@ -1395,9 +1398,9 @@
           "evidence": "the mis-scoped DELETE trace + survival read"
         },
         {
-          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/share_key_account_qualified_contacts_with_managers/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched contact with source 'rule' and source_id = the rule's id. For this DECLARED rule that id IS its name — a declared rule is projected from the registry, not stored, and its id is its name (ADR-0131 D2) — while an organization-authored rule's id is its sys_sharing_rule row id (srule_…)",
+          "clause": "rule evaluate reconciles the audience: POST /sharing/rules/showcase_share_key_account_qualified_contacts_with_managers/evaluate returns {ruleId, matchedRecords>=1, grantsCreated/grantsUpdated} and a sys_record_share row exists for the matched contact with source 'rule' and source_id = the rule's id. For this DECLARED rule that id IS its name — a declared rule is projected from the registry, not stored, and its id is its name (ADR-0131 D2) — while an organization-authored rule's id is its sys_sharing_rule row id (srule_…)",
           "oracle": "api",
-          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row: assert share.source_id === the body's ruleId, which for this rule is 'share_key_account_qualified_contacts_with_managers' (packages/plugins/plugin-sharing/src/sharing-rule-service.ts#projectDeclaredRule projects a declared rule with id = name, and that id is what its grants carry as sys_record_share.source_id). The rule id is the stable key the reconcile path relies on — revokeRuleGrants(ruleId) purges where {source:'rule', source_id: ruleId}. ⛔ Do not look for a sys_sharing_rule row for this rule: that table holds only organization-authored rules and answers total 0 on stock",
+          "verify": "the SharingRuleEvaluationResult body (packages/plugins/plugin-sharing/src/sharing-rule-service.ts evaluateRule) + the materialized rule-sourced share row: assert share.source_id === the body's ruleId, which for this rule is 'showcase_share_key_account_qualified_contacts_with_managers' (packages/plugins/plugin-sharing/src/sharing-rule-service.ts#projectDeclaredRule projects a declared rule with id = name, and that id is what its grants carry as sys_record_share.source_id). The rule id is the stable key the reconcile path relies on — revokeRuleGrants(ruleId) purges where {source:'rule', source_id: ruleId}. ⛔ Do not look for a sys_sharing_rule row for this rule: that table holds only organization-authored rules and answers total 0 on stock",
           "evidence": "evaluate response + the sys_record_share read (the row's source_id beside the body's ruleId)"
         }
       ],
@@ -1413,7 +1416,7 @@
         "packages/rest/src/sharing-routes.ts#registerSharingEndpoints (the record-shares family: GET and POST /data/:object/:id/shares and DELETE .../:shareId, the body of RestServer#registerSharingEndpoints moved into this module whole) + packages/rest/src/sharing-routes.ts#registerSharingRuleEndpoints (the evaluate leg). The registerRecordShareEndpoints an older revision named still does not exist (#13788); the family's registrar is registerSharingEndpoints",
         "packages/plugins/plugin-sharing/src/objects/sys-record-share.object.ts#recipient_type (recipient_type/recipient_id/access_level/source fields)",
         "packages/plugins/plugin-sharing/src/sharing-rule-service.ts#evaluateRule (evaluateRule → SharingRuleEvaluationResult)",
-        "examples/app-showcase/src/security/sharing-rules.ts#share_key_account_qualified_contacts_with_managers (share_key_account_qualified_contacts_with_managers seeded criteria rule)",
+        "examples/app-showcase/src/security/sharing-rules.ts#showcase_share_key_account_qualified_contacts_with_managers (showcase_share_key_account_qualified_contacts_with_managers seeded criteria rule)",
         "ADR-0111 D1/D4/D5"
       ],
       "history": [
@@ -1922,7 +1925,7 @@
         "app": "showcase",
         "requires": [
           "an object declaring publicSharing { enabled:true, allowedAudiences, allowedPermissions, redactFields } with at least one visible record — REQUIRED to mint any link",
-          "showcase_client_brief is that object since #9308 fixture 2: publicSharing { enabled:true, allowedAudiences ['link_only','signed_in','email'], allowedPermissions ['view'], maxExpiryDays 30, redactFields ['internal_notes','deal_value'], eligibility \"record.status == 'published'\" }. The minter persona is a member holding showcase_client_liaison (bound to the client_liaison position); the seed carries a PUBLISHED brief ('Northwind — Website Relaunch brief', mint-eligible) and a DRAFT one ('Fabrikam — Compliance Audit brief', which the eligibility predicate refuses 422 RECORD_NOT_ELIGIBLE)"
+          "showcase_client_brief is that object since #9308 fixture 2: publicSharing { enabled:true, allowedAudiences ['link_only','signed_in','email'], allowedPermissions ['view'], maxExpiryDays 30, redactFields ['internal_notes','deal_value'], eligibility \"record.status == 'published'\" }. The minter persona is a member holding showcase_client_liaison (bound to the showcase_client_liaison position); the seed carries a PUBLISHED brief ('Northwind — Website Relaunch brief', mint-eligible) and a DRAFT one ('Fabrikam — Compliance Audit brief', which the eligibility predicate refuses 422 RECORD_NOT_ELIGIBLE)"
         ],
         "knownGaps": [
           "[CLOSED by #9308 fixture 2 — the gap text stays because it carries the reason] NO stock showcase object set publicSharing.enabled (verified across examples/app-showcase/src), so createLink answered 422 SHARING_NOT_ENABLED for every showcase object and only the SHARING_NOT_ENABLED clause was runnable; the resolve/redact/password/revoke clauses were BLOCKED. showcase_client_brief now opts in (see requires). NOTE the negative control did NOT move: every OTHER showcase object still declines the opt-in, so clause 1's 422 is still runnable — probe it against showcase_private_note, not against the new object",
@@ -2221,7 +2224,7 @@
           "an audience position holding object-level allowRead on showcase_contact at the DEFAULT (own) record scope — this needs a SCRATCH permission set bound to a scratch position, because stock's only showcase_contact grant is showcase_manager { allowRead: true, readScope: 'org' } (permission-sets.ts), whose org-depth read already sees every contact and would mask the widening; and no other stock set grants showcase_contact at all, so any other stock position is refused by the OBJECT gate before record scope is ever consulted"
         ],
         "knownGaps": [
-          "authoring a rule in Setup issues a direct sys_sharing_rule insert (packages/spec/src/security/sharing.zod.ts). Stock seeds TWO rules (examples/app-showcase/src/security/sharing-rules.ts allSharingRules; the showcase_project and showcase_task rules were retired because a public_read_write OWD leaves nothing to widen): share_new_inquiries_with_field_ops on showcase_inquiry, and share_key_account_qualified_contacts_with_managers ON showcase_contact — condition record.stage == 'qualified' && record.company == 'Northwind', shared with the manager position. So a seeded rule DOES touch this item's object. It does not confound the item, for two reasons the run must keep true: neither scored persona holds the manager position (the audience holds the scratch position, the outsider holds neither; the seeded dev admin does hold manager and is never a scored reader here), and acceptance[2] attributes a share by source_id = the NEW rule's row id, so a seeded-rule share on a Northwind-qualified probe is a different row. That item tests the SEEDED rules' enforcement; this one authors and retracts a rule in-run",
+          "authoring a rule in Setup issues a direct sys_sharing_rule insert (packages/spec/src/security/sharing.zod.ts). Stock seeds TWO rules (examples/app-showcase/src/security/sharing-rules.ts allSharingRules; the showcase_project and showcase_task rules were retired because a public_read_write OWD leaves nothing to widen): showcase_share_new_inquiries_with_field_ops on showcase_inquiry, and showcase_share_key_account_qualified_contacts_with_managers ON showcase_contact — condition record.stage == 'qualified' && record.company == 'Northwind', shared with the showcase_manager position. So a seeded rule DOES touch this item's object. It does not confound the item, for two reasons the run must keep true: neither scored persona holds the showcase_manager position (the audience holds the scratch position, the outsider holds neither; the seeded dev admin does hold manager and is never a scored reader here), and acceptance[2] attributes a share by source_id = the NEW rule's row id, so a seeded-rule share on a Northwind-qualified probe is a different row. That item tests the SEEDED rules' enforcement; this one authors and retracts a rule in-run",
           "the audience persona must be provisioned in-run (scratch permission set + scratch position, see fixtures.requires); a stock position cannot serve as the audience for a showcase_contact rule. Until that provisioning is scripted, treat a run that skips it as blocked(fixture) — never as a pass off the admin's own reads"
         ]
       },
@@ -2278,7 +2281,7 @@
       ],
       "negative": [
         "a rule that shares the NON-matching (stage='new') contact, or grants that survive the rule's deletion (orphaned sys_record_share), is a FAIL",
-        "do not overlap access-security.sharing-rules-widen: that item verifies the SEEDED rules' enforcement — this item authors a rule in-run on showcase_contact for a scratch position no seeded rule names (the seeded showcase_contact rule shares only with the manager position, see knownGaps), and verifies authoring + retraction",
+        "do not overlap access-security.sharing-rules-widen: that item verifies the SEEDED rules' enforcement — this item authors a rule in-run on showcase_contact for a scratch position no seeded rule names (the seeded showcase_contact rule shares only with the showcase_manager position, see knownGaps), and verifies authoring + retraction",
         "⛔ a run that authors the rule on a public_read_write object (showcase_project, showcase_task, …) proves nothing: the baseline is already org-wide, so the audience persona would read the 'matching' row with or without the rule and the item passes vacuously — the object under test must be OWD private"
       ],
       "traps": [
@@ -2319,7 +2322,7 @@
       "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2337,7 +2340,7 @@
       "steps": [
         "boot showcase with the console; admin session; provision member M granted a writable set S that WITHHOLDS a verb on an object (e.g. delete:false on showcase_task); as M create the showcase_task rows the DELETE probes below use — M's OWN rows, never seeded ids: a set silent on writeScope is owner-only (packages/plugins/plugin-security/src/permission-evaluator.ts getEffectiveScope), so a seeded task owned by someone else stays refused after the verb flips ON and confounds the verb with ownership",
         "baseline: as M, DELETE /api/v1/data/showcase_task/<one of M's own ids> — must be refused 403 (the withheld verb)",
-        "in the console Permission Matrix editor for S (Setup's metadata-admin door, which mounts the editor with no packageId), flip delete ON for showcase_task and Save. That Save is a plain PUT that lands state:'active' at once, not a draft: only a package-scoped editor (Studio's Access pillar, packageId set) saves with mode 'draft' (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx, the saveVersioned call; QA run #27441). Capture PUT /api/v1/meta/permission/S, then POST /api/v1/meta/permission/S/publish, which answers 404 code NO_DRAFT after that active save, per acceptance[1]; a run that edits through the package door instead publishes the pending draft and captures a 2xx",
+        "in the console Permission Matrix editor for S (Setup's metadata-admin door: /apps/setup/metadata/permission/S redirects to /_console/studio/~all/metadata/permission/S, which mounts the editor with no packageId and saves on an explicit Save), flip delete ON for showcase_task and Save. That Save is a plain PUT that lands state:'active' at once, not a draft: only a package-scoped editor (Studio's Access pillar, packageId set) saves with mode 'draft' (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx, the saveVersioned call; QA run #27441). Capture PUT /api/v1/meta/permission/S, then POST /api/v1/meta/permission/S/publish, which answers 404 code NO_DRAFT after that active save, per acceptance[1]; a run that edits through the package door instead publishes the pending draft and captures a 2xx",
         "as M: DELETE /api/v1/data/showcase_task/<another of M's own ids> — must now be 2xx (access flipped)",
         "flip delete back OFF in the matrix and Save (active at once, as in steps[2]; publish only a package-door draft); as M: DELETE again — must be refused 403",
         "field-level half: flip an FLS bit (a showcase_project field editable:false→true) in the lower matrix and Save (as in steps[2]); as M PATCH that field — the write flips accordingly",
@@ -2431,6 +2434,12 @@
           "date": "2026-11-01",
           "change": "negative[2] moved to source[6]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-08",
+          "change": "steps[2]: /apps/setup/metadata/permission/NAME redirects to /_console/studio/~all/metadata/permission/NAME, where the editor uses an explicit Save. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },

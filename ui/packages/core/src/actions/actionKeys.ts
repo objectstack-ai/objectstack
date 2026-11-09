@@ -164,6 +164,10 @@ export const ACTION_DEF_KEYS = [
   'params',
   'actionParams',
   'resultDialog',
+  // The param dialog's preflight read (`ActionSchema.preflight`), derived from
+  // the spec. The runner hands the dialog its URL filler; the console's
+  // param-collection handlers read the block (objectstack#31808).
+  'preflight',
   'target',
   'body',
   'openIn',
@@ -321,6 +325,11 @@ export const SPEC_ACTION_KEYS = [
   'overrides',
   'params',
   'patch',
+  // Added to `ActionSchema` by objectstack#31840: the param dialog's preflight
+  // read. `ActionDef` declares it (derived) since objectstack#31808, whose
+  // console param-collection handlers read it and whose runner hands the dialog
+  // the filler for its `read.url`.
+  'preflight',
   // Added to `ActionSchema` by objectstack#27946: the pressed-state predicate a
   // header button draws as `aria-pressed` for the reader ("you voted Helpful").
   // `ActionDef` declares it (derived), and the record header and the declared

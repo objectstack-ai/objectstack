@@ -31,23 +31,19 @@ export const CaseViews = defineView({
 ```
 
 > **Never export a bare flat view object** (`{ name, label, type, columns }`
-> at top level): nothing registers and no view appears in the switcher. Every
-> view lives under `list` / `form` / `listViews` / `formViews`, as above.
+> at top level): nothing registers and no view appears in the switcher.
 
 ### Data Source (`data`)
 
-Every view connects to data via one of two providers:
+Bare-key blocks in this file are fragments, so `check:skill-examples` skips
+them. Every view connects to data via one of two providers:
 
 ```typescript
-// Auto-connect to an ObjectStack object
 data: { provider: 'object', object: 'support_case' }
-
-// Static inline data
 data: { provider: 'value', items: [...] }
 ```
 
-> Use `provider: 'object'` for an ObjectStack-managed object (CRUD, live
-> updates, filtering, pagination). A view never calls an API: an API read is a
+> Use `provider: 'object'` for an ObjectStack-managed object. A view never calls an API: an API read is a
 > page element's `dataSource` binding.
 
 ### Columns
@@ -64,7 +60,7 @@ columns: [
   { field: 'assigned_to', label: 'Owner' },
   {
     field: 'due_date',
-    summary: 'min',       // footer aggregation — plain enum value, not an object
+    summary: 'min',       // plain enum value, not an object
     sortable: true,
   },
 ]
@@ -140,26 +136,24 @@ Rules:
 - Every `field` MUST exist on the source object — reference diagnostics
   (`_diagnostics`) flag unknown fields; treat `valid: false` as a failed write.
 - **A list view has no `tabs` key** — it was removed (a parse error that
-  names the fix): nothing ever drew it. Each named preset is a `listViews`
+  names the fix). Each named preset is a `listViews`
   entry, rendered as a tab in the object's saved-view switcher.
 - **On an object list view (`*.view.ts` `list` / `listViews`), only
   `element: 'dropdown'` (value chips) is allowed — `tabs` is page-only**
   (ADR-0047 amendment): the saved-view switcher already owns the tab bar, so
   `ObjectUserFiltersSchema` **rejects** `tabs` at parse (not dropped) and the
-  `validate` list-view-mode lint reports it.
-  Need named presets on an object? Add a `listViews` entry instead. The full
+  `validate` list-view-mode lint reports it. The full
   `dropdown | tabs | toggle` range applies only to **page lists** /
-  `interfaceConfig.userFilters` (the block above).
+  `interfaceConfig.userFilters`.
 - **Omit `userFilters` when unsure — omission means a clean toolbar.** Nothing
-  is auto-derived, and the saved-views switcher already covers presets.
+  is auto-derived.
 - `userFilters: { element: 'dropdown' }` (no `fields`) is valid shorthand:
   the renderer fills the field list from the object's select/boolean fields.
 
 ### Toolbar Search (`searchableFields`, ADR-0061)
 
 The toolbar's search box scans a set the **object** owns. A list view's
-`searchableFields` **narrows** that set for this one list — never widens it;
-the runtime **refuses the request** rather than dropping the extra name.
+`searchableFields` **narrows** that set for this one list — never widens it.
 
 <!-- os:check -->
 ```typescript
@@ -185,8 +179,10 @@ export const CaseViews = defineView({
 
 | The object … | The allowed set is |
 |:-------------|:-------------------|
-| declares `searchableFields` | **that list, verbatim** — whatever the field types are |
-| declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select` / `status`) |
+| declares `searchableFields` | **that list, verbatim** — any stored field type |
+| declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select`) + every field marked `searchable: true`, of any type except `secret` / `password` / `vector` or a virtual `formula` |
+
+`searchable: false`, the default, removes nothing the type default scans.
 
 Modelling side: **objectstack-data → Search Fields**. Query side
 (`search.fields` over the API): **objectstack-query → Full-Text Search**.
@@ -201,11 +197,9 @@ the whole search box, for every user and every term: no result at all.
 |:---------------------------|:--------------|:--------------------------|
 | a subset of the allowed set | clean | scans exactly those columns |
 | key omitted | clean | scans the object's full allowed set |
-| `searchableFields: []` | clean | **identical to omitting it** — empty is *absent* at all three layers, so it scans MORE than `["subject"]` would |
-| a renamed / mistyped column | `searchable-field-unknown` | `400 INVALID_FIELD` |
-| a dotted path (`account_id.name`) | `searchable-field-unknown` | `400 INVALID_FIELD` |
-| a real column outside the allowed set | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
-| a virtual `formula` column — nothing stored to scan | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
+| `searchableFields: []` | clean | **identical to omitting it** — empty is *absent*, so it scans MORE than `["subject"]` would |
+| a renamed / mistyped column, or a dotted path (`account_id.name`) | `searchable-field-unknown` | `400 INVALID_FIELD` |
+| a real column outside the allowed set, or a virtual `formula` column | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 
 Both diagnostics are **errors**, not warnings — `os validate` fails the build.
 
@@ -221,7 +215,7 @@ export const AuditViews = defineView({
   list: {
     label: 'Audit Log', type: 'grid', data,
     columns: ['case_number', 'status'],
-    userActions: { search: false },   // ← no search box; `searchableFields: []` would NOT do this
+    userActions: { search: false },   // ← no search box
   },
 });
 ```
@@ -261,25 +255,54 @@ grouping: { fields: [
 Board settings nest under `kanban:` (`KanbanConfigSchema`) — there is **no
 top-level `groupBy`**; the top-level `columns` stays required.
 
+<!-- os:check -->
 ```typescript
-{
+import type { ListView } from '@objectstack/spec/ui';
+
+const board: ListView = {
   type: 'kanban',
   data: { provider: 'object', object: 'project_task' },
-  columns: ['title', 'assignee', 'priority'],       // required on every list view
+  columns: ['title', 'assignee', 'priority'],
   kanban: {
     groupByField: 'status',                // a select field — one lane per option
-    lanes: ['todo', 'in_progress', 'review'],   // option VALUES to draw, in this order
+    lanes: ['todo', 'in_progress', 'review'],
     summarizeField: 'estimate_hours',      // optional — summed at the top of each column
     columns: ['title', 'assignee', 'priority'],   // fields shown on each card
   },
   sort: [{ field: 'priority', order: 'desc' }],
-}
+};
 ```
 
 > `lanes` chooses the lanes and their order, not the records: a record whose
 > value is unlisted lands in `Uncategorized`, so filter the view to keep records
 > off the board. Omit it to draw every option in its own order; a value that is
 > not one of the field's inline options, or listed twice, fails `os validate`.
+
+### Adding a board, calendar, gallery or gantt beside the list
+
+"Add a kanban (calendar / gallery / gantt) view" means a NEW `listViews` entry
+that coexists with the views the object has — its key encodes the kind or
+purpose (`status_kanban`, `timeline_gantt`: the key a nav item's `viewName`
+names, registered as `OBJECT.status_kanban`), the default `list` and every
+other view untouched. Never satisfy an add by retyping `list` (or an existing named
+view) to `type: 'kanban'`: nothing refuses it, the view is converted in place
+and the original is gone. Change a view's kind in place only when the request
+says to convert or replace THAT view.
+
+**A board over a field added in the same change opens empty.** Adding a field
+writes nothing into existing rows, so when `kanban.groupByField` is a `select`
+created in this change every pre-existing record lands in the trailing
+`Uncategorized` lane: one empty lane per option, the populated lane last,
+under a non-zero record count. That
+is the renderer's correct fallback, not lost data, and the hand-over says so
+instead of "the board is ready": (a) the existing records are all in the last
+`Uncategorized` lane, scroll right; (b) dragging a card out of it onto a real
+lane writes the field, or edit them from the list; (c) a runtime-token
+(`current_user`) or CEL `defaultValue` is applied on INSERT and changes no
+existing row, but on a SQL datasource a LITERAL `defaultValue` becomes the
+added column's DEFAULT, so there the existing rows read it and land in its
+lane. The same is owed when an existing list is converted into a board over a
+just-added field.
 
 ---
 
@@ -288,8 +311,11 @@ top-level `groupBy`**; the top-level `columns` stays required.
 Timeline settings nest under `gantt:` (`GanttConfigSchema`);
 `startDateField` / `endDateField` / `titleField` are required in it.
 
+<!-- os:check -->
 ```typescript
-{
+import type { ListView } from '@objectstack/spec/ui';
+
+const timeline: ListView = {
   type: 'gantt',
   data: { provider: 'object', object: 'project_task' },
   columns: ['name', 'assigned_to', 'status'],   // left-pane tree columns
@@ -301,7 +327,7 @@ Timeline settings nest under `gantt:` (`GanttConfigSchema`);
     dependenciesField: 'depends_on',            // FS dependency arrows
     parentField: 'parent',                      // builds the summary-bar tree
   },
-}
+};
 ```
 
 Rows with children (or `type: 'summary'`) are **summary bars**: dragged as a

@@ -359,3 +359,33 @@ describe('objectui#12931 — the controls', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 });
+
+/**
+ * objectstack#29704 — the app page's failed-read state follows the record
+ * page's rule (`answeredLoadFailure`): a read the server answered shows its
+ * sentence and code; "check your connection" is only for a read with no answer.
+ */
+describe('objectstack#29704 — a failed row read says what the server answered', () => {
+  it('an answered 500 shows the server sentence and its code, not the network sentence', async () => {
+    mount(envPage(), async () => {
+      throw Object.assign(new Error('The org directory is being migrated'), { httpStatus: 500, code: 'SERVICE_UNAVAILABLE' });
+    });
+    await settle();
+    const failed = screen.getByTestId('page-record-load-failed');
+    expect(failed).toHaveTextContent('The org directory is being migrated');
+    expect(screen.getByTestId('page-record-load-failed-code')).toHaveTextContent('SERVICE_UNAVAILABLE');
+    expect(failed).not.toHaveTextContent(/connection/);
+    expect(failed).toContainElement(screen.getByTestId('page-record-load-failed-retry'));
+  });
+
+  it('CONTROL: a read with no answer keeps the network sentence and shows no code', async () => {
+    mount(envPage(), async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    await settle();
+    const failed = screen.getByTestId('page-record-load-failed');
+    expect(failed).toHaveTextContent('Check your connection and try again.');
+    expect(failed).not.toHaveTextContent('Failed to fetch');
+    expect(screen.queryByTestId('page-record-load-failed-code')).toBeNull();
+  });
+});

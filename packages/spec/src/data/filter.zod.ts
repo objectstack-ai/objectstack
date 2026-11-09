@@ -1956,7 +1956,7 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
  *   hand; refusing them here, blind, would trade a silent zero for false
  *   rejections. (`@objectstack/lint`'s `filter-preset-comparand` rule draws
  *   the same boundary at the same positions.)
- * - **Only the 13 DECLARED names are judged** ({@link DATE_RANGE_PRESETS}) —
+ * - **Only the DECLARED names are judged** ({@link DATE_RANGE_PRESETS}) —
  *   never a guessed superset (`last_60_days` stays a plain string here; on a
  *   temporal field the engine's own door catches it, field type in hand).
  *   `{placeholder}` spellings are another vocabulary with its own loud refusal

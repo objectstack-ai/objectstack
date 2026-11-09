@@ -35,6 +35,7 @@ import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { ApprovalDecisionRenderer } from './ApprovalDecisionPanel';
 import { resetApproverDirectoryCache } from '../../hooks/useApproverDirectory';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 const i18n = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
 
@@ -147,9 +148,9 @@ describe('ApprovalDecisionPanel — the summary is labelled as the submitted val
     expect(within(panel).queryByText(HEADING)).toBeNull();
   });
 
-  it('the heading copy is a key in all ten language packs', () => {
+  it('the heading copy is a key in every language pack', () => {
     const languages = Object.keys(builtInLocales);
-    expect(languages).toHaveLength(10);
+    expect(languages).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     for (const language of languages) {
       const value = packHeading(language);
       expect(typeof value, `${language} defines ${HEADING_KEY}`).toBe('string');

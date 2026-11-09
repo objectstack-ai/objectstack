@@ -21,6 +21,7 @@ import {
   MULTI_CAPABLE_TYPES,
   MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
+  SEARCH_VIRTUAL_TYPES,
   STRUCTURED_JSON_TYPES,
   VIRTUAL_FIELD_AGGREGATE_REMEDY,
   isAggregateCompatibleWithFieldType,
@@ -32,6 +33,7 @@ import { runAuthoringRules } from './authoring-rules.js';
 import { explainRule } from './rule-explanations.js';
 import {
   DIMENSION_JSON_STORED_FIELD_REFUSED,
+  DIMENSION_VIRTUAL_FIELD_REFUSED,
   MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
   groupKeyClassOf as moduleGroupKeyClassOf,
   validateDatasetMeasureAggregates as validateDatasetMeasureAggregatesUnrecorded,
@@ -1237,8 +1239,150 @@ describe('[#23235] groupKeyClassOf — the exported classifier and the rule agre
   });
 });
 
-describe('[#22161] one-line verdicts — the two ids', () => {
-  const IDS = [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED, DIMENSION_JSON_STORED_FIELD_REFUSED];
+// ───────────────────────────────────────────────────────────────────────────
+// [#30773] The virtual-dimension leg — `dimension-virtual-field-refused`. A
+// dataset or cube dimension over a `formula` (computed on read, never stored)
+// is a group key no query can serve: every analytics face refuses the group at
+// query time (`400 INVALID_FIELD` at `groupBy.N`), and the dataset compile
+// refuses a dataset declaring one. Measured on `origin/main` `2d04cd2b` before
+// this leg: `runAuthoringRules` on validate / build / lint fired nothing for a
+// dataset dimension or a cube dimension over a formula.
+// ───────────────────────────────────────────────────────────────────────────
+
+const VIRTUAL_RULE = DIMENSION_VIRTUAL_FIELD_REFUSED;
+const FORMULA_TEXT = { type: 'formula', expression: 'record.name', returnType: 'text' };
+const FORMULA_DATE = { type: 'formula', expression: 'record.name', returnType: 'date' };
+
+const virtualFindings = (stack: unknown) =>
+  validateDatasetMeasureAggregates(stack).filter((f) => f.rule === VIRTUAL_RULE);
+
+describe('dimension-virtual-field-refused — a dimension over a virtual field is refused at authoring', () => {
+  // ⭐ The card's pin and its control, one pair.
+  it('refuses a dataset dimension over a formula field, and accepts one over a text field', () => {
+    const found = validateDatasetMeasureAggregates(dimensionStack(FORMULA_TEXT));
+    expect(found).toHaveLength(1);
+    const issue = found[0];
+    expect(issue.severity).toBe('error');
+    expect(issue.rule).toBe(VIRTUAL_RULE);
+    expect(issue.path).toBe('datasets[0].dimensions[0].field');
+    expect(issue.where).toBe('dataset "opportunity_metrics" › dimension "the_dimension"');
+    expect(issue.message).toBe(
+      'groups by field "grouped" (`formula` on object "crm_opportunity"), a value computed on read and never ' +
+        'stored, so no query can group by it',
+    );
+    // The remedy the query-time doors name: store the value, group by that.
+    expect(issue.hint).toBe(
+      'Store the value in a stored field of "crm_opportunity" (written when its source changes) and point this ' +
+        'dimension at that field, or remove the dimension.',
+    );
+    expect(validateDatasetMeasureAggregates(dimensionStack({ type: 'text' }))).toEqual([]);
+  });
+
+  it('refuses it whatever the returnType — a date-typed dimension bucketed by month over a formula of date included', () => {
+    const stack = dimensionStack(FORMULA_DATE);
+    const ds = (stack.datasets as Array<Record<string, unknown>>)[0];
+    ds.dimensions = [{ name: 'closed_month', field: 'grouped', type: 'date', dateGranularity: 'month' }];
+    const [issue] = virtualFindings(stack);
+    expect(issue?.path).toBe('datasets[0].dimensions[0].field');
+    expect(issue?.where).toBe('dataset "opportunity_metrics" › dimension "closed_month"');
+    // …while a stored date dimension bucketed the same way stays clean.
+    expect(validateDatasetMeasureAggregates(dimensionStack({ type: 'date' }))).toEqual([]);
+  });
+
+  // The whole surface against the spec's one predicate, never a local list.
+  it('agrees with SEARCH_VIRTUAL_TYPES on every declared FieldType', () => {
+    expect(SEARCH_VIRTUAL_TYPES.size).toBeGreaterThan(0);
+    let refused = 0;
+    let accepted = 0;
+    for (const fieldType of FieldType.options) {
+      const fires = virtualFindings(dimensionStack({ type: fieldType })).length > 0;
+      expect(fires, fieldType).toBe(SEARCH_VIRTUAL_TYPES.has(fieldType));
+      if (fires) refused++;
+      else accepted++;
+    }
+    expect(refused).toBe(SEARCH_VIRTUAL_TYPES.size);
+    expect(accepted).toBeGreaterThan(40);
+  });
+
+  it('names the later position beside a stored dimension, and never lands under the JSON-stored id', () => {
+    const stack = dimensionStack(FORMULA_TEXT);
+    const ds = (stack.datasets as Array<Record<string, unknown>>)[0];
+    ds.dimensions = [{ name: 'by_name', field: 'name' }, { name: 'by_calc', field: 'grouped' }];
+    const found = validateDatasetMeasureAggregates(stack);
+    expect(found.map((f) => [f.rule, f.path])).toEqual([[VIRTUAL_RULE, 'datasets[0].dimensions[1].field']]);
+  });
+
+  it('judges a dimension over a joined field on the object the leaf lives on', () => {
+    const joined = (leaf: Record<string, unknown>) => ({
+      name: 'analytics_probe',
+      objects: [
+        {
+          name: 'crm_opportunity',
+          sharingModel: 'private',
+          fields: { name: { type: 'text' }, account: { type: 'lookup', reference: 'crm_account' } },
+        },
+        { name: 'crm_account', sharingModel: 'private', fields: { name: { type: 'text' }, tier: leaf } },
+      ],
+      datasets: [
+        {
+          name: 'opportunity_metrics',
+          object: 'crm_opportunity',
+          include: ['account'],
+          dimensions: [{ name: 'acct_tier', field: 'account.tier' }],
+          measures: [{ name: 'n', aggregate: 'count' }],
+        },
+      ],
+    });
+    const found = virtualFindings(joined(FORMULA_TEXT));
+    expect(found).toHaveLength(1);
+    expect(found[0].message).toContain('"account.tier" (`formula` on joined object "crm_account")');
+    expect(found[0].hint).toContain('a stored field of "crm_account"');
+    expect(virtualFindings(joined({ type: 'text' }))).toEqual([]);
+  });
+
+  it('refuses a cube dimension whose sql names a formula column, and accepts a stored one', () => {
+    const stack = cubeStack({ dimensions: { calc: dim('calc'), stage: dim('stage') } }, {}, { calc: FORMULA_TEXT });
+    const found = validateDatasetMeasureAggregates(stack);
+    expect(found).toHaveLength(1);
+    expect(found[0].rule).toBe(VIRTUAL_RULE);
+    expect(found[0].path).toBe('analyticsCubes[0].dimensions.calc.sql');
+    expect(found[0].where).toBe('cube "fx_cube" › dimension "calc"');
+    expect(found[0].message).toContain('(`formula` on object "fx_ledger")');
+    expect(validateDatasetMeasureAggregates(cubeStack({ dimensions: { stage: dim('stage') } }))).toEqual([]);
+  });
+
+  it('never hands the predicate a guess — the same skips as the JSON-stored leg', () => {
+    expect(virtualFindings(dimensionStack(FORMULA_TEXT, { datasetObject: 'not_here' }))).toEqual([]);
+    expect(virtualFindings(dimensionStack(FORMULA_TEXT, { field: 'nope' }))).toEqual([]);
+    expect(virtualFindings(dimensionStack(FORMULA_TEXT, { field: undefined }))).toEqual([]);
+  });
+
+  it('leaves the measure leg over a formula as it was: a count accepted, a total refused under the measure id', () => {
+    expect(findings(stackWith('count', 'formula'))).toEqual([]);
+    const [total] = findings(stackWith('sum', 'formula'));
+    expect(total?.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    expect(validateDatasetMeasureAggregates(stackWith('sum', 'formula')).map((f) => f.rule)).toEqual([RULE]);
+  });
+
+  it('fires through runAuthoringRules on all three commands, and only on the refused dimension', () => {
+    const stack = dimensionStack(FORMULA_TEXT);
+    for (const command of ['validate', 'build', 'lint'] as const) {
+      const found = runAuthoringRules(command, { normalized: stack, parsed: stack }).filter(
+        (f) => f.rule === VIRTUAL_RULE,
+      );
+      expect(found, command).toHaveLength(1);
+      expect(found[0].severity, command).toBe('error');
+    }
+    const control = dimensionStack({ type: 'text' });
+    expect(
+      runAuthoringRules('lint', { normalized: control, parsed: control }).filter((f) => f.rule === VIRTUAL_RULE),
+    ).toEqual([]);
+  });
+});
+
+describe('[#22161] one-line verdicts — the three ids', () => {
+  // [#30773] `dimension-virtual-field-refused` joined the two #22161 shaped.
+  const IDS = [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED, DIMENSION_JSON_STORED_FIELD_REFUSED, DIMENSION_VIRTUAL_FIELD_REFUSED];
 
   it('every verdict the cases above fired is one line of at most 200 characters', () => {
     // The coverage control first: each id fired at least once, so the shape
@@ -1254,9 +1398,10 @@ describe('[#22161] one-line verdicts — the two ids', () => {
   const MOVED: Record<string, readonly string[]> = {
     [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED]: ['property of the SQL dialect', 'average YEAR', 'compares values for equality', '400 DATASET_INVALID', '`measure-aggregate-incoherent`'],
     [DIMENSION_JSON_STORED_FIELD_REFUSED]: ['GROUP KEY', 'one groups each serialized value apart', 'before any SQL is built', 'instead of an answer'],
+    [DIMENSION_VIRTUAL_FIELD_REFUSED]: ['GROUP KEY', '`400 INVALID_FIELD` at `groupBy.N`', '`400 DATASET_INVALID`', 'one null group'],
   };
 
-  it('covers exactly the two ids', () => {
+  it('covers exactly the three ids', () => {
     expect(Object.keys(MOVED).sort()).toEqual([...IDS].sort());
   });
 
@@ -1283,8 +1428,8 @@ describe('[#22161] one-line verdicts — the two ids', () => {
     expect(text).toContain(`\`min\` and \`max\`: ${table.min.join(', ')}.`);
   });
 
-  it('both explanations name the JSON-stored types the spec declares', () => {
-    for (const rule of IDS) {
+  it('both JSON-stored explanations name the JSON-stored types the spec declares', () => {
+    for (const rule of [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED, DIMENSION_JSON_STORED_FIELD_REFUSED]) {
       const text = explanationOf(rule);
       expect(text, rule).toContain(`a structured-JSON type — ${[...STRUCTURED_JSON_TYPES].join(', ')} —`);
       expect(text, rule).toContain(`an inherently multi option type (${[...MULTI_OPTION_TYPES].join(', ')})`);
@@ -1297,8 +1442,8 @@ describe('[#22161] one-line verdicts — the two ids', () => {
 // declaration accepts, and the dimension id its one remedy per class; why
 // `count` reaches further, the stored-numeric route, the doors that refuse the
 // pair later and the per-member `$contains` query are the explanations'.
-describe('[#22161] one-line fixes — the two ids', () => {
-  const IDS = [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED, DIMENSION_JSON_STORED_FIELD_REFUSED];
+describe('[#22161] one-line fixes — the three ids', () => {
+  const IDS = [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED, DIMENSION_JSON_STORED_FIELD_REFUSED, DIMENSION_VIRTUAL_FIELD_REFUSED];
 
   it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
     const converted = fired.filter((f) => IDS.includes(f.rule));
@@ -1310,6 +1455,8 @@ describe('[#22161] one-line fixes — the two ids', () => {
     const dimension = converted.filter((f) => f.rule === DIMENSION_JSON_STORED_FIELD_REFUSED).map((f) => f.hint);
     expect(dimension.some((h) => h.startsWith('Group by a field that stores one scalar value'))).toBe(true);
     expect(dimension.some((h) => h.includes('`$contains`'))).toBe(true);
+    const virtual = converted.filter((f) => f.rule === DIMENSION_VIRTUAL_FIELD_REFUSED).map((f) => f.hint);
+    expect(virtual.some((h) => h.startsWith('Store the value in a stored field'))).toBe(true);
     for (const f of converted) {
       expect(f.hint, f.rule).not.toContain('\n');
       expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
@@ -1329,6 +1476,10 @@ describe('[#22161] one-line fixes — the two ids', () => {
         'store the part of the document you group on in a field of its own',
         '`where { FIELD: { $contains: VALUE } }`',
         'one query per member',
+      ],
+      [DIMENSION_VIRTUAL_FIELD_REFUSED]: [
+        'store it in a field of its own on the object',
+        'point the dimension at that stored field',
       ],
     };
     for (const rule of IDS) {

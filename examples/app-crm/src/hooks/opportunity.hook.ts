@@ -7,7 +7,7 @@ import { defineHook, type HookContext } from '@objectstack/spec/data';
  * and 0% when Closed Lost. Demonstrates a basic before-update hook.
  */
 export const OpportunityStageHook = defineHook({
-  name: 'opportunity_stage_probability',
+  name: 'crm_opportunity_stage_probability',
   object: 'crm_opportunity',
   events: ['beforeInsert', 'beforeUpdate'],
   priority: 100,

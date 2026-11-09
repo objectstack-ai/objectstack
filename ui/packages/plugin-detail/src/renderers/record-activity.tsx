@@ -75,17 +75,20 @@ import {
   normalizeLimit,
   describeRefusedFeedLimit,
   isRefusedFeedRead,
+  IMPERSONATED_ACTOR_FALLBACK,
   type SysActivityRow,
 } from './recordActivityFeed';
 import { useRecordAriaProps } from './recordComponentAria';
 import { useDefaultRecordPage } from '../defaultRecordPage';
 import {
   RecordFieldChangesContext,
+  RecordFieldHistoryContext,
   RecordTimelineCountContext,
   RecordTimelinePanelContext,
   RecordTimelineTotalContext,
   filterTimelineStream,
   mergeTimelineStream,
+  timelineStreamFilters,
   type TimelineStreamFilter,
 } from '../recordTimelineStream';
 
@@ -217,6 +220,8 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   const [selfDenied, setSelfDenied] = React.useState(false);
 
   const systemActorLabel = tt('detail.systemActor', 'System');
+  const impersonatedActorTemplate = tt('detail.impersonatedActor', IMPERSONATED_ACTOR_FALLBACK);
+  const unknownUserLabel = tt('detail.unknownUser', 'Unknown');
 
   React.useEffect(() => {
     if (!canSelfFetch) return;
@@ -245,7 +250,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         const rows: SysActivityRow[] = Array.isArray(raw) ? (raw as SysActivityRow[]) : [];
         const mapped: FeedItem[] = [];
         for (const row of rows) {
-          const item = activityRowToFeedItem(row, systemActorLabel);
+          const item = activityRowToFeedItem(row, systemActorLabel, impersonatedActorTemplate, unknownUserLabel);
           if (item) mapped.push(item);
         }
         setFetchedHasMore(rows.length > Math.max(1, pageSize));
@@ -270,7 +275,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         if (!cancelled) setSelfLoading(false);
       });
     return () => { cancelled = true; };
-  }, [canSelfFetch, dataSource, objectName, recordId, pageSize, systemActorLabel]);
+  }, [canSelfFetch, dataSource, objectName, recordId, pageSize, systemActorLabel, impersonatedActorTemplate, unknownUserLabel]);
 
   // objectstack#27055, Target 3 — on the synthesized default record page this
   // block IS the 动态 stream: ONE stream of the discussion, the activity and
@@ -283,8 +288,12 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   const asPeek = asStream && timelinePanel !== null;
   const peekEntries = timelinePanel?.entries ?? 0;
   const fieldChanges = React.useContext(RecordFieldChangesContext);
-  const [streamFilter, setStreamFilter] = React.useState<TimelineStreamFilter>('all');
+  const [chosenStreamFilter, setStreamFilter] = React.useState<TimelineStreamFilter>('all');
   const [streamPages, setStreamPages] = React.useState(1);
+  // objectstack#30074 — no 变更 chip while the record's field history is not
+  // shown; a chip that is not offered filters nothing.
+  const streamFilters = timelineStreamFilters(React.useContext(RecordFieldHistoryContext));
+  const streamFilter: TimelineStreamFilter = streamFilters.includes(chosenStreamFilter) ? chosenStreamFilter : 'all';
 
   const discussionItems = discussion?.items as FeedItem[] | undefined;
   const applied = React.useMemo(() => {
@@ -397,6 +406,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
             ? {
                 variant: 'stream' as const,
                 streamFilter,
+                streamFilters,
                 onStreamFilterChange: (next: TimelineStreamFilter) => {
                   setStreamFilter(next);
                   setStreamPages(1);

@@ -8,6 +8,11 @@ import { SysAuditLog } from './index.js';
  * `sys_audit_log.action` enum (maintainer ruling 2026-08-12 on #7675, ADR-0049
  * enforce-or-remove, registered under ADR-0087 as `audit-log-action-enum-retired`).
  *
+ * #30955 — `export` came back WRITER-FIRST, by the rule the last paragraph of
+ * this docblock states: its writer is `data-export-audit.ts`, called by the
+ * REST export door, and its list view is `config_changes`. It moved from
+ * `RETIRED_ACTIONS` to `ACTIONS_WITH_WRITERS` in the same change.
+ *
  * #8315 — `restore` joins them, under the same ruling carried by triage and
  * registered as `audit-log-action-restore-retired`. It was the last unresolved
  * value from #7675's survey, and the least ambiguous of the three: `actionFor()`
@@ -44,12 +49,6 @@ const RETIRED_ACTIONS: ReadonlyArray<readonly [action: string, prescription: str
     'permission-object writes are already on the ledger as ordinary `create` / `update` '
       + 'rows written by the generic hook writer; a second semantically-duplicate row is '
       + 'not minted. Filter the permission objects by `object_name` instead.',
-  ],
-  [
-    'export',
-    'no export feature has ever written an audit row — `actionFor()` in audit-writers.ts '
-      + 'emits create/update/delete and nothing else. A filter on this value matched '
-      + 'nothing on every deployment that has ever run.',
   ],
   [
     'restore',
@@ -90,6 +89,12 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
   ['config_change', 'service-settings/src/config-change-audit.ts — CONFIG_CHANGE_ACTION (#8145)'],
   ['import', 'plugin-auth/src/admin-import-users.ts — run-level row, record_id null'],
   [
+    'export',
+    'plugin-audit/src/data-export-audit.ts — createDataExportAuditWriter on the `audit` slot, run-level '
+      + 'row with record_id null; called by rest/src/data-action-routes.ts (GET /data/:object/export) '
+      + 'on every export it streams (#30955)',
+  ],
+  [
     'platform_admin_standing_change',
     'plugin-security/src/bootstrap-platform-admin.ts — recordPlatformAdminStandingChange, '
       + 'row shape in plugin-security/src/platform-admin-standing-audit.ts (#18412)',
@@ -99,6 +104,32 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
     'plugin-audit/src/action-invocation-audit.ts — createActionInvocationAuditWriter on the `audit` '
       + 'slot; called by runtime/src/domains/actions.ts (REST door) and runtime/src/action-execution.ts + '
       + 'runtime/src/domains/mcp.ts (MCP run_action / resume_run) (#27908)',
+  ],
+  [
+    'package_uninstall',
+    'plugin-audit/src/package-lifecycle-audit.ts — createPackageLifecycleAuditWriter on the `audit` slot; '
+      + 'called by metadata-protocol/src/protocol-package-uninstall.ts (deletePackage, the uninstall verb '
+      + 'every door reaches) once per package it uninstalled (#31186)',
+  ],
+  [
+    'package_unmanaged_import',
+    'plugin-audit/src/package-lifecycle-audit.ts — createPackageLifecycleAuditWriter on the `audit` slot; '
+      + 'called by cloud-connection/src/marketplace-install-local-plugin.ts (installUnmanaged, the unmanaged '
+      + 'branch both install doors reach) once per copy it attempted (#30964)',
+  ],
+  [
+    'credential_use',
+    'plugin-audit/src/credential-use-audit.ts — createCredentialUseAuditWriter on the `audit` slot, fed by '
+      + 'installCredentialUseAudit\'s afterUpdate hook on the two credential use stamps (core/src/security/'
+      + 'api-key.ts stampAdmittedKey, plugin-auth/src/mcp-client-last-use.ts) and by plugin-auth\'s hand-off '
+      + 'for a skip_consent OAuth client (#31796)',
+  ],
+  [
+    'scim_refused',
+    'plugin-audit/src/scim-refusal-audit.ts — createScimRefusalAuditWriter on the `audit` slot; called by '
+      + 'plugin-auth/src/auth-manager-request-routing.ts (handleRequest, the SCIM arm every /scim/v2/* request '
+      + 'passes) through plugin-auth/src/scim-refusal-audit.ts for each request answered 400 or above, '
+      + 'bounded per connection (#31829)',
   ],
 ];
 

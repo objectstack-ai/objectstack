@@ -16,6 +16,7 @@ import type {
   ISharingService,
 } from '@objectstack/spec/contracts';
 import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './objects/index.js';
+import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
 // the service that writes the row on every `emit()` (#4154). This plugin never
@@ -29,6 +30,14 @@ import { installAuditWriters, type AuditI18nSurface, type MessagingEmitSurface }
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
 import { createActionInvocationAuditWriter } from './action-invocation-audit.js';
+import { createDataExportAuditWriter } from './data-export-audit.js';
+import { createPackageLifecycleAuditWriter } from './package-lifecycle-audit.js';
+import {
+  createCredentialUseAuditWriter,
+  installCredentialUseAudit,
+  type CredentialUseAuditWriter,
+} from './credential-use-audit.js';
+import { createScimRefusalAuditWriter } from './scim-refusal-audit.js';
 import { installCommentAccessHooks, installCommentReadVisibility } from './comment-access-hooks.js';
 import {
   COMMENT_REACTION_REMOVE_ROUTE,
@@ -260,6 +269,13 @@ export class AuditPlugin implements Plugin {
    */
   private readAuditWriter: ReadAuditWriterHandle | null = null;
 
+  /**
+   * [#31796] The credential-use writer, built in `init()` (the `audit` slot
+   * carries it) and handed to the stamp hook `start()` installs, so the slot
+   * and the hook write through one writer.
+   */
+  private credentialUseWriter: CredentialUseAuditWriter | null = null;
+
   constructor(private readonly options: AuditPluginOptions = {}) {}
 
   async init(ctx: PluginContext): Promise<void> {
@@ -273,6 +289,12 @@ export class AuditPlugin implements Plugin {
       defaultDatasource: 'cloud',
       namespace: 'sys',
       objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction],
+      // The ledger row's record page: its fields, and every ledger row about
+      // the same record beside it, so a `config_change` row sits next to the
+      // mirror's rows about the same settings row (`sys-audit-log.page.ts`).
+      // A non-secret key's `config_change` row carries its readable before
+      // and after itself; a secret-valued key's carries only the digest.
+      pages: [SysAuditLogDetailPage],
       // ADR-0029 D7 — contribute the one Audit Log entry into the Setup app's
       // `group_diagnostics` slot. The plugin owns sys_audit_log (K2), so the
       // entry lives and dies with this plugin and needs no item gate.
@@ -313,6 +335,24 @@ export class AuditPlugin implements Plugin {
     // (`recordActionInvocation`): the two action doors in `@objectstack/runtime`
     // resolve it per request and hand it one event per invocation, naming the
     // door it came through (ruling 6513869839 on #27681, parameter 3).
+    //
+    // [#30955] And the data-export writer (`recordDataExport`): the REST
+    // export door resolves it per request and hands it one event per export
+    // it streamed, so every export of every object, this ledger included,
+    // leaves a run-level `export` row (`data-export-audit.ts`).
+    //
+    // [#31186] And the package lifecycle writer (`recordPackageLifecycleEvent`):
+    // the uninstall verb (`deletePackage` in `@objectstack/metadata-protocol`)
+    // resolves it per call and hands it one event per package it uninstalled,
+    // so the package itself leaves a `package_uninstall` row
+    // (`package-lifecycle-audit.ts`). [#30964] The install-local door's
+    // unmanaged branch hands the same writer one `package_unmanaged_import`
+    // event per copy it attempted, landed or not.
+    //
+    // [#31829] And the SCIM refusal writer (`recordScimRefusal`): plugin-auth's
+    // SCIM door hands it one event per refused `/scim/v2/*` request its bound
+    // admitted, so a connection's errors leave `scim_refused` rows
+    // (`scim-refusal-audit.ts`).
     const getLedgerEngine = (): IDataEngine | undefined => {
       try {
         return ctx.getService<IDataEngine>('objectql');
@@ -326,9 +366,21 @@ export class AuditPlugin implements Plugin {
         }
       }
     };
+    //
+    // [#31796] And the credential-use writer (`recordCredentialUse`): one
+    // `credential_use` row per credential per use window. The two stamped
+    // credentials reach it through the stamp hook `start()` installs; a
+    // `skip_consent` OAuth client, which has no consent row to stamp, through
+    // this slot, from plugin-auth's OAuth stamp point
+    // (`credential-use-audit.ts`).
+    this.credentialUseWriter = createCredentialUseAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger });
     ctx.registerService('audit', {
       ...createAuthEventAuditSink({ getEngine: getLedgerEngine, logger: ctx.logger }),
       ...createActionInvocationAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      ...createDataExportAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      ...createPackageLifecycleAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
+      ...this.credentialUseWriter,
+      ...createScimRefusalAuditWriter({ getEngine: getLedgerEngine, logger: ctx.logger }),
     });
 
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
@@ -437,7 +489,7 @@ export class AuditPlugin implements Plugin {
           return undefined;
         }
       };
-      installAuditWriters(engine as any, this.name, {
+      const auditWriters = installAuditWriters(engine as any, this.name, {
         getMessaging,
         getI18n,
         getLocale,
@@ -446,6 +498,13 @@ export class AuditPlugin implements Plugin {
           admitMentionRecipients({ engine: engine as any, getTenancyPosture, logger: ctx.logger as any }, input),
       });
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
+
+      // [#31796] The `credential_use` row: recognised on each credential's own
+      // throttled use stamp, so it adds no timer of its own
+      // (`credential-use-audit.ts`).
+      if (this.credentialUseWriter) {
+        installCredentialUseAudit(engine as any, this.credentialUseWriter, { packageId: this.name });
+      }
 
       // [#8992] Record-view auditing — the `read` half of the ledger. Installed
       // only over the objects this deployment opted in, and returns null when
@@ -515,6 +574,12 @@ export class AuditPlugin implements Plugin {
               return null;
             }
           },
+          // A comment's display identity (author name and avatar) is the
+          // session user's own, read by the same resolution the record
+          // history's actor columns are written with.
+          auditWriters
+            ? (hookCtx, userId) => auditWriters.resolveActorSnapshot(hookCtx?.api, userId)
+            : undefined,
         );
         if (typeof (engine as any).registerMiddleware === 'function') {
           // [ADR-0139 E7] The thread gate writes one ReadableIds leaf per parent

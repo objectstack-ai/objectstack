@@ -190,8 +190,8 @@ describe('still-generates — the fix must not be satisfied by emitting a valid 
     expect(fields.name.type).toBe('text');
     expect(fields.signed_up_at.type).toBe('datetime');
 
-    expect(draft.source).toContain("id: { type: 'text' }");
-    expect(draft.source).toContain("signed_up_at: { type: 'datetime' }");
+    expect(draft.source).toContain("id: { type: 'text', label: 'Id' }");
+    expect(draft.source).toContain("signed_up_at: { type: 'datetime', label: 'Signed Up At' }");
   });
 
   it('keeps the external binding pointed at the REMOTE table, not the renamed object', async () => {

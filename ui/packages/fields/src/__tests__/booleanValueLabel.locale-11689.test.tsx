@@ -77,9 +77,9 @@ describe('read-only boolean words come from the locale (objectui#11689)', () => 
   for (const [name, draw] of Object.entries(DRAWERS)) {
     describe(name, () => {
       it('zh renders 是 / 否', () => {
-        expect(inLocale('zh', draw(true)).container.textContent).toBe('是');
+        expect(inLocale('zh-Hans', draw(true)).container.textContent).toBe('是');
         cleanup();
-        expect(inLocale('zh', draw(false)).container.textContent).toBe('否');
+        expect(inLocale('zh-Hans', draw(false)).container.textContent).toBe('否');
       });
 
       it('en is unchanged: Yes / No', () => {
@@ -132,7 +132,7 @@ describe('BooleanCellRenderer words come from the locale (objectui#11689)', () =
 
   it('zh: a status column holding false is an unchecked box named by the column label, with no pack word', () => {
     const { container } = inLocale(
-      'zh',
+      'zh-Hans',
       <BooleanCellRenderer value={false} field={{ name: 'active', type: 'boolean', label: '启用' } as never} />,
     );
     expect(badgeOf(container)).toBeNull();
@@ -143,9 +143,9 @@ describe('BooleanCellRenderer words come from the locale (objectui#11689)', () =
 
   it('zh: the completion indicator is named in the pack', () => {
     const field = { name: 'completed', type: 'boolean', label: 'Completed' } as never;
-    expect(indicatorName(inLocale('zh', <BooleanCellRenderer value={true} field={field} />).container)).toBe('已完成');
+    expect(indicatorName(inLocale('zh-Hans', <BooleanCellRenderer value={true} field={field} />).container)).toBe('已完成');
     cleanup();
-    expect(indicatorName(inLocale('zh', <BooleanCellRenderer value={false} field={field} />).container)).toBe('未完成');
+    expect(indicatorName(inLocale('zh-Hans', <BooleanCellRenderer value={false} field={field} />).container)).toBe('未完成');
   });
 
   it('en: an Active box, Completed, Not completed', () => {

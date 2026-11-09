@@ -225,7 +225,10 @@ const ALLOW = new Map([
 // with the call it delegates through: the resolver itself, or the one
 // request-to-ExecutionContext composition in core that calls it (ruling record
 // 6227928430, letter A). A door converted onto that composition moves its row's
-// call, and the composition is itself a delegator of the resolver.
+// call, and the composition is itself a delegator of the resolver. A door served
+// by core's shared own-row delete door delegates through that door's caller
+// resolution (`ownRowDeleteCallerResolver`), which is itself a delegator of the
+// composition.
 const DELEGATORS = new Map([
   ['packages/rest/src/rest-server.ts', 'resolveRequestExecutionContext'],
   ['packages/runtime/src/security/resolve-execution-context.ts', 'resolveRequestExecutionContext'],
@@ -233,9 +236,11 @@ const DELEGATORS = new Map([
   ['packages/services/service-storage/src/storage-service-plugin.ts', 'resolveRequestExecutionContext'],
   ['packages/plugins/plugin-hono-server/src/current-user-endpoints.ts', 'resolveRequestExecutionContext'],
   // [#26161] The own-row unreact door AuditPlugin mounts.
-  ['packages/plugins/plugin-audit/src/comment-reaction-routes.ts', 'resolveRequestExecutionContext'],
+  ['packages/plugins/plugin-audit/src/comment-reaction-routes.ts', 'ownRowDeleteCallerResolver'],
   // [#29443] The owner's delete door for a personal view AuthPlugin mounts.
-  ['packages/plugins/plugin-auth/src/personal-view-routes.ts', 'resolveRequestExecutionContext'],
+  ['packages/plugins/plugin-auth/src/personal-view-routes.ts', 'ownRowDeleteCallerResolver'],
+  // [#29636] The shared own-row delete door both of the above are served by.
+  ['packages/core/src/security/own-row-delete-routes.ts', 'resolveRequestExecutionContext'],
   ['packages/core/src/security/request-execution-context.ts', 'resolveAuthzContext'],
 ]);
 

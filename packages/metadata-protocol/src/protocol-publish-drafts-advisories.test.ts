@@ -34,7 +34,7 @@
  * `publishPackageDrafts` — nothing on the gate path is stubbed.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
@@ -87,8 +87,10 @@ function matchesMetadataWhere(r: Row, where: Record<string, unknown>): boolean {
     return true;
 }
 
-function makeStubEngine() {
+function makeStubEngine(refusedSync: ReadonlySet<string> = new Set()) {
     const rows = new Map<string, Row>();
+    // [#30693] Every object name the driver's schema sync was handed and ran.
+    const syncedObjects: string[] = [];
     const historyRows: HistoryRow[] = [];
     let nextId = 0;
 
@@ -161,6 +163,13 @@ function makeStubEngine() {
         async transaction<T>(cb: (ctx: any, info: { owned: boolean }) => Promise<T>): Promise<T> {
             return cb(undefined, { owned: true });
         },
+        // [#30693] A name in `refusedSync` is the driver refusing that
+        // object's DDL — the #30635 fixture shape (an undeclared failure).
+        syncObjectSchema: vi.fn(async (name: string) => {
+            if (refusedSync.has(name)) throw new Error(`there is already an index named ${name}`);
+            syncedObjects.push(name);
+            return true;
+        }),
         registry: {
             registerItem: () => {},
             registerObject: () => {},
@@ -171,7 +180,7 @@ function makeStubEngine() {
             getPackage: (id: string) => (id === PKG ? { manifest: { id: PKG } } : undefined),
         },
     };
-    return { engine, rows, historyRows };
+    return { engine, rows, historyRows, syncedObjects };
 }
 
 const PKG = 'app.ops';
@@ -330,5 +339,130 @@ describe('publishPackageDrafts carries per-draft advisories on published[] eleme
         // `failed[]` elements are unaffected by #9343 — the ruling's explicit
         // boundary: no advisories key appears anywhere on a refused batch.
         expect(JSON.stringify(res.failed)).not.toContain('advisories');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#30693] A refused object-storage sync rides the object's element too.
+// ---------------------------------------------------------------------------
+// Since #30635 a publish-mode save and `POST /meta/:type/:name/publish` answer
+// a refused sync with one `warning` advisory (rule `object-storage-sync-refused`).
+// The batch door runs the same sync per promoted item in Phase 2 and used to
+// drop the answer: the element was pushed before the side effects ran, so
+// "publish whole app" answered a plain success while the object's table was
+// not created or altered. The same advisory now rides that object's
+// `published[]` element; the publish is not failed and every other element is
+// byte-unchanged.
+
+const SYNC_REFUSED_RULE = 'object-storage-sync-refused';
+
+/** An object body that clears the publish path's authoring gates (#8308 OWD, one field). */
+const objectBody = (name: string) => ({
+    name,
+    label: name,
+    sharingModel: 'private',
+    fields: { title: { type: 'text', label: 'Title' } },
+});
+
+async function stageObjectDraft(protocol: ObjectStackProtocolImplementation, name: string): Promise<void> {
+    await (protocol as any).saveMetaItem({
+        type: 'object', name, item: objectBody(name), packageId: PKG, mode: 'draft',
+    });
+}
+
+describe('[#30693] publishPackageDrafts reports a refused object-storage sync on that object\'s element', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    /** Quiets (and keeps) the #22985 operator line `ensureObjectStorage` logs. */
+    const quietConsole = () => vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    it('a batch with one refused sync answers success; exactly that element carries the warning, its siblings no key', async () => {
+        const error = quietConsole();
+        const { engine, syncedObjects } = makeStubEngine(new Set(['ticket']));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+        await stageObjectDraft(protocol, 'invoice');
+        await stageFlowDraft(protocol, 'bounded_purge', cleanFlow('bounded_purge'));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        // Status unchanged: the metadata is live, the publish is not failed.
+        expect(res.failed).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 3, failedCount: 0 });
+        expect(syncedObjects).toEqual(['invoice']);
+
+        const byName = new Map(res.published.map((p) => [p.name, p]));
+        const refused = byName.get('ticket')!;
+        expect(refused.advisories).toHaveLength(1);
+        expect(refused.advisories![0]).toMatchObject({
+            rule: SYNC_REFUSED_RULE, severity: 'warning', path: '', where: 'object "ticket"',
+        });
+        expect(refused.advisories![0]!.message).toContain("'ticket'");
+        // The single-item doors' element shape (#30635 reuses the gate's
+        // `RuntimeAuthoringIssueSchema` keys), not a batch-only variant.
+        expect(Object.keys(refused.advisories![0]!).sort())
+            .toEqual(['hint', 'message', 'path', 'rule', 'severity', 'where']);
+        // An undeclared driver failure is withheld from the 2xx body, as on
+        // the single-item doors, and still reaches the server log whole.
+        expect(refused.advisories![0]!.message).not.toContain('there is already an index');
+        expect(error.mock.calls.some((args) => args[1] === 'there is already an index named ticket')).toBe(true);
+
+        for (const name of ['invoice', 'bounded_purge']) {
+            const el = byName.get(name)!;
+            expect('advisories' in el).toBe(false);
+            expect(Object.keys(el).sort()).toEqual(['name', 'type', 'version']);
+        }
+    });
+
+    it('a DECLARED driver refusal (4xx) is quoted on the element, as on the single-item doors', async () => {
+        quietConsole();
+        const { engine } = makeStubEngine();
+        engine.syncObjectSchema = vi.fn(async () => {
+            throw Object.assign(new Error("Schema sync REFUSED for the existing table 'ticket': it holds 2 rows."), { status: 409 });
+        });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
+        const [advisory, ...rest] = res.published[0]!.advisories ?? [];
+        expect(rest).toEqual([]);
+        expect(advisory?.rule).toBe(SYNC_REFUSED_RULE);
+        expect(advisory?.message).toContain("Schema sync REFUSED for the existing table 'ticket': it holds 2 rows.");
+    });
+
+    it('the gate\'s findings and the sync refusal ride one element together, gate findings first', async () => {
+        quietConsole();
+        const { engine } = makeStubEngine(new Set(['ticket']));
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+        await stageFlowDraft(protocol, 'nightly_purge', advisoryFlow('nightly_purge'));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: true, publishedCount: 2, failedCount: 0 });
+        const byName = new Map(res.published.map((p) => [p.name, p]));
+        // The flow's gate advisory is untouched by the object's refusal.
+        expect(byName.get('nightly_purge')!.advisories!.map((a) => a.rule)).toEqual(['flow-multi-write-unfiltered']);
+        expect(byName.get('ticket')!.advisories!.map((a) => a.rule)).toEqual([SYNC_REFUSED_RULE]);
+    });
+
+    it('CONTROL: a batch whose every sync runs adds no `advisories` key anywhere', async () => {
+        const { engine, syncedObjects } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'ticket');
+        await stageObjectDraft(protocol, 'invoice');
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: true, publishedCount: 2, failedCount: 0 });
+        expect([...syncedObjects].sort()).toEqual(['invoice', 'ticket']);
+        for (const el of res.published) {
+            expect(Object.keys(el).sort()).toEqual(['name', 'type', 'version']);
+        }
+        expect(JSON.stringify(res.published)).not.toContain('advisories');
     });
 });

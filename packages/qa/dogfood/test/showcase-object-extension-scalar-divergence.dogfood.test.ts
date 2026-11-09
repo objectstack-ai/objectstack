@@ -118,6 +118,8 @@ import { writeBuildShapedArtifact } from './build-shaped-artifact.js';
 
 /** What the showcase's `objectExtensions` entry declares on `main` today. */
 const EXTENSION_LABEL = 'Account (Success Overlay)';
+/** The plural the same extension declares with it (#30465). */
+const EXTENSION_PLURAL_LABEL = 'Accounts (Success Overlay)';
 /** What the showcase's `en` catalog declares for the same object. */
 const CATALOG_LABEL = 'Account';
 
@@ -278,6 +280,30 @@ describe('dogfood: the object-extension fold and the i18n catalog disagree on sc
         // Asserting only the agreement would stay green if a later change made
         // all three serve `Account` again.
         expect(labelOf(singleBody?.item)).toBe(EXTENSION_LABEL);
+    });
+
+    it('[#30465] the renamed object is served the extension\'s plural with its label, in en and zh-CN', async () => {
+        // An extension that renames `label` with no `pluralLabel` is served with
+        // no plural (the base's `Accounts` names the old label), and a list title
+        // reads the plural first. So the extension declares the pair, and both
+        // translated reads serve it. Both values diverge from the packaged base,
+        // so the showcase's code catalog yields to them in every locale: zh-CN
+        // serves the pair as written, the singular and the plural alike.
+        const declared = (showcaseStack as any)?.objectExtensions
+            ?.find((e: any) => e?.extend === 'showcase_account');
+        expect(declared?.pluralLabel).toBe(EXTENSION_PLURAL_LABEL);
+        for (const locale of ['en', 'zh-CN']) {
+            const headers = { Authorization: `Bearer ${token}`, 'Accept-Language': locale };
+            const single: any = await (await stack.api('/meta/object/showcase_account', { headers })).json();
+            const listRes = await stack.api('/meta/object', { headers });
+            const listBody: any = await listRes.json();
+            const listed = ((Array.isArray(listBody) ? listBody : (listBody?.items ?? listBody?.data ?? [])) as any[])
+                .find((o) => o?.name === 'showcase_account');
+            for (const [read, doc] of [['item', single?.item], ['list', listed]] as const) {
+                expect(labelOf(doc), `${locale} ${read} label`).toBe(EXTENSION_LABEL);
+                expect(doc?.pluralLabel, `${locale} ${read} pluralLabel`).toBe(EXTENSION_PLURAL_LABEL);
+            }
+        }
     });
 
     it('[ADR-0131 D6] the Studio rename round-trip of a PACKAGED object is refused, hatch open — nothing is stored', async () => {

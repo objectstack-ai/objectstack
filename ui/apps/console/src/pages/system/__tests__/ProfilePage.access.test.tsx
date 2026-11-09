@@ -43,7 +43,7 @@ const { translate, findOne } = vi.hoisted(() => ({
   findOne: vi.fn(async () => ({ id: 'usr_admin' })),
 }));
 
-vi.mock('@object-ui/providers', async (importOriginal) => ({
+vi.mock('@object-ui/fields', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useUpload: () => ({ upload: async () => ({ url: '' }) }),
 }));

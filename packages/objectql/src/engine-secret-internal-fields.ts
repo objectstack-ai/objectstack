@@ -27,7 +27,11 @@
  * may only seal a new value or keep its own record's ref. `encryptSecretFields`
  * takes the write's own stored rows ({@link StoredRowsReader}) and refuses any
  * other ref with {@link SecretRefWriteError}; the system principal keeps the
- * pass-through.
+ * pass-through. The stored rows a non-system write is compared against are
+ * the rows as that caller's own read door serves them
+ * ({@link storedReferencesCallerReads}), which serves a `secret` column
+ * masked, so no stored ref is one a non-system write keeps: every ref it
+ * sends gets the same refusal, whatever the column holds.
  *
  * ## How the moved bodies reach the class
  *
@@ -40,7 +44,7 @@
  * (`_registry`, `cryptoProvider`, `txStore`, `logger`) go as GETTERS, so each
  * read happens when the body makes it: `setCryptoProvider` replaces the
  * provider at any time, and a body sees whatever is installed at the moment it
- * reads, as it did. The six methods they call (`getDriver`,
+ * reads, as it did. The seven methods they call (`find`, `getDriver`,
  * `transactionCoversDriverFor`, `isClosedUnitHandle`, `omitInternalFields`,
  * `privilegedReadDriverOptions`, `resolveSecret`) go as late-bound closures
  * over the instance, so a double or spy set on the engine — tests replace
@@ -51,6 +55,11 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { CryptoHandle } from '@objectstack/spec/contracts';
@@ -69,6 +78,7 @@ import {
   SECRET_MASK,
 } from './secret-fields.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
+import { storedReferencesCallerReads } from './engine-referential-integrity.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -84,6 +94,7 @@ export interface SecretInternalFieldsHost {
   readonly cryptoProvider: ObjectQL['cryptoProvider'];
   readonly txStore: ObjectQL['txStore'];
   readonly logger: ObjectQL['logger'];
+  find: ObjectQL['find'];
   getDriver: ObjectQL['getDriver'];
   transactionCoversDriverFor: ObjectQL['transactionCoversDriverFor'];
   isClosedUnitHandle: ObjectQL['isClosedUnitHandle'];
@@ -119,7 +130,9 @@ export interface SecretHandleSlot {
  * insert (a new record holds no ref of its own), the pre-image for a by-id
  * update, the matched rows for a predicate update — and the reader is called
  * only when a non-system payload carries a ref, so every other write reads
- * nothing more than it did.
+ * nothing more than it did. The rows are compared only as the caller's own
+ * read door serves them ({@link storedReferencesCallerReads}), never as the
+ * call site read them.
  */
 export type StoredRowsReader = () => Promise<readonly (Record<string, unknown> | null | undefined)[] | null>;
 
@@ -135,9 +148,12 @@ export const SECRET_REF_WRITE_REFUSAL_STATUS = 400;
 
 /**
  * [#27582] Refusal of a `secret:` ref on a non-system write that is not the
- * value the record's own column already holds. Fail closed, with one answer:
- * the message names the column and never the ref, and nothing about the handle
- * the ref names is looked up, so the answer is the same whatever it names.
+ * value the record's own column holds as its caller reads it. Fail closed, with
+ * one answer: the message names the column and never the ref, and nothing about
+ * the handle the ref names is looked up, so the answer is the same whatever it
+ * names. The read door serves a `secret` column masked to every caller, so a
+ * non-system write that sends a ref always meets this refusal, whatever the
+ * column holds.
  */
 export class SecretRefWriteError extends Error {
   readonly code = SECRET_REF_WRITE_REFUSAL_CODE;
@@ -149,9 +165,10 @@ export class SecretRefWriteError extends Error {
   constructor(object: string, field: string) {
     super(
       `Stored-reference value refused for secret field "${object}.${field}": a value that starts with "secret:" `
-        + 'is read as a reference to a credential already stored, not as a credential, and a write may only keep '
-        + 'the reference this record already holds. To set the secret, send its value; to clear it, write null; '
-        + 'to leave it unchanged, omit the field. Nothing was written.',
+        + 'is read as a reference to a credential already stored, not as a credential, and a write keeps a '
+        + 'reference only where it is the value its caller reads in this column, which serves a secret masked. '
+        + 'To set the secret, send its value; to clear it, write null; to leave it unchanged, omit the field or '
+        + 'send back the mask it reads. Nothing was written.',
     );
     this.name = 'SecretRefWriteError';
     this.object = object;
@@ -159,9 +176,57 @@ export class SecretRefWriteError extends Error {
   }
 }
 
-/** The body of `ObjectQL#encryptSecretFields`; the method's docblock there is its contract. */
+/**
+ * Normalize credential fields on `row` in place before it reaches the driver.
+ *
+ * Two channels share the read mask ({@link SECRET_MASK}) but differ on write
+ * (see ADR-0100):
+ *
+ *  - **`secret`** — encrypted: each plaintext is wrapped by the ICryptoProvider
+ *    and replaced on `row` by an opaque ref. Cleartext never reaches the
+ *    business table. [#27495] The `sys_secret` row is SEALED here and handed
+ *    back, not written: the caller writes it with {@link persistSecretRows}
+ *    immediately before the record's own driver write, so a write refused
+ *    after this pass (validation, the post-image seam) leaves no row behind.
+ *  - **`password`** (generic, non-`better-auth`) — plaintext at rest: stored
+ *    verbatim, no encryption and no `sys_secret` row. Only the echoed-mask drop
+ *    below applies to it.
+ *
+ * Rules:
+ *  - Any masked field (secret or password) whose value equals the read mask ⇒
+ *    the key is dropped, so a form round-trip that echoes the mask does not
+ *    overwrite the stored value.
+ *  - No secret fields on the object ⇒ no further work (fast path, no crypto).
+ *  - `null`/`undefined` secret value ⇒ left as-is (clears the secret).
+ *  - [#8559] `""` secret value ⇒ REFUSED with {@link EmptyCredentialWriteError}
+ *    (ADR-0112 `VALIDATION_ERROR`/400, message names `null` as the clear
+ *    spelling). Encrypting it would mint a `sys_secret` row that decrypts to
+ *    nothing behind a perfectly valid ref, so every read reports "a secret is
+ *    set" while the dereference returns nothing — the contradictory state
+ *    #8542/#8558 defend consumers against. Refused, not folded into the
+ *    `null` branch: silently reinterpreting the write was explicitly rejected
+ *    (maintainer ruling 2026-08-13 on #8559). The `password` half of the same
+ *    ruling lands at its own seam — {@link refuseEmptyPasswordFields} — since
+ *    the two types share the read mask but not this encryption path.
+ *  - Secret value already a ref ⇒ [#27582] a non-system write may only seal
+ *    a new value or keep its own record's ref. From the system principal
+ *    (`context.isSystem === true`) it is left as-is, as it always was. From
+ *    any other caller it is kept only when every row the write lands on
+ *    holds exactly that ref in that column AS THE CALLER'S OWN READ DOOR
+ *    SERVES IT — `storedRows`, which each call site supplies (none for an
+ *    insert, the pre-image for a by-id update, the matched rows for a
+ *    predicate update), projected by {@link storedReferencesCallerReads} —
+ *    and then the key is dropped, as the echoed mask is. The read door serves
+ *    a `secret` column masked ({@link maskSecretFields}), never as stored, so
+ *    no stored ref is kept: every ref is REFUSED with
+ *    {@link SecretRefWriteError} (ADR-0112 `VALIDATION_ERROR`/400), one
+ *    answer whatever the ref names and whatever the column holds.
+ *  - **Fail-closed:** any other secret value with no CryptoProvider registered,
+ *    or no reachable `sys_secret` store, THROWS — never persists cleartext.
+ *    (A `password` field needs no CryptoProvider — it is stored as-is.)
+ */
 export async function encryptSecretFields(
-  this: Pick<SecretInternalFieldsHost, '_registry' | 'cryptoProvider' | 'getDriver'>,
+  this: Pick<SecretInternalFieldsHost, '_registry' | 'cryptoProvider' | 'getDriver' | 'find' | 'logger'>,
   object: string,
   row: Record<string, unknown>,
   context: ExecutionContext | undefined,
@@ -206,7 +271,18 @@ export async function encryptSecretFields(
       // predicate that matches nothing) has nothing to keep. Kept, the key is
       // dropped, as the echoed mask is: the column is not rewritten at all, so
       // the verdict cannot go stale before the statement runs.
-      ownRows ??= (await storedRows()) ?? [];
+      // ⛔ The rows are compared only as this caller's own read door serves
+      // them, never as stored: the answer to a column the caller cannot read
+      // as stored must not depend on what it holds. The door serves a
+      // `secret` column masked, so no ref survives the projection and every
+      // ref this caller sends is refused alike.
+      ownRows ??= await storedReferencesCallerReads.call(
+        this,
+        object,
+        ((await storedRows()) ?? []).map((own) => (own && typeof own === 'object' ? own : {})),
+        secretFields,
+        context,
+      );
       const keepsOwn = ownRows.length > 0 && ownRows.every((own) => own?.[field] === value);
       if (!keepsOwn) throw new SecretRefWriteError(object, field);
       delete row[field];
@@ -323,7 +399,14 @@ export function deletedSecretSlots(
   return retiredSecretSlots(schema, deletedRows, clearEvery);
 }
 
-/** The body of `ObjectQL#persistSecretRows`; the method's docblock there is its contract. */
+/**
+ * [#27495] Write the `sys_secret` rows {@link encryptSecretFields} sealed for
+ * one record write. Called immediately before that record's driver write and
+ * after every pass that can refuse it, so the credential row is written only
+ * with the record that names it. Each row lands on `written` as it is
+ * written, which is what the write's failure path hands to
+ * {@link releaseSecretHandles} when the record write does not land.
+ */
 export async function persistSecretRows(
   this: Pick<SecretInternalFieldsHost, 'getDriver'>,
   pending: readonly PendingSecretRow[],
@@ -335,7 +418,40 @@ export async function persistSecretRows(
   }
 }
 
-/** The body of `ObjectQL#releaseSecretHandles`; the method's docblock there is its contract. */
+/**
+ * [#27495] Remove each `sys_secret` row in `slots` that the column it was
+ * minted for no longer names — best-effort, and never a throw.
+ *
+ * Two occasions reach it. `'refused'`: a write that sealed and wrote a row
+ * did not complete, so the row may name nothing. `'retired'`: a committed
+ * update cleared the field (`null`) or replaced its value, so the handle the
+ * column named before may name nothing; [#27581] a committed delete reaches
+ * it the same way, for every handle the removed rows held. The same three
+ * checks decide both,
+ * and every one that cannot pass KEEPS the row, the recoverable direction
+ * (deleting a handle a row still names destroys that credential, and nothing
+ * can name what was lost):
+ *
+ *  - **Verified, never inferred.** No row of `object` may still name the
+ *    handle in that column: a predicate write seals ONE handle for every row
+ *    it matches, so clearing one of them leaves the handle in force for the
+ *    rest; a write that did land after all (a partially applied batch) still
+ *    names its row.
+ *  - **This column's own handle.** The `sys_secret` row's `namespace`/`key`
+ *    must be this object and field; a ref a system writer copied onto another
+ *    column is not released through that column.
+ *  - **Inside the record's unit.** The count and the delete ride the open
+ *    transaction where it covers their drivers, so they see the write's own
+ *    state and roll back with it; a record write in a unit that does not
+ *    cover the `sys_secret` store keeps the row, since the delete could
+ *    outlive a rollback of the record.
+ *
+ * A row kept for a failure (not for being in use) is reported once at
+ * `error`, naming the column and the remedy: the caller's answer does not
+ * change, and the stored ciphertext is exactly what the operator believes
+ * gone. Legacy orphans written before this existed are not swept here; the
+ * orphan report lists them.
+ */
 export async function releaseSecretHandles(
   this: Pick<SecretInternalFieldsHost, 'getDriver' | 'txStore' | 'transactionCoversDriverFor' | 'isClosedUnitHandle' | 'logger'>,
   object: string,
@@ -403,7 +519,29 @@ export async function releaseSecretHandles(
   }
 }
 
-/** The body of `ObjectQL#refuseEmptyPasswordFields`; the method's docblock there is its contract. */
+/**
+ * [#8559] Refuse `""` on a `password`-typed field before it reaches the
+ * driver — the `password` half of the same maintainer ruling (2026-08-13)
+ * that makes {@link encryptSecretFields} refuse `""` on a `secret` field.
+ *
+ * Its own seam, deliberately NOT routed through the encryption path: the two
+ * types share the read mask and the echoed-mask drop but a `password` field
+ * is plaintext at rest (no CryptoProvider, no `sys_secret` row — ADR-0100),
+ * so the refusal binds where its write actually flows. Storing `""` verbatim
+ * would produce the same contradiction as the secret arm without the cipher
+ * row: a non-null stored value that every read masks as "a password is set"
+ * while the credential has no content. `null` (clear) and the echoed mask
+ * (drop, handled in {@link encryptSecretFields}) keep their meanings.
+ *
+ * Scope is {@link collectMaskedPasswordFields}: `managedBy: 'better-auth'`
+ * objects are exempt — their password column is not masked on read, so the
+ * "reads as set, holds nothing" contradiction cannot arise there, and its
+ * write path belongs to the auth subsystem.
+ *
+ * Called at every call site of {@link encryptSecretFields} (single/bulk
+ * insert, single-id update, multi update) so the two halves of the ruling
+ * guard the same doors.
+ */
 export function refuseEmptyPasswordFields(
   this: Pick<SecretInternalFieldsHost, '_registry'>,
   object: string,
@@ -418,7 +556,19 @@ export function refuseEmptyPasswordFields(
   }
 }
 
-/** The body of `ObjectQL#maskSecretFields`; the method's docblock there is its contract. */
+/**
+ * Mask credential fields on read so plaintext never leaves the engine through
+ * the normal query path. Covers `secret` fields (always) and `password` fields
+ * on generic, non-`better-auth` objects (see {@link collectMaskedReadFields}
+ * and ADR-0100). A set value becomes {@link SECRET_MASK}; an unset one stays
+ * `null`. Privileged callers that genuinely need a secret's plaintext use
+ * {@link resolveSecret} against the stored ref; a `password` field is stored
+ * as plaintext at rest, so its cleartext is only ever reachable off this path.
+ *
+ * [#7728] Second collector branch, same choke point: a field declared
+ * `internal: true` is OMITTED rather than masked — see
+ * {@link omitInternalFields} for why the two dispositions differ.
+ */
 export function maskSecretFields(
   this: Pick<SecretInternalFieldsHost, '_registry' | 'omitInternalFields'>,
   object: string,
@@ -443,7 +593,61 @@ export function maskSecretFields(
   this.omitInternalFields(object, rows);
 }
 
-/** The body of `ObjectQL#omitInternalFields`; the method's docblock there is its contract. */
+/**
+ * [#7728] Drop every field declared `internal: true` from the rows the engine
+ * hands back — "the declared value is never returned on the generic data
+ * path". This is the read protection for ADR-0100's third credential channel:
+ * auth-subsystem one-way hashes stored in `text` columns, which the two
+ * type-keyed credential collectors structurally cannot reach.
+ *
+ * **OMIT, not mask** (maintainer ruling 2026-08-12 on #7728). The credential
+ * mask exists to signal "a value is set" without leaking it. The column this
+ * was minted for — `sys_api_key.key` — is `required: true`, so it is ALWAYS
+ * set: the signal carries zero bits, while still shipping a value under a
+ * field whose own description says it is "never exposed to clients". Omission
+ * also leaves that description string untouched, so the four generated
+ * translation bundles that mirror it do not churn.
+ *
+ * **`?select=` is covered by construction, and that is load-bearing.** The
+ * strip acts on the RESULT ROWS, not on the projection, so a client that
+ * spells the column out (`?select=id,key`) gets a 200 without it rather than
+ * a bypass. `select` only gates on whether a field is KNOWN
+ * (`assertProjectionFieldsExist`) and a flagged column is known, so a
+ * projection-aware strip would have shipped looking complete and still leaked
+ * to any caller who named the column — measured on the sibling column in
+ * #7823, and reproduced here on `sys_api_key.key` before the fix.
+ *
+ * **No system carve-out**, and this is where the shape deliberately diverges
+ * from its sibling {@link stripSearchCompanionFromRead}. That one keeps the
+ * `__search` companion for a system caller who names it by projection,
+ * because it has exactly one such reader whose backfill comparison would
+ * otherwise rewrite every row on every run. This flag has no such reader: the
+ * API-key verifier uses the column as a `where` FILTER and never reads it off
+ * the result (`resolveApiKeyPrincipal` takes `expires_at` / `user_id` /
+ * `organization_id` / `scopes`), and the mint path returns the plaintext it
+ * generated, not the row it inserted. An escape hatch nobody needs is a hole
+ * in a non-exposure guarantee, so there isn't one — if a legitimate system
+ * reader ever appears, it reads the column through a purpose-built privileged
+ * accessor, the way {@link resolveSecret} does for `secret`.
+ *
+ * Nothing below storage is touched. The strip runs on rows the driver has
+ * already produced, so the predicate has been evaluated and the index used
+ * before this method sees anything — which is precisely why authentication
+ * keeps working.
+ *
+ * **READ path only** (#7823, maintainer ruling 2026-08-13 / A-prime). This
+ * used to run at the two write-response sites as well (the 201 create body
+ * and the by-id-update 200 body), which conflated "never returned on the
+ * generic data path" with "never returned to the engine-level caller that
+ * performed the write" — and broke authentication for `sys_session.token`,
+ * whose minted value better-auth reads back off the insert result. The
+ * write-response half of the guarantee now lives at the generic-data-path
+ * ingress (`omitInternalFieldsFromWriteResponse` in
+ * `@objectstack/metadata-protocol`, tripwire-enforced across every `*Data`
+ * write face); engine write results keep the stored row whole. Lifecycle
+ * consumers that need a flagged value back off a READ go through
+ * {@link resolveInternalField} — never a carve-out here.
+ */
 export function omitInternalFields(
   this: Pick<SecretInternalFieldsHost, '_registry'>,
   object: string,
@@ -460,7 +664,70 @@ export function omitInternalFields(
   }
 }
 
-/** The body of `ObjectQL#stripSearchCompanionFromRead`; the method's docblock there is its contract. */
+/**
+ * [#7642] Strip the hidden `__search` companion column from what a read
+ * hands back, unless a SYSTEM caller named it in its projection.
+ *
+ * The column is declared client-invisible (`hidden` + `readonly` + `system`
+ * + `searchable: false`) and the enforcement that exists is real: it is kept
+ * out of auto-views, out of the `$search` auto-default, and a `$searchFields`
+ * override naming it is refused with a 400 ("is hidden"). What was missing is
+ * the PROJECTION half — a query that names no `fields` reaches the driver
+ * with `ast.fields` undefined, every driver answers that with `SELECT *`, and
+ * the companion rode back in every record body: list results, GET by id,
+ * `/search` hits (which are `engine.find` rows verbatim) and the 201 create
+ * body. The rule is applied HERE, at the engine, because the engine is the
+ * PRODUCER those four surfaces share; fixing them one consumer at a time is
+ * how three of the four would stay broken.
+ *
+ * Two carve-outs, both measured rather than defensive:
+ *
+ *  - **A system caller that asks for it by name keeps it.** The companion has
+ *    exactly one such reader: `plugin-pinyin-search`'s backfill/reconcile
+ *    walk, which projects `['id', ...sources, '__search']` under
+ *    `{ isSystem: true }` and compares the stored blob against the recomputed
+ *    one. Strip it unconditionally and that comparison reads `undefined`
+ *    every pass — the backfill would rewrite every row of every object on
+ *    every run, which is worse than the disclosure it was fixing.
+ *  - **A non-system caller does NOT keep it, even by name.** `select` only
+ *    gates on whether a field is KNOWN (`assertProjectionFieldsExist`), and
+ *    the companion is known once provisioned — so `?select=__search` would
+ *    otherwise be an open door straight through this strip, and a
+ *    client-invisibility rule with a documented spelling that bypasses it is
+ *    not one. `isSystem` is server-derived (never client input), the same
+ *    trust the read-only strips on the write path already place in it.
+ *
+ * ## Why this door is SILENT where the `$searchFields` door returns a 400
+ *
+ * Asked on #7876 and ruled there on 2026-08-12 (direction C): the divergence
+ * is intended, and it is not reopenable on symmetry alone. The two doors are
+ * two KINDS of surface.
+ *
+ *  - `$searchFields` is AUTHORING input — it tells the server how to RUN the
+ *    query. A value the server will not honour has to be said out loud, or
+ *    the caller gets a WIDER answer than the one they narrowed to, in a
+ *    response with nothing to distinguish it from a satisfied one. That is
+ *    why `assertSearchFieldsAreSearchable` refuses the name with a 400
+ *    (#4254) — the refusal is protecting the ROW SET.
+ *  - `select` is a READ PROJECTION — it names what the caller would like
+ *    back. Dropping a column the caller may not see leaves the answer
+ *    correct: the rows are still the rows that were asked for, one key
+ *    lighter. {@link omitInternalFields} directly above answers
+ *    `?select=id,key` exactly this way, for exactly this reason (#7728), so
+ *    silence here is the platform's existing read-path rule, not an
+ *    exception to it.
+ *
+ * ⛔ Do not add a refusal here to make the two doors agree. That was option B
+ * on #7876, weighed and declined: it turns a request that answers 200
+ * today into a failure, for tidiness, on a spelling no non-system caller in
+ * this tree uses — the companion's only deliberate reader is the backfill
+ * carved out above. If a REAL caller is ever burned by the silent drop, that
+ * measurement reopens it; the asymmetry by itself does not.
+ *
+ * ⚠️ `requestedFields` must be the CALLER's `fields`, captured before
+ * `planFormulaProjection` — that pass rewrites the projection to every stored
+ * column when a formula is in play, companion included.
+ */
 export function stripSearchCompanionFromRead(
   rows: unknown,
   requestedFields: readonly string[] | undefined,
@@ -470,7 +737,39 @@ export function stripSearchCompanionFromRead(
   stripSearchCompanion(rows);
 }
 
-/** The body of `ObjectQL#privilegedReadDriverOptions`; the method's docblock there is its contract. */
+/**
+ * Driver options for a PRIVILEGED, driver-level read so it JOINS the open
+ * ambient transaction instead of asking the pool for a second connection.
+ *
+ * The three privileged read verbs — {@link resolveSecret},
+ * {@link resolveSecretField}, {@link resolveInternalField} — deliberately
+ * read at DRIVER level, the only layer where the masked/omitted value still
+ * exists. That bypasses hooks, field-level security and sharing by design;
+ * what it must NOT bypass is the connection the surrounding transaction is
+ * holding. {@link buildDriverOptions} threads the ambient handle onto every
+ * ordinary read for that reason (ADR-0034); these three passed NO options at
+ * all, so their read went to a FRESH pooled connection.
+ *
+ * On a roomy pool that is invisible — the pool simply hands out a second
+ * connection. On a **single-connection pool it is a deadlock**: SQLite's knex
+ * pool is `max: 1` (`driver-sqlite-wasm` and `driver-sql`/better-sqlite3
+ * both), so the open transaction holds the one connection and the privileged
+ * read waits for a connection that cannot be freed until the transaction
+ * that is waiting on the read commits. Measured on the erasure path
+ * (`runSubjectErasureAtomically` → better-auth `/admin/remove-user` →
+ * `reattachInternalFieldsOnRead` → `resolveInternalField`): the read blocked
+ * until knex's own acquire timeout fired ("Timeout acquiring a connection.
+ * The pool is probably full", from `Transaction_Sqlite.acquireConnection`),
+ * and the vendor route degraded that into an authentication refusal — a
+ * signed-in caller answered `401` after ~120 s, on a route reachable without
+ * credentials. Postgres/MySQL (`max >= 10`) never exhibited it.
+ *
+ * Reads only, and only the transaction: the same-origin gate (#5351) still
+ * decides whether the handle is this object's driver's to use, so a
+ * privileged read that resolves to a DIFFERENT datasource keeps its own
+ * connection rather than executing on the wrong one. Returns `undefined`
+ * when there is no ambient transaction, which is the pre-existing shape.
+ */
 export function privilegedReadDriverOptions(
   this: Pick<SecretInternalFieldsHost, 'txStore' | 'transactionCoversDriverFor'>,
   object: string,

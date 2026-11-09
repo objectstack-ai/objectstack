@@ -6,7 +6,9 @@
  * On a `sharingModel: 'controlled_by_parent'` object the master reference is
  * what the object's record access is derived through, and three declarable
  * shapes leave the security gate as the only thing refusing a detail record
- * saved without its master: `required` absent (or `false`), `required: true` +
+ * saved without its master: `required` absent (or `false` beside another
+ * `master_detail` — the only one declared `false` is the optional master since
+ * #30905 ruling A, and passes), `required: true` +
  * `readonly: true`, and `required: true` + `system: true` (record validation
  * never checks a non-required field and skips readonly/system fields before its
  * required check). All three are refused here at `error` — the v18 narrowing of
@@ -62,9 +64,13 @@ const masterRef = (shape: Record<string, unknown>) => ({
 
 const UNSAFE_SHAPES: Array<[label: string, shape: Record<string, unknown>, path: string]> = [
   ['`required` absent', {}, 'objects[1].fields.order.required'],
-  ['`required: false`', { required: false }, 'objects[1].fields.order.required'],
+  ['`required` not a boolean', { required: 'false' }, 'objects[1].fields.order.required'],
   ['`required: true` + `readonly: true`', { required: true, readonly: true }, 'objects[1].fields.order.readonly'],
   ['`required: true` + `system: true`', { required: true, system: true }, 'objects[1].fields.order.system'],
+  // [#30905 ruling A] The optional master is a master too: the flags still
+  // leave its reference unwritable.
+  ['`required: false` + `readonly: true`', { required: false, readonly: true }, 'objects[1].fields.order.readonly'],
+  ['`required: false` + `system: true`', { required: false, system: true }, 'objects[1].fields.order.system'],
 ];
 
 describe('R2 on a controlled_by_parent object — the three unsafe shapes are refused at error', () => {
@@ -78,6 +84,33 @@ describe('R2 on a controlled_by_parent object — the three unsafe shapes are re
   // prove nothing about the shapes they name.
   it('CONTROL: `required: true` with neither flag is clean', () => {
     expect(r2(stack('controlled_by_parent', masterRef({ required: true })))).toEqual([]);
+  });
+
+  // [#30905 ruling A · ADR-0055 §1 as amended] The object's ONLY
+  // master_detail, declared `required: false`, is its optional master.
+  it('the optional master — the only master_detail, an explicit `required: false` — passes', () => {
+    expect(r2(stack('controlled_by_parent', masterRef({ required: false })))).toEqual([]);
+    expect(
+      r2(stack('controlled_by_parent', masterRef({ required: false, readonly: false, system: false }))),
+    ).toEqual([]);
+  });
+
+  it('an explicit `required: false` beside another master_detail is still reported — it is not the master', () => {
+    const issues = r2(
+      stack('controlled_by_parent', {
+        order: { type: 'master_detail', reference: 'work_order', required: true },
+        other: { type: 'master_detail', reference: 'work_order', required: false },
+      }),
+    );
+    expect(issues.map((issue) => [issue.severity, issue.path, issue.fix])).toEqual([
+      ['error', 'objects[1].fields.other.required', 'required: true'],
+    ]);
+  });
+
+  it('an omitted `required` on the only master_detail names both spellings, and fixes to `required: true`', () => {
+    const [issue] = r2(stack('controlled_by_parent', masterRef({})));
+    expect(issue).toMatchObject({ severity: 'error', fix: 'required: true' });
+    expect(issue!.message).toContain('declares no required: write true (every detail names its master) or false (an optional master)');
   });
 
   it('CONTROL: an explicit `readonly: false` / `system: false` is clean — the flag, not the key, is the defect', () => {
@@ -150,7 +183,8 @@ describe('R2 outside controlled_by_parent — the verdict is unchanged', () => {
 
 // What reaches the rule from the authoring builder. Under
 // `controlled_by_parent`, `ObjectSchema.create()` forces an omitted `required`
-// to `true` and refuses an explicit `false`; the parse it ends in refuses a one
+// to `true` and keeps an explicit `false` on the only `master_detail` (the
+// optional master, #30905 ruling A; beside another it refuses it); the parse it ends in refuses a one
 // master marked `readonly` or `system` (spec shape `master-not-writable`), so
 // the two flagged shapes no longer leave the builder, and this rule reports
 // them on a stack that never went through it.
@@ -187,6 +221,12 @@ describe('R2 over objects built by ObjectSchema.create()', () => {
     const detail = build(Field.masterDetail('work_order', { label: 'Work Order' }));
     expect(r2([{ name: 'work_order', sharingModel: 'private', fields: {} }, detail])).toEqual([]);
   });
+
+  it('CONTROL: the builder keeps an explicit `required: false` (the optional master), and it lints clean', () => {
+    const detail = build(Field.masterDetail('work_order', { label: 'Work Order', required: false }));
+    expect((detail.fields as Record<string, { required?: boolean }>).order!.required).toBe(false);
+    expect(r2([{ name: 'work_order', sharingModel: 'private', fields: {} }, detail])).toEqual([]);
+  });
 });
 
 describe('[#22161] one-line verdicts — relationship/master-detail-required, relationship/delete-behavior', () => {
@@ -195,14 +235,30 @@ describe('[#22161] one-line verdicts — relationship/master-detail-required, re
     expect(RELATIONSHIP_DELETE_BEHAVIOR).toBe('relationship/delete-behavior');
   });
 
-  it('each controlled_by_parent shape reads as one sentence ending in the one shared consequence', () => {
+  it('each controlled_by_parent shape reads as one sentence: the shared consequence, or the two spellings', () => {
     const verdict = (shape: Record<string, unknown>) =>
       r2(stack('controlled_by_parent', masterRef(shape)))[0]!.message;
     const consequence = 'a controlled_by_parent detail saved without its master is readable by nobody';
-    expect(verdict({})).toBe(`master_detail "work_order_item.order" → work_order must be required: ${consequence}`);
+    // [#30905] The sole master_detail's omitted `required` names its two spellings.
+    expect(verdict({})).toBe(
+      'master_detail "work_order_item.order" → work_order declares no required: write true (every detail ' +
+        'names its master) or false (an optional master)',
+    );
     expect(verdict({ readonly: true, system: true })).toBe(
-      'master_detail "work_order_item.order" → work_order must be required and not marked readonly or ' +
-        `system: ${consequence}`,
+      'master_detail "work_order_item.order" → work_order declares no required and is marked readonly or ' +
+        'system: write required: true or false, and drop the flag',
+    );
+    // Beside another master_detail, `false` is not the master: the required consequence stands.
+    const beside = r2(
+      stack('controlled_by_parent', {
+        lead: { type: 'master_detail', reference: 'work_order', required: true },
+        order: { type: 'master_detail', reference: 'work_order', required: false },
+      }),
+    )[0]!.message;
+    expect(beside).toBe(`master_detail "work_order_item.order" → work_order must be required: ${consequence}`);
+    expect(verdict({ required: false, readonly: true })).toBe(
+      'master_detail "work_order_item.order" → work_order is the optional master and is marked readonly, ' +
+        'which no detail write supplies: the master reference must be writable',
     );
     expect(verdict({ required: true, readonly: true })).toBe(
       'master_detail "work_order_item.order" → work_order is marked readonly, which skips its required ' +
@@ -246,6 +302,10 @@ describe('[#22161] one-line verdicts — relationship/master-detail-required, re
         '`assertControlledByParentWrite`',
         '`ObjectSchema.create()`',
         'never a publish verdict',
+        // [#30905 ruling A] The optional master and the two spellings.
+        'optional master (ADR-0055 §1 as amended)',
+        'read by its owner (`owner_id`) and by a holder of View All on the detail',
+        'Write `required: true` (every detail names its master) or `required: false`',
       ],
       [RELATIONSHIP_DELETE_BEHAVIOR]: [
         'an unset one included',

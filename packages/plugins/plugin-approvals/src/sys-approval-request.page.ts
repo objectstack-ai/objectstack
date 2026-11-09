@@ -21,7 +21,11 @@ import type { Page } from '@objectstack/spec/ui';
  *    drawn as authored at every width. It was a `kind: 'slotted'` page until
  *    the `tabs` slot retired (#27053); the rebuild renders the same nodes in
  *    the same order. Its `page:header` is the one the synthesizer supplied:
- *    the request's title, and the header actions the object declares (none).
+ *    the request's title, and the object's placed header actions read live
+ *    (`placedActions: true`, #29951). The object places none of its own (its
+ *    decision actions are `record_section` ones, drawn by the panel below), so
+ *    the header draws only what an installed package places on
+ *    `sys_approval_request` at `record_header` / `record_more`.
  *  - After the header, ONE `record:approval_decision` node: the request's
  *    decision progress and its declared decision actions, the reply
  *    (`approval_comment`) included, in one panel. The type is declared with an
@@ -92,10 +96,12 @@ export const SysApprovalRequestDetailPage: Page = {
       name: 'main',
       width: 'full',
       components: [
-        // ── The record header: the request's title. The object declares no
-        // `record_header` / `record_more` action, so it carries none, exactly
-        // as the synthesized header did; the host appends its system actions.
-        { type: 'page:header' },
+        // ── The record header: the request's title, and every action placed
+        // on the object at `record_header` / `record_more`, read live, as the
+        // synthesized header drew them. The object places none of its own, so
+        // only an action another package places there shows (a bare header
+        // dropped it, #29951); the host appends its system actions.
+        { type: 'page:header', properties: { placedActions: true } },
 
         // ── The decision panel ────────────────────────────────────────
         { type: 'record:approval_decision' },
@@ -116,12 +122,12 @@ export const SysApprovalRequestDetailPage: Page = {
             position: 'top',
             items: [
               {
-                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles' },
+                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles', 'zh-Hant': '詳細資料', 'ar': 'التفاصيل', 'fr': 'Détails', 'pt-BR': 'Detalhes', 'ru': 'Подробности', 'de': 'Details', 'ko': '세부 정보' },
                 icon: 'file-text',
                 children: [{ type: 'record:details' }],
               },
               {
-                label: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
+                label: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología', 'zh-Hant': '時間軸', 'ar': 'المخطط الزمني', 'fr': 'Chronologie', 'pt-BR': 'Linha do tempo', 'ru': 'Хронология', 'de': 'Verlauf', 'ko': '타임라인' },
                 icon: 'history',
                 children: [
                   {
@@ -133,7 +139,7 @@ export const SysApprovalRequestDetailPage: Page = {
                       sort: [{ field: 'created_at', order: 'desc' }],
                       limit: 50,
                       showViewAll: true,
-                      title: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
+                      title: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología', 'zh-Hant': '時間軸', 'ar': 'المخطط الزمني', 'fr': 'Chronologie', 'pt-BR': 'Linha do tempo', 'ru': 'Хронология', 'de': 'Verlauf', 'ko': '타임라인' },
                     },
                   },
                 ],

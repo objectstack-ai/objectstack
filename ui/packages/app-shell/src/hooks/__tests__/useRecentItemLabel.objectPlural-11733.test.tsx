@@ -38,11 +38,21 @@ import type { RecentItem } from '../../context/RecentItemsProvider';
 
 type Lang = 'en' | 'zh-CN';
 
-function metadata() {
+/**
+ * The served objects, per language: the server translates what it serves
+ * under the request's language from the same catalog the console loads, so a
+ * zh-CN session holds the zh-CN answer (objectstack#30311).
+ */
+const SERVED_PROJECT = {
+  en: { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects' },
+  'zh-CN': { name: 'showcase_project', label: '项目', pluralLabel: '项目清单' },
+} as const;
+
+function metadata(lang: Lang) {
   return {
     apps: [],
     objects: [
-      { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects' },
+      SERVED_PROJECT[lang],
       { name: 'showcase_note', label: 'Note' },
     ],
     dashboards: [],
@@ -69,7 +79,7 @@ function wrapper(lang: Lang) {
   expect(i18n.language).toBe(lang);
   return ({ children }: { children: ReactNode }) => (
     <I18nProvider instance={i18n} persistLanguage={false}>
-      <MetadataCtx.Provider value={metadata() as never}>{children}</MetadataCtx.Provider>
+      <MetadataCtx.Provider value={metadata(lang) as never}>{children}</MetadataCtx.Provider>
     </I18nProvider>
   );
 }

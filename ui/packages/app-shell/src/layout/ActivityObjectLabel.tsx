@@ -11,7 +11,7 @@
  */
 
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { findByName, metadataText } from '../hooks/useNavTargetLabel.js';
+import { findByName, servedObjectLabel } from '../hooks/useNavTargetLabel.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { readObjectsByName } from '../hooks/useObjectPresence.js';
 
@@ -29,8 +29,9 @@ function nonEmpty(text: string | undefined): string | undefined {
  * `… · sys_user_preference`. The console resolves the name; the row stays as
  * the server wrote it. The label is read the way `useNavTargetLabel` reads an
  * object's: the definition's `label` from `useMetadata().objects` (an inline
- * locale map read in the active language), passed through `useObjectLabel`'s
- * bundle lookup (`{ns}.objects.<name>.label`).
+ * locale map read in the active language), drawn as served since the server
+ * translated it (objectstack#30390); `useObjectLabel`'s bundle lookup
+ * (`{ns}.objects.<name>.label`) only when the definition carries none.
  *
  * objectstack#29121 — the definition is read by name (`readObjectsByName`)
  * while nothing has loaded the whole `object` list, so a few rows on Home ask
@@ -53,6 +54,6 @@ export function ActivityObjectLabel({ objectName }: { objectName: string }) {
   const metadata = useMetadata();
   const { objectLabel } = useObjectLabel();
   const { language } = useObjectTranslation();
-  const text = metadataText(findByName(readObjectsByName(metadata, [objectName]), objectName)?.label, language);
-  return <>{nonEmpty(objectLabel({ name: objectName, label: text ?? '' })) ?? objectName}</>;
+  const def = findByName(readObjectsByName(metadata, [objectName]), objectName);
+  return <>{nonEmpty(servedObjectLabel({ name: objectName, label: def?.label }, language, objectLabel)) ?? objectName}</>;
 }

@@ -79,7 +79,7 @@ describe('tool cards under a zh console (objectui#7254)', () => {
   it('localizes the plan count strip, which was concatenated with an English "+ s" plural', () => {
     renderZh(<ChatbotEnhanced messages={[plan]} onSendMessage={vi.fn()} />);
     expect(screen.getByText('拟定应用方案')).toBeInTheDocument();
-    expect(screen.getByText('1 个对象 · 1 个视图 · 1 个仪表板')).toBeInTheDocument();
+    expect(screen.getByText('1 个对象 · 1 个视图 · 1 个仪表盘')).toBeInTheDocument();
   });
 
   it('an unknown / third-party tool still degrades to the English title-caser', () => {

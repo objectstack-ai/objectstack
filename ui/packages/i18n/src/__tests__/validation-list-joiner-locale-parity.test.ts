@@ -45,14 +45,14 @@ describe('validation.formInvalidJoiner is declared per locale (objectstack#5407)
   });
 
   it('CJK packs enumerate with U+3001', () => {
-    for (const lang of ['zh', 'ja']) {
+    for (const lang of ['zh-Hans', 'zh-Hant', 'ja']) {
       expect(validationOf(lang)[JOINER], lang).toBe(CJK_COMMA);
     }
   });
 
   it('Latin-script and Korean packs enumerate with a comma + space', () => {
     // Korean sits here rather than with zh/ja: it uses the ASCII comma.
-    for (const lang of ['en', 'es', 'de', 'fr', 'pt', 'ru', 'ko']) {
+    for (const lang of ['en', 'es', 'de', 'fr', 'pt-BR', 'ru', 'ko']) {
       expect(validationOf(lang)[JOINER], lang).toBe(', ');
     }
   });
@@ -63,7 +63,7 @@ describe('validation.formInvalidJoiner is declared per locale (objectstack#5407)
 
   it('no pack outside zh/ja carries the CJK comma — the exact shipped defect', () => {
     const offenders = Object.keys(builtInLocales).filter(
-      (lang) => !['zh', 'ja'].includes(lang) && validationOf(lang)[JOINER].includes(CJK_COMMA),
+      (lang) => !['zh-Hans', 'zh-Hant', 'ja'].includes(lang) && validationOf(lang)[JOINER].includes(CJK_COMMA),
     );
     expect(offenders).toEqual([]);
   });

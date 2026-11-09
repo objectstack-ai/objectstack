@@ -370,7 +370,11 @@ describe('[#4441] a lookup id that resolves to nothing is refused', () => {
     const row: any = await engine.insert(
       'ref_audit_note', { note: 'n', recorded_by: 'ps_does_not_exist' }, { context: userCtx } as any,
     );
-    expect(row.recorded_by, 'stripped before the reference check, not refused by it').toBeUndefined();
+    // [#29538] The answer reads the unstored column `null`, as the next read
+    // does; the strip is the STORED row's own: no key at all.
+    expect(row.recorded_by, 'stripped before the reference check, not refused by it').toBeNull();
+    const stored = await engine.getDriverForObject('ref_audit_note')!.findOne('ref_audit_note', { where: { id: row.id } });
+    expect(stored, 'stripped before the reference check, not refused by it').not.toHaveProperty('recorded_by');
   });
 
   it('…and the issue\'s own fields are NOT readonly, so they stay enforced', () => {

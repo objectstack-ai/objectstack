@@ -224,7 +224,9 @@ describe('[#28893] validate, build and lint refuse a flow region the engine refu
   // so the finding sits at the union path and names the flow in `where`.
   it('[#29059] an assembled artifact: the refused flow in the second packages[] entry is refused once, and build writes nothing', async () => {
     const { refusal } = CASES.assembled;
-    const expected = { rule: RULE, where: "flow 'rgn_ops_lead_time'", path: 'flows[1]' };
+    // [#29558] Forced edit: the finding is anchored on the container the
+    // engine names (the try_catch at the flow's nodes[1]), not the flow.
+    const expected = { rule: RULE, where: "flow 'rgn_ops_lead_time' › node 'guard'", path: 'flows[1].nodes[1]' };
 
     const validated = await validate('assembled', '--json');
     expect(validated.code, validated.stdout).toBe(1);
@@ -243,7 +245,7 @@ describe('[#28893] validate, build and lint refuse a flow region the engine refu
     const linted = await lint('assembled');
     expect(linted.code, linted.stdout).toBe(1);
     const lintRows = (json(linted, 'lint assembled').issues as Array<Record<string, unknown>>).filter((i) => i.rule === RULE);
-    expect(lintRows.map(({ path }) => path)).toEqual(['flows[1]']);
+    expect(lintRows.map(({ path }) => path)).toEqual(['flows[1].nodes[1]']);
   }, 60_000);
 
   it('CONTROL: the same flow with the join restored validates and builds', async () => {

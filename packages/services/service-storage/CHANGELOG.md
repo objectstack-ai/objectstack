@@ -1,5 +1,532 @@
 # @objectstack/service-storage
 
+## 18.3.0
+
+### Minor Changes
+
+- 3557366: feat!: an object that declares `titleFormat` is refused at save and by `os validate`, with the `nameField` prescription (#29007)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered object-title-format-refused -->
+  
+  **BREAKING** accept-set narrowing on `object.titleFormat`. The key stays in the schema; what changes is which doors accept it.
+  
+  - **Before.** `titleFormat` was deprecated (ADR-0079) and still accepted: a save, a publish and `os validate` all passed, with an advisory `title-format-retired` warning on the CLI only. It titled nothing. An explicit `nameField` outranks it, and the registry stamps a derived `nameField` on every object that authors none, so the record page and the list showed one field however the template was written.
+  - **Now.** `title-format-retired` is an error. An object definition that declares `titleFormat` is refused by `os validate`, `os build` and `os lint`, and at the metadata save gate (`422 INVALID_METADATA`): an active save, a draft promotion and a restore. A draft save still lands, and its `_diagnostics` reads `valid: false` with the refusal its publish gives. The message and the fix line are the prescription the `titleFormat` describe already carried.
+  - **Unchanged.** A stored object that carries `titleFormat` still parses, loads and is served; no conversion drops the key. It is refused only when it is next saved, published or restored. The title order is unchanged: `nameField`, then its alias `displayNameField`, then the derivation.
+  - **The platform's own objects.** The 68 system objects that declared `titleFormat` no longer do. 65 already declared the `nameField` that titles them. `sys_attachment`, `sys_audience_binding_suggestion` and `sys_notification_template` now declare the field the registry already stamped (`file_name`, `permission_set_name`, `subject`), so every record title reads as before.
+  - **`@objectstack/lint`.** `validateTitleFormatRetired` is a new export and a new gating registry entry. `validateRecordTitle` now reports `title-unresolvable` only.
+  
+  **The remedy.** Point `nameField` at the title field and drop `titleFormat`. For a composite title that an import, a sort or a search must match, add a `text` field that declares an `expression` (computed and stored on every write) and point `nameField` at it; a `formula` with `returnType: 'text'` stays legal for a title shown for display only. The upgrade guide entry is `object-title-format-refused`.
+
+### Patch Changes
+
+- 416d9dd: fix(service-storage)!: a file field refuses a file whose upload was never completed, so a record cannot claim a `pending` `sys_file`
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A record write naming a pending sys_file is refused at the file-field write gate: no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and the refusal reuses the existing VALIDATION_FAILED envelope with an invalid_value field entry. There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing at the file-field write gate (`installFileReferenceHooks`, `@objectstack/service-storage`), which every engine record write runs before the driver: a single insert, each row of a batch insert, and a single update.
+  
+  - **Before.** A presigned upload is a `sys_file` row with `status: pending` until `POST /api/v1/storage/upload/complete` commits it, and that door is the one that checks the storage backend holds the bytes the row declares (#24548). A signed-in record write naming a `pending` file was taken like a committed one: `201`, the record held the id, and the row was stamped with `ref_object` / `ref_id` / `ref_field` while it stayed `pending`. The field read as attached, the download door answered `404` for it, and the bytes were never measured: a file declared at 100 bytes and PUT at 2 MiB passed a 1 MiB `maxSize`, and the commit door then refused it, so it stayed `pending` and claimed.
+  - **Now.** That write is refused before the driver runs, with the envelope a file the caller may not read already gets (#26043): one `400 VALIDATION_FAILED` with an ADR-0114 `invalid_value` entry per field. The entry names the field and the file, because the caller may read it. Nothing is written and the `sys_file` row is not stamped. Once `/upload/complete` has run, the same write is taken.
+  - **Unchanged.** A committed file, and a released (`deleted`) file a claim revives within its grace window. The read check still runs first, so a file the caller may not read keeps #26043's answer. A system write and a context-less programmatic write are not judged: the seed loader writes a record over the `pending` row `storeFile` makes and commits it with `claimFiles` after. A record that already holds a `pending` file can still be updated while it resends that value.
+  - **Who sees it.** A client that saved the `fileId` from `/upload/presigned` into a record before calling `/upload/complete` now gets `400` instead of `201`. `storage.upload(file)` in the client SDK completes the upload before it returns the id, so it is not affected.
+  
+  **The remedy.** Call `POST /api/v1/storage/upload/complete` with the `fileId`, then save the record again.
+- 898703f: fix(service-storage): the pending-upload retention no longer deletes a `pending` `sys_file` that a record or an attachment still holds
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `sys_file` reaps `status: pending` rows after 7 days, through the `sys_file` reap guard. Its pending branch deleted the bytes and the row without asking whether anything held the file. A pending file can be held: until the previous release a signed-in record write could claim one (`ref_object` / `ref_id` / `ref_field` stamped while the row stayed `pending`), and a system write still does, since the seed loader writes the record before `claimFiles` commits the row. Seven days later the record named a file id whose bytes and row were gone.
+  - **Now.** The pending branch asks the same hold question the tombstone branch asks (a `sys_attachment` row, or the `ref_*` columns). A held pending file is kept, bytes and row, and stays `pending`; each sweep logs one warning naming the file and its holder. An unheld pending file is reaped as before. A failure to answer the hold question keeps the file for the next sweep.
+  - **What an operator does with the warning.** The uploader completes the upload with `POST /api/v1/storage/upload/complete`, which checks the stored bytes and commits the file. A record that lets go of the file hands it back to the sweep. The guard never commits the file itself, because that would skip the byte check the complete door makes.
+- a0413fc: fix(service-storage): `sys_file`'s storage-owned columns (`key`, `mime_type`, `size`, `status`, `etag`) can no longer be set or changed by a write that does not come from the storage service
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A data-door write to five storage-owned sys_file columns is no longer applied: no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and no write is refused (an update keeps the stored values, a create starts pending). There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  A file field refuses a file whose upload never completed by reading `sys_file.status`, and judges its `accept` / `maxSize` by `mime_type` / `size`. Those columns were plain writable fields, so a caller allowed to write `sys_file` rows (an administrator, on a stock boot) could `PATCH /api/v1/data/sys_file/ID` a presigned upload that never received its bytes to `committed`, and a record's file field then claimed it; or rewrite `size` / `mime_type` after commit so the field's constraints judged values that do not describe the stored bytes.
+  
+  - **Update.** The five columns are now `readonly` on `sys_file`. A non-system update, by id or by predicate, keeps the values the storage service wrote and lands the rest of the payload; the write answers as before and the engine logs the dropped column at `warn`, as it does for every read-only column. A caller that passes `strictReadonlyWrites` is refused with `ERR_READONLY_FIELD_REJECTED`, as for every read-only column.
+  - **Create.** A non-system create of a `sys_file` row keeps the caller's other columns, drops any value it gives these five, and starts the row `pending`, with one `warn` naming the dropped columns. A file field refuses such a file, and the lifecycle's `pending` retention collects it. The create is not refused.
+  - **Unchanged.** The storage service's own writes all run under the system context and still move every column: presign, PUT and `/upload/complete`, the chunked upload, a file field's claim, release and copy, and the attachment tombstone. Every other `sys_file` column (`name`, `acl`, `scope`, ownership) is written through the data door as before.
+  
+  To change what a file is, upload it again through the storage upload doors (`POST /api/v1/storage/upload/presigned`, then `/upload/complete`).
+- 85663a5: fix(service-storage): the chunk upload door refuses a `chunkIndex` the upload did not declare, and the presigned upload door refuses a `size` that is not a byte count
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A REST request value is refused at the presigned upload door (a negative size): no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and the refusal reuses the existing 400 INVALID_REQUEST envelope. There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  Narrowed: a negative `size`, which the spec number (`GetPresignedUrlRequestSchema.size`, a bare `z.number()`) admits, is now refused `400` at the presigned door.
+  
+  - **Chunk door** (`PUT /api/v1/storage/upload/chunked/:uploadId/chunk/:chunkIndex`). **Before:** the index was read with `parseInt`, so `0.5` was read as `0`, `-1` reached the storage backend as part number 0 and answered `500 INTERNAL`, and an index at or past the upload's `totalChunks` was stored, counted in the progress, and then made `POST .../complete` answer `409` for good, since no door removes a stored chunk. **Now:** the index must be a whole number (decimal digits only) in `[0, totalChunks)`; anything else answers `400 INVALID_REQUEST` naming the valid range, with `details: { chunkIndex, totalChunks }`. Nothing is stored and the progress is unchanged, so the upload can still be completed. The check runs after the resume-token check, so a caller without the token still gets `403 INVALID_RESUME_TOKEN` first.
+  - **Presigned upload door** (`POST /api/v1/storage/upload/presigned`). **Before:** only a missing `size` was refused. A non-numeric `size` such as `"abc"` reached the `sys_file` insert and failed there as `500 INTERNAL`, and a negative `size` such as `-5` answered `200` and stored a pending `sys_file` row with that size. **Now:** `size` must be a finite, non-negative JSON number (the `GetPresignedUrlRequestSchema.size` number); a string (a numeric string such as `"100"` included), `NaN`, an infinity, a negative number or a boolean answers `400 INVALID_REQUEST` naming `size`, and no `sys_file` row is written. `0` and any positive number behave as before.
+  - **Who sees it.** Only a client that sent an index outside the range it was given, or a size that is not a JSON number of bytes. The SDK (`storage.upload`, `resumeUpload`) and the Console upload client send `0 .. totalChunks - 1` and `File.size`, so they are not affected.
+- ca167f6: fix(service-storage): the chunked-upload init door parses its body with `InitiateChunkedUploadRequestSchema`, so a `totalSize` that is not a positive whole number and a `chunkSize` below the declared minimum are refused instead of minting a session that can never complete
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A REST request body is refused at the chunked-upload init door when it does not parse with the spec schema it already declares (`InitiateChunkedUploadRequestSchema`, unchanged): no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and the refusal reuses the existing 400 INVALID_REQUEST envelope. There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `patch`: nothing a metadata author writes changes (`Metadata-protocol: none`), so the level follows the kind, and the banner and the ADR-0087 disposition stay.
+  
+  **FROM.** `POST /api/v1/storage/upload/chunked` checked `totalSize` for truthiness only and read the rest of the body as sent:
+  
+  - A negative `totalSize` such as `-5` answered `200` and minted a session with `totalChunks` of `-0`, so every chunk was then refused and the upload could never complete. A numeric string such as `"100"` was stored on the pending `sys_file` row as sent, and a fraction was accepted.
+  - A `chunkSize` below 5242880 (5 MiB, the declared minimum) was silently clamped up to 5242880; `null` was read as omitted, and a non-numeric one produced a `NaN` chunk count.
+  - `bucket` and `metadata` were stored whatever their type.
+  
+  **TO.** The body is parsed with `InitiateChunkedUploadRequestSchema` before the `sys_file` row, the backend multipart and the upload-session row:
+  
+  - `totalSize` must be a whole number of at least 1, sent as a JSON number.
+  - `chunkSize`, when sent, must be a whole number of at least 5242880, sent as a JSON number; a smaller one is refused, not clamped. An omitted `chunkSize` keeps the declared default of 5242880, so `totalChunks` for a valid body is unchanged.
+  - `bucket`, when sent, must be a string, and `metadata`, when sent, an object of string values.
+  - Anything else answers `400 INVALID_REQUEST` naming each failing field, and neither row is written. A missing `filename`, `mimeType` or `totalSize` and an off-vocabulary `scope` keep their existing `400` answers.
+  
+  **Fix.** A client that sent a smaller `chunkSize` sends 5242880 or more, or omits it. A client that sent `totalSize` as a string sends the JSON number. The SDK's `storage.initChunkedUpload` takes the schema's own input type, so a typed caller already sends an in-schema body; no Console path calls this door.
+- 2c683cf: fix(spec)!: `GetPresignedUrlRequestSchema.size` declares a whole, non-negative byte count, and `filename` / `mimeType` declare that they are non-empty, the accept set the presigned-upload door enforces (#27598)
+  
+  Clause-②: no (narrowing) — the published declaration of the presigned-upload request body refuses a negative or fractional `size` and an empty `filename` or `mimeType`, which it admitted before. Nothing is widened and no key is added, removed or renamed.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no metadata type or stored shape moves: a REST request declaration no metadata type embeds stops admitting a negative or fractional `size` and an empty `filename` or `mimeType`. The door already refused all but the fraction, and a fractional size never named a byte count a stored file can hold. A caller sends the file's whole byte length, name and MIME type; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing of a published request declaration (`@objectstack/spec/api`), read by the `POST /api/v1/storage/upload/presigned` door, codegen, the reference docs and clients.
+  
+  - **Before.** `size` was any number, and `filename` / `mimeType` were bare strings, so `-1`, `1.5` and `''` parsed. The door refused a negative size and an empty name or type with a 400, but accepted a fractional size: it minted an upload URL and a pending file record that no upload could complete, because the complete door compares the held byte count, always whole, with the declared one.
+  - **Now.** `size` is `int().min(0)`, and `filename` / `mimeType` carry a minimum length of 1; their descriptions say so. A parse of any of those values fails on that key. The door (`@objectstack/service-storage`) also refuses a fractional `size` with `400 INVALID_REQUEST`, before any record is written, with the message `size must be the file size in bytes: a non-negative whole number, sent as a JSON number`.
+  - **Unchanged.** A negative, non-numeric, `NaN` or infinite size, and an empty or missing `filename` or `mimeType`, get the same 400 as before, in the same order as before. `0` is still a legal empty file. The SDK's `storage.getPresignedUrl` takes this schema's input type, which stays `number` / `string`.
+  - **Who sees it.** Code that parses a presigned-upload body with this schema and sent one of the refused values, a generated client that trusted the wider declaration, and a caller that sent a fractional size to the door.
+  
+  **The remedy.** Send the file's length in whole bytes (`File.size` already is), and its name and MIME type; an unknown type is sent as `application/octet-stream`.
+- 7e1089e: fix(service-storage): `sys_file`'s file-reference columns (`ref_object`, `ref_id`, `ref_field`, `released_ref_object`, `released_ref_id`) are owned by the file-reference lifecycle and can no longer be set or changed by a write that does not come from it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A data-door write to five lifecycle-owned sys_file columns is no longer applied: no key of any metadata schema is removed, renamed or re-shaped, no export, type or error code is removed or renamed, and no write is refused (an update keeps the stored values, a create starts with none of them). There is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  The five columns that record which record and field hold a file, and which record last let it go, take the same form as the five storage-owned columns:
+  
+  - **Update.** They are now `readonly` on `sys_file`. A non-system update, by id or by predicate, keeps the values the lifecycle wrote and lands the rest of the payload; the write answers as before and the engine logs the dropped column at `warn`, as it does for every read-only column. A caller that passes `strictReadonlyWrites` is refused with `ERR_READONLY_FIELD_REJECTED`, as for every read-only column.
+  - **Create.** The create-side guard of the storage-owned columns now drops these five too: a non-system create of a `sys_file` row keeps the caller's other columns, drops any value it gives them, starts `pending` as before, and logs one `warn` naming the dropped columns. The create is not refused.
+  - **Unchanged.** The file-reference lifecycle writes them under the system context, as before: a file field's claim, release and copy, and the operator backfill of file references.
+  
+  A file is attached to a record by writing its id into the record's file field, never by writing `sys_file` directly.
+  
+  `system-file.object.ts` now also states that the presence of `key` and `status` on a `sys_file` row is the storage writers' invariant, not the engine's (the engine checks a `readonly` field for shape only on insert), and the guard's unused helper export is no longer exported.
+- 1fd68ea: feat(service-storage): `sys_attachment` verifies the caller may open the file a row references
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An attachment links an `attachments`-scope file to a parent record, and the download door admits a caller through any parent record the file is attached to. The `sys_attachment` write gate now asks, of every insert and of every update that changes `file_id`, the same question a file-class field asks before it references a file: may this caller open the file it names?
+  
+  - **One predicate, two write doors.** The check is the one the file-field door already runs (`findReferenceableFile`, bound by the storage plugin to the download door's own verdict), now shared by both doors from `referenceable-file.ts`, so a field reference and an attachment reference cannot disagree about which files a caller may take.
+  - **The refusal is the file-field door's.** A file the caller may not open, and an id that names no file the acting organization reaches, are answered alike: `400 VALIDATION_FAILED` with one `invalid_value` entry for `file_id` ("File cannot reference this file: it is not a file you can open. Choose a file you can open, or upload it again."). Nothing is written.
+  - **What keeps working.** Attaching a file you uploaded, or one you can already open through another record, is admitted as before, as is `attachFileAs`, which attaches the caller's own fresh upload. System-context and context-less writes (seeds, engine self-writes, lifecycle sweeps) are not judged. The parent and row rules still answer first, so a caller they refuse keeps their refusal. A kernel that composes no download gate serves every file, and so every file may be referenced there.
+- 6f35b74: fix(plugin-audit, service-storage)!: a row's author or uploader is read-only after creation, like the comment's display name
+  
+  Clause-②: no (narrowing) — on a write by a non-system caller, `sys_comment.author_id`, `sys_attachment.uploaded_by` and `sys_file.owner_id` are read-only on update and dropped (reported in `droppedFields`), and a comment or attachment create whose session names no signed-in user is refused. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten, converted or dropped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a runtime accept set on three platform-written columns of three platform objects, `sys_comment.author_id`, `sys_attachment.uploaded_by` and `sys_file.owner_id`, whose value is recorded once at creation; the remedy for a writer that needs another value recorded is a system-context write, which no ledger entry can derive. The other categories are closed on facts: the bumped packages publish (not unpublished); no ADR-0087 id covers these columns and this diff adds none (not registered, not already-registered); no export is added, removed or retyped, so no interface or type narrows (not runtime-export-retired, runtime-interface-only or type-surface-only). -->
+  
+  **BREAKING** accept-set narrowing on `sys_comment`, `sys_attachment` and `sys_file` writes (`@objectstack/plugin-audit`, `@objectstack/platform-objects`, `@objectstack/service-storage`), served by every data door (REST, MCP, the console).
+  
+  - **Now.** A row's author or uploader is recorded once, at creation, and is read-only after it, like the comment's display name. `sys_comment.author_id`, `sys_attachment.uploaded_by` and `sys_file.owner_id` declare `readonly: true`. On update a non-system caller's value is dropped and reported in `droppedFields` and the `X-ObjectStack-Dropped-Fields` header, the rest of the write lands, and the write is not refused. This holds for every non-system caller: the author's or uploader's own edit, a parent editor's, and, on `sys_file.owner_id`, a holder of the ownership-transfer grant.
+  - **Refused.** A non-system create of a comment or an attachment whose session names no signed-in user is refused with 403 `RECORD_NOT_ACCESSIBLE`, as a comment reaction with no signed-in user already is: there is no user to record as its author or uploader. A signed-in create is unchanged: the session user is recorded, whatever the request carries.
+  - **Unchanged.** System-context writes (seeds, imports, migrations) and a historical import's update (`preserveAudit`, which only the system principal may start) keep the values they supply. The upload doors already refuse a request with no signed-in user. Stored rows keep what they were written with. The console needs no change: it never sends these columns on an edit.
+  - **Also.** `sys_comment.author_id` stays `required`, but as a `readonly` field its presence on a system-context create is the writer's to supply: the engine's record validator does not refuse a system create that omits it.
+  
+  **The remedy.** None for the console. A client that sends one of these columns on an edit gets the same answer as before, with the column reported in `droppedFields`; to record a different author or uploader on an existing row, write it from a system context (a migration or an import). A server-side caller that creates comments or attachments with no signed-in user runs as the system principal or names the user it acts for.
+- Updated dependencies [ce12ad2]
+- Updated dependencies [ea025d3]
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [a8ec04d]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [0bf7aaf]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [0c64014]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [1e01924]
+- Updated dependencies [2c0a97b]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [8ce974c]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [9b4d193]
+- Updated dependencies [aa46d14]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [e7a6cc7]
+- Updated dependencies [4d278c9]
+- Updated dependencies [76bf6c5]
+- Updated dependencies [1a95c74]
+- Updated dependencies [0c03ce2]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [bc02a77]
+- Updated dependencies [0aaad18]
+- Updated dependencies [67103cc]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [c594e1c]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [7b293c4]
+- Updated dependencies [3fb74b6]
+- Updated dependencies [1617b7f]
+- Updated dependencies [b399cb8]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [8d208a4]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [c708de6]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [92b7bbd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [bf03ebb]
+- Updated dependencies [2c3574c]
+- Updated dependencies [1335c6b]
+- Updated dependencies [bdb19ca]
+- Updated dependencies [d8c611d]
+- Updated dependencies [ec0316e]
+- Updated dependencies [8bb2417]
+- Updated dependencies [2ac698b]
+- Updated dependencies [d0df873]
+- Updated dependencies [462b4f9]
+- Updated dependencies [9a0c622]
+- Updated dependencies [138dacf]
+- Updated dependencies [7f4258f]
+- Updated dependencies [1ac1c24]
+- Updated dependencies [97ca257]
+- Updated dependencies [104cd1a]
+- Updated dependencies [f1d795b]
+- Updated dependencies [b3d1415]
+- Updated dependencies [078e581]
+- Updated dependencies [18e4ac1]
+- Updated dependencies [51058ef]
+- Updated dependencies [4df6292]
+- Updated dependencies [f125ce4]
+- Updated dependencies [b16ee8b]
+- Updated dependencies [86d0a8c]
+- Updated dependencies [d089dac]
+- Updated dependencies [3557366]
+- Updated dependencies [29c70ca]
+- Updated dependencies [b5e7ba5]
+- Updated dependencies [38a278b]
+- Updated dependencies [bb82da1]
+- Updated dependencies [85ea12f]
+- Updated dependencies [85f7a0d]
+- Updated dependencies [e9fb529]
+- Updated dependencies [7b55ea9]
+- Updated dependencies [4138ce8]
+- Updated dependencies [53dda03]
+- Updated dependencies [ba1f164]
+- Updated dependencies [20f052d]
+- Updated dependencies [9467a1b]
+- Updated dependencies [8b65633]
+- Updated dependencies [c268b72]
+- Updated dependencies [d68d129]
+- Updated dependencies [bd68248]
+- Updated dependencies [f72bc9e]
+- Updated dependencies [a20dcae]
+- Updated dependencies [5d46f43]
+- Updated dependencies [c9aaee9]
+- Updated dependencies [3d6f230]
+- Updated dependencies [7eb0b19]
+- Updated dependencies [8e6ab05]
+- Updated dependencies [e756782]
+- Updated dependencies [8209a2f]
+- Updated dependencies [aee9c47]
+- Updated dependencies [0e75081]
+- Updated dependencies [45b4922]
+- Updated dependencies [399df5b]
+- Updated dependencies [31204d1]
+- Updated dependencies [2c881fb]
+- Updated dependencies [1bdf674]
+- Updated dependencies [4b8cbe2]
+- Updated dependencies [5f99582]
+- Updated dependencies [63f962f]
+- Updated dependencies [df8d020]
+- Updated dependencies [6f09464]
+- Updated dependencies [772b356]
+- Updated dependencies [4008e62]
+- Updated dependencies [b64bb72]
+- Updated dependencies [b861525]
+- Updated dependencies [6903c93]
+- Updated dependencies [4b06a54]
+- Updated dependencies [ebbb5b8]
+- Updated dependencies [9bdfe37]
+- Updated dependencies [a81b7cb]
+- Updated dependencies [eeb3117]
+- Updated dependencies [a5fcd06]
+- Updated dependencies [56076fd]
+- Updated dependencies [fdb9a07]
+- Updated dependencies [57958aa]
+- Updated dependencies [59775a0]
+- Updated dependencies [744211f]
+- Updated dependencies [87956dc]
+- Updated dependencies [3482f3d]
+- Updated dependencies [a6a369e]
+- Updated dependencies [601832b]
+- Updated dependencies [5c4e752]
+- Updated dependencies [4ab2e7e]
+- Updated dependencies [589049b]
+- Updated dependencies [d0f308c]
+- Updated dependencies [4dc41e6]
+- Updated dependencies [eb05ea2]
+- Updated dependencies [55a4898]
+- Updated dependencies [f87239a]
+- Updated dependencies [2ae8c89]
+- Updated dependencies [a4daa85]
+- Updated dependencies [b64980a]
+- Updated dependencies [bbb98c4]
+- Updated dependencies [1bb9536]
+- Updated dependencies [2bf71ce]
+- Updated dependencies [c1af99c]
+- Updated dependencies [6f35b74]
+- Updated dependencies [99a6a78]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [1a8ba3f]
+- Updated dependencies [3ac22c9]
+- Updated dependencies [ceef714]
+- Updated dependencies [b388cfe]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [cfd237f]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/core@18.3.0
+  - @objectstack/types@18.3.0
+  - @objectstack/observability@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

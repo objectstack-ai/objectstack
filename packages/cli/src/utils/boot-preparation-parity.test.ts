@@ -155,6 +155,10 @@ const SERVE_ONLY: Record<string, string> = {
     'decides serve\'s artifact-less MetadataPlugin for a host config that no artifact door serves ([#22989]); '
     + 'the one-shot boot boots the standalone data stack, whose MetadataPlugin is always composed, and lays a '
     + 'host config\'s plugins over it (buildSchemaMigrationPlugins)',
+  hasMetadataPlugin:
+    'decides whether serve adds its own MetadataPlugin, the dev artifact door or the artifact-less host-config '
+    + 'door, beside the one a composition already holds ([#29936]); the one-shot boot boots the standalone data '
+    + 'stack, whose MetadataPlugin is always composed, and adds none of its own',
   bundleDeclaresTranslations:
     'decides serve\'s tier-gated i18n service, which the declaration boot does not compose '
     + '(schema-migration-plugins.ts, "What this does NOT compose")',

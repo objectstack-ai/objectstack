@@ -28,8 +28,28 @@
  * Language-only prefix matching (`zh` → `zh-CN`) is deliberately NOT here: no
  * contract declares it, and inventing it would put a resolution rule in the
  * code that no spec, doc or form describes.
+ *
+ * ## The name rule: `(package, name)` (ADR-0150 D3/D4)
+ *
+ * An email template is addressed by `(package, name)`. Before a bundle is
+ * read, the name is resolved by the ONE package-scoped resolver
+ * (`resolvePackageScopedName`, `@objectstack/objectql`) over the ObjectQL
+ * registry, as a caller with no package: `SendTemplateInput` names no
+ * package, so every send is context-free — the environment's own item, else
+ * the unique package holder (the built-ins rank below it, ADR-0150 D3 (b)),
+ * else a refusal naming every candidate, which fails the send
+ * ({@link EmailTemplateAmbiguousError}). ⛔ Never a first-listed pick. While
+ * phase 1's one-holder refusal stands (`email_template` is one of its types)
+ * no two packages hold a name, so every name resolves as before, and the
+ * layered list below answers the bundle exactly as it did.
  */
 
+import {
+  resolvePackageScopedName,
+  type PackageScopedHolder,
+  type PackageScopedRefusal,
+  type PackageScopedRegistry,
+} from '@objectstack/objectql';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { EmailTemplateDefinitionSchema, type EmailTemplateDefinitionParsed } from '@objectstack/spec/system';
 import { DEFAULT_TEMPLATE_LOCALE, TEMPLATE_BUNDLE_LOCALES, type EmailTemplateRow, type TemplateLoader, type TemplateBundleLocales } from './email-service.js';
@@ -42,7 +62,7 @@ import { DEFAULT_TEMPLATE_LOCALE, TEMPLATE_BUNDLE_LOCALES, type EmailTemplateRow
 export const BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID = 'com.objectstack.service.email';
 
 /** The metadata type the loader reads. */
-const EMAIL_TEMPLATE_TYPE = 'email_template';
+const EMAIL_TEMPLATE_TYPE = 'email_template' as const;
 
 /**
  * The reads {@link createRegistryEmailTemplateLoader} resolves through, looked
@@ -58,12 +78,47 @@ export interface EmailTemplateRegistrySources {
    */
   protocol?: { getMetaItemsForExecution(request: { type: string }): Promise<{ items?: unknown[] }> };
   /**
-   * The ObjectQL `SchemaRegistry`. Read ONLY when no `protocol` is
-   * registered: such a host has no metadata door, so no environment item can
-   * exist and the code declarations the registry holds are already the
-   * effective set.
+   * The ObjectQL `SchemaRegistry`. Its items are read ONLY when no `protocol`
+   * is registered: such a host has no metadata door, so no environment item
+   * can exist and the code declarations the registry holds are already the
+   * effective set. When it carries the package-scoped slice
+   * ({@link PackageScopedRegistry}), every name is resolved over it first
+   * (module doc, "The name rule").
    */
-  registry?: { listItems(type: string): unknown[] };
+  registry?: { listItems(type: string): unknown[] } & Partial<PackageScopedRegistry>;
+}
+
+/**
+ * [ADR-0150 D3, epic #31527 red line 2] A template name that resolves to no
+ * single template: two packages ship it, and nothing picks one. `code` +
+ * `status` are the conflict envelope (409 `RESOURCE_CONFLICT`, the status
+ * ADR-0150 D5 gives an ambiguous bare name); `candidates` names every holder,
+ * and so does the message.
+ */
+export class EmailTemplateAmbiguousError extends Error {
+  readonly code = 'RESOURCE_CONFLICT';
+  readonly status = 409;
+  /** The template name. */
+  readonly template: string;
+  /** Every holder of the name, in the resolver's order. */
+  readonly candidates: readonly PackageScopedHolder[];
+  constructor(refusal: PackageScopedRefusal) {
+    super(`email template '${refusal.name}' cannot be sent: ${refusal.message}`);
+    this.name = 'EmailTemplateAmbiguousError';
+    this.template = refusal.name;
+    this.candidates = refusal.candidates;
+  }
+}
+
+/** The registry, when it carries the slice the package-scoped resolver reads. */
+function packageScopedRegistryOf(registry: EmailTemplateRegistrySources['registry']): PackageScopedRegistry | undefined {
+  return typeof registry?.packageScopedHoldersOf === 'function'
+    && typeof registry.getPackageScopedItem === 'function'
+    && typeof registry.getEnvironmentScopedItem === 'function'
+    && typeof registry.getPackage === 'function'
+    && typeof registry.getAllPackages === 'function'
+    ? (registry as PackageScopedRegistry)
+    : undefined;
 }
 
 /** An item's locale as the bundle key reads it: the schema default when it declares none. */
@@ -138,6 +193,14 @@ export function createRegistryEmailTemplateLoader(
 
   const readBundle = async (name: string): Promise<Record<string, unknown>[]> => {
     const { protocol, registry } = resolveSources() ?? {};
+    // [ADR-0150 D3] The name first: a send names no package, so it resolves
+    // as a caller with no package. A refusal fails the send, naming every
+    // candidate; any other answer leaves the bundle to the read below.
+    const scoped = packageScopedRegistryOf(registry);
+    if (scoped) {
+      const resolved = resolvePackageScopedName(scoped, { type: EMAIL_TEMPLATE_TYPE, name });
+      if (resolved.status === 'refused') throw new EmailTemplateAmbiguousError(resolved);
+    }
     let items: unknown[];
     if (typeof protocol?.getMetaItemsForExecution === 'function') {
       const listed = await protocol.getMetaItemsForExecution({ type: EMAIL_TEMPLATE_TYPE });
@@ -172,8 +235,10 @@ export function createRegistryEmailTemplateLoader(
   };
 
   // [#28880] The bundle's tags, for the service's fold (module-private key,
-  // not on `TemplateLoader`): sorted, so variant expansion's "first match" is
-  // the lowest tag, whatever order the list carries.
+  // not on `TemplateLoader`): sorted, so each first-match step of
+  // `resolveLocaleAmong` (the table language's first mapped tag, variant
+  // expansion's first variant) answers the lowest tag, whatever order the
+  // list carries.
   const bundleLocales: TemplateBundleLocales = async (name) =>
     [...new Set((await readBundle(name)).map(itemLocale))].sort();
 

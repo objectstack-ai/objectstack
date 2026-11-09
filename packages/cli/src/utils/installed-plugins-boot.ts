@@ -7,6 +7,7 @@ import {
   loadInstalledPlugins,
   pluginInstallationsFile,
   type InstalledPluginRefusal,
+  type InstalledPluginsLoad,
 } from '@objectstack/runtime';
 import { isExitSignal } from './format.js';
 import { pluginEnvironmentId } from './plugin-install.js';
@@ -27,18 +28,22 @@ import { readTrustedKeys } from './plugin-trust-read.js';
  * to the packages this CLI runs on; and `kernel.use` for each plugin that
  * passed, so dependency order and health checks are the kernel's.
  *
- * A refused plugin does not stop the boot — the config `plugins` loop's
- * precedent — and it is printed by name, one `✗` line each, with the count on
- * the banner. A plugin refused before its import had nothing of it evaluated;
- * one refused after it (`import_failed`, `not_a_plugin`, `signature_conflict`,
+ * A refused plugin is printed by name, one `✗` line each, with the count on
+ * the banner, and answered in `refused`; `os serve` then refuses the boot when
+ * one of them cannot be ruled out as the crypto provider
+ * (`refuseRefusedInstalledCryptoProviderPlugins`), and otherwise goes on
+ * without it. A plugin refused here carries what the loader read it declares
+ * (`declaredServices`), as one the loader refused after its import does.
+ *
+ * A plugin refused before its import had nothing of it evaluated; one refused
+ * after it (`import_failed`, `not_a_plugin`, `signature_conflict`,
  * `plugin_name_taken`, `kernel_refused`) had its entry module's top-level code
  * run, and is not registered. An installed plugin never supersedes a plugin
  * this boot already registered under the same name (the kernel's same-name
  * rule would replace the host's): it is refused instead. A host plugin
  * registered LATER under the same name supersedes the installed one, with the
  * kernel's warning: the host's wins either way. Even a loader that throws
- * outright is one `✗` line (`loader_failed`), and the boot goes on without
- * installed plugins.
+ * outright is one `✗` line (`loader_failed`).
  *
  * No installations file for this project and environment: nothing is read,
  * and the boot is as it was.
@@ -66,17 +71,28 @@ function thrownMessage(error: unknown): string {
   }
 }
 
-export async function registerInstalledPlugins(input: {
-  kernel: BootKernel;
-  track(name: string): void;
-}): Promise<InstalledPluginsBoot | null> {
+/** A refusal of an imported plugin, carrying what the loader read it declares. */
+function withDeclaredServices(declaredServices: string[] | undefined, refusal: InstalledPluginRefusal): InstalledPluginRefusal {
+  return declaredServices === undefined ? refusal : { ...refusal, declaredServices };
+}
+
+/**
+ * The installed plugins of this project and environment, verified and imported
+ * by the runtime's loader with this host's parts (module header), and nothing
+ * registered: `null` when there is no installations file. A loader that throws
+ * outright is one `loader_failed` refusal. `os serve` registers what this
+ * answers ({@link registerInstalledPlugins}); a one-shot command reads it
+ * without registering, with `leaveUninstallsPending`, so it removes nothing.
+ */
+export async function loadHostInstalledPlugins(
+  opts: { leaveUninstallsPending?: boolean } = {},
+): Promise<InstalledPluginsLoad | null> {
   const environmentId = pluginEnvironmentId();
   if (!existsSync(pluginInstallationsFile(environmentId))) return null;
-
-  let result: Awaited<ReturnType<typeof loadInstalledPlugins>>;
   try {
-    result = await loadInstalledPlugins({
+    return await loadInstalledPlugins({
       environmentId,
+      leaveUninstallsPending: opts.leaveUninstallsPending,
       resolveKeys: async (keyIds) => {
         const read = await readTrustedKeys(keyIds, { databaseUrl: process.env.OS_DATABASE_URL, json: false });
         if (!read.ok) throw new Error(read.message);
@@ -90,13 +106,21 @@ export async function registerInstalledPlugins(input: {
     });
   } catch (error) {
     if (isExitSignal(error)) throw error;
-    result = {
+    return {
       loaded: [],
       removed: [],
       disabled: [],
       refused: [{ id: '*', version: '*', error: 'loader_failed', message: `the installed-plugin loader failed (${thrownMessage(error)}); no installed plugin was loaded.` }],
     };
   }
+}
+
+export async function registerInstalledPlugins(input: {
+  kernel: BootKernel;
+  track(name: string): void;
+}): Promise<InstalledPluginsBoot | null> {
+  const result = await loadHostInstalledPlugins();
+  if (result === null) return null;
 
   const out: InstalledPluginsBoot = { loaded: [], refused: [...result.refused] };
   for (const { record, kept } of result.removed) {
@@ -110,32 +134,32 @@ export async function registerInstalledPlugins(input: {
   for (const record of result.disabled) {
     console.error(chalk.dim(`  Installed plugin ${record.id}@${record.version} is disabled (os plugin enable ${record.id})`));
   }
-  for (const { record, plugin } of result.loaded) {
+  for (const { record, plugin, declaredServices } of result.loaded) {
     let name: string;
     try {
       name = String((plugin as { name?: unknown }).name ?? record.id);
     } catch (error) {
-      out.refused.push({ id: record.id, version: record.version, error: 'kernel_refused', message: `its plugin name cannot be read: ${thrownMessage(error)}` });
+      out.refused.push(withDeclaredServices(declaredServices, { id: record.id, version: record.version, error: 'kernel_refused', message: `its plugin name cannot be read: ${thrownMessage(error)}` }));
       continue;
     }
     if (input.kernel.hasPlugin(name)) {
-      out.refused.push({
+      out.refused.push(withDeclaredServices(declaredServices, {
         id: record.id,
         version: record.version,
         error: 'plugin_name_taken',
         message: `its plugin name '${name}' is a plugin this boot already registered, and an installed plugin does not replace one.`,
-      });
+      }));
       continue;
     }
     try {
       await input.kernel.use(plugin as Plugin);
     } catch (error) {
-      out.refused.push({
+      out.refused.push(withDeclaredServices(declaredServices, {
         id: record.id,
         version: record.version,
         error: 'kernel_refused',
         message: thrownMessage(error),
-      });
+      }));
       continue;
     }
     if (record.trustUnsigned) {

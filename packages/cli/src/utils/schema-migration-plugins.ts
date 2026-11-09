@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {
   isDevelopmentBoot,
+  isFederatedObject,
   readDeploymentOrgScopingEntitlement,
   resolveAuthSecret,
   resolvePlatformAuthComposition,
@@ -11,6 +12,8 @@ import {
   type PlatformAuthSkipReason,
 } from '@objectstack/core';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
+import { isDeclaredByHost } from '@objectstack/types/node';
+import { describeAiAutoInjectRefusal, mountsAiServicePlugin, resolveAiServiceLoad } from './ai-service-auto-inject.js';
 import { isAppPluginLike } from './graft-runtime-hooks.js';
 import { isHostConfig } from './plugin-detection.js';
 import {
@@ -1933,7 +1936,10 @@ async function materializeHostPlugins(
  *
  * `serve`'s flags (`--preset minimal` mounts no slate; `--dev` adds the
  * config's `devPlugins`); its tier-gated AI and i18n services and the rest of
- * its boot that is no shared rule. (The `telemetry` sibling datasource a
+ * its boot that is no shared rule. The AI service is the one it REFUSES
+ * instead: a config `serve` would auto-inject it for, mounting none itself,
+ * is refused with the remedy (mount it explicitly), read through `serve`'s own
+ * predicate (`resolveAiServiceLoad`, #31411). (The `telemetry` sibling datasource a
  * development boot provisions, ADR-0057 §3.6, is not a composition: the boot
  * itself provisions it, `bootSchemaStack`, #22579.) The parity pin
  * (`commands/migrate/plan.boot-parity.integration.test.ts`) holds the object
@@ -1966,9 +1972,31 @@ async function composeServedPlatform(input: {
     : stackDeclaredCapabilities(config);
   const notes: string[] = [];
 
+  const declaredTiers = resolveStackCollection(config, 'tiers').filter((t): t is string => typeof t === 'string');
+
+  // ── `serve` 4 — the AI plugin it auto-injects, refused here ──────────────
+  // [#31411, ruled B] `serve` mounts `@objectstack/service-ai` for a config
+  // that asks for it (`requires: ['ai']`, or the app's package.json) and mounts
+  // none itself. This boot composes no AI plugin, so on that config it would
+  // plan without the `ai_*` tables `serve` declares: refused instead, naming
+  // the remedy. Read through `serve`'s own predicate, never a copy of it. Only
+  // a declared `ai` / `ai-studio` token opens the `ai` tier, so the declared
+  // `requires` answer the tier as `serve`'s full token list does.
+  const aiLoad = resolveAiServiceLoad({
+    declaredRequires: new Set(requires),
+    aiTierEnabled: resolveStackTiers({
+      declaredTiers,
+      requires,
+      ...(input.serveFlags?.preset !== undefined ? { preset: input.serveFlags.preset } : {}),
+    }).has('ai'),
+    hostDeclaresDependency: (pkg) => isDeclaredByHost(pkg, input.packageRoot),
+  });
+  if (aiLoad !== 'off' && !mountsAiServicePlugin([...input.basePlugins, ...input.hostPlugins, ...input.composed])) {
+    throw new Error(describeAiAutoInjectRefusal(aiLoad));
+  }
+
   // ── `serve` 5d — the auth family, behind its auth gate ──────────────────
   const authFamily: unknown[] = [];
-  const declaredTiers = resolveStackCollection(config, 'tiers').filter((t): t is string => typeof t === 'string');
   const decision = resolvePlatformAuthComposition({
     plugins: [...input.basePlugins, ...input.hostPlugins],
     tiers: resolveStackTiers({ declaredTiers, requires }),
@@ -2399,7 +2427,13 @@ export async function measureComposedCoverage(
   // the injected-columns plan's input, so it is installed before one object
   // is bound. See this function's docblock.
   notes.push(...installDeploymentPlatformGlobalObjects(kernel, engine?.registry));
-  const objects: unknown = engine?.registry?.getAllObjects?.();
+  // The STORAGE layer's objects: a disabled package's `objectExtensions`
+  // folded in. The DDL-free binding below installs each one as the driver's
+  // managed field set, so a served fold here would make the drift report
+  // propose dropping every column a disable only hides.
+  const objects: unknown = typeof engine?.registry?.getAllStorageObjects === 'function'
+    ? engine.registry.getAllStorageObjects()
+    : engine?.registry?.getAllObjects?.();
   if (
     !Array.isArray(objects)
     || typeof engine?.getDriverForObject !== 'function'
@@ -2429,7 +2463,7 @@ export async function measureComposedCoverage(
     // Federated objects have no managed table — `detectManagedDrift` could not
     // diff one if it wanted to. Counted apart from a real gap rather than
     // folded into it.
-    if (obj?.external != null) { federated++; continue; }
+    if (isFederatedObject(obj)) { federated++; continue; }
     const driver = engine.getDriverForObject(obj.name);
     if (!driver) { unbound++; continue; }
     if (!plannedDrivers.includes(driver)) { otherDriver++; continue; }

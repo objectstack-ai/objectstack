@@ -59,6 +59,35 @@
 import type { DeclaredDefaultChange } from './authorable-defaults.js';
 
 /**
+ * Shared by the three seed-mode rows below (#30081): the dataset default, the
+ * loader configuration's fallback that now IS that default, and the request's
+ * parsed default `config` that carries it.
+ */
+const SEED_MODE_CREATE_ONLY_REASON =
+  'A RULED default change (ruling 6631016988 on #30081, option A, after a production measurement): a '
+  + 'seed is create-only by default. A load inserts the records whose row is missing and leaves every '
+  + 'existing row as it is, so a replay — every single-tenant boot, a package install or upgrade, a '
+  + 'publish of a `seed` item — no longer writes a seeded value back over a customer\'s edit. Measured '
+  + 'before the change on `os start`, `os serve`, a boot-artifact upgrade and an `os package install` '
+  + 'upgrade: each put an edited seeded row back to the shipped value, silently. What moves for a '
+  + 'consumer: a dataset that omits `mode` parses to `ignore` where it parsed to `upsert`, so a replay '
+  + 'no longer refreshes rows that already exist — a changed seed value reaches only a row the load '
+  + 'creates. To keep refreshing a dataset (reference data the package keeps current), write '
+  + '`mode: \'upsert\'`, and exempt the columns the customer or a job owns with '
+  + '`columns: { FIELD: { applyOn: \'create\' } }`. A package BUILT before this change carries a written `mode: "upsert"` in its compiled '
+  + 'artifact (`os build` stores the parsed seed), which the loader cannot tell from an authored one, '
+  + 'so it keeps replaying with upsert until it is rebuilt; nothing converts it. An install-local '
+  + 'package (`os package install`) keeps the body it was installed with in its install ledger, and its '
+  + 'sample-data reseed replays that body in its stored mode, so an entry installed from such an '
+  + 'artifact keeps writing the shipped values back on every reseed until the rebuilt artifact is '
+  + 're-installed: a rebuild alone changes nothing for it. The ledger\'s other replays never overwrite: '
+  + 'the boot rehydrate seeds nothing, the heal seeds only when every seeded object is empty, and the '
+  + 'per-organization replay runs only for a new organization. A stored `seed` metadata item with no '
+  + '`mode` is not rewritten either: its next publish parses it to `ignore`, so that publish inserts '
+  + 'only the rows it is missing where it used to write its values back over existing rows, with no '
+  + 'signal. D3 entry: `seed-mode-default-create-only`.';
+
+/**
  * Declared default changes, keyed by the protocol major that shipped them.
  *
  * The table landed EMPTY at major 17 — that emptiness was the ratchet's own
@@ -741,6 +770,32 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + '`false` and keeps withholding the control: recompile it, or delete the key. To withhold '
         + 'the control, write `userActions: { hideFields: false }`. To take the platform default, '
         + 'change nothing. D3 entry: `list-view-hide-fields-default-on`.',
+    },
+    {
+      key: 'data/Seed:mode',
+      from: '"upsert"',
+      to: '"ignore"',
+      reason: SEED_MODE_CREATE_ONLY_REASON,
+    },
+    {
+      key: 'data/SeedLoaderConfig:defaultMode',
+      from: '"upsert"',
+      to: '"ignore"',
+      reason:
+        'The loader configuration\'s fallback mode IS `SeedSchema.mode` now, default included, so it '
+        + 'moves with it (one default, stated once). A request parsed through `SeedLoaderRequestSchema` '
+        + 'fills every dataset\'s `mode` itself, so this value is read only for a dataset handed to the '
+        + 'loader unparsed (`validate()`). A host that passed its own `defaultMode` keeps it; the '
+        + 'platform\'s own call sites pass none. ' + SEED_MODE_CREATE_ONLY_REASON,
+    },
+    {
+      key: 'data/SeedLoaderRequest:config',
+      from: '{"batchSize":1000,"defaultMode":"upsert","dryRun":false,"haltOnError":false,"multiPass":true,"transaction":false}',
+      to: '{"batchSize":1000,"defaultMode":"ignore","dryRun":false,"haltOnError":false,"multiPass":true,"transaction":false}',
+      reason:
+        'The parsed default `config` of a seed load request carries `SeedLoaderConfig.defaultMode`, '
+        + 'which moved from `upsert` to `ignore` with `SeedSchema.mode`; every other member is unchanged. '
+        + SEED_MODE_CREATE_ONLY_REASON,
     },
   ],
 };

@@ -214,7 +214,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "通道",
-        help: "通道:inbox(站内收件箱,始终可用)、email(配置邮件服务后可用)、sms(配置短信服务后可用),或已安装插件添加的通道 ID。填 * 表示所有通道。没有任何通道使用的 ID 不会匹配任何通知。"
+        help: "通道:inbox(站内收件箱,始终可用)、email(配置邮件服务后可用)、sms(配置短信服务后可用)、push(配置推送服务后可用,发送到用户已登记的设备),或已安装插件添加的通道 ID。填 * 表示所有通道。没有任何通道使用的 ID 不会匹配任何通知。"
       },
       enabled: {
         label: "启用",
@@ -460,7 +460,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "语言区域",
-        help: "发送到此设备的推送所使用的设备语言区域。"
+        help: "注册时提交的设备语言区域，随设备保存；推送不按它渲染：推送以收件人的语言送达（其用户语言，其次部署默认语言）。"
+      },
+      origin: {
+        label: "服务器来源",
+        help: "注册设备时控制台的加载来源（例如 https://crm.example.com）。发往该设备的每条推送都会携带它，因此保存了多个服务器的移动端外壳会在这个服务器上打开推送。未带来源注册的设备此项为空。"
       },
       name: {
         label: "设备名称"

@@ -18,7 +18,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "Registro de auditoría",
     pluralLabel: "Registros de auditoría",
-    description: "Registro de auditoría inmutable para eventos de la plataforma",
+    description: "Registro de auditoría de los eventos de la plataforma. Solo la plataforma escribe sus entradas, que son de solo lectura en la API de datos y en Configuración.",
     fields: {
       created_at: {
         label: "Marca temporal"
@@ -37,8 +37,13 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "Cuenta bloqueada",
           config_change: "Cambio de configuración",
           import: "Importar",
+          export: "Exportar",
           platform_admin_standing_change: "Cambio de acceso de administrador de plataforma",
-          action_invocation: "Invocación de acción"
+          action_invocation: "Invocación de acción",
+          package_uninstall: "Desinstalación de paquete",
+          package_unmanaged_import: "Package Unmanaged Import",
+          credential_use: "Credential Use",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {
@@ -113,9 +118,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_activity: {
-    label: "Actividad",
-    pluralLabel: "Actividades",
-    description: "Entradas recientes del flujo de actividad (ligeras y desnormalizadas).",
+    label: "Feed de actividad",
+    pluralLabel: "Feed de actividad",
+    description: "Lo que las personas hicieron recientemente en los registros, de lo más nuevo a lo más antiguo: quién creó, cambió o eliminó qué. Las entradas se conservan 14 días.",
     fields: {
       id: {
         label: "ID de actividad"
@@ -192,6 +197,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       milestone_key: {
         label: "Clave de hito",
         help: "Para un hito de actividad disparado, una clave ordenada y separada por comas de todos los campos que la declaración activityMilestones del objeto vigilaba al dispararse; NULL para cualquier otra fila. La plataforma la marca al escribir y nunca se sirve: la regla de lectura la compara con la declaración actual."
+      }
+    },
+    _views: {
+      recent: {
+        label: "Actividad reciente",
+        emptyState: {
+          title: "Sin actividad reciente",
+          message: "Los cambios que las personas hacen en los registros aparecen aquí, de lo más nuevo a lo más antiguo."
+        }
+      },
+      all: {
+        label: "Todas las entradas"
       }
     }
   },

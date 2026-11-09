@@ -27,6 +27,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { TenancyPostureSchema } from '../security/tenancy-posture';
 import { AUDIENCE_POSTURES } from '../system/auth-config.zod';
+import { SessionSchema, SessionUserSchema } from './auth.zod';
 export const AuthEndpointPaths = {
   // Email/Password Authentication
   signInEmail: '/sign-in/email',
@@ -64,6 +65,17 @@ export const AuthEndpointPaths = {
   deviceRequest: '/device/request',
   deviceToken: '/device/token',
   deviceApprove: '/device/approve',
+
+  // Mobile sign-in hand-off (when at least one app scheme is registered in
+  // `AuthConfig.trustedAppSchemes`). `handoff` is ObjectStack's own route;
+  // `verify` is better-auth's one-time-token plugin route as better-auth 1.7.12
+  // names it. The plugin's third route, `GET /one-time-token/generate`, is
+  // mounted but refuses every client request (`disableClientRequest`), so it is
+  // deliberately not declared here: the hand-off is the only way to mint a token.
+  // Request/response shapes: `OneTimeTokenHandoffQuerySchema`,
+  // `OneTimeTokenVerifyRequestSchema`, `OneTimeTokenVerifyResponseSchema`.
+  oneTimeTokenHandoff: '/one-time-token/handoff',
+  oneTimeTokenVerify: '/one-time-token/verify',
 } as const;
 
 /**
@@ -250,6 +262,11 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   phoneNumberOtp: z.boolean().optional().describe(
     'Phone-number OTP sign-in and self-service password reset available — requires the phoneNumber plugin plus a deliverable SMS service',
   ),
+  emailDelivery: z.boolean().optional().describe(
+    'Email leaves this deployment: the wired email service reports itself configured with a real transport, so password-reset, verification and invitation mail is delivered. '
+    + 'False with no email service and with the stock log transport, which writes mail to the server console instead of sending it; the forgot-password page can then say a reset link cannot be emailed here and to ask an administrator. '
+    + 'A statement about the deployment, never about an address: the password-reset request answers known and unknown addresses alike either way. Absent means not live',
+  ),
   cloudManaged: z.boolean().optional().describe(
     'Managed (cloud-hosted, SSO-only) mode: people arrive through the identity provider, so the UI hides inviting, creating users and setting their passwords; absent means not managed',
   ),
@@ -392,3 +409,100 @@ export type DeviceRequestResponse = z.input<typeof DeviceRequestResponseSchema>;
 /** Post-parse shape of {@link DeviceRequestResponse} — defaults applied, transforms run (ADR-0122). */
 export type DeviceRequestResponseParsed = z.infer<typeof DeviceRequestResponseSchema>;
 export type DeviceTokenResponse = z.input<typeof DeviceTokenResponseSchema>;
+
+// ==========================================
+// Mobile Sign-In Hand-Off (One-Time Token)
+// ==========================================
+
+/**
+ * Query of `GET /api/v1/auth/one-time-token/handoff` — the step that hands a
+ * sign-in completed in the system browser back to a native app.
+ *
+ * Some identity providers refuse embedded WebViews, so the mobile shell opens
+ * the sign-in in the system authentication session (`ASWebAuthenticationSession`
+ * on iOS, Custom Tabs on Android), and this route is the one URL it opens there.
+ * For a session signed in within the last five minutes (the system browser's
+ * cookie), the server mints a single-use token bound to the shell's PKCE challenge
+ * (RFC 7636) and redirects to the app's registered scheme; the WebView then redeems
+ * the token at `POST /one-time-token/verify` together with the matching verifier,
+ * so a callback intercepted by another app on the device cannot be redeemed without
+ * the verifier only the shell holds. A browser with no such session is sent to sign
+ * in first, and comes back here afterwards.
+ *
+ * The parameter set is CLOSED: an unknown or repeated parameter is refused.
+ *
+ * Answers, every `400` decided before any session is read:
+ * - `302` with a token: `Location` is `redirect_uri` with a `token` query parameter
+ *   appended (the single-use token, valid for one minute), sent with
+ *   `Cache-Control: no-store`.
+ * - `302` to sign in: a page navigation with no session, or with one older than
+ *   five minutes, when this process answers the Console's sign-in page with
+ *   `200 text/html`, unless it reports `Sec-Fetch-Site: same-origin`. `Location` is
+ *   that page, root-relative so the browser stays on this origin, with `redirect`
+ *   naming this same request and `handoff_refused_at` carrying the server's time of
+ *   the refusal in epoch milliseconds. The page's route is not part of this contract:
+ *   an app opens this route and never names it.
+ * - `400 VALIDATION_ERROR`, with NO redirect: a navigation another site started
+ *   (`Sec-Fetch-Site: cross-site`), an unknown or repeated parameter, a
+ *   `redirect_uri` whose scheme is not registered in
+ *   `AuthConfig.trustedAppSchemes` (compared case-insensitively), a malformed
+ *   `code_challenge`, or a `code_challenge_method` other than `S256`.
+ * - `401 UNAUTHENTICATED`: no session, or one older than five minutes, on any request
+ *   that does not get that redirect. That is a request that is not a page navigation
+ *   (an app's anonymous probe gets this, and reads it as "this server registered
+ *   me"); a page navigation reporting `Sec-Fetch-Site: same-origin`, which is the
+ *   sign-in page forwarding a session this route refuses; and any request when this
+ *   process does not answer that page with `200 text/html`, so a Console served by
+ *   something in front of this process keeps the `401` too.
+ *
+ * The parameter names are the OAuth 2.0 / RFC 7636 wire names, kept verbatim.
+ */
+export const OneTimeTokenHandoffQuerySchema = lazySchema(() => z.object({
+  redirect_uri: z.string().min(1).describe(
+    'Where to send the token: an absolute URI whose scheme is registered in AuthConfig.trustedAppSchemes '
+    + '(e.g. com.example.app://auth/callback); any other scheme is refused with 400 and no redirect',
+  ),
+  code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/).describe(
+    'RFC 7636 S256 code challenge: the unpadded base64url SHA-256 of the verifier the app keeps (43 characters)',
+  ),
+  code_challenge_method: z.literal('S256').optional().describe(
+    'RFC 7636 challenge method; only S256 is accepted (plain is refused), and absent means S256',
+  ),
+}).strict());
+
+/**
+ * Body of `POST /api/v1/auth/one-time-token/verify` — better-auth's
+ * one-time-token verify route, body unchanged so its stock client works.
+ *
+ * The interception binding rides inside `token`: the app sends the token it
+ * received on its scheme, a dot, and the RFC 7636 code verifier whose S256
+ * challenge it sent to the hand-off. The token itself never contains a dot
+ * (better-auth's alphabet is `a-z A-Z 0-9 - _`), so the server splits on the
+ * FIRST dot. A missing or wrong verifier finds no stored token and consumes
+ * nothing.
+ */
+export const OneTimeTokenVerifyRequestSchema = lazySchema(() => z.object({
+  token: z.string().regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9._~-]{43,128}$/).describe(
+    'The hand-off token, a dot, then the RFC 7636 code verifier (43-128 characters) whose S256 challenge was sent to the hand-off',
+  ),
+}));
+
+/**
+ * Response of `POST /api/v1/auth/one-time-token/verify`: better-auth's body,
+ * not wrapped in the ObjectStack envelope — the redeemed session and its user —
+ * sent with the session cookie (`Set-Cookie`), so the WebView is signed in.
+ *
+ * Refused with better-auth's `400` ("Invalid token") when the token is unknown,
+ * already used, expired (one minute after the hand-off) or paired with the
+ * wrong verifier; every refusal looks the same on purpose.
+ */
+export const OneTimeTokenVerifyResponseSchema = lazySchema(() => z.object({
+  session: SessionSchema.describe('The session the token was minted from'),
+  user: SessionUserSchema.describe('The signed-in user'),
+}));
+
+export type OneTimeTokenHandoffQuery = z.input<typeof OneTimeTokenHandoffQuerySchema>;
+export type OneTimeTokenVerifyRequest = z.input<typeof OneTimeTokenVerifyRequestSchema>;
+export type OneTimeTokenVerifyResponse = z.input<typeof OneTimeTokenVerifyResponseSchema>;
+/** Post-parse shape of {@link OneTimeTokenVerifyResponse} — defaults applied, transforms run (ADR-0122). */
+export type OneTimeTokenVerifyResponseParsed = z.infer<typeof OneTimeTokenVerifyResponseSchema>;

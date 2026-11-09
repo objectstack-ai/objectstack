@@ -131,6 +131,18 @@ export function parseAuditValue(v: unknown): Record<string, unknown> | null {
 }
 
 /**
+ * The administrator a `sys_audit_log` row says made its write from an
+ * impersonation session — `metadata.impersonated_by`, a `sys_user` id — or
+ * `null` for a write the user in `user_id` made themselves (the writer stamps
+ * the key on such writes only, so its absence is the record).
+ */
+export function auditImpersonatorId(metadata: unknown): string | null {
+  const parsed = parseAuditValue(metadata);
+  const by = parsed?.impersonated_by;
+  return typeof by === 'string' && by.trim() ? by.trim() : null;
+}
+
+/**
  * Union-diff two audit payloads into the changes worth showing. Fields whose
  * definition marks them computed or hidden are dropped, as are system/noise
  * columns and changes where both sides are empty.

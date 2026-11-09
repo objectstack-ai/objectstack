@@ -43,23 +43,34 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
 } from '@object-ui/components';
 import { ArrowLeft, ExternalLink, Download, AlertCircle, Package, Trash2, MoreHorizontal, CheckCircle2, ArrowUpCircle, Database, Loader2 } from 'lucide-react';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useObjectTranslation } from '@object-ui/i18n';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { useAdapter } from '@object-ui/react';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
+import { useAdapter, useHasNotificationProvider } from '@object-ui/react';
 import { PackageIcon } from './PackageIcon.js';
 import { MarkdownText } from './MarkdownText.js';
 import { PluginDisclosure } from './PluginDisclosure.js';
 import { MarketplaceAccessDenied } from './MarketplaceAccessDenied.js';
 import { MarketplaceResolving } from './MarketplaceResolving.js';
 import { MarketplaceDisabled } from './MarketplaceDisabled.js';
+import { MarketplaceNotLoadedReason } from './MarketplaceRowActions.js';
 import { localizePackage } from './usePackageL10n.js';
 import { isNewerVersion } from './versionPrecedence.js';
 import {
   getMarketplacePackage,
-  getDeclaredInstallModes,
+  getServedPackageBody,
+  declaredInstallModesOf,
   installPackage,
   installLocal,
   uninstallLocal,
@@ -72,24 +83,40 @@ import {
   purgeSampleData,
   reseedLocalSampleData,
   purgeLocalSampleData,
+  countLocalSampleData,
   type MarketplaceDetailResponse,
   type CloudEnvironment,
   type LocalInstallEntry,
-  type LocalInstallNotLoaded,
   type LocalInstallMode,
   type LocalInstallStrippedLock,
   type CloudInstallationInfo,
 } from './marketplaceApi.js';
 import { useDependencyMissingText } from './dependencyMissing.js';
+import { useProtocolCheckSkippedText } from './protocolCheckSkipped.js';
+import { ProtocolCheckSkippedNote } from './ProtocolCheckSkippedNote.js';
+import { installPreviewOf, type InstallPreview } from './installPreview.js';
+import {
+  forgetSampleData,
+  noteServedSampleCount,
+  rememberSampleData,
+  sampleDataGeneration,
+  sampleDataNotice,
+  sampleRecordsLoaded,
+  takeClearConfirmRequest,
+} from './sampleDataNotice.js';
+import { SampleDataLeaveBanner } from './SampleDataLeaveBanner.js';
 import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
-import { appRouteSegment, filterActiveApps, resolveKeyedI18nLabel } from '../../utils/index.js';
+import { appRouteSegment, filterActiveApps } from '../../utils/index.js';
 import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { SuggestedBindingsPanel, type SuggestedBindingsStrings } from '../../components/SuggestedBindingsPanel.js';
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import { errorCodeIs } from '@object-ui/types';
+import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
+import { effectiveSolutionType, readListingTaxonomy } from './marketplaceTaxonomy.js';
+import { DetailLanguagesGroup } from './MarketplaceLanguages.js';
 
 /**
  * Whether a cloud install lands in the environment this console renders, read
@@ -141,12 +168,25 @@ function versionEntryId(version: string): string {
   return `marketplace-version-${version}`;
 }
 
+/**
+ * The page under the frame that fetches its strings first — the
+ * `marketplace` namespace (`MarketplaceNamespaceGate.tsx` says why).
+ */
 export function MarketplacePackagePage() {
+  return (
+    <MarketplaceNamespaceGate>
+      <MarketplacePackagePageBody />
+    </MarketplaceNamespaceGate>
+  );
+}
+
+function MarketplacePackagePageBody() {
   const navigate = useNavigate();
   const { packageId, appName } = useParams<{ packageId?: string; appName?: string }>();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
   const { t, language } = useObjectTranslation();
   const dependencyMissingText = useDependencyMissingText();
+  const protocolCheckSkippedText = useProtocolCheckSkippedText();
   // Dates and numbers on this surface read the display locale; a bare
   // `toLocale*()` call used the MACHINE's locale (objectui#9909).
   const displayLocale = useDisplayLocale();
@@ -176,13 +216,17 @@ export function MarketplacePackagePage() {
     revoking: t('marketplace.suggestedBindings.revoking'),
     revokedToast: (s: SuggestedBinding) =>
       t('marketplace.suggestedBindings.revokedToast', { set: s.permission_set_name }),
+    reopen: t('marketplace.suggestedBindings.reopen'),
+    reopening: t('marketplace.suggestedBindings.reopening'),
+    reopenedToast: (s: SuggestedBinding) =>
+      t('marketplace.suggestedBindings.reopenedToast', { set: s.permission_set_name }),
   };
   const basePath = appName ? `/apps/${appName}` : '';
   const { refresh: refreshMetadata } = useMetadata();
   // The adapter `MetadataProvider` reads through: the deploy wait asks the
   // same `GET /meta/app` the cache would, without the cache persisting it.
   const adapter = useAdapter();
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // The runtime's own answer, read once per render -- the same read the
   // catalog page makes (objectui#5504). `false` means this runtime mounts no
   // marketplace at all, so there is no package to fetch and nothing to
@@ -262,13 +306,35 @@ export function MarketplacePackagePage() {
     message: string;
     unmanaged?: { strippedLocks: LocalInstallStrippedLock[] };
     credentials?: { packageId: string; note?: string };
+    // objectstack#30326 — the install answer's `protocolCheckSkipped`, drawn:
+    // installed, but its platform protocol range was not checked.
+    protocolNote?: string;
+    // objectstack#30323 — the sample records the install answer says it left
+    // in place (`seeded`), and whether this was an install over an existing
+    // one, which loads the sample data again. Cleared once they are purged.
+    sampleData?: { count: number; reinstall: boolean };
   } | null>(null);
+  // objectstack#30323 — the console's own confirm for a sample-data purge, in
+  // place of the browser's: which install it purges. The count it draws for a
+  // local purge is read when it is drawn (`localSampleCount` below), so a
+  // count the runtime answers while it is open still reaches it.
+  const [purgeConfirm, setPurgeConfirm] = useState<{ target: 'local' | 'cloud' } | null>(null);
+  // objectstack#30616 — bumped when the runtime's count of this page's local
+  // install's sample rows lands in the session record, so the page draws it.
+  const [, setSampleCountReads] = useState(0);
+  const hasNotificationProvider = useHasNotificationProvider();
   // ADR-0131 D6 — the install modes the package's latest manifest declares,
   // read from the manifest install-local judges, and the operator's pick among
   // them. Both are kept with the package they belong to, so a page that moves
   // to another package never offers or sends the last one's.
   const [modesRead, setModesRead] = useState<{ packageId: string; modes: readonly LocalInstallMode[] | undefined } | null>(null);
   const [modePick, setModePick] = useState<{ packageId: string; mode: LocalInstallMode } | null>(null);
+  // objectstack#30325 — what the install will add, read from the same manifest
+  // answer as the modes, kept with its package. `preview: null` = the manifest
+  // could not be read or is not a package body; no entry for this package yet
+  // = still reading. The confirm in front of a local Install draws it.
+  const [previewRead, setPreviewRead] = useState<{ packageId: string; preview: InstallPreview | null } | null>(null);
+  const [confirmLocalOpen, setConfirmLocalOpen] = useState(false);
   // `undefined` until read, when the manifest declares none, or when it could
   // not be read: then no choice is drawn and no mode is sent, so the door's own
   // default and answer decide.
@@ -294,7 +360,14 @@ export function MarketplacePackagePage() {
     let cancelled = false;
     (async () => {
       const items = await listLocalInstalls();
-      if (!cancelled) setLocalInstalls(items);
+      if (cancelled) return;
+      setLocalInstalls(items);
+      // objectstack#30323 — the app's sample-data banner brought the installer
+      // here to clear: its action asks for the confirm of the package whose
+      // page it opens, so the confirm opens once the listing says that
+      // package's sample data is still there.
+      const requested = items.find((i) => i.withSampleData && !i.notLoaded && takeClearConfirmRequest(i.manifestId));
+      if (requested) setPurgeConfirm({ target: 'local' });
     })();
     return () => { cancelled = true; };
   }, [packageId, localResult, isAdmin]);
@@ -302,20 +375,26 @@ export function MarketplacePackagePage() {
   // ADR-0131 D6 — what the package permits is its manifest's `installModes`,
   // so the page reads the manifest the install door reads: the same path and
   // the same version (`latest`, the one `installLocal` installs when it names
-  // none). Only where install-local is the page's install door (the cloud
-  // install routes take no mode) and only for a viewer the page serves.
+  // none). Where an install door takes a mode — install-local, or the hosted
+  // environment's cloud-connection install, which hands it to the control
+  // plane to judge — and only for a viewer the page serves.
   useEffect(() => {
     if (!packageId) return;
     if (!marketplaceEnabled) return;
     if (!isAdmin) return;
-    if (!getRuntimeConfig().features.installLocal) return;
+    if (!getRuntimeConfig().features.installLocal && !getCloudBase()) return;
     let cancelled = false;
     (async () => {
       try {
-        const modes = await getDeclaredInstallModes(packageId);
-        if (!cancelled) setModesRead({ packageId, modes });
+        // One read serves both: the modes it declares, and what it adds.
+        const body = await getServedPackageBody(packageId);
+        if (cancelled) return;
+        setModesRead({ packageId, modes: declaredInstallModesOf(body) });
+        setPreviewRead({ packageId, preview: installPreviewOf(body) });
       } catch {
         // No manifest to read: no choice and no mode, and the door decides.
+        // The confirm says it could not read what the install adds.
+        if (!cancelled) setPreviewRead({ packageId, preview: null });
       }
     })();
     return () => { cancelled = true; };
@@ -327,6 +406,13 @@ export function MarketplacePackagePage() {
   const requestedInstallMode: LocalInstallMode | undefined = !declaredModes
     ? undefined
     : declaredModes.length === 1 ? declaredModes[0] : (chosenMode || undefined);
+  // The hosted install (a cloud base, no install-local door) sends the same
+  // resolved mode, except where the package permits nothing beyond `managed`:
+  // that request stays the one every hosted install sent before the mode.
+  const hostedModeDoor = !getRuntimeConfig().features.installLocal && !!getCloudBase();
+  const hostedInstallMode: LocalInstallMode | undefined = hostedModeDoor && declaredModes?.some((m) => m !== 'managed')
+    ? requestedInstallMode
+    : undefined;
 
   // Seed cloud-install state so the primary CTA renders as "Installed" on
   // first paint instead of inviting another install.
@@ -516,8 +602,32 @@ export function MarketplacePackagePage() {
     setDeploy({ phase: 'served', manifestId, version, updatedTo, app: filterActiveApps(wait.apps)[0] ?? null });
   };
 
+  /**
+   * The text for a refused install, on either install door: the refusal drawn
+   * from its facts, or the console's sentence for a code it explains, else the
+   * envelope's own message. The install-mode refusals
+   * (`INSTALL_MODE_NOT_PERMITTED`, `UNMANAGED_INSTALL_WALLED_POSTURE`,
+   * `RESOURCE_CONFLICT`) take no branch: each message names its own remedy,
+   * and the page has nothing to add to it.
+   */
+  const installRefusalText = (e: unknown): string => {
+    // ADR-0141 D2 — an unsatisfied declared dependency, drawn from the
+    // refusal's facts in the reader's locale; without facts the envelope's
+    // message stands.
+    const dependencyMissing = dependencyMissingText(e);
+    if (dependencyMissing) return dependencyMissing;
+    const msg = (e as { message?: string } | null | undefined)?.message ?? String(e);
+    if (errorCodeIs(e, 'MANIFEST_CONFLICT')) return t('marketplace.install.localManifestConflict', { message: msg });
+    if (errorCodeIs(e, 'UNAUTHENTICATED')) return t('marketplace.install.localUnauthorized');
+    if (errorCodeIs(e, 'MARKETPLACE_UNAVAILABLE')) return t('marketplace.install.localMarketplaceUnavailable');
+    return msg;
+  };
+
   const doInstall = async () => {
     if (!packageId || !selectedEnv) return;
+    // ADR-0131 D6 — an install, never an update of the managed copy this
+    // environment holds, sends the mode the package page resolved.
+    const installMode = dialogUpdate ? undefined : hostedInstallMode;
     setInstalling(true);
     setInstallResult(null);
     try {
@@ -529,7 +639,25 @@ export function MarketplacePackagePage() {
         packageId,
         environmentId: selectedEnv,
         seedSampleData: dialogUpdate ? false : seedSampleData,
+        ...(installMode ? { installMode } : {}),
       });
+      const name = data?.package ? localizePackage(data.package as any, language).displayName : packageId;
+      // An unmanaged copy (ADR-0131 D6) is the environment's own base, not a
+      // package installation: the Installed state does not flip, and no app is
+      // waited for under the package's id.
+      if (installResp?.installMode === 'unmanaged') {
+        try {
+          await refreshMetadata('app');
+        } catch {
+          // Non-fatal: the copy is written; the app list refreshes on next navigation.
+        }
+        setInstallResult({
+          ok: true,
+          message: t('marketplace.install.unmanagedSuccess', { version: installResp.version, name, base: installResp.targetPackageId }),
+        });
+        emitMetadataRefresh();
+        return;
+      }
       // The version an update reports moving to: the install answer's own, else
       // the one the dialog named.
       const updatedTo = dialogUpdate ? (installResp?.installation?.version ?? dialogUpdate.to) : null;
@@ -552,7 +680,12 @@ export function MarketplacePackagePage() {
           if (info) setCloudInstall(info);
         }
       } catch { /* non-fatal */ }
-      if (installLandsInThisEnvironment(selectedEnv) && data) {
+      if (installMode === 'unmanaged') {
+        // Asked for a copy, answered without one: an environment that forwards
+        // no mode installed the package MANAGED. Said out loud, since the
+        // opposite of what was asked happened.
+        setInstallResult({ ok: false, message: t('marketplace.install.unmanagedIgnored', { name }) });
+      } else if (installLandsInThisEnvironment(selectedEnv) && data) {
         // objectui#12087 — the runtime answers this install while it still
         // serves the PRE-install kernel, so nothing is refreshed yet: the wait
         // below refreshes once the package's app is served. Not awaited, and
@@ -572,30 +705,57 @@ export function MarketplacePackagePage() {
         });
       }
     } catch (e: any) {
-      setInstallResult({ ok: false, message: e?.message ?? String(e) });
+      setInstallResult({ ok: false, message: installRefusalText(e) });
     } finally {
       setInstalling(false);
     }
   };
 
   /**
+   * The local Install button: opens the confirm that says what the install
+   * adds (objectstack#30325). Its Install is the one click that installs, so
+   * the install itself is unchanged and stays one click away.
+   */
+  const doInstallLocal = () => {
+    if (!packageId) return;
+    if (offeredInstallModes && !requestedInstallMode) return;
+    setConfirmLocalOpen(true);
+  };
+
+  /**
    * Install this package into the LOCAL runtime kernel (not a cloud env).
-   * Single-target operation — no picker, no dialog. Same-origin POST so
+   * Single-target operation — no environment picker. Same-origin POST so
    * cloud session is not required. The local AuthPlugin session is what
    * the backend validates.
    */
-  const doInstallLocal = async () => {
+  const runInstallLocal = async () => {
     if (!packageId) return;
     // ADR-0131 D6 — the mode is sent only when the manifest declares
     // `installModes`: its one mode, or the operator's pick among several.
     // Declaring none sends none, and the door's own default stands.
     const installMode = requestedInstallMode;
     if (offeredInstallModes && !installMode) return;
+    // Read before the install answers: an install over an existing one loads
+    // the package's sample data again, and its note says so.
+    const reinstall = !!localInstall;
     setInstallingLocal(true);
     setLocalResult(null);
     try {
       const result = await installLocal({ packageId, ...(installMode ? { installMode } : {}) });
       const name = data?.package ? localizePackage(data.package as any, language).displayName : result.manifestId;
+      // objectstack#30326 — every success answer can say the package was
+      // admitted with its protocol range unchecked; each note below carries it.
+      const protocolNote = protocolCheckSkippedText(result) ?? undefined;
+      const withProtocolNote = protocolNote ? { protocolNote } : {};
+      // objectstack#30323 — the answer's own count of the sample records the
+      // install left in place. Remembered for this session: the clear confirm
+      // reads it back, and the banner that follows the installer to the app is
+      // raised from it. An unmanaged copy loads none (`seeded.mode: skipped`).
+      const loaded = sampleRecordsLoaded(result);
+      const withSampleData = loaded !== null ? { sampleData: { count: loaded, reinstall } } : {};
+      if (loaded !== null) {
+        rememberSampleData({ manifestId: result.manifestId, name, count: loaded, path: `${basePath}/system/marketplace/${packageId}` });
+      }
       // An unmanaged copy (ADR-0131 D6): the package's metadata is this
       // runtime's own from now on, in the base the answer names; the answer
       // lists every protection lock the copy dropped, with the package's reason.
@@ -609,6 +769,7 @@ export function MarketplacePackagePage() {
           ok: true,
           message: t('marketplace.install.unmanagedSuccess', { version: result.version, name, base: result.targetPackageId }),
           unmanaged: { strippedLocks: result.strippedLocks },
+          ...withProtocolNote,
         });
         emitMetadataRefresh();
         return;
@@ -624,8 +785,8 @@ export function MarketplacePackagePage() {
       // and the page says when the app will appear.
       if (!result.hotLoaded) {
         setLocalResult(ignoredCopy
-          ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }) }
-          : { ok: true, message: t('marketplace.install.localLoadsAtRestart', { version: result.version, name }) });
+          ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote, ...withSampleData }
+          : { ok: true, message: t('marketplace.install.localLoadsAtRestart', { version: result.version, name }), ...withProtocolNote, ...withSampleData });
         return;
       }
       try {
@@ -634,34 +795,17 @@ export function MarketplacePackagePage() {
         // Non-fatal: the install succeeded; the app list will refresh on next navigation.
       }
       setLocalResult(ignoredCopy
-        ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }) }
+        ? { ok: false, message: t('marketplace.install.unmanagedIgnored', { name }), ...withProtocolNote, ...withSampleData }
         : {
             ok: true,
             message: t('marketplace.install.localSuccess', { version: result.version, name }),
             credentials: { packageId: result.manifestId, note: result.credentialNote },
+            ...withProtocolNote,
+            ...withSampleData,
           });
       emitMetadataRefresh();
     } catch (e: any) {
-      // A refusal shows the envelope's own message. The install-mode refusals
-      // (`INSTALL_MODE_NOT_PERMITTED`, `UNMANAGED_INSTALL_WALLED_POSTURE`,
-      // `RESOURCE_CONFLICT`) take no branch below: each message names its own
-      // remedy, and the page has nothing to add to it.
-      const code = e?.code;
-      let msg = e?.message ?? String(e);
-      // ADR-0141 D2 — an unsatisfied declared dependency, drawn from the
-      // refusal's facts in the reader's locale; without facts the envelope's
-      // message stands.
-      const dependencyMissing = dependencyMissingText(e);
-      if (dependencyMissing) {
-        msg = dependencyMissing;
-      } else if (errorCodeIs(e, 'MANIFEST_CONFLICT')) {
-        msg = t('marketplace.install.localManifestConflict', { message: msg });
-      } else if (errorCodeIs(e, 'UNAUTHENTICATED')) {
-        msg = t('marketplace.install.localUnauthorized');
-      } else if (errorCodeIs(e, 'MARKETPLACE_UNAVAILABLE')) {
-        msg = t('marketplace.install.localMarketplaceUnavailable');
-      }
-      setLocalResult({ ok: false, message: msg });
+      setLocalResult({ ok: false, message: installRefusalText(e) });
     } finally {
       setInstallingLocal(false);
     }
@@ -745,9 +889,6 @@ export function MarketplacePackagePage() {
    */
   const doPurgeSampleData = async () => {
     if (!cloudInstall) return;
-    if (!confirm(t('marketplace.detail.purgeConfirm'))) {
-      return;
-    }
     setSampleDataBusy('purge');
     setSampleDataMsg(null);
     try {
@@ -784,6 +925,13 @@ export function MarketplacePackagePage() {
       const inserted = r.inserted ?? 0;
       const updated = r.updated ?? 0;
       const errored = r.errors ?? 0;
+      // objectstack#30323 — what the reseed left in place, for the clear
+      // confirm and the banner, as an install's count is.
+      const reseeded = sampleRecordsLoaded({ seeded: { mode: 'inline', inserted, updated, skipped: r.skipped } });
+      if (reseeded !== null) {
+        const name = data?.package ? localizePackage(data.package as any, language).displayName : localInstall.manifestId;
+        rememberSampleData({ manifestId: localInstall.manifestId, name, count: reseeded, path: `${basePath}/system/marketplace/${packageId}` });
+      }
       const base = t('marketplace.detail.reseedLocalSuccess', { inserted, updated });
       // A reseed can land some rows and fail others (the server only hard-fails
       // when ZERO rows write). Don't hide the partial failures behind a green
@@ -800,9 +948,6 @@ export function MarketplacePackagePage() {
 
   const doPurgeLocalSampleData = async () => {
     if (!localInstall) return;
-    if (!confirm(t('marketplace.detail.purgeConfirm'))) {
-      return;
-    }
     setSampleDataBusy('purge');
     setSampleDataMsg(null);
     try {
@@ -810,6 +955,10 @@ export function MarketplacePackagePage() {
       setLocalInstalls((prev) => prev.map((i) =>
         i.manifestId === localInstall.manifestId ? { ...i, withSampleData: false } : i,
       ));
+      // objectstack#30323 — cleared: the install note drops its clear, and the
+      // session record and its banner go.
+      forgetSampleData(localInstall.manifestId);
+      setLocalResult((prev) => (prev?.sampleData ? { ...prev, sampleData: undefined } : prev));
       const removed = r.deleted ?? 0;
       setSampleDataMsg({
         ok: true,
@@ -837,6 +986,37 @@ export function MarketplacePackagePage() {
     ? localInstalls.find((i) => !!data && i.manifestId === data.package.manifest_id)
     : localInstalls.find((i) => i.packageId === packageId)) ?? null;
 
+  // objectstack#30616 — the runtime's count of the sample rows a purge of this
+  // install would delete now, read on every visit and again each time the
+  // listing is read (after an install, a reseed or a clear, which hand the
+  // page a new entry). It goes into the session record the confirm and the
+  // banner read: above zero it is the count they draw, zero drops the record
+  // and its banner. An answer of this session's own that lands while the read
+  // is in flight is fresher and stays (`noteServedSampleCount`). A failed read
+  // changes nothing: the record keeps what this session knows, if anything.
+  useEffect(() => {
+    if (!localInstall || localInstall.notLoaded) return;
+    const manifestId = localInstall.manifestId;
+    const generation = sampleDataGeneration(manifestId);
+    let cancelled = false;
+    (async () => {
+      const served = await countLocalSampleData(manifestId);
+      if (cancelled || !served) return;
+      const name = data?.package ? localizePackage(data.package as any, language).displayName : manifestId;
+      noteServedSampleCount({ manifestId, name, count: served.count, path: `${basePath}/system/marketplace/${packageId}` }, generation);
+      setSampleCountReads((n) => n + 1);
+    })();
+    return () => { cancelled = true; };
+  }, [localInstall, data, language, basePath, packageId]);
+
+  // objectstack#30323 — the console's confirm for a local purge, with the
+  // count this session knows the install's purge would delete, when it knows one.
+  const openLocalPurgeConfirm = () => {
+    if (!localInstall) return;
+    setPurgeConfirm({ target: 'local' });
+  };
+  const localSampleCount = localInstall ? sampleDataNotice(localInstall.manifestId)?.count ?? null : null;
+
   // The local-install menu and the two status banners, drawn by both the
   // catalog view and the marketplace-off local view below (objectui#11627).
   //
@@ -856,16 +1036,12 @@ export function MarketplacePackagePage() {
       {t('marketplace.detail.installedV', { version: localInstall.version })}
     </Badge>
   ));
-  // The reason in plain words. A code the console has no sentence for is still
-  // read as not loaded, naming the code — Installed Apps' reading of the marker.
-  const notLoadedReason = (marker: LocalInstallNotLoaded): string =>
-    marker.code === 'OS_PROTOCOL_INCOMPATIBLE'
-      ? t('marketplace.notLoaded.protocolIncompatible', { requiredRange: marker.requiredRange })
-      : t('marketplace.notLoaded.otherReason', { code: marker.code });
+  // The reason in plain words, through Installed Apps' one reader of the
+  // marker: the protocol range, or the code with the engine's sentence.
   const localNotLoadedReason = localInstall?.notLoaded && (
     <p className="text-xs text-destructive mt-2 flex items-start gap-1.5">
       <AlertCircle className="h-3.5 w-3.5 mt-px shrink-0" aria-hidden="true" />
-      <span>{notLoadedReason(localInstall.notLoaded)}</span>
+      <MarketplaceNotLoadedReason marker={localInstall.notLoaded} />
     </p>
   );
   const localMenu = localInstall && (
@@ -893,7 +1069,7 @@ export function MarketplacePackagePage() {
                 : t('marketplace.detail.addSampleData')}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={doPurgeLocalSampleData}
+              onSelect={openLocalPurgeConfirm}
               disabled={sampleDataBusy !== null || !localInstall.withSampleData}
               className="text-destructive focus:text-destructive"
             >
@@ -927,6 +1103,46 @@ export function MarketplacePackagePage() {
       </button>
     </div>
   );
+  // objectstack#30323 — the purge confirm, in the console's own dialog. The
+  // count line is drawn for a local purge whose count this session knows: the
+  // runtime's (objectstack#30616) or, when that could not be read, the one the
+  // install answered. A cloud purge draws none.
+  const purgeConfirmCount = purgeConfirm?.target === 'local' ? localSampleCount : null;
+  const purgeConfirmDialog = (
+    <AlertDialog open={purgeConfirm !== null} onOpenChange={(open) => { if (!open) setPurgeConfirm(null); }}>
+      <AlertDialogContent data-testid="purge-sample-data-dialog">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('marketplace.detail.purgeSampleData')}</AlertDialogTitle>
+          <AlertDialogDescription className="whitespace-pre-line">
+            {purgeConfirmCount != null
+              ? `${t('marketplace.detail.purgeConfirmAtMost', { count: purgeConfirmCount })}\n${t('marketplace.detail.purgeConfirm')}`
+              : t('marketplace.detail.purgeConfirm')}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            data-testid="purge-sample-data-confirm"
+            onClick={() => {
+              const target = purgeConfirm?.target;
+              setPurgeConfirm(null);
+              if (target === 'local') void doPurgeLocalSampleData();
+              else if (target === 'cloud') void doPurgeSampleData();
+            }}
+          >
+            {t('marketplace.detail.purgeSampleData')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+  // The banner that follows the installer to the app once they leave this
+  // page, for the package this page is about (`SampleDataLeaveBanner`).
+  const leaveBanner = hasNotificationProvider ? (
+    <SampleDataLeaveBanner manifestId={data?.package?.manifest_id ?? localInstall?.manifestId ?? null} />
+  ) : null;
+
   // objectui#12087 — the install-into-this-environment status, from the
   // install answering until its app is served (or the wait expires). Drawn in
   // the install dialog while it is open and on the page once it is closed, so
@@ -965,8 +1181,8 @@ export function MarketplacePackagePage() {
           <Button size="sm" onClick={() => navigate(`/apps/${appRouteSegment(deployApp)}`)}>
             {t('marketplace.install.openApp', {
               name: appLabel({
+                ...deployApp,
                 name: String(deployApp.name ?? appRouteSegment(deployApp)),
-                label: resolveKeyedI18nLabel(deployApp.label, t),
               }),
             })}
           </Button>
@@ -991,6 +1207,30 @@ export function MarketplacePackagePage() {
       {localResult.ok ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" /> : <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />}
       <div className="flex-1">
         {localResult.message}
+        {localResult.protocolNote ? <ProtocolCheckSkippedNote text={localResult.protocolNote} /> : null}
+        {/* objectstack#30323 — how many sample records the install loaded, and
+            the clear, right where the installer reads that it is installed. */}
+        {localResult.sampleData ? (
+          <div className="mt-2 whitespace-normal text-foreground" data-testid="install-sample-data">
+            <p>
+              {t('marketplace.detail.sampleDataLoaded', { count: localResult.sampleData.count })}
+              {localResult.sampleData.reinstall ? <>{' '}{t('marketplace.detail.sampleDataReloaded')}</> : null}
+            </p>
+            {localInstall?.manifestId && !localInstall.notLoaded ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={openLocalPurgeConfirm}
+                disabled={sampleDataBusy !== null}
+                data-testid="install-sample-data-clear"
+              >
+                <Trash2 className="h-4 w-4 mr-1.5" aria-hidden="true" />
+                {t('marketplace.detail.purgeSampleData')}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         {/* ADR-0131 D6 — each protection lock the unmanaged copy dropped, as
             the answer states it: the item, the lock and the package's reason
             verbatim, so the operator reads why the vendor locked an item
@@ -1082,6 +1322,8 @@ export function MarketplacePackagePage() {
         )}
         {sampleDataNote}
         {localResultNote(null)}
+        {purgeConfirmDialog}
+        {leaveBanner}
         <MarketplaceDisabled />
       </div>
     );
@@ -1150,6 +1392,8 @@ export function MarketplacePackagePage() {
   const pkg = data.package;
   const loc = localizePackage(pkg as any, language);
   const latestVersion = pkg.latest_version?.version ?? data.versions[0]?.version ?? null;
+  // The version that string names: its languages are the ones the page draws.
+  const latestServedVersion = pkg.latest_version ?? data.versions[0] ?? null;
   // PD4 (ADR-0025 §3.11): code-bearing packages must disclose + be acknowledged.
   const containsCode = !!pkg.latest_version?.contains_code;
   // ADR-0010 version lifecycle: installed cloud env is on an OLDER version than
@@ -1164,7 +1408,10 @@ export function MarketplacePackagePage() {
 
   // ADR-0131 D6 — where the package permits more than one mode, the install
   // waits for the operator's pick.
-  const installModeUnpicked = supportsLocal && !!offeredInstallModes && !chosenMode;
+  // On the hosted path the choice belongs to an install, not to the update of a
+  // copy this environment already holds.
+  const modeChoiceShown = supportsLocal || (hostedModeDoor && !cloudInstalledVersion);
+  const installModeUnpicked = modeChoiceShown && !!offeredInstallModes && !chosenMode;
   const primaryDisabled = !latestVersion || installingLocal || installing || installModeUnpicked || (!supportsLocal && !!cloudInstalledVersion && !cloudUpdateAvailable);
   // The reason Install is disabled, when the missing pick is what disables it:
   // the console's convention for a disabled control (`DeclaredActionsBar`'s
@@ -1175,6 +1422,7 @@ export function MarketplacePackagePage() {
     ? t('marketplace.install.mode.required')
     : undefined;
   const installModeReasonId = 'install-mode-required-reason';
+  const localPreviewRead = previewRead && previewRead.packageId === packageId ? previewRead : null;
   const primaryAction = supportsLocal
     ? {
       label: installingLocal
@@ -1213,16 +1461,36 @@ export function MarketplacePackagePage() {
     ? data.versions.find((v) => v.version === dialogUpdate.to && !!v.release_notes?.trim())
     : undefined;
 
-  const categoryLabel = pkg.category
-    ? t(`marketplace.category.${pkg.category}` as any, { defaultValue: pkg.category })
-    : null;
+  // The listing's taxonomy (`marketplaceTaxonomy.ts`): every business
+  // function in the listing's order, the industries, the solution type, and
+  // Beta. An undeclared solution type reads as the spec's default, as the
+  // catalog page filters and counts it; the other facets draw nothing when the
+  // listing carries none.
+  const taxonomy = readListingTaxonomy(pkg);
+  const taxonomyGroups = [
+    {
+      key: 'solutionType',
+      label: t('marketplace.facet.solutionType'),
+      values: [t(`marketplace.solutionType.${effectiveSolutionType(taxonomy)}`)],
+    },
+    taxonomy.businessFunctions.length > 0 && {
+      key: 'businessFunction',
+      label: t('marketplace.facet.businessFunction'),
+      values: taxonomy.businessFunctions.map((v) => t(`marketplace.businessFunction.${v}`)),
+    },
+    taxonomy.industries.length > 0 && {
+      key: 'industry',
+      label: t('marketplace.facet.industry'),
+      values: taxonomy.industries.map((v) => t(`marketplace.industry.${v}`)),
+    },
+  ].filter((g): g is { key: string; label: string; values: string[] } => !!g);
 
   // ADR-0131 D6 — the install modes the manifest permits, as the operator's
   // choice: drawn only where it permits more than one. A package that permits
   // only `unmanaged` draws no choice, but says what its install does before
   // the click, since that install is a copy rather than the registration every
   // install was before the key existed.
-  const installModeChoice = supportsLocal && offeredInstallModes ? (
+  const installModeChoice = modeChoiceShown && offeredInstallModes ? (
     <div className="mt-4 max-w-2xl space-y-2" data-testid="install-mode-choice">
       <p id="install-mode-label" className="text-sm font-medium">{t('marketplace.install.mode.label')}</p>
       <RadioGroup
@@ -1232,7 +1500,7 @@ export function MarketplacePackagePage() {
           setModePick(mode && packageId ? { packageId, mode } : null);
         }}
         aria-labelledby="install-mode-label"
-        disabled={installingLocal}
+        disabled={installingLocal || installing}
         className="gap-3"
       >
         {offeredInstallModes.map((mode) => (
@@ -1250,7 +1518,7 @@ export function MarketplacePackagePage() {
         ))}
       </RadioGroup>
     </div>
-  ) : supportsLocal && declaredModes?.length === 1 && declaredModes[0] === 'unmanaged' ? (
+  ) : modeChoiceShown && declaredModes?.length === 1 && declaredModes[0] === 'unmanaged' ? (
     <p className="mt-3 max-w-2xl text-sm text-muted-foreground" data-testid="install-mode-sole">
       <span className="font-medium text-foreground">{t('marketplace.install.mode.unmanaged')}</span>
       {': '}
@@ -1330,7 +1598,9 @@ export function MarketplacePackagePage() {
             {pkg.publisher && pkg.publisher !== 'private' && (
               <Badge variant={pkg.publisher === 'objectstack' ? 'default' : 'secondary'}>{pkg.publisher}</Badge>
             )}
-            {categoryLabel && <Badge variant="outline">{categoryLabel}</Badge>}
+            {taxonomy.beta && (
+              <Badge variant="secondary" data-testid="marketplace-detail-beta">{t('marketplace.maturity.beta')}</Badge>
+            )}
             {pkg.license && <Badge variant="outline" className="font-normal">{pkg.license}</Badge>}
             {localInstalledBadge}
             {!localInstall && cloudInstalledVersion && (
@@ -1345,6 +1615,24 @@ export function MarketplacePackagePage() {
                 {t('marketplace.detail.updateAvailable', { defaultValue: 'Update available' })} → v{latestVersion}
               </Badge>
             )}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5" data-testid="marketplace-detail-taxonomy">
+            {taxonomyGroups.map((group) => (
+              <div
+                key={group.key}
+                role="group"
+                aria-label={group.label}
+                className="flex flex-wrap items-center gap-1.5"
+                data-testid={`marketplace-detail-${group.key}`}
+              >
+                <span className="text-xs text-muted-foreground" aria-hidden="true">{group.label}</span>
+                {group.values.map((value) => (
+                  <Badge key={value} variant="outline" className="font-normal">{value}</Badge>
+                ))}
+              </div>
+            ))}
+            {/* Every language the latest version ships, with coverage. */}
+            <DetailLanguagesGroup version={latestServedVersion} />
           </div>
           {localNotLoadedReason}
           {loc.description && (
@@ -1377,7 +1665,7 @@ export function MarketplacePackagePage() {
                     : t('marketplace.detail.addSampleData')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onSelect={doPurgeSampleData}
+                  onSelect={() => setPurgeConfirm({ target: 'cloud' })}
                   disabled={sampleDataBusy !== null || cloudSampleDataRefused || !cloudInstall.withSampleData}
                   className="text-destructive focus:text-destructive"
                 >
@@ -1397,9 +1685,14 @@ export function MarketplacePackagePage() {
       {!installOpen && deployNote}
 
       {localResultNote(pkg.manifest_id)}
+      {purgeConfirmDialog}
+      {leaveBanner}
 
+      {/* `min-w-0` on each cell: a grid item's automatic minimum is its content's
+          width, so a long line in the README would widen the page past its edge
+          instead of scrolling inside its own block. */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-4">
+        <div className="min-w-0 lg:col-span-2 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">{t('marketplace.detail.about')}</CardTitle>
@@ -1413,7 +1706,7 @@ export function MarketplacePackagePage() {
             </CardContent>
           </Card>
         </div>
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">{t('marketplace.detail.versions')}</CardTitle>
@@ -1451,6 +1744,63 @@ export function MarketplacePackagePage() {
           </Card>
         </div>
       </div>
+
+      {/* objectstack#30325 — the confirm in front of a local Install: what the
+          install adds, read from the manifest it installs, and the grants it
+          will suggest. Its Install runs the install as the button did. */}
+      <AlertDialog open={confirmLocalOpen} onOpenChange={setConfirmLocalOpen}>
+        <AlertDialogContent data-testid="install-preview-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {localInstall
+                ? t('marketplace.install.preview.reinstallTitle', { name: loc.displayName })
+                : t('marketplace.install.preview.title', { name: loc.displayName })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {!localPreviewRead
+                ? t('marketplace.install.preview.reading')
+                : localPreviewRead.preview
+                  ? t('marketplace.install.preview.intro')
+                  : t('marketplace.install.preview.unreadable')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {localPreviewRead?.preview && (
+            <div className="space-y-3 text-sm" data-testid="install-preview">
+              <dl className="grid grid-cols-[auto_auto] justify-start gap-x-6 gap-y-1">
+                <dt className="text-muted-foreground">{t('marketplace.install.preview.objects')}</dt>
+                <dd className="font-medium tabular-nums" data-testid="install-preview-objects">{localPreviewRead.preview.objects}</dd>
+                <dt className="text-muted-foreground">{t('marketplace.install.preview.permissionSets')}</dt>
+                <dd className="font-medium tabular-nums" data-testid="install-preview-permission-sets">{localPreviewRead.preview.permissionSets}</dd>
+                <dt className="text-muted-foreground">{t('marketplace.install.preview.sampleRecords')}</dt>
+                <dd className="font-medium tabular-nums" data-testid="install-preview-sample-records">
+                  {localPreviewRead.preview.sampleRecordsAtMost
+                    ? t('marketplace.install.preview.atMost', { count: localPreviewRead.preview.sampleRecords })
+                    : localPreviewRead.preview.sampleRecords}
+                </dd>
+              </dl>
+              {localPreviewRead.preview.sampleRecords > 0 && (
+                <p className="text-muted-foreground">{t('marketplace.install.preview.sampleNote')}</p>
+              )}
+              {localPreviewRead.preview.suggestedGrants.length > 0 && (
+                <ul className="space-y-1" data-testid="install-preview-suggestions">
+                  {localPreviewRead.preview.suggestedGrants.map((set) => (
+                    <li key={set}>{t('marketplace.install.preview.suggestsEveryone', { set })}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="install-preview-confirm"
+              onClick={() => { void runInstallLocal(); }}
+            >
+              {localInstall ? t('marketplace.action.reinstall') : t('marketplace.action.install')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={installOpen} onOpenChange={(o) => { setInstallOpen(o); if (!o) { setInstallResult(null); setAcknowledged(false); } }}>
         <DialogContent

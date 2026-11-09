@@ -31,8 +31,8 @@
  */
 
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
-import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
-import { grantsAuthoringTools } from './mcp-http-tools.js';
+import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { DELETE_RECORDS_MAX_PER_CALL, grantsAuthoringTools } from './mcp-http-tools.js';
 
 /** Skill identity (mirrors the `SKILL.md` YAML frontmatter). */
 export const OBJECTSTACK_SKILL_NAME = 'objectstack';
@@ -100,6 +100,24 @@ export interface RenderSkillOptions {
    * renderer cannot see the bridge, so the host says so.
    */
   federationTools?: boolean;
+  /**
+   * [#30892] Whether the host's bridge carries the file pair (`read_file` /
+   * `create_upload_link`, `registerFileTools`). Each entry renders only when
+   * this is true AND {@link grantedScopes} admit its family (`read_file`:
+   * `data:read`; `create_upload_link`: `data:write`), so the skill names them
+   * exactly where `tools/list` lists them. Default false: the renderer cannot
+   * see the bridge, so the host says so.
+   */
+  fileTools?: boolean;
+  /**
+   * [ADR-0149 D2] Whether the host's bridge carries the dataset pair
+   * (`list_datasets` / `query_dataset`, `registerDatasetTools`). The entries,
+   * and the D3 selection rule that teaches a client when to use them, render
+   * only when this is true AND {@link grantedScopes} admit `data:read`, so the
+   * skill names them exactly where `tools/list` lists them. Default false: the
+   * renderer cannot see the bridge, so the host says so.
+   */
+  datasetTools?: boolean;
 }
 
 const URL_PLACEHOLDER = '<YOUR_ENV_MCP_URL>'; // e.g. https://<env>.objectos.app/api/v1/mcp
@@ -164,6 +182,75 @@ const FEDERATION_TOOL_LINES = `- **list_remote_tables({ datasource, schema? })**
   when its target is already imported, so import targets first; the result's
   \`review\` names lossy columns and left-out navigations.
 `;
+
+/** [#30892] `read_file`'s entry, rendered where `registerFileTools` registers it (`data:read`). */
+const READ_FILE_TOOL_LINES = `- **read_file({ objectName, recordId, field?, fileId?, attachmentId? })** —
+  read a file a record carries: one in a file field (\`field\`, plus \`fileId\`
+  for a multi-file field) or one attachment (\`attachmentId\`). Answers the
+  file's name, type and size, the byte cap it reads, and a short-lived download
+  link, then the text of a text file, PDF or Word document, or the image
+  itself. Send neither \`field\` nor \`attachmentId\` to list the record's
+  files with their ids. A record you cannot read answers as not found.
+`;
+
+/** [#30892] `create_upload_link`'s entry, rendered where `registerFileTools` registers it (`data:write`). */
+const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, field? | attachments: true })** —
+  a link through which the user uploads one file onto a record: into a file
+  field, or as an attachment. Give the link to the user to open where they
+  are signed in to this deployment; it works only for them, once, for that
+  record and field only, and expires at \`expiresAt\`. The upload is stored
+  as the user, so they must be able to edit the record.
+`;
+
+/**
+ * [ADR-0149 D2/D3] The dataset pair's entries and the selection rule that
+ * tells a client when a governed metric answers instead of an object query.
+ * The rule is ADR-0149 D3's, in the client's terms: an exact word match
+ * (after normalization) is the only hit, one hit wins, several hits are a
+ * question for the user, no hit falls back to the object tools with the
+ * answer labelled as not a governed metric, and a dimension alone is not an
+ * answer.
+ */
+const DATASET_TOOL_LINES = `- **list_datasets({ terms? })** — the governed datasets (business metrics)
+  you may query: each dataset's measures and dimensions with their business
+  labels, descriptions and synonyms. Pass the business words of the question
+  as \`terms\`; the answer's \`matches\` says which member each word names
+  exactly. \`membersWithheld: true\` means some measures exist that you may not
+  read: say so rather than saying the metric does not exist.
+- **query_dataset({ datasetName, selection })** — compute a governed metric:
+  \`selection\` takes \`measures\`, \`dimensions\` and a \`runtimeFilter\`, by
+  the names \`list_datasets\` gives. The answer carries \`provenance\` (the
+  dataset and measures used); cite the source from it, not from memory, and
+  use a measure's \`description\` to explain what the number includes.
+- **Choosing between a metric and an object query.** Call \`list_datasets\`
+  with the question's business words first. A word matches only when it
+  equals a member's name, label or synonym (case, spacing, \`_\` and \`-\`
+  aside), never by similarity. One measure match: answer with
+  \`query_dataset\`. Several matches (two datasets or two members): ask the
+  user which one they mean, listing each candidate's label, dataset and
+  description; do not pick. No match: fall back to \`query_records\` /
+  \`aggregate_records\` and say the answer is not from a governed metric. A
+  dimension match alone (a grouping such as "by stage") is not an answer: you
+  still need a measure match, or ask.
+`;
+
+/** The dataset pair's entries for a host whose bridge carries them, under the grant that registers them. */
+function renderDatasetToolLines(options: RenderSkillOptions): string {
+  if (options.datasetTools !== true) return '';
+  // Mirrors the gate in `registerDatasetTools` (`!scopes || scopes.includes(data:read)`).
+  const scopes = options.grantedScopes;
+  return !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ) ? DATASET_TOOL_LINES : '';
+}
+
+/** The file pair's entries for a host whose bridge carries them, each for the grant that registers it. */
+function renderFileToolLines(options: RenderSkillOptions): string {
+  if (options.fileTools !== true) return '';
+  const scopes = options.grantedScopes;
+  // Mirrors the gates in `registerFileTools` (`!scopes || scopes.includes(…)`).
+  const read = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
+  const write = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE);
+  return (read ? READ_FILE_TOOL_LINES : '') + (write ? UPLOAD_LINK_TOOL_LINES : '');
+}
 
 /**
  * Render the full `SKILL.md` (YAML frontmatter + body). Pass the env's MCP URL
@@ -264,20 +351,43 @@ create/update payload.
 
 - **list_objects()** — list available objects (system \`sys_*\` objects are hidden).
 - **describe_object({ objectName })** — an object's fields and features.
-- **validate_expression({ objectName, expression, site? })** — check a CEL
+- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
   unknown fields/functions) and advisory warnings (text/boolean fields misused
-  in arithmetic), plus the fields and stdlib functions in scope. \`site\` is
-  \`formula\` | \`validation\` | \`flow_condition\` | \`template\` (default \`formula\`).
+  in arithmetic; an error at a \`validation\` site, worded for the rule's
+  \`severity\`, and at a \`flow_condition\` of a record-triggered or
+  time-relative flow, where it fails the run; a warning on any other flow), plus the fields and
+  stdlib functions in scope. \`site\` is \`formula\` | \`validation\` |
+  \`flow_condition\` | \`template\` (default \`formula\`). Pass the rule's
+  \`severity\` or the flow's \`triggerKind\` (\`record_change\` by default) to
+  get the verdict the publish gate gives that rule or flow; for a
+  \`time_relative\` flow, pass the object its sweep scans (\`timeRelative.object\`)
+  as \`objectName\`: its conditions read rows of that object, and a start whose
+  \`objectName\` names another object is refused at publish
+  (\`flow-time-relative-object-mismatch\`). \`sweepObject\` names that same object.
 - **query_records({ objectName, where?, fields?, limit?, offset?, orderBy? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.
   Results are page-capped; use \`limit\`/\`offset\` to page.
 - **get_record({ objectName, recordId })** — fetch one record by id.
 - **create_record({ objectName, data })** — create a record.
 - **update_record({ objectName, recordId, data })** — change fields on a record.
-- **delete_record({ objectName, recordId })** — delete a record (destructive —
-  confirm with the user first).
+- **delete_record({ objectName, recordId, confirm })** — delete a record,
+  permanently. The server REFUSES a call without \`confirm: true\`
+  (\`ACTION_CONFIRMATION_REQUIRED\`) and nothing is deleted. Ask your human
+  first; the flag asserts an approval, it does not obtain one.
+- **delete_records({ objectName, where | recordIds, confirm })** — delete many
+  records of one object in one call, instead of one \`delete_record\` per row.
+  Without \`confirm: true\` it deletes nothing and is REFUSED
+  (\`ACTION_CONFIRMATION_REQUIRED\`) with a \`preview\`: how many records match
+  and sample ids. Show that to your human, then retry with \`confirm: true\`.
+  A confirmed call deletes up to ${DELETE_RECORDS_MAX_PER_CALL} records (fewer on a deployment with
+  a smaller read page; the answer's \`cap\` says), each under your permissions
+  and the object's delete rules (no one bypasses them); refused records stay
+  and come back grouped by reason with their ids, and \`remaining\` says how
+  many still match. Call again to continue. A fault (not a rule's refusal)
+  stops the call and names the record it stopped at. Over OAuth it needs both
+  \`data:read\` and \`data:write\`.
 - **list_actions()** — list the business actions available to you (only those
   the app author exposed to AI and you are permitted to run), with each
   action's declared parameters, whether it operates on a record, and whether
@@ -299,7 +409,7 @@ create/update payload.
   screen, which you fill with another \`resume_run\`. Only the user whose call
   started the run can resume it, under the same gates as \`run_action\`
   (including \`confirm: true\` for an action flagged \`requiresConfirmation\`).
-${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
+${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a

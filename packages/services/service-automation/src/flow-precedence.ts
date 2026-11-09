@@ -43,9 +43,11 @@
 // ADR-0126 §2 says, and it does.
 //
 // ⛔ NOT DONE HERE: making the engine's flow map package-aware. That is a much
-// larger change, and ADR-0048 does not ask for it — the ADR's answer for two
-// packages shipping one bare name is a precedence plus a warning, both of
-// which are here.
+// larger change, and ADR-0048 does not ask for it. ADR-0150 D3 answers a
+// bare name the package-scoped resolver cannot answer for a caller with no
+// package (two packages hold it) with a refusal: `registerFlow` refuses it,
+// naming every holder, and arms nothing. So the warning below asks that same
+// resolver (`refusalOf`) and, when it refuses, says no definition is armed.
 //
 // [#20864, ADR-0126 §2 / §7.3] WHICH CONTENDER IS PACKAGED IS THE LOADER'S SET.
 //
@@ -85,20 +87,35 @@
 // tsup config externalises only `dependencies`/`peerDependencies` the bundler
 // answered it by inlining objectql's implementation into this package's dist.
 // `pnpm check:undeclared-dep-imports` is the gate over that class.
-import { isCodeArtifactBody } from '@objectstack/metadata-core';
+import { isCodeArtifactBody, pairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 // [#28412, ADR-0146 D9 item 1] The one served-override predicate (N-10) and
 // the stored row's own binding the protocol's hydration records — never a
 // second spelling of "is this the declared override", and never the body's
 // `_packageId`.
 import { isServedOverrideRowOf, storedRowBindingOf } from '@objectstack/metadata-protocol';
-import { customizationPackageId } from '@objectstack/spec/kernel';
 import type { FlowContender, FlowShadowingRecord, PackagedFlowSource } from './engine.js';
+
+/**
+ * [ADR-0150 D3] The refusal message the engine's flow-name resolver gives a
+ * bare flow name for a caller with no package, or `undefined` when it serves
+ * the name. The automation plugin builds it from `flowNameResolver`, the reader
+ * `AutomationEngine.setFlowNameResolver` is given, so precedence asks exactly
+ * what `registerFlow` asks.
+ */
+export type FlowNameRefusalReader = (name: string) => string | undefined;
 
 /** One flow name's resolved winner, plus the receipt when it displaced others. */
 export interface FlowPrecedenceWinner {
     name: string;
     /** The body to register — the winner under ADR-0005 precedence. */
     definition: unknown;
+    /**
+     * [ADR-0150 D3, epic #31527 child E5] Where that body comes from, for
+     * EVERY name — one contender included — so the engine records the arm
+     * (`registerFlow`'s `armedFrom`) and `armedFlowPackage` answers the
+     * package only for the loader's own body.
+     */
+    contender: FlowContender;
     /** Present only when this name had more than one contender. */
     shadowing?: FlowShadowingRecord;
 }
@@ -141,14 +158,33 @@ function loaderSetOwner(packagedFlowOwner: PackagedFlowSource | undefined, name:
  * `runtime` contender keeps a body's id for display only —
  * {@link renderFlowContender} never prints it.
  */
-function classifyContender(item: unknown, owner: string | undefined): FlowContender {
+function classifyContender(item: unknown, owner: string | undefined, installed: InstalledManifestLookup): FlowContender {
     const packageId = (item as { _packageId?: unknown } | null | undefined)?._packageId;
     // [#28412, ADR-0146 D9 item 1] Asked FIRST, and only inside a held name:
     // the owner's declared override, by its stored binding (see the header).
     if (owner !== undefined) {
         const binding = storedRowBindingOf(item);
-        if (isServedOverrideRowOf({ type: 'flow', package_id: binding, metadata: item }, owner)) {
+        if (isServedOverrideRowOf({ type: 'flow', package_id: binding, metadata: item }, owner, installed)) {
             return { source: 'override', packageId: binding as string };
+        }
+        // [ADR-0150 D3, epic #31527 child E5] The same override as the
+        // protocol's view serves it (the `kernel:ready` bind, the re-sync and
+        // the mutation sync read that view): no stored binding, and stamped
+        // with the base's own envelope (`_packageId` = the base) beside the
+        // declaration it was saved with — measured on the real composition,
+        // `flow-declared-override-first-boot-pull.integration.test.ts`.
+        // Without this that body passes `isCodeArtifactBody` below as the
+        // loader's own. The read-side reading the protocol's
+        // `servedOverrideBaseOf` makes: the base's envelope, AND the predicate
+        // above holding for the row the pair would store it as. A package-less
+        // row declaring the same thing carries no envelope and stays `runtime`.
+        const pair = pairOf(owner, installed);
+        if (
+            pair.ok
+            && packageId === owner
+            && isServedOverrideRowOf({ type: 'flow', package_id: pair.value, metadata: item }, owner, installed)
+        ) {
+            return { source: 'override', packageId: pair.value };
         }
     }
     if (owner !== undefined && isCodeArtifactBody(item)) {
@@ -182,9 +218,13 @@ function classifyContender(item: unknown, owner: string | undefined): FlowConten
  * cannot tell a tenant overlay bound to a package from a code artifact (see
  * `isTenantAuthored` in `@objectstack/metadata-core`, and cloud#970).
  */
-export function describeFlowContender(item: unknown, packagedFlowOwner?: PackagedFlowSource): FlowContender {
+export function describeFlowContender(
+    item: unknown,
+    packagedFlowOwner: PackagedFlowSource | undefined,
+    installed: InstalledManifestLookup,
+): FlowContender {
     const name = (item as { name?: unknown } | null | undefined)?.name;
-    return classifyContender(item, loaderSetOwner(packagedFlowOwner, name));
+    return classifyContender(item, loaderSetOwner(packagedFlowOwner, name), installed);
 }
 
 /**
@@ -255,8 +295,8 @@ function precedenceRank(contender: FlowContender): number {
  * ⛔ No longer "clone": the clone is a second flow beside the base, and both
  * run.
  */
-function undeclaredRemedy(owner: string | undefined): string {
-    const pair = owner === undefined ? undefined : customizationPackageId(owner);
+function undeclaredRemedy(owner: string | undefined, installed: InstalledManifestLookup): string {
+    const pair = owner === undefined ? undefined : pairOf(owner, installed);
     const where = pair?.ok
         ? `declare it as an override in '${pair.value}' (overrides: { package: '${owner}', basedOn })`
         : 'declare it as an override in the shipping package\'s paired .custom package';
@@ -282,7 +322,8 @@ function undeclaredRemedy(owner: string | undefined): string {
  * that can express it; the engine's bare-name flow map cannot, so it needs SOME
  * deterministic answer, and a sorted package id is one that does not change when
  * boot order does. That case is warned about too — it is exactly as invisible as
- * the package-vs-stored-row one.
+ * the package-vs-stored-row one. [ADR-0150 D3] Where the engine's resolver
+ * refuses the name, the engine arms none of them, and the warning says so.
  *
  * Two `runtime` contenders tie on both rules and keep arrival order. The boot
  * hydration registers every stored row under the one bare-name slot, so the
@@ -294,7 +335,9 @@ function undeclaredRemedy(owner: string | undefined): string {
  * [#20864] Which contender is `package` is the loader's set's answer, asked
  * ONCE per contested name so every contender of that name is judged against
  * one answer — see {@link describeFlowContender}. A name with one contender
- * asks nothing: precedence decides nothing there.
+ * is classified too, though precedence decides nothing there: the winner
+ * carries its `contender`, which the engine records as the arm (ADR-0150 D3,
+ * epic #31527 child E5).
  *
  * [#20913] ONE decision for BOTH boot steps. The automation plugin resolves
  * the boot pull's registry list and the `kernel:ready` / `metadata:reloaded`
@@ -305,11 +348,22 @@ function undeclaredRemedy(owner: string | undefined): string {
  * @param logger             warned once per colliding name, naming both contenders
  * @param packagedFlowOwner  the loader's set — the boot pull passes the engine's
  *                           `packagedFlowOwner`; absent, no contender is packaged
+ * @param installed          the installed manifests of the registry the flows
+ *                           come from: the declared override of a shipped flow
+ *                           is its App's pair's (`pairOf` in
+ *                           `@objectstack/metadata-core`)
+ * @param refusalOf          [ADR-0150 D3] the refusal the engine's flow-name
+ *                           resolver gives `name` for a caller with no package
+ *                           (the question `registerFlow` asks before it arms),
+ *                           or `undefined` when it serves the name. Absent,
+ *                           nothing is refused and every line reads as before.
  */
 export function resolveFlowPrecedence(
     items: readonly unknown[],
-    logger?: { warn(message: string, meta?: unknown): void },
-    packagedFlowOwner?: PackagedFlowSource,
+    logger: { warn(message: string, meta?: unknown): void } | undefined,
+    packagedFlowOwner: PackagedFlowSource | undefined,
+    installed: InstalledManifestLookup,
+    refusalOf?: FlowNameRefusalReader,
 ): FlowPrecedenceWinner[] {
     // Group by bare name, remembering arrival order for a stable tie-break.
     const groups = new Map<string, Array<{ definition: unknown; index: number }>>();
@@ -329,15 +383,16 @@ export function resolveFlowPrecedence(
     const winners: FlowPrecedenceWinner[] = [];
     for (const name of order) {
         const members = groups.get(name)!;
+        const owner = loaderSetOwner(packagedFlowOwner, name);
         if (members.length === 1) {
-            winners.push({ name, definition: members[0].definition });
+            const definition = members[0].definition;
+            winners.push({ name, definition, contender: classifyContender(definition, owner, installed) });
             continue;
         }
 
-        const owner = loaderSetOwner(packagedFlowOwner, name);
         const group = members.map((member) => ({
             ...member,
-            contender: classifyContender(member.definition, owner),
+            contender: classifyContender(member.definition, owner, installed),
         }));
         const ranked = [...group].sort((a, b) => {
             const byRank = precedenceRank(a.contender) - precedenceRank(b.contender);
@@ -365,7 +420,7 @@ export function resolveFlowPrecedence(
         const overrideOverOwnBase = armed.contender.source === 'override'
             && shadowed.every((contender) => contender.source === 'package' && contender.packageId === owner);
         if (overrideOverOwnBase) {
-            winners.push({ name, definition: armed.definition });
+            winners.push({ name, definition: armed.definition, contender: armed.contender });
             continue;
         }
         // [#20913] Say WHY this one is armed, per case — the cases are
@@ -381,8 +436,34 @@ export function resolveFlowPrecedence(
                     ? ' by package id'
                     : ' by arrival order';
         const remedy = sealedOverStored
-            ? undeclaredRemedy(owner)
+            ? undeclaredRemedy(owner, installed)
             : 'Rename one of them.';
+        // [ADR-0150 D3, #31677 Q1] The engine's resolver refuses the name, so
+        // `registerFlow` refuses the body handed on below and arms nothing,
+        // whichever rule ranked it first. ⛔ Never "arming <first>" here, in
+        // the text or in the meta: the line asks the resolver the engine asks,
+        // never a guess from the contenders' shapes.
+        if (refusalOf?.(name) !== undefined) {
+            const contenders = ranked.map((entry) => renderFlowContender(entry.contender)).join(', ');
+            logger?.warn(
+                `[Automation] Flow name collision: '${name}' is claimed by ${group.length} definitions ` +
+                `(${contenders}); arming ${group.length === 2 ? 'neither' : 'none of them'}: the engine refuses ` +
+                `this bare name for a caller with no package (ADR-0150 D3), so no definition dispatches; the ` +
+                `'failed to register flow' warning for '${name}' names every holder. Rename one of them.`,
+                {
+                    flow: name,
+                    refused: true,
+                    contenders: ranked.map((entry) => entry.contender),
+                },
+            );
+            winners.push({
+                name,
+                definition: armed.definition,
+                contender: armed.contender,
+                shadowing: { name, armed: armed.contender, shadowed },
+            });
+            continue;
+        }
         logger?.warn(
             `[Automation] Flow name collision: '${name}' is claimed by ${group.length} definitions ` +
             `(${ranked.map((entry) => renderFlowContender(entry.contender)).join(', ')}); ` +
@@ -398,6 +479,7 @@ export function resolveFlowPrecedence(
         winners.push({
             name,
             definition: armed.definition,
+            contender: armed.contender,
             shadowing: { name, armed: armed.contender, shadowed },
         });
     }

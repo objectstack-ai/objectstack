@@ -172,6 +172,9 @@ export interface MetaItemReadRouteHost {
     sendMetaReadRefusal: (typeof RestServer)['sendMetaReadRefusal'];
 }
 
+/** The `GET /meta/:type/:name` handler, as the route manager runs it. */
+export type MetaItemReadHandler = (req: any, res: any) => Promise<void>;
+
 /**
  * Register the `/meta` per-item reads — the reference sweep, the layered read,
  * the book tree and the item read, the fourth group of
@@ -181,8 +184,13 @@ export interface MetaItemReadRouteHost {
  * the published declaration carries, names the families, their switches and
  * the ordering facts the routes below keep.
  */
-export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: MetaRouteScope): void {
+export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: MetaRouteScope): MetaItemReadHandler | undefined {
     const { metadata, metaPath, isScoped } = scope;
+    // [ADR-0150 D5, epic #31527 child G1] The item read's handler, handed back
+    // to the registrar so the qualified path `GET /meta/:type/:ns/:name`
+    // (`meta-qualified-item-route.ts`, registered after every literal sibling)
+    // answers through THIS handler, never a copy of it.
+    let readItem: MetaItemReadHandler | undefined;
 
     // GET /meta/:type/:name - Get specific item
     //
@@ -416,6 +424,8 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             requestLocale: (i18n) => this.extractLocale(req, i18n),
                             // [#26690] The book's own labels, from the bundle's `books` group.
                             resolveI18nService: () => this.resolveI18nService(environmentId, req),
+                            // [#30062] …judged against its packaged base, with its pair's translations.
+                            resolveProtocol: async () => prot,
                         },
                         { name: req.params.name, packageId },
                     );
@@ -438,7 +448,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
         this.routeManager.register({
             method: 'GET',
             path: `${metaPath}/:type/:name`,
-            handler: async (req: any, res: any) => {
+            handler: readItem = async (req: any, res: any) => {
                 try {
                     // [#6877] Declared at the top for the same reason #3984
                     // normalizes `:type` here: this handler reads its query
@@ -731,8 +741,15 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // withheld folds nothing, so the `304` answers as
                         // before.
                         const audienceFolds = metaType === 'view' || metaType === 'object';
+                        // [ADR-0106 D1] And for an `action`: it is withheld
+                        // from a caller who cannot read a field it binds, and
+                        // that caller is answered as for a name with nothing
+                        // behind it, so the protocol must not answer a `304`
+                        // before the projection below has judged it. The
+                        // validator is judged after it, unchanged.
+                        const actionProjects = metaType === 'action';
                         const cacheRequest = {
-                            ifNoneMatch: (maskApplies || intakeFolds || audienceFolds) ? undefined : (req.headers['if-none-match'] as string),
+                            ifNoneMatch: (maskApplies || intakeFolds || audienceFolds || actionProjects) ? undefined : (req.headers['if-none-match'] as string),
                             ifModifiedSince: req.headers['if-modified-since'] as string,
                         };
 
@@ -855,6 +872,33 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             cachedDocument = masked.document;
                             visibilityFingerprint = masked.fingerprint;
                         }
+                        // [ADR-0106 D1] The item chain's `action` step on this
+                        // arm (`projectMetaActionItem`, the one decision): a
+                        // withheld action is answered {@link sendMetaItemAbsent},
+                        // the answer this arm gives a name with nothing behind
+                        // it; a served one keeps the protocol's validator, and
+                        // its `304` is judged here as the protocol judges it.
+                        let actionUndetermined = false;
+                        if (actionProjects) {
+                            const projected = await metaReadGate.projectMetaActionItem(
+                                this.metaItemAnswerSources(environmentId, req, p, { arms: 'all', app: 'gate' }),
+                                cachedDocument,
+                            );
+                            if (projected.kind === 'withhold') {
+                                sendMetaItemAbsent(res);
+                                return;
+                            }
+                            if (projected.kind === 'fault') {
+                                sendFieldVisibilityFault(res, projected.object);
+                                return;
+                            }
+                            actionUndetermined = projected.cacheControl !== undefined;
+                            if (!actionUndetermined && result.etag
+                                && normalizeIfNoneMatch(req.headers['if-none-match']) === result.etag.value) {
+                                res.status(304).send();
+                                return;
+                            }
+                        }
                         // [#21476] The administrator's read names why an open
                         // public form is not offered on this posture.
                         let intakeFingerprint = '';
@@ -875,7 +919,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // revalidated under a SHARED validator: a later 304
                         // would hand this body to a caller whose projection
                         // did resolve. No ETag, no Last-Modified, no-store.
-                        if (maskPosture.kind === 'undetermined') {
+                        if (maskPosture.kind === 'undetermined' || actionUndetermined) {
                             res.header('Cache-Control', 'private, no-store');
                             res.header('Vary', 'Accept-Language');
                             res.json(await this.translateMetaEnvelope(
@@ -1150,6 +1194,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
             },
         });
     }
+    return readItem;
 }
 
 // [#23050 slice 13b] Moved here from `rest-server.ts`, verbatim, with the body above:

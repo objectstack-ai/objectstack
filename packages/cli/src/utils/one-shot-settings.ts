@@ -1,6 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import type { ICryptoProvider } from '@objectstack/spec/contracts';
+import type { InstalledPluginRefusal } from '@objectstack/runtime';
+import type { HostCryptoProvider } from '../commands/serve.js';
+import { resolveStartHome } from './start-home.js';
 
 /**
  * [#21471] The settings service a ONE-SHOT command composes, and the one place
@@ -32,9 +37,42 @@ import type { ICryptoProvider } from '@objectstack/spec/contracts';
  * then reads as the settings service reads any value it cannot open (`null`,
  * with a warning), which is what a minted key would have produced too.
  *
- * `os secret rewrap` resolves the key FIRST and hands the same instance to the
- * service and to its own re-wrap, so no provider in that run mints a key.
- * Every other caller lets {@link oneShotSettingsPlugin} resolve it.
+ * `os secret rewrap` composes the crypto FIRST ({@link oneShotCrypto}) and
+ * hands the same provider to the service and to its own re-wrap, so no
+ * provider in that run mints a key. Every other caller lets
+ * {@link oneShotSettingsPlugins} compose it.
+ *
+ * ## Which provider: the one `os serve` seals with (#31007)
+ *
+ * `os serve` seals every `sys_secret` row with the provider a plugin of its
+ * stack registers as the kernel service `crypto-provider`, else its own local
+ * one (`createHostCryptoProvider`, `commands/serve.ts`). A one-shot run opens
+ * and re-seals those same rows, so it chooses through that SAME function, over
+ * the plugins that DECLARE the provider in the host config's `plugins` —
+ * read by `serve`'s own rules (`stackBootPlugins`, `materializeStackPlugin`,
+ * `Serve.importConfigPlugin`, `cryptoProviderPlugins`):
+ *
+ *  - one declaring plugin: it is composed into this run's boot, its `init()`
+ *    registers the provider, and the run seals and opens with it. If it does
+ *    not boot, or boots and registers none, the run refuses, naming it — ⛔ it
+ *    never falls back to the local key, under which nothing that deployment
+ *    sealed opens and under which a re-seal would be a downgrade;
+ *  - two: refused, both named (`refuseTwoCryptoProviderPlugins`, `serve`'s);
+ *  - none: the local provider over the key that already exists, as above;
+ *  - a host config that does not load, or a `plugins` entry that does not
+ *    materialize: refused, because whether a provider is declared cannot be
+ *    read, and guessing "none" is the fallback the line above forbids.
+ *
+ * Only `plugins` is read, never `devPlugins`: the list `os serve` boots
+ * without `--dev`, and `os start`.
+ *
+ * The plugins `os plugin install` installed for this project and environment
+ * are read beside it, through the loader `os serve`'s boot reads them with
+ * (`loadHostInstalledPlugins`), and judged by its rule: one that loads and
+ * declares the provider is the declaring plugin above; a refused one that may
+ * provide it refuses the run (`refuseRefusedInstalledCryptoProviderPlugins`).
+ * ⛔ The run registers and removes none of them: a pending uninstall is left
+ * for the next boot.
  *
  * ⛔ Nothing else in `src/` names `SettingsServicePlugin` or
  * `LocalCryptoProvider`, except `commands/serve.ts`, the long-lived host:
@@ -56,17 +94,56 @@ export interface ExistingDataKey {
 /**
  * Resolve the data key this host already has, never minting one. A key that
  * is missing, or set but unusable, is an answer here, not a throw.
+ *
+ * ⚠ It writes the key-file channels (`KEY_FILE_CHANNEL_ENV`,
+ * `KEY_FILE_CANDIDATE_CHANNEL_ENV`) on `opts.env`, which defaults to the real
+ * `process.env`: it sets or deletes both, so this process and every child it
+ * spawns afterwards read the file this call resolved. Pass an env map of your
+ * own to keep `process.env` untouched (the tests do).
  */
-export async function resolveExistingDataKey(): Promise<ExistingDataKey> {
+export async function resolveExistingDataKey(
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<ExistingDataKey> {
   // Loaded at the point of use, never at module load: oclif imports every
   // command module on every invocation while building its table.
-  const { LocalCryptoProvider } = await import('@objectstack/service-settings');
+  const {
+    LocalCryptoProvider,
+    deferredLocalCryptoProvider,
+    resolvePersistedKeyFile,
+    KEY_FILE_CHANNEL_ENV,
+    KEY_FILE_CANDIDATE_CHANNEL_ENV,
+  } = await import('@objectstack/service-settings');
+  const env = opts.env ?? process.env;
+  const cwd = opts.cwd ?? process.cwd();
+  // [#30042] The SAME file a `serve` child of `os dev` / `os start` reads for
+  // this project, chosen by the same resolution: the canonical file, the
+  // project's legacy file when it alone holds a key, and — when the two hold
+  // different keys — whichever opens more of the newest stored secrets, ruled
+  // by the settings service in this run's own boot (`settleKeyFileChannel`).
+  // This process opens the database itself, so it is its own parent: it sets
+  // both channels on its own env, exactly as `applyCryptoKeyFileChannel` sets
+  // them on a child's.
+  const startHome = resolveStartHome(undefined, {
+    hasProjectConfig: existsSync(path.resolve(cwd, 'objectstack.config.ts')),
+    cwd,
+    env,
+  });
+  const answer = resolvePersistedKeyFile({ env, legacyKeyFile: path.join(startHome, 'dev-crypto-key') });
+  // The canonical file is the one the provider reads with no channel at all.
+  delete env[KEY_FILE_CANDIDATE_CHANNEL_ENV];
+  if (answer && answer.kind !== 'canonical') env[KEY_FILE_CHANNEL_ENV] = answer.path;
+  else delete env[KEY_FILE_CHANNEL_ENV];
+  const strict = () => ({ mode: 'production' as const, env: { ...env, OS_CRYPTO_AUTOKEY: undefined } });
   try {
-    const provider = new LocalCryptoProvider({
-      mode: 'production',
-      env: { ...process.env, OS_CRYPTO_AUTOKEY: undefined },
-    });
-    return { provider, unavailable: null };
+    // Built now, over the file this answer names: it proves a key exists
+    // before the boot, and is the provider itself whenever one file is named.
+    const provider = new LocalCryptoProvider(strict());
+    if (answer?.kind !== 'both-differ' || !answer.legacy) return { provider, unavailable: null };
+    // Two candidate keys: the provider this run uses is built at its first
+    // use, after the boot's settings service ruled between them (every reader
+    // of a stored secret in a one-shot runs at `kernel:ready` or after it).
+    env[KEY_FILE_CANDIDATE_CHANNEL_ENV] = answer.legacy;
+    return { provider: deferredLocalCryptoProvider(strict), unavailable: null };
   } catch (error) {
     return { provider: null, unavailable: error instanceof Error ? error.message : String(error) };
   }
@@ -91,15 +168,269 @@ export function refusingCryptoProvider(reason: string): ICryptoProvider {
 }
 
 /**
- * The settings service for a one-shot boot: no routes, and the provider over
- * `key` (resolved here when the caller has none of its own), or one that
- * refuses every call. ⛔ Never the service's default provider.
+ * What a one-shot boot composes for its secrets, and the provider it seals and
+ * opens them with.
  */
-export async function oneShotSettingsPlugin(key?: ExistingDataKey): Promise<unknown> {
-  const resolved = key ?? await resolveExistingDataKey();
+export interface OneShotCrypto {
+  /**
+   * Composed into the boot, in this order: the plugin that declares the crypto
+   * provider (when the host config has one), the host's crypto-provider seam
+   * (`createHostCryptoProvider`, `os serve`'s), and the settings service over
+   * that seam's provider. ⛔ Never the settings service's default provider.
+   */
+  plugins: unknown[];
+  /**
+   * The provider the boot chose, at `kernel:ready` — `os serve`'s one host
+   * provider. Read it once the boot is up: before that it refuses.
+   */
+  provider: HostCryptoProvider;
+  /** The plugin that declares the crypto provider, or `null` when none does. */
+  declaredBy: string | null;
+  /** The local key, resolved when no plugin declares a provider; else `null`. */
+  key: ExistingDataKey | null;
+}
+
+/**
+ * Compose the crypto for a one-shot boot: the provider `os serve` would seal
+ * with on this host, chosen by `serve`'s own function. Throws a
+ * `HostCryptoProviderRefusal` — before anything boots — when two plugins
+ * declare the provider, or when the host config or one of its `plugins`
+ * cannot be read. See the module header.
+ */
+export async function oneShotCrypto(
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): Promise<OneShotCrypto> {
+  const cwd = opts.cwd ?? process.cwd();
+  const { createHostCryptoProvider, HostCryptoProviderRefusal } = await import('../commands/serve.js');
+  const declared = await readDeclaredCryptoProvider(cwd);
   const { SettingsServicePlugin } = await import('@objectstack/service-settings');
-  return new SettingsServicePlugin({
-    registerRoutes: false,
-    cryptoProvider: resolved.provider ?? refusingCryptoProvider(resolved.unavailable ?? 'no data key'),
-  });
+  const settingsOver = (provider: ICryptoProvider) => new SettingsServicePlugin({ registerRoutes: false, cryptoProvider: provider });
+
+  if (declared) {
+    // The local fallback of a deployment that declares its provider is a
+    // refusal: the declaring plugin booted and registered nothing.
+    const host = createHostCryptoProvider(() => {
+      throw new HostCryptoProviderRefusal(
+        `Refusing to seal or open a secret: the plugin '${declared.name}' declares the crypto provider `
+        + `('crypto-provider') ${declaredWhere(declared.source)}, and registered none in this run. Every secret this `
+        + 'deployment holds is sealed by that provider, so this run uses no other key. Nothing was opened or written.',
+      );
+    });
+    return {
+      plugins: [
+        await refusingNamedOnFailure(declared.plugin, declared.name, declaredWhere(declared.source), HostCryptoProviderRefusal),
+        host.plugin,
+        settingsOver(host.provider),
+      ],
+      provider: host.provider,
+      declaredBy: declared.name,
+      key: null,
+    };
+  }
+
+  const key = await resolveExistingDataKey(opts);
+  const host = createHostCryptoProvider(
+    () => key.provider ?? refusingCryptoProvider(key.unavailable ?? 'no data key'),
+  );
+  return { plugins: [host.plugin, settingsOver(host.provider)], provider: host.provider, declaredBy: null, key };
+}
+
+/**
+ * The settings service for a one-shot boot, with the crypto it seals and opens
+ * through: no routes, `os serve`'s provider choice ({@link oneShotCrypto},
+ * composed here when the caller has none of its own). Spread into the boot's
+ * plugin list. ⛔ Never the service's default provider.
+ */
+export async function oneShotSettingsPlugins(crypto?: OneShotCrypto): Promise<unknown[]> {
+  return (crypto ?? await oneShotCrypto()).plugins;
+}
+
+/**
+ * The one plugin that declares the crypto provider — of the host config's
+ * `plugins`, or of the plugins `os plugin install` installed — or `null` when
+ * none does. Two are refused, both named. Read by `serve`'s rules for the same
+ * lists (module header); ⛔ never guessed: an unreadable config or entry, or a
+ * refused installed plugin that may provide it, is refused, not read as "none".
+ */
+async function readDeclaredCryptoProvider(
+  cwd: string,
+): Promise<{ name: string; plugin: object; source: CryptoProviderSource } | null> {
+  const {
+    cryptoProviderPlugins,
+    refuseTwoCryptoProviderPlugins,
+    refuseRefusedInstalledCryptoProviderPlugins,
+  } = await import('../commands/serve.js');
+  const composed = await readHostConfigPlugins(cwd);
+  const installed = await readInstalledPlugins(composed, refuseRefusedInstalledCryptoProviderPlugins);
+  composed.push(...installed);
+  refuseTwoCryptoProviderPlugins(composed);
+  const declared = cryptoProviderPlugins(composed)[0];
+  if (!declared) return null;
+  return { ...declared, source: installed.includes(declared.plugin) ? 'installed' : 'host-config' };
+}
+
+/** Where the plugin that declares the crypto provider came from. */
+type CryptoProviderSource = 'host-config' | 'installed';
+
+/** The words a refusal uses for {@link CryptoProviderSource}. */
+function declaredWhere(source: CryptoProviderSource): string {
+  return source === 'installed' ? 'as a plugin installed by `os plugin install`' : 'in the host config';
+}
+
+/** A thrown value's message, or words for one that cannot be printed. */
+function thrownMessage(error: unknown): string {
+  try {
+    return String(error instanceof Error ? error.message : error);
+  } catch {
+    return 'a value that cannot be printed';
+  }
+}
+
+/**
+ * The host config's `plugins`, each materialized by `serve`'s rules and never
+ * booted; none when there is no host config. ⛔ An unreadable config or entry
+ * is refused, not read as "none".
+ */
+async function readHostConfigPlugins(cwd: string): Promise<unknown[]> {
+  const { findHostConfig } = await import('./schema-migration-plugins.js');
+  const configPath = findHostConfig(cwd);
+  if (!configPath) return [];
+  const { default: Serve, HostCryptoProviderRefusal } = await import('../commands/serve.js');
+  const refuse = (what: string, error: unknown): never => {
+    throw new HostCryptoProviderRefusal(
+      `Refusing to seal or open a secret: ${what} could not be read (${error instanceof Error ? error.message : String(error)}), `
+      + `so this run cannot tell whether a plugin provides the crypto provider ('crypto-provider') that \`os serve\` `
+      + 'seals with, and it uses no key it cannot confirm. Nothing was opened or written.',
+    );
+  };
+  const configName = path.basename(configPath);
+  let config: unknown;
+  try {
+    const { loadConfig } = await import('./config.js');
+    ({ config } = await loadConfig(configPath));
+  } catch (error) {
+    return refuse(configName, error);
+  }
+  const { stackBootPlugins } = await import('./stack-collections.js');
+  const { materializeStackPlugin } = await import('@objectstack/core');
+  const hostRoot = path.dirname(configPath);
+  const composed: unknown[] = [];
+  for (const [index, entry] of stackBootPlugins(config, false).entries()) {
+    if (entry === undefined || entry === null || entry === false) continue;
+    try {
+      composed.push(await materializeStackPlugin(entry, {
+        importSpecifier: async (specifier) => Serve.importConfigPlugin(specifier, hostRoot),
+        // A bundle is app metadata `serve` wraps into an AppPlugin, which
+        // provides no crypto: read as it is, never wrapped or booted here.
+        wrapBundle: async (bundle) => bundle,
+      }));
+    } catch (error) {
+      return refuse(`${configName} plugins[${index}]${typeof entry === 'string' ? ` ('${entry}')` : ''}`, error);
+    }
+  }
+  return composed;
+}
+
+/**
+ * The plugins `os plugin install` installed for this project and environment,
+ * read the way `os serve`'s boot reads them (`loadHostInstalledPlugins`) and
+ * judged by its rule: a refused one that may provide the crypto provider
+ * refuses this run ({@link refuseRefused}, `serve`'s
+ * `refuseRefusedInstalledCryptoProviderPlugins`), and each one that loads is
+ * answered, so the provider it declares is the one this run seals with. ⛔
+ * Nothing is registered or removed here: a pending uninstall is left for the
+ * next boot. One whose name an entry of the host config, or an installed
+ * plugin read before it, already takes is refused as `os serve` refuses it
+ * (`plugin_name_taken`), and so is one whose name cannot be read
+ * (`kernel_refused`).
+ */
+async function readInstalledPlugins(
+  configPlugins: readonly unknown[],
+  refuseRefused: (refused: readonly InstalledPluginRefusal[]) => void,
+): Promise<unknown[]> {
+  const { loadHostInstalledPlugins } = await import('./installed-plugins-boot.js');
+  const installed = await loadHostInstalledPlugins({ leaveUninstallsPending: true });
+  if (installed === null) return [];
+  const taken = new Set<string>();
+  for (const plugin of configPlugins) {
+    try {
+      const name = (plugin as { name?: unknown } | null)?.name;
+      if (typeof name === 'string') taken.add(name);
+    } catch {
+      // a name that cannot be read takes none
+    }
+  }
+  const takenByInstalled = new Set<string>();
+  const refused: InstalledPluginRefusal[] = [...installed.refused];
+  const loaded: unknown[] = [];
+  for (const { record, plugin, declaredServices } of installed.loaded) {
+    const refusal = (error: InstalledPluginRefusal['error'], message: string): void => {
+      refused.push(declaredServices === undefined
+        ? { id: record.id, version: record.version, error, message }
+        : { id: record.id, version: record.version, error, message, declaredServices });
+    };
+    let name: string;
+    try {
+      name = String((plugin as { name?: unknown }).name ?? record.id);
+    } catch (error) {
+      refusal('kernel_refused', `its plugin name cannot be read: ${thrownMessage(error)}`);
+      continue;
+    }
+    if (taken.has(name)) {
+      refusal('plugin_name_taken', `its plugin name '${name}' is a plugin of the host config, and an installed plugin does not replace one.`);
+      continue;
+    }
+    if (takenByInstalled.has(name)) {
+      refusal('plugin_name_taken', `its plugin name '${name}' is an installed plugin read before it, and an installed plugin does not replace one.`);
+      continue;
+    }
+    takenByInstalled.add(name);
+    loaded.push(plugin);
+  }
+  refuseRefused(refused);
+  return loaded;
+}
+
+/**
+ * `plugin`, with an `init()` that refuses naming it when it throws: the
+ * one-shot run boots the deployment's crypto provider plugin, and a failure
+ * there must say whose provider could not boot. Every other member is
+ * forwarded, `constructor` unbound so a class-name presence test still reads
+ * the plugin's own class. The artifact verdict a host recorded for `plugin`
+ * is recorded for the wrapper too, since the kernel reads it by object
+ * identity.
+ */
+async function refusingNamedOnFailure<T extends object>(
+  plugin: T,
+  name: string,
+  where: string,
+  Refusal: new (message: string) => Error,
+): Promise<T> {
+  const wrapper = new Proxy(plugin, {
+    get(target, prop) {
+      const value = (target as Record<string | symbol, unknown>)[prop];
+      if (prop === 'init' && typeof value === 'function') {
+        return async (...args: unknown[]): Promise<unknown> => {
+          try {
+            return await Reflect.apply(value as (...a: unknown[]) => unknown, target, args);
+          } catch (error) {
+            throw new Refusal(
+              `Refusing to seal or open a secret: the plugin '${name}', which declares the crypto provider `
+              + `('crypto-provider') ${where}, could not boot in this run `
+              + `(${error instanceof Error ? error.message : String(error)}). Every secret this deployment holds is `
+              + 'sealed by that provider, so this run uses no other key. Nothing was opened or written.',
+            );
+          }
+        };
+      }
+      if (typeof value === 'function' && prop !== 'constructor') {
+        return (value as (...a: unknown[]) => unknown).bind(target);
+      }
+      return value;
+    },
+  }) as T;
+  const { pluginArtifactVerdict, recordPluginArtifactVerdict } = await import('@objectstack/core');
+  const verdict = pluginArtifactVerdict(plugin);
+  if (verdict) recordPluginArtifactVerdict(wrapper, verdict);
+  return wrapper;
 }

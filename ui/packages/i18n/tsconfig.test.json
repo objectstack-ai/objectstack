@@ -44,5 +44,5 @@
   // Add it here the moment one appears — an ambient declaration is a program
   // input only when a pattern NAMES it, and the build gets that for free from
   // its `"include": ["src"]` while this project would not.
-  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "scripts/**/*.d.mts"]
 }

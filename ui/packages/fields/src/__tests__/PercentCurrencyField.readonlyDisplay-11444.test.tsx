@@ -23,8 +23,8 @@
  *   declared `max > 1` rule; the cell's `percentDisplayValue`), so every row
  *   below holds a value the two readings scale identically.
  * - **currency:** the cell's `formatCurrency` dropped the fraction of a whole
- *   amount (the objectui#4033 trimming) while the read-only face kept the ISO
- *   4217 minor-unit width (objectui#10276). Triage ruled the declared width is
+ *   amount (the objectui#4033 trimming) while the read-only face kept the CLDR
+ *   fraction-digit width (objectui#10276). Triage ruled the declared width is
  *   the protocol's convention and retired the trimming (objectui#11444,
  *   comment 5946462862), so both faces now read a whole USD `3456` as
  *   `$3,456.00`, and the face calls `formatCurrency` itself.
@@ -127,7 +127,7 @@ describe('read-only percent and currency faces render through the cell formatter
     });
   });
 
-  describe('currency: the declared width, ISO 4217 minor units, on both faces', () => {
+  describe('currency: the declared width, CLDR fraction digits, on both faces', () => {
     it('a whole USD 3456 reads `$3,456.00` in the form and in the cell', async () => {
       const form = await readonlyText('currency', 3456, fixed('USD'), 'en');
       expect(form).toBe('$3,456.00');

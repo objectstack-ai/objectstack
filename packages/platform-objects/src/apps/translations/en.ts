@@ -31,6 +31,7 @@ export const en: TranslationData = {
         grp_account_inbox: { label: 'Inbox' },
         grp_account_security: { label: 'Security' },
         grp_account_developer: { label: 'Developer' },
+        grp_account_ai_assistant: { label: 'AI Assistant' },
         nav_account_profile: { label: 'Profile' },
         nav_account_notifications: { label: 'Notifications' },
         nav_account_approvals: { label: 'Approvals' },
@@ -40,7 +41,7 @@ export const en: TranslationData = {
         nav_account_api_keys: { label: 'API Keys' },
         nav_account_oauth_apps: { label: 'OAuth Applications' },
         // Contributed at RUNTIME by `@objectstack/mcp` into
-        // `grp_account_developer` (`connect-ui.ts`), so `ACCOUNT_APP` declares
+        // `grp_account_ai_assistant` (`connect-ui.ts`), so `ACCOUNT_APP` declares
         // no nav item for it and no static walk in this package can see it —
         // the same shape as the contributed Setup entries below. Its Setup twin
         // carries the identical source string, and BOTH keys are needed: the
@@ -48,7 +49,7 @@ export const en: TranslationData = {
         // app, so `apps.setup.navigation.nav_connect_agent` never answers for
         // the Account door. Its absence rendered the English literal under
         // Account while Setup rendered the translation, for one destination.
-        nav_connect_agent: { label: 'Connect an Agent' },
+        nav_connect_agent: { label: 'Connect an AI Assistant' },
       },
     },
     setup: {
@@ -68,6 +69,7 @@ export const en: TranslationData = {
 
         // Overview
         nav_system_overview: { label: 'System Overview' },
+        nav_connect_agent: { label: 'Connect an AI Assistant' },
 
         // Apps / Marketplace
         nav_packaged_actions: { label: 'Packaged Actions' },
@@ -93,6 +95,7 @@ export const en: TranslationData = {
         nav_record_shares: { label: 'Record Shares' },
         nav_queues: { label: 'Queues' },
         nav_queue_members: { label: 'Queue Members' },
+        nav_assignment_rules: { label: 'Assignment Rules' },
         // `nav_sso_providers` is contributed by `@objectstack/plugin-auth` only
         // when the external-IdP RP is wired (`OS_SSO_ENABLED`, or the cloud
         // per-env `planAllowsSso`), so it is the one Setup entry
@@ -106,8 +109,14 @@ export const en: TranslationData = {
         // object's own `pluralLabel` per locale (`sys_sso_provider`), since the
         // entry opens that object's list view.
         nav_sso_providers: { label: 'SSO Providers' },
+        // `nav_scim_credentials` is the same case (#31123): plugin-auth
+        // contributes it only while SCIM is wired (`isScimWired()`, the answer
+        // the SCIM credential mint door reads), so no boot of
+        // `check:app-nav-i18n` merges it and the tombstone file's conditional
+        // list keeps it honest. It opens `sys_scim_connection_credential`'s
+        // list; the label is the short form of that object's `pluralLabel`.
+        nav_scim_credentials: { label: 'SCIM Credentials' },
         nav_api_keys: { label: 'API Keys' },
-        nav_connect_agent: { label: 'Connect an Agent' },
 
         // Approvals. `nav_approvals_inbox` is the working surface (#7234); the
         // three below it are the engine's raw tables, kept as the admin view.
@@ -125,11 +134,12 @@ export const en: TranslationData = {
         nav_settings_sms: { label: 'SMS Delivery' },
         nav_settings_branding: { label: 'Branding' },
         nav_settings_auth: { label: 'Authentication' },
+        nav_settings_access_policy: { label: 'Access policy' },
         nav_settings_storage: { label: 'File Storage' },
         nav_settings_ai: { label: 'AI & Embedder' },
         nav_settings_knowledge: { label: 'Knowledge' },
         nav_settings_lifecycle: { label: 'Data Lifecycle' },
-        nav_settings_feature_flags: { label: 'Feature Flags' },
+        nav_recycle_bin: { label: 'Recycle Bin' },
         // Notifications (contributed by @objectstack/service-messaging)
         nav_notification_preferences: { label: 'Notification Preferences' },
         nav_notification_templates: { label: 'Notification Templates' },
@@ -286,10 +296,10 @@ export const en: TranslationData = {
         + "organization's private packages and install them here.",
     },
     connect_agent: {
-      label: 'Connect an Agent',
+      label: 'Connect an AI Assistant',
       subtitle:
-        'Give any MCP-capable AI client governed access to this system — '
-        + "every call runs under the caller's own permissions and row-level security.",
+        'Work in this system from Claude, Doubao and other AI assistants. '
+        + 'Each one acts as you: it sees and changes only what your own permissions allow.',
     },
 
     // The platform's own record pages (`@objectstack/platform-objects/pages`,

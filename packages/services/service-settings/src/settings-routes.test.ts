@@ -151,6 +151,36 @@ describe('settings-routes', () => {
     expect(state.body.data.ok).toBe(true);
   });
 
+  // The answer an action composes (the "Send test email" toast) is shown to
+  // the caller, so the handler is told the caller's display language: the top
+  // Accept-Language tag, else `?locale`, the same reading the page's
+  // live-status statement gets. It authorizes nothing and stays out of `ctx`.
+  it('POST action hands the handler the caller\'s display locale, outside ctx', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(brandingSettingsManifest);
+    const seen: Array<{ locale?: string; ctxKeys: string[] }> = [];
+    svc.registerAction('branding', 'ping', ({ locale, ctx }) => {
+      seen.push({ locale, ctxKeys: Object.keys(ctx) });
+      return { ok: true, message: 'pong' };
+    });
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('POST /api/settings/:namespace/:actionId')!;
+    const zh = makeReqRes({
+      params: { namespace: 'branding', actionId: 'ping' },
+      body: null,
+      headers: { 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' },
+    });
+    await h(zh.req, zh.res);
+    const none = makeReqRes({ params: { namespace: 'branding', actionId: 'ping' }, body: null });
+    await h(none.req, none.res);
+
+    expect(zh.state.status).toBe(200);
+    expect(seen.map((s) => s.locale)).toEqual(['zh-CN', undefined]);
+    expect(seen[0].ctxKeys).not.toContain('locale');
+  });
+
   // ── [Finding-1] the DEFAULT (no verified provider) is SECURE ──────────────
   // Header-trusted identity is gone; an unauthenticated request can neither
   // enumerate protected namespaces nor write them. Since the family took the
@@ -584,8 +614,10 @@ describe('settings-routes — #7522 encrypted values are redacted at the REST bo
     expect(r1.state.body.data.values.smtp_password.source).toBe('env');
     expect(r1.state.body.data.values.smtp_password.locked).toBe(true);
     expect(r1.state.body.data.values.smtp_password.lockedReason).toContain('OS_SECRETSNS_SMTP_PASSWORD');
+    // Beneath the env entry, the stored cascade: nothing stored, so the default.
     expect(r1.state.body.data.values.smtp_password.cascadeChain).toEqual([
       expect.objectContaining({ scope: 'env', value: SETTINGS_SECRET_MASK, locked: true }),
+      { scope: 'default', value: null },
     ]);
 
     const write = http.routes.get('PUT /api/settings/:namespace')!;
@@ -889,5 +921,80 @@ describe('settings-routes — the two retired Branding keys (#24766)', () => {
     expect(put.state.status).toBe(200);
     expect(put.state.body.data.values.logo_url).toMatchObject({ value: 'https://acme.test/logo.svg', source: 'tenant' });
     expect(await storedRetiredRows()).toEqual(RETIRED_BRANDING_ROWS);
+  });
+});
+
+describe('settings-routes — GET /:ns lists what is stored beneath an env pin', () => {
+  /** The secret stack with an env the test pins after storing. */
+  function pinnableSecretStack() {
+    const env: Record<string, string | undefined> = {};
+    const secretRows = new Map<string, any>();
+    const cryptoProvider = new LocalCryptoProvider();
+    const svc = new SettingsService({
+      env,
+      cryptoProvider,
+      secretStore: {
+        async insert(row) { secretRows.set(row.id, row); return { id: row.id }; },
+        async get(id) { return secretRows.get(id) ?? null; },
+        async update(id, patch) { secretRows.set(id, { ...secretRows.get(id), ...patch }); },
+      },
+    });
+    svc.registerManifest(secretsManifest);
+    const http = new MockHttp();
+    registerSettingsRoutes(http, svc, { contextFromRequest: secretAdmin });
+    const read = async () => {
+      const r = makeReqRes({ params: { namespace: 'secretsns' } });
+      await http.routes.get('GET /api/settings/:namespace')!(r.req, r.res);
+      return r.state;
+    };
+    return { env, svc, http, cryptoProvider, read };
+  }
+
+  it('a pinned key\'s stored row rides beneath its env entry; a pinned secret\'s shows the mask, never the value', async () => {
+    const { env, svc, cryptoProvider, read } = pinnableSecretStack();
+    await svc.set('secretsns', 'smtp_host', 'stored.example.com', { userId: 'usr_1' });
+    await svc.set('secretsns', 'smtp_password', SMTP_PLAINTEXT, { userId: 'usr_1' });
+    env.OS_SECRETSNS_SMTP_HOST = 'env.example.com';
+    env.OS_SECRETSNS_SMTP_PASSWORD = 'env-supplied-secret';
+    env.OS_SECRETSNS_WEBHOOK_TOKEN = 'env-supplied-token';
+    const decrypt = vi.spyOn(cryptoProvider, 'decrypt');
+
+    const state = await read();
+    expect(state.status).toBe(200);
+    const values = state.body.data.values;
+    expect(values.smtp_host).toMatchObject({ value: 'env.example.com', source: 'env', locked: true });
+    expect(values.smtp_host.cascadeChain).toEqual([
+      expect.objectContaining({ scope: 'env', value: 'env.example.com', effective: true }),
+      { scope: 'user', value: 'stored.example.com' },
+      { scope: 'default', value: 'smtp.example.com' },
+    ]);
+    expect(values.smtp_password.cascadeChain).toEqual([
+      expect.objectContaining({ scope: 'env', value: SETTINGS_SECRET_MASK, effective: true }),
+      { scope: 'user', value: SETTINGS_SECRET_MASK },
+      { scope: 'default', value: null },
+    ]);
+    // A pinned secret with nothing stored lists no stored entry.
+    expect(values.webhook_token.cascadeChain.slice(1)).toEqual([{ scope: 'default', value: null }]);
+    const wire = JSON.stringify(state.body);
+    expect(wire).not.toContain(SMTP_PLAINTEXT);
+    expect(wire).not.toContain('env-supplied-secret');
+    expect(decrypt).not.toHaveBeenCalled();
+  });
+
+  it('after PUT clears the stored value through the pin, the next read lists it null', async () => {
+    const { env, svc, http, read } = pinnableSecretStack();
+    await svc.set('secretsns', 'smtp_host', 'stored.example.com', { userId: 'usr_1' });
+    env.OS_SECRETSNS_SMTP_HOST = 'env.example.com';
+
+    const put = makeReqRes({ params: { namespace: 'secretsns' }, body: { smtp_host: null } });
+    await http.routes.get('PUT /api/settings/:namespace')!(put.req, put.res);
+    expect(put.state.status).toBe(200);
+
+    const values = (await read()).body.data.values;
+    expect(values.smtp_host).toMatchObject({ value: 'env.example.com', source: 'env', locked: true });
+    expect(values.smtp_host.cascadeChain.slice(1)).toEqual([
+      { scope: 'user', value: null },
+      { scope: 'default', value: 'smtp.example.com' },
+    ]);
   });
 });

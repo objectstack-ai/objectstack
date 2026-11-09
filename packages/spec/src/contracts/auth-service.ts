@@ -46,6 +46,20 @@ export interface AuthSession {
 }
 
 /**
+ * [#31821] The two facts a door holds about where a request came from, as it
+ * received them: the request's headers (lower-cased names) and the
+ * transport's own peer address (`IHttpRequest.remoteAddress`). Raw input to
+ * {@link IAuthService.resolveClientAddress}; ⛔ never read as an address by
+ * the door itself.
+ */
+export interface AuthRequestTransport {
+    /** Request headers, lower-cased as every adapter delivers them. */
+    headers?: Record<string, string | string[] | undefined>;
+    /** The transport's peer address. */
+    remoteAddress?: string;
+}
+
+/**
  * Authentication result returned by login/verify operations
  */
 export interface AuthResult {
@@ -269,6 +283,29 @@ export interface IAuthService {
     ): Promise<readonly NonNullable<ExecutionContext['authGate']>[]>;
 
     /**
+     * [ADR-0090 D12] Is `userId` an administrator in `organizationId`? The ONE
+     * reading of that question: the multi-factor requirement's
+     * `administrators` level asks this same member, so a caller outside the
+     * auth provider gets the gate's own answer. Read-only and in-process; no
+     * route reaches it.
+     *
+     * True for any of D12's three kinds: a tenant-level administrator (the
+     * `PLATFORM_ADMIN` posture rung), an organization-level administrator of
+     * `organizationId` (the `TENANT_ADMIN` rung, conferred by an owner or
+     * admin membership), and a delegated administrator there (a permission
+     * set carrying an `adminScope`). A delegated grant that cannot be read
+     * counts as an administrator: a requirement that holds administrators
+     * holds rather than lapses. A provider that does not judge delegated
+     * administrators answers from the two rungs alone.
+     *
+     * @param userId - The user asked about
+     * @param organizationId - The organization the question is asked in;
+     *   `undefined` asks about the tenant-level kind and global grants only
+     * @returns Whether the user is an administrator there
+     */
+    isOrganizationAdministrator?(userId: string, organizationId: string | undefined): Promise<boolean>;
+
+    /**
      * [#23367, ruling A] The API-key lifecycle policy in force, read from the
      * auth configuration (the `auth` settings keys `api_key_*`, bound into the
      * service). Two readers, one source: the signing door (`POST /keys`,
@@ -283,6 +320,22 @@ export interface IAuthService {
      * @returns The policy, every number already defaulted
      */
     resolveApiKeyLifecyclePolicy?(): ApiKeyLifecyclePolicy;
+
+    /**
+     * [#31821] The client address this deployment establishes for a request:
+     * the platform's one client-address trust rule applied with the
+     * deployment's `server.trustProxy`. Forwarded headers count only when
+     * `trustProxy` is declared; otherwise the transport's own peer address
+     * (`IHttpRequest.remoteAddress`); `undefined` when neither is available.
+     *
+     * A door hands over the two facts it holds and never reads a forwarded
+     * header itself, so the trust switch is read in one place. Synchronous,
+     * never throws, reads nothing but its argument and the configuration.
+     *
+     * @param transport - The request's headers and the transport's peer address
+     * @returns The established address, or `undefined` when none can be established
+     */
+    resolveClientAddress?(transport: AuthRequestTransport): string | undefined;
 
     /**
      * Verify an OAuth 2.1 access token issued by this deployment's embedded
@@ -320,6 +373,44 @@ export interface IAuthService {
          */
         organizationId?: string;
     } | undefined>;
+
+    /**
+     * [#31211] Record that the caller ADMITTED a call made with a verified MCP
+     * access token, so the provider can keep its coarse "last used" record of
+     * the grant the token was minted under.
+     *
+     * Verifying a token is not admitting the call: the door that resolves the
+     * principal can still refuse it after `verifyMcpAccessToken` answers (a
+     * banned subject, an authorization store it could not read). So a
+     * provider records nothing at verification, and the caller calls this
+     * member once per admitted call, only after its last refusal has had its
+     * say, with the very object `verifyMcpAccessToken` resolved to. A refused
+     * call never reaches it, so it is never recorded as a use. Admitting is
+     * the decision about WHO calls, not every later authorization verdict:
+     * once the principal is admitted, a refusal of what it then asks for,
+     * rendered further down the request (the MCP domain's 403
+     * `insufficient_scope` for a token that grants none of the MCP tool
+     * families, a tool the token's scopes leave unregistered, an action whose
+     * scope family the token was not granted), is still a use of the grant,
+     * and it is recorded.
+     *
+     * The provider records only a principal object it returned itself; any
+     * other object (a hand-built principal, a copy) records nothing. It
+     * returns nothing, never throws and never makes the caller wait: the
+     * record is the provider's own bookkeeping, settled off the request's
+     * path, and its failure is never the call's failure.
+     *
+     * [#31821] `transport` is the admitted request's headers and the
+     * transport's peer address, as the door received them. The provider
+     * establishes the client address from them under its own trust rule
+     * ({@link resolveClientAddress}) and reads the user agent from the
+     * headers, so the use it records names where the call came from. A
+     * caller that omits it records a use with no client facts.
+     */
+    recordMcpAccessTokenUse?(
+        principal: NonNullable<Awaited<ReturnType<NonNullable<IAuthService['verifyMcpAccessToken']>>>>,
+        transport?: AuthRequestTransport,
+    ): void;
 
     /**
      * [#23772] Mint a short-lived session for the requesting user's OWN

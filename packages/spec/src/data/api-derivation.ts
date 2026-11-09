@@ -132,10 +132,17 @@ interface DerivationRule {
  *   `list` WITHOUT `export`. Omitting the slot is the no-user-context case and
  *   leaves `export` derived (#3544 wired the bit in; plugin-security's
  *   `permission-evaluator` and plugin-hono-server's `/me/permissions` both feed it).
- * - `restore`/`purge` map to `delete` but their flag is permanently `false`:
- *   `enable.trash` was retired (#2377/ADR-0049) with no runtime consumer, so
- *   there is no soft-delete state to restore/purge. They return as live derived
- *   verbs only if/when a real recycle bin ships (#3146, parked).
+ * - `restore`/`purge` derive from `delete`: an object that exposes `delete`
+ *   exposes its recycle bin's doors (ADR-0148, #30237). Their flag was
+ *   permanently `false` while no recycle bin existed (`enable.trash` was
+ *   retired by #2377/ADR-0049 with no runtime consumer); the bin shipped with
+ *   #30237, so they are live derived verbs. Who may restore or purge is the
+ *   security layer's question (`allowRestoreOwnDeleted`, `manageRecycleBin`);
+ *   this table only says whether the object's API exposes the verb. A platform
+ *   object (`sys_`, `cloud_`, `ai_`) has no bin (ADR-0148 D5): its bin doors
+ *   refuse whatever `apiMethods` says, and the effective `apiOperations`
+ *   annotation withholds the two verbs there. This table cannot see that, since
+ *   it reads `enable` and never the object's name.
  */
 export const API_METHOD_DERIVATION: Record<LegacyApiMethod, DerivationRule> = {
   upsert: { all: ['create', 'update'] },
@@ -144,8 +151,8 @@ export const API_METHOD_DERIVATION: Record<LegacyApiMethod, DerivationRule> = {
   aggregate: { all: ['list'] },
   search: { all: ['list'], flag: (e) => e.searchable !== false },
   history: { all: ['get'], flag: (e) => e.trackHistory === true },
-  restore: { all: ['delete'], flag: () => false },
-  purge: { all: ['delete'], flag: () => false },
+  restore: { all: ['delete'] },
+  purge: { all: ['delete'] },
 };
 
 /**
@@ -369,9 +376,8 @@ export function isApiOperationAllowed(
       // unknown writeMode → fall through to the derived answer below.
     }
     // Otherwise the derived answer. `operations` already folds in the schema
-    // flags (searchable/trackHistory) and the permanently-off trash flag, so
-    // restore/purge stay closed even for an unrestricted object — the gate
-    // decision and the serialized effective set never disagree.
+    // flags (searchable/trackHistory), so the gate decision and the
+    // serialized effective set never disagree.
     return eff.operations.has(operation);
   }
 

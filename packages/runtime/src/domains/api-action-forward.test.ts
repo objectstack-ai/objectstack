@@ -1701,3 +1701,103 @@ describe('[#29173] a record-less aggregate api action declaring `recordIdParam` 
         expect((nulled as any).message).toContain('"token"');
     });
 });
+
+// [#29881] The showcase's "Recalculate Estimate" shape: an api action declared
+// `execution: 'perRecord'` whose `target` carries no record token. Called with
+// no record id it used to be forwarded with none, and the flow endpoint behind
+// it answered `400 FLOW_FAILED` naming its internal node (`load_task`); with an
+// unknown id it was forwarded too, and answered the same code wrapping "Record
+// … not found". The declaration says the action runs on one record, so the
+// door refuses both before any forward: `400 VALIDATION_ERROR` naming
+// `recordId`, and the door's own `404 RECORD_NOT_FOUND`. The real-stack half,
+// on the stock showcase, is `packages/qa/dogfood/test/api-action-door-forward.dogfood.test.ts`.
+describe('[#29881] a per-record api action is refused at the door with no record id, and 404s an id its caller cannot resolve', () => {
+    const RECALC_ONE = {
+        name: 'recalc_one', label: 'Recalculate Estimate', objectName: OBJECT, type: 'api',
+        execution: 'perRecord', target: '/api/v1/apps/showcase/recalc', recordIdParam: 'recordId',
+        ai: { exposed: true, description: 'Recalculate one lead.' },
+    };
+    const UNKNOWN = 'lead_none';
+    const runViaMcp = async (h: ReturnType<typeof boot>, name: string, input: any = {}) => {
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+        return invokeBusinessAction(deps, CTX() as any, name, input, {
+            driver: h.ql,
+            ec: { userId: 'u_agent', tenantId: 'org_1', systemPermissions: [] },
+            getMeta: () => h.metadata,
+            // The caller's scope resolves `u_target` only.
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: p?.id === 'u_target' ? { id: p.id } : undefined }),
+        });
+    };
+
+    it('REST: no `recordId`, or an empty one, answers 400 VALIDATION_ERROR naming it, and nothing is forwarded', async () => {
+        for (const body of [{}, { params: {} }, { recordId: '', params: {} }]) {
+            const { dispatcher, request } = boot({ extraActions: [RECALC_ONE] });
+
+            const res = await dispatcher.handleActions(`/${OBJECT}/${RECALC_ONE.name}`, 'POST', body, CTX());
+
+            expect(statusOf(res), JSON.stringify(body)).toBe(400);
+            expect(codeOf(res), JSON.stringify(body)).toBe('VALIDATION_ERROR');
+            expect(messageOf(res)).toContain('`recordId`');
+            expect(messageOf(res)).toContain("`execution: 'perRecord'`");
+            expect(request, JSON.stringify(body)).not.toHaveBeenCalled();
+        }
+    });
+
+    it('REST: an id the caller\'s scope does not resolve answers the door\'s 404 RECORD_NOT_FOUND, and nothing is forwarded', async () => {
+        const { dispatcher, request } = boot({ extraActions: [RECALC_ONE] });
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${RECALC_ONE.name}`, 'POST', { recordId: UNKNOWN }, CTX());
+
+        expect(statusOf(res)).toBe(404);
+        expect(codeOf(res)).toBe('RECORD_NOT_FOUND');
+        expect(request).not.toHaveBeenCalled();
+    });
+
+    it('REST, the controls: a real id is forwarded with it; the aggregate twin with no id is forwarded as before (#29173)', async () => {
+        const real = boot({ extraActions: [RECALC_ONE] });
+        const ok = await real.dispatcher.handleActions(`/${OBJECT}/${RECALC_ONE.name}`, 'POST', { recordId: 'u_target' }, CTX());
+        expect(statusOf(ok), JSON.stringify(ok?.response?.body)).toBe(200);
+        expect(JSON.parse(String(real.injected[0].init.body))).toEqual({ recordId: 'u_target' });
+
+        const bulk = boot({ extraActions: [RECALC_SELECTION] });
+        const ran = await bulk.dispatcher.handleActions(`/${OBJECT}/${RECALC_SELECTION.name}`, 'POST', {}, CTX());
+        expect(statusOf(ran), JSON.stringify(ran?.response?.body)).toBe(200);
+        expect(bulk.injected).toHaveLength(1);
+    });
+
+    it('MCP `run_action`: the same two refusals are thrown, and nothing is forwarded', async () => {
+        for (const input of [{}, { recordId: '' }]) {
+            const h = boot({ extraActions: [RECALC_ONE] });
+            const thrown = await runViaMcp(h, RECALC_ONE.name, input).catch((e) => e);
+            expect((thrown as any).status, JSON.stringify(input)).toBe(400);
+            expect((thrown as any).code).toBe('VALIDATION_ERROR');
+            expect(String((thrown as any).message)).toContain('`recordId`');
+            expect(h.request).not.toHaveBeenCalled();
+        }
+        const h = boot({ extraActions: [RECALC_ONE] });
+        const thrown = await runViaMcp(h, RECALC_ONE.name, { recordId: UNKNOWN }).catch((e) => e);
+        expect((thrown as any).status ?? (thrown as any).statusCode).toBe(404);
+        expect((thrown as any).code).toBe('RECORD_NOT_FOUND');
+        expect(h.request).not.toHaveBeenCalled();
+    });
+
+    it('the shared helpers: a per-record declaration does not forward on a denied load, and builds no request without an id', () => {
+        expect(forwardsOnDeniedSubjectLoad(RECALC_ONE)).toBe(false);
+        expect(forwardsOnDeniedSubjectLoad(RECALC_SELECTION)).toBe(true);
+        expect(forwardsOnDeniedSubjectLoad(RECALC_LEAD)).toBe(true);
+        const ec = { userId: 'u1', tenantId: 'org_9' };
+        for (const input of [{ record: {}, params: {}, ec }, { recordId: '', record: {}, params: {}, ec }]) {
+            const refused = buildApiActionRequest(RECALC_ONE, input);
+            expect((refused as any).status).toBe(400);
+            expect(refused).not.toHaveProperty('path');
+        }
+        expect(buildApiActionRequest(RECALC_ONE, { recordId: 'r1', params: {}, ec })).toEqual({ method: 'POST', path: '/api/v1/apps/showcase/recalc', body: { recordId: 'r1' } });
+    });
+});

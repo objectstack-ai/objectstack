@@ -77,6 +77,7 @@ import {
   vetOrganizationClaim,
   withoutOperationPrivateKeys,
 } from '@objectstack/core';
+import type { PackageScopedRefusal } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import {
   filterApproversWhoCanRead,
@@ -129,6 +130,7 @@ import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from '
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
 import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { APPROVAL_EMAIL_CHANNELS, EMAILED_APPROVAL_TOPICS } from './approval-email-templates.js';
 import {
   approvalNotificationText,
   subjectParams,
@@ -206,6 +208,14 @@ export interface ApprovalResumeSurface {
      */
     resumedBy?: string;
     /**
+     * The administrator impersonating {@link resumedBy} when the decision came
+     * from an impersonation session (`ResumeSignal.impersonatedBy`), read off
+     * the decision request's context ({@link impersonatorOf}); the engine
+     * stamps it on the decider's segment. Absent when the decider acted in
+     * their own name, and never sent without `resumedBy`.
+     */
+    impersonatedBy?: string;
+    /**
      * #3801: the engine refuses a resume of an `approval` suspension unless
      * the signal carries this marker — the proof that the resume is the tail
      * of a decision THIS service already authorized and recorded, not a raw
@@ -216,6 +226,22 @@ export interface ApprovalResumeSurface {
   }): Promise<unknown>;
   /** Flow definition lookup, used to derive step-progress display data. */
   getFlow?(name: string): Promise<any | null>;
+  /**
+   * [ADR-0150 D3] The package whose OWN body the engine runs for the flow
+   * `name` — the shipping package when the armed body is the loader's, and
+   * `undefined` for a declared `.custom` override or any other
+   * environment-authored body, and for a flow authored in this deployment.
+   * Read by {@link ApprovalService.flowPackageOf}: an approval step is written
+   * in the body that runs, so the queue an approver names is read from that
+   * body's package, and an override's step from no package (ADR-0150 D3: a
+   * reference in an overlay is the environment's).
+   *
+   * ⚠️ Declares a method `AutomationEngine` implements publicly
+   * (`armedFlowPackage`, the reader its own subflow addressing reads); it
+   * widens no engine surface. Optional: absent, every step reads its queue
+   * names environment-wide, as before.
+   */
+  armedFlowPackage?(name: string): string | undefined;
   /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
@@ -416,7 +442,30 @@ export interface ApprovalMessagingSurface {
      * fallback beside it.
      */
     keyedText?: ApprovalKeyedText;
+    /**
+     * [#30509] The channels to fan out to (`EmitInput.channels` of the
+     * messaging service). Absent, messaging delivers to the in-app inbox only.
+     */
+    channels?: string[];
   }): Promise<unknown>;
+  /**
+   * [#30509] Declare code-level notification templates
+   * (`MessagingService.registerBuiltinTemplates`): rendered beneath an
+   * organization's own `sys_notification_template` row, never stored.
+   * Optional — a messaging service without it renders the e-mail from the
+   * notification's title and body alone.
+   */
+  registerBuiltinTemplates?(templates: readonly ApprovalBuiltinTemplate[]): void;
+}
+
+/** [#30509] One code-declared notification template, as the messaging service takes it. */
+export interface ApprovalBuiltinTemplate {
+  readonly topic: string;
+  readonly channel: string;
+  readonly locale: string;
+  readonly subject?: string;
+  readonly body?: string;
+  readonly format?: 'markdown' | 'html' | 'text' | 'mjml';
 }
 
 /**
@@ -446,6 +495,17 @@ type ApprovalNotificationPayload = {
   readonly body: string;
   /** Where opening it lands; `notify()` narrows the approvals inbox to the request. */
   readonly actionUrl: string;
+  /**
+   * [#30509] The same request page as `actionUrl`, prefixed with the
+   * deployment's public origin when one resolves (`publicBaseUrl`), for a
+   * channel read outside the Console: the approval e-mail's link
+   * (`approval-email-templates.ts`). Set by `notify()` beside the
+   * deep-linked `actionUrl` on the notices that go by e-mail
+   * (`EMAILED_APPROVAL_TOPICS`); `actionUrl` stays relative because the
+   * Console routes on it. It opens the request page for a signed-in reader and decides
+   * nothing: not an ADR-0043 action link.
+   */
+  readonly approvalUrl?: string;
 };
 
 /**
@@ -925,6 +985,13 @@ export interface StrandedContinuationSignal {
    * original carried none.
    */
   resumedBy?: string;
+  /**
+   * The administrator the original resume named as impersonating
+   * {@link resumedBy} (`ResumeSignal.impersonatedBy`), so a replay stamps the
+   * decider's segment exactly as the decision did. Absent when the original
+   * carried none.
+   */
+  impersonatedBy?: string;
 }
 
 /**
@@ -1076,6 +1143,18 @@ function actingUserId(context: ExecutionContext | undefined): string | null {
 }
 
 /**
+ * The administrator a request's context names as impersonating its user — the
+ * session-resolved, attribution-only `ExecutionContext.impersonatedBy` — as a
+ * non-blank string, or `undefined`. Never read off a caller's input.
+ */
+function impersonatorOf(context: ExecutionContext | undefined): string | undefined {
+  const by = context?.impersonatedBy;
+  if (typeof by !== 'string') return undefined;
+  const trimmed = by.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+/**
  * The PERSON an action records (ADR-0118 D1): a `sys_user` id, or `null` —
  * never the slot the action took (that is `acted_as`), never an address the
  * caller named, and never a machine sentinel. It is the one value written to
@@ -1097,6 +1176,23 @@ function actingUserId(context: ExecutionContext | undefined): string | null {
  */
 function recordedActor(context: ExecutionContext | undefined): string | null {
   return actingUserId(context);
+}
+
+/**
+ * Is `actorId` the submitter of request row `raw`? The one test the
+ * submitter's doors — `recall`, `remind`, `resubmit` — admit a caller by.
+ *
+ * A request with no submitter (a run whose trigger resolved no user stamps
+ * `submitter_id` null) has no one to be: the answer is `false` for every
+ * actor, ⛔ never `true` for all. Each door's other arms are unchanged — a
+ * system context, and the #3424 override actor, wherever that door admits
+ * them — so such a request is recalled, reminded or resubmitted only by them.
+ * Being able to READ a request (a pending approver, a record reader) grants no
+ * right over it.
+ */
+function actsAsSubmitter(raw: { submitter_id?: unknown }, actorId: unknown): boolean {
+  const submitter = raw?.submitter_id == null ? '' : String(raw.submitter_id);
+  return submitter !== '' && submitter === String(actorId ?? '');
 }
 
 /**
@@ -1144,6 +1240,128 @@ function holderReadRefusal(scope: string, err: unknown): Error {
     `[approvals] ${scope} could not be read: ${err instanceof Error ? err.message : String(err)}. `
     + 'Routing to a shortened slate would leave holders unasked, so the expansion refuses instead.',
   ), { cause: err });
+}
+
+/**
+ * [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The
+ * approver types whose failed directory read refuses the approval node. A
+ * `queue`, `team` or `position` approver names a SET of people read from the
+ * directory at node entry; when that read fails, the slate it would build is
+ * missing people nobody can name, and every `onEmptyApprovers` policy would act
+ * on that wrong slate — open on the rest of it, open on the administrators or on
+ * a fallback, or approve. So the node opens on none of them.
+ *
+ * An `expression` approver's `resolveAs: 'team' | 'position'` values are read
+ * through the same expanders, and refuse the same way ({@link
+ * ApprovalService.resolveExpressionApprovers}). The other graph kinds
+ * (`department` and its dialects, `org_membership_level`) are not named by the
+ * ruling and keep their literal slot.
+ */
+const DIRECTORY_REFUSING_APPROVER_TYPES: ReadonlySet<string> = new Set(['queue', 'team', 'position']);
+
+/**
+ * [#29604] The read a failed ADR-0105 D9 cross-organization read filter names:
+ * that filter's, not the directory's. One wording for the static resolver and
+ * the `expression` one, so a refusal from either says the same thing.
+ */
+function crossOrgFilterReadFailure(directoryOrg: unknown, organizationId: unknown, err: unknown): string {
+  return `the cross-organization read filter (who among the people of organization '${directoryOrg}' can read `
+    + `this request of organization '${organizationId}') could not be read: `
+    + `${err instanceof Error ? err.message : String(err)}.`;
+}
+
+/**
+ * [ADR-0150 D3] The resolver's refusal a rejection carries, when the
+ * rejection is a refused package-scoped name (the queue service's
+ * `PackageScopedNameRefusedError`, read by its shape: this package does not
+ * depend on the plugin that throws it).
+ */
+function packageScopedRefusalOf(err: unknown): PackageScopedRefusal | undefined {
+  const refusal = (err as { refusal?: Partial<PackageScopedRefusal> } | null | undefined)?.refusal;
+  return refusal?.status === 'refused' && typeof refusal.message === 'string' && typeof refusal.reason === 'string'
+    ? refusal as PackageScopedRefusal
+    : undefined;
+}
+
+/**
+ * [ADR-0150 D3] What makes a refused queue name resolve, for the package the
+ * step was read from — the refusal's own remedy, said for a step.
+ */
+function refusalRemedy(refusal: PackageScopedRefusal): string {
+  const from = refusal.callerPackageId;
+  if (!from) {
+    return 'Running the flow again changes nothing until the name resolves: leave one holder of it in this '
+      + 'environment, or name the queue from a step in a package that declares a dependency on the package '
+      + 'whose queue it means.';
+  }
+  return `Running the flow again changes nothing until the name resolves from package '${from}': declare a `
+    + `dependency on the package whose queue it means, enable that package if it is disabled, or ship the queue `
+    + `in package '${from}'.`;
+}
+
+/**
+ * [ADR-0142 D6 as amended; ruling record 6599731698 on #29604, letter B] The
+ * approval node refuses to open because a directory read behind one of its
+ * approvers failed ({@link DIRECTORY_REFUSING_APPROVER_TYPES}).
+ *
+ * Its own class, and never `NO_APPROVERS` or "expanded to nobody": the slate
+ * was not found empty, it could not be read. The message names the approver
+ * and the read that failed, and starts with `APPROVER_DIRECTORY_UNREADABLE:` in
+ * the message-prefix family this service's refusals use. Retryable: nothing is
+ * written before it is thrown, so the run can be started again once the
+ * directory reads. No parked or auto-retry state is part of it.
+ */
+export class ApproverDirectoryUnreadableError extends Error {
+  override readonly name = 'ApproverDirectoryUnreadableError';
+  /**
+   * The run can be re-triggered once the directory reads again. `false` when
+   * the cause is an ADR-0150 D3 refusal of the name: a re-run is refused the
+   * same way until the remedy the message names is applied.
+   */
+  readonly retryable: boolean;
+  /** The approver whose directory read failed: its type and value as authored. */
+  readonly approverType: string;
+  readonly approverValue: string;
+  /** What could not be read, as the read reported it. */
+  readonly failedRead: string;
+
+  constructor(input: {
+    type: string;
+    value: unknown;
+    organizationId: string | null | undefined;
+    failedRead: string;
+    /** The CEL source, when the approver is an `expression` resolved as `type`. */
+    expression?: string;
+    cause?: unknown;
+  }) {
+    const approver = input.expression === undefined
+      ? `approver '${input.type}:${input.value}'`
+      : `approver 'expression' (resolveAs '${input.type}', value '${input.value}')`;
+    const inOrg = input.organizationId ? ` in organization '${input.organizationId}'` : '';
+    const read = input.failedRead.trim();
+    const refusal = packageScopedRefusalOf(input.cause);
+    const notOpened = 'The approval node does not open: ';
+    const routedPast = ' would be routed past, so the request is not opened on the rest of the slate, on the '
+      + 'declared fallbackApprovers or on the organization\'s administrators, and is not auto-approved, whatever '
+      + 'the node\'s onEmptyApprovers says.';
+    super(
+      refusal
+        // [ADR-0150 D3] A refused name is not a failed read: running the flow
+        // again reads the same holders and is refused again. Its remedy is
+        // the refusal's own.
+        ? `APPROVER_DIRECTORY_UNREADABLE: ${approver} could not be expanded${inOrg}, because its name was refused `
+          + `(ADR-0150 D3, ${refusal.reason}): ${refusal.message} ${notOpened}the people of whichever queue was `
+          + `meant${routedPast} ${refusalRemedy(refusal)}`
+        : `APPROVER_DIRECTORY_UNREADABLE: ${approver} could not be expanded${inOrg}, because a read behind it failed: `
+          + `${read}${/[.!?]$/.test(read) ? '' : '.'} ${notOpened}the people who could not be read${routedPast} `
+          + `Run the flow again once the directory can be read.`,
+    );
+    this.retryable = refusal === undefined;
+    if (input.cause !== undefined) Object.assign(this, { cause: input.cause });
+    this.approverType = input.type;
+    this.approverValue = String(input.value);
+    this.failedRead = input.failedRead;
+  }
 }
 
 /**
@@ -2032,7 +2250,13 @@ export class ApprovalService implements IApprovalService {
         && event.source?.object === 'sys_approval_request'
         && event.source.id
       ) {
-        payload = { ...payload, actionUrl: `/system/approvals?request=${encodeURIComponent(event.source.id)}` };
+        const actionUrl = `/system/approvals?request=${encodeURIComponent(event.source.id)}`;
+        payload = {
+          ...payload,
+          actionUrl,
+          // [#30509] The e-mail's link: only the notices that go by e-mail carry it.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { approvalUrl: `${this.publicBaseUrl}${actionUrl}` } : {}),
+        };
       }
       // A dedup key names ONE event: a notice split per name keys each part by
       // its first recipient, so messaging never folds one part into another.
@@ -2040,6 +2264,10 @@ export class ApprovalService implements IApprovalService {
       try {
         await this.messaging.emit({
           severity: 'info', ...event, payload, keyedText: part.keyedText, audience: part.audience,
+          // [#30509] The approval lifecycle's own notices also go by e-mail;
+          // every other approval topic stays inbox-only. Preferences filter as
+          // for any channel.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { channels: [...APPROVAL_EMAIL_CHANNELS] } : {}),
           ...(dedupKey ? { dedupKey } : {}),
           ...(person ? { actorId: person } : {}),
           ...(organization ? { organizationId: organization } : {}),
@@ -2415,9 +2643,25 @@ export class ApprovalService implements IApprovalService {
        * as `__resolvedFrom` so "why these people" stays answerable later.
        */
       resolvedFrom?: Record<string, unknown>;
+      /**
+       * [ADR-0142 D6 as amended] What a failed directory read behind a
+       * `queue` / `team` / `position` approver does: `'refuse'` (the default)
+       * throws {@link ApproverDirectoryUnreadableError}, so a node never opens on
+       * a slate it could not read; `'literal'` keeps the slot's `type:value`
+       * literal, for the one reader that re-resolves a slate AFTER a decision
+       * was recorded and must not fail it (`decide`'s pre-snapshot tally).
+       */
+      onDirectoryFailure?: 'refuse' | 'literal';
+      /**
+       * [ADR-0150 D3] The package the step is declared in — its flow's
+       * ({@link flowPackageOf}) — which a `queue` approver's name is read
+       * from. `null` / omitted: environment-wide, as before.
+       */
+      callerPackageId?: string | null;
     },
   ): Promise<string[]> {
     if (!step || !Array.isArray(step.approvers)) return [];
+    const onDirectoryFailure = opts?.onDirectoryFailure ?? 'refuse';
     const now = opts?.now ?? this.clock.now().getTime();
     const out: string[] = [];
     // A person is a member of a per_group group once (#28684): the tally sizes
@@ -2451,7 +2695,7 @@ export class ApprovalService implements IApprovalService {
       // contract of resolveApproverSpec cannot carry.
       if (canonicalApproverType(String(a.type)) === 'expression') {
         const resolved = await this.resolveExpressionApprovers(
-          a, record, organizationId, now, opts?.substitutions, opts?.exprCtx,
+          a, record, organizationId, now, opts?.substitutions, opts?.exprCtx, onDirectoryFailure,
         );
         if (opts?.resolvedFrom) opts.resolvedFrom[`expression#${idx}`] = resolved.raw;
         for (const entry of resolved.slots) {
@@ -2467,7 +2711,9 @@ export class ApprovalService implements IApprovalService {
       if (opts?.resolvedFrom && canonicalApproverType(String(a.type)) === 'field' && a.value != null) {
         opts.resolvedFrom[`field:${a.value}`] = (record as any)?.[a.value] ?? null;
       }
-      const ids = await this.resolveApproverSpec(a, record, organizationId, now, opts?.substitutions);
+      const ids = await this.resolveApproverSpec(
+        a, record, organizationId, now, opts?.substitutions, onDirectoryFailure, opts?.callerPackageId ?? null,
+      );
       // per_group (#3266): tag each resolved id with this spec's group.
       for (const u of ids) {
         if (!u) continue;
@@ -2496,6 +2742,8 @@ export class ApprovalService implements IApprovalService {
     organizationId: string | null | undefined,
     now: number,
     substitutions?: OooSubstitution[],
+    onDirectoryFailure: 'refuse' | 'literal' = 'refuse',
+    callerPackageId: string | null = null,
   ): Promise<string[]> {
     // ADR-0090 D3: `role` is the deprecated spelling of `org_membership_level`.
     // Resolve on the canonical type, and write the canonical type in the
@@ -2585,14 +2833,21 @@ export class ApprovalService implements IApprovalService {
     //
     // A cross-org slate is filtered to the people who can actually READ the
     // request (D2 union); same-org routing is untouched and does no extra read.
-    const bounded = async (users: string[]): Promise<string[]> => (
-      crossOrg
-        ? filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
+    //
+    // [#29604] A failure of the read filter itself is named as that read, not
+    // as the directory's, so the warning and the node's refusal below say which
+    // read could not be done.
+    const bounded = async (users: string[]): Promise<string[]> => {
+      if (!crossOrg) return users;
+      try {
+        return await filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
           approverType: type, value: a.value != null ? String(a.value) : undefined,
           directoryOrgId: directoryOrg,
-        })
-        : users
-    );
+        });
+      } catch (err) {
+        throw Object.assign(new Error(crossOrgFilterReadFailure(directoryOrg, organizationId, err)), { cause: err });
+      }
+    };
 
     // The user a `manager` approver resolved FROM, kept for the warning below
     // when no manager comes back.
@@ -2623,7 +2878,7 @@ export class ApprovalService implements IApprovalService {
         // organization (a queue is an organization's: APPROVER_ORG_SCOPED), on
         // the ADDRESSING purpose — the slate routes work, so the holders of a
         // switched-off position stay on it (D2).
-        const users = await bounded(await this.expandQueueUsers(String(a.value), directoryOrg));
+        const users = await bounded(await this.expandQueueUsers(String(a.value), directoryOrg, callerPackageId));
         if (users.length) return users;
       } else if (type === 'manager' && record) {
         const subject = (record as any)[a.value] ?? (record as any).owner_id;
@@ -2642,6 +2897,17 @@ export class ApprovalService implements IApprovalService {
       // A directory lookup failed → handled below as resolving to nobody, and
       // the graph-type warning names the failure (#29362).
       directoryFailure = err instanceof Error ? err.message : String(err);
+      // [ADR-0142 D6 as amended; ruling record 6599731698, letter B] …unless
+      // the approver names a directory SET: then the node refuses to open,
+      // before any `onEmptyApprovers` policy can act on a slate missing the
+      // people who could not be read. Ahead of the `queue` branch's "expanded to
+      // nobody" return below, which would otherwise answer an unreadable queue
+      // as an empty one.
+      if (onDirectoryFailure === 'refuse' && DIRECTORY_REFUSING_APPROVER_TYPES.has(type)) {
+        throw new ApproverDirectoryUnreadableError({
+          type, value: a.value, organizationId: directoryOrg, failedRead: directoryFailure, cause: err,
+        });
+      }
     }
     // #22558: a PERSON type that resolved to nobody contributes NO slot — see
     // PERSON_APPROVER_TYPES for why its `type:value` literal could never be
@@ -2678,7 +2944,19 @@ export class ApprovalService implements IApprovalService {
     // are read at node entry, so a member who joins later is not owed this
     // request. A `queue:` slot a stored request already holds stays as stored,
     // decidable by the override (the ADR-0090 D3 `role:` precedent).
+    //
+    // A queue whose read FAILED reaches here only on the `'literal'` reader (a
+    // refusing one threw above); it still writes no slot, and its warning says
+    // the read failed rather than that the queue is empty.
     if (type === 'queue') {
+      if (directoryFailure !== undefined) {
+        this.logger?.warn?.(
+          `[approvals] approver 'queue:${a.value}' could not be expanded — a directory or read-filter lookup failed. `
+          + `It adds no slot to this slate, as an empty queue adds none; fix the read (see error).`,
+          { type, value: a.value ?? null, organizationId: directoryOrg ?? null, error: directoryFailure },
+        );
+        return [];
+      }
       this.logger?.warn?.(
         `[approvals] approver 'queue:${a.value}' expanded to nobody — `
         + (this.queueSource()
@@ -2780,6 +3058,7 @@ export class ApprovalService implements IApprovalService {
     now: number,
     substitutions?: OooSubstitution[],
     exprCtx?: ApproverExpressionContext,
+    onDirectoryFailure: 'refuse' | 'literal' = 'refuse',
   ): Promise<{ slots: Array<{ id: string; subGroup?: string }>; raw: string[] }> {
     const source = String(a.value ?? '').trim();
     if (!source) {
@@ -2899,6 +3178,15 @@ export class ApprovalService implements IApprovalService {
         }
       } catch (err: any) {
         if (String(err?.message ?? '').startsWith('VALIDATION_FAILED')) throw err;
+        // [ADR-0142 D6 as amended; ruling record 6599731698, letter B] A
+        // `team` or `position` value is read through the same expanders as the
+        // static types, and refuses the node the same way.
+        if (onDirectoryFailure === 'refuse' && DIRECTORY_REFUSING_APPROVER_TYPES.has(resolveAs)) {
+          throw new ApproverDirectoryUnreadableError({
+            type: resolveAs, value: key, organizationId: directoryOrg,
+            failedRead: err instanceof Error ? err.message : String(err), expression: source, cause: err,
+          });
+        }
         // [#29606] The literal slot below is the same fallback the static graph
         // types take, and it says why exactly as they do: a failed read is not
         // an unstaffed value, so an operator is pointed at the read rather than
@@ -2907,9 +3195,23 @@ export class ApprovalService implements IApprovalService {
         users = [];
       }
       if (crossOrg && users.length) {
-        users = await filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
-          approverType: resolveAs, value: key, directoryOrgId: directoryOrg,
-        });
+        try {
+          users = await filterApproversWhoCanRead(this.orgScopeDeps, users, organizationId, {
+            approverType: resolveAs, value: key, directoryOrgId: directoryOrg,
+          });
+        } catch (err) {
+          // [#29604] The read filter is a read behind a `team` or `position`
+          // value as much as the expansion is: it refuses the node the same
+          // way, naming the filter's read as the static resolver's `bounded`
+          // does. Every other case fails as it always did.
+          if (onDirectoryFailure === 'refuse' && DIRECTORY_REFUSING_APPROVER_TYPES.has(resolveAs)) {
+            throw new ApproverDirectoryUnreadableError({
+              type: resolveAs, value: key, organizationId: directoryOrg,
+              failedRead: crossOrgFilterReadFailure(directoryOrg, organizationId, err), expression: source, cause: err,
+            });
+          }
+          throw err;
+        }
       }
       if (!users.length) {
         slots.push({ id: `${resolveAs}:${key}`, subGroup: key });
@@ -3322,12 +3624,44 @@ export class ApprovalService implements IApprovalService {
    * fail-open). The service resolves the name registry-first, then the
    * organization's own `sys_queue` row, and answers `[]` for a name that
    * resolves nowhere. With no service registered there is nothing to expand.
+   *
+   * [#29604] `onFailedRead: 'refuse'` (D2 as amended): a failed read behind the
+   * queue rejects instead of answering "nobody", and {@link resolveApproverSpec}'s
+   * catch turns that rejection into the node's {@link ApproverDirectoryUnreadableError},
+   * so the slate is never opened without the people who could not be read. An
+   * axis of its own beside `purpose`.
+   *
+   * [ADR-0150 D3] `callerPackageId` is the package the step is declared in
+   * ({@link flowPackageOf}): the name resolves from it — its own queue, else
+   * the one holder in its declared dependencies — through the queue service,
+   * the one resolver. A name it cannot pick rejects under `'refuse'` with the
+   * refusal naming every candidate, which the node answers as it answers a
+   * failed read: the slate is never opened on a guess. No package: the
+   * environment-wide read, as before.
    */
-  private async expandQueueUsers(queueName: string, organizationId?: string | null): Promise<string[]> {
+  private async expandQueueUsers(queueName: string, organizationId?: string | null, callerPackageId?: string | null): Promise<string[]> {
     if (!queueName) return [];
     const queues = this.queueSource();
     if (!queues) return [];
-    return queues.expandMembers(queueName, organizationId ?? null, { purpose: 'addressing' });
+    return queues.expandMembers(queueName, organizationId ?? null, {
+      purpose: 'addressing', onFailedRead: 'refuse', ...(callerPackageId ? { callerPackageId } : {}),
+    });
+  }
+
+  /**
+   * [ADR-0150 D3] The package the approval step of flow `flowName` is
+   * written in: the package of the body the engine runs for the flow, as the
+   * engine answers it (`armedFlowPackage`, the reader its own subflow
+   * addressing takes the caller's package from) — the shipping package for
+   * its own body, and `null` for an environment-authored override of it, a
+   * flow authored in this deployment, a request with no flow, and an engine
+   * that cannot say. ⛔ Not `packagedFlowOwner`: it names the package that
+   * ships the NAME, whichever body is armed under it.
+   */
+  private flowPackageOf(flowName: string | null | undefined): string | null {
+    if (!flowName || typeof this.automation?.armedFlowPackage !== 'function') return null;
+    const owner = this.automation.armedFlowPackage(flowName);
+    return typeof owner === 'string' && owner !== '' ? owner : null;
   }
 
   /**
@@ -4134,6 +4468,9 @@ export class ApprovalService implements IApprovalService {
     const requestOrg = subjectOrg ?? ctxOrg;
     const resolvedFrom: Record<string, unknown> = {};
     const exprCtx = { trigger: input.record ?? null, vars: input.variables ?? null };
+    // [ADR-0150 D3] The package this step is declared in — its flow's — which
+    // every slate below reads a `queue` approver's name from.
+    const callerPackageId = this.flowPackageOf(input.flowName);
     const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     // [#25573] `excludeSubmitter: true` (ruling 6377888641, letter B): the
     // submitter is taken off every slate this request can open on. It runs on
@@ -4172,6 +4509,7 @@ export class ApprovalService implements IApprovalService {
         now: nowDate.getTime(), substitutions, groups,
         exprCtx,
         resolvedFrom,
+        callerPackageId,
       },
     ), 'approvers', groups);
 
@@ -4231,6 +4569,7 @@ export class ApprovalService implements IApprovalService {
               now: nowDate.getTime(), substitutions, groups,
               exprCtx,
               resolvedFrom: fallbackResolvedFrom,
+              callerPackageId,
             },
           ), 'fallback', groups);
           // Keep the primary slate's resolution inputs (they explain WHY the
@@ -4968,8 +5307,18 @@ export class ApprovalService implements IApprovalService {
         groupMap = snapshotGroups;
         original = Object.keys(snapshotGroups);
       } else {
+        // The decision is already recorded above, so a directory outage here
+        // must not fail it: the legacy re-resolution keeps the literal slot it
+        // always kept (ADR-0142 D6's refusal is the node's, at open time).
         original = await this.expandApprovers(
           { approvers: config.approvers }, parseJson(raw.payload_json, undefined), org,
+          {
+            onDirectoryFailure: 'literal',
+            // [ADR-0150 D3] The step's flow is the row's `flow:<name>` process.
+            callerPackageId: this.flowPackageOf(
+              typeof raw.process_name === 'string' && raw.process_name.startsWith('flow:') ? raw.process_name.slice('flow:'.length) : null,
+            ),
+          },
         );
         groupMap = {};
       }
@@ -5053,7 +5402,7 @@ export class ApprovalService implements IApprovalService {
    */
   private async serviceResume(
     runId: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string; impersonatedBy?: string },
   ): Promise<{ runId: string; repairable: boolean; error: string } | undefined> {
     const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
     const reported = result as
@@ -5270,7 +5619,7 @@ export class ApprovalService implements IApprovalService {
     runId: string,
     requestId: string,
     what: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string; impersonatedBy?: string },
     decision: string,
   ): Promise<{ resumed: boolean; resumeError?: string; resumeFailure?: ResumeFailureReport }> {
     const missing = this.missingRunCapability(runId, requestId, what, 'resume');
@@ -5331,6 +5680,7 @@ export class ApprovalService implements IApprovalService {
         await this.journalStrandedContinuation(requestId, {
           branchLabel: signal.branchLabel, output: signal.output, decision, what,
           ...(signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
+          ...(signal.resumedBy && signal.impersonatedBy ? { impersonatedBy: signal.impersonatedBy } : {}),
         });
       }
       throw strandedDecisionFailure(
@@ -5403,6 +5753,11 @@ export class ApprovalService implements IApprovalService {
       // vouches for nobody, so its auto-decision names no decider and the run
       // keeps the identity it had.
       const decider = actingUserId(context);
+      // The administrator at the keyboard when this decision came from an
+      // impersonation session, off the decision request's own context (the
+      // session), never off the input: the decider's segment names them, as
+      // the decision's own audit row does. Only beside a decider.
+      const impersonatedBy = decider ? impersonatorOf(context) : undefined;
       const outcome = await this.resumeRecordedOutcome(
         result.runId, requestId, `the ${result.decision} decision`,
         {
@@ -5414,6 +5769,7 @@ export class ApprovalService implements IApprovalService {
           // whitelist already rejects them; this is defense in depth).
           output: { ...(result.outputs ?? {}), decision: result.decision, requestId },
           ...(decider ? { resumedBy: decider } : {}),
+          ...(impersonatedBy ? { impersonatedBy } : {}),
         },
         result.decision,
       );
@@ -5595,13 +5951,17 @@ export class ApprovalService implements IApprovalService {
     // toast. See {@link ApprovalService.userFacingRefusal}.
     const overrideAdmits = raw.status === 'pending'
       && this.isOverrideActor(context, raw.organization_id ?? null);
-    if (!overrideAdmits && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
+    // A request with no submitter is recalled only through the arm above (a
+    // system context or the override actor, on `pending`): `actsAsSubmitter`
+    // answers no for every actor there.
+    if (!overrideAdmits && !actsAsSubmitter(raw, actorId)) {
       // The developer's half: the ids the catalog sentence deliberately does
       // not name (the throw site knows the submitter only as an opaque user
       // id), kept where a developer reads them and a user never does.
+      const submitterNamed = raw.submitter_id ? `submitter '${String(raw.submitter_id)}'` : 'no submitter';
       const developerMessage =
         `[approvals] recall refused: actor '${actorId}' is not the submitter of request `
-        + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no admin override `
+        + `'${requestId}' (${submitterNamed}) and holds no admin override `
         + `for a '${raw.status}' request (the override reaches pending requests only)`;
       this.logger?.warn?.(developerMessage, {
         request: requestId,
@@ -6177,7 +6537,8 @@ export class ApprovalService implements IApprovalService {
     if (raw.status !== 'returned') {
       throw new Error(`INVALID_STATE: request is ${raw.status} (resubmit applies to returned requests)`);
     }
-    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
+    // A request with no submitter is resubmitted by a system context alone.
+    if (!context.isSystem && !actsAsSubmitter(raw, actorId)) {
       throw new Error('FORBIDDEN: only the submitter may resubmit');
     }
     await this.assertLatestForRun(raw);
@@ -6532,7 +6893,8 @@ export class ApprovalService implements IApprovalService {
   ): Promise<{ request: ApprovalRequestRow; notified: number }> {
     const actorId = await this.resolveActor(input?.actorId, context);
     const raw = await this.loadPendingRow(requestId, context);
-    if (!context.isSystem && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
+    // A request with no submitter is reminded by a system context alone.
+    if (!context.isSystem && !actsAsSubmitter(raw, actorId)) {
       throw new Error('FORBIDDEN: only the submitter may send reminders');
     }
 
@@ -7804,6 +8166,11 @@ export class ApprovalService implements IApprovalService {
         // The journalled decider (ruling A): the replayed nodes after the
         // decision run as the person who decided, not as the run's trigger.
         ...(typeof signal.resumedBy === 'string' && signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
+        // The journalled impersonator beside that decider: the replayed
+        // segment is stamped exactly as the decision's own resume would have.
+        ...(typeof signal.resumedBy === 'string' && signal.resumedBy
+          && typeof signal.impersonatedBy === 'string' && signal.impersonatedBy.trim()
+          ? { impersonatedBy: signal.impersonatedBy.trim() } : {}),
       },
       signal.decision,
     );

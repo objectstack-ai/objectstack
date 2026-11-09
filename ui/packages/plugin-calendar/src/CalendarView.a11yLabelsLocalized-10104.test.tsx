@@ -77,7 +77,7 @@ function renderAt(language: string, view: 'month' | 'week' = 'month') {
 }
 
 /** Read a pack value by dotted path, so a missing key surfaces as `undefined`. */
-function packValue(lang: 'en' | 'zh', dotted: string): unknown {
+function packValue(lang: 'en' | 'zh-Hans', dotted: string): unknown {
   return dotted
     .split('.')
     .reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], builtInLocales[lang])
@@ -119,7 +119,7 @@ describe('objectui#10104 — CalendarView a11y labels come from the pack', () =>
     const notAString = WHOLE_LITERAL_LABELS.filter((k) => typeof packValue('en', k) !== 'string' || !packValue('en', k))
     expect(notAString, `en lacks ${notAString.length} swept key(s)`).toEqual([])
 
-    const agreeing = WHOLE_LITERAL_LABELS.filter((k) => packValue('zh', k) === packValue('en', k))
+    const agreeing = WHOLE_LITERAL_LABELS.filter((k) => packValue('zh-Hans', k) === packValue('en', k))
     expect(agreeing, `zh and en agree on ${agreeing.length} key(s), so those assertions would be vacuous`).toEqual([])
   })
 
@@ -127,15 +127,15 @@ describe('objectui#10104 — CalendarView a11y labels come from the pack', () =>
     // `calendar.today` predates this card. Its zh render is what makes the
     // English findings below attributable to the component rather than to a
     // provider that never switched language.
-    const { container } = renderAt('zh')
+    const { container } = renderAt('zh-Hans')
     const todayButton = container.querySelector('[aria-label]')
     expect(todayButton, 'nothing rendered at all').toBeTruthy()
-    expect(container.textContent).toContain(builtInLocales.zh.calendar.today)
+    expect(container.textContent).toContain(builtInLocales['zh-Hans'].calendar.today)
     expect(container.textContent).not.toContain(builtInLocales.en.calendar.today)
   })
 
   it('no swept label renders its ENGLISH literal under zh', () => {
-    renderAt('zh')
+    renderAt('zh-Hans')
     const values = renderedLabelValues()
     expect(values.length, 'no labelled element rendered — the sweep would be vacuous').toBeGreaterThan(0)
 
@@ -146,25 +146,25 @@ describe('objectui#10104 — CalendarView a11y labels come from the pack', () =>
   })
 
   it('every month-view label renders its zh pack value', () => {
-    renderAt('zh')
+    renderAt('zh-Hans')
     const values = renderedLabelValues()
-    const missing = MONTH_VIEW_LABELS.map((k) => packValue('zh', k) as string).filter(
+    const missing = MONTH_VIEW_LABELS.map((k) => packValue('zh-Hans', k) as string).filter(
       (chinese) => !values.some((v) => v === chinese),
     )
     expect(missing, `${missing.length} month-view label(s) never reached the DOM in zh`).toEqual([])
   })
 
   it('the week view\'s own two resize labels come from the pack too', () => {
-    renderAt('zh', 'week')
+    renderAt('zh-Hans', 'week')
     const values = renderedLabelValues()
     for (const key of TIME_GRID_LABELS) {
-      expect(values, `${key} is absent from the week view`).toContain(packValue('zh', key) as string)
+      expect(values, `${key} is absent from the week view`).toContain(packValue('zh-Hans', key) as string)
       expect(values).not.toContain(packValue('en', key) as string)
     }
   })
 
   it('the interpolated labels carry their data, not an English frame', () => {
-    renderAt('zh')
+    renderAt('zh-Hans')
     const values = renderedLabelValues()
     // `Current date: X` and `<date>, N event(s)` were English frames wrapped
     // around localized data. The frames are what a pack must own.

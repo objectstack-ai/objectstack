@@ -2,53 +2,105 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { requiredOneOf } from '../shared/refinement-projection';
 import { strictObject } from '../shared/strict-object';
 
 /**
- * Push Service Configuration Protocol — the push channel's transports.
+ * Push Service Configuration Protocol — how the push channel reaches the
+ * vendors.
  *
- * **Declared ahead of its reader.** Every schema here carries a
- * `[PLANNED — not yet read]` marker in its `.describe()`: nothing reads this
- * shape until the push channel plugin lands, so a value written to it today
- * changes nothing. The marker comes off with the change that wires the reader.
+ * **Read by `@objectstack/service-push`.** `PushServicePlugin` parses its
+ * `config` option with {@link PushServiceConfigSchema} when it initialises:
+ * for the relay transport it sends through the hosted push relay with the
+ * server's cloud binding credential, and for the direct transport it builds
+ * one vendor transport per block. The `push` channel in
+ * `@objectstack/service-messaging` delivers through the push service it
+ * registers. Under `objectstack serve` the value is the stack definition's
+ * `push` key, read when the stack declares `requires: ['push']` (below).
  *
- * Operator-facing configuration for the `push` channel ADR-0012 §4 ships in
- * core: Apple Push Notification service with token-based auth, and Firebase
- * Cloud Messaging over its HTTP v1 API. It sits beside
- * `EmailServiceConfigSchema` (`email-config.zod.ts`), the declaration of
- * the email channel's transport selection.
+ * **Two transports, and the hosted relay is the default.** The store-published
+ * ObjectOS app is signed with ObjectStack's own APNs key and Firebase project,
+ * and those credentials never leave ObjectStack. So a server delivers to that
+ * app through the hosted push relay (`transport: 'relay'`), which holds the
+ * credentials and forwards each delivery to APNs or FCM. The relay
+ * authenticates the server by its cloud binding credential (cloud ADR-0008,
+ * the `oscc_…` bearer the server received when it was bound), so the relay
+ * block carries no credential of its own. It sees only an opaque, ID-only
+ * payload: the wire shape is `PushRelayRequestSchema`
+ * (`api/push-relay.zod.ts`).
+ *
+ * The direct transport (`transport: 'direct'`) is for a white-label build: an
+ * app signed with the operator's own APNs key and Firebase project, which the
+ * relay cannot deliver to. It carries one block per vendor (ADR-0012 §4:
+ * Apple Push Notification service with token-based auth, and Firebase Cloud
+ * Messaging over its HTTP v1 API), each naming its secret by reference.
+ *
+ * **What a block without `transport` reads as.** `transport` is the
+ * discriminator, and a block may leave it out: with no vendor block it reads
+ * as the relay, the default; with an `apns` or `fcm` block it reads as
+ * direct, which is the shape this schema had before the relay existed. A
+ * block that names `transport` is judged by that transport alone. Two mixed
+ * shapes are refused when they are written: a relay block that carries a
+ * credential (a vendor block, or a key an operator would reach for), and a
+ * direct block with no vendor block, which names no `credentialRef` and so
+ * could deliver to nothing.
+ *
+ * **What is served.** Both transports, in `@objectstack/service-push`
+ * (ADR-0012, amended 2026-11-03, #29041), read by `objectstack serve` from
+ * the stack's `push` key. The relay sender (#29920) reads the binding
+ * credential from the `cloud-binding` service on every send, so a server
+ * that is not bound yet still boots: its push channel reports no transport
+ * until the bind is done, and the bind takes effect without a restart. The
+ * boot refuses a relay block, the default `{}` included, only on a deployment
+ * that declared it has no control plane (`OS_CLOUD_URL=off`), where nothing
+ * could ever deliver through the relay (ADR-0012 §6.1, the air-gap rule).
+ *
+ * It sits beside `EmailServiceConfigSchema` (`email-config.zod.ts`), the
+ * declaration of the email channel's transport selection.
  *
  * **Secrets are references, never values (ADR-0143 D3, ADR-0097 §3).** Each
- * transport has one secret — the APNs `.p8` signing key and the FCM
+ * direct vendor block has one secret — the APNs `.p8` signing key and the FCM
  * service-account JSON — and each is named by a `credentialRef`, the same key
  * every other secret an author names is written under (ADR-0143 D3), which
- * the push channel resolves through the secrets layer when it sends (in the
- * open tier, the name of an environment variable). An inline secret is
+ * the push transport resolves through the secrets layer when it first signs
+ * (in the open tier, the name of an environment variable). An inline secret is
  * refused two ways: written under a key an operator would reach for (`key`,
  * `privateKey`, `serviceAccount`, …), it is refused by name with
  * `credentialRef` as the prescription; written into the reference itself, it
  * is refused because a reference is one token — a PEM block carries
  * whitespace and a JSON document carries braces, and a name carries neither.
  *
- * **What reads it, and why it is not a stack key yet.** The push channel
- * plugin (`plugin-notification-push`, ADR-0012 §11) is its one reader, and it
- * is a later change than this declaration. The email transport selection it
- * sits beside is read from `config.email` of the stack definition
- * (`StackEmailConfigSchema`) and `OS_EMAIL_*`; this shape gets its own
- * configuration door in the change that ships the reader, not here, so a key
- * is never authorable before something honours it.
+ * **What reads it: the stack's `push` key under `objectstack serve`.** It is
+ * the stack definition's top-level `push` key, beside `email` and `sms`. A
+ * stack that declares `requires: ['push']` has `objectstack serve` (and
+ * `@objectstack/verify`'s `bootStack`) mount `PushServicePlugin`, built by
+ * `resolvePushCapabilityArg` (`@objectstack/service-push`) from that key.
+ * The reader parses the key with this schema again at boot, because a
+ * compiled artifact may not have passed `defineStack`, and it refuses two
+ * things there, failing the boot: a relay block (the default `{}` and an
+ * absent key included) on a deployment that declared it has no control
+ * plane, and an inline secret.
+ * A host that composes the plugin in code hands it the value through the
+ * constructor instead. No `OS_PUSH_*` environment variable carries any of
+ * it: the vendor blocks hold no secret to override, and each `credentialRef`
+ * already names one.
  *
- * Out of scope here: a hosted (cloud-side) configuration surface, and the
- * other vendors ADR-0012 §6 routes to alternate channel plugins (HMS,
- * Xiaomi, OPPO, vivo).
+ * Out of scope here: the domestic Android vendors (HMS / Honor / Xiaomi /
+ * OPPO / vivo). ADR-0012 §6.1 has the hosted relay front them in phase 2, as
+ * further values of `vendor`, the token type the sender routes on; there is
+ * no per-vendor plugin and no per-vendor channel.
  */
 
 /**
  * Push vendors core delivers through: `apns` (Apple) and `fcm` (Firebase).
  *
- * Closed on purpose. ADR-0012 §6 plugs the domestic Android vendors in as
- * alternate channel implementations, not as transports of this channel, so a
- * new value here is a spec change made together with its transport.
+ * Closed on purpose. `vendor` is the token type the sender routes on: the
+ * direct transport today, the hosted relay (the default) once served (ADR-0012
+ * §6.1). Phase 1 routes these two, and phase 2 adds the domestic Android
+ * vendors (HMS / Honor / Xiaomi / OPPO / vivo) behind the relay, with no
+ * per-vendor plugin and no per-vendor channel. So a new value here is
+ * a spec change made together with its transport: the relay's routing for
+ * that vendor.
  */
 export const PushVendorSchema = z.enum(['apns', 'fcm'])
   .describe('Push vendor core delivers through: apns (Apple Push Notification service) or fcm (Firebase Cloud Messaging HTTP v1)');
@@ -110,7 +162,7 @@ export const ApnsTransportConfigSchema = lazySchema(() => strictObject(
     credentialRef: secretReference('APNs .p8 signing key')
       .describe('Secrets-layer reference to the .p8 signing key (an environment-variable name in the open tier). Never the key itself'),
   },
-).describe('[PLANNED — not yet read] APNs transport with token-based auth (.p8 signing key by reference)'));
+).describe('APNs transport with token-based auth (.p8 signing key by reference)'));
 export type ApnsTransportConfig = z.input<typeof ApnsTransportConfigSchema>;
 
 /** FCM over the HTTP v1 API, authenticated by a service account. */
@@ -135,22 +187,103 @@ export const FcmTransportConfigSchema = lazySchema(() => strictObject(
     credentialRef: secretReference('FCM service-account JSON')
       .describe('Secrets-layer reference to the service-account JSON (an environment-variable name in the open tier). Never the JSON itself'),
   },
-).describe('[PLANNED — not yet read] FCM HTTP v1 transport (service-account JSON by reference)'));
+).describe('FCM HTTP v1 transport (service-account JSON by reference)'));
 export type FcmTransportConfig = z.input<typeof FcmTransportConfigSchema>;
 
+const RELAY_CREDENTIAL_GUIDANCE =
+  'Not authorable on the relay push transport. The hosted relay holds the APNs and FCM credentials and '
+  + 'authenticates this server by its cloud binding credential, so a relay block carries no credential. To deliver '
+  + "with your own APNs key or Firebase project (a white-label build), write `transport: 'direct'` with the vendor "
+  + 'blocks.';
+
+const DIRECT_ENDPOINT_GUIDANCE =
+  "Not authorable on the direct push transport: it sends straight to APNs and FCM. `endpoint` addresses the hosted "
+  + "relay, so write `transport: 'relay'` (or leave out the vendor blocks) to use it.";
+
+/** The message a direct block with no vendor block meets. */
+const PUSH_DIRECT_TRANSPORT_EMPTY_MESSAGE =
+  "A direct push transport names at least one vendor block (`apns` or `fcm`), each with its `credentialRef`. "
+  + "With no vendor block it delivers to nothing: to deliver through the hosted relay, write `transport: 'relay'` "
+  + 'or leave `transport` out.';
+
 /**
- * The push channel's transport configuration: one optional block per vendor.
- * A vendor with no block is a vendor this deployment does not deliver
- * through.
+ * The hosted push relay: the default transport. The relay holds the APNs and
+ * FCM credentials of the store-published app and authenticates this server by
+ * its cloud binding credential, so the block carries none.
  */
-export const PushServiceConfigSchema = lazySchema(() => strictObject(
+export const PushRelayTransportConfigSchema = lazySchema(() => strictObject(
   {
-    surface: 'the push transport configuration',
-    history: 'This block is strict from birth — no push configuration existed before it.',
+    surface: 'the relay push transport',
+    history: 'This block is strict from birth — no relay configuration existed before it.',
+    aliases: { url: 'endpoint', relayUrl: 'endpoint' },
+    guidance: {
+      apns: RELAY_CREDENTIAL_GUIDANCE,
+      fcm: RELAY_CREDENTIAL_GUIDANCE,
+      credentialRef: RELAY_CREDENTIAL_GUIDANCE,
+      credential: RELAY_CREDENTIAL_GUIDANCE,
+      token: RELAY_CREDENTIAL_GUIDANCE,
+      apiKey: RELAY_CREDENTIAL_GUIDANCE,
+      key: RELAY_CREDENTIAL_GUIDANCE,
+      secret: RELAY_CREDENTIAL_GUIDANCE,
+    },
   },
   {
+    transport: z.literal('relay').default('relay')
+      .describe('The hosted push relay. The default: a block with no vendor block reads as relay'),
+    endpoint: z.string().url().regex(/^https:\/\//, {
+      message: 'The push relay endpoint is an https URL: every request carries the server binding credential.',
+    }).optional().describe(
+      'The push relay URL, for a staging relay only. Absent: the production relay. https only, because every request '
+      + 'carries the server binding credential',
+    ),
+  },
+).describe('The hosted push relay transport (the default): authenticated by the server cloud binding credential, so it carries none. '
+  + 'Read by the push service, which sends each push to the relay once the server is bound to the cloud'));
+export type PushRelayTransportConfig = z.input<typeof PushRelayTransportConfigSchema>;
+/** Post-parse shape of {@link PushRelayTransportConfig} — `transport` filled in (ADR-0122). */
+export type PushRelayTransportConfigParsed = z.infer<typeof PushRelayTransportConfigSchema>;
+
+/**
+ * Direct delivery to APNs and FCM with the operator's own credentials, for a
+ * white-label build: one optional block per vendor, at least one present. A
+ * vendor with no block is a vendor this deployment does not deliver through.
+ */
+export const PushDirectTransportConfigSchema = lazySchema(() => strictObject(
+  {
+    surface: 'the direct push transport',
+    history: 'This block is strict from birth — before the relay existed it was the whole push configuration, with the same two vendor blocks.',
+    guidance: {
+      endpoint: DIRECT_ENDPOINT_GUIDANCE,
+    },
+  },
+  {
+    transport: z.literal('direct').default('direct')
+      .describe('Direct delivery with your own APNs key and Firebase project, for a white-label build. A block with a vendor block and no transport reads as direct'),
     apns: ApnsTransportConfigSchema.optional().describe('APNs transport (token-based auth). Absent: no delivery to apns devices'),
     fcm: FcmTransportConfigSchema.optional().describe('FCM HTTP v1 transport. Absent: no delivery to fcm devices'),
   },
-).describe('[PLANNED — not yet read] Push channel transport configuration: one optional block per vendor (apns, fcm). Nothing reads it until the push channel plugin ships'));
+).refine(requiredOneOf(['apns', 'fcm']), { message: PUSH_DIRECT_TRANSPORT_EMPTY_MESSAGE })
+  .describe('Direct push transport for a white-label build: one block per vendor (apns, fcm), at least one, each naming its credential by reference; read by the push service'));
+export type PushDirectTransportConfig = z.input<typeof PushDirectTransportConfigSchema>;
+/** Post-parse shape of {@link PushDirectTransportConfig} — `transport` filled in (ADR-0122). */
+export type PushDirectTransportConfigParsed = z.infer<typeof PushDirectTransportConfigSchema>;
+
+/**
+ * The push channel's transport configuration: the hosted relay (the default)
+ * or direct delivery, discriminated by `transport`.
+ *
+ * A block that names `transport` is judged by that transport alone. A block
+ * that leaves it out is tried as the relay and then as direct, so `{}` reads
+ * as the relay and a block with a vendor block reads as direct.
+ */
+export const PushServiceConfigSchema = lazySchema(() => z.discriminatedUnion(
+  'transport',
+  [PushRelayTransportConfigSchema, PushDirectTransportConfigSchema],
+  // Both members default `transport`, so neither owns its absence: an absent
+  // tag falls back to trying the members in order, relay first.
+  { unionFallback: true },
+).describe('Push channel transport configuration: the hosted relay (the default) or direct delivery to apns and fcm for a white-label build. '
+  + 'The push service reads it: relay sends through the hosted relay with the server cloud binding, and direct drives the vendor transports'));
 export type PushServiceConfig = z.input<typeof PushServiceConfigSchema>;
+/** Post-parse shape of {@link PushServiceConfig} — `transport` filled in (ADR-0122). */
+export type PushServiceConfigParsed = z.infer<typeof PushServiceConfigSchema>;

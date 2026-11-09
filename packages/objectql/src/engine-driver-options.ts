@@ -20,6 +20,18 @@
  *
  * Nothing stays behind in this section: every member of it moved.
  *
+ * ## A driver is handed the declared driver options and nothing else
+ *
+ * Since the move, this module also owns the engine → driver hop's key set:
+ * `declaredDriverOptionKeys` (the keys `DriverOptionsSchema` declares),
+ * `pickDeclaredDriverOptions` (a bag cut to those keys — what
+ * `buildDriverOptions` now returns, and what the engine's raw `execute` hands
+ * its driver) and `mergeDriverOptionsIntoHookView` (the `after*` hook view of
+ * `input.options`, which stays the caller's bag with the driver options merged
+ * on). The engine builds the driver's options with `buildDriverOptions` and
+ * hands a driver that object; the merged view goes to hooks, never to a
+ * driver.
+ *
  * ## The transaction seam's same-origin half (ADR-0119, ADR-0067)
  *
  * `buildDriverOptions` threads the open transaction handle only to the driver
@@ -44,9 +56,14 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
-import { isTenancyDisabled } from '@objectstack/spec/data';
+import { DriverOptionsSchema, isTenancyDisabled } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import {
   // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
@@ -95,7 +112,178 @@ function accessibleOrganizationsOf(execCtx: ExecutionContext | undefined): strin
   return Array.isArray(set) && set.length > 0 ? set.map(String) : undefined;
 }
 
-/** The body of `ObjectQL#buildDriverOptions`; the method's docblock there is its contract. */
+/**
+ * Does this shape member admit only absence? That is a `retiredKey()`
+ * tombstone (`z.never()` under its `.optional()`): declared so the removal is
+ * audible, never a key a driver is handed. Structural, as the spec's own
+ * `acceptsNothing` walker reads it, so it holds however the tombstone helper is
+ * spelled.
+ */
+function admitsOnlyAbsence(member: unknown, depth = 0): boolean {
+  if (depth > 6) return false;
+  const def = (member as { _zod?: { def?: { type?: string; innerType?: unknown } } } | undefined)?._zod?.def;
+  if (!def?.type) return false;
+  if (def.type === 'never') return true;
+  return def.type === 'optional' || def.type === 'nullable' || def.type === 'default' || def.type === 'readonly'
+    ? admitsOnlyAbsence(def.innerType, depth + 1)
+    : false;
+}
+
+let declaredDriverOptionKeysMemo: ReadonlySet<string> | undefined;
+
+/**
+ * The option keys a driver is handed: the ones `DriverOptionsSchema` declares,
+ * minus its tombstones. Read off the schema on first use (it is lazy) and never
+ * restated here, so a key the spec declares reaches every driver with no edit
+ * in this file, and a key it does not declare reaches none.
+ */
+export function declaredDriverOptionKeys(): ReadonlySet<string> {
+  if (declaredDriverOptionKeysMemo === undefined) {
+    const shape = DriverOptionsSchema.shape as Record<string, unknown>;
+    declaredDriverOptionKeysMemo = new Set(Object.keys(shape).filter((key) => !admitsOnlyAbsence(shape[key])));
+  }
+  return declaredDriverOptionKeysMemo;
+}
+
+/**
+ * The engine → driver hop: a copy of `bag` holding its declared driver-option
+ * keys ({@link declaredDriverOptionKeys}) and nothing else, or `undefined` when
+ * there is no bag. Copied as a spread copies (own enumerable keys), so a
+ * declared key keeps exactly the value it had.
+ *
+ * A caller's option bag is not a driver option bag: it carries the query, the
+ * write-observability callbacks and the other engine-level keys of its
+ * `Engine*Options` contract, which the engine reads and the driver contract
+ * never declared. They are dropped here without a sound — the caller's bag was
+ * already judged at the engine's own door, so nothing dropped here is the
+ * caller's mistake.
+ */
+export function pickDeclaredDriverOptions(bag: unknown): Record<string, unknown> | undefined {
+  if (bag === null || typeof bag !== 'object') return undefined;
+  const source = bag as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+  for (const key of declaredDriverOptionKeys()) {
+    if (Object.prototype.propertyIsEnumerable.call(source, key)) picked[key] = source[key];
+  }
+  return picked;
+}
+
+/**
+ * `input.options` once the driver options are built — the `after*` phase of
+ * the HookContext PHASE contract (`hook.zod.ts`): the caller's bag with the
+ * driver options merged on. ADDITIVE, as that contract states: every key the
+ * caller's bag carried stays readable to a hook. This view is the hooks', and
+ * only the hooks': the driver is handed `driverOptions` itself.
+ *
+ * Answers the caller's own bag, the same object, when the driver options add
+ * nothing to it, and a COPY of `driverOptions` when there is no caller bag —
+ * never `driverOptions` itself, so the hooks' view and the driver's bag are
+ * never one object, whatever order a later edit puts a hook and a driver
+ * call in.
+ */
+export function mergeDriverOptionsIntoHookView(
+  callerBag: unknown,
+  driverOptions: Record<string, unknown> | undefined,
+): unknown {
+  if (driverOptions === undefined) return callerBag;
+  if (callerBag === null || typeof callerBag !== 'object') return { ...driverOptions };
+  const bag = callerBag as Record<string, unknown>;
+  const addsNothing = Object.keys(driverOptions).every(
+    (key) => Object.prototype.propertyIsEnumerable.call(bag, key) && bag[key] === driverOptions[key],
+  );
+  return addsNothing ? callerBag : { ...bag, ...driverOptions };
+}
+
+/**
+ * Build the DriverOptions blob passed to every IDataDriver call.
+ *
+ * # The tenant read scope is the wall's verdict (ADR-0131 D8)
+ *
+ * The driver's native tenant scope — `tenantId` (equality) and `tenantIds`
+ * (the `group` union), which `applyTenantScope` compiles — is the Layer 0
+ * verdict projected onto `DriverOptions`, never a second derivation beside
+ * it. One function decides ({@link computeTenantLayer0Verdict},
+ * `@objectstack/core`), and the engine reads it from one of two places:
+ *
+ * - **the verdict the wall RECORDED on this operation**
+ *   ({@link OperationContext.tenantLayer0Verdict}, passed in as
+ *   `scope.recordedVerdict`) — present where the security layer composed its
+ *   wall onto the predicate: a read, or a predicate write. It already carries
+ *   what only that layer can know (the exempt `PLATFORM_ADMIN` on a
+ *   posture-permitting object, the verified platform owner's read, the
+ *   delegator's intersection), so the driver reaches exactly the rows Layer 0
+ *   admits;
+ * - **otherwise, the same function over the engine's own facts** — the
+ *   posture in force ({@link resolveEnginePosture}), the context's active
+ *   organization and access set, the object's tenancy — with no admin
+ *   exemption, since the engine holds no permission sets. That covers a
+ *   system context, a by-id write, and a composition with no security layer
+ *   mounted.
+ *
+ * Projected: `none` (the `single` posture; a non-tenant, tenancy-disabled or
+ * federated object; an exempt platform admin) → no scope; `organization` →
+ * `tenantId`; `organizations` → `tenantIds`, with the active organization as
+ * `tenantId` (the driver keys its scope on `tenantId` being present); `deny`
+ * → the active organization if there is one — the narrowest scope a driver
+ * can express, and where the wall ran its deny sentinel is already in the
+ * predicate. Under `single` the driver therefore no longer narrows a read to
+ * the active organization: the posture is one tenant, and isolation inside it
+ * was never the driver's to add (ADR-0131 D11).
+ *
+ * # The write target is not a read scope
+ *
+ * An insert (`scope.writeTarget`) keeps the active organization as
+ * `tenantId` in EVERY posture — `injectTenantOnInsert` stamps the row with
+ * it, the counter scopes by it, and an upsert's identity probe refuses a
+ * merge into another organization's row by it — and the `group` membership
+ * set beside it, unchanged.
+ *
+ * # Withheld for two object postures
+ *
+ * 1. **`tenancy.enabled: false`** (ADR-0066 platform-global posture, e.g.
+ *    `sys_license`): stamping the caller's active-org tenantId there would
+ *    org-scope a global catalog at the driver, and its NULL-org rows would
+ *    vanish for authenticated org-context reads while anonymous reads still
+ *    see them (#3249).
+ *
+ * 2. **`isFederatedObject`** — a federated object (ADR-0015), whose schema
+ *    is owned by the REMOTE database (#7738). The driver turns `tenantId`
+ *    into `organization_id = :tenant`, and
+ *    against a remote table that carries no such column that is a SQL error
+ *    on Postgres/MySQL — or worse on SQLite, whose quoted-identifier
+ *    fallback reinterprets the unresolvable identifier as the string
+ *    literal `'organization_id'`, makes both disjuncts constant-false, and
+ *    answers **0 rows with HTTP 200**: a correctly-bound external object
+ *    silently reads empty.
+ *
+ *    Note the reason is NOT "the remote happens to lack the column". The
+ *    column the driver detects is the platform's OWN: `applySystemFields`
+ *    (`resolveInjectedSystemColumns`) injects `organization_id` into every
+ *    object it registers, with no `external` branch, and
+ *    `SqlDriver.registerExternalObject` is DDL-free by design and runs no
+ *    introspection — so it computes the tenant column from the platform's
+ *    field set, never from the remote's. On a federated object
+ *    `organization_id`'s presence is therefore always the injection and
+ *    never evidence about the remote, which leaves the engine no ground on
+ *    which to scope by it. Tenant isolation for federated data belongs to
+ *    the remote and to the layers above (RBAC/RLS, the datasource binding),
+ *    not to a predicate the platform guesses onto someone else's table.
+ *
+ * # Declared keys only
+ *
+ * The result holds the keys `DriverOptionsSchema` declares and nothing else
+ * (`pickDeclaredDriverOptions`, `engine-driver-options.ts`). `base` is
+ * usually a caller's whole option bag — the query, the write-observability
+ * callbacks and the other engine-level keys ride in it — and only its
+ * declared keys are kept: an explicitly-passed `base.tenantId` /
+ * `base.transaction` / `base.bypassTenantAudit` is deliberate caller intent
+ * and still wins, under every verdict; everything else in the bag is the
+ * engine's, never a driver's. That is why a verb hands its driver THIS
+ * object and keeps `input.options` as the hooks' additive view
+ * (`mergeDriverOptionsIntoHookView`). System / isSystem callers may still
+ * cross tenants by clearing `tenantId` themselves on the resulting object;
+ * this helper does not mask the system path.
+ */
 export function buildDriverOptions(
   this: Pick<DriverOptionsHost, 'isClosedUnitHandle' | 'txStore' | 'transactionCoversDriverFor' | '_registry' | 'driverWriteTarget' | 'driverReadScope' | 'wallExemptedOperation'>,
   object: string,
@@ -161,8 +349,13 @@ export function buildDriverOptions(
     tenantObject && isTenantAuditInScope && !scope.writeTarget &&
     this.wallExemptedOperation(execCtx, scope.recordedVerdict);
   const preserveAudit = (execCtx as any)?.preserveAudit === true;
-  if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return base;
-  const opts: any = base && typeof base === 'object' ? { ...base } : {};
+  // A driver is handed the keys `DriverOptionsSchema` declares and nothing
+  // else: the declared keys of `base` (a caller's explicit `tenantId` /
+  // `bypassTenantAudit` / `transaction` still win below), never the rest of
+  // the bag it rode in on. See {@link pickDeclaredDriverOptions}.
+  const declared = pickDeclaredDriverOptions(base);
+  if (!hasTx && !hasTenant && !isSystem && !hasTz && !preserveAudit && !wallExempt) return declared;
+  const opts: any = declared ?? {};
   if (hasTx && opts.transaction === undefined) {
     opts.transaction = tx;
   }
@@ -216,7 +409,16 @@ export function buildDriverOptions(
   return opts;
 }
 
-/** The body of `ObjectQL#driverReadScope`; the method's docblock there is its contract. */
+/**
+ * [ADR-0131 D8] The driver's native read scope for one operation — the Layer
+ * 0 verdict projected onto `DriverOptions` (see {@link buildDriverOptions}).
+ * `undefined` is "no scope"; the caller has already excluded a
+ * tenancy-disabled or federated object.
+ *
+ * A recorded verdict that does not parse as `TenantLayer0VerdictSchema`
+ * reads as absent — never as an organization — and the engine then decides
+ * over its own facts, which carry no admin exemption: fail toward the wall.
+ */
 export function driverReadScope(
   this: Pick<DriverOptionsHost, 'engineLayer0Verdict'>,
   execCtx: ExecutionContext | undefined,
@@ -240,7 +442,11 @@ export function driverReadScope(
   }
 }
 
-/** The body of `ObjectQL#engineLayer0Verdict`; the method's docblock there is its contract. */
+/**
+ * The Layer 0 verdict over the engine's OWN facts — what {@link driverReadScope}
+ * falls back to where no wall was recorded. The one ladder,
+ * `computeTenantLayer0Verdict`, with the exemption's facts withheld.
+ */
 export function engineLayer0Verdict(
   this: Pick<DriverOptionsHost, 'resolveEnginePosture'>,
   execCtx: ExecutionContext | undefined,
@@ -263,7 +469,22 @@ export function engineLayer0Verdict(
   });
 }
 
-/** The body of `ObjectQL#wallExemptedOperation`; the method's docblock there is its contract. */
+/**
+ * [ADR-0131 D8 · 8c-1] Did the wall's EXEMPTION lift this operation's scope?
+ * True when the recorded verdict is `none` while the same ladder over the
+ * engine's own facts — every rung but the exemption — would have walled it.
+ * That is plugin-security's own `crossedByPlatformAdmin` test (the ladder
+ * asked a second time with only the exemption withheld), with the engine's
+ * existing fallback ({@link engineLayer0Verdict}, what an unrecorded
+ * operation is scoped by) as the second asking: no rung is computed beside
+ * the one ladder, and a `single` posture answers `none` both ways, so it is
+ * no crossing. The #12974 owner bypass records `none` on READS only, where
+ * the declaration is inert.
+ *
+ * Absence is not exemption: a by-id write, a system context or a stack with
+ * no security layer records nothing, and answers false. A recorded value
+ * that does not parse answers false too — junk never lifts anything.
+ */
 export function wallExemptedOperation(
   this: Pick<DriverOptionsHost, 'engineLayer0Verdict'>,
   execCtx: ExecutionContext | undefined,
@@ -279,7 +500,12 @@ export function wallExemptedOperation(
   return this.engineLayer0Verdict(execCtx, activeOrganization).kind !== 'none';
 }
 
-/** The body of `ObjectQL#driverWriteTarget`; the method's docblock there is its contract. */
+/**
+ * The write target of an insert or upsert: the active organization, in every
+ * posture, with the `group` membership set beside it — the scope the
+ * driver's insert readback and upsert identity probe narrow by (ADR-0105 D5:
+ * the active organization is where a write lands).
+ */
 export function driverWriteTarget(
   this: Pick<DriverOptionsHost, 'resolveEnginePosture'>,
   execCtx: ExecutionContext | undefined,
@@ -290,7 +516,27 @@ export function driverWriteTarget(
   return { tenantId: execCtx.tenantId as string, ...(tenantIds ? { tenantIds: [...tenantIds] } : {}) };
 }
 
-/** The body of `ObjectQL#resolveEnginePosture`; the method's docblock there is its contract. */
+/**
+ * [#8844] The tenancy posture IN FORCE for this engine, by the same two-step
+ * `app-plugin.organizationWallActive` uses and for the same reason: the
+ * injected provider is the `tenancy` service's answer (what is actually
+ * ENFORCED, degraded boots included), and the env resolution is what the
+ * operator ASKED for — the best fact available to a lean embedding that
+ * mounts no SecurityPlugin.
+ *
+ * ⛔ Never `resolveMultiOrgEnabled()`: ADR-0105 D1 demoted that boolean to a
+ * back-compat INPUT of `resolveTenancyPosture()`, so it reads `false` on a
+ * deployment configured the documented way and would put a fully walled
+ * install on the single-tenant branch below — the third recurrence of that
+ * shape is what `app-plugin` documents.
+ *
+ * Read live per call, never cached: nothing here may freeze a verdict a later
+ * boot phase can still change. `resolveTenancyPosture()` THROWS on an
+ * unrecognized `OS_TENANCY_POSTURE` (deliberately — a typo'd posture must not
+ * silently remove the wall); a write is not the place that refusal belongs,
+ * and an unreadable posture is exactly the case where guessing `single` would
+ * be worst, so it degrades to the walled reading and the write is refused.
+ */
 export function resolveEnginePosture(
   this: Pick<DriverOptionsHost, 'tenancyPostureProvider'>,
 ): TenancyPosture {

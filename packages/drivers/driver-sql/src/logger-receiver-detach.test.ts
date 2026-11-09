@@ -48,13 +48,15 @@
  * ⓪ the doubles (and the platform's real logger) are receiver-sensitive.
  * ① the `info` site, driven through the real dev auto-reconcile path.
  * ② the durability sites, driven through the real declared-index sync.
- * ③ a structural pin over `sql-driver.ts` itself: no detach-then-call shape
- *   survives anywhere in the file, in ANY of the four spellings the sweep
- *   measured — including the two a single-line regex cannot see.
+ * ③ a structural pin over `sql-driver.ts` itself, and every non-test
+ *   `sql-driver*.ts` module beside it (#29520: the codemod split moves bodies
+ *   out of the host): no detach-then-call shape survives anywhere in them, in
+ *   ANY of the four spellings the sweep measured — including the two a
+ *   single-line regex cannot see.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import ts from 'typescript';
 import { createLogger } from '@objectstack/core';
 import { SqlDriver } from './sql-driver.js';
@@ -493,11 +495,49 @@ describe('[#12792] ③ no detach-then-call shape survives in sql-driver.ts', () 
     expect(found.filter((f) => f.line >= 13)).toEqual([]);
   });
 
-  it('sql-driver.ts contains none of them', () => {
-    const source = readFileSync(new URL('./sql-driver.ts', import.meta.url), 'utf8');
-    expect(
-      scan(source, 'sql-driver.ts').map((f) => `${f.shape} @${f.line}: ${f.text.trim()}`),
-      'every log call must go through a property access so the receiver stays bound',
-    ).toEqual([]);
+  // [#29520 codemod] The split moves `SqlDriver` method bodies (log calls
+  // included) out of `sql-driver.ts` into generated `sql-driver-*.ts` modules,
+  // and which modules exist depends on what the codemod moves on the `main` it
+  // is re-run on. So the pin reads the host and EVERY non-test `sql-driver*.ts`
+  // beside it by listing the directory, not by a named list that would rot at
+  // the next regeneration. The pin asserts an absence, so a file it stops
+  // reading would keep it green while it checked less; the floor below makes a
+  // listing that finds nothing past the host fail instead.
+  const SCANNED = readdirSync(new URL('.', import.meta.url))
+    .filter((name) => /^sql-driver.*\.ts$/.test(name) && !name.endsWith('.test.ts'))
+    .sort();
+
+  it('reads the host and every module split out of it', () => {
+    expect(SCANNED).toContain('sql-driver.ts');
+    expect(SCANNED.length).toBeGreaterThan(1);
   });
+
+  /**
+   * An explicit budget, sized to the measured work. The case parses every
+   * module in SCANNED with the TypeScript compiler and walks each tree twice
+   * (37 files, about 1.5 MB of source, at this commit). That work is the claim,
+   * so it is not cut. The case is synchronous, so vitest judges it after the
+   * body returns.
+   *
+   * Readings: the slowest `Test Core` reading is 2499 ms (`main` push and merge
+   * group runs, 2026-11-03..06, n=2); local idle, 442 and 469 ms.
+   *
+   * The rule (plugin-sharing's `share-link-password-webcontainer.test.ts`):
+   * a case whose slowest reading is over half the default gets 3x that
+   * reading, rounded up to the next second. 2499 ms is 1 ms under that line,
+   * and it takes the budget anyway: the default leaves it 2.0x, barely above
+   * the 1.88x spread between two CI runs that the rule's 3x was sized on, from
+   * only two readings. 3 x 2499 = 7497, so the budget is 8000. If the split
+   * adds modules, re-measure and re-size.
+   */
+  const SCAN_BUDGET_MS = 8_000;
+
+  it('sql-driver.ts and the modules split out of it contain none of them', () => {
+    const found = SCANNED.flatMap((name) =>
+      scan(readFileSync(new URL(`./${name}`, import.meta.url), 'utf8'), name).map(
+        (f) => `${name} ${f.shape} @${f.line}: ${f.text.trim()}`,
+      ),
+    );
+    expect(found, 'every log call must go through a property access so the receiver stays bound').toEqual([]);
+  }, SCAN_BUDGET_MS);
 });

@@ -217,21 +217,23 @@ describe('useConsoleActionRuntime — authenticated handlers', () => {
     expect(res).toEqual({ success: false, error: 'HTTP 500' });
   });
 
-  it('apiHandler turns an entitlement 403 into the upgrade dialog, not a red error toast', async () => {
-    // Free org that already has its production env clicks "create" → the control
-    // plane 403s with DEV_ENV_PLAN_LOCKED. The runtime must open a friendly
-    // dialog and NOT return an `error` (which the ActionRunner would toast red).
+  it('apiHandler turns an entitlement 403 into the limit dialog, not a red error toast', async () => {
+    // An org that already owns its one production environment POSTs "create"
+    // (e.g. from the no-signal state, where the metadata label still renders)
+    // → the control plane 403s with PRODUCTION_ENV_LIMIT. The runtime must open
+    // a friendly dialog and NOT return an `error` (which the ActionRunner would
+    // toast red).
     authFetchSpy.mockResolvedValue({
       ok: false,
       status: 403,
       json: async () => ({
         success: false,
         error: {
-          code: 'DEV_ENV_PLAN_LOCKED',
-          message: 'Development environments are a paid feature. Upgrade to add them.',
+          code: 'PRODUCTION_ENV_LIMIT',
+          message: 'Each organization includes exactly one production environment.',
           httpStatus: 403,
           // Business context lives in the declared `details` slot (cloud#1046).
-          details: { upgrade_url: '/settings/billing', plan: 'free' },
+          details: { current: 1, limit: 1, contact_url: 'mailto:sales@example.com' },
         },
       }),
     });
@@ -252,9 +254,9 @@ describe('useConsoleActionRuntime — authenticated handlers', () => {
     expect(res).toEqual({ success: false });
     expect(onRefresh).not.toHaveBeenCalled();
 
-    // …and the shared entitlement dialog is now open with the upgrade title.
+    // …and the shared entitlement dialog is now open with the limit title.
     render(<>{result.current.dialogs}</>);
-    expect(await screen.findByText('Development environments are a paid feature')).toBeTruthy();
+    expect(await screen.findByText('You already have your production environment')).toBeTruthy();
   });
 
   it('apiHandler does NOT open the entitlement dialog for the retired flat error shape', async () => {
@@ -268,10 +270,9 @@ describe('useConsoleActionRuntime — authenticated handlers', () => {
       status: 403,
       json: async () => ({
         success: false,
-        error: 'Development environments are a paid feature. Upgrade to add them.',
-        code: 'DEV_ENV_PLAN_LOCKED',
-        upgrade_url: '/settings/billing',
-        plan: 'free',
+        error: 'Each organization includes exactly one production environment.',
+        code: 'PRODUCTION_ENV_LIMIT',
+        contact_url: 'mailto:sales@example.com',
       }),
     });
     const { result } = renderHook(() =>
@@ -287,11 +288,49 @@ describe('useConsoleActionRuntime — authenticated handlers', () => {
 
     expect(res).toEqual({
       success: false,
-      error: 'Development environments are a paid feature. Upgrade to add them.',
+      error: 'Each organization includes exactly one production environment.',
     });
     render(<>{result.current.dialogs}</>);
-    expect(screen.queryByText('Development environments are a paid feature')).toBeNull();
+    expect(screen.queryByText('You already have your production environment')).toBeNull();
   });
+
+  // objectstack-ai/cloud#3487 D retires the development environment type, and
+  // with it the development refusals: the Console keeps no dialog copy for
+  // them, so a control plane that still answers one gets the ordinary error
+  // path, carrying the server's own (localized) message.
+  it.each(['DEV_ENV_PLAN_LOCKED', 'DEV_ENV_LIMIT', 'DEV_ENV_RETIRED'])(
+    'apiHandler takes the ordinary error path for the retired development code %s',
+    async (code) => {
+      authFetchSpy.mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({
+          success: false,
+          error: {
+            code,
+            message: 'Each organization has one environment.',
+            httpStatus: 403,
+            details: { upgrade_url: '/settings/billing', plan: 'free' },
+          },
+        }),
+      });
+      const { result } = renderHook(() =>
+        useConsoleActionRuntime({ dataSource: {}, objects: [] }),
+      );
+
+      let res: any;
+      await act(async () => {
+        res = await result.current.apiHandler({
+          type: 'api', name: 'create_environment', target: '/api/v1/cloud/environments',
+        } as any);
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toBeTruthy();
+      render(<>{result.current.dialogs}</>);
+      expect(screen.queryByTestId('environment-entitlement-dialog')).toBeNull();
+    },
+  );
 
   it('apiHandler merges bodyExtra into the dataSource update payload (pure-confirmation action)', async () => {
     // A pure-confirmation action carries no params array; its mutation lives in

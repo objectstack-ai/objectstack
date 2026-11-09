@@ -232,6 +232,13 @@ export const ShowcaseTranslationBundle = {
           tax_rate: { label: 'Tax Rate (%)' },
           paid_on: { label: 'Paid On' },
           total: { label: 'Total' },
+          // Translated at birth (the multi-currency fields, ADR-0144):
+          // check-i18n-coverage ratchets this example at its untranslated count.
+          currency_code: { label: 'Currency' },
+          invoice_date: { label: 'Invoice Date' },
+          amount: { label: 'Total incl. Tax' },
+          amount_home: { label: 'Total incl. Tax (Home Currency)' },
+          amount_rate: { label: 'Exchange Rate' },
         },
         // `ui/pages/invoice-document.page.ts` `record:details` sections — the
         // invoice print page's headings.
@@ -382,7 +389,8 @@ export const ShowcaseTranslationBundle = {
         // hence 任务数; `total_estimate` reuses showcase_task's 预计工时.
         fields: {
           name: { label: '项目名称' },
-          account: { label: '客户' },
+          // The account page's Projects list, titled by this lookup.
+          account: { label: '客户', relatedListTitle: '项目' },
           owner: { label: '负责人邮箱' },
           status: {
             label: '状态',
@@ -449,7 +457,8 @@ export const ShowcaseTranslationBundle = {
         pluralLabel: '任务',
         fields: {
           title: { label: '标题' },
-          project: { label: '项目' },
+          // The project page's Tasks list, titled by this master-detail.
+          project: { label: '项目', relatedListTitle: '任务' },
           assignee: { label: '负责人' },
           status: {
             label: '状态',
@@ -730,7 +739,8 @@ export const ShowcaseTranslationBundle = {
         pluralLabel: '发票',
         fields: {
           name: { label: '发票号' },
-          account: { label: '客户' },
+          // The account page's Invoices table, titled by this lookup.
+          account: { label: '客户', relatedListTitle: '发票' },
           contact: { label: '联系人' },
           owner: { label: '负责人邮箱' },
           status: { label: '状态' },
@@ -738,6 +748,11 @@ export const ShowcaseTranslationBundle = {
           tax_rate: { label: '税率 (%)' },
           paid_on: { label: '付款日期' },
           total: { label: '合计' },
+          currency_code: { label: '币种' },
+          invoice_date: { label: '发票日期' },
+          amount: { label: '含税总额' },
+          amount_home: { label: '含税总额（本位币）' },
+          amount_rate: { label: '汇率' },
         },
         _sections: {
           invoice: { label: '发票' },
@@ -876,7 +891,9 @@ export const ShowcaseTranslationBundle = {
         description: '组织架构层级——在自引用对象上演示树形 / 树形表格视图。',
         fields: {
           name: { label: '名称' },
-          parent: { label: '上级单元' },
+          // The self-lookup's related-list title on a unit's record page,
+          // translated at birth like the label beside it.
+          parent: { label: '上级单元', relatedListTitle: '下级单元' },
           kind: {
             label: '类型',
             options: { company: '公司', division: '事业部', department: '部门', team: '团队' },
@@ -1367,16 +1384,16 @@ export const ShowcaseTranslationBundle = {
     // `check-i18n-coverage` like every other declared label: a new position or
     // set that skips zh-CN widens the debt.
     positions: {
-      contributor: { label: '贡献者', description: '处理自己项目中的任务。' },
-      manager: { label: '项目经理', description: '管理项目及其中的贡献者。' },
-      exec: { label: '高管', description: '用于报表的全量只读可见性。' },
-      auditor: { label: '审计员', description: '跨私有记录的合规只读视图（viewAllRecords）。' },
-      ops: { label: '运营', description: '后台运营 — Setup 访问、公告修复、运营应用。' },
-      field_ops_delegate: { label: '现场运营委派管理员', description: '对现场运营业务单元子树的范围化管理。' },
-      client_liaison: { label: '客户联络人', description: '准备并发布面向客户的项目简报；看不到内部预算数据。' },
-      client_portal_user: { label: '客户门户用户', description: '获准进入客户门户的外部客户。' },
-      finance: { label: '财务', description: '发票和大额费用的财务签批权（仅用于审批路由）。' },
-      legal: { label: '法务', description: '发票和大额费用的法务签批权（仅用于审批路由）。' },
+      showcase_contributor: { label: '贡献者', description: '处理自己项目中的任务。' },
+      showcase_manager: { label: '项目经理', description: '管理项目及其中的贡献者。' },
+      showcase_exec: { label: '高管', description: '用于报表的全量只读可见性。' },
+      showcase_auditor: { label: '审计员', description: '跨私有记录的合规只读视图（viewAllRecords）。' },
+      showcase_ops: { label: '运营', description: '后台运营 — Setup 访问、公告修复、运营应用。' },
+      showcase_field_ops_delegate: { label: '现场运营委派管理员', description: '对现场运营业务单元子树的范围化管理。' },
+      showcase_client_liaison: { label: '客户联络人', description: '准备并发布面向客户的项目简报；看不到内部预算数据。' },
+      showcase_client_portal_user: { label: '客户门户用户', description: '获准进入客户门户的外部客户。' },
+      showcase_finance: { label: '财务', description: '发票和大额费用的财务签批权（仅用于审批路由）。' },
+      showcase_legal: { label: '法务', description: '发票和大额费用的法务签批权（仅用于审批路由）。' },
     },
     permissions: {
       showcase_contributor: { label: '示例贡献者' },

@@ -18,16 +18,12 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: ui
   tags: view, app, page, dashboard, report, chart, action, widget, doc
 ---
 
 # UI Design — ObjectStack UI Protocol
-
-Expert instructions for designing user interfaces using the ObjectStack
-specification. This skill covers Views (list, form, kanban, calendar, …),
-App navigation, Dashboards, Reports, and Actions.
 
 ---
 
@@ -46,6 +42,14 @@ App navigation, Dashboards, Reports, and Actions.
 | `map` | Geospatial records with `location` fields |
 | `chart` | Aggregate visualisation over the object (mini chart view) |
 | `tree` | Self-referencing hierarchy (tree-grid) |
+
+**Keep the kind the request names.** A photo wall, card wall or catalogue of
+covers is `gallery` (an image, avatar or file field as `gallery.coverField`),
+a schedule or timeline over a start/end date pair is `gantt`, a board is
+`kanban`; never downgrade a named kind to `grid`: the file parses and the user
+opens a table where they asked for a board. Adding one beside the list, and
+the empty board over a field added in the same change:
+[List Views](./rules/list-views.md#adding-a-board-calendar-gallery-or-gantt-beside-the-list).
 
 ### Form Views
 
@@ -114,8 +118,7 @@ ObjectUI forms consume them. Their semantics and server behaviour:
 
 UI-side: inline master-detail grids evaluate these rules **row-by-row** against
 each child row. Use `requiredWhen` — the `conditionalRequired` alias was REMOVED
-in protocol 17 and is now a parse error. Load **objectstack-formula** when
-authoring non-trivial CEL.
+in protocol 17 and is now a parse error.
 
 ---
 
@@ -183,14 +186,12 @@ Use this CRM-style structure as the canonical UI assembly reference:
 |:--|:--|:--|
 | Multi-view object UI | `src/views/*.view.ts` | Define default `list` + `form`, then named `listViews` / `formViews` for scenarios |
 | **Public form** | `src/views/*.view.ts` (formView with `sharing: { enabled: true, allowAnonymous: true, publicLink: 'slug' }`) | Web-to-Lead at `GET/POST /api/v1/forms/:slug` |
-| App navigation | `src/apps/*.app.ts` | Use grouped nav trees, `viewName` shortcuts, and `requiresObject` for capability-aware visibility |
+| App navigation | `src/apps/*.app.ts` | Grouped nav trees, `viewName` shortcuts, `requiresObject` |
 | **Analytics dataset** | `src/datasets/*.dataset.ts` | One per object you want reportable — dashboards and reports bind a **declared** dataset by name, so an object without one has no analytics face |
 | Dashboards | `src/dashboards/*.dashboard.ts` | Combine KPI + chart + table widgets with shared `dateRange` and `globalFilters` |
 | Reports | `src/reports/*.report.ts` | Select `rows` (dimensions) + `values` (measures) from that dataset; tabular/summary/matrix/joined |
-| Record pages | — (synthesized) | The object's declarations produce the page ([Record Page](./rules/record-page.md)); `src/pages/*.page.ts` only to override a `slotted` slot or for a `kind: 'full'` layout |
+| Record pages | — (synthesized) | The object's declarations produce the page ([Record Page](./rules/record-page.md)) |
 | User actions | `src/actions/*.actions.ts` | Use `flow` for orchestration and `script` for parameterized bulk mutations |
-
-This blueprint is the default for “build a complete metadata app UI” tasks.
 
 ---
 
@@ -233,19 +234,31 @@ Register them under `defineStack({ actions: [...] })`.
 | `api`    | Call a registered API endpoint                                     | `target`       |
 | `form`   | Open a FormView by name (routed to `/_console/forms/:name`)        | `target`       |
 
+**An operation is an `action`, never a view.** "Mark as done", "approve",
+"submit", "set status to X" — anything that DOES something to a record — is
+`defineAction` metadata; a view only displays. A record button carries
+`objectName` (what folds it into that object's record surfaces) and
+`locations`; with neither `locations` nor a view naming it in `rowActions` /
+`bulkActions` it renders nowhere (`action-no-placement`). **A write button must
+write:** `ctx.record` is a read-only snapshot and the body's return value is
+applied to nothing, so a body that only returns the new values or assigns to
+`ctx.record` changes nothing and still reports success
+(`action-record-write-discarded`). Write with `type: 'script'` and
+`body: { language: 'js', source: "await ctx.api.object('task').update({ id: ctx.recordId, status: 'done' });", capabilities: ['api.write'] }`:
+`js`, because an `expression` body is a pure formula with no I/O; `api.write`,
+because the sandbox throws on `ctx.api…update` / `insert` / `delete` without
+it; the option `value`, never its label. A multi-step operation is
+`type: 'flow'` with `target` naming a flow you also author.
+
 ---
 
 ## Common Pitfalls
 
-1. **Putting too many columns in a grid view.**
-   Users rarely need more than 6–8 columns visible by default. Use `hidden`
-   for secondary columns.
+1. **Too many default columns, or no `link: true` on the primary one.** 6–8
+   visible columns is plenty (`hidden` the rest); the name/subject column is
+   the record link ([Columns](./rules/list-views.md#column-features)).
 
-2. **Forgetting `link: true` on the primary column.**
-   The first meaningful column (usually the name/subject) should be the
-   navigation link to the record detail.
-
-3. **Putting widget grid placement in `position`.**
+2. **Putting widget grid placement in `position`.**
    The grid-placement field is `layout: { x, y, w, h }` — `position` is not a
    widget key and the closed schema REJECTS it by name (it was silently
    dropped before protocol 17). `layout` is optional: omit it and the widget
@@ -264,18 +277,17 @@ os validate     # CEL predicates (record.<field>) + widget bindings + schema
 # or: os build  # the same gates, plus emits dist/
 ```
 
-Two UI-specific traps it catches, both **silent at runtime** otherwise:
+Two UI-specific traps it catches, otherwise met only at runtime:
 
 - **Action / field predicate** — a bare field ref in an action `visible` /
   `disabled` or a field `visibleWhen` (`done` instead of `record.done`)
-  evaluates to `null` and hides the control on *every* record (the
-  "button never shows" trap).
+  faults on *every* record: the action hides (`visible`) or greys out
+  (`disabled`), the field shows; the console logs the fault.
 - **Dashboard widget binding** — a widget `dataset` / `dimensions` / `values`
   that doesn't resolve to a declared dataset/field renders an empty chart
   (ADR-0021).
 
-Don't report a view/action/dashboard done until `os validate` passes. In a
-scaffolded project the gate is `npm run validate`.
+In a scaffolded project the gate is `npm run validate`.
 
 ---
 

@@ -186,3 +186,70 @@ describe('ObjectPicker — when a name leaves it (objectui#11783)', () => {
     expect(h.previewList).toHaveBeenCalledWith('object');
   });
 });
+
+describe('ObjectPicker — objectsOnly: a door that takes no expression (objectstack#30038)', () => {
+  const refusal = () => document.querySelector('[data-object-refused]');
+
+  it('Enter on a typed prefix with one match left commits that match, not the prefix', async () => {
+    const { input, onCommit } = renderPicker({ objectsOnly: true });
+    await openList(input);
+    await userEvent.type(input, 'techn');
+    expect(offered()).toEqual(['repairs_technician']);
+    await userEvent.keyboard('{Enter}');
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith('repairs_technician');
+    expect(refusal()).toBeNull();
+  });
+
+  it('Enter on a prefix that leaves several matches commits no object and says none is chosen', async () => {
+    const { input, onCommit } = renderPicker({ objectsOnly: true });
+    await openList(input);
+    await userEvent.type(input, 'repairs');
+    expect(offered()).toHaveLength(2);
+    await userEvent.keyboard('{Enter}');
+    // The value was empty and stays empty: nothing to commit.
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(refusal()).toHaveTextContent(
+      t('engine.inspector.objectPicker.notChosen', 'en-US').replace('{text}', 'repairs'),
+    );
+  });
+
+  it('a typed name that is no object clears a chosen one, on Enter and on blur alike', async () => {
+    const enter = renderPicker({ objectsOnly: true, value: 'showcase_account' });
+    await openList(enter.input);
+    await userEvent.clear(enter.input);
+    await userEvent.type(enter.input, 'crm_custom_eval');
+    await userEvent.keyboard('{Enter}');
+    expect(enter.onCommit).toHaveBeenCalledTimes(1);
+    expect(enter.onCommit).toHaveBeenCalledWith('');
+    cleanup();
+
+    const blur = renderPicker({ objectsOnly: true, value: 'showcase_account' });
+    await openList(blur.input);
+    await userEvent.clear(blur.input);
+    await userEvent.type(blur.input, 'crm_custom_eval');
+    await userEvent.tab();
+    expect(blur.onCommit).toHaveBeenCalledTimes(1);
+    expect(blur.onCommit).toHaveBeenCalledWith('');
+    expect(refusal()).not.toBeNull();
+  });
+
+  it('a name typed out in full is committed as itself', async () => {
+    const { input, onCommit } = renderPicker({ objectsOnly: true });
+    await openList(input);
+    await userEvent.type(input, 'sys_file');
+    await userEvent.keyboard('{Enter}');
+    expect(onCommit).toHaveBeenCalledWith('sys_file');
+  });
+
+  it('without objectsOnly, the same one-match prefix is committed as typed (a flow reference may hold an expression)', async () => {
+    const { input, onCommit } = renderPicker();
+    await openList(input);
+    await userEvent.type(input, 'techn');
+    expect(offered()).toEqual(['repairs_technician']);
+    await userEvent.keyboard('{Enter}');
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith('techn');
+    expect(refusal()).toBeNull();
+  });
+});

@@ -228,8 +228,9 @@ export interface INotificationService {
      * Implemented by `@objectstack/service-messaging` (`MessagingService`,
      * over `sys_user_device`); `registerDevice` and `unregisterDevice` are
      * served by `POST` / `DELETE /api/v1/notifications/devices`.
-     * `listDevices` has no route, and `invalidateDeviceToken` is called by
-     * the push channel's invalid-recipient path.
+     * `listDevices` has no route: the `push` channel (`push-channel.ts`,
+     * also service-messaging) reads it to address the recipient's phones, and
+     * calls `invalidateDeviceToken` for a token the vendor reports dead.
      */
 
     /**
@@ -286,8 +287,8 @@ export interface INotificationService {
 
     /**
      * Retire a token the vendor reported dead (APNs `BadDeviceToken` /
-     * `Unregistered`, FCM `UNREGISTERED`), called by the push channel's
-     * invalid-recipient path (ADR-0012 §6, §12).
+     * `Unregistered`, FCM `UNREGISTERED`), called by the `push` channel when
+     * a send to that token is answered dead (ADR-0012 §6, §12).
      *
      * The device row is KEPT, disabled, with the time of invalidation, so
      * "why did this phone stop getting pushes" stays answerable and a later

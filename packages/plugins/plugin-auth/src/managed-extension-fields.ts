@@ -83,9 +83,22 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     // Generically editable since the 2026-09-03 ruling: see the editable map
     // below.
     'locale',
+    // ADR-0151 D1 — the AI service account's kind and its accountable owner.
+    // better-auth neither reads nor writes either (not `additionalFields`, for
+    // the `ai_access` reason above); declared so D7 proves better-auth's user
+    // schema owns neither name at the pinned version. Never generically
+    // editable: the kind is fixed at creation, the owner moves only through
+    // the change-owner door (`service-account-identity.ts`).
+    'principal_kind',
+    'accountable_user_id',
   ]),
   sys_organization: new Set([
-    // ADR-0069 D3 — per-org MFA tightening above the global floor.
+    // ADR-0069 D3 — the toggle-era per-org MFA column. Retired: an
+    // organization's multi-factor level is its `access_policy.mfa_required`
+    // setting (`organization-access-policy.ts`), and the boot move
+    // (`migrateLegacyOrganizationRequireMfa`) carries a stored `true` there
+    // and clears the column. Still ours (the column is still provisioned, so
+    // the move can read it); no longer editable — see below.
     'require_mfa',
     // ADR-0105 D6 — group structure. Reporting dimension ONLY: no permission
     // inheritance walks this reference (lint-enforced).
@@ -132,11 +145,12 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     // column here (see the editable map).
     'revoked',
     // Why a key was revoked, where the reason decides who may restore it
-    // (`admin_password_reset`: a platform administrator only). Deliberately
-    // NOT in the editable map: an owner who could clear it could restore the
-    // key the reset closed. Its one stamp is the forced reset
-    // (`forced-reset-revocation.ts`) and its one keeper is
-    // `api-key-restore-guard.ts`, both system-side.
+    // (`admin_password_reset` and `administrator_suspended`: a platform
+    // administrator only). Deliberately NOT in the editable map: an owner who
+    // could clear it could restore the key the reset or the administrator
+    // closed. Its stamps are the forced reset (`forced-reset-revocation.ts`)
+    // and the restore guard's own write on a platform administrator's revoke
+    // of a key they do not own; its one keeper is `api-key-restore-guard.ts`.
     'revoked_reason',
     'key',
   ]),
@@ -180,12 +194,13 @@ export const MANAGED_EXTENSION_EDITABLE_FIELDS: Readonly<Record<string, Readonly
   // `SYS_USER_PROFILE_EDIT_FIELDS` — see the warning above.
   sys_user: new Set(['locale']),
   sys_organization: new Set([
-    'require_mfa',
+    // `require_mfa` left this list with the multi-factor levels: a value
+    // written here would be read by nothing (ADR-0049), so the guard strips it.
     'parent_organization_id',
     'sort_order',
     // #14238 — the hierarchy's root default is a value an administrator SETS;
     // a column the guard strips on every user-context write would be a root
-    // default nobody can set. Same tier as `require_mfa` and the D6 pair.
+    // default nobody can set. Same tier as the D6 pair.
     // What reaches the row is still judged by the column itself:
     // `valueDomain: 'iana_time_zone'` refuses a non-member on the write path
     // (`org-hierarchy-timezone-write-contract.test.ts` drives both layers).

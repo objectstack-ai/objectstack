@@ -15,7 +15,8 @@ works on those records, and no row is stored on the platform side.
 
 The OData driver is a **plugin driver**, so everything [Virtual objects](/docs/data-modeling/virtual-objects)
 says about plugin drivers holds here too: the engine re-applies every query, a read
-matches at most 1000 rows, and the sharing model needs a deliberate choice. The one
+matches at most 1000 rows unless the datasource raises `external.rowCap`, and the
+sharing model needs a deliberate choice. The one
 difference is that this driver is already written.
 [Which way in](/docs/data-modeling/virtual-objects#which-way-in-odata-a-plugin-driver-or-a-real-object)
 says when to choose it over a driver of your own or a synced copy.
@@ -144,7 +145,11 @@ What each piece does on this driver:
   datasource page lists its entity sets on the **Tables** tab. **Import** saves one,
   and **Import selected** saves several, referenced entity sets first. An MCP client
   whose token carries `metadata:write` reaches the same import through
-  `list_remote_tables` and `import_object`. The draft maps each EDM type to a field
+  `list_remote_tables` and `import_object`. An import saves an object into the
+  environment's metadata, so under the `group` and `isolated` tenancy postures only
+  the platform operator imports, as only the platform operator saves any other
+  metadata there ([tenancy modes](/docs/deployment/tenancy-modes)). A refresh of the
+  datasource's catalog saves its snapshot there too, so the same holds for it. The draft maps each EDM type to a field
   type, makes the key the `id`, and writes `columnMap` for every property whose name is
   not a snake_case field name (`CategoryID` becomes `category_id`). EDM types with no
   field type, such as `Edm.Duration` or a service's own enum, are listed for review. An
@@ -258,7 +263,8 @@ plugins: [
   credential. An instance that cannot lend also fails the datasource's connect, so
   Setup → Integrations → Datasources shows why
   ([Borrowing a connector instance's credential](/docs/data-modeling/external-datasources#borrowing-a-connector-instances-credential)
-  has the rules the stack is validated against).
+  has the rules the stack is validated against, and how the datasource recovers without a
+  restart once the instance can lend).
 
 ## 4. What the service is asked
 
@@ -279,18 +285,21 @@ Prefer: odata.maxpagesize=500
   translated, so the service never returns fewer rows than match. This is also why a
   service that compares text case-insensitively still answers correctly.
 - **`$orderby`** carries the sort, then the entity key, so pages partition the result.
-- **Paging** follows `@odata.nextLink` until 1001 rows are read. A link to another
-  origin is refused, so the credential never goes to a host you did not configure.
+- **Paging** follows `@odata.nextLink` until the cap plus one row is read (`$top=1001`
+  above, at the default cap). A link to another origin is refused, so the credential
+  never goes to a host you did not configure.
 - **The page size and the total** are the engine's, applied to the rows read. A count
   is computed the same way. The engine aggregates in memory.
 
-**The 1000-row cap applies.** A read that matches more than 1000 rows answers
+**The row cap applies.** A read that matches more rows than the cap (1000 unless the
+datasource sets `external.rowCap`, at most 10,000) answers
 `422 EXTERNAL_ROW_CAP_EXCEEDED` rather than a partial set
-([the cap](/docs/data-modeling/virtual-objects#the-engine-re-applies-every-query)). Every
+([the row cap](/docs/data-modeling/virtual-objects#the-row-cap)). Every
 `$filter` the driver can push down makes the service return only matching rows, so the cap
 counts matching rows, not the whole entity set. Give list views a filter the service
-can run. For an entity set users must browse whole, mirror it into a real object
-instead.
+can run. The driver honours whatever `$top` it is sent, so a raised cap needs no
+driver change. For an entity set users must browse whole past the ceiling, mirror it
+into a real object instead.
 
 ## 5. Writes
 
@@ -382,7 +391,7 @@ The driver then speaks the public v2 protocol. Everything above holds, spelled t
 | A read the service refuses for its own sake (`400`, `404`, `422`) | `400 INVALID_QUERY`, with a message naming the entity set, the status and the service's own text |
 | A write the service refuses | `422 EXTERNAL_WRITE_REFUSED`, with the service's message |
 | A `5xx`, a timeout, an unreachable service, a `401` after the retry, a `403` or a `429` | `503 ERR_DATASOURCE_UNAVAILABLE`; the cause goes to the server log |
-| A read that matches more than 1000 rows | `422 EXTERNAL_ROW_CAP_EXCEEDED` |
+| A read that matches more rows than the cap (1000, or `external.rowCap`) | `422 EXTERNAL_ROW_CAP_EXCEEDED` |
 
 An outage is never answered as an empty list. A read refusal's message is withheld, and
 goes to the server log, when the read carries a predicate the caller did not write, such
@@ -397,7 +406,8 @@ as a sharing scope. The full mapping is in
   its own; an imported foreign key becomes a `lookup` onto it.
 - **Actions and functions** of the service. `execute` is refused.
 - **Transactions and `$batch`.** Each write is one request.
-- **More than 1000 matching rows** in one read (the cap above).
+- **More matching rows than the cap** in one read (the cap above: 1000, or the
+  datasource's `external.rowCap`, at most 10,000).
 - **A read scoped by a parent's access** (an object `controlled_by_parent`): it is
   refused, because `$filter` has no form of that join.
 

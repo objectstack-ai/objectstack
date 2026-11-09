@@ -39,7 +39,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       banned: {
         label: "已封禁",
-        help: "为 true 时，用户无法登录。可通过“封禁用户 / 解除封禁”操作切换。"
+        help: "开启后，用户无法登录。可通过“封禁用户 / 解除封禁”操作切换。"
       },
       ban_reason: {
         label: "封禁原因"
@@ -70,7 +70,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       must_change_password: {
         label: "须修改密码",
-        help: "为 true 时，用户会被阻止访问（403 PASSWORD_RESET_REQUIRED），直到修改密码。由管理员用户管理接口写入；系统维护。"
+        help: "开启后，用户必须先修改密码才能继续使用。管理员创建账号、导入用户或重置密码时会自动开启；系统维护。"
       },
       mfa_required_at: {
         label: "MFA 强制生效时间",
@@ -87,6 +87,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       ai_access: {
         label: "AI 访问权限",
         help: "该用户是否占用一个 AI 席位。席位授予 `ai_seat` 能力，可使用应用内的 AI 助手（build 和 ask）。可占用席位的用户数受许可证所含席位数限制。"
+      },
+      principal_kind: {
+        label: "主体类型",
+        help: "该用户是人员还是 AI 服务账号。AI 服务账号从不登录，只通过它自己的 API 密钥操作。在创建用户时设定，之后不会改变。",
+        options: {
+          human: "人员",
+          agent: "AI 服务账号"
+        }
+      },
+      accountable_user_id: {
+        label: "负责人",
+        help: "对于 AI 服务账号，指对它负责的人员。人员的此项为空。负责人自己的权限不会传给该账号。"
       },
       image: {
         label: "头像"
@@ -159,7 +171,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "封禁用户",
-        description: "要封禁该用户吗？封禁后会立即登出，且在解除封禁前无法再次登录。",
+        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝，OAuth 访问令牌与令牌续期同样被拒绝。解除封禁后这些密钥恢复可用。",
         successMessage: "用户已封禁",
         params: {
           banReason: {
@@ -252,6 +264,43 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "关闭",
           fields: {
             entries: "平台管理员"
+          }
+        }
+      },
+      register_service_account: {
+        label: "注册 AI 服务账号",
+        description: "在此组织中注册一个 AI 服务账号：为无人值守运行的智能体提供一个独立身份，它只能通过为其创建的 API 密钥行事。在被授予权限集之前它什么也做不了，并且永远不会拥有管理员权限。",
+        successMessage: "AI 服务账号已注册",
+        params: {
+          name: {
+            label: "名称",
+            helpText: "说明这个智能体是什么、用来做什么。用户列表和审计记录中靠这个名称识别该账号。"
+          },
+          ownerId: {
+            label: "责任人",
+            helpText: "对该账号负责的人，须是此组织的成员。留空则由你本人担任责任人。"
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "创建 API 密钥",
+        description: "为此 AI 服务账号创建一个 API 密钥。该密钥以账号本身的身份、按账号自己的授权，在账号所属的组织中行事。",
+        params: {
+          name: {
+            label: "密钥名称"
+          },
+          expires_at: {
+            label: "过期时间",
+            helpText: "留空则使用「设置 → 身份验证 → API 密钥」中的默认密钥有效期(未修改时为 90 天)。晚于该处密钥最长有效期的日期会被拒绝。"
+          }
+        },
+        resultDialog: {
+          title: "API 密钥已创建",
+          description: "请立即复制密钥——它只显示这一次，之后无法找回。如果泄露，请撤销它并创建新的密钥。",
+          acknowledge: "我已保存密钥",
+          fields: {
+            key: "API 密钥",
+            expires_at: "过期时间"
           }
         }
       },
@@ -369,7 +418,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "撤销原因",
-        help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、user_revoked、admin、organization_membership_ended、admin_password_reset 等）。"
+        help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset 等）。"
       },
       active_organization_id: {
         label: "当前组织"
@@ -556,8 +605,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         help: "JSON 序列化的组织元数据"
       },
       require_mfa: {
-        label: "强制多因素认证",
-        help: "为 true 时，该组织的每位成员都必须注册身份验证器 App 才能访问数据。"
+        label: "强制多因素认证（已停用）",
+        help: "已停用。请在“设置 → 访问策略”中设置本组织的多因素认证要求。此处原为开启的值已迁移为“所有人”并清除。"
       },
       timezone: {
         label: "时区",
@@ -565,11 +614,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "上级组织",
-        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。"
+        help: "用于汇报 / 分组的上级。不授予任何权限——跨组织的可见性来自成员关系，绝不来自此引用。仅在部署运行多个组织时有意义。"
       },
       sort_order: {
         label: "排序",
-        help: "在同级组织中的显示顺序。仅用于展示。"
+        help: "在同级组织中的显示顺序。仅用于展示。仅在部署运行多个组织时有意义。"
       },
       id: {
         label: "组织 ID"
@@ -633,6 +682,20 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "退出组织",
         confirmText: "要退出该组织吗？退出后你将失去对其环境和成员的访问权限。",
         successMessage: "你已退出该组织"
+      }
+    },
+    _sections: {
+      identity: {
+        label: "基本信息"
+      },
+      branding: {
+        label: "品牌"
+      },
+      configuration: {
+        label: "配置"
+      },
+      group_structure: {
+        label: "集团结构"
       }
     }
   },
@@ -984,7 +1047,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "业务单元",
     pluralLabel: "业务单元",
-    description: "公司的组织结构——事业部、部门、区域和办公地点——用于划定数据和报表的范围。",
+    description: "公司的组织结构——事业部、部门、区域和办公地点。共享规则可以把记录共享给某个业务单元，或某个业务单元及其下级单元：成员获得这些访问权限，离开后即失去。让权限集按业务单元读取全部记录（读取范围「unit」）需要企业版。",
     fields: {
       name: {
         label: "名称"
@@ -995,7 +1058,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       kind: {
         label: "类型",
-        help: "分类提示——不会改变图谱语义。",
+        help: "仅用于分类和报表，不会改变该单元在组织中的位置和覆盖范围。",
         options: {
           company: "公司",
           division: "事业部",
@@ -1006,11 +1069,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_business_unit_id: {
         label: "上级业务单元",
-        help: "组织树的自关联字段。Null 表示租户根节点。仍有下级单元的业务单元无法删除，须先将下级单元改挂到其他上级或删除。"
+        help: "该单元的上级单元。留空表示顶级单元。仍有下级单元的业务单元无法删除，须先将下级单元改挂到其他上级或删除。"
       },
       timezone: {
         label: "时区",
-        help: "该业务单元计算日期边界所用的 IANA 时区（如 Asia/Shanghai）。留空则依次继承上级业务单元的时区、组织的时区，最后为 UTC。"
+        help: "为该业务单元保存的 IANA 时区（如 Asia/Shanghai）；留空则取上级业务单元的，再取组织的。它目前不会改变任何日期计算：公式、报表和显示的日期使用 设置 → 本地化 → 默认时区。"
       },
       organization_id: {
         label: "组织",
@@ -1022,19 +1085,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       active: {
         label: "启用",
-        help: "为 false 时，图谱查询不会展开该业务单元成员。"
+        help: "关闭后即停用该单元：授予该单元或其上级单元的共享等访问权限，将不再覆盖其成员及下级单元。"
       },
       effective_from: {
         label: "生效时间",
-        help: "该业务单元生效的时间（HRIS 同步）。"
+        help: "该业务单元成立的时间，通常由 HR 系统同步填写。"
       },
       effective_to: {
         label: "失效时间",
-        help: "该业务单元停用的时间（HRIS 同步）。"
+        help: "该业务单元撤销的时间，通常由 HR 系统同步填写。"
       },
       external_ref: {
         label: "外部引用",
-        help: "上游 HRIS 中的 ID（Workday / SAP HR / 北森）。"
+        help: "该单元在 HR 系统（如 Workday、SAP HR、北森）中的编号，每次同步时用它对应到本单元。"
       },
       id: {
         label: "业务单元 ID"
@@ -1146,9 +1209,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤销原因",
-        help: "管理员强制重置密码时撤销了该密钥，则记录此原因。此类密钥只能由平台管理员恢复，其所有者应创建新的密钥。密钥恢复后清除。从 API 密钥列表撤销的密钥此项为空。",
+        help: "密钥被撤销的原因，仅在它决定谁能恢复密钥时记录。管理员强制重置密码：只有平台管理员能恢复该密钥。组织成员资格已结束：所有者已离开组织，任何人都不能恢复该密钥，由组织成员创建新的密钥。已被管理员暂停：平台管理员撤销了不属于自己的密钥，只有平台管理员能恢复该密钥。密钥恢复后清除。所有者从 API 密钥列表撤销的密钥此项为空。",
         options: {
-          admin_password_reset: "管理员强制重置密码"
+          admin_password_reset: "管理员强制重置密码",
+          organization_membership_ended: "组织成员资格已结束",
+          administrator_suspended: "已被管理员暂停"
         }
       },
       key: {
@@ -1859,6 +1924,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "更新时间"
+      },
+      last_used_at: {
+        label: "最近使用时间",
+        help: "客户端在此同意下最近一次经验证的 MCP 调用所在小时的开始时间；尚无记录时为空"
       }
     }
   },
@@ -2029,6 +2098,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML 配置",
         help: "JSON：entryPoint、cert、identifierFormat、映射（由 better-auth 管理）"
       },
+      allow_idp_initiated: {
+        label: "允许 IdP 发起的登录",
+        help: "接受从身份提供方发起的登录（未经请求的 SAML 响应，或不带 state 的 OIDC 回调），而不是从本系统发起的登录。默认关闭：IdP 发起的 SAML 响应不对应本系统发出的任何请求。请通过“编辑登录选项”修改。"
+      },
+      allow_jit: {
+        label: "允许即时开通账号",
+        help: "在仅限邀请的受众策略下，为通过此提供方登录、但既无账号也无邀请的人创建账号。默认关闭：此类人员会被拒绝。其他策略照旧开通账号。请通过“编辑登录选项”修改。"
+      },
       user_id: {
         label: "注册人",
         help: "注册该提供方的用户"
@@ -2095,6 +2172,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "映射：姓名 claim",
             helpText: "可选。映射到显示名称的 claim。默认为 “name”。",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "映射：组 claim",
+            helpText: "可选。携带用户所属组的 claim，例如 “groups”。每次登录都会授予映射到这些组的权限集。留空则不映射任何组。",
+            placeholder: "groups"
           }
         }
       },
@@ -2125,6 +2207,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID 格式",
             helpText: "可选。请求的 SAML NameID 格式。默认为 IdP 配置的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "映射：组属性",
+            helpText: "可选。携带用户所属组的断言属性。每次登录都会授予映射到这些组的权限集。留空则不映射任何组。",
+            placeholder: "groups"
           }
         }
       },
@@ -2149,6 +2236,39 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "删除 SSO 提供方",
         description: "删除该 SSO 提供方吗？其域名下的用户将无法再通过它登录。",
         successMessage: "SSO 提供方已删除"
+      },
+      edit_sso_sign_in_options: {
+        label: "编辑登录选项",
+        successMessage: "登录选项已保存"
+      },
+      show_sso_groups_claim: {
+        label: "查看组 claim",
+        resultDialog: {
+          title: "组 claim",
+          description: "此提供方在每次登录时读取用户所属组的 OIDC claim 或 SAML 属性。为空表示该提供方不映射任何组。可通过“编辑组 claim”修改。",
+          acknowledge: "完成",
+          fields: {
+            groupsClaim: "组 claim"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "编辑组 claim",
+        params: {
+          groupsClaim: {
+            label: "组 claim",
+            helpText: "携带用户所属组的 OIDC claim 或 SAML 属性。每次登录都会授予映射到这些组的权限集。留空即移除：该提供方将不再映射任何组。",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "组 claim 已保存",
+          description: "此提供方此后每次登录时读取的组 claim。为空表示不映射任何组。",
+          acknowledge: "完成",
+          fields: {
+            groupsClaim: "组 claim"
+          }
+        }
       }
     }
   },
@@ -2263,6 +2383,49 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       all: {
         label: "全部"
+      }
+    },
+    _actions: {
+      mint_scim_credential: {
+        label: "签发凭据",
+        description: "为 SCIM 连接签发一个 Bearer 凭据。把它作为 SCIM 令牌交给 IdP；它只显示一次。",
+        params: {
+          connectionId: {
+            label: "连接 ID",
+            helpText: "该凭据认证的 SCIM 连接，例如 “okta-prod”。最多 246 个字符。如需轮换，请为同一连接再签发一个凭据，让 IdP 改用它，然后撤销旧凭据。"
+          },
+          label: {
+            label: "标签",
+            helpText: "可选。该凭据的名称，例如 “rotation 2026-Q3”。"
+          },
+          organizationId: {
+            label: "组织",
+            helpText: "可选。拥有该连接的组织。留空则为默认组织。"
+          },
+          provisioningDomainId: {
+            label: "预配域",
+            helpText: "可选。接收所预配的用户和组的边界。留空则使用连接 ID。"
+          },
+          expiresAt: {
+            label: "过期时间",
+            helpText: "可选。超过此时间后该凭据会被拒绝。留空则凭据永不过期。"
+          }
+        },
+        resultDialog: {
+          title: "SCIM 凭据已签发",
+          description: "请立即复制令牌——它只显示这一次，之后无法找回。请把它粘贴到 IdP 中作为 SCIM Bearer 令牌。如果泄露，请撤销它并签发新的凭据。",
+          acknowledge: "我已保存令牌",
+          fields: {
+            token: "令牌",
+            connectionId: "连接 ID",
+            expiresAt: "过期时间"
+          }
+        }
+      },
+      revoke_scim_credential: {
+        label: "撤销凭据",
+        confirmText: "确定要撤销此 SCIM 凭据吗？使用它的 IdP 从下一次请求起将被拒绝。此操作无法撤销：如需恢复预配，请签发新的凭据。",
+        successMessage: "SCIM 凭据已撤销"
       }
     }
   },
@@ -2575,6 +2738,55 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "IdP 组映射",
+    pluralLabel: "IdP 组映射",
+    description: "将身份提供商的组映射到其成员被授予的权限集",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "来源类型",
+        help: "发送该组的来源：SCIM 连接，或登录时的 SSO 提供方。",
+        options: {
+          scim: "SCIM 连接",
+          sso: "SSO 提供方"
+        }
+      },
+      source_id: {
+        label: "来源 ID",
+        help: "该组经由的 SCIM 连接 ID 或 SSO 提供方 ID，例如 \"okta-prod\"。"
+      },
+      group_external_id: {
+        label: "组外部 ID",
+        help: "身份提供商发送的组 externalId。与显示名称二选一，不可同时设置。"
+      },
+      group_display_name: {
+        label: "组显示名称",
+        help: "组的 displayName，精确匹配。映射未指定外部 ID 时使用。"
+      },
+      permission_set: {
+        label: "权限集",
+        help: "授予该组成员的权限集。管理员权限集会被拒绝。"
+      },
+      organization_id: {
+        label: "组织",
+        help: "授权所在的组织：拥有该 SCIM 连接或 SSO 提供方的组织。"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      }
+    },
+    _views: {
+      all: {
+        label: "全部"
+      }
+    }
+  },
   sys_notification: {
     label: "通知",
     pluralLabel: "通知",
@@ -2777,6 +2989,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       name: {
         label: "名称",
         help: "点分隔的 snake_case 标识（例如 auth.password_reset）"
+      },
+      package_id: {
+        label: "软件包",
+        help: "模板来自的应用。由平台填写;在此创建的模板为空。"
       },
       label: {
         label: "标签",
@@ -3388,7 +3604,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "命名空间",
-        help: "Manifest 命名空间（例如 mail、branding、feature_flags）。"
+        help: "Manifest 命名空间（例如 mail、branding、storage）。"
       },
       key: {
         label: "键",
@@ -3443,6 +3659,54 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       all_settings: {
         label: "全部"
+      }
+    }
+  },
+  sys_platform_setting: {
+    label: "平台设置",
+    pluralLabel: "平台设置",
+    description: "整个部署共用的设置值：设置级联中的全局层。",
+    fields: {
+      id: {
+        label: "设置 ID"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      },
+      namespace: {
+        label: "命名空间",
+        help: "Manifest 命名空间（例如 mail、storage、ai）。"
+      },
+      key: {
+        label: "键",
+        help: "命名空间内的标识键（snake_case）。"
+      },
+      value: {
+        label: "值",
+        help: "JSON 编码的值。加密存储时为空（见「加密值」）。"
+      },
+      encrypted: {
+        label: "已加密",
+        help: "开启后，值加密存放在「加密值」中，「值」一列为空。"
+      },
+      locked: {
+        label: "已锁定",
+        help: "开启后，组织和用户的设置不能覆盖该值；对这两层的写入会被拒绝（409）。"
+      },
+      locked_reason: {
+        label: "锁定原因",
+        help: "锁定时在界面提示中显示的说明。"
+      },
+      value_enc: {
+        label: "加密值",
+        help: "保存密文的 sys_secret 记录的句柄。仅在加密存储时有值。"
+      },
+      updated_by: {
+        label: "更新人",
+        help: "最近一次通过设置服务写入该记录的人。"
       }
     }
   },
@@ -3565,6 +3829,84 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       request_id: {
         label: "请求 ID",
         help: "与 sys_audit_log / tracing 关联。"
+      }
+    },
+    _views: {
+      recent: {
+        label: "最近"
+      }
+    }
+  },
+  sys_platform_setting_audit: {
+    label: "平台设置审计记录",
+    pluralLabel: "平台设置审计",
+    description: "设置服务对全局设置的每次变更的追加写入审计记录。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      created_at: {
+        label: "创建时间",
+        help: "记录该变更的时间。"
+      },
+      namespace: {
+        label: "命名空间"
+      },
+      key: {
+        label: "键"
+      },
+      scope: {
+        label: "范围",
+        help: "该记录写入的级联层；这里始终是全局层。",
+        options: {
+          global: "全局"
+        }
+      },
+      action: {
+        label: "操作",
+        help: "变更类型。",
+        options: {
+          set: "设置",
+          reset: "重置",
+          lock: "锁定",
+          unlock: "解锁",
+          rotate: "轮换"
+        }
+      },
+      actor_id: {
+        label: "执行人",
+        help: "执行该变更的用户；系统任务时为空。"
+      },
+      source: {
+        label: "来源",
+        help: "变更入口。",
+        options: {
+          ui: "UI",
+          api: "API",
+          migration: "迁移",
+          import: "导入",
+          system: "系统"
+        }
+      },
+      reason: {
+        label: "原因",
+        help: "执行人提供的说明（可选）。"
+      },
+      old_hash: {
+        label: "旧哈希",
+        help: "旧值的摘要，绝不是明文：普通值为 sha256: 十六进制摘要，机密值为带密钥的 hmac-sha256: 摘要。此前未设置时为空，机密值没有可用的带密钥摘要时也为空。"
+      },
+      new_hash: {
+        label: "新哈希",
+        help: "新值的摘要，绝不是明文：普通值为 sha256: 十六进制摘要，机密值为带密钥的 hmac-sha256: 摘要。重置时为空，机密值没有可用的带密钥摘要时也为空。"
+      },
+      encrypted: {
+        label: "已加密",
+        help: "该设置保存的是密钥材料时为是（轮换更值得关注）。"
+      },
+      request_id: {
+        label: "请求 ID",
+        help: "用于与审计日志和链路追踪关联。"
       }
     },
     _views: {

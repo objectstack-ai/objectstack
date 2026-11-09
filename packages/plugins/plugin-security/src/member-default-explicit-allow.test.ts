@@ -28,7 +28,7 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator.js';
 import { RLSCompiler, RLS_DENY_FILTER } from './rls-compiler.js';
-import { defaultPermissionSets, BETTER_AUTH_MANAGED_OBJECTS } from './objects/default-permission-sets.js';
+import { defaultPermissionSets, BETTER_AUTH_MANAGED_OBJECTS, EXTERNAL_DEFAULT_PERMISSION_SET } from './objects/default-permission-sets.js';
 
 const evaluator = new PermissionEvaluator();
 const MEMBER_DEFAULT = defaultPermissionSets.find((p) => p.name === 'member_default')!;
@@ -267,13 +267,10 @@ describe('[#7344] the personal inbox is readable by a member, scoped to their ow
     expect(rls.compileFilter(policiesFor(object, 'select') as any, {} as any)).toEqual(RLS_DENY_FILTER);
   });
 
-  it('`sys_activity` is deliberately NOT granted — the ruling excludes it', () => {
-    // Named as an explicit negative so a future "while we are here" sweep has to
-    // argue with the ruling rather than quietly widen past it. It is not a
-    // per-user-scoped shape; a separate question if it ever matters.
-    for (const { operation } of AXES) {
-      expect(allows(operation, [MEMBER_DEFAULT], 'sys_activity'), `sys_activity ${operation}`).toBe(false);
-    }
+  it('`sys_activity` rides on its own ruling, not on this one: no `_self` policy scopes it to the caller', () => {
+    // The inbox ruling left it out because it has no `user_id` to scope by. Its
+    // grant (the `[#30108]` block below) is scoped by its parent-record gate, so
+    // no inbox-shaped `_self` carve-out may appear for it.
     const names = (MEMBER_DEFAULT.rowLevelSecurity ?? []).map((p: any) => p.name);
     expect(names).not.toContain('sys_activity_self');
   });
@@ -288,6 +285,60 @@ describe('[#7344] the personal inbox is readable by a member, scoped to their ow
       expect(perm.modifyAllRecords ?? false).toBe(false);
     }
     expect(Object.keys(MEMBER_DEFAULT.objects ?? {})).not.toContain('*');
+  });
+});
+
+// [#30108 — maintainer ruling 6633054352, 「同意 A」] A record's comments and its
+// activity timeline, for every member who can read the record. The baseline
+// opens the two OBJECTS and nothing more; which rows is plugin-audit's
+// parent-record gates' answer, driven on a real stack in
+// `member-default-feed-grants.integration.test.ts`. What is pinned here is the
+// shape of the opening: the part that would quietly widen if it moved.
+const FEED_OBJECTS = ['sys_comment', 'sys_activity'] as const;
+
+describe('[#30108] the baseline opens comments and activity, and leaves the rows to the parent gates', () => {
+  it('sys_comment: a member reads, posts and edits — and holds no delete bit', () => {
+    expect(allows('find', [MEMBER_DEFAULT], 'sys_comment'), 'read').toBe(true);
+    expect(allows('insert', [MEMBER_DEFAULT], 'sys_comment'), 'create').toBe(true);
+    expect(allows('update', [MEMBER_DEFAULT], 'sys_comment'), 'edit').toBe(true);
+    expect(allows('delete', [MEMBER_DEFAULT], 'sys_comment'), 'delete').toBe(false);
+  });
+
+  it('sys_activity: a member reads — the audit mirror is its only writer', () => {
+    expect(allows('find', [MEMBER_DEFAULT], 'sys_activity'), 'read').toBe(true);
+    for (const operation of ['insert', 'update', 'delete']) {
+      expect(allows(operation, [MEMBER_DEFAULT], 'sys_activity'), operation).toBe(false);
+    }
+  });
+
+  it.each(FEED_OBJECTS)('%s: no read or create row policy of the baseline stands in for the parent gate', (object) => {
+    // A select- or insert-class policy here would answer the gate's question with
+    // a column predicate neither object can answer (no owner or user column, and
+    // a different parent object on every row).
+    expect(policiesFor(object, 'select').map((p: any) => p.name), 'select').toEqual([]);
+    expect(policiesFor(object, 'insert').map((p: any) => p.name), 'insert').toEqual([]);
+  });
+
+  it('sys_comment: an edit stays under the ownership floor — a member edits the comments they wrote', () => {
+    // The moderation carve-out is the DELETE limb only; the edit limb is the
+    // wildcard floor, so a member's edit reaches their own comments alone.
+    expect(policiesFor('sys_comment', 'update').map((p: any) => p.name)).toEqual(['owner_only_writes']);
+  });
+
+  it.each(FEED_OBJECTS)('%s: no export, view-all or modify-all rides along', (object) => {
+    const perm = (MEMBER_DEFAULT.objects as any)[object];
+    expect(perm, `${object} is named`).toBeTruthy();
+    expect(perm.allowDelete ?? false).toBe(false);
+    expect(perm.allowExport ?? false).toBe(false);
+    expect(perm.viewAllRecords ?? false).toBe(false);
+    expect(perm.modifyAllRecords ?? false).toBe(false);
+  });
+
+  it.each(FEED_OBJECTS)('%s: the external baseline does not name it — the grant reaches no external member', (object) => {
+    const external = defaultPermissionSets.find((p) => p.name === EXTERNAL_DEFAULT_PERMISSION_SET)!;
+    expect(external, `${EXTERNAL_DEFAULT_PERMISSION_SET} is shipped`).toBeTruthy();
+    expect(allows('find', [external], object)).toBe(false);
+    expect(Object.keys(external.objects ?? {})).not.toContain(object);
   });
 });
 

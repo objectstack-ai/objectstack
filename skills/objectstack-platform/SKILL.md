@@ -17,7 +17,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x and @objectstack/core 18.x (Zod v4 schemas), Node 22+
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: platform
   tags: project, defineStack, driver, hono, plugin, kernel, service, requires, capability, DI, lifecycle, cli, deploy, ops
 ---
@@ -26,7 +26,7 @@ metadata:
 
 ## `defineStack()` — The Core Configuration
 
-→ Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Minimal Example.
+→ See [references/bootstrap.md](./references/bootstrap.md) § Minimal Example.
 
 ### Full Configuration Reference
 
@@ -39,7 +39,7 @@ are `manifest`, `packages`, `objects`, `objectExtensions`, `picklists`,
 `agents`, `tools`, `skills`, `hooks`, `functions`, `mappings`,
 `analyticsCubes`, `connectors`, `data` (seed), `datasources`,
 `datasourceMapping`, `translations`, `i18n`, `plugins`, `devPlugins`,
-`devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`.
+`devHint`, `devLogins`, `demoStaff`, `requires`, `tiers`, `onEnable`, `appName`, `email`, `sms`, `push`.
 
 There is deliberately **no** top-level `workflows` or `approvals` collection:
 an approval is a flow with Approval nodes, and record
@@ -52,8 +52,8 @@ objectstack-data): named sets of people a new record of an `ownership: 'user'`
 object sits in until a member claims it. `assignmentRules` (`defineAssignmentRule`,
 `@objectstack/spec/automation`; objectstack-automation) routes each inserted
 ownerless row into a queue — parked, `round_robin` or `least_loaded` — or to one
-user. Both need the ownership-queue service `@objectstack/plugin-sharing` registers
-(`sharing` in `requires`): a stack declaring either without it is refused at boot.
+user. Both need the ownership-queue service `@objectstack/plugin-sharing` registers:
+a stack declaring either without it is refused at boot.
 
 Undeclared keys are handled per surface, in two postures:
 
@@ -62,17 +62,12 @@ Undeclared keys are handled per surface, in two postures:
   the surface and the offending key. TypeScript rejects the literal earlier
   still, with `TS2353: Object literal may only specify known properties`.
 - **Warned, then dropped** — the authoring surfaces whose shapes have not
-  been closed yet (`connectors` is one). `defineStack()` prints the warning
-  before the parse, and the value does not survive it:
+  been closed yet (`connectors` is one). `defineStack()` warns before the parse:
   `defineStack: connectors.stripe.bogusKey: 'bogusKey' is not a declared connector key, so its value is dropped at load.`
   Treat these as errors-in-waiting: a key that only warns today is expected
   to be refused later.
 
-Exact shape: `ObjectStackDefinitionSchema` in
-`node_modules/@objectstack/spec/src/stack.zod.ts`; each collection's item
-schema sits in its domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
-
-→ Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Map Format (Key → Name) · § Barrel Import Pattern.
+→ See [references/bootstrap.md](./references/bootstrap.md) § Map Format (Key → Name) · § Barrel Import Pattern.
 
 ### Strict Validation
 
@@ -82,11 +77,7 @@ schema sits in its domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
 2. **Cross-references** — views/actions/flows reference defined objects
 3. **Seed data** — dataset objects exist in the definition
 
-To disable (e.g., objects provided by another plugin):
-
-```typescript
-export default defineStack(config, { strict: false });
-```
+Disable it with `defineStack(config, { strict: false })` (objects another plugin provides).
 
 ### Compile Artifact and Runtime Metadata Boundary
 
@@ -120,18 +111,22 @@ manifest: {
 ```
 
 **`manifest.engines.protocol`:** the metadata-protocol major the app is authored
-against (stamped by `create-objectstack`; the example apps carry it). The runtime
+against (stamped by `create-objectstack`). The runtime
 checks it **before it loads anything** and refuses an out-of-range app at the
 boundary with the exact migration command. Change it when you deliberately move
 to a new protocol major — never to silence a mismatch.
 
 **Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load. Never set `tableName`, and never add a `sys_metadata` object to a runtime manifest.
 
-**`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
+**`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`).
 
-**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow, never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a pre-D11 unbound Setup row wins over the base's until `os migrate packageless-overlays` moves it, and its package-less save, reset and rollback are refused once movable (D11). The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); a locale a dependent adds under the base's name is served only under its own `?package=`, never by a base-named or package-less read. An undeclared pair row or a dependent's row at a locale the base ships is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`.
+**Which names carry the namespace (ADR-0150):** object and doc names, capabilities (`crm.export_data`) and positions (one slot per environment). Every other name stays short (`send_email`): flows, actions, hooks, apps, pages, dashboards, reports, datasets, permission sets, tools, skills, agents are identified by package and name. A prefixed name stays valid; no name starts with `_`, which the router reserves. `os lint`'s `naming/namespace-prefix` warns on a bare capability or position name, and when one package declares an app, page, dashboard, flow, report or dataset name twice, or an action name twice on one object.
 
-The pair comes from `POST /api/v1/packages/hotcrm/ensure-customization`: `namespace` = the base's + `_custom`, `dependencies: { hotcrm: '^<major>' }`; `GET /packages/hotcrm/customizations` lists its overrides, extensions and switched-off items, and uninstalling the base is refused (`409`) while the pair exists. Only the pair declares: the save, publish and install doors, `os validate` and `os build` refuse `overrides` from any other package, and a dependent's item under a base item's name — its one fix is a new name. A permission set, position or capability is never overridden: copy it under a new name ("new similar", landing in the pair). An object is extended (`__c` fields, **objectstack-data**); a flow is overridden or copied (**objectstack-automation**).
+**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. Reads honour it only from the pair (the row's `package_id`), for a view, dashboard, report, email_template, translation, flow, action, page, app, dataset, doc, book or mapping, never judging `basedOn`. An email template is one item per (name, locale): an override names a locale the base ships; one it does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it, and removing the pair's item (`DELETE …?package=hotcrm.custom`) serves the base's again; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a pre-D11 unbound Setup row wins over the base's until `os migrate packageless-overlays` moves it, and once movable as a declared override, its package-less save, publish, reset and rollback are refused (D11); an email-template row at a locale the base does not ship moves as the pair's own member and keeps that write. The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); one a dependent adds under the base's name is served only under its own `?package=`. An undeclared pair row or a dependent's row at a base-shipped locale is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`.
+
+The pair comes from `POST /api/v1/packages/hotcrm/ensure-customization`: `namespace` = the base's + `_custom`, `dependencies: { hotcrm: '^<major>' }`; `GET /packages/hotcrm/customizations` lists its overrides, extensions and switched-off items, and uninstalling the base is refused (`409`) while the pair exists. Only the pair declares: the save, publish and install doors, `os validate` and `os build` refuse `overrides` from any other package, and a dependent's item under a base item's name — its one fix is a new name. A permission set, position or capability is never overridden: copy it under a new name ("new similar", landing in the pair). An object is extended (`__c` fields, **objectstack-data**); a flow is overridden or copied (**objectstack-automation**). An action override keeps the base's `objectName` (keyed `OBJECT:NAME`; another object is refused `declared_package_ships_no_such_item`) and replaces its behaviour (`type`, `body`, `label`, `visible`, …) whole, for whoever could already run the base: dropping a `requiredPermissions` entry, turning `ai.exposed` on or `ai.requiresConfirmation` off is refused `declared_action_widens_access`, both `403 NOT_OVERRIDABLE`.
+
+That read's `contributions` lists what other packages add to the base, one entry per item with its `packageId`: a `field` or `flow` names the base's `object` it is on, a `nav` item the base's `app`, its `group` if any, and its id as `name`; `counts.contributions` counts items, not packages.
 
 ---
 
@@ -144,7 +139,7 @@ what the platform owns.
 
 - **Business features belong in the app; capability belongs in the platform.**
   A missing default, a wrong diagnostic, a shape the spec refuses — the fix is
-  upstream. Raise it there; do not compensate for it here.
+  upstream.
 - **Could this be written by something that has only the metadata, and no
   knowledge of this company?** *No* — it encodes this company's own judgement (a
   discount ceiling, who a case is assigned to, how won/lost is booked) ⇒ the
@@ -170,14 +165,12 @@ what the platform owns.
   generic connector executors in `plugins:`; and the eight generator barrels
   (`objects`, `views`, `actions`, `flows`, `dashboards`, `apps`, `skills`, `picklists`),
   each `src/*/index.ts` handed to the stack key of its name through
-  `exportsOf` — the scaffolded `AGENTS.md` says how to add to them. The
-  memory driver and the Hono server are NOT in the file — the CLI
-  auto-registers both at boot
+  `exportsOf` — the scaffolded `AGENTS.md` says how to add to them.
 
 The five retired remote templates (`todo`, `compliance`, `content`,
 `contracts`, `procurement`) are refused by name.
 
-→ Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Scaffolding Command.
+→ See [references/bootstrap.md](./references/bootstrap.md) § Scaffolding Command.
 
 ---
 
@@ -197,7 +190,6 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 | File names | `{name}.{type}.ts` | `task.object.ts`, `main.app.ts` |
 | Machine names | `snake_case` | `project_task`, `first_name` |
 | Config keys | `camelCase` | `maxLength`, `defaultValue` |
-| Barrel exports | `Object.values(imported)` | `objects: Object.values(objects)` |
 
 ---
 
@@ -211,7 +203,7 @@ Drivers are the storage layer:
 | **SQL** | `@objectstack/driver-sql` | Production (PostgreSQL, MySQL, SQLite) | `SqlDriver` — Knex.js under the hood (`pg` / `mysql` / `better-sqlite3` clients) |
 | **MongoDB** | `@objectstack/driver-mongodb` | Production (document store) | `MongoDBDriver` |
 | **SQLite WASM** | `@objectstack/driver-sqlite-wasm` | Browser / WebContainer | `SqliteWasmDriver` — in-process, no server |
-| **Turso** | `@objectstack/driver-turso` | Edge, serverless, multi-tenant | **Cloud / EE only** — ships with the ObjectStack cloud / enterprise distribution, not the open framework. The open-core CLI recognizes `libsql://` URLs but **fails loudly** (`UnsupportedDriverError`) |
+| **Turso** | `@objectstack/driver-turso` | Edge, serverless, multi-tenant | **Cloud / EE only**. The open-core CLI recognizes `libsql://` URLs but **fails loudly** (`UnsupportedDriverError`) |
 
 ### Wiring a driver — you usually do not
 
@@ -291,27 +283,28 @@ CLI: `os serve` / `os dev`
      │      surface at /_console/studio/…)
      ├── RESTPlugin (auto-generated API)
      ├── DispatcherPlugin
-     └── AIServicePlugin (cloud / EE only — reverse-mounted by a cloud host; absent in the open framework per cloud ADR-0025)
+     └── AIServicePlugin (cloud / EE only — reverse-mounted by a cloud host)
   5. Runtime.start() → init + start all plugins
   6. Server listens on the resolved port
 ```
 
-**Port resolution** and conflict behaviour (dev hops to the next free port,
-production fails loudly): [Ports & networking](./references/operations.md#ports--networking).
+**Port resolution** and conflict behaviour: [Ports & networking](./references/operations.md#ports--networking).
 
 ### `requires:` — which service plugins boot
 
-Step 4's list is the fixed core. Every other service plugin is opt-in, and
-`requires: [...]` on the stack root is what turns it on. The CLI expands each
+Step 4's list is the fixed core. Tokens marked ° are always-on: every boot
+mounts them, listed or not, and `--preset minimal` drops them; `email`, `approvals` or `auth` keeps `job` and `queue`. Every
+other service plugin is opt-in (`requires: [...]` on the stack root turns it on) but the host defaults, mounted under every preset: `mcp` unless `OS_MCP_SERVER_ENABLED=false`, and `pinyin-search` when `i18n` names a `zh-*` locale (`OS_SEARCH_PINYIN_ENABLED` overrides). The CLI expands each
 token through the `CAPABILITY_PROVIDERS` registry in
-`packages/cli/src/commands/serve.ts` — its 19 opt-in entries:
+`@objectstack/core`:
 
 | Token | Provider package |
 |:--|:--|
 | `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
-| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` | `@objectstack/service-` + the token |
-| `marketplace` | `@objectstack/service-package` |
-| `audit` `email` `sharing` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
+| `analytics`° `cache`° `storage`° `queue`° `job`° `messaging`° `realtime` `settings`° `sms`° `push` | `@objectstack/service-` + the token ([the `push` block](./references/operations.md#mobile-push)) |
+| `mailbox` | `@objectstack/service-mailbox` — inbound mail |
+| `marketplace` `package-registry`° | `@objectstack/service-package` |
+| `audit` `email`° `sharing`° `approvals` `webhooks` | `@objectstack/plugin-` + the token |
 | `pinyin-search` | `@objectstack/plugin-pinyin-search` |
 | `mcp` | `@objectstack/mcp` |
 | `triggers` | `@objectstack/trigger-record-change`, plus `trigger-schedule` and `trigger-api` |
@@ -321,8 +314,7 @@ through it:
 
 - **Tier-gated** — `ai`, `ai-studio`, `i18n`, `ui`, `auth` have no provider
   entry; dedicated blocks in `serve.ts` `run()` open their tier instead
-  (`ai`/`ai-studio` through the intent-driven AI block, the other three through
-  their tier blocks).
+  (`ai`/`ai-studio` through the intent-driven AI block).
 - **Enterprise / cloud** — `hierarchy-security` has no open-edition provider and
   ships in `@objectstack/security-enterprise`, loaded through `plugins[]`;
   `ai-seat` and `governance` are resolved only by cloud's objectos-runtime.
@@ -338,15 +330,14 @@ Five rules that change what you write:
 - **Declaring is a demand.** A capability YOU declared whose provider package is
   absent is a hard boot error; one the platform auto-injects for you stays
   best-effort (warn and continue).
-- **`auth` implies `email`.** Auth callbacks (password reset, email
-  verification, magic link, invitation) need the mail service, so the CLI
-  appends `email` whenever `auth` is required.
+- **`auth` implies `email`**, even under `--preset minimal`: auth callbacks
+  need the mail service.
 - **Keep `automation` whenever `plugins:` lists a connector** — connector
-  executors register their provider factories with it, and without it they have
-  nowhere to register and boot fails.
-- **Pair `triggers` with `job`.** `triggers` alone arms record-change triggers;
-  schedule and time-relative triggers run on the job service, so autolaunched
-  scheduled flows stay silent without `job`.
+  executors register their provider factories with it, and without it boot
+  fails.
+- **Under `--preset minimal`, pair `triggers` with `job`:** `triggers` alone
+  arms record-change triggers; schedule and time-relative ones run on the job
+  service, so scheduled flows stay silent.
 
 ### `onEnable` — where an app binds runtime code
 
@@ -354,7 +345,7 @@ Five rules that change what you write:
 `AppPlugin` invokes it during boot and hands the app live runtime handles: this
 is the one seam where declarative metadata reaches imperative code (registering
 action handlers, giving a job its data handle, provisioning a fixture
-datasource). All three example apps use it.
+datasource).
 
 ```typescript
 export const onEnable = async (ctx: { ql: { registerAction: (...a: unknown[]) => void } }) => {
@@ -362,11 +353,7 @@ export const onEnable = async (ctx: { ql: { registerAction: (...a: unknown[]) =>
 };
 ```
 
-→ Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Plugin Loading Order Matters · § Programmatic Bootstrap (Without CLI).
-
----
-
-→ Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Multi-App Composition.
+→ See [references/bootstrap.md](./references/bootstrap.md) § Plugin Loading Order Matters · § Programmatic Bootstrap (Without CLI) · § Multi-App Composition · § Complete Working Example.
 
 ---
 
@@ -376,8 +363,8 @@ The stack's `data:` collection is authored with `defineSeed()`, which
 **objectstack-data** owns — go there for `externalId` matching, `env:` scoping,
 and which keys are derived.
 
-`mode` (`upsert` default · `insert` · `update` · `ignore` · `replace` ⚠️ **data
-loss**) decides what a replay does to rows that already exist —
+`mode` (`ignore` default · `upsert` · `insert` · `update` · `replace` ⚠️ never
+deletes, duplicates) decides what a replay does to existing rows:
 [Import modes](../objectstack-data/references/seeds.md#import-modes).
 
 ### Demo accounts — `demoStaff` vs `devLogins`
@@ -393,7 +380,7 @@ an entry carries no `password`:
 demoStaff: [
   { name: 'Legal Lead', email: 'lead@example.com' },
   { name: 'Legal Counsel 1', email: 'counsel1@example.com', manager: 'lead@example.com',
-    position: 'legal_counsel', permissionSets: ['contracts_editor'] }],
+    position: 'crm_legal_counsel', permissionSets: ['crm_contracts_editor'] }],
 ```
 
 `name` is what a seed reference resolves by; `position` / `permissionSets`
@@ -403,26 +390,15 @@ boot writes `manager_id` itself once every account exists and keeps one set
 by hand, so no seed hook writes it; a display name, an address no entry
 has, the entry itself or a loop is refused at load; `os build` drops the
 key and a non-dev boot creates nothing. `devLogins` creates and grants nothing — it only prints an
-existing account on the boot banner. Pick `demoStaff` whenever the demo
-needs an account to exist.
+existing account on the boot banner.
 
 ---
 
-## CLI Commands
-
-Daily commands are in [Part 3 — Operations](./references/operations.md#part-3--operations-cli-testing-deployment).
+→ Part 2 — Plugin Development & Kernel Extension: [references/plugin-development.md](./references/plugin-development.md); its detailed rules stay at [rules/plugin-lifecycle.md](./rules/plugin-lifecycle.md) · [rules/service-registry.md](./rules/service-registry.md) · [references/plugin-hooks.md](./references/plugin-hooks.md).
 
 ---
 
-→ Moved verbatim to [references/bootstrap.md](./references/bootstrap.md) § Complete Working Example.
-
----
-
-→ Part 2 — Plugin Development & Kernel Extension moved verbatim to [references/plugin-development.md](./references/plugin-development.md) (Quick Reference — Detailed Rules · ObjectKernel vs LiteKernel · Plugin Interface — Quick Overview · PluginContext API · Complete Plugin Example · Using Plugins · Testing Plugins · Well-Known Plugin Names & Services · MetadataPlugin Runtime Boundary · Health Monitoring · Feature Flags); its detailed rules stay at [rules/plugin-lifecycle.md](./rules/plugin-lifecycle.md) · [rules/service-registry.md](./rules/service-registry.md) · [references/plugin-hooks.md](./references/plugin-hooks.md).
-
----
-
-→ Part 3 — Operations: CLI, Testing, Deployment moved verbatim to [references/operations.md](./references/operations.md) (Daily-loop commands · Build & runtime · Verify your work · Ports & networking · Data & migrations · Environments & deploy · Shipping a plugin · Testing pattern · Deployment targets · Health & observability · Common ops pitfalls).
+→ Part 3 — Operations: CLI, Testing, Deployment (`os deploy` to see an edit on your Cloud environment): [references/operations.md](./references/operations.md).
 
 ---
 

@@ -110,9 +110,16 @@ describe('(2) the User page lists each per-user store, keyed to its record (#238
       'zh-CN': '偏好设置',
       'ja-JP': '設定',
       'es-ES': 'Preferencias',
+      'zh-Hant': '偏好設定',
+      ar: 'التفضيلات',
+      fr: 'Préférences',
+      'pt-BR': 'Preferências',
+      ru: 'Предпочтения',
+      de: 'Präferenzen',
+      ko: '기본 설정',
     });
     expect((tabOf('sys_account')?.label as Rec)?.en).toBe('Linked Accounts');
-    expect(Object.keys((tabOf('sys_account')?.label as Rec) ?? {}).sort()).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+    expect(Object.keys((tabOf('sys_account')?.label as Rec) ?? {}).sort()).toEqual(['ar', 'de', 'en', 'es-ES', 'fr', 'ja-JP', 'ko', 'pt-BR', 'ru', 'zh-CN', 'zh-Hant']);
   });
 });
 

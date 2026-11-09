@@ -48,7 +48,7 @@ import { defineHook, type HookContext } from '@objectstack/spec/data';
  * `readonly`/strip reasoning applies — only a hook can write the clear.
  */
 const taskHook = defineHook({
-  name: 'task_logic',
+  name: 'todo_task_logic',
   object: 'todo_task',
   events: ['beforeInsert', 'beforeUpdate', 'afterUpdate'],
   handler: async (ctx: HookContext) => {
@@ -116,7 +116,7 @@ const taskHook = defineHook({
       // touches crosses its due date with no update to observe, so a record hook
       // is structurally the wrong instrument and any version of this branch would
       // fire late, or never. The clock-driven sweep already exists in the right
-      // place: `flows/task.flow.ts`'s `overdue_escalation`, a scheduled flow that
+      // place: `flows/task.flow.ts`'s `todo_overdue_escalation`, a scheduled flow that
       // runs daily and selects on `due_date` directly.
     }
   }

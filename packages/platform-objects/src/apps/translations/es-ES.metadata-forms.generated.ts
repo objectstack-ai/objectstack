@@ -112,6 +112,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Condición de visibilidad",
         helpText: "Predicado CEL sobre el registro (p. ej., record.type == 'invoice'): el formulario de entrada muestra el grupo entero, encabezado incluido, solo mientras sea TRUE."
       },
+      "fieldGroups.requiresFeature": {
+        label: "Requiere función",
+        helpText: "Función del despliegue que necesita el grupo (p. ej., multiOrgEnabled): donde está desactivada, el formulario de entrada y la página de detalle del registro ocultan el grupo entero. Junto con Condición de visibilidad, el grupo solo se muestra mientras se cumplen ambas. Los campos siguen siendo legibles a través de la API."
+      },
       fields: {
         label: "Campos",
         helpText: "Añade las columnas que almacenará este objeto"
@@ -1154,19 +1158,36 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Nombres de campo disponibles para búsqueda rápida"
       },
       resizable: {
-        label: "Redimensionable"
+        label: "Redimensionable",
+        helpText: "Permite cambiar el ancho de las columnas"
       },
       compactToolbar: {
-        label: "Barra compacta"
+        label: "Barra compacta",
+        helpText: "Agrupa Grupo / Color / Densidad / Ocultar campos en un único menú emergente de «Configuración de la vista»"
       },
       rowHeight: {
-        label: "Altura de fila"
+        label: "Altura de fila",
+        helpText: "Ajuste de altura / densidad de las filas"
       },
       selection: {
-        label: "Selección"
+        label: "Selección",
+        helpText: "Configuración de la selección de filas"
+      },
+      "selection.type": {
+        label: "Tipo de selección",
+        helpText: "Modo de selección"
       },
       pagination: {
-        label: "Paginación"
+        label: "Paginación",
+        helpText: "Configuración de la paginación"
+      },
+      "pagination.pageSize": {
+        label: "Tamaño de página",
+        helpText: "Número de registros por página. En una vista sin paginador (kanban, galería, línea de tiempo) es el límite de carga, y el renderizador debe hacer dos cosas: limitar la carga a este número y, cuando el conjunto filtrado sea mayor, mostrar un aviso visible de truncamiento que indique que lo que hay en pantalla no es el conjunto completo"
+      },
+      "pagination.pageSizeOptions": {
+        label: "Opciones de tamaño de página",
+        helpText: "Tamaños de página disponibles"
       },
       kanban: {
         label: "Configuración Kanban"
@@ -1190,31 +1211,138 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Filtros de usuario",
         helpText: "Barra de filtros rápidos: estilo de elemento (dropdown / tabs / toggle) + campos expuestos o preajustes de pestañas"
       },
+      "userFilters.element": {
+        label: "Estilo del control",
+        helpText: "Estilo del control de filtro en vistas de objeto: \"dropdown\" (chips de valores por campo). \"toggle\" está obsoleto. \"tabs\" es solo para páginas: usa `listViews` para los preajustes con nombre."
+      },
+      "userFilters.fields": {
+        label: "Campos de filtro",
+        helpText: "Campos expuestos como filtros rápidos (controles dropdown / toggle)"
+      },
+      "userFilters.fields.field": {
+        label: "Campo"
+      },
+      "userFilters.fields.label": {
+        label: "Etiqueta"
+      },
+      "userFilters.fields.type": {
+        label: "Tipo"
+      },
+      "userFilters.fields.options": {
+        label: "Opciones"
+      },
+      "userFilters.fields.showCount": {
+        label: "Mostrar recuento"
+      },
+      "userFilters.fields.defaultValues": {
+        label: "Valores predeterminados"
+      },
       appearance: {
         label: "Apariencia",
         helpText: "allowedVisualizations: qué renderizadores pueden alternar los usuarios"
+      },
+      "appearance.showDescription": {
+        label: "Mostrar descripción",
+        helpText: "Muestra el texto de descripción de la vista"
+      },
+      "appearance.allowedVisualizations": {
+        label: "Visualizaciones permitidas",
+        helpText: "Lista de tipos de visualización entre los que los usuarios pueden cambiar (p. ej. [\"grid\", \"gallery\", \"kanban\"])"
       },
       userActions: {
         label: "Acciones de usuario",
         helpText: "Conmutadores de la barra de herramientas: ordenar / buscar / filtrar / altura de fila"
       },
+      "userActions.sort": {
+        label: "Ordenar",
+        helpText: "Permite a los usuarios ordenar los registros"
+      },
+      "userActions.search": {
+        label: "Buscar",
+        helpText: "Permite a los usuarios buscar registros"
+      },
+      "userActions.filter": {
+        label: "Filtrar",
+        helpText: "Permite a los usuarios filtrar los registros"
+      },
+      "userActions.refresh": {
+        label: "Actualizar",
+        helpText: "Permite a los usuarios volver a cargar los datos de la vista desde el servidor sin recargar toda la página"
+      },
+      "userActions.rowHeight": {
+        label: "Altura de fila",
+        helpText: "Permite a los usuarios cambiar la altura / densidad de las filas"
+      },
+      "userActions.group": {
+        label: "Agrupar",
+        helpText: "Permite a los usuarios cambiar la agrupación de registros desde la barra de herramientas. Solo es un interruptor: la agrupación en sí se configura en el bloque `grouping` de la vista."
+      },
+      "userActions.addRecordForm": {
+        label: "Agregar registro con formulario",
+        helpText: "Agrega registros mediante un formulario en lugar de en línea"
+      },
+      "userActions.editInline": {
+        label: "Edición en línea",
+        helpText: "Permite a los usuarios editar registros en línea. Activado por defecto: un usuario que puede actualizar el objeto edita una celda en su sitio con el control adecuado al tipo del campo (el mismo que usa el formulario), bajo la misma comprobación de permisos que ya decide si el objeto es editable. Declara `editInline: false` para que la lista sea de solo lectura en su sitio."
+      },
+      "userActions.hideFields": {
+        label: "Ocultar campos",
+        helpText: "Permite a los usuarios ocultar / mostrar campos desde la barra de herramientas (la función detrás de la lista `hiddenFields` de la vista). Interruptor booleano, distinto del `hideFields` del componente de detalles del registro, que es un array de nombres de campo que se omiten. Activado por defecto: cada lector oculta y muestra columnas para sí mismo; declara `hideFields: false` para retirar el control."
+      },
+      "userActions.rowColor": {
+        label: "Color de fila",
+        helpText: "Permite a los usuarios configurar el coloreado de filas desde la barra de herramientas. Interruptor booleano: las reglas de color están en el bloque `rowColor` de la vista. Desactivado por defecto: el coloreado de filas es opcional."
+      },
+      "userActions.buttons": {
+        label: "Botones",
+        helpText: "ID de los botones de acción personalizados que se muestran en la barra de herramientas"
+      },
       addRecord: {
-        label: "Agregar registro"
+        label: "Agregar registro",
+        helpText: "Configuración del punto de entrada para agregar registros"
       },
       "addRecord.enabled": {
-        label: "Habilitado"
+        label: "Habilitado",
+        helpText: "Muestra el punto de entrada para agregar registros. OBLIGATORIO: `true` dibuja el botón Agregar y `false` lo declara desactivado"
       },
       "addRecord.position": {
-        label: "Posición"
+        label: "Posición",
+        helpText: "Posición del botón para agregar registros: `top` (la barra de herramientas, por defecto), `bottom` (debajo de la lista) o `both`"
       },
       showRecordCount: {
-        label: "Mostrar recuento de registros"
+        label: "Mostrar recuento de registros",
+        helpText: "Muestra el recuento de registros al pie de la lista"
       },
       navigation: {
-        label: "Navegación"
+        label: "Navegación",
+        helpText: "Configuración de la navegación al hacer clic en un elemento (panel lateral por defecto; también page, new_window o none)"
+      },
+      "navigation.mode": {
+        label: "Modo"
+      },
+      "navigation.preventNavigation": {
+        label: "Impedir navegación",
+        helpText: "Desactiva por completo la navegación estándar"
+      },
+      "navigation.openNewTab": {
+        label: "Abrir en pestaña nueva",
+        helpText: "Fuerza la apertura en una pestaña nueva (se aplica al modo page)"
+      },
+      "navigation.size": {
+        label: "Tamaño",
+        helpText: "Categoría de tamaño del panel de detalle: 'auto' (por defecto: el renderizador lo deriva del número de campos y del área visible; la IA no escribe nada) o un ajuste aproximado sm/md/lg/xl/full. Prefiérelo al `width` en píxeles; el modo page lo ignora."
+      },
+      "navigation.width": {
+        label: "Ancho",
+        helpText: "[OBSOLETO → size] Ancho en píxeles / porcentaje del panel lateral (p. ej. \"600px\"). Al crear la vista no se conoce el área visible del cliente, así que no se puede elegir un ancho en píxeles: usa la categoría `size`."
       },
       sharing: {
-        label: "Compartición"
+        label: "Compartición",
+        helpText: "Configuración de uso compartido de la vista: quién bloqueó su configuración"
+      },
+      "sharing.lockedBy": {
+        label: "Bloqueado por",
+        helpText: "Usuario que bloqueó la configuración de la vista"
       }
     }
   },
@@ -1756,6 +1884,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "params.type": {
         label: "Tipo"
       },
+      "params.widget": {
+        label: "Control del campo"
+      },
       "params.required": {
         label: "Obligatorio"
       },
@@ -2110,6 +2241,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "dimensions.nullLabel": {
         label: "Etiqueta de nulos"
       },
+      "dimensions.synonyms": {
+        label: "Sinónimos",
+        helpText: "Palabras que la gente usa para esta dimensión en una pregunta (p. ej., etapa, etapa de venta, stage), separadas por comas; se pueden mezclar idiomas. Las cotejan las herramientas de IA del conjunto de datos y nunca se muestran. Como máximo 20, cada una de 60 caracteres como máximo; una palabra solo puede corresponder a un miembro de este conjunto de datos"
+      },
+      "dimensions.description": {
+        label: "Descripción",
+        helpText: "Definición de negocio en lenguaje sencillo: una o dos frases sobre qué es esta dimensión y cuándo usarla. Se publica con los metadatos de análisis y la leen las herramientas de IA del conjunto de datos; es una definición, nunca un prompt ni una instrucción para una IA. Como máximo 500 caracteres"
+      },
       measures: {
         label: "Medidas",
         helpText: "Cada medida: nombre, agregación, campo (opcional para count) y formato de visualización/moneda"
@@ -2143,6 +2282,14 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.duration": {
         label: "Duración"
+      },
+      "measures.synonyms": {
+        label: "Sinónimos",
+        helpText: "Palabras que la gente usa para esta medida en una pregunta (p. ej., ingresos, ventas, revenue), separadas por comas; se pueden mezclar idiomas. Las cotejan las herramientas de IA del conjunto de datos y nunca se muestran. Como máximo 20, cada una de 60 caracteres como máximo; una palabra solo puede corresponder a un miembro de este conjunto de datos"
+      },
+      "measures.description": {
+        label: "Descripción",
+        helpText: "Definición de negocio en lenguaje sencillo: una o dos frases sobre qué es esta medida y cuándo usarla. Se publica con los metadatos de análisis y la leen las herramientas de IA del conjunto de datos; es una definición, nunca un prompt ni una instrucción para una IA. Como máximo 500 caracteres"
       }
     }
   },

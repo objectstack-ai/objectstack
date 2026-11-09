@@ -29,6 +29,8 @@ import {
   URL_FILTER_OPS,
   NULL_FILTER,
   EMPTY_FILTER,
+  URL_COMPARE_OPS,
+  URL_LIST_OPS,
   parseUrlFilterTriples,
   type FilterTriple,
 } from './drillUrlFilters';
@@ -103,7 +105,7 @@ describe('Save as view folds URL drill triples to spec rules (objectui#3419)', (
     // and the emptiness PAIR, whose one param carries a direction rather than a
     // comparand and so is not in that range map) so an operator added to the URL
     // contract fails HERE rather than at publish time. `parseUrlFilterTriples`
-    // emits nothing outside this set.
+    // emits nothing outside this set and the next test's (objectstack#30743).
     //
     // ⚠️ `NULL_FILTER.notOp` joined the set in objectui#9508. Listing only
     // `op` would have left this pin GREEN while the contract grew an operator
@@ -146,6 +148,33 @@ describe('Save as view folds URL drill triples to spec rules (objectui#3419)', (
       // reaches `normalizeFilterOperator` unbridged.
       'is_empty',
       'is_not_empty',
+    ]);
+    expect(gate.success).toBe(true);
+  });
+
+  it('folds the negation, text, membership and boolean triples too (objectstack#30743)', () => {
+    // Computed from the two maps for the reason the test above gives: an
+    // operator added to either map fails here, not at publish time.
+    expect(Object.values(URL_COMPARE_OPS)).toEqual([
+      '!=', 'contains', 'notcontains', 'startswith', 'endswith', 'icontains',
+    ]);
+    expect(Object.values(URL_LIST_OPS)).toEqual(['in', 'nin']);
+    const triples: FilterTriple[] = [
+      ...Object.values(URL_COMPARE_OPS).map((op, i) => ['c' + i, op, 'v' + i] as FilterTriple),
+      ...Object.values(URL_LIST_OPS).map((op, i) => ['l' + i, op, ['a', 'b']] as FilterTriple),
+      ['done', '=', true],
+    ];
+    const { spec, gate } = saveAsView(triples);
+    expect(spec.filter).toEqual([
+      { field: 'c0', operator: 'not_equals', value: 'v0' },
+      { field: 'c1', operator: 'contains', value: 'v1' },
+      { field: 'c2', operator: 'not_contains', value: 'v2' },
+      { field: 'c3', operator: 'starts_with', value: 'v3' },
+      { field: 'c4', operator: 'ends_with', value: 'v4' },
+      { field: 'c5', operator: 'icontains', value: 'v5' },
+      { field: 'l0', operator: 'in', value: ['a', 'b'] },
+      { field: 'l1', operator: 'not_in', value: ['a', 'b'] },
+      { field: 'done', operator: 'equals', value: true },
     ]);
     expect(gate.success).toBe(true);
   });

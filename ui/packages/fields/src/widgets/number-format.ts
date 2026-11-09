@@ -102,8 +102,8 @@ export function formatNumberFieldValue(value: number, field: FieldMetadata, loca
 }
 
 /**
- * The display width of a currency amount: the resolved currency's own ISO 4217
- * minor-unit count (2 for USD / CNY, 0 for JPY, 3 for KWD), or the historical 2
+ * The display width of a currency amount: the resolved currency's own CLDR
+ * fraction-digit count (2 for USD / CNY, 0 for JPY, 3 for KWD), or the historical 2
  * when no currency is resolved, since there is then no minor unit to ask about.
  *
  * A currency's decimal places are the CURRENCY's, not a field setting: the

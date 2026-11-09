@@ -338,6 +338,22 @@ describe('#24295 / #24342: no file that spawns the CLI draws a released port', (
     }
   });
 
+  /**
+   * An explicit budget, sized to the measured work. The case reads and parses
+   * every `.ts` file under `test/` (`liveTree()`). Reaching the whole live
+   * tree is what the case claims, so the walk is not cut. The case is
+   * synchronous, so vitest judges it after the body returns.
+   *
+   * Readings: the slowest `Test Core` reading is 2629 ms (`main` push and merge
+   * group runs, 2026-11-03..06, n=6); local idle, 1102-1291 ms.
+   *
+   * The rule is 3x the slowest reading, rounded up to the next second (the rule
+   * and why 3x: plugin-sharing's `share-link-password-webcontainer.test.ts`):
+   * 3 x 2629 = 7887, so the budget is 8000. If `test/` grows much, re-measure
+   * and re-size.
+   */
+  const LIVE_TREE_BUDGET_MS = 8_000;
+
   it('the census reaches the live tree: every way of spawning the CLI, and the draw, are found', () => {
     const tree = liveTree();
     const population = cliSpawners(tree);
@@ -359,7 +375,7 @@ describe('#24295 / #24342: no file that spawns the CLI draws a released port', (
     const instrument = tree.get('serve-port-bind-probe.test.ts');
     expect(instrument?.drawLines.length ?? 0, 'the draw census finds no draw in the bind-probe instrument').toBeGreaterThan(0);
     expect(instrument?.spawnsCli).toBe(false);
-  });
+  }, LIVE_TREE_BUDGET_MS);
 
   it('every file that spawns the CLI draws exactly what its ledger entry allows — zero without one', () => {
     const offenders: string[] = [];

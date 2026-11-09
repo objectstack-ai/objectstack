@@ -283,6 +283,7 @@
         "$TURBO_ROOT$/examples/app-showcase/src/data/objects/semantic-zoo.object.ts",
         "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-triage.page.ts",
         "$TURBO_ROOT$/content/docs/deployment/cli.mdx",
+        "$TURBO_ROOT$/content/docs/deployment/environment-variables.mdx",
         "$TURBO_ROOT$/content/docs/deployment/index.mdx",
         "$TURBO_ROOT$/content/docs/deployment/troubleshooting.mdx",
         "$TURBO_ROOT$/content/docs/getting-started/index.mdx",
@@ -307,6 +308,9 @@
         "$TURBO_ROOT$/scripts/sync-scaffold-emission-policy.mjs",
         "$TURBO_ROOT$/packages/drivers/driver-sql/src/sql-driver.ts",
         "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts",
+        "$TURBO_ROOT$/packages/drivers/driver-sql/src/sql-driver-*.ts",
+        "$TURBO_ROOT$/scripts/sql-driver-split-source.mjs",
+        "$TURBO_ROOT$/scripts/sql-driver-split-source.d.mts",
         "$TURBO_ROOT$/packages/spec/src/data/field.zod.ts",
         "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/objectstack.config.ts",
         "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/src/**",
@@ -432,7 +436,8 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/ui/apps/console/src/pages/developer/objectstack-skill.ts"
       ]
     },
     "@objectstack/runtime#test": {
@@ -609,7 +614,9 @@
         "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-settings/src/settings-route-ledger.ts",
+        "$TURBO_ROOT$/packages/services/service-messaging/src/messaging-route-ledger.ts",
         "$TURBO_ROOT$/packages/plugins/plugin-auth/src/personal-view-route-ledger.ts",
+        "$TURBO_ROOT$/packages/plugins/plugin-sharing/src/sharing-route-ledger.ts",
         "$TURBO_ROOT$/packages/spec/src/automation/**",
         "$TURBO_ROOT$/packages/spec/src/data/**",
         "$TURBO_ROOT$/examples/app-showcase/**",
@@ -694,6 +701,22 @@
         "!**/node_modules/**",
         "$TURBO_ROOT$/packages/spec/src/**",
         "$TURBO_ROOT$/packages/spec/package.json"
+      ]
+    },
+    "@objectstack/scenarios#test": {
+      "dependsOn": ["build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "!**/node_modules/**",
+        "$TURBO_ROOT$/docs/qa/scenarios/*.json",
+        "$TURBO_ROOT$/docs/qa/platform-checklist/areas/*.json",
+        "$TURBO_ROOT$/packages/cli/src/lint/corpus.ts",
+        "$TURBO_ROOT$/docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md"
       ]
     },
     "create-objectstack#test": {
@@ -786,7 +809,10 @@
         "!coverage/**",
         "!.turbo/**",
         "!**/node_modules/**",
-        "$TURBO_ROOT$/packages/**/*.ts"
+        "$TURBO_ROOT$/packages/**/*.ts",
+        "$TURBO_ROOT$/scripts/check-vouch-for-reference-callers.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/invoked-as.mjs"
       ]
     },
     "@objectstack/types#test:repo": {

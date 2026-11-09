@@ -74,7 +74,7 @@ function layout(prefix: string): { tree: string; base: string; head: string } {
 }
 
 describe('check:i18n-drift over the change that IMPORTS the tree (objectstack#25728)', () => {
-  it('reads an empty before side when the tree does not exist at the base, and still throws when only a pack is missing', () => {
+  it('reads an empty before side when the tree does not exist at the base, and still throws when only the en pack is missing', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'git-paths-import-'));
     tempRoots.push(repo);
     const git = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
@@ -103,12 +103,23 @@ describe('check:i18n-drift over the change that IMPORTS the tree (objectstack#25
     expect(result.findings).toEqual([]);
     expect(result.counters.addedEnKeys).toBe(1);
 
-    // The tree exists at the base but a pack does not: a broken input, never an empty side.
+    // The tree exists at the base but `en` does not: a broken input, never an
+    // empty side.
+    fs.rmSync(path.join(tree, packPath('en')));
+    git('add', '-A');
+    git('commit', '-q', '-m', 'lose the en pack');
+    const lostEn = git('rev-parse', 'HEAD');
+    expect(() => analyze(tree, { base: lostEn, head: imported })).toThrow(/cannot read/);
+
+    // A follower pack the base does not have is a language the platform locale
+    // table gained (objectstack#30511): it reads as empty there, and is named.
+    git('checkout', '-q', imported, '--', '.');
     fs.rmSync(path.join(tree, packPath('ja')));
     git('add', '-A');
-    git('commit', '-q', '-m', 'lose a pack');
-    const lost = git('rev-parse', 'HEAD');
-    expect(() => analyze(tree, { base: lost, head: imported })).toThrow(/cannot read/);
+    git('commit', '-q', '-m', 'a base without the ja pack');
+    const noJa = git('rev-parse', 'HEAD');
+    const gained = analyze(tree, { base: noJa, head: imported });
+    expect(gained.newAtBase).toEqual(['ja']);
   });
 });
 

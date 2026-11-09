@@ -22,8 +22,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { AuthzStoreUnavailableError, bindSecurityCatalogReader } from '@objectstack/core';
-import { DelegatedAdminGate } from './delegated-admin-gate.js';
+import { AuthzStoreUnavailableError, bindSecurityCatalogReader, createSecurityCatalogReader } from '@objectstack/core';
+import { SchemaRegistry } from '@objectstack/objectql';
+import { DelegatedAdminGate, organizationBoundaryFailure } from './delegated-admin-gate.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const EAST_SCOPE = {
@@ -32,6 +33,12 @@ const EAST_SCOPE = {
   manageAssignments: true,
   assignablePermissionSets: ['sales_user'],
 };
+
+/**
+ * [ADR-0123 D2] The organization the fixture tree belongs to and the delegate's
+ * context names: a delegated scope covers units of the active organization only.
+ */
+const ORG = 'org_1';
 
 const SETS: Record<string, any[]> = {
   tenant_admin: [{ name: 'admin_full', objects: { '*': { allowRead: true, modifyAllRecords: true } } }],
@@ -55,9 +62,9 @@ const CATALOG = {
 function makeQl(tables: Record<string, any[]> = {}) {
   const all: Record<string, any[]> = {
     sys_business_unit: [
-      { id: 'bu_hq', name: 'hq', parent_business_unit_id: null },
-      { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
-      { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq' },
+      { id: 'bu_hq', name: 'hq', parent_business_unit_id: null, organization_id: ORG },
+      { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq', organization_id: ORG },
+      { id: 'bu_west', name: 'west', parent_business_unit_id: 'bu_hq', organization_id: ORG },
     ],
     // Rows say something else on purpose: `rep` is bound to the set NOT on
     // the allowlist, and `mixed` to nothing at all.
@@ -102,7 +109,7 @@ const assign = (gate: DelegatedAdminGate, position: string) =>
     object: 'sys_user_position',
     operation: 'insert',
     data: { user_id: 'u_east_1', position, business_unit_id: 'bu_east' },
-    context: { principal: 'delegate', userId: 'u_delegate' },
+    context: { principal: 'delegate', userId: 'u_delegate', organizationId: ORG },
   });
 
 async function refusal(p: Promise<unknown>): Promise<any> {
@@ -148,7 +155,7 @@ describe('DelegatedAdminGate — a position distributes what its definition decl
 describe('DelegatedAdminGate — describeDelegableScope lists the catalog positions', () => {
   it('a delegate is offered exactly the positions whose declared sets are all allowlisted (anchors excluded)', async () => {
     const gate = gateOver(bindTestSecurityCatalog(makeQl(), CATALOG));
-    const report = await gate.describeDelegableScope(SETS.delegate, { userId: 'u_delegate' });
+    const report = await gate.describeDelegableScope(SETS.delegate, { userId: 'u_delegate', organizationId: ORG });
     expect(report.assignablePositions.sort()).toEqual(['registry_only', 'rep']);
   });
 
@@ -161,5 +168,40 @@ describe('DelegatedAdminGate — describeDelegableScope lists the catalog positi
   it('with no catalog bound, nothing is offered (fail closed) — a row is not a position', async () => {
     const report = await gateOver(makeQl()).describeDelegableScope(SETS.tenant_admin, { userId: 'u_admin' });
     expect(report.assignablePositions).toEqual([]);
+  });
+});
+
+describe('[ADR-0150 D3/D7] the organization boundary judges a position\'s set as the position resolves it', () => {
+  const P = 'com.acme.caller';
+  const Q = 'com.acme.other';
+  const manifest = (id: string, deps: string[] = []) => ({
+    id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+    ...(deps.length > 0 ? { dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])) } : {}),
+  }) as never;
+  const rig = (pDeps: string[]) => {
+    const registry = new SchemaRegistry();
+    registry.logLevel = 'silent';
+    registry.installPackage(manifest(Q), 'code');
+    registry.installPackage(manifest(P, pDeps), 'code');
+    registry.registerItem('permission', { name: 'q_reader', objects: {} }, 'name' as never, Q);
+    registry.registerItem('position', { name: 'p_pos', permissionSets: ['q_reader'] }, 'name' as never, P);
+    return createSecurityCatalogReader({ registry: registry as never, metadata: { get: () => undefined, list: () => [] } });
+  };
+
+  it('a set the position\'s package cannot reach cannot be shown inside, and the reason carries the refusal naming its holder', async () => {
+    const catalog = rig([]);
+    const position = await catalog.resolve('position', 'p_pos');
+    // The bare name alone is inside the boundary …
+    expect(await organizationBoundaryFailure(catalog, 'q_reader')).toBeNull();
+    // … but the position cannot resolve it (ADR-0150 D3 step 3), so it is refused, naming the holder.
+    const reason = await organizationBoundaryFailure(catalog, 'q_reader', { position });
+    expect(reason).toContain("permission set 'q_reader'");
+    expect(reason).toContain(Q);
+  });
+
+  it('the same set is inside once the position\'s package declares the dependency', async () => {
+    const catalog = rig([Q]);
+    const position = await catalog.resolve('position', 'p_pos');
+    expect(await organizationBoundaryFailure(catalog, 'q_reader', { position })).toBeNull();
   });
 });

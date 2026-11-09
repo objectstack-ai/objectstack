@@ -75,7 +75,7 @@ deployment suppresses it. A deployment-wide data superuser needs
 </Callout>
 
 <Callout type="warn">
-**Lifecycle operations are partly pending:** the dedicated `transfer` / `restore` / `purge` ObjectQL operations do not exist yet (roadmap M2). `allowTransfer` is **already enforced today** through the ordinary `insert` / `update` door — `owner_id` is system-managed, so planting a record under another user or reassigning / disowning one is denied unless the caller holds `allowTransfer` (or `modifyAllRecords`, which implies it) (#3004), and the future `transfer` op is pre-mapped to the same bit. The former `allowRestore` / `allowPurge` flags were **retired** (#12497, ADR-0049 — they claimed to gate operations that do not exist, so authoring them granted nothing); a dispatched `restore` / `purge` is denied unconditionally by the fail-closed destructive-operation backstop, and the flags return with the M2 lifecycle batch (#1883).
+**Lifecycle operations:** `allowTransfer` is enforced through the ordinary `insert` / `update` door — `owner_id` is system-managed, so planting a record under another user or reassigning / disowning one is denied unless the caller holds `allowTransfer` (or `modifyAllRecords`, which implies it) (#3004); a dedicated `transfer` ObjectQL operation does not exist yet (roadmap M2), and is pre-mapped to the same bit. The recycle bin's `restore` and `purge` operations exist (ADR-0148) and are gated by their own keys (#30237): `restore` asks `allowRestoreOwnDeleted` and restores only the entries the caller deleted, while `purge` — purging an entry, emptying an object's entries, and the permanent delete — asks `manageRecycleBin`, which also restores anyone's entry. Each key is bounded by `allowRead`; `modifyAllRecords` implies both; `allowDelete` implies neither. The former `allowRestore` / `allowPurge` flags stay **retired** (#12497, ADR-0049): they grant nothing, and the schema refuses them.
 </Callout>
 
 ---
@@ -238,7 +238,7 @@ OWD sets the baseline access level for each object across the entire organizatio
 | **Public Read/Write** | `public_read_write` | All users | All users | Low-sensitivity data (e.g., tasks, wiki pages) |
 | **Public Read Only** | `public_read` | All users | Owner + shared | Moderate sensitivity (e.g., accounts, contacts) |
 | **Private** | `private` | Owner + shared | Owner + shared | High sensitivity (e.g., opportunities, HR records) |
-| **Controlled by Parent** | `controlled_by_parent` | Derived from the master record | Derived from the master record | Master-detail children (e.g., order lines) |
+| **Controlled by Parent** | `controlled_by_parent` | Derived from the master record; a row with no (optional) master: its owner + View All | Derived from the master record; a row with no (optional) master: its owner + Modify All | Master-detail children (e.g., order lines; a contact whose account is optional) |
 
 <Callout type="warn">
 These are the **only four canonical values** (ADR-0090 D4). The legacy spellings
@@ -370,7 +370,7 @@ flowchart TD
 | 7 | **Field-Level Security** | Which fields is the user allowed to see/edit? |
 
 <Callout type="tip">
-**Performance:** For reads, steps 2–6 are compiled into a query filter (owner-match ∪ materialized shares, AND-ed with RLS) at query time, not evaluated record-by-record. By-id writes are verified with a pre-image check: the target row is re-read through the write-scope filter before the mutation, and a row the caller cannot read answers exactly what a missing id answers (`404 RECORD_NOT_FOUND`). A predicate (`multi: true`) update or delete matches only the rows the caller can read: a row the read door would not return is not written, not counted and not refused, and above 10 000 such rows the write is refused (`400 INVALID_FILTER`) rather than narrowed by a cut-off list. This keeps security checks efficient even on tables with millions of rows.
+**Performance:** For reads, steps 2–6 are compiled into a query filter (owner-match ∪ materialized shares, AND-ed with RLS) at query time, not evaluated record-by-record. By-id writes are verified with a pre-image check: the target row is re-read through the write-scope filter before the mutation, and a row the caller cannot read answers exactly what a missing id answers (`404 RECORD_NOT_FOUND`). A predicate (`multi: true`) update or delete matches only the rows the caller can read: a row the read door would not return is not written, not counted and not refused, and above 10 000 such rows the write is refused (`400 INVALID_FILTER`) rather than narrowed by a cut-off list. A caller whose read of the object is refused writes none of its records: its by-id and predicate updates and deletes are refused, whatever rows they address. This keeps security checks efficient even on tables with millions of rows.
 </Callout>
 
 ## See also

@@ -1,11 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type {
   AIToolDefinition,
   ToolCallPart,
   ToolExecutionContext,
   ToolResultPart,
 } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
 
 /**
  * Minimal ToolRegistry interface consumed by the MCP bridge.
@@ -17,8 +19,16 @@ export interface ToolRegistry {
   /** Return all registered tool definitions. */
   getAll(): AIToolDefinition[];
 
-  /** Execute a tool call and return the result. */
-  execute(toolCall: ToolCallPart): Promise<ToolExecutionResult>;
+  /**
+   * Execute a tool call and return the result.
+   *
+   * [#31605] The long-lived (stdio) bridge passes the transport's principal as
+   * `context` once the plugin has bound one (`OS_MCP_STDIO_API_KEY`, resolved
+   * per call), so a governed registry sees the key's user as the actor. A
+   * runtime with no stdio principal bound calls `execute(toolCall)` with one
+   * argument, as before.
+   */
+  execute(toolCall: ToolCallPart, context?: ToolExecutionContext): Promise<ToolExecutionResult>;
 }
 
 /**
@@ -112,4 +122,139 @@ export interface McpAuthoringInjection {
   principal: McpTokenPrincipal;
   /** The environment the host dispatched this request for. */
   environmentId?: string;
+  /**
+   * The server instructions this request's `initialize` answers with — the
+   * text an MCP client puts in its model's context (where the authoring
+   * rules live, which ones exist). Read under the SAME grant that admits
+   * {@link registry}: a request whose grant registers the authoring family
+   * is answered with this text; any other request — a `data:read` token, an
+   * API key, a session — gets the runtime's configured or default
+   * instructions and never sees it. Omitted, the authoring request gets the
+   * configured or default instructions too.
+   */
+  instructions?: string;
 }
+
+// ── Host-installed tool-call interceptor (every MCP tool call) ───────────────
+
+/**
+ * [#31605] The transport a tool call arrived on: `http` for the per-request
+ * Streamable HTTP server (`handleHttpRequest`), `stdio` for the long-lived
+ * server `start()` attaches. Stamped by the runtime, never read from a request.
+ */
+export type McpToolTransport = 'http' | 'stdio';
+
+/** The principal kinds an `ExecutionContext` names (ADR-0090 D10). */
+export type McpPrincipalKind = NonNullable<ExecutionContext['principalKind']>;
+
+/**
+ * [#31605] Who a tool call runs as, projected by the runtime from the
+ * `ExecutionContext` the HOST admitted the caller as — the request's resolved
+ * credential on HTTP, the `OS_MCP_STDIO_API_KEY` identity on stdio. Every
+ * member is copied from that context (or, for `environmentId`, from the
+ * environment the host dispatched the request for) and from nothing a client
+ * sent: no header, no argument and no JSON-RPC member can set or change one.
+ * Frozen, so an interceptor cannot taint the next call's view.
+ *
+ * A member is absent when the context carries none: a personal API key has no
+ * `onBehalfOf` or `performedBy`, and the stdio transport serves one process's
+ * kernel and stamps no `environmentId`. An empty principal means the host
+ * passed none; it is never a grant of anything.
+ */
+export interface McpToolCallPrincipal {
+  /** The user the call is authorized as (`ExecutionContext.userId`). */
+  readonly userId?: string;
+  /** `human`, `agent` (an OAuth client acting for a user), `service`, … */
+  readonly principalKind?: McpPrincipalKind;
+  /** The delegator an agent principal acts for (ADR-0090 D10). */
+  readonly onBehalfOf?: Readonly<{ userId: string; principalKind?: McpPrincipalKind }>;
+  /** The OAuth client that performed the call, set only by the `/mcp` OAuth door. */
+  readonly performedBy?: Readonly<{ clientId: string }>;
+  /** The organization the principal is in (`ExecutionContext.tenantId`). */
+  readonly organizationId?: string;
+  /** The environment the host dispatched the request for (HTTP only). */
+  readonly environmentId?: string;
+  /** Present, and `true`, only for a system principal the host admitted. */
+  readonly isSystem?: true;
+}
+
+/**
+ * [#31605] What a tool-call interceptor is told about one call. Built by the
+ * runtime at the call, on the server side of the transport.
+ */
+export interface McpToolCallContext {
+  /** Always {@link MCP_TOOL_DOOR}. */
+  readonly door: McpToolDoor;
+  /** The transport the call arrived on. */
+  readonly transport: McpToolTransport;
+  /** The registered tool's name. */
+  readonly toolName: string;
+  /**
+   * The arguments the tool is about to run with, after the SDK validated them
+   * against the tool's input schema: a frozen copy, so observing them cannot
+   * change what the tool receives. Empty for a tool that declares no input.
+   */
+  readonly arguments: Readonly<Record<string, unknown>>;
+  /** Who the call runs as. */
+  readonly principal: McpToolCallPrincipal;
+  /**
+   * [#31838] Present, and `false`, only for a call naming a tool the server
+   * holds none of (a name the grant did not register, or any other name). No
+   * handler runs: `next()` resolves to the answer the client gets, the
+   * SDK's own `Tool NAME not found` tool error, `arguments` is empty, and whatever the interceptor
+   * returns, the client gets that answer unchanged. Absent on every call to a
+   * registered tool.
+   */
+  readonly registered?: false;
+}
+
+/** The MCP `tools/call` result a tool answers with, and an interceptor may replace. */
+export type McpToolCallResult = CallToolResult;
+
+/**
+ * [#31605] An interceptor's refusal: the call does not run, and the client is
+ * answered with the coded-refusal envelope every MCP tool error uses —
+ * `isError: true` with the text `{ "error": { code, message, status } }`.
+ *
+ * `outcome` is a discriminator so a later outcome (a `hold` that routes the
+ * call to an approval) can be added beside `deny` without reshaping it. Today
+ * `deny` is the only outcome: anything else an interceptor returns is refused
+ * as a malformed verdict, never run.
+ */
+export interface McpToolCallRefusal {
+  readonly outcome: 'deny';
+  /** The ADR-0112 error code the client branches on. */
+  readonly code: string;
+  /** The sentence the client (and its model) reads. */
+  readonly message: string;
+  /** The HTTP status the refusal corresponds to (403 for a policy refusal). */
+  readonly status?: number;
+}
+
+/**
+ * [#31605] The host-installed seam around every MCP tool call, on both
+ * transports and every registration path: the object, action, file and
+ * federation tools, the host-injected authoring family, the bridged AI tools
+ * and any tool a plugin registers on the runtime's server.
+ *
+ * - **Allow**: call `next()`. The interceptor sees the tool's result and
+ *   returns it, or a replacement result.
+ * - **Deny**: return a {@link McpToolCallRefusal} without calling `next()`.
+ *   The tool never runs.
+ * - **A name nothing registered** ([#31838], `call.registered === false`):
+ *   observation only. No tool runs and the client gets the SDK's own
+ *   `not found` answer; a deny or a replacement is not served.
+ *
+ * A throw from the interceptor refuses the call too: it is answered as a tool
+ * error, a coded throw with its `code` and `status`, as every MCP tool's own
+ * catch answers one.
+ *
+ * Neutral by contract: the runtime carries no policy. Audit, seat checks and
+ * kill switches live entirely in whichever host installs the interceptor
+ * (`MCPServerRuntime.setToolInterceptor`). With none installed every tool
+ * call runs exactly as it did before the seam existed.
+ */
+export type McpToolInterceptor = (
+  call: McpToolCallContext,
+  next: () => Promise<McpToolCallResult>,
+) => Promise<McpToolCallResult | McpToolCallRefusal>;

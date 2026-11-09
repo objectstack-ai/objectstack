@@ -117,6 +117,7 @@ export const objectForm = defineForm({
               { label: 'Collapsed — collapsible, starts closed', value: 'collapsed' },
             ] },
             { field: 'visibleWhen', label: 'Visible When', type: 'code', language: 'expression', helpText: 'CEL predicate over the record (e.g. record.type == \'invoice\') — the entry form shows the whole group, header included, only while it is TRUE.' },
+            { field: 'requiresFeature', label: 'Requires Feature', helpText: 'Deployment feature the group needs (e.g. multiOrgEnabled): where it is off, the entry form and the record detail page hide the whole group. Combined with Visible When, the group shows only while both hold. The fields stay readable through the API.' },
           ],
         },
       ],
@@ -341,7 +342,8 @@ export const objectForm = defineForm({
             // visibility fails OPEN, keeping the option. Either way the author
             // would still be offered "Set null".
             //
-            // ⚠️ The predicates must stay disjoint AND total over the two types:
+            // ⚠️ The predicates must stay disjoint AND total over the types they
+            // serve (`lookup` and `user` on one, `master_detail` on the other):
             // an overlap renders two selects writing one key, a gap makes the
             // control vanish for that type. Both are pinned in
             // `form-delete-behavior-options.test.ts`.
@@ -350,7 +352,14 @@ export const objectForm = defineForm({
             // form fields by field PATH (`metadataForms.<type>.fields.<path>`),
             // so these two declarations share one translation key — divergent
             // text here would collide silently, last writer winning.
-            { field: 'deleteBehavior', type: 'select', helpText: 'What happens when the referenced record is deleted', visibleWhen: "data.type == 'lookup'", options: [
+            //
+            // `user` shares the `lookup` branch (#29415): since #29253 a
+            // declared `deleteBehavior` on a `user` field takes effect when the
+            // user is deleted, and all three outcomes are legal there. Unlike a
+            // `lookup`, a `user` field has no default (declaring nothing keeps
+            // it out of the delete walk), so the select writes a value only when
+            // the author picks one.
+            { field: 'deleteBehavior', type: 'select', helpText: 'What happens when the referenced record is deleted', visibleWhen: "data.type in ['lookup','user']", options: [
               { label: 'Set null', value: 'set_null' },
               { label: 'Cascade (delete children)', value: 'cascade' },
               { label: 'Restrict (block the delete)', value: 'restrict' },

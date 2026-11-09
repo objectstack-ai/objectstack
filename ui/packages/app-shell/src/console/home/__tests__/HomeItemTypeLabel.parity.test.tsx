@@ -41,7 +41,7 @@ vi.mock('react-router-dom', () => ({
  * One translator for all three surfaces.
  *
  * The keyed entry is spelled in zh (verbatim from
- * `packages/i18n/src/locales/zh.ts`) on purpose: `capitalizeFirst` could
+ * `packages/i18n/src/locales/zh-Hans.ts`) on purpose: `capitalizeFirst` could
  * never produce `报表`, so the keyed control below cannot pass by accidentally
  * running the fallback. Anything not in this map misses, exactly as i18next
  * misses an absent key, and the call site's `defaultValue` decides.

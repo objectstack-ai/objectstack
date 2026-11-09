@@ -19,11 +19,19 @@ import {
   Ban,
   RefreshCw,
 } from 'lucide-react';
-import { createObjectStackUploadAdapter } from '@object-ui/providers';
+import { createObjectStackUploadAdapter } from '@object-ui/data-objectstack';
 import { createAuthenticatedFetch } from '@object-ui/auth';
 import { useObjectTranslation, isPermissionError, classifyLoadError } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { resolveAffordance, type ConfirmationHandler } from '@object-ui/core';
+import {
+  NATIVE_FILE_MAX_BYTES,
+  getNativeHost,
+  nativeFileFromBlob,
+  nativeHostCan,
+  nativeOpenFile,
+  type NativeFile,
+} from '@object-ui/mobile';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
 import { RECORD_PAGE_ATTACHMENT_ROWS, recordAttachmentsCountField } from './recordPagePayload.js';
 
@@ -37,8 +45,12 @@ import { RECORD_PAGE_ATTACHMENT_ROWS, recordAttachmentsCountField } from './reco
  * and the enforcement seam always agree).
  *
  * Storage model: one `sys_file` row per uploaded blob (three-step
- * presigned upload via @object-ui/providers' ObjectStack adapter), one
- * `sys_attachment` join row linking it to `(parent_object, parent_id)`.
+ * presigned upload via @object-ui/data-objectstack's ObjectStack adapter), one
+ * `sys_attachment` join row linking it to `(parent_object, parent_id)`. The
+ * join row is written by the upload's own completion (`attachTo`), as the
+ * signed-in user: the server's attach verb, never a `sys_attachment` create
+ * through the generic data door, which a member who may attach files but not
+ * read `sys_file` is refused (`reference_not_found` on `file_id`).
  * Downloads fetch a short-lived signed URL from `/storage/files/:fileId/url`
  * with the console's Bearer token (the endpoint requires an authenticated
  * session for attachments-scope files, objectstack-ai/objectstack#2970), then open it.
@@ -57,9 +69,9 @@ interface AttachmentRow {
 export interface RecordAttachmentsPanelProps {
   objectName: string;
   recordId: string;
-  /** ObjectUI DataSource (sys_attachment CRUD goes through the generic data path). */
+  /** ObjectUI DataSource (the list read and the delete go through the generic data path; the attach does not). */
   dataSource: any;
-  /** Current user id, stamped on `uploaded_by`. */
+  /** Current user id. The server stamps `uploaded_by` from the session; the panel no longer sends it. */
   currentUserId?: string | null;
   className?: string;
 }
@@ -127,11 +139,46 @@ function formatSize(bytes?: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+
+/**
+ * Inside the ObjectStack mobile shell, when it announces `openFile`: fetch the
+ * attachment's bytes from the signed URL this panel already fetched with the
+ * Console's own session, and hand the BYTES to the shell, which previews or
+ * opens them with the OS (objectstack-ai/mobile `docs/HYBRID-SHELL.md`,
+ * "Files"; the shell never downloads a URL or reads the session). Answers
+ * whether the shell took the file.
+ *
+ * `false` keeps the browser path (`window.open` on the signed URL), exactly as
+ * outside the shell: no shell or an older one, a file over the bridge's
+ * `NATIVE_FILE_MAX_BYTES` (judged on the row's size before any byte is
+ * fetched, and on the fetched size), a fetch that fails (a cross-origin
+ * storage URL without CORS), and the shell refusing (`bad_args`) or failing
+ * the call. ⛔ The signed URL is a credential: only bytes cross the
+ * bridge, never the URL.
+ */
+async function openInNativeShell(target: string, row: AttachmentRow): Promise<boolean> {
+  if (!nativeHostCan(getNativeHost(), 'openFile')) return false;
+  if (typeof row.size === 'number' && row.size > NATIVE_FILE_MAX_BYTES) return false;
+  let file: NativeFile;
+  try {
+    const res = await fetch(target);
+    if (!res.ok) return false;
+    let blob = await res.blob();
+    if (blob.size > NATIVE_FILE_MAX_BYTES) return false;
+    if (!blob.type && row.mime_type) blob = new Blob([blob], { type: row.mime_type });
+    file = await nativeFileFromBlob(blob, row.file_name || row.file_id);
+  } catch {
+    return false;
+  }
+  // Anything but `ok` (the shell refusing the file with `bad_args`, or failing
+  // it) takes the browser path, so a tap is never answered worse than before.
+  return (await nativeOpenFile(file)).status === 'ok';
+}
+
 export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   objectName,
   recordId,
   dataSource,
-  currentUserId,
   className,
 }) => {
   const { t } = useObjectTranslation();
@@ -172,10 +219,10 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
    * and a delete go through the storage route, not `sys_attachment`'s generic
    * data door, so that door's operation set says nothing about them.
    *
-   * Upload needs `create`. Without it the three-step presigned flow below
-   * commits a `sys_file` and only the final `sys_attachment` insert is
-   * refused: the user meets the error after the bytes are stored, and the file
-   * stays committed with nothing attached to it.
+   * Upload needs `create`. Without it the attach at the end of the upload
+   * below is refused after the bytes are stored (the server leaves the file
+   * pending, and its retention reclaims it); hiding Upload spares the user
+   * that round trip.
    *
    * Delete needs `delete`, and being the uploader does not change that. The
    * server asks the object grant first (plugin-security's CRUD check wraps the
@@ -208,9 +255,17 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   // upload adapter and the download-URL fetch — the storage routes require a
   // session and there is no cookie for `credentials: 'include'` to carry.
   const authFetch = React.useMemo(() => createAuthenticatedFetch(), []);
+  // Every upload from this panel is attached to this record by the call that
+  // completes it (`attachTo`): the server's attach verb, run as the user.
   const adapter = React.useMemo(
-    () => createObjectStackUploadAdapter({ baseUrl, scope: 'attachments', fetchImpl: authFetch }),
-    [baseUrl, authFetch],
+    () =>
+      createObjectStackUploadAdapter({
+        baseUrl,
+        scope: 'attachments',
+        fetchImpl: authFetch,
+        ...(objectName && recordId ? { attachTo: { parentObject: objectName, parentId: recordId } } : {}),
+      }),
+    [baseUrl, authFetch, objectName, recordId],
   );
 
   /** Map the server's fail-closed 40x codes (objectstack-ai/objectstack#2755, objectstack-ai/objectstack#2970) to friendly copy. */
@@ -346,27 +401,18 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
 
   const handleFiles = React.useCallback(
     async (files: FileList | null) => {
-      if (!files || files.length === 0 || !dataSource) return;
+      if (!files || files.length === 0 || !dataSource || !objectName || !recordId) return;
       setUploading(true);
       setError(null);
       try {
         for (const file of Array.from(files)) {
-          // 1) blob → sys_file via the canonical presigned three-step flow
+          // blob → sys_file → sys_attachment: the presigned three-step flow,
+          // whose completion attaches the file to this record as the user
+          // (the server checks the create grant, edit access to the record,
+          // `enable.files`, and that the file is the user's own upload).
           const uploaded = await adapter.upload(file);
-          const fileId = (uploaded.meta as any)?.fileId as string | undefined;
-          if (!fileId) throw new Error('Upload did not return a fileId');
-          // 2) join row → sys_attachment (server enforces enable.files)
-          await dataSource.create('sys_attachment', {
-            parent_object: objectName,
-            parent_id: recordId,
-            file_id: fileId,
-            file_name: uploaded.name ?? file.name,
-            mime_type: uploaded.mimeType ?? file.type,
-            size: uploaded.size ?? file.size,
-            // Back-compat with pre-objectstack-ai/objectstack#2755 servers; a current server stamps
-            // `uploaded_by` from the session and ignores this value.
-            ...(currentUserId ? { uploaded_by: currentUserId } : {}),
-          });
+          const attachmentId = (uploaded.meta as any)?.attachmentId as string | undefined;
+          if (!attachmentId) throw new Error('The server completed the upload but did not attach it to this record');
         }
         await refresh();
       } catch (err: any) {
@@ -376,7 +422,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         if (inputRef.current) inputRef.current.value = '';
       }
     },
-    [adapter, dataSource, objectName, recordId, currentUserId, refresh],
+    [adapter, dataSource, objectName, recordId, refresh],
   );
 
   /**
@@ -465,6 +511,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         const url: string | undefined = body?.url ?? body?.data?.url;
         if (!url) throw new Error('Download URL missing from response');
         const target = /^https?:/i.test(url) ? url : `${baseUrl}${url}`;
+        if (await openInNativeShell(target, row)) return;
         window.open(target, '_blank', 'noopener,noreferrer');
       } catch (err: any) {
         setError(friendlyError(err));

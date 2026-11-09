@@ -78,7 +78,7 @@ import { builtInLocales } from '../locales/index';
  * The packs whose script is not Latin. Identity with `en` is decidable evidence
  * of omission here, and only here — see the header on why de/fr/es/pt are out.
  */
-const NON_LATIN = ['zh', 'ja', 'ko', 'ru', 'ar'] as const;
+const NON_LATIN = ['zh-Hans', 'zh-Hant', 'ja', 'ko', 'ru', 'ar'] as const;
 type NonLatin = (typeof NON_LATIN)[number];
 
 /** A run of Latin letters long enough that a non-Latin pack cannot mean it. */
@@ -104,6 +104,8 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   'auth.shell.poweredBy': 'Powered by ObjectStack — the Community Console sign-in page attribution; ja keeps the English wordmark line, as publicForm.poweredBy does.',
   'console.studio.title': 'Studio — the product name, which every pack writes in Latin script in its own Studio strings (objectui#11863).',
   'connectAgent.apiKey.badge': 'headless — the literal mode name the CLI and API use.',
+  'connectAgent.doubao.title': 'Doubao Work — the product name; zh writes the vendor\'s own Chinese name, the other packs keep the Latin one.',
+  'connectAgent.qwenwork.title': 'QwenWork — the product name; zh writes the vendor\'s own Chinese name, the other packs keep the Latin one.',
   // `marketplace.pricing.freemium` sat here until objectui#8754 retired the
   // whole `marketplace.pricing.*` family as dead. Its entry went with it, on
   // the same reasoning the `workflow.*` note above records: an entry is a fact
@@ -147,6 +149,8 @@ const LEGITIMATE_IDENTITIES: Record<string, string> = {
   'appManagement.toast.bulkFailureEntry': '{{name}} ({{reason}}) — holes and parentheses only.',
   'collaboration.userStatusTitle': '{{name}} ({{status}}) — holes and parentheses only.',
   'chatbot.build.nextStepQuote': '“{{step}}” — a hole in quote marks; ko quotes with the same curly marks as en (objectui#12724).',
+  'console.assignedWork.row': '{{object}} · {{field}} — two holes and a middle dot, no prose (objectstack#30205).',
+  'console.assignedWork.failure': '{{object}} {{id}}: {{message}} — holes and a colon; zh sets a fullwidth colon, ja/ko/ru/ar keep `: ` (objectstack#30205).',
 };
 
 /** Every string leaf of a pack, as `[dotted.path, value]`. */

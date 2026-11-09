@@ -67,12 +67,12 @@ import { ComponentRegistry, Registry, type ComponentMeta } from '@object-ui/core
 // Importing the package entry is what performs the registrations, exactly as a
 // host does. The renderer is compared by IDENTITY below, so these pins cannot be
 // satisfied by a look-alike.
+import { DashboardRenderer, RETIRED_DASHBOARD_NODE_TYPES } from '../index';
+// Not on the package entry: the module the entry registers them from.
 import {
-  DashboardRenderer,
-  RETIRED_DASHBOARD_NODE_TYPES,
   RetiredDashboardNodeTombstone,
   resetRetiredDashboardNodeTypeReports,
-} from '../index';
+} from '../retired-node-types';
 
 afterEach(cleanup);
 

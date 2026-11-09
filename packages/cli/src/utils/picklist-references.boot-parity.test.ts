@@ -23,7 +23,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 
-import { judgePicklistReferences, PICKLIST_RESIDUAL_UNREFERENCED } from './picklist-references.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+
+import { judgePicklistReferences, PICKLIST_REFERENCE_UNKNOWN, PICKLIST_RESIDUAL_UNREFERENCED } from './picklist-references.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -48,7 +50,13 @@ const composed = (top: AnyRec, coreExtra: AnyRec = {}): AnyRec => ({
 /** One refused stack and one control. */
 const STACKS: Record<string, AnyRec> = {
   'a list nothing names': composed({ picklists: [unused] }),
-  'CONTROL: a body-declared list a body field names': composed({}, { objects: [caseObj(statusField)] }),
+  // [ADR-0150 D3] Forced edit: the core body declares its dependency on the
+  // app body, so the door accepts the whole stack — a sibling it does not
+  // depend on is refused (the third describe below).
+  'CONTROL: a body-declared list a body field names': composed({}, {
+    dependencies: { 'com.example.parity.app': '^1.0.0' },
+    objects: [caseObj(statusField)],
+  }),
 };
 
 const kernels: ObjectKernel[] = [];
@@ -59,21 +67,36 @@ afterEach(async () => {
   }
 });
 
-/** Boot the stack through the `manifest` service; the boot's refusal, or `undefined`. */
-async function bootRefusal(stack: AnyRec): Promise<(Error & { code?: string }) | undefined> {
+/**
+ * Boot the stack through the `manifest` service. Answers the boot's refusal (or
+ * `undefined`) and the engine it registered into, so a pin can ask the
+ * REGISTRY what the boot made of the stack.
+ */
+async function bootStack(stack: AnyRec): Promise<{
+  refusal?: Error & { code?: string };
+  engine?: { registry: unknown };
+}> {
   const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
   kernels.push(kernel);
   await kernel.use(new ObjectQLPlugin());
+  let engine: { registry: unknown } | undefined;
   await kernel.use({
     name: 'test.parity.app',
     dependencies: ['com.objectstack.engine.objectql'],
     init: async (ctx: PluginContext) => {
+      engine = ctx.getService<{ registry: unknown }>('objectql');
       await ctx.getService<{ register(m: unknown): unknown }>('manifest')
         .register({ ...(stack.manifest as AnyRec), ...stack });
     },
   } as Plugin);
-  return kernel.bootstrap().then(() => undefined, (e: Error & { code?: string }) => e);
+  return kernel.bootstrap().then(
+    () => ({ engine }),
+    (e: Error & { code?: string }) => ({ refusal: e, engine }),
+  );
 }
+
+/** Boot the stack through the `manifest` service; the boot's refusal, or `undefined`. */
+const bootRefusal = async (stack: AnyRec) => (await bootStack(stack)).refusal;
 
 describe('picklist-residual-unreferenced — the author-time door and the boot agree', () => {
   it.each(Object.keys(STACKS))('%s', async (label) => {
@@ -82,11 +105,175 @@ describe('picklist-residual-unreferenced — the author-time door and the boot a
     const boot = await bootRefusal(stack);
     if (label.startsWith('CONTROL')) {
       expect(door).toEqual([]);
+      expect(judgePicklistReferences(stack)).toEqual({ refusals: [], notices: [] });
       expect(boot?.message ?? '').not.toContain('is declared on the top level of stack');
       return;
     }
     expect(door).toHaveLength(1);
     expect(boot?.code).toBe('INVALID_METADATA');
     expect(boot?.message).toBe(`${door[0].message} ${door[0].hint}`);
+  });
+});
+
+/**
+ * [#29898] The second parity, on the same stacks: `picklist-reference-unknown`
+ * (this door, over the PARSED artifact) and the metadata save door's
+ * `unknownPicklistBindingSaveRefusal` (`@objectstack/metadata-protocol`, over
+ * the BOOTED registry) must call the same name declared.
+ *
+ * They cannot share one judgement the way the residual pair above does: this
+ * door resolves a reference against the artifact's own `picklists` and weighs
+ * the declaring package's outside dependencies, while the save door asks the
+ * live registry (`resolvePicklistOptions`, the read that serves the field's
+ * options) because a runtime write is judged against the packages INSTALLED
+ * here. So the agreement is pinned rather than inherited — and pinned where
+ * the two can disagree: a list a SIBLING package of the same artifact owns,
+ * which this door resolves through the declaring package's declared
+ * dependency on it (ADR-0150 D3) and the save door must resolve because the
+ * boot registered it.
+ *
+ * Asked of the save door's judge directly, over the real registry the boot
+ * filled. `readMetaItem` is stubbed to "no stored row", so the case is a FIRST
+ * write of the binding; the held-binding exemption, the other doors and the
+ * envelope are pinned in
+ * `packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts`,
+ * and the real-store controls (a dependency's list, the base's list of a
+ * `.custom` pair, another installed package's) in
+ * `packages/runtime/src/domains/meta-picklist-binding-door.test.ts`.
+ */
+describe('[#29898] picklist-reference-unknown — the author-time door and the metadata save door agree', () => {
+  /** The object body a case writes: one select field bound to `picklist`. */
+  const boundCase = (picklist: string) =>
+    caseObj({ subject: { type: 'text', label: 'Subject' }, status: { type: 'select', label: 'Status', picklist } });
+
+  /**
+   * One artifact: the core body carries the object, the app body declares
+   * `parity_status`. [ADR-0150 D3, child E6; N1 ruled on #31678: the declared
+   * dependency closure only] Forced edit: the core body declares its
+   * dependency on the app body — a sibling it does not depend on is outside
+   * its closure, and the boot refuses that reference.
+   */
+  const artifactWith = (picklist: string): AnyRec => ({
+    manifest: manifest(STACK_ID),
+    packages: [
+      { manifest: { ...manifest('com.example.parity.core'), dependencies: { 'com.example.parity.app': '^1.0.0' }, objects: [boundCase(picklist)] } },
+      { manifest: { ...manifest('com.example.parity.app'), picklists: [status] } },
+    ],
+  });
+
+  /**
+   * The save door's judge, over the registry a boot of the DECLARING artifact
+   * filled — the live deployment an author then writes into. ⛔ Not a boot of
+   * the typo artifact: that is the shape the boot already refuses (the pin
+   * above), which is why the save door is the door this card is about.
+   */
+  const saveDoorRefusal = async (body: AnyRec) => {
+    const { refusal, engine } = await bootStack(artifactWith('parity_status'));
+    expect(refusal, String(refusal?.message)).toBeUndefined();
+    const protocol = new ObjectStackProtocolImplementation(engine as never, () => new Map()) as unknown as {
+      readMetaItem: unknown;
+      unknownPicklistBindingSaveRefusal(type: string, item: unknown, name: string): Promise<{ issues?: Array<{ path: string }> } | undefined>;
+    };
+    protocol.readMetaItem = async () => undefined;
+    return protocol.unknownPicklistBindingSaveRefusal('object', body, String(body.name));
+  };
+
+  it('a list a SIBLING package of the same artifact declares: both doors accept it', async () => {
+    const stack = artifactWith('parity_status');
+
+    const door = judgePicklistReferences(stack);
+    const saveDoor = await saveDoorRefusal(boundCase('parity_status'));
+
+    expect(door.refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN)).toEqual([]);
+    expect(door.notices).toEqual([]);
+    expect(saveDoor, JSON.stringify(saveDoor?.issues)).toBeUndefined();
+  });
+
+  // The two paths are rooted in their own SUBJECTS — the artifact for this
+  // door, the one body for the save door — so the field is the tail of the
+  // artifact-rooted path, never the whole of it.
+  it('a name no package of the artifact declares: both doors refuse it, at the same field', async () => {
+    const stack = artifactWith('parity_typo');
+
+    const door = judgePicklistReferences(stack).refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN);
+    const saveDoor = await saveDoorRefusal(boundCase('parity_typo'));
+
+    expect(door).toHaveLength(1);
+    expect(saveDoor?.issues?.map((i) => i.path)).toEqual(['fields.status.picklist']);
+    expect(door[0].path, door[0].path).toBe('packages[0].manifest.objects[0].fields.status.picklist');
+    expect(door[0].path?.endsWith(saveDoor!.issues![0].path)).toBe(true);
+  });
+});
+
+/**
+ * [ADR-0150 D3; maintainer ruling N1, record 6729820123] The third parity: a
+ * field naming a list a SIBLING package of the same artifact declares, with no
+ * declared dependency on it. Since E6 the boot serves that field no options
+ * and warns with R's refusal (`findOutsideClosurePicklistReferences`), and the
+ * install judge refuses it; this door refuses it first, in the same sentence —
+ * both read `resolvePackageScopedHolders` over `packageResolutionClosure`.
+ */
+describe('[ADR-0150 D3] picklist-reference-unknown — a sibling\'s list with no declared dependency: the door and the boot say one sentence', () => {
+  const artifact = (dependencies?: Record<string, string>): AnyRec => ({
+    manifest: manifest(STACK_ID),
+    packages: [
+      { manifest: { ...manifest('com.example.parity.core'), ...(dependencies ? { dependencies } : {}), objects: [caseObj(statusField)] } },
+      { manifest: { ...manifest('com.example.parity.app'), picklists: [status] } },
+    ],
+  });
+  const outsideClosure = (engine: { registry: unknown } | undefined) =>
+    (engine?.registry as { findOutsideClosurePicklistReferences(): Array<{ field: string; refusal?: string }> })
+      .findOutsideClosurePicklistReferences();
+
+  it('the door refuses it, with the sentence the boot warns with', async () => {
+    const stack = artifact();
+    const door = judgePicklistReferences(stack).refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN);
+    const { refusal, engine } = await bootStack(stack);
+
+    expect(refusal, String(refusal?.message)).toBeUndefined();
+    expect(door).toHaveLength(1);
+    expect(door[0].path).toBe('packages[0].manifest.objects[0].fields.status.picklist');
+    expect(outsideClosure(engine).map((o) => [o.field, o.refusal])).toEqual([['status', door[0].message]]);
+  });
+
+  it('CONTROL: with the dependency declared, the door accepts it and the boot warns nothing', async () => {
+    const stack = artifact({ 'com.example.parity.app': '^1.0.0' });
+    const door = judgePicklistReferences(stack);
+    const { refusal, engine } = await bootStack(stack);
+
+    expect(refusal, String(refusal?.message)).toBeUndefined();
+    expect(door.refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN)).toEqual([]);
+    expect(door.notices).toEqual([]);
+    expect(outsideClosure(engine)).toEqual([]);
+  });
+
+
+  // [ADR-0150 D3] Two holders one reference reaches: the boot refuses them
+  // (`INVALID_METADATA`), quoting R's sentence, and so does the door.
+  const twoHolders = (core: AnyRec): AnyRec => ({
+    manifest: manifest(STACK_ID),
+    packages: [
+      { manifest: { ...manifest('com.example.parity.core'), ...core } },
+      { manifest: { ...manifest('com.example.parity.app'), picklists: [status] } },
+      { manifest: { ...manifest('com.example.parity.crm'), picklists: [status] } },
+    ],
+  });
+
+  it.each([
+    ['a field whose package depends on both holders', twoHolders({
+      dependencies: { 'com.example.parity.app': '^1.0.0', 'com.example.parity.crm': '^1.0.0' },
+      objects: [caseObj(statusField)],
+    })],
+    ['an extension whose target two packages hold', twoHolders({
+      picklistExtensions: [{ extend: 'parity_status', options: [{ label: 'Closed', value: 'closed' }] }],
+    })],
+  ])('%s: the door refuses it, and the boot refuses it quoting the same sentence', async (_label, stack) => {
+    const door = judgePicklistReferences(stack).refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN);
+    const { refusal } = await bootStack(stack);
+
+    expect(door).toHaveLength(1);
+    expect(door[0].message).toContain('Nothing picks one of them');
+    expect(refusal?.code).toBe('INVALID_METADATA');
+    expect(refusal?.message).toContain(`(${door[0].message})`);
   });
 });

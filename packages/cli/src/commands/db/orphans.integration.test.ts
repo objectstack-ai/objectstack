@@ -20,7 +20,11 @@
  *    reference cannot be probed, so it is UNDETERMINED, never an orphan;
  *  - a plain lookup naming no campaign, on the live member — dangling, listed,
  *    never deleted, and no reason to delete the row it sits on;
- *  - an object with no required master-detail at all — not read.
+ *  - an object with no required master-detail at all — not read;
+ *  - [#30976] tips, `controlled_by_parent` children of a campaign through an
+ *    OPTIONAL master (`required: false`, ruling A of #30905): one names no
+ *    campaign (valid, never listed), one names the live campaign, and one names
+ *    the missing campaign — an orphan like the member, deleted with it.
  *
  * ## What each case proves
  *
@@ -46,6 +50,15 @@ import { ObjectQL, SUMMARY_RECOMPUTE_CODE } from '@objectstack/objectql';
 import { isExitSignal } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import DbOrphans from './orphans.js';
+
+// Pay the first load of what `bootSchemaStack` and the command reach through
+// dynamic `import()`s at MODULE LOAD, outside any clocked case.
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/runtime';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
@@ -94,6 +107,12 @@ const ARTIFACT = {
       name: 'od_ref',
       fields: { name: { type: 'text' }, campaign_ref: { type: 'lookup', reference: 'od_campaign' } },
     },
+    {
+      // [#30976] An OPTIONAL controlled-by-parent master: a row may name no campaign.
+      name: 'od_tip',
+      sharingModel: 'controlled_by_parent',
+      fields: { body: { type: 'text' }, campaign: { type: 'master_detail', reference: 'od_campaign', required: false } },
+    },
   ],
 };
 
@@ -121,7 +140,7 @@ async function idsOf(dbFile: string): Promise<Record<string, string[]>> {
   const k = (driver as any).knex;
   try {
     const out: Record<string, string[]> = {};
-    for (const table of ['od_campaign', 'od_member', 'od_member_note', 'od_ghost_member', 'od_hold', 'od_ref']) {
+    for (const table of ['od_campaign', 'od_member', 'od_member_note', 'od_ghost_member', 'od_hold', 'od_ref', 'od_tip']) {
       out[table] = ((await k(table).select('id').orderBy('id')) as Array<{ id: string }>).map((r) => r.id);
     }
     return out;
@@ -212,6 +231,9 @@ beforeAll(async () => {
     await seedRow(ql, 'od_member_note', { ...ORG, id: 'n_orphan', body: 'goes with its member', member: 'm_orphan' });
     await seedRow(ql, 'od_ghost_member', { ...ORG, id: 'g_row', name: 'unknown master', ghost: 'nobody_knows' });
     await seedRow(ql, 'od_ref', { ...ORG, id: 'r_row', name: 'dangling lookup', campaign_ref: 'Gone Campaign' });
+    await seedRow(ql, 'od_tip', { ...ORG, id: 't_none', body: 'names no campaign' });
+    await seedRow(ql, 'od_tip', { ...ORG, id: 't_live', body: 'kept', campaign: 'c_live' });
+    await seedRow(ql, 'od_tip', { ...ORG, id: 't_orphan', body: 'orphan', campaign: MISSING_CAMPAIGN });
   } finally {
     await stack.shutdown();
   }
@@ -224,6 +246,7 @@ beforeAll(async () => {
     od_ghost_member: ['g_row'],
     od_hold: [],
     od_ref: ['r_row'],
+    od_tip: ['t_live', 't_none', 't_orphan'],
   });
 }, 180_000);
 
@@ -248,13 +271,21 @@ describe('[#24964] os db orphans — the default run is a report that writes not
 
     expect(exitCode).toBe(0);
     expect(payload.mode).toBe('report');
-    expect(payload.plan.orphans).toEqual([{
-      object: 'od_member',
-      recordId: 'm_orphan',
-      fields: [{ field: 'campaign', master: 'od_campaign', missingMasterId: MISSING_CAMPAIGN }],
-      cascade: [{ object: 'od_member_note', id: 'n_orphan' }],
-    }]);
-    expect(payload.plan.counts).toMatchObject({ orphans: 1, deeperDetails: 1, withheld: 0 });
+    expect(payload.plan.orphans).toEqual([
+      {
+        object: 'od_member',
+        recordId: 'm_orphan',
+        fields: [{ field: 'campaign', master: 'od_campaign', missingMasterId: MISSING_CAMPAIGN }],
+        cascade: [{ object: 'od_member_note', id: 'n_orphan' }],
+      },
+      {
+        object: 'od_tip',
+        recordId: 't_orphan',
+        fields: [{ field: 'campaign', master: 'od_campaign', missingMasterId: MISSING_CAMPAIGN }],
+        cascade: [],
+      },
+    ]);
+    expect(payload.plan.counts).toMatchObject({ orphans: 2, deeperDetails: 1, withheld: 0 });
     // Zero writes: no row, no table, and no file beside the database.
     expect(await readState(c.dbFile)).toEqual(before);
     expect(existsSync(join(c.caseDir, 'export.json'))).toBe(false);
@@ -280,6 +311,24 @@ describe('[#24964] os db orphans — the default run is a report that writes not
     // An object with no required master-detail is not this command's to read.
     expect(payload.plan.objects).not.toContain('od_ref');
   }, CASE_TIMEOUT_MS);
+
+  it('[#30976] an optional master: one naming a missing campaign is an orphan; an empty one is valid and never listed', async () => {
+    const c = prepareCase();
+
+    const { payload } = await runJson(['--database-url', c.url, '--json']);
+
+    // The scan read the optional-master object.
+    expect(payload.plan.objects).toContain('od_tip');
+    const listed = [
+      ...payload.plan.orphans.map((o: { object: string; recordId: string }) => `${o.object}/${o.recordId}`),
+      ...payload.plan.otherDangling.map((d: { objectName: string; recordId: string }) => `${d.objectName}/${d.recordId}`),
+    ];
+    expect(payload.plan.orphans.map((o: { object: string; recordId: string }) => `${o.object}/${o.recordId}`))
+      .toContain('od_tip/t_orphan');
+    // A tip that names no campaign, and one that names the live campaign, are listed nowhere.
+    expect(listed).not.toContain('od_tip/t_none');
+    expect(listed).not.toContain('od_tip/t_live');
+  }, CASE_TIMEOUT_MS);
 });
 
 describe('[#24964] os db orphans --delete', () => {
@@ -291,11 +340,14 @@ describe('[#24964] os db orphans --delete', () => {
 
     expect(payload.error, JSON.stringify(payload).slice(0, 400)).toBeUndefined();
     expect(exitCode).toBe(0);
-    expect(payload.deleted).toEqual([expect.objectContaining({
-      object: 'od_member',
-      recordId: 'm_orphan',
-      removed: [{ object: 'od_member', id: 'm_orphan' }, { object: 'od_member_note', id: 'n_orphan' }],
-    })]);
+    expect(payload.deleted).toEqual([
+      expect.objectContaining({
+        object: 'od_member',
+        recordId: 'm_orphan',
+        removed: [{ object: 'od_member', id: 'm_orphan' }, { object: 'od_member_note', id: 'n_orphan' }],
+      }),
+      expect.objectContaining({ object: 'od_tip', recordId: 't_orphan', removed: [{ object: 'od_tip', id: 't_orphan' }] }),
+    ]);
     // The roll-up on the master that does not exist cannot be recomputed; the run says so, and deleted anyway.
     expect(payload.deleted[0].notes.join(' ')).toMatch(/od_campaign\.member_total was not recomputed for Spring Promo/);
     expect(payload.failed).toEqual([]);
@@ -307,12 +359,14 @@ describe('[#24964] os db orphans --delete', () => {
       od_ghost_member: ['g_row'],
       od_hold: [],
       od_ref: ['r_row'],
+      // The tip that names no campaign stays, with the one whose campaign is live.
+      od_tip: ['t_live', 't_none'],
     });
 
     const doc = JSON.parse(readFileSync(exportPath, 'utf8'));
     expect(doc.format).toBe('objectstack.orphan-detail.pre-delete-export.v1');
     expect(doc.rows.map((r: { object: string; id: string }) => `${r.object}/${r.id}`)).toEqual([
-      'od_member/m_orphan', 'od_member_note/n_orphan',
+      'od_member/m_orphan', 'od_member_note/n_orphan', 'od_tip/t_orphan',
     ]);
     expect(doc.rows[0].row).toMatchObject({ id: 'm_orphan', name: 'orphan', campaign: MISSING_CAMPAIGN });
     expect(doc.rows[1].row).toMatchObject({ id: 'n_orphan', body: 'goes with its member', member: 'm_orphan' });
@@ -339,7 +393,7 @@ describe('[#24964] os db orphans --delete', () => {
 
     // Non-vacuity: the command reached its delete through the intercepted method.
     expect(seenAtFirstDelete).toBeDefined();
-    expect(seenAtFirstDelete).toEqual(['od_member/m_orphan', 'od_member_note/n_orphan']);
+    expect(seenAtFirstDelete).toEqual(['od_member/m_orphan', 'od_member_note/n_orphan', 'od_tip/t_orphan']);
     expect(exitCode).toBe(1);
     expect(payload.failed).toEqual([expect.objectContaining({ object: 'od_member', recordId: 'm_orphan', code: 'INJECTED_REFUSAL' })]);
     // Refused, so nothing went.
@@ -364,7 +418,8 @@ describe('[#24964] os db orphans --delete — the delete is the engine\'s own', 
     const { payload, exitCode } = await runJson(['--delete', '--export', exportPath, '--yes', '--database-url', c.url, '--json']);
 
     expect(exitCode).toBe(1);
-    expect(payload.deleted).toEqual([]);
+    // The other orphan, which nothing restricts, is deleted as before.
+    expect(payload.deleted).toEqual([expect.objectContaining({ object: 'od_tip', recordId: 't_orphan' })]);
     expect(payload.failed).toEqual([expect.objectContaining({
       object: 'od_member', recordId: 'm_orphan', code: 'DELETE_RESTRICTED',
       remaining: [{ object: 'od_member', id: 'm_orphan' }, { object: 'od_member_note', id: 'n_orphan' }],

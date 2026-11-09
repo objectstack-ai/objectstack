@@ -519,10 +519,13 @@ const PROBES: readonly Probe[] = [
     re: /async\s+handleMcp\s*\(/g,
     key: () => 'mcp:http-dispatcher.ts:handleMcp',
   },
+  // [#30892] The request context stays the bridge's SECOND argument; a trailing
+  // seams object literal (the per-request file seam) is admitted beside it, so
+  // a bridge built from anything but the request context still vanishes here.
   {
     kind: 'GATE_PIN',
     file: 'packages/runtime/src/domains/mcp.ts',
-    re: /buildMcpBridge\(deps, context\)/g,
+    re: /buildMcpBridge\(deps, context(?:, \{[^}]*\})?\)/g,
     key: () => 'mcp:domains/mcp.ts:buildMcpBridge(context-threaded)',
   },
   // (3) The stdio transport's PRINCIPAL binding (ADR-0101): the long-lived
@@ -1103,6 +1106,10 @@ describe('the ledger-sourced population and its baseline bite', () => {
       'rest-family:rest-route-ledger.ts:metadata',
       // [#22430] classified by `anonymous-deny-api-description`.
       'rest-family:rest-route-ledger.ts:openapi',
+      // [#30237] classified by `anonymous-deny-recycle-bin`: it arrived classified.
+      'rest-family:rest-route-ledger.ts:recycle-bin',
+      // [#30205] classified by `anonymous-deny-user-work`: it arrived classified.
+      'rest-family:rest-route-ledger.ts:user-work',
     ]);
     // …and the two halves partition the population exactly: nothing minted by
     // a ledger probe is both, and nothing is neither.

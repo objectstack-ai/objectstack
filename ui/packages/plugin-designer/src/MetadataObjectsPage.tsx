@@ -35,7 +35,12 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ObjectDefinition } from '@object-ui/types';
-import { MetadataClient, dropServedPicklistOptions, type MetadataClientConfig } from '@object-ui/data-objectstack';
+import {
+  MetadataClient,
+  authoredPublished,
+  dropServedPicklistOptions,
+  type MetadataClientConfig,
+} from '@object-ui/data-objectstack';
 import { ObjectManager } from './ObjectManager';
 
 /**
@@ -106,6 +111,13 @@ function toObjectDefinition(raw: ServerObjectSchema): ObjectDefinition {
     fieldCount,
   };
 }
+
+/**
+ * The object keys {@link ObjectManager} edits that this page writes back
+ * (objectstack#30786): only these, and only when the edit changed them, are
+ * laid over the authored document. `group` is not among them (objectui#6223).
+ */
+const EDITABLE_OBJECT_KEYS = ['label', 'pluralLabel', 'description', 'icon', 'isSystem'] as const;
 
 /**
  * The value the server stamps as `_packageId` on a row bound to NO package. It
@@ -209,9 +221,10 @@ export function MetadataObjectsPage({
    * truth.
    *
    * Deletes are issued via DELETE /meta/object/:name (overlay reset).
-   * Updates merge the manager's edited fields back onto the raw server
-   * payload to preserve everything the manager doesn't render (fields,
-   * indexes, hooks, permissions, etc.).
+   * Updates lay the keys the manager's edit changed over the object as
+   * authored (`overlay ?? code` off the layered read, objectstack#30786),
+   * preserving everything the manager doesn't render (fields, indexes,
+   * hooks, permissions, etc.) as the author wrote it.
    */
   const handleObjectsChange = useCallback(async (next: ObjectDefinition[]) => {
     const prev = state.byName;
@@ -244,46 +257,70 @@ export function MetadataObjectsPage({
 
     // Inserts + updates
     for (const updated of next) {
-      // One own-entry lookup feeding both the merge base and the
-      // redundant-save guard below (objectui#6522). Off a plain object literal
+      // One own-entry lookup feeding both the redundant-save guard and the
+      // changed-keys reading below (objectui#6522). Off a plain object literal
       // a name that was never stored still answered — `prev['constructor']`
-      // handed back the `Object` function — so the merge spread the wrong base
-      // and the guard below compared against inherited `undefined`s.
+      // handed back the `Object` function — so the guard compared against
+      // inherited `undefined`s.
       const previous = prev.get(updated.name);
-      const base = previous ?? { name: updated.name };
-      const merged: ServerObjectSchema = {
-        ...base,
-        name: updated.name,
-        label: updated.label,
-        pluralLabel: updated.pluralLabel,
-        description: updated.description,
-        icon: updated.icon,
-        // `group` is deliberately not merged back (objectui#6223) — see the
-        // note on `ServerObjectSchema`.
-        isSystem: updated.isSystem,
-      };
-      // `...base` is a verbatim spread of whatever the server sent, so simply
-      // not writing `group` is not enough: an object that already has the key
-      // stored from before this fix would spread it straight back out and stay
-      // permanently unsaveable. Strip it on the way out too — the objectui#4644
-      // strip-on-load shape, applied on the write side where the spread is.
-      delete merged.group;
+      // objectstack#30786 — what the manager shows is the LISTED object, which
+      // the server translates for the console's `Accept-Language` and fills
+      // with the platform's injected columns. Spread back as the save body, a
+      // relabel in a Chinese console stored every translated label (the
+      // object's and each field's) and the injected columns as authored. The
+      // body is now the object as its author wrote it (`overlay ?? code` off
+      // the layered read) with only the keys this edit CHANGED laid over it: a
+      // key the manager hands back as listed is the translation, not the
+      // author's text, so it is never written.
+      const shown = previous ? toObjectDefinition(previous) : undefined;
+      const edits: Partial<ServerObjectSchema> = {};
+      for (const key of EDITABLE_OBJECT_KEYS) {
+        if (!shown || updated[key] !== shown[key]) {
+          (edits as Record<string, unknown>)[key] = updated[key];
+        }
+      }
       // Don't issue redundant saves if nothing visible changed.
       if (
         previous
-        && previous.label === merged.label
-        && previous.pluralLabel === merged.pluralLabel
-        && previous.description === merged.description
-        && previous.icon === merged.icon
+        && !('label' in edits)
+        && !('pluralLabel' in edits)
+        && !('description' in edits)
+        && !('icon' in edits)
       ) {
         continue;
       }
       try {
-        // objectui#11692 — `merged` spreads the SERVED object (`client.list`),
-        // whose picklist-bound fields carry `picklist` beside the options the
-        // runtime resolved from the list. The authoring door refuses the pair
-        // for the whole object, so a relabel here was refused for a field it
-        // never touched. The resolved `options` stay out of the body.
+        let base: Record<string, unknown> = {};
+        if (previous) {
+          const layers = await client.layered('object', updated.name);
+          // A listed object with neither authored layer is one the layered
+          // read could not answer: a body built on `{}` would drop every field
+          // the author wrote, so nothing is sent and the row says why.
+          if (layers.overlay == null && layers.code == null) {
+            errors.push(`Save ${updated.name}: the object as authored could not be read, so nothing was saved.`);
+            continue;
+          }
+          base = authoredPublished('object', layers);
+        }
+        const merged: ServerObjectSchema = {
+          ...base,
+          ...edits,
+          name: updated.name,
+        };
+        // `group` is deliberately not merged back (objectui#6223) — see the
+        // note on `ServerObjectSchema`. `...base` is a verbatim spread of the
+        // stored document, so simply not writing `group` is not enough: an
+        // object that already has the key stored from before that fix would
+        // spread it straight back out and stay permanently unsaveable. Strip it
+        // on the way out too — the objectui#4644 strip-on-load shape, applied
+        // on the write side where the spread is.
+        delete merged.group;
+        // objectui#11692 — a picklist-bound field must not leave with
+        // `picklist` beside options the runtime resolved from the list: the
+        // authoring door refuses the pair for the whole object, so a relabel
+        // here was refused for a field it never touched. The base is the
+        // authored document now, but this page edits no options, so options
+        // beside a `picklist` can only be a served copy: they stay out.
         await client.save('object', updated.name, dropServedPicklistOptions(merged));
       } catch (err) {
         errors.push(`Save ${updated.name}: ${err instanceof Error ? err.message : String(err)}`);

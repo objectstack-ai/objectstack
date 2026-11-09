@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { isFederatedObject } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction, referenceCarrierOf } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -1440,7 +1441,12 @@ export class AnalyticsServicePlugin implements Plugin {
               type?: string;
               multiple?: boolean;
               max?: number;
-              currencyConfig?: { currencyMode?: string; defaultCurrency?: string; currencyField?: string };
+              currencyConfig?: {
+                currencyMode?: string;
+                defaultCurrency?: string;
+                currencyField?: string;
+                homeAmount?: { field?: string };
+              };
             }
           | undefined;
         if (!f) return undefined;
@@ -1453,12 +1459,18 @@ export class AnalyticsServicePlugin implements Plugin {
         const recordCurrencyField = f.currencyConfig?.currencyMode === 'record'
           ? f.currencyConfig.currencyField
           : undefined;
+        // [ADR-0144 D6, #27195] …and the home field beside it, which the cube
+        // door's refusal names as the consolidated-total remedy.
+        const homeAmountField = recordCurrencyField !== undefined
+          ? f.currencyConfig?.homeAmount?.field
+          : undefined;
         return {
           type: f.type,
           multiple: f.multiple === true,
           max: f.max,
           defaultCurrency: fixedCurrency,
           currencyField: recordCurrencyField,
+          homeAmountField,
         };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
@@ -1494,7 +1506,7 @@ export class AnalyticsServicePlugin implements Plugin {
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.
       isExternalObject: (objectName: string) => {
         const obj = dataEngine()?.getObject?.(objectName);
-        return !!(obj && obj.external != null);
+        return isFederatedObject(obj);
       },
       // [#3867] Existence probe for the cube auto-inference gate. Reads the
       // same schema registry the data path's #3770 gate consults, through the

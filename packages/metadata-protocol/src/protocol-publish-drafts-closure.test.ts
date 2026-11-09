@@ -56,6 +56,8 @@
  * `saveMetaItem` / `publishPackageDrafts` run.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 // The producer's OWN write-verb dispatch decisions, so the fake engine below
 // cannot accept a call ObjectQL refuses. From `@objectstack/metadata-core`,

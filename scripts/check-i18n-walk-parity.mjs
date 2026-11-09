@@ -161,12 +161,12 @@ const at = (rel) => join(REPO_ROOT, rel);
 
 /** The DECLARED side: `TranslationDataSchema`, from the built spec. */
 const SPEC_SYSTEM_DIST = 'packages/spec/dist/system/index.mjs';
-/** The WALKED side: `collectExpectedEntries`, from the built CLI. */
-const CLI_WALKER_DIST = 'packages/cli/dist/utils/i18n-extract.js';
+/** The WALKED side: `collectExpectedEntries`, from the built CLI (re-exported from `@objectstack/lint`). */
+const CLI_WALKER_DIST = 'packages/cli/dist/utils/i18n-bundle-extract.js';
 /** The schema module a reader edits when a group is added. Named, never read. */
 const TRANSLATION_SCHEMA_SRC = 'packages/spec/src/system/translation.zod.ts';
 /** The walker a reader edits when a group has no emitter. Named, never read. */
-const WALKER_SRC = 'packages/cli/src/utils/i18n-extract.ts';
+const WALKER_SRC = 'packages/lint/src/i18n-walk.ts';
 /** A stack config authoring one member of every group the walker can reach. */
 const FIXTURE = 'scripts/fixtures/i18n-walk-parity/every-group.stack.json';
 
@@ -175,10 +175,12 @@ const FIXTURE = 'scripts/fixtures/i18n-walk-parity/every-group.stack.json';
  * derivation can extract it (a computed spelling contributes nothing and the
  * gate silently drops out of every card's brief). `packages/cli/src` arrives
  * inherited from `cli-build-prerequisite.mjs`; what this declaration adds is
- * the OTHER side — the schema whose group set is half of the comparison, and
- * the fixture whose thinness could fake a red.
+ * the walk itself, which lives in `@objectstack/lint` and so is outside that
+ * inherited tree, and the OTHER side — the schema whose group set is half of
+ * the comparison, and the fixture whose thinness could fake a red.
  */
 const DECLARED_WATCH_HINTS = [
+  'packages/lint/src/i18n-walk.ts/**',
   'packages/spec/src/system/translation.zod.ts/**',
   'scripts/fixtures/i18n-walk-parity/**',
 ];

@@ -240,9 +240,17 @@ export const SysSession = ObjectSchema.create({
       // `admin_password_reset` is the second authorization-event cause: an
       // administrator's forced password reset revoked the session
       // (`plugin-auth/forced-reset-revocation.ts`, `FORCED_RESET_REVOKE_REASON`).
+      // `password_reset` is its self-service counterpart: a completed password
+      // reset ended the session (the reset doors in `INTERACTIVE_REVOKE_REASON`,
+      // `plugin-auth/session-tombstone.ts`).
+      // `ip_not_allowed` is a session control beside the timers: the
+      // organization's own allowed IP ranges (`access_policy`, ADR-0069 TL;DR 6)
+      // no longer admit the address the session was read from, judged on a
+      // session read through a door (`enforceSessionControls`,
+      // `plugin-auth/auth-manager-password-session-policy.ts`).
       description:
-        'Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, '
-        + 'admin, organization_membership_ended, admin_password_reset, …).',
+        'Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, '
+        + 'admin, organization_membership_ended, admin_password_reset, password_reset, …).',
     }),
 
     // ── Active context (multi-org/team) ──────────────────────────

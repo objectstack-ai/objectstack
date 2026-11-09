@@ -1,0 +1,22 @@
+---
+'@objectstack/runtime': patch
+---
+
+fix(runtime)!: `PATCH /api/v1/packages/:id/disable` refuses while an enabled package's validation rule reads a field the package adds through `objectExtensions`
+
+Clause-②: no (narrowing) — the package disable door, and the install door's `enableOnInstall: false` arm on an overwrite of an enabled package, refuse (`409` `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`) a disable they accepted before: one that would withhold a field an active validation rule reads. Nothing is widened: no export, request shape, response member or authorable key is added, and the code is the one #30724 registered.
+Metadata-protocol: none
+Skills-docs: updated here — `content/docs/api/metadata-api.mdx` (the disable door's entry), `content/docs/deployment/marketplace-handbook.mdx` (the Enable-and-disable step and the Disabling-a-module list) and `content/docs/api/error-catalog.mdx` (the code's 409 entry) name the refusal; `skills/**` teaches no package disable door (grep for `packages/:id/disable`, `disableable`, `WRITABLE_PACKAGE_REQUIRED`: none), so no skill or eval moves.
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package root changes: a disable request that would have left an object refusing every write is refused before anything changes, with an error code already registered. Nothing at rest records that answer, so there is nothing for a migration to rewrite and no tombstone. -->
+
+**BREAKING** accept-set narrowing on the package disable door and the install door's `enableOnInstall: false` arm on an overwrite of an enabled package (`@objectstack/runtime`, `domains/packages.ts`), for one case only.
+
+- **Before.** A disabled package's `objectExtensions` fields are withheld from the object they extend. When a validation rule of another package that stayed enabled read one of those fields, the disable answered `200`, and every write to that object was then refused (`400 VALIDATION_FAILED`, naming the rule) for as long as the package stayed off.
+- **Now.** The door refuses such a disable with `409` and `error.code` `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`, after the read-only check and before anything changes: the package row, the served objects and the environment's stored disable state stay as they were. The message names every reading rule as `package · object · rule (reads FIELD)`, one or several. The refusal carries no other `error.details`.
+- **Who is scanned.** Any enabled package, declared dependent or not (no `manifest.dependencies` entry is read), an app's `<base>.custom` pair (where tenant-written rules live) included, at every severity. Each rule is judged as the object will serve it once the disable lands: one rule per name (a later layer's copy replaces an earlier one), with a tenant overlay's `message` and `active` on it, so a packaged rule the tenant switched off through the overlay does not refuse the disable. The message names each rule after the layer whose copy is served (`tenant overlay` for a rule the overlay declares itself). A rule reads a field when its predicate names it on the rule's own object or one hop through a reference field of that object (`record.account.FIELD`), or when it is a `state_machine` / `format` / `json_schema` rule on that field.
+- **The install door too, on an overwrite of an enabled package.** `POST /api/v1/packages` with `overwrite` and `enableOnInstall: false`, over a package that is enabled before the install, asks the same scan before it disables: such an overwrite still lands, the package stays enabled, and the door answers the same `409` instead of a `201` claiming a disable. A fresh install (or a reinstall after a delete) and an overwrite of a disabled package withhold nothing a rule is served against, and land disabled as asked, as before.
+- **Unchanged.** A formula over the field is no reason to refuse (it answers `null`), nor is a rule switched off (`active: false`) or a rule of a package that is itself disabled. Every other disable answers as before.
+- **Who moves.** An administrator or client disabling such a package, or overwriting it, while enabled, with `enableOnInstall: false`: a refusal naming the rules, instead of a disable that left the object refusing every write.
+
+**The remedy.** Switch off or change each named rule first, or disable the package that owns it, then disable the package; or keep the package enabled.

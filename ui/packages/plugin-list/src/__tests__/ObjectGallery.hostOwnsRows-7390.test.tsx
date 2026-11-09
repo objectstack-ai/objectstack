@@ -28,7 +28,8 @@
  *     branch and returns before `dataSource.find`. `object-gallery` is
  *     registered as the component itself (no wrapper that drops props), which
  *     is what makes it the opposite of the `object-gantt` case pinned in
- *     `plugin-gantt/src/ObjectGantt.hostDataProp-7210.test.tsx`.
+ *     the `ObjectGantt.hostDataProp-7210` block of
+ *     `plugin-gantt/src/ObjectGantt.harness.test.tsx`.
  *   - Standalone — a `{ type: 'object-gallery', objectName }` node an author
  *     writes into a page schema — the gallery owns the query, and there is no
  *     `ListView`, hence no paging chrome, above it. Every in-repo host

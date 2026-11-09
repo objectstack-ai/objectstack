@@ -64,6 +64,7 @@ export {
   validateDatasetMeasureAggregates,
   MEASURE_AGGREGATE_FIELD_TYPE_REFUSED,
   DIMENSION_JSON_STORED_FIELD_REFUSED,
+  DIMENSION_VIRTUAL_FIELD_REFUSED,
   MEASURE_DURATION_FIELD_TYPE_REFUSED,
   // [#23235] The dimension leg's group-key verdict on its own, so a consumer
   // deriving dataset dimensions (cloud's AI build) asks the door's two
@@ -139,12 +140,16 @@ export {
   validateFlowApiTriggerSecret,
   FLOW_TRIGGER_UNKNOWN_OBJECT,
   FLOW_INPUT_UNKNOWN_OBJECT,
+  FLOW_INPUT_OBJECT_LESS,
+  FLOW_INPUT_RECORD_READ_AS_LIST,
   FLOW_DRAFT_STATUS_AMBIGUOUS,
   FLOW_TRIGGER_UNKNOWN_EVENT,
   FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID,
   FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE,
+  FLOW_TIME_RELATIVE_OBJECT_MISMATCH,
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
+  FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -361,8 +366,24 @@ export {
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  holdsSuperuserBypass,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
+
+// A roll-up summary a permission set reads over child data the same set cannot
+// read: the roll-up aggregates the whole child collection and answers only to
+// the parent field's own permissions, so the author is told where they
+// configure the set.
+export {
+  validateRollupSourceVisibility,
+  SECURITY_ROLLUP_SOURCE_UNREADABLE,
+  SECURITY_ROLLUP_SOURCE_ROW_SCOPED,
+} from './validate-rollup-source-visibility.js';
+export type {
+  RollupSourceVisibilityFinding,
+  RollupSourceVisibilitySeverity,
+} from './validate-rollup-source-visibility.js';
 
 export {
   validateOrgAxisRedLines,
@@ -519,9 +540,13 @@ export type {
 // ingress, `assertOrderByIsMaterializable` #7095 in the engine); this is the
 // authoring-time half, which is what makes the refusal traceable back to the
 // declaration that caused it.
+// [#30023] `indexObjectSortability` builds the optional trailing argument of
+// `checkSortDeclaration` that answers the author-declared verdict
+// (`sortable: false`), so an out-of-repo caller of the core can pass it.
 export {
   validateSortableFields,
   checkSortDeclaration,
+  indexObjectSortability,
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
@@ -529,6 +554,7 @@ export {
 export type {
   SortableFieldFinding,
   SortableFieldSeverity,
+  SortabilityFields,
 } from './validate-sortable-fields.js';
 
 // [#14107] The rest of the list view's field surface — the two rules above own
@@ -719,6 +745,14 @@ export {
 } from './validate-report-date-range.js';
 export type { ReportDateRangeFinding } from './validate-report-date-range.js';
 
+// [#29900] A report's `runtimeFilter` keys resolved on its dataset's object
+// graph, by the dashboard twin's own judgement (`widget-filter-field-unknown`).
+export {
+  validateReportRuntimeFilters,
+  REPORT_FILTER_FIELD_UNKNOWN,
+} from './validate-report-runtime-filter.js';
+export type { ReportRuntimeFilterFinding } from './validate-report-runtime-filter.js';
+
 // [#28473] ADR-0146 D3: a package namespace too long to have a paired
 // customization namespace, judged with `customizationNamespace` itself.
 export {
@@ -756,6 +790,15 @@ export {
   MAPPING_TARGET_FIELD_UNKNOWN,
 } from './validate-mapping-target-fields.js';
 export type { MappingTargetFieldFinding } from './validate-mapping-target-fields.js';
+
+// A mapping's `connectorSource.connector` must name a declared `connectors[]`
+// entry whose provider a pull reads through (rest or openapi).
+export {
+  validateMappingConnectorSources,
+  MAPPING_CONNECTOR_SOURCE_UNKNOWN,
+  CONNECTOR_SOURCE_PROVIDERS,
+} from './validate-mapping-connector-source.js';
+export type { MappingConnectorSourceFinding } from './validate-mapping-connector-source.js';
 
 // The two reusable seams the rule above is written on, exported because the
 // queued siblings (#14148 widget filter keys + sortBy, #14107 list-view field
@@ -1008,6 +1051,7 @@ export {
   FLOW_DEFAULT_EDGE_WITH_CONDITION,
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
+  FLOW_NODE_UNREACHABLE,
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
@@ -1081,7 +1125,7 @@ export {
   validateEmailTemplateHoleGrammar,
   EMAIL_TEMPLATE_HOLE_GRAMMAR,
 } from './validate-email-template-hole-grammar.js';
-export type { EmailTemplateHoleGrammarFinding } from './validate-email-template-hole-grammar.js';
+export type { EmailTemplateHoleGrammarFinding, EmailTemplateHoleGrammarOptions } from './validate-email-template-hole-grammar.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';
 export type { AutonumberLintFinding } from './lint-autonumber-formats.js';
@@ -1197,3 +1241,11 @@ export type {
   EnvelopeAuditDoor,
   PageEnvelopeAudit,
 } from './page-envelope-audit.js';
+
+// The translatable-key walk: every key a translation bundle can carry for a
+// stack, each with the source text it translates. `os i18n extract` builds its
+// skeletons from it, `os lint`'s coverage gate decides what it gates from it,
+// and Studio's translation editor draws its table from it, in a browser — which
+// is why it lives here and not in the CLI.
+export { authorWarnedTranslationGroups, collectExpectedEntries, humanizeFieldPath } from './i18n-walk.js';
+export type { ExpectedEntry, ExpectedEntryOptions } from './i18n-walk.js';

@@ -72,6 +72,10 @@ import { DataPillar } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
 import { addFieldFromFormToolbar, addFieldFromGrid } from './__tests__/dataPillarAddField';
+// The pinyin dictionary a Chinese label derives through, resident before any
+// case, as it is once a Console door has fetched it (objectstack#29690).
+import { loadHanRomanizer } from '../metadata-admin/romanizeHan';
+await loadHanRomanizer();
 
 const FORM = t('engine.studio.data.tab.form', 'en');
 const ADD_FIELD = t('engine.studio.data.addField', 'en');
@@ -190,14 +194,16 @@ describe('Data pillar — Add field asks for the label and type first (objectui#
   });
 
   // objectui#13389 — these two used to get a silent `field_<N>`, permanent
-  // once published; the popover now asks for the api name instead.
+  // once published; the popover now asks for the api name instead. A Chinese
+  // label derives through its pinyin since objectstack#29690 (last block), so
+  // the label that derives none is a Japanese one.
   it('a label whose name is taken, or that derives none, is named by the api name the popover asks for', async () => {
     await openForm();
     // `name` is the served field's api name.
     await addFieldFromFormToolbar(undefined, { label: 'Name', apiName: 'full_name' });
     const inspector = await screen.findByTestId('data-field-inspector');
     expect(within(inspector).getByText('full_name')).toBeInTheDocument();
-    await addFieldFromFormToolbar(undefined, { label: '健康分', apiName: 'health_score' });
+    await addFieldFromFormToolbar(undefined, { label: 'ヘルススコア', apiName: 'health_score' });
     await waitFor(() => expect(within(screen.getByTestId('data-field-inspector')).getByText('health_score')).toBeInTheDocument());
     const fields = await waitFor(async () => {
       const f = await savedFields();
@@ -205,14 +211,14 @@ describe('Data pillar — Add field asks for the label and type first (objectui#
       return f;
     }, { timeout: 8000 });
     expect(fields.full_name).toMatchObject({ type: 'text', label: 'Name' });
-    expect(fields.health_score).toMatchObject({ type: 'text', label: '健康分' });
+    expect(fields.health_score).toMatchObject({ type: 'text', label: 'ヘルススコア' });
   });
 
   it('a label that derives no name keeps Create off until an api name is typed, and says why', async () => {
     await openForm();
     await userEvent.click(toolbarAddField());
     const popover = await screen.findByTestId('add-field-popover');
-    await userEvent.type(within(popover).getByTestId('add-field-label-input'), '满意度');
+    await userEvent.type(within(popover).getByTestId('add-field-label-input'), 'マンゾクド');
     const create = within(popover).getByTestId('add-field-create');
     expect(create).toHaveAttribute('aria-disabled', 'true');
     expect(within(popover).getByTestId('add-field-api-name-hint')).toHaveTextContent(
@@ -274,5 +280,34 @@ describe('Data pillar — Add field asks for the label and type first (objectui#
     expect(screen.queryByTestId('add-field-popover')).toBeNull();
     await userEvent.click(screen.getAllByRole('button', { name: FORM })[0]);
     expect(within(await screen.findByTestId('form-toolbar')).queryByRole('button', { name: ADD_FIELD })).toBeNull();
+  });
+});
+
+describe('Data pillar — a Chinese label names the field by pinyin, as previewed (objectstack#29690)', () => {
+  it('the popover previews the pinyin name and the field is created under exactly that name', async () => {
+    await openForm();
+    await userEvent.click(toolbarAddField());
+    const popover = await screen.findByTestId('add-field-popover');
+    await userEvent.type(within(popover).getByTestId('add-field-label-input'), '客户等级');
+    const preview = within(popover).getByTestId('add-field-api-name-preview');
+    expect(preview).toHaveTextContent('kehu_dengji');
+    expect(within(popover).queryByTestId('add-field-api-name-input')).toBeNull();
+    await userEvent.click(within(popover).getByTestId('add-field-create'));
+    const inspector = await screen.findByTestId('data-field-inspector');
+    expect(within(inspector).getByText('kehu_dengji')).toBeInTheDocument();
+    const fields = await savedFields();
+    expect(Object.keys(fields)).toEqual(['name', 'kehu_dengji']);
+    expect(fields.kehu_dengji).toMatchObject({ type: 'text', label: '客户等级' });
+  });
+
+  it('a pinyin name another field holds gets the taken-name refusal, as any other name does', async () => {
+    await openForm();
+    await addFieldFromFormToolbar(undefined, { label: '客户等级' });
+    await screen.findByTestId('data-field-inspector');
+    await userEvent.click(toolbarAddField());
+    const popover = await screen.findByTestId('add-field-popover');
+    await userEvent.type(within(popover).getByTestId('add-field-label-input'), '客户等级');
+    expect(within(popover).getByTestId('add-field-api-name-hint')).toHaveTextContent('kehu_dengji');
+    expect(within(popover).getByTestId('add-field-create')).toHaveAttribute('aria-disabled', 'true');
   });
 });

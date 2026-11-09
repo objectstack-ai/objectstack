@@ -96,7 +96,7 @@
 //     removed there under #6660, and `nav_sso_providers` — labelled in #6659
 //     although no composition this gate boots ever merges it — is pinned as the
 //     converse case. Neither verdict is one this gate could honestly reach.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // The exit-code contract for a refusal, from the frame that owns it —
@@ -145,7 +145,7 @@ const CLI_ROOT = join(HERE, '..');
 //
 // `account` satisfied both halves all along and was invisible anyway:
 // `@objectstack/mcp` contributes `nav_connect_agent` into
-// `grp_account_developer` (`connect-ui.ts`, #16746) and commit c744c0af3 supplied its
+// `grp_account_ai_assistant` (`connect-ui.ts`, #16746) and commit c744c0af3 supplied its
 // label in all four locales — while this gate printed a BYTE-IDENTICAL
 // `OK (…)` line before and after that landing, because every site below
 // narrowed to one app name. Widening the three obvious filters is NOT the fix:
@@ -229,6 +229,43 @@ export function contributionsForApp(contributions, appName) {
   return contributions
     .filter((c) => (c.apps ?? []).includes(appName))
     .map((c) => ({ source: c.source, ids: c.idsByApp?.[appName] ?? [] }));
+}
+
+/**
+ * Read one app back from the composition: its merged nav ids, `undefined` when
+ * it was never registered, or — when the by-name read is REFUSED — a finding
+ * that names every candidate.
+ *
+ * `registry.getApp(name)` with no package is a read by a caller with no package
+ * (ADR-0150 D3), so a name two packages in this composition both ship is
+ * refused `409 RESOURCE_CONFLICT` (`PackageScopedNameRefusedError`) rather than
+ * answered. That is a composition finding — there is no ONE app to judge —
+ * and it is reported as one, beside the other composition errors. ⛔ Never
+ * swallowed (it would read as "not registered", whose remedy is the opposite),
+ * and never thrown out of the gate as a bare stack. Any other error is not a
+ * refusal and is rethrown untouched.
+ *
+ * `isRefusal` is the class test, handed in so `--self-test` can drive this
+ * without a build.
+ */
+export function readMergedApp(appName, getApp, isRefusal) {
+  let mergedApp;
+  try {
+    mergedApp = getApp(appName);
+  } catch (err) {
+    if (!isRefusal(err)) throw err;
+    const candidates = (err.refusal?.candidates ?? []).map((c) =>
+      c?.kind === 'package' ? `package "${c.packageId}"` : `the ${c?.kind ?? 'unknown holder'}`,
+    );
+    return {
+      refused:
+        `the \`${appName}\` app could not be read back: the composition holds more than one app by that name, ` +
+        `so a read naming no package is refused (${err.code} ${err.status}) — ${err.message} ` +
+        `Candidates: ${candidates.join(', ') || 'none named'}. This gate judges ONE merged app per name: ` +
+        `rename or remove the app in the package that should not hold it.`,
+    };
+  }
+  return { ids: mergedApp ? collectNavIds(mergedApp.navigation) : undefined };
 }
 
 /**
@@ -407,8 +444,8 @@ const CONTRIBUTORS = [
     source: '@objectstack/mcp (CONNECT_AGENT_UI_BUNDLE)',
     // The one contributor that lands in BOTH apps: `CONNECT_AGENT_UI_BUNDLE`
     // carries two `navigationContributions` entries pointing at one page —
-    // `setup`/`group_integrations` for admins and `account`/
-    // `grp_account_developer` for the per-user half (#16746). The Account half
+    // `setup`/`group_overview` for admins and `account`/
+    // `grp_account_ai_assistant` for the per-user half (#16746). The Account half
     // is the contribution this gate was blind to.
     apps: ['setup', 'account'],
     async load() {
@@ -702,6 +739,51 @@ function selfTest() {
   expect('#14857 NEGATIVE CONTROL: the literal-advisory pin can still fail', spellsALiteralCode(controlLiteralAdvisory), 'the predicate no longer sees a spelled-out code');
   expect('#14857 NEGATIVE CONTROL: the stale-code pin can still fail', /Exit code 1\b/.test(controlLiteralAdvisory()), 'the stale-spelling predicate no longer sees `Exit code 1`');
 
+  // ── A REFUSED app read is a composition finding, never a throw or a miss (#31852) ──
+  //
+  // `getApp(name)` naming no package is refused when two packages ship the name
+  // (ADR-0150 D3). Recorded shape: the refusal class carries `code`, `status`
+  // and the resolver's `refusal` with every candidate. The local class stands
+  // in for `PackageScopedNameRefusedError` so this runs without a build.
+  class RefusedSample extends Error {
+    code = 'RESOURCE_CONFLICT';
+    status = 409;
+    refusal = {
+      candidates: [
+        { kind: 'package', packageId: 'com.acme.alpha' },
+        { kind: 'package', packageId: 'com.acme.beta' },
+      ],
+    };
+  }
+  const isRefusedSample = (err) => err instanceof RefusedSample;
+  const refusedRead = readMergedApp('setup', () => { throw new RefusedSample('The app "setup" is held by 2 packages.'); }, isRefusedSample);
+  expect('#31852 a refused read is reported as a finding, not thrown', typeof refusedRead.refused === 'string', JSON.stringify(refusedRead));
+  expect(
+    '#31852 the finding names the app and every candidate',
+    refusedRead.refused?.includes('`setup`') && refusedRead.refused.includes('com.acme.alpha') && refusedRead.refused.includes('com.acme.beta'),
+    String(refusedRead.refused),
+  );
+  expect(
+    '#31852 a refused read never reads as "not registered" (an undefined id list), whose remedy is the opposite',
+    refusedRead.ids === undefined && !('ids' in refusedRead),
+    JSON.stringify(refusedRead),
+  );
+  const mergedRead = readMergedApp('setup', () => ({ navigation: MERGED_NAV_SAMPLE }), isRefusedSample);
+  expect('#31852 a served read answers its merged ids', mergedRead.ids?.includes('nav_webhooks') && !mergedRead.refused, JSON.stringify(mergedRead));
+  expect('#31852 an unregistered app still answers undefined ids', readMergedApp('setup', () => undefined, isRefusedSample).ids === undefined, 'undefined');
+  let rethrown;
+  try {
+    readMergedApp('setup', () => { throw new TypeError('boom'); }, isRefusedSample);
+  } catch (err) {
+    rethrown = err;
+  }
+  expect('#31852 NEGATIVE CONTROL: an error that is not the refusal is rethrown, never swallowed', rethrown instanceof TypeError, String(rethrown));
+  expect(
+    '#31852 the gate hands readMergedApp the refusal CLASS test, not a code match',
+    /readMergedApp\(app\.name,[^\n]*instanceof PackageScopedNameRefusedError/.test(readFileSync(fileURLToPath(import.meta.url), 'utf8')),
+    'the boot read no longer passes the class test',
+  );
+
   if (failures.length) {
     console.error(`\ncheck-app-nav-i18n --self-test: ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
@@ -803,7 +885,7 @@ checkBuildPrerequisite();
 // Boot the composition and read the merged app back.
 // ---------------------------------------------------------------------------
 
-const { ObjectQL } = await import('@objectstack/objectql');
+const { ObjectQL, PackageScopedNameRefusedError } = await import('@objectstack/objectql');
 const { SetupAppTranslations } = await import('@objectstack/platform-objects/apps');
 
 const engine = new ObjectQL();
@@ -904,12 +986,13 @@ for (const contributor of CONTRIBUTORS) {
  * at all" have different remedies, and `collectNavIds(undefined)` answers `[]`
  * for both.
  */
-const mergedIdsByApp = new Map(
-  APPS.map((app) => {
-    const mergedApp = engine.registry.getApp(app.name);
-    return [app.name, mergedApp ? collectNavIds(mergedApp.navigation) : undefined];
-  }),
+const mergedReads = new Map(
+  APPS.map((app) => [
+    app.name,
+    readMergedApp(app.name, (name) => engine.registry.getApp(name), (err) => err instanceof PackageScopedNameRefusedError),
+  ]),
 );
+const mergedIdsByApp = new Map(APPS.map((app) => [app.name, mergedReads.get(app.name).ids]));
 
 // The two verdicts are kept apart because their REMEDIES are opposites, and a
 // footer that prescribes one for the other is the #5862 defect (a confident
@@ -928,7 +1011,10 @@ for (const app of APPS) {
         `ids to check.`,
     );
   }
-  if (mergedIdsByApp.get(app.name) === undefined) {
+  const refused = mergedReads.get(app.name).refused;
+  if (refused) {
+    compositionErrors.push(refused);
+  } else if (mergedIdsByApp.get(app.name) === undefined) {
     compositionErrors.push(
       `the \`${app.name}\` app is not registered at all — the composition produced no app to judge. ` +
         `Its shell ships in \`${app.shellPackage}\`, which must be a CONTRIBUTORS entry above.`,

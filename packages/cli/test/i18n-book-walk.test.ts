@@ -8,7 +8,7 @@
 // measure a debt of zero while the sidebar shipped in the authoring language.
 
 import { describe, it, expect } from 'vitest';
-import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract.js';
+import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-bundle-extract.js';
 import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
 import { TranslationDataSchema } from '@objectstack/spec/system';
 

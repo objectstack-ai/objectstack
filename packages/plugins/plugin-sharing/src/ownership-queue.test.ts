@@ -21,12 +21,19 @@ import {
   QUEUE_GUARD_PACKAGE,
 } from './queue-hooks.js';
 import { ruleRegrantQueue } from './rule-hooks.js';
+import {
+  bindAssignmentRuleGuards,
+  reportShadowedAuthoredAssignmentRules,
+  AssignmentRuleValidationError,
+  ASSIGNMENT_RULE_GUARD_PACKAGE,
+} from './assignment-rule-hooks.js';
 
 type Row = Record<string, any>;
 
 /**
- * Equality, `$in`, `$or` and `$and` — every predicate shape the queue reads
- * send. Any other combinator or operator is refused rather than misread.
+ * Equality, `$in`, `$gt`, `$or` and `$and` — every predicate shape the queue
+ * reads send (`$gt` is the keyset cursor of a paged read, #29604). Any other
+ * combinator or operator is refused rather than misread.
  */
 function matches(row: Row, filter: any): boolean {
   if (!filter || typeof filter !== 'object') return true;
@@ -43,6 +50,10 @@ function matches(row: Row, filter: any): boolean {
     const rv = row[k] ?? null;
     if (v != null && typeof v === 'object') {
       const ops = Object.keys(v as object);
+      if (ops.length === 1 && ops[0] === '$gt') {
+        if (!(rv != null && String(rv) > String((v as any).$gt))) return false;
+        continue;
+      }
       if (ops.length !== 1 || ops[0] !== '$in') throw new Error(`test double: operator ${ops.join(',')} on '${k}' is not implemented`);
       if (!(v as any).$in.includes(rv)) return false;
       continue;
@@ -72,6 +83,9 @@ function makeEngine(opts: {
       if (opts.failOn?.includes(object)) throw new Error(`${object} unavailable`);
       const filter = options?.filter ?? options?.where;
       const rows = (tables[object] ?? []).filter((r) => matches(r, filter));
+      for (const { field } of [...(options?.orderBy ?? [])].reverse()) {
+        rows.sort((a, b) => (String(a[field]) < String(b[field]) ? -1 : String(a[field]) > String(b[field]) ? 1 : 0));
+      }
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async insert(object: string, data: any) {
@@ -117,11 +131,12 @@ const BASE_TABLES = (): Record<string, Row[]> => ({
     { id: 'q1', name: 'billing', label: 'Billing', organization_id: 'org_a' },
     { id: 'q2', name: 'billing', label: 'Billing B', organization_id: 'org_b' },
   ],
+  // [#29604] Carrying their `id` too: the authored queue reads page by it.
   sys_queue_member: [
-    { queue: 'billing', recipient_type: 'position', recipient_id: 'billing_clerk', organization_id: 'org_a' },
-    { queue: 'billing', recipient_type: 'user', recipient_id: 'u_e', organization_id: 'org_a' },
-    { queue: 'support_tier1', recipient_type: 'team', recipient_id: 't_night', organization_id: 'org_a' },
-    { queue: 'billing', recipient_type: 'user', recipient_id: 'u_b_only', organization_id: 'org_b' },
+    { id: 'qm_1', queue: 'billing', recipient_type: 'position', recipient_id: 'billing_clerk', organization_id: 'org_a' },
+    { id: 'qm_2', queue: 'billing', recipient_type: 'user', recipient_id: 'u_e', organization_id: 'org_a' },
+    { id: 'qm_3', queue: 'support_tier1', recipient_type: 'team', recipient_id: 't_night', organization_id: 'org_a' },
+    { id: 'qm_4', queue: 'billing', recipient_type: 'user', recipient_id: 'u_b_only', organization_id: 'org_b' },
   ],
   [METADATA_ACTIVATION_TABLE]: [],
 });
@@ -199,11 +214,12 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
   });
 
   it('[#29503] a failed team or position holder read keeps the queue\'s declared posture: that specification contributes nobody, logged once', async () => {
-    // The team and position reads now refuse a failed read instead of answering
-    // "nobody"; the queue service keeps answering for its own consumers exactly
-    // as its header declares (a failed member-table read contributes nobody),
-    // on the expansion and on the holder check alike. Whether the queue should
-    // refuse too is left to a ruling (ADR-0142 does not declare this posture).
+    // The team and position reads refuse a failed read instead of answering
+    // "nobody"; under the default `onFailedRead: 'nobody'` the queue service
+    // answers its admission consumers as its header declares (a failed
+    // member-table read contributes nobody), on the expansion and on the
+    // holder check alike. Under `'refuse'` it rejects instead — pinned in the
+    // `onFailedRead 'refuse'` describe below (#29604).
     for (const failed of ['sys_team_member', 'sys_user_position'] as const) {
       const warn = vi.fn();
       const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: [failed] }), { warn });
@@ -235,7 +251,7 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
 
   it('queuesOf lists every queue the user is in, declared and authored, ordered by name', async () => {
     const tables = BASE_TABLES();
-    tables.sys_queue_member.push({ queue: 'billing', recipient_type: 'user', recipient_id: 'u_a', organization_id: 'org_a' });
+    tables.sys_queue_member.push({ id: 'qm_5', queue: 'billing', recipient_type: 'user', recipient_id: 'u_a', organization_id: 'org_a' });
     const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables }));
     expect(await svc.queuesOf('u_a', 'org_a')).toEqual(['billing', 'support_tier1']);
     expect(await svc.queuesOf('u_c', 'org_a')).toEqual(['billing']);
@@ -292,6 +308,180 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
 });
 
 // ─── "Does this organization have any queue at all?" ───────────────────────
+
+// [#29604, review record 6591670782] The queue reads paged by id to completion,
+// where they read one page of 10,000 rows and answered on it: a queue's
+// 10,001st member, an organization's 10,001st queue, and the queues naming a
+// recipient past that bound were silently not there. A read that fails partway
+// keeps the answer a failed read gives today (nobody, logged once) until the
+// contract can carry a refusal (#30251) — never the first page as if complete.
+describe('[ADR-0142 D2] OwnershipQueueService — the queue reads page to completion (#29604)', () => {
+  const PAST_ONE_PAGE = 10_001;
+  const pad = (i: number) => String(i).padStart(5, '0');
+  const LAST = pad(PAST_ONE_PAGE - 1);
+
+  /** `count` user members of queue `big` in org_a, keyed so the last sorts last. */
+  const bigQueue = (count = PAST_ONE_PAGE): Record<string, Row[]> => ({
+    ...BASE_TABLES(),
+    sys_queue: [{ id: 'q_big', name: 'big', label: 'Big', organization_id: 'org_a' }],
+    sys_queue_member: Array.from({ length: count }, (_, i) => ({
+      id: `qm_${pad(i)}`, queue: 'big', recipient_type: 'user', recipient_id: `u_${pad(i)}`, organization_id: 'org_a',
+    })),
+  });
+
+  it('a queue past one page expands to every member, and its last member is one', async () => {
+    const svc = service(makeEngine({ tables: bigQueue() }));
+    const members = await svc.expandMembers('big', 'org_a');
+    expect(members).toHaveLength(PAST_ONE_PAGE);
+    expect(members.at(-1)).toBe(`u_${LAST}`);
+    expect(await svc.isMember(`u_${LAST}`, 'big', 'org_a')).toBe(true);
+    expect(await svc.queuesOf(`u_${LAST}`, 'org_a')).toEqual(['big']);
+  });
+
+  it('an organization past one page of queues lists its last queue for that queue\'s member', async () => {
+    const tables = BASE_TABLES();
+    tables.sys_queue = Array.from({ length: PAST_ONE_PAGE }, (_, i) => ({
+      id: `q_${pad(i)}`, name: `queue_${pad(i)}`, label: `Queue ${i}`, organization_id: 'org_a',
+    }));
+    tables.sys_queue_member = [
+      { id: 'qm_last', queue: `queue_${LAST}`, recipient_type: 'user', recipient_id: 'u_z', organization_id: 'org_a' },
+    ];
+    const svc = service(makeEngine({ tables }));
+    expect(await svc.queuesOf('u_z', 'org_a')).toEqual([`queue_${LAST}`]);
+    expect(await svc.hasAnyQueue('org_a')).toBe(true);
+  });
+
+  it('the queues naming a recipient are found past one page of member rows', async () => {
+    const tables = BASE_TABLES();
+    tables.sys_queue_member = Array.from({ length: PAST_ONE_PAGE }, (_, i) => ({
+      id: `qm_${pad(i)}`, queue: `queue_${pad(i)}`, recipient_type: 'position',
+      recipient_id: i === PAST_ONE_PAGE - 1 ? 'closer' : 'filler', organization_id: 'org_a',
+    }));
+    const svc = service(makeEngine({ tables }));
+    expect(await svc.queuesNaming('position', new Set(['closer']), 'org_a')).toEqual([`queue_${LAST}`]);
+  });
+
+  it('a read that fails on its second page answers as a failed read does today, never with the first page', async () => {
+    const engine = makeEngine({ tables: bigQueue() });
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => {
+      if (object === 'sys_queue_member' && options?.where?.$and) throw new Error('sys_queue_member page 2 unavailable');
+      return find(object, options);
+    };
+    const warn = vi.fn();
+    const svc = service(engine, { warn });
+
+    expect(await svc.expandMembers('big', 'org_a')).toEqual([]);
+    expect(await svc.isMember('u_00000', 'big', 'org_a')).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/sys_queue_member read failed/);
+    expect(warn.mock.calls[0][1]).toEqual({ error: 'sys_queue_member page 2 unavailable' });
+  });
+
+  it('a read that cannot vouch for completion logs its reason, not the walk\'s "refuses instead" — the queue answers nobody', async () => {
+    // A full page whose last row carries no id: the walk cannot resume after it.
+    const tables = bigQueue(10_000);
+    delete tables.sys_queue_member.at(-1)!.id;
+    const warn = vi.fn();
+    const svc = service(makeEngine({ tables }), { warn });
+
+    expect(await svc.expandMembers('big', 'org_a')).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][1].error).toBe(
+      "[sharing] the member rows of queue 'big' in organization 'org_a' could not be read: "
+      + 'the read by id could not continue past a page (a row without an id, or a page that repeated the cursor).',
+    );
+  });
+});
+
+describe('[ADR-0142 D2 as amended] OwnershipQueueService — onFailedRead \'refuse\' rejects a failed read, naming it (#29604)', () => {
+  const REFUSE = { onFailedRead: 'refuse' } as const;
+  const esc = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  /** The refusal's shape: the queue, its organization, then the read that failed, never the walk's own consequence. */
+  const refusal = (queue: string, read: string) =>
+    new RegExp(`^${esc(`[queue] queue '${queue}' in organization 'org_a' does not answer its members, because a read behind it failed: ${read}`)}`);
+
+  it('⛔ a failed sys_queue row read rejects, naming it — the default still resolves the name nowhere', async () => {
+    const warn = vi.fn();
+    const svc = service(makeEngine({ tables: BASE_TABLES(), failOn: ['sys_queue'] }), { warn });
+    const read = "the sys_queue row of queue 'billing' in organization 'org_a' could not be read: sys_queue unavailable.";
+    await expect(svc.expandMembers('billing', 'org_a', REFUSE)).rejects.toThrow(refusal('billing', read));
+    await expect(svc.isMember('u_e', 'billing', 'org_a', REFUSE)).rejects.toThrow(refusal('billing', read));
+    expect(warn).not.toHaveBeenCalled();
+    // The admission answer, unchanged: nobody, logged once.
+    expect(await svc.expandMembers('billing', 'org_a')).toEqual([]);
+    expect(await svc.isMember('u_e', 'billing', 'org_a')).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('⛔ a failed sys_queue_member read rejects — never the declared positions alone', async () => {
+    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: ['sys_queue_member'] }), { warn: vi.fn() });
+    await expect(svc.expandMembers('support_tier1', 'org_a', { purpose: 'addressing', ...REFUSE })).rejects.toThrow(
+      refusal('support_tier1', "the member rows of queue 'support_tier1' in organization 'org_a' could not be read: sys_queue_member unavailable. The caller"),
+    );
+    await expect(svc.isMember('u_d', 'support_tier1', 'org_a', REFUSE)).rejects.toThrow(/sys_queue_member unavailable/);
+    expect(await svc.expandMembers('support_tier1', 'org_a')).toEqual(['u_a', 'u_b']);
+  });
+
+  it('⛔ a failed member-table read behind a specification rejects, naming the read and carrying the driver error as cause', async () => {
+    // support_tier1 = position support_agent (u_a, u_b; its sys_member limb
+    // too) + team t_night (u_a, u_d); billing = position billing_clerk (u_c) + user u_e.
+    for (const [failed, queue, read] of [
+      ['sys_team_member', 'support_tier1', "the members of team 't_night' could not be read: sys_team_member unavailable"],
+      ['sys_user_position', 'support_tier1', "the assignments of position 'support_agent' in organization 'org_a' could not be read: sys_user_position unavailable"],
+      ['sys_member', 'billing', "the holders of role 'billing_clerk' in organization 'org_a' could not be read: sys_member unavailable"],
+    ] as const) {
+      const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: [failed] }), { warn: vi.fn() });
+      const err = await svc.expandMembers(queue, 'org_a', REFUSE).then(() => null, (e: unknown) => e as Error);
+      expect(err?.message, failed).toMatch(refusal(queue, `${read}. The caller`));
+      expect(err?.message, failed).not.toMatch(/refuses instead/);
+      expect(((err as any)?.cause as Error)?.message, failed).toMatch(new RegExp(`${failed} unavailable`));
+    }
+  });
+
+  it('isMember under refuse: true when a read that succeeded reaches the user, whichever specification failed first; a rejection when none does', async () => {
+    // Position first (declared), team second (authored).
+    const positionDown = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: ['sys_user_position'] }), { warn: vi.fn() });
+    expect(await positionDown.isMember('u_d', 'support_tier1', 'org_a', REFUSE)).toBe(true); // the team reaches u_d after the failure
+    await expect(positionDown.isMember('u_b', 'support_tier1', 'org_a', REFUSE)).rejects.toThrow(/sys_user_position unavailable/);
+    await expect(positionDown.isMember('u_z', 'support_tier1', 'org_a', REFUSE)).rejects.toThrow(/sys_user_position unavailable/);
+
+    const teamDown = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: ['sys_team_member'] }), { warn: vi.fn() });
+    expect(await teamDown.isMember('u_b', 'support_tier1', 'org_a', REFUSE)).toBe(true); // the position reaches u_b before it
+    await expect(teamDown.isMember('u_d', 'support_tier1', 'org_a', REFUSE)).rejects.toThrow(
+      refusal('support_tier1', "whether user 'u_d' is a member of team 't_night' could not be read: sys_team_member unavailable. The caller"),
+    );
+    // The admission answer for the same user, unchanged.
+    expect(await teamDown.isMember('u_d', 'support_tier1', 'org_a')).toBe(false);
+  });
+
+  it('facts stay facts: an empty queue is [], an unresolved name is [] / false, and healthy reads answer what the default answers', async () => {
+    const svc = service(makeEngine({ declared: [...SUPPORT_DECLARED, { name: 'empty_q', label: 'Empty', members: [] }], tables: BASE_TABLES() }));
+    expect(await svc.expandMembers('empty_q', 'org_a', REFUSE)).toEqual([]);
+    expect(await svc.expandMembers('nowhere', 'org_a', REFUSE)).toEqual([]);
+    expect(await svc.isMember('u_a', 'nowhere', 'org_a', REFUSE)).toBe(false);
+    expect(await svc.expandMembers('support_tier1', 'org_a', REFUSE)).toEqual(['u_a', 'u_b', 'u_d']);
+    expect(await svc.expandMembers('billing', 'org_a', REFUSE)).toEqual(['u_c', 'u_e']);
+    expect(await svc.isMember('u_z', 'support_tier1', 'org_a', REFUSE)).toBe(false);
+    expect(await svc.isMember('u_d', 'support_tier1', 'org_a', REFUSE)).toBe(true);
+  });
+
+  it('a refusal is not remembered: the next call, once the table reads, answers the members', async () => {
+    const failOn = ['sys_team_member'];
+    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn }), { warn: vi.fn() });
+    await expect(svc.expandMembers('support_tier1', 'org_a', REFUSE)).rejects.toThrow(/sys_team_member unavailable/);
+    failOn.length = 0;
+    expect(await svc.expandMembers('support_tier1', 'org_a', REFUSE)).toEqual(['u_a', 'u_b', 'u_d']);
+  });
+
+  it('a failed activation-ledger read is not a failed read under refuse either: the declared default — on — answers, logged', async () => {
+    const warn = vi.fn();
+    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: BASE_TABLES(), failOn: [METADATA_ACTIVATION_TABLE] }), { warn });
+    expect(await svc.expandMembers('support_tier1', 'org_a', REFUSE)).toEqual(['u_a', 'u_b', 'u_d']);
+    expect(await svc.isMember('u_b', 'support_tier1', 'org_a', REFUSE)).toBe(true);
+    expect(warn.mock.calls.some(([line]) => /treated as switched ON/.test(String(line)))).toBe(true);
+  });
+});
 
 describe('[ADR-0131 D4] OwnershipQueueService.hasAnyQueue — the session payload\'s one boolean', () => {
   const ROW_ONLY = (): Record<string, Row[]> => ({
@@ -439,6 +629,22 @@ describe('[ADR-0142 D3] SharingService — a record sitting in a queue the calle
     expect(JSON.stringify(await bare.buildReadFilter('ticket', ctx('u_a')))).not.toContain('"queue"');
   });
 
+  it('[#29604] control — a failed member read reaches nobody through the queue and refuses nothing: the access path keeps the default answer', async () => {
+    const down = makeEngine({
+      declared: SUPPORT_DECLARED,
+      tables: engine._tables,
+      schemas: { ticket: TICKET_SCHEMA, job: AUTHOR_QUEUE_SCHEMA, idea: OPEN_SCHEMA, sys_record_share: { name: 'sys_record_share' } },
+      failOn: ['sys_team_member'],
+    });
+    const queues = service(down, { warn: vi.fn() });
+    const s = new SharingService({ engine: down as any, ownershipQueues: () => queues });
+    // u_d sits in support_tier1 only through team t_night, whose read fails: no access, and no throw.
+    expect(await s.checkEdit('ticket', 't1', ctx('u_d'))).toBe('deny');
+    expect(JSON.stringify(await s.buildReadFilter('ticket', ctx('u_d')) ?? {})).not.toContain('"queue"');
+    // u_b sits in it through position support_agent, which reads.
+    expect(await s.checkEdit('ticket', 't1', ctx('u_b'))).toBe('allow');
+  });
+
   it('membership is resolved once per request context', async () => {
     const queuesOf = vi.fn(async () => ['support_tier1']);
     const s = new SharingService({ engine: engine as any, ownershipQueues: () => ({ queuesOf, isMember: async () => false }) });
@@ -557,5 +763,139 @@ describe('[ADR-0142 D7] queue-recipient rules recompute on a queue-membership wr
     });
     expect(svc.revokeRuleGrantsForRetiredRecipients).toHaveBeenCalledTimes(1);
     await ruleRegrantQueue.whenIdle();
+  });
+});
+
+// ─── ADR-0142 D5: an organization's own assignment rules, judged on save ─────
+
+describe('[ADR-0142 D5] the sys_assignment_rule save guard', () => {
+  const DECLARED_RULES = [{ name: 'ticket_intake', object: 'ticket', entries: [] }];
+  const SCHEMAS: Record<string, any> = {
+    ticket: { name: 'ticket', fields: {} }, // an owned object: the platform injects the queue column
+    catalog: { name: 'catalog', ownership: 'org', fields: {} }, // no owner, so no queue column
+    sys_member: { name: 'sys_member', fields: {} },
+    sys_user: { name: 'sys_user', fields: {} },
+  };
+  let engine: ReturnType<typeof makeEngine>;
+
+  beforeEach(() => {
+    engine = makeEngine({
+      schemas: SCHEMAS,
+      tables: {
+        sys_member: [
+          { id: 'm1', user_id: 'u_lead', organization_id: 'org_a' },
+          { id: 'm2', user_id: 'u_banned', organization_id: 'org_a' },
+          { id: 'm3', user_id: 'u_elsewhere', organization_id: 'org_b' },
+        ],
+        sys_user: [{ id: 'u_lead' }, { id: 'u_banned', banned: true }, { id: 'u_elsewhere' }],
+      },
+    });
+    const listItems = engine.registry.listItems;
+    engine.registry.listItems = (type: string) => (type === 'assignment_rule' ? DECLARED_RULES : listItems(type));
+    bindAssignmentRuleGuards(engine as any);
+  });
+
+  const valid = (extra: Row = {}): Row => ({
+    name: 'vip_tickets', label: 'VIP tickets', object_name: 'ticket', criteria: 'record.priority == "high"',
+    recipient_type: 'queue', recipient_id: 'vip', ...extra,
+  });
+  const save = (data: Row, session: Row | null = { organizationId: 'org_a' }) =>
+    engine.fire('beforeInsert', 'sys_assignment_rule', { input: { data }, ...(session ? { session } : {}) });
+  const refusal = async (p: Promise<unknown>) => {
+    try {
+      await p;
+    } catch (err) {
+      return err as AssignmentRuleValidationError;
+    }
+    throw new Error('expected the save to be refused');
+  };
+
+  it('a well-formed rule saves, queue or member target, with or without a strategy', async () => {
+    await expect(save(valid())).resolves.toBeUndefined();
+    await expect(save(valid({ recipient_type: 'user', recipient_id: 'u_lead' }))).resolves.toBeUndefined();
+    await expect(save(valid({ strategy: 'least_loaded', load: 'record.status != "closed"' }))).resolves.toBeUndefined();
+    await expect(save(valid({ criteria: null, strategy: 'round_robin' }))).resolves.toBeUndefined();
+  });
+
+  it('refuses a declared rule\'s name — one name, one rule — and a name that is not a machine name', async () => {
+    const taken = await refusal(save(valid({ name: 'ticket_intake' })));
+    expect(taken).toBeInstanceOf(AssignmentRuleValidationError);
+    expect(taken).toMatchObject({ code: 'VALIDATION_FAILED', name: 'ValidationError', fields: [{ field: 'name', code: 'invalid_value' }] });
+    expect((await refusal(save(valid({ name: 'VIP Tickets' })))).fields).toEqual([expect.objectContaining({ field: 'name', code: 'invalid_format' })]);
+  });
+
+  it('refuses an object that does not exist, and one whose records have no owner to set', async () => {
+    expect((await refusal(save(valid({ object_name: 'tickets' })))).fields).toEqual([expect.objectContaining({ field: 'object_name', code: 'reference_not_found' })]);
+    expect((await refusal(save(valid({ object_name: 'catalog' })))).fields).toEqual([expect.objectContaining({ field: 'object_name', code: 'invalid_value' })]);
+  });
+
+  it('refuses the entry shapes the stack schema refuses for a declared entry', async () => {
+    expect((await refusal(save(valid({ recipient_type: 'user', recipient_id: 'u_lead', strategy: 'round_robin' })))).fields)
+      .toEqual([expect.objectContaining({ field: 'strategy' })]);
+    expect((await refusal(save(valid({ strategy: 'least_loaded' })))).fields).toEqual([expect.objectContaining({ field: 'load' })]);
+    expect((await refusal(save(valid({ load: 'record.status != "closed"' })))).fields).toEqual([expect.objectContaining({ field: 'load' })]);
+    expect((await refusal(save(valid({ recipient_id: 'VIP Queue' })))).fields).toEqual([expect.objectContaining({ field: 'recipient_id' })]);
+    expect((await refusal(save(valid({ recipient_type: 'team' })))).fields).toEqual([expect.objectContaining({ field: 'recipient_type' })]);
+  });
+
+  it('refuses a condition or an open-work expression the engine\'s CEL paths cannot compile', async () => {
+    expect((await refusal(save(valid({ criteria: 'record.priority == (' })))).fields).toEqual([expect.objectContaining({ field: 'criteria', code: 'invalid_value' })]);
+    expect((await refusal(save(valid({ strategy: 'least_loaded', load: 'size(record.subject) > 3' })))).fields)
+      .toEqual([expect.objectContaining({ field: 'load', code: 'invalid_value' })]);
+  });
+
+  it('refuses a user target who is not an active member of the rule\'s organization', async () => {
+    expect((await refusal(save(valid({ recipient_type: 'user', recipient_id: 'u_elsewhere' })))).fields)
+      .toEqual([expect.objectContaining({ field: 'recipient_id', code: 'reference_not_found' })]);
+    expect((await refusal(save(valid({ recipient_type: 'user', recipient_id: 'u_banned' })))).fields)
+      .toEqual([expect.objectContaining({ field: 'recipient_id', code: 'reference_user_banned' })]);
+    // The same user saves in the organization they are a member of.
+    await expect(save(valid({ recipient_type: 'user', recipient_id: 'u_elsewhere' }), { organizationId: 'org_b' })).resolves.toBeUndefined();
+  });
+
+  it('refuses a rule that would land in no organization', async () => {
+    expect((await refusal(save(valid(), null))).fields).toEqual([expect.objectContaining({ field: 'organization_id', code: 'required' })]);
+    await expect(save(valid({ organization_id: 'org_a' }), null)).resolves.toBeUndefined();
+  });
+
+  it('names every field at fault in one refusal', async () => {
+    const err = await refusal(save(valid({ name: 'ticket_intake', object_name: 'catalog', criteria: 'record.x == (' })));
+    expect(err.fields.map((f) => f.field).sort()).toEqual(['criteria', 'name', 'object_name']);
+  });
+
+  it('an update is judged on the merged row when it touches a judged column, and not re-judged otherwise', async () => {
+    const previous = { id: 'r1', organization_id: 'org_a', ...valid({ recipient_type: 'user', recipient_id: 'u_lead' }) };
+    const update = (data: Row) => engine.fire('beforeUpdate', 'sys_assignment_rule', { input: { data }, previous, session: { organizationId: 'org_a' } });
+    await expect(update({ label: 'Renamed', active: false, sort_order: 3 })).resolves.toBeUndefined();
+    expect((await refusal(update({ recipient_id: 'u_elsewhere' }))).fields).toEqual([expect.objectContaining({ field: 'recipient_id' })]);
+    // The merged row carries the pre-image's user target, so a strategy alone is refused.
+    expect((await refusal(update({ strategy: 'round_robin' }))).fields).toEqual([expect.objectContaining({ field: 'strategy' })]);
+  });
+
+  it('a membership read that fails refuses the save, saying it could not judge — never a pass', async () => {
+    const failing = makeEngine({ schemas: SCHEMAS, failOn: ['sys_member'] });
+    bindAssignmentRuleGuards(failing as any);
+    await expect(failing.fire('beforeInsert', 'sys_assignment_rule', {
+      input: { data: valid({ recipient_type: 'user', recipient_id: 'u_lead' }) }, session: { organizationId: 'org_a' },
+    })).rejects.toThrow(/could not be read, so the assignment rule cannot be judged and is not saved/);
+  });
+
+  it('re-binding replaces, never stacks', () => {
+    const before = engine.hooks.filter((h) => h.packageId === ASSIGNMENT_RULE_GUARD_PACKAGE).length;
+    expect(before).toBe(2);
+    bindAssignmentRuleGuards(engine as any);
+    expect(engine.hooks.filter((h) => h.packageId === ASSIGNMENT_RULE_GUARD_PACKAGE).length).toBe(before);
+  });
+
+  it('a boot report names every authored rule a declaration now shadows, at error', async () => {
+    engine._tables.sys_assignment_rule = [
+      { id: 'r1', name: 'ticket_intake', organization_id: 'org_a' },
+      { id: 'r2', name: 'vip_tickets', organization_id: 'org_a' },
+    ];
+    const logger = { warn: vi.fn(), error: vi.fn() };
+    await reportShadowedAuthoredAssignmentRules(engine as any, logger);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0][0]).toMatch(/assignment rule 'ticket_intake' is shadowed/);
+    expect(logger.error.mock.calls[0][1]).toEqual({ rule: 'ticket_intake', organization: 'org_a' });
   });
 });

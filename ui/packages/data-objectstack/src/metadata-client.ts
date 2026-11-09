@@ -32,7 +32,11 @@
  * type, mirroring the framework's "single Zod source per type" rule.
  */
 
-import { FlowRegistrationSchema, GetMetaItemLayeredResponseSchema } from '@objectstack/spec/api';
+import {
+  FindReferencesToMetaResponseSchema,
+  FlowRegistrationSchema,
+  GetMetaItemLayeredResponseSchema,
+} from '@objectstack/spec/api';
 // objectui#8676 - the object-metadata write invariant, applied HERE because this
 // is a DOOR and not a writer. Every `client.save('object', ...)` call site in the
 // repo passes through this one method, so guarding it covers a writer set that
@@ -587,6 +591,15 @@ export interface MetadataLayered<T = unknown> {
   /** Merged effective view — what the runtime actually sees. */
   effective: T | null;
   /**
+   * objectstack#29793 — the pending draft row exactly as stored (spec
+   * `GetMetaItemLayeredResponseSchema.draft`): untranslated, ungoverned, no
+   * injected columns. `null` when no draft is pending. ABSENT when the server
+   * did not serve the layer (it serves it only to a caller its draft-read
+   * admission admits): absence means "not served", never "no draft", so this
+   * key is forwarded only when the server sent it.
+   */
+  draft?: T | null;
+  /**
    * Load-time validation result for `effective` (server-computed via
    * the same Zod registry used at save time). Undefined for types
    * without a registered Zod schema. Surfaced by the Studio as a
@@ -769,15 +782,23 @@ export interface MetadataDiagnosticsSummary {
   stats?: Record<string, { count: number; locked?: number; packages: string[] }>;
 }
 
-/** Reference back-pointer — Phase 3a `/references`. */
+/**
+ * Reference back-pointer — Phase 3a `/references`: one element of the served
+ * `references[]` (`FindReferencesToMetaResponseSchema`), named from the
+ * referring side.
+ */
 export interface MetadataReference {
-  /** Referencing item's metadata type. */
+  /** Referencing item's metadata type (the served `type`). */
   fromType: string;
-  /** Referencing item's name. */
+  /** Referencing item's name (the served `name`). */
   fromName: string;
+  /** The referring item's display label, when the server serves one. */
+  fromLabel?: string;
   /** JSON path within the referencing item that holds the reference. */
   path: string;
-  /** The actual value seen at `path` (the referenced name). */
+  /** What kind of reference it is (the served `kind`, e.g. `dashboard dataset`). */
+  kind?: string;
+  /** The referenced name: the item the read was asked about. */
   value: string;
 }
 
@@ -1182,13 +1203,15 @@ export class MetadataClient {
    * just-built app package looks empty there; this surfaces the drafts so the
    * console can show a "pending changes" view and draft-aware package contents.
    * Optionally narrow by `packageId` and/or `type`. Returns light headers
-   * (no body) carrying `packageId` for grouping.
+   * (no body) carrying `packageId` for grouping. `packageId` goes on the wire
+   * as `?package=`, the spelling every `/meta` read takes; the server refuses
+   * the retired `?packageId=`.
    */
   async listDrafts(
     options: { packageId?: string; type?: string } = {},
   ): Promise<MetadataDraftHeader[]> {
     const params: string[] = [];
-    if (options.packageId) params.push(`packageId=${encodeURIComponent(options.packageId)}`);
+    if (options.packageId) params.push(`package=${encodeURIComponent(options.packageId)}`);
     if (options.type) params.push(`type=${encodeURIComponent(options.type)}`);
     const qs = params.length ? `?${params.join('&')}` : '';
     const url = `${this.base}/_drafts${qs}`;
@@ -1765,6 +1788,8 @@ export class MetadataClient {
         overlay: (envelope.overlay ?? null) as T | null,
         overlayScope: envelope.overlayScope,
         effective: (envelope.effective ?? null) as T | null,
+        // objectstack#29793 — the draft layer, forwarded only when served.
+        ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
         ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
         lock: envelope.lock,
         ...(envelope.lockReason !== undefined ? { lockReason: envelope.lockReason } : {}),
@@ -1797,6 +1822,7 @@ export class MetadataClient {
       overlay: body.overlay ?? null,
       overlayScope: body.overlayScope ?? null,
       effective: body.effective ?? null,
+      ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
       ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
       ...(body.lock !== undefined ? { lock: body.lock as MetadataLayered['lock'] } : {}),
       ...(body.lockReason !== undefined ? { lockReason: body.lockReason as string } : {}),
@@ -1857,8 +1883,21 @@ export class MetadataClient {
     const res = await this.fetchImpl(url, { method: 'GET', headers: this.headers, cache: 'no-store' });
     if (res.status === 404) return [];
     if (!res.ok) throw await parseError(res);
-    const data = await res.json();
-    return Array.isArray(data) ? (data as MetadataReference[]) : (data?.items ?? []);
+    // The route's declared answer is `{ references: [...] }`, served bare.
+    // An answer the declaration refuses is a failed read, never "nothing
+    // references it": the panels render an empty list as safe to delete.
+    const parsed = FindReferencesToMetaResponseSchema.safeParse(await res.json().catch(() => null));
+    if (!parsed.success) {
+      throw new Error(`The references read for ${type} '${name}' answered a body its declaration refuses.`);
+    }
+    return parsed.data.references.map((ref) => ({
+      fromType: ref.type,
+      fromName: ref.name,
+      ...(ref.label !== undefined ? { fromLabel: ref.label } : {}),
+      path: ref.path,
+      kind: ref.kind,
+      value: name,
+    }));
   }
 
   /**

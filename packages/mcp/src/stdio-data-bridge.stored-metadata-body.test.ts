@@ -141,6 +141,8 @@ function fakeEngine(apiKeyOwner = ADMIN) {
       // reader passes `(obj, { where, limit, context })`.
       const context = options?.context ?? query?.context;
       if (object === 'sys_api_key') return [{ id: 'k1', user_id: apiKeyOwner, revoked: false }];
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      if (object === 'sys_user') return query?.where?.id === apiKeyOwner ? [{ id: apiKeyOwner }] : [];
       if (STORED_METADATA_BODY_OBJECTS.has(object) && context?.userId !== ADMIN) throw permissionDenied(object);
       const rows = (TABLES[object] ?? []).filter((row) => matches(row, query?.where));
       const limited = typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
@@ -490,6 +492,10 @@ const ENGINE_READ_SITES: Record<string, Record<string, number>> = {
   'stdio-data-bridge.ts': { 'find(object)': 2, 'aggregate(object)': 1 },
   // The ADR-0101 record resource reader.
   'plugin.ts': { 'find(objectName)': 1 },
+  // [#30891] NOT an engine read: `delete_records` counting its selection
+  // through the BRIDGE's `aggregate` member, the one enumerated above for
+  // this transport, so the stored-body and hash refusals apply to it there.
+  'mcp-http-tools.ts': { 'aggregate(objectName)': 1 },
 };
 
 const ENGINE_READ_VERBS: ReadonlySet<string> = new Set(['find', 'findOne', 'aggregate', 'count']);

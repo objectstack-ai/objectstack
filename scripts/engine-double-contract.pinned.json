@@ -2,6 +2,11 @@
   "$comment": "GENERATED — the RETAINED ledger of check-engine-double-contract.mjs (#9680). Regenerate with `node scripts/check-engine-double-contract.mjs --write`; never hand-edit. Each row is one (file, verb) whose engine double routes through the producer's dispatch predicate. This is the OPPOSITE polarity to engine-double-contract.baseline.json: that ledger records DEBT and may only shrink, this one records COVERAGE and may only grow. A row that disappears is a pinned double that left the population — the blind spot #9680 measured, where deleting a double's delete() member took 319 pinned to 318 with the gate green. Read a removal in this file's diff as a coverage loss and check it was intended.",
   "entries": [
     {
+      "file": "packages/cli/src/commands/migrate/recompute-home-amounts.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/cli/src/commands/serve-datasource-secret-resolver.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -12,17 +17,47 @@
       "pinned": 1
     },
     {
+      "file": "packages/cloud-connection/src/connection-credential-ledger.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/cloud-connection/src/connection-credential-ledger.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/cloud-connection/src/marketplace-install-local-install-modes.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/cloud-connection/src/marketplace-install-local-install-modes.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/cloud-connection/src/marketplace-install-local-sample-data-not-loaded.test.ts",
       "verb": "delete",
       "pinned": 1
     },
     {
+      "file": "packages/cloud-connection/src/marketplace-install-local-seed-owner.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/core/src/security/resolve-user-grants-cache.test.ts",
       "verb": "delete",
       "pinned": 1
     },
     {
       "file": "packages/core/src/security/resolve-user-grants-cache.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/core/src/security/user-assigned-work.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -63,6 +98,36 @@
     },
     {
       "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-delete-record-confirmation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-delete-record-confirmation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-delete-record-confirmation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-delete-records.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-delete-records.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-delete-records.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -512,6 +577,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.cached-item-last-modified.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cached-item-last-modified.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cached-item-last-modified.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.capability-write-door.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -603,6 +683,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.container-issue-descent.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.copy-doors-inherited-grants.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.copy-doors-inherited-grants.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.copy-doors-inherited-grants.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1337,6 +1432,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.namespace-object-name-doors.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.namespace-object-name-doors.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.namespace-object-name-doors.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.object-cascade-delete-objects.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -1499,6 +1609,11 @@
     {
       "file": "packages/metadata-protocol/src/protocol.packageless-save-address.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.pair-translation-bundle.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -1952,6 +2067,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.seed-list-row-name.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.select-shorthand-refusal.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2083,6 +2203,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.unknown-grant-object-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.unknown-picklist-binding-refusal.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2637,6 +2772,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-snapshot-drained-keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-snapshot-drained-keys.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.history-snapshot-drained-keys.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2663,6 +2813,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.recorded-by.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.restore-and-publish-drained-keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.restore-and-publish-drained-keys.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository.restore-and-publish-drained-keys.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2789,6 +2954,11 @@
     {
       "file": "packages/objectql/src/package-disable-enforcement.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/package-scoped-exact-qualifier.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -2973,6 +3143,21 @@
     },
     {
       "file": "packages/objectql/src/protocol-registry-shadow.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-restore-publish-drained-connector-keys.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-restore-publish-drained-connector-keys.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-restore-publish-drained-connector-keys.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3499,7 +3684,7 @@
     {
       "file": "packages/plugins/plugin-auth/src/auth-manager.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/plugins/plugin-auth/src/auth-plugin.test.ts",
@@ -3657,6 +3842,41 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy-doors.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy-doors.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy-doors.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy-mfa-level.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/organization-access-policy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/organization-add-member.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3797,6 +4017,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/sign-in-method-floor.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/sys-session-ttl-sweep.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3927,12 +4152,22 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/controlled-by-parent-optional-master.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/controlled-by-parent-sharing.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
     {
       "file": "packages/plugins/plugin-security/src/controlled-by-parent-write-member.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/effective-access.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -3989,6 +4224,11 @@
     {
       "file": "packages/plugins/plugin-security/src/explain-write-verdict-inputs.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/external-organization-scope.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -4457,6 +4697,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/email-send-display-name.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-compound-save-force-parity.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4489,7 +4734,7 @@
     {
       "file": "packages/rest/src/meta-dashboard-view-i18n-explicit-override.test.ts",
       "verb": "findOne",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
@@ -4523,6 +4768,11 @@
     },
     {
       "file": "packages/rest/src/meta-object-extension-agreement.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-object-extension-plural-label.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -4602,6 +4852,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-environment-scoped-providers.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-environment-scoped-providers.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/rest-exposure-gate-execution-read.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4654,6 +4914,11 @@
     {
       "file": "packages/rest/src/rest-server-meta-references-refusal-envelope.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/user-work-routes.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -4722,6 +4987,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/action-package-addressing.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/api-key-lifecycle.pin.test.ts",
       "verb": "update",
       "pinned": 1
@@ -4742,7 +5012,17 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/domains/actions-addressed-route.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/domains/catalog-activation-door.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/catalog-activation-package-scoped.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -4942,6 +5222,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/security/resolve-execution-context.agent-account.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/security/resolve-execution-context.forward-credential.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -5047,8 +5332,28 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/builtin/notify-email-field.shared-redis.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/notify-organization-stamp.integration.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-push-delivery.integration.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-push-delivery.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-push-delivery.integration.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -5192,6 +5497,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-job/src/db-job-adapter.degraded-outcome.test.ts",
       "verb": "update",
       "pinned": 1
@@ -5274,6 +5594,21 @@
     {
       "file": "packages/services/service-messaging/src/preference-resolver.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/push-channel.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/push-channel.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/push-channel.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -5459,6 +5794,11 @@
     {
       "file": "packages/services/service-storage/src/mount-storage-routes.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/storage-credential-use-client.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

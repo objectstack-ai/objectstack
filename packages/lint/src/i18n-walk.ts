@@ -1,0 +1,2552 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * I18n translatable-key walk
+ *
+ * Walks a normalized stack config and lists every key a translation bundle can
+ * carry for it, each with the source text it translates.
+ * {@link collectExpectedEntries} is the **single** definition of what is
+ * translatable at all. The CLI's `os i18n extract` builds its skeletons from it
+ * (`packages/cli/src/utils/i18n-bundle-extract.ts`), `os lint`'s coverage gate
+ * (`i18n-coverage.ts`) decides what it gates from it, and Studio's translation
+ * editor draws its source-to-translation table from it. It lives in this
+ * package, not the CLI, so a browser runs the same walk the CLI does.
+ *
+ * The coverage gate and the extractor used to keep parallel walks. They
+ * had drifted — inline object `actions` and object-nested `listViews` were
+ * scaffoldable but ungated, which is how English approval buttons shipped into
+ * a zh-CN workspace unnoticed (#3370). Add a surface here and both sides get it.
+ *
+ * Three axes per entry, and they are not the same question:
+ *   `sourceValue`   — what extract seeds the skeleton with; may be a derived
+ *                     fallback (an object's own name, a humanized field path).
+ *   `inline`        — what the reader actually sees in the source locale;
+ *                     drives the coverage gate, so a string nobody authored is
+ *                     never reported as an untranslated one.
+ *   `inlineLocales` — the inline LOCALE MAP the author wrote at this prop, if
+ *                     they wrote one; authored text that no bundle row can be
+ *                     scaffolded from. See the note below.
+ *
+ * ## Inline locale maps are NOT extracted — and are not "unauthored" either
+ *
+ * `I18nLabelSchema` authorizes two forms of a display label: a plain string,
+ * whose translations live in a bundle under the key this walk emits, and an
+ * inline locale map — `{ en: 'Members', 'zh-CN': '成员' }` — which the author
+ * writes out in place and the renderer picks from (`pickLocalized` /
+ * `resolveI18nLabel`). Rulings #5728 and #14412, and the ruling commit d173125fb landed,
+ * make the map the ONE localisation route for the props that have no bundle key at all
+ * (`element:text`'s `content` among them), so a page localised that way is
+ * fully localised.
+ *
+ * **The map stays out of the bundle.** Nothing here scaffolds a row for it, no
+ * key family is added for one, and ⛔ no key is synthesised from a node's
+ * position in the component tree — an array index promoted to a bundle key
+ * turns reordering two sibling components into a silent, all-green swap of
+ * their translations, and `page:accordion` already delivers index identity as
+ * a contract (`component.zod.ts`, `panel-INDEX`). Maintainer ruling
+ * 2026-09-03 (#14749, Q3 = C3) settles that as a refusal, and records the
+ * direction if inline maps are ever to be extracted: **identity first** —
+ * `component.id` / `section.name` / `tabs item.value` made mandatory and
+ * gate-enforced, then the existing `pages.<page>.components.<id>.<key>` family
+ * reused. ⛔ Never array-index keys.
+ *
+ * **What the map does get is an honest coverage record** (#14749, Q2 = B1).
+ * The key this walk emits for the prop already exists; what was missing was
+ * evidence that the author had written anything at it. `inlineText` narrows a
+ * map to `undefined` — the same value an absent prop produces — so the two
+ * arrived here indistinguishable, and a prop written out in four languages was
+ * recorded exactly like one nobody had written. `inlineLocales` is that third
+ * axis: it says the prop IS authored and in which locales, so the gate can
+ * count the locales present as covered and the absent ones as gaps, with no
+ * bundle row and no new key. ⛔ Do not re-narrow an authored value with
+ * `inlineText` before handing it to a `push*` helper — that is precisely how
+ * the map used to be lost.
+ *
+ * Walk surface:
+ *
+ *   objects.<name>.label
+ *   objects.<name>.pluralLabel
+ *   objects.<name>.description
+ *   objects.<name>.fields.<field>.label
+ *   objects.<name>.fields.<field>.help
+ *   objects.<name>.fields.<field>.placeholder
+ *   objects.<name>.fields.<field>.options.<value>
+ *   objects.<name>._sections.<section>.label
+ *   objects.<name>._sections.<section>.fields.<field>.{label,placeholder,helpText}
+ *   objects.<name>._views.<view>.label
+ *   objects.<name>._views.<view>.description
+ *   objects.<name>._views.<view>.emptyState.title / .message
+ *   objects.<name>._views.<form>.title
+ *   objects.<name>._views.<form>.submitBehavior.title / .message
+ *   objects.<name>._views.<view>.bulkActions.<def>.label / .confirmText
+ *                                                       / .confirmLabel
+ *   objects.<name>._views.<view>.bulkActions.<def>.params.<param>.label
+ *                                                       / .help / .placeholder
+ *     ^ a bulk param spells its hint `help`; an ACTION param spells the same
+ *       idea `helpText` (`ui/bulk-action.zod.ts`'s known divergence)
+ *   objects.<name>._validations.<rule>.message
+ *   objects.<name>._actions.<action>.label
+ *   objects.<name>._actions.<action>.description
+ *   objects.<name>._actions.<action>.confirmText
+ *   objects.<name>._actions.<action>.successMessage
+ *   objects.<name>._actions.<action>.disabledReason
+ *   objects.<name>._actions.<action>.submitText      (only beside a non-empty `params`)
+ *   objects.<name>._actions.<action>.cancelText      (only beside `confirmText` or a non-empty `params`)
+ *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
+ *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
+ *   objects.<name>._actions.<action>.params.<param>.options.<value>
+ *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
+ *   objects.<name>._actions.<action>.resultDialog.fields.<path>
+ *   objects.<name>._actions.<action>.preflight.fields.<path>
+ *   globalActions.<action>.label / .description / .confirmText / .successMessage
+ *                          / .disabledReason / .submitText (beside a non-empty `params`)
+ *                          / .cancelText (beside `confirmText` or a non-empty `params`)
+ *   globalActions.<action>.outcomeMessages.<outcome>
+ *   globalActions.<action>.params.<param>.* / .resultDialog.* / .preflight.fields.<path>
+ *                          (same shape as object actions)
+ *   apps.<app>.label / .description
+ *   apps.<app>.navigation.<id>.label
+ *     ^ an item another package CONTRIBUTES into the app through
+ *       `manifest.navigationContributions` too, keyed under the TARGET app
+ *       (#24993; see `navigationContributionsOf`)
+ *   dashboards.<dash>.label / .description
+ *   dashboards.<dash>.widgets.<w>.title / .description
+ *   datasets.<dataset>.label / .description
+ *   datasets.<dataset>.dimensions.<dim>.label
+ *   datasets.<dataset>.measures.<measure>.label
+ *   reports.<report>.label / .description
+ *   picklists.<picklist>.label
+ *   picklists.<picklist>.options.<value>   (a `picklistExtensions` entry's options too)
+ *   pages.<page>.label / .description
+ *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
+ *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
+ *   pages.<page>.components.<tabsId>.items.<value>.label  (a `page:tabs` item label)
+ *   pages.<page>.components.<formId>.submitBehavior.title / .message
+ *                                       (an `object-form`'s thank-you panel)
+ *   flows.<flow>.label
+ *   flows.<flow>.screens.<node_id>.title                       (#7646 / #11287)
+ *   flows.<flow>.screens.<node_id>.description                 (#22507)
+ *   flows.<flow>.screens.<node_id>.fields.<field>.label
+ *   flows.<flow>.screens.<node_id>.fields.<field>.placeholder
+ *   flows.<flow>.screens.<node_id>.fields.<field>.inlineHelpText
+ *   flows.<flow>.screens.<node_id>.fields.<field>.options.<value>   (#22507)
+ *   flows.<flow>.successMessage / .errorMessage                (#22507)
+ *   flows.<flow>.refusals.<node_id>.message                    (#22450)
+ *   flows.<flow>.notices.<node_id>.message                     (#28251)
+ *   flows.<flow>.approvals.<node_id>.label                     (#24916)
+ *     ^ walked because the ledger's `flows` row is `live` and warns no
+ *       author; a group the ledger does warn on is left out of the walk
+ *       (see `authorWarnedTranslationGroups`)
+ *   hooks.<hook>.refusals.<CODE>.message                       (#26170)
+ *   positions.<position>.label / .description
+ *   permissions.<permission_set>.label / .description
+ *   books.<book>.label / .description
+ *   books.<book>.groups.<group_key>.label   (a doc book's section title, #26690)
+ *   metadataForms.<type>.label / .description
+ *   metadataForms.<type>.sections.<section>.label / .description
+ *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
+ *
+ * The `metadataForms.*` surface is registry-driven (sourced from
+ * `METADATA_FORM_REGISTRY` + `DEFAULT_METADATA_TYPE_REGISTRY` in
+ * `@objectstack/spec`) — it is included unconditionally, independent of
+ * the supplied stack config.
+ *
+ * Pure given its inputs: no network, and the only filesystem read is the
+ * shipped liveness ledger behind {@link authorWarnedTranslationGroups} —
+ * injectable as `warnedGroups`, so the walk itself stays a pure function of
+ * `config`. Safe to call from the CLI, IDE tooling, unit tests and a browser.
+ * A browser has no ledger file to read, so there the default leaves no group
+ * out; a caller that must honour the ledger there passes `warnedGroups`.
+ */
+
+import {
+  METADATA_FORM_REGISTRY,
+  PAGE_COMPONENT_COPY_KEYS,
+  FLOW_SCREEN_COPY_KEYS,
+  FLOW_SCREEN_FIELD_COPY_KEYS,
+  FLOW_TERMINAL_MESSAGE_KEYS,
+  PAGE_TABS_COMPONENT_TYPE,
+  PAGE_FORM_COMPONENT_TYPE,
+  globalFilterKey,
+  pageTabItemKey,
+  walkAddressedPageComponents,
+} from '@objectstack/spec/system';
+import { FLOW_REGION_SLOTS_BY_TYPE, flowScreenFieldOptionKey, templateSlotSource } from '@objectstack/spec/automation';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { APPROVAL_NODE_TYPE } from '@objectstack/spec/automation';
+import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
+import { authorWarnedProperties } from './lint-liveness-properties.js';
+import { walkPageComponents } from './page-walk.js';
+
+// ─── Public types ──────────────────────────────────────────────────────
+
+/** A single translation entry — path + source value carried from the schema. */
+export interface ExpectedEntry {
+  /** Lookup path expressed as an array of segments. */
+  path: string[];
+  /**
+   * Value `os i18n extract` seeds the default-locale skeleton with — the
+   * English literal on the schema, or the fallback the renderer displays when
+   * the author omitted one (an object's own name, a humanized field path).
+   *
+   * `undefined` means there is nothing to scaffold: the key is recorded only so
+   * the coverage gate can notice a bundle that authors it anyway.
+   */
+  sourceValue?: string;
+  /**
+   * The text a reader actually sees in the source locale. Drives the coverage
+   * gate: a key with no `inline` and no bundle entry has no text to translate
+   * at all, so demanding a translation for it would be noise (a *missing* label
+   * is `required/label`'s finding, not an i18n gap).
+   *
+   * Narrower than {@link sourceValue} wherever the seed is a derived fallback
+   * the author never wrote.
+   */
+  inline?: string;
+  /**
+   * The **inline locale map** the author wrote at this prop, verbatim
+   * (`{ en: 'Members', 'zh-CN': '成员' }`) — the second form
+   * `I18nLabelSchema` authorizes, kept as a third axis beside
+   * {@link sourceValue} and {@link inline} because it answers a question
+   * neither of those can (#14749, maintainer ruling 2026-09-03, Q2 = B1).
+   *
+   * `inline` is a *plain-string* reading: `inlineText` narrows a map away to
+   * `undefined`, which is the same value an absent prop produces. That made
+   * one diagnostic carry two opposite facts — a label written out in four
+   * languages and a label nobody wrote were recorded identically, and the
+   * coverage gate reported the first as if it were the second.
+   *
+   * Set ⇒ the prop **is** authored, and the map says in which locales. Unset
+   * ⇒ nothing (or nothing map-shaped) is there. `sourceValue` stays
+   * `undefined` for a map-only entry on purpose: this is a *coverage* record,
+   * not a bundle row — see the "inline maps are not extracted" note in the
+   * module header.
+   *
+   * Only non-empty string values survive here, and only if
+   * `InlineLocaleMapSchema` accepts the object: the schema's own key
+   * refinement is the authority on what a locale tag is, so the retired
+   * `{ key, defaultValue }` key-reference dialect it rejects is not laundered
+   * into "authored" by this walk either.
+   */
+  inlineLocales?: Readonly<Record<string, string>>;
+  /** What kind of metadata this entry was harvested from. */
+  source:
+    | 'object'
+    | 'field'
+    | 'option'
+    | 'section'
+    | 'view'
+    | 'action'
+    | 'globalAction'
+    | 'app'
+    | 'navigation'
+    | 'dashboard'
+    | 'widget'
+    | 'dataset'
+    | 'report'
+    | 'picklist'
+    | 'page'
+    | 'flow'
+    | 'hook'
+    | 'position'
+    | 'permission'
+    | 'book'
+    | 'metadataType'
+    | 'metadataFormSection'
+    | 'metadataFormField';
+  /** Object name when applicable (for `--filter` matching). */
+  objectName?: string;
+  /** App name when applicable (for `--filter` matching). */
+  appName?: string;
+  /** Metadata type name when applicable (for `--filter` matching). */
+  metadataType?: string;
+  /** Flow name when applicable (for `--filter` matching). */
+  flowName?: string;
+}
+
+
+// ─── Walk helpers ──────────────────────────────────────────────────────
+
+/**
+ * The object a view binds to.
+ *
+ * The last two arms cover the aggregated View CONTAINER (`{ list, listViews,
+ * formViews }`), which per spec carries no object of its own and is keyed
+ * implicitly by its inner data source — the same fallback chain objectql's
+ * `resolveMetadataItemName` uses to register it.
+ */
+function viewObjectName(view: any): string | undefined {
+  return (
+    view?.objectName ??
+    view?.object ??
+    view?.data?.object ??
+    view?.list?.data?.object ??
+    view?.form?.data?.object
+  );
+}
+
+/**
+ * The bare `_views` key the RUNTIME assigns to a container's default `list`.
+ *
+ * Asked of the composer (`expandViewContainer`, `spec/src/ui/view.zod.ts`)
+ * rather than re-derived here — that function is the single producer of a
+ * view's runtime identity, and the whole point of #5164 is that a second
+ * derivation drifts from it. This walker used to spell the key
+ * `view.list.name ?? 'list'` while the composer named the very same view
+ * `<object>.default`, so a container declaring only a default `list` got a
+ * bundle skeleton keyed `list`, a registry entry keyed `default`, and an
+ * English label on screen forever. Ruled 2026-08-06 (#5164): canonical = the
+ * runtime identity's bare key.
+ *
+ * Two facts live in the composer and nowhere else, both load-bearing here:
+ *
+ *  1. a nameless default list is keyed **`default`** (never `list`), and a
+ *     named one keeps the author's `list.name`;
+ *  2. a default list whose STRUCTURE merely restates a `listViews` entry is
+ *     **collapsed into that entry** and has no key of its own — the
+ *     `examples/app-crm` shape, where `list` restates `listViews.all` key for
+ *     key and the live key is therefore `all`. This returns `all`
+ *     there, and the caller skips the emit because the `listViews` loop
+ *     already covered it. Emitting a second key for the collapsed view would
+ *     scaffold a translation no lookup can reach — the same defect one shape
+ *     over.
+ *
+ * A key renamed by a collision (`default` → `default_2`, when `listViews`
+ * already claimed `default`) is returned as renamed, because that rename is
+ * the registry key too.
+ *
+ * Returns `undefined` when the container declares no default `list`.
+ */
+function defaultListViewKey(object: string, container: any): string | undefined {
+  if (!container?.list || typeof container.list !== 'object') return undefined;
+  const item = expandViewContainer(object, container).find(
+    (i) => i.viewKind === 'list' && i.isDefault,
+  );
+  if (!item) return undefined;
+  const prefix = `${object}.`;
+  return item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
+}
+
+/**
+ * Emit label / description / emptyState for ONE view under
+ * `objects.<object>._views.<viewName>.*` — the address the shipped platform
+ * bundles already carry (`en.objects.generated.ts`:
+ * `sys_user._views.all_users.label`).
+ *
+ * **The three tails do not share one reader**, and for `description` the
+ * reader is not in the browser at all. Getting that backwards reads as "this
+ * key is dead" — the inference #15180 drew and #17546 corrected.
+ *
+ *  - **`label` — read on BOTH sides.** `resolveViewLabel`
+ *    (`packages/spec/src/system/i18n-resolver.ts`) through `translateView`,
+ *    which `@objectstack/rest` applies at the REST metadata boundary off
+ *    `TRANSLATABLE_METADATA_TYPES`; and `useObjectLabel().viewLabel` in
+ *    `@object-ui/i18n`, client-side.
+ *  - **`description` — read SERVER-SIDE ONLY**, by `resolveViewDescription`
+ *    in that same resolver and through that same `translateView`. objectui#7219
+ *    removed the `useObjectLabel().viewDescription()` member, so the server
+ *    overlay is this key's ONE reader: it lands on the `description` of the
+ *    served view document, which objectui relays (`ObjectView`) and renders
+ *    (`ListView`, via `pickLocalized`).
+ *    ⚠️ objectui pins this key as "an inert catalog entry", and no bundle in
+ *    this repo authors a `description` leaf under `_views` (the nine shipped
+ *    `en.objects.generated.ts` carry `label` and `emptyState` leaves only).
+ *    ⛔ Neither fact licenses deleting this emission: both are scoped to the
+ *    BROWSER path objectui#7219 removed, and the server reader above is
+ *    untouched by them. Absence of a browser-side helper, and absence of an
+ *    authored value, are not evidence the key is unread.
+ *  - **`emptyState` — read CLIENT-SIDE ONLY**, by
+ *    `useObjectLabel().viewEmptyState` in `@object-ui/i18n`. The spec resolver
+ *    declares no empty-state reader at all, which is why `pushViewEmptyState`
+ *    below is the site that cites the client convention.
+ *
+ * ⚠️ `viewLabel` and `viewEmptyState` were NOT retired alongside
+ * `viewDescription`: objectui kept the `viewSuffixes` helper all three shared
+ * and dropped only the `'description'` tail passed to it. Naming those two
+ * here is current, not residue.
+ */
+function pushViewEntries(out: ExpectedEntry[], objectName: string, viewName: string, view: any): void {
+  const root = ['objects', objectName, '_views', viewName];
+  pushDerived(out, [...root, 'label'], inlineText(view?.label) ?? viewName, view?.label, 'view', { objectName });
+  pushOptional(out, [...root, 'description'], view?.description, 'view', { objectName });
+  pushViewEmptyState(out, root, view, objectName);
+  pushBulkActionDefs(out, root, view, objectName);
+}
+
+/**
+ * Emit `_views.<view>.title` for every FORM view a view container serves —
+ * each `formViews.<key>` entry and the default `form` — the key
+ * `translateView` overlays a form's `title` (`FormViewSchema.title`) from.
+ *
+ * **The key is the composer's, asked, never re-derived.** A container form is
+ * served as the item `expandViewContainer` expands it to, and `translateView`
+ * keys its title by that item's registry name with the object prefix
+ * stripped: `formViews.<key>` is `<key>` (renamed on a collision, e.g.
+ * `default_2` beside a default list), the default `form` is its `name` or
+ * `form`. Reading the expanded items is the same discipline
+ * {@link defaultListViewKey} keeps for the default list, so the key written
+ * here is the key the runtime reads.
+ *
+ * **Title and thank-you panel only** ({@link pushFormViewCopy}). The other
+ * `_views` tails stay unemitted for a form: a container's form entry carries
+ * no `label`, and its `description` is not overlaid by anything a form
+ * renders. A form that authors no title still records the key
+ * (`pushOptional`), so the coverage gate notices a bundle that translates one
+ * the source never wrote.
+ */
+function pushContainerFormTitles(out: ExpectedEntry[], containerObject: string, container: any): void {
+  if (!container?.form && !container?.formViews) return;
+  const prefix = `${containerObject}.`;
+  for (const item of expandViewContainer(containerObject, container)) {
+    if (item.viewKind !== 'form') continue;
+    const key = item.name.startsWith(prefix) ? item.name.slice(prefix.length) : item.name;
+    pushFormViewCopy(out, containerObject, key, item.config);
+  }
+}
+
+/**
+ * Emit the `_views` tails ONE served form view carries: its heading
+ * (`_views.<key>.title`, `config.title`) and its thank-you panel
+ * (`_views.<key>.submitBehavior.title` / `.message`, the `title` / `message`
+ * of a `kind: 'thank-you'` `config.submitBehavior`) — the strings
+ * `translateView` overlays. A panel of another kind authors no copy, so its
+ * two keys are recorded unauthored (`pushOptional`), exactly as an untitled
+ * form's `title` is.
+ */
+function pushFormViewCopy(out: ExpectedEntry[], objectName: string, key: string, config: unknown): void {
+  const form = config && typeof config === 'object' ? config as { title?: unknown; submitBehavior?: any } : undefined;
+  const root = ['objects', objectName, '_views', key];
+  pushOptional(out, [...root, 'title'], form?.title, 'view', { objectName });
+  pushThankYouPanel(out, root, form?.submitBehavior, 'view', { objectName });
+}
+
+/**
+ * Emit `<root>.submitBehavior.title` / `.message` for one form's
+ * `submitBehavior` — the panel's two slots, under whichever address its
+ * carrier has: a form view's `_views.<key>` ({@link pushFormViewCopy}) or a
+ * page `object-form` component's `pages.<page>.components.<id>`
+ * ({@link emitPageComponentCopy}). Only a `kind: 'thank-you'` panel authors
+ * copy; any other kind records both keys unauthored (`pushOptional`), so the
+ * two carriers cannot read the kind differently.
+ */
+function pushThankYouPanel(
+  out: ExpectedEntry[],
+  root: string[],
+  behavior: unknown,
+  source: ExpectedEntry['source'],
+  extra?: EntryScope,
+): void {
+  const panel = behavior && typeof behavior === 'object' ? behavior as { kind?: unknown; title?: unknown; message?: unknown } : undefined;
+  const thankYou = panel?.kind === 'thank-you' ? panel : undefined;
+  pushOptional(out, [...root, 'submitBehavior', 'title'], thankYou?.title, source, extra);
+  pushOptional(out, [...root, 'submitBehavior', 'message'], thankYou?.message, source, extra);
+}
+
+/**
+ * Emit `_views.<view>.bulkActions.<def>.*` for a list view's authored
+ * `bulkActionDefs[]` (#14253's resolver, #14376's walk).
+ *
+ * **Why this hangs off the VIEW and not the action pass.** A `bulkActionDefs`
+ * entry is authored inside the view and is not an action document, so it never
+ * reaches `translateAction` and no other pass here would ever see it. That is
+ * the same reason `translateView` — not `translateAction` — is where the
+ * resolver overlays it, and the reason `ObjectTranslationDataSchema` puts the
+ * group under `_views.<view>` rather than beside `_actions`.
+ *
+ * **The view key is the caller's, deliberately.** `translateBulkActionDefs` is
+ * called by `translateView` with `viewTranslationKey(view, objectName)` — the
+ * bare `_views` key — so emitting under the same `root` this function already
+ * built for `label` / `description` keeps the two halves keyed by construction
+ * rather than by a second derivation (the #5164 lesson one surface over).
+ *
+ * **Read from the AUTHORED address.** The resolver reads
+ * `config.bulkActionDefs` because a SERVED `ViewItem` nests the whole
+ * `ListViewSchema` under `config`; this walker is handed the authored stack
+ * config, where the defs sit on the list view itself — the same authored
+ * addresses the rest of this file reads (`view.list.data.object`,
+ * `obj.listViews`). Accepting the served spelling here as well would be a
+ * tolerant alias for a shape this walk is never given.
+ *
+ * Three deliberate exclusions, each measured against `BulkActionDefSchema`
+ * rather than mirrored from the report:
+ *
+ *   - `successMessage` — a def declares none (the run reports a per-record
+ *     outcome summary the console words from its own catalog);
+ *   - `description` — a def declares none either; the sentence above the
+ *     affected-record summary IS `confirmText`;
+ *   - per-param `options` — `BulkActionParamTranslationSchema` carries
+ *     `guidance` against them instead of a key, so scaffolding them would
+ *     write keys `.strict()` then rejects.
+ *
+ * ⚠️ `help`, not `helpText`. A bulk param spells its hint `help`
+ * (`BulkActionParamSchema.help`) where an ACTION param spells it `helpText` —
+ * the known divergence `ui/bulk-action.zod.ts` names, and the one spelling the
+ * translation face declares.
+ */
+function pushBulkActionDefs(out: ExpectedEntry[], viewRoot: string[], view: any, objectName: string): void {
+  const defs = view?.bulkActionDefs;
+  if (!Array.isArray(defs)) return;
+  for (const def of defs) {
+    if (!def || typeof def !== 'object') continue;
+    const defName = def.name;
+    if (typeof defName !== 'string' || defName.length === 0) continue;
+    const base = [...viewRoot, 'bulkActions', defName];
+    // The selection bar renders `def.label ?? formatActionLabel(def.name)`
+    // (objectui `BulkActionBar.tsx`), so the humanized name is what a reader
+    // actually sees when the author omitted a label — a usable seed, with
+    // `inline` left unset so coverage never demands a translation of a string
+    // nobody wrote.
+    const authoredLabel = inlineText(def.label);
+    pushDerived(out, [...base, 'label'], authoredLabel ?? humanizeFieldPath(defName), def.label, 'view', { objectName });
+    // [#24798] `confirmText` is a `template` slot: a bare string or the
+    // `{ dialect: 'template', source }` envelope, and either one is the same
+    // authored sentence. Read it through the template judge's one reader, so
+    // the envelope form is seeded like the string instead of being recorded
+    // as an absent key.
+    pushOptional(out, [...base, 'confirmText'], templateSlotSource(def.confirmText), 'view', { objectName });
+    pushOptional(out, [...base, 'confirmLabel'], def.confirmLabel, 'view', { objectName });
+    if (!Array.isArray(def.params)) continue;
+    for (const param of def.params) {
+      if (!param || typeof param !== 'object') continue;
+      const pname = param.name;
+      if (typeof pname !== 'string' || pname.length === 0) continue;
+      const pbase = [...base, 'params', pname];
+      // The dialog renders `param.label ?? param.name` — the bare name, the
+      // same fallback `pushActionParams` seeds an inline action param from.
+      const literalLabel = inlineText(param.label);
+      pushDerived(out, [...pbase, 'label'], literalLabel ?? pname, param.label, 'view', { objectName });
+      pushOptional(out, [...pbase, 'help'], param.help, 'view', { objectName });
+      pushOptional(out, [...pbase, 'placeholder'], param.placeholder, 'view', { objectName });
+    }
+  }
+}
+
+/**
+ * Emit `_views.<view>.emptyState.{title,message}` entries when the view
+ * declares empty-state copy. Mirrors the client-side resolver convention
+ * (`viewEmptyState` in @object-ui/i18n) and `ObjectTranslationDataSchema`.
+ */
+function pushViewEmptyState(out: ExpectedEntry[], viewPath: string[], view: any, objectName: string): void {
+  const emptyState = view?.emptyState;
+  if (!emptyState || typeof emptyState !== 'object') return;
+  // No `typeof === 'string'` pre-filter: `pushEntry` is the one place that
+  // decides what counts as authored, and it accepts BOTH authorized forms of
+  // an `I18nLabel`. A guard here would re-narrow the map away (#14749).
+  pushEntry(out, [...viewPath, 'emptyState', 'title'], emptyState.title, 'view', { objectName });
+  pushEntry(out, [...viewPath, 'emptyState', 'message'], emptyState.message, 'view', { objectName });
+}
+
+type EntryScope = Pick<ExpectedEntry, 'objectName' | 'appName' | 'metadataType' | 'flowName'>;
+
+/** Narrow to a usable source string; an empty string is not authored text. */
+function inlineText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Narrow to the **inline locale map** form of an `I18nLabel`, or `undefined`.
+ *
+ * ⛔ Deliberately not a hand-written "looks like a locale map" test. The one
+ * definition of that shape is `InlineLocaleMapSchema` in
+ * `spec/src/ui/i18n.zod.ts`, whose key refinement is doing real work: it
+ * rejects the retired `{ key, defaultValue }` key-reference dialect BY NAME,
+ * because a map keyed that way reaches both resolvers' last-resort limb and
+ * renders the raw i18n key on screen (#5055 / #9925 / #10492). A second
+ * predicate here would be a second contract — the failure Prime Directive #12
+ * describes — and the one that drifted would be this one, silently promoting a
+ * shape the schema refuses into "authored".
+ *
+ * Two narrowings on top of a clean parse, both matching how this file already
+ * counts on the *bundle* side (`lookupKey` in `i18n-coverage.ts`):
+ *
+ *  - an empty-string value is not a translation, so those entries are dropped;
+ *  - a map left with no entries is not authored text, so it answers
+ *    `undefined` rather than an empty record — `{}` parses fine, and reporting
+ *    it as "authored in zero locales" would invent an authoring act.
+ */
+function inlineLocaleMap(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  if (!InlineLocaleMapSchema.safeParse(value).success) return undefined;
+  const map: Record<string, string> = {};
+  for (const [tag, text] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof text === 'string' && text.length > 0) map[tag] = text;
+  }
+  return Object.keys(map).length > 0 ? map : undefined;
+}
+
+/**
+ * The evidence an authored value carries, read once so that every `push*`
+ * helper below files a locale map the same way. `authored` is the RAW prop —
+ * ⛔ never pre-narrowed with `inlineText` at the call site, which is precisely
+ * how a written map used to arrive here already flattened to `undefined`.
+ */
+function authoredEvidence(authored: unknown): Pick<ExpectedEntry, 'inline' | 'inlineLocales'> {
+  const inline = inlineText(authored);
+  if (inline !== undefined) return { inline };
+  const inlineLocales = inlineLocaleMap(authored);
+  return inlineLocales ? { inlineLocales } : {};
+}
+
+/**
+ * Record a key whose displayed text *is* its seed — the common case, where the
+ * author wrote the literal we scaffold from.
+ *
+ * A value in the inline-map form is recorded as **authored, with no seed**: it
+ * is already multilingual, so there is nothing for `os i18n extract` to
+ * scaffold (`sourceValue` unset ⇒ no bundle row), while `inlineLocales` tells
+ * the coverage gate which locales the author actually wrote.
+ */
+function pushEntry(
+  out: ExpectedEntry[],
+  path: string[],
+  sourceValue: unknown,
+  source: ExpectedEntry['source'],
+  extra?: EntryScope,
+): void {
+  if (typeof sourceValue === 'string') {
+    out.push({ path, sourceValue, inline: sourceValue, source, ...extra });
+    return;
+  }
+  const inlineLocales = inlineLocaleMap(sourceValue);
+  if (inlineLocales) out.push({ path, inlineLocales, source, ...extra });
+}
+
+/**
+ * Record a key whose seed is *derived* — an object's own name standing in for a
+ * missing label, a param's machine name rendered as its caption. The seed keeps
+ * the extracted skeleton usable, but `inline` stays unset so the coverage gate
+ * does not demand translations of a string nobody authored.
+ *
+ * `authored` is the raw prop, not a pre-narrowed string: a derived seed and an
+ * inline locale map co-exist (the map is what a reader sees; the seed is what
+ * a skeleton would show), and only the raw value can tell the two apart from
+ * "the author wrote nothing".
+ */
+function pushDerived(
+  out: ExpectedEntry[],
+  path: string[],
+  seed: string,
+  authored: unknown,
+  source: ExpectedEntry['source'],
+  extra?: EntryScope,
+): void {
+  const evidence = authoredEvidence(authored);
+  // `inline` is spelled out rather than spread, so a derived entry keeps the
+  // key present-with-`undefined` it has always had — `toMatchObject` in the
+  // existing pins reads the property's PRESENCE, not just its value.
+  out.push({
+    path,
+    sourceValue: seed,
+    inline: evidence.inline,
+    ...(evidence.inlineLocales ? { inlineLocales: evidence.inlineLocales } : {}),
+    source,
+    ...extra,
+  });
+}
+
+/**
+ * [#24814, #27948, #28266] An action's `confirmText` / `successMessage` /
+ * `description` / `outcomeMessages` entry and a param's `helpText` are
+ * `template` slots that also take an inline locale map: a bare string, the
+ * parsed
+ * `{ dialect: 'template', source }` envelope, or the map. The envelope and the
+ * string are the same authored sentence, so the envelope is read through the
+ * template judge's one reader and seeded like the string; anything else (the
+ * map) is handed on as written, for {@link authoredEvidence} to file.
+ */
+function actionCopy(value: unknown): unknown {
+  return templateSlotSource(value) ?? value;
+}
+
+/**
+ * Record an optional authored string: seeds the skeleton when present, and
+ * still records the key when absent so the coverage gate notices a bundle that
+ * authors it without an inline counterpart.
+ */
+function pushOptional(
+  out: ExpectedEntry[],
+  path: string[],
+  value: unknown,
+  source: ExpectedEntry['source'],
+  extra?: EntryScope,
+): void {
+  const evidence = authoredEvidence(value);
+  if (evidence.inline !== undefined) pushEntry(out, path, evidence.inline, source, extra);
+  else out.push({ path, ...evidence, source, ...extra });
+}
+
+/**
+ * Emit `submitText`, the param dialog's submit button label, under an action's
+ * translation root — OPTIONAL-not-derived like `description` (an action that
+ * names no verb shows the console's own "Confirm"), and only for an action with
+ * a non-empty `params`: that is the only action `translateAction` overlays the
+ * key onto, because no other action opens the dialog the button sits in. A
+ * paramless action gets no slot, so a translation filed there stays dangling.
+ */
+function pushActionSubmitText(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  source: ExpectedEntry['source'],
+  objectName: string | undefined,
+): void {
+  if (!Array.isArray(action?.params) || action.params.length === 0) return;
+  pushOptional(out, [...actionRoot, 'submitText'], action.submitText, source, { objectName });
+}
+
+/**
+ * Emit `cancelText`, the dismiss button label of the dialog an action opens
+ * before it runs, under the action's translation root — OPTIONAL-not-derived
+ * like `submitText` (an action that names no label shows the console's own
+ * "Cancel"), and only for an action that opens one of the two dialogs carrying
+ * that button: the confirm dialog of a declared `confirmText`, or the param
+ * dialog of a non-empty `params`. Those are the actions `translateAction`
+ * overlays the key onto; any other action gets no slot, so a translation filed
+ * there stays dangling.
+ */
+function pushActionCancelText(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  source: ExpectedEntry['source'],
+  objectName: string | undefined,
+): void {
+  const opensDialog = action?.confirmText != null
+    || (Array.isArray(action?.params) && action.params.length > 0);
+  if (!opensDialog) return;
+  pushOptional(out, [...actionRoot, 'cancelText'], action.cancelText, source, { objectName });
+}
+
+/**
+ * Emit `params.<param>.{label,helpText,placeholder}` and
+ * `params.<param>.options.<value>` entries under an action's translation root.
+ * Mirrors the client-side resolver convention (`actionParamText` /
+ * `actionParamOptionLabel` in @object-ui/i18n) and the `params` slot on
+ * `ObjectTranslationDataSchema._actions`.
+ *
+ * Field-backed params (`{ field: 'email' }`) inherit the referenced field's
+ * translated label/help at runtime, so a label entry is emitted only when the
+ * author overrode it with a literal string. Inline params (name-based) always
+ * emit a label — falling back to the param name, matching the dialog render.
+ * Localized-map labels (`{ en, 'zh-CN' }`) are already multilingual and are
+ * skipped.
+ */
+function pushActionParams(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  if (!Array.isArray(action?.params)) return;
+  for (const param of action.params) {
+    if (!param || typeof param !== 'object') continue;
+    const pname = param.name ?? param.field;
+    if (typeof pname !== 'string' || pname.length === 0) continue;
+    const base = [...actionRoot, 'params', pname];
+    const literalLabel = inlineText(param.label);
+    if (param.field) {
+      pushOptional(out, [...base, 'label'], param.label, kind, { objectName });
+    } else {
+      pushDerived(out, [...base, 'label'], literalLabel ?? pname, param.label, kind, { objectName });
+    }
+    pushOptional(out, [...base, 'helpText'], actionCopy(param.helpText), kind, { objectName });
+    pushOptional(out, [...base, 'placeholder'], param.placeholder, kind, { objectName });
+    if (Array.isArray(param.options)) {
+      for (const opt of param.options) {
+        if (opt && typeof opt === 'object' && 'value' in opt && typeof opt.label === 'string') {
+          pushEntry(out, [...base, 'options', String(opt.value)], opt.label, kind, { objectName });
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Emit `resultDialog.{title,description,acknowledge}` and
+ * `resultDialog.fields.<path>` entries under an action's translation root.
+ * Mirrors `ActionResultDialogTranslationSchema` in @objectstack/spec and the
+ * client-side `actionResultDialog` resolver. Field entries are keyed by the
+ * LITERAL result-field path (`"user.email"`) — the dot stays inside a single
+ * path segment, matching how resolvers index the record without splitting.
+ */
+/**
+ * Emit `outcomeMessages.<outcome>` entries under an action's translation root —
+ * one per outcome the action declares (`ActionSchema.outcomeMessages`, #21095),
+ * beside `successMessage`, at the address `translateAction` overlays
+ * (`spec/system/i18n-resolver.ts`). Each message is optional-not-derived like
+ * `successMessage`: an outcome with no entry falls back at render time, so
+ * nothing is seeded for an outcome the author did not write.
+ */
+function pushActionOutcomeMessages(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const messages = action?.outcomeMessages;
+  if (!messages || typeof messages !== 'object' || Array.isArray(messages)) return;
+  for (const [outcome, message] of Object.entries<unknown>(messages)) {
+    pushOptional(out, [...actionRoot, 'outcomeMessages', outcome], actionCopy(message), kind, { objectName });
+  }
+}
+
+function pushActionResultDialog(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const dialog = action?.resultDialog;
+  if (!dialog || typeof dialog !== 'object') return;
+  const base = [...actionRoot, 'resultDialog'];
+  pushOptional(out, [...base, 'title'], dialog.title, kind, { objectName });
+  pushOptional(out, [...base, 'description'], dialog.description, kind, { objectName });
+  pushOptional(out, [...base, 'acknowledge'], dialog.acknowledge, kind, { objectName });
+  if (Array.isArray(dialog.fields)) {
+    for (const field of dialog.fields) {
+      if (!field || typeof field !== 'object') continue;
+      if (typeof field.path !== 'string' || field.path.length === 0) continue;
+      pushEntry(out, [...base, 'fields', field.path], field.label, kind, { objectName });
+    }
+  }
+}
+
+/**
+ * Emit `preflight.fields.<path>` entries under an action's translation root —
+ * one per field the action's `preflight.fields[]` declares, keyed by the
+ * LITERAL path exactly as `pushActionResultDialog` keys `resultDialog.fields`
+ * (#31885). Mirrors `ActionPreflightTranslationSchema` in @objectstack/spec and
+ * `resolveActionPreflight`, which overlays the declared fields only. A preflight
+ * has no `title` (the console draws its panel under its own heading), so the
+ * field labels are its whole translatable copy.
+ */
+function pushActionPreflight(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const preflight = action?.preflight;
+  if (!preflight || typeof preflight !== 'object' || !Array.isArray(preflight.fields)) return;
+  for (const field of preflight.fields) {
+    if (!field || typeof field !== 'object') continue;
+    if (typeof field.path !== 'string' || field.path.length === 0) continue;
+    pushEntry(out, [...actionRoot, 'preflight', 'fields', field.path], field.label, kind, { objectName });
+  }
+}
+
+/**
+ * How deep a `conditional` chain is followed. `ValidationRuleSchema` is
+ * recursive with no declared bound, and this walker is handed hand-authored
+ * TypeScript — a shared branch object appearing under its own ancestor would
+ * otherwise loop forever. Real nesting is two or three deep (the schema's own
+ * worked examples stop at two).
+ */
+const MAX_VALIDATION_DEPTH = 10;
+
+/**
+ * Emit `objects.<object>._validations.<rule>.message` for an object's custom
+ * validation rules (#14253's resolver, #14376's walk).
+ *
+ * `object.validations[].message` is the sentence a rejected write returns, and
+ * the ObjectQL rule evaluator now resolves it through the engine's existing
+ * `i18nService` channel at exactly this address
+ * (`objectValidationMessageKey`, `spec/system/i18n-resolver.ts`). Without this
+ * pass the address has a reader and a schema slot but nothing writes the
+ * skeleton, so a deployment gets platform-generated refusals in the caller's
+ * language and author-written ones in the source language, side by side in one
+ * error envelope.
+ *
+ * **A `conditional` wrapper contributes no key of its own.** `checkConditional`
+ * evaluates `when` and then returns `evaluateRule(branch, …)` — the BRANCH
+ * supplies the violation, so the wrapper's own `message` never reaches a user.
+ * Scaffolding it would offer a translator a string no rejected write can ever
+ * show. The branches carry their own `name` and are addressed by it, which is
+ * what both the resolver's JSDoc and `_validations`' schema note state.
+ *
+ * **`active: false` is not a reason to skip a rule.** It is a toggle on a
+ * surface that exists, not the absence of one, and no other family in this
+ * walker consults a runtime toggle — this walk reports what a config
+ * DECLARES. Flipping the toggle back on must not silently owe a translation.
+ */
+function pushValidationMessages(
+  out: ExpectedEntry[],
+  objectName: string,
+  rules: unknown,
+  depth: number,
+): void {
+  if (!Array.isArray(rules) || depth >= MAX_VALIDATION_DEPTH) return;
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object') continue;
+    const ruleName = (rule as any).name;
+    if (typeof ruleName !== 'string' || ruleName.length === 0) continue;
+    if ((rule as any).type === 'conditional') {
+      pushValidationMessages(out, objectName, [(rule as any).then, (rule as any).otherwise], depth + 1);
+      continue;
+    }
+    pushEntry(
+      out,
+      ['objects', objectName, '_validations', ruleName, 'message'],
+      (rule as any).message,
+      'object',
+      { objectName },
+    );
+  }
+}
+
+// ─── Object sections (`objects.<o>._sections.<section>.label`) ─────────
+//
+// A section heading is authored in TWO independent places and rendered from
+// both, so a walk that reads only one of them under-reports (#5405):
+//
+//   (a) the object's `fieldGroups` semantic role (ADR-0085 §5) — the fields
+//       are the authority for which sections exist (a declared group nothing
+//       references never renders), `fieldGroups[].label` supplies the source
+//       text. Rendered by `RecordDetailView` via
+//       `deriveFieldGroupDetailSections` and by `ObjectFormDesigner`, both of
+//       which look the heading up as `sectionLabel(object, group.key, …)`.
+//
+//   (b) authored `sections[]` on a form view or inside a record page's
+//       component tree, keyed by the section's own `name`. Rendered by
+//       `plugin-form`'s `ObjectForm`/`ModalForm` and `plugin-detail`'s
+//       `record:details`.
+//
+// Both resolve through the SAME convention —
+// `objects.<object>._sections.<name>.label`, `useObjectLabel.sectionLabel` in
+// `@object-ui/i18n` — against the `_sections` slot `ObjectTranslationDataSchema`
+// declares. So one expected key per (object, section), whichever source found
+// it first.
+//
+// A section with no `name` is deliberately skipped: every renderer guards the
+// lookup on it (`s?.name ? sectionLabel(...) : s?.label`), so a nameless
+// section is untranslatable by construction and demanding a bundle entry for
+// it would be noise. The `_sections` schema says the same ("Each section in
+// the page schema must declare a stable `name` for the lookup to fire").
+
+/**
+ * object name → section name → the authored label, RAW (undefined = none
+ * authored). Raw rather than narrowed to a string because an inline locale map
+ * is authored text too, and narrowing it here would erase that fact before the
+ * entry is ever built — the #14749 defect, one layer up from `pushDerived`.
+ */
+type SectionIndex = Map<string, Map<string, AuthoredLabel>>;
+
+/** Either authorized form of an `I18nLabel`, or nothing authored at all. */
+type AuthoredLabel = string | Record<string, unknown> | undefined;
+
+/** Is this value authored text in either authorized form? */
+function isAuthored(label: unknown): boolean {
+  return inlineText(label) !== undefined || inlineLocaleMap(label) !== undefined;
+}
+
+/** Narrow an arbitrary value to {@link AuthoredLabel} — anything else is nothing. */
+function asAuthoredLabel(label: unknown): AuthoredLabel {
+  return isAuthored(label) ? (label as AuthoredLabel) : undefined;
+}
+
+/**
+ * Do two authored labels say the same thing — in either authorized form?
+ *
+ * Used for the `page:header` de-duplication, whose rule is "a title that
+ * merely restates the page label resolves through the label's own key, so
+ * offering it a second key would offer one string under two keys". That rule
+ * is about the TEXT, not about the JavaScript value: two inline locale maps
+ * written out identically are the duplicate the rule means, and `!==` on two
+ * object references would answer `false` for every one of them.
+ *
+ * Key ORDER is deliberately not significant (the maps are compared as sets of
+ * entries) — `pickLocalized`'s insertion-order limbs decide which entry is
+ * shown for an unlisted locale, but two maps carrying the same entries show
+ * the same text for every locale either of them lists, which is the question
+ * here.
+ */
+function sameAuthored(a: unknown, b: unknown): boolean {
+  const aText = inlineText(a);
+  const bText = inlineText(b);
+  if (aText !== undefined || bText !== undefined) return aText === bText;
+  const aMap = inlineLocaleMap(a);
+  const bMap = inlineLocaleMap(b);
+  if (!aMap || !bMap) return aMap === bMap;
+  const aKeys = Object.keys(aMap).sort();
+  const bKeys = Object.keys(bMap).sort();
+  return aKeys.length === bKeys.length && aKeys.every((k, i) => bKeys[i] === k && aMap[k] === bMap[k]);
+}
+
+/**
+ * Record one (object, section) pair.
+ *
+ * One heading, one key — however many surfaces declare it. The first AUTHORED
+ * label wins, and a later authored one upgrades an entry recorded without any
+ * (a group that declares no `label` of its own, whose heading text the page
+ * section carries): `inline` must report the text the reader actually sees,
+ * whichever surface happens to be walked first.
+ */
+function addSection(index: SectionIndex, objectName: unknown, sectionName: unknown, label: unknown): void {
+  if (typeof objectName !== 'string' || objectName.length === 0) return;
+  if (typeof sectionName !== 'string' || sectionName.length === 0) return;
+  let sections = index.get(objectName);
+  if (!sections) index.set(objectName, (sections = new Map()));
+  const authored = asAuthoredLabel(label);
+  if (!sections.has(sectionName)) sections.set(sectionName, authored);
+  else if (sections.get(sectionName) === undefined && authored !== undefined) {
+    sections.set(sectionName, authored);
+  }
+}
+
+/** Read a `sections[]` array (form view / component props) into the index. */
+function addSectionList(index: SectionIndex, sections: unknown, objectName: unknown): void {
+  if (!Array.isArray(sections)) return;
+  for (const section of sections) {
+    if (!section || typeof section !== 'object') continue;
+    const s = section as Record<string, unknown>;
+    // `label` is the ONE heading spelling both surfaces declare —
+    // `RecordDetailsProps.sections[]` and `FormSectionSchema` (#5611, #5730).
+    // A `title` here is off-spec and deliberately unread: reading it would
+    // scaffold a bundle key for a heading the schema rejects, which is how a
+    // consumer-side tolerance grows into a second de-facto contract (PD #12).
+    // A localized-map label (`{ en, 'zh-CN' }`) is already multilingual and
+    // `inlineText` drops it to "nothing authored in plain text".
+    addSection(index, objectName, s.name, s.label);
+  }
+}
+
+/**
+ * object name → section name → entry `field` → the override copy that entry
+ * authors, RAW — the `objects.<o>._sections.<s>.fields.<f>.*` keys.
+ */
+type SectionEntryIndex = Map<string, Map<string, Map<string, Partial<Record<SectionEntryAttr, AuthoredLabel>>>>>;
+
+/** The override copy a form section entry carries (`FormFieldSchema`). */
+type SectionEntryAttr = 'label' | 'placeholder' | 'helpText';
+const SECTION_ENTRY_ATTRS: readonly SectionEntryAttr[] = ['label', 'placeholder', 'helpText'];
+
+/**
+ * Read the override copy of a FORM VIEW's section entries into the index —
+ * the `label`, `placeholder` and `helpText` an entry object authors over the
+ * object field it renders, addressed under its section's `name` by its own
+ * `field`, which is where `translateView` reads them.
+ *
+ * Form views only: a `record:details` section and a `fieldGroups` group have
+ * no entry overrides the resolver reads. A nameless section has no address,
+ * and a bare field-name entry authors no copy, so neither contributes. One
+ * string, one key: the first authored value wins, as for a heading.
+ */
+function addSectionEntries(index: SectionEntryIndex, sections: unknown, objectName: unknown): void {
+  if (!Array.isArray(sections)) return;
+  if (typeof objectName !== 'string' || objectName.length === 0) return;
+  for (const section of sections) {
+    if (!section || typeof section !== 'object') continue;
+    const s = section as Record<string, unknown>;
+    if (typeof s.name !== 'string' || s.name.length === 0 || !Array.isArray(s.fields)) continue;
+    for (const raw of s.fields) {
+      if (!raw || typeof raw !== 'object') continue;
+      const entry = raw as Record<string, unknown>;
+      if (typeof entry.field !== 'string' || entry.field.length === 0) continue;
+      let byObject = index.get(objectName);
+      if (!byObject) index.set(objectName, (byObject = new Map()));
+      let bySection = byObject.get(s.name);
+      if (!bySection) byObject.set(s.name, (bySection = new Map()));
+      let copy = bySection.get(entry.field);
+      if (!copy) bySection.set(entry.field, (copy = {}));
+      for (const attr of SECTION_ENTRY_ATTRS) {
+        const authored = asAuthoredLabel(entry[attr]);
+        if (copy[attr] === undefined && authored !== undefined) copy[attr] = authored;
+      }
+    }
+  }
+}
+
+/**
+ * Emit `objects.<object>._sections.<section>.label` for every section the
+ * stack renders, from both authoring surfaces, and
+ * `objects.<object>._sections.<section>.fields.<field>.{label,placeholder,helpText}`
+ * for the override copy a form view's section entries author.
+ */
+function walkObjectSections(config: any, out: ExpectedEntry[]): void {
+  const index: SectionIndex = new Map();
+  const entries: SectionEntryIndex = new Map();
+
+  // (a) `fieldGroups` × field `group` membership. `deriveFieldGroupLayout` is
+  //     the shared derivation the renderers themselves consume, so "which
+  //     groups become sections" is decided in exactly one place: a group no
+  //     visible field references, or one that is referenced but never
+  //     declared, produces no heading and therefore no expected key.
+  const objects: any[] = Array.isArray(config?.objects) ? config.objects : [];
+  for (const obj of objects) {
+    if (!obj?.name) continue;
+    const derived = deriveFieldGroupLayout(obj);
+    if (!derived) continue;
+    // The derivation substitutes the key for a missing label; read the
+    // declared label back so `inline` stays honest about what was authored.
+    const declaredLabels = new Map<string, unknown>();
+    for (const group of Array.isArray(obj.fieldGroups) ? obj.fieldGroups : []) {
+      if (group && typeof group === 'object' && typeof group.key === 'string') {
+        declaredLabels.set(group.key, group.label);
+      }
+    }
+    for (const section of derived) {
+      // The trailing ungrouped bucket carries no key — it renders without
+      // chrome, so there is no heading to translate.
+      if (section.key === undefined) continue;
+      addSection(index, obj.name, section.key, declaredLabels.get(section.key));
+    }
+  }
+
+  // (b) authored form-view sections.
+  const views: any[] = Array.isArray(config?.views) ? config.views : [];
+  for (const view of views) {
+    const containerObject = viewObjectName(view);
+    addSectionList(index, view?.sections, containerObject);
+    addSectionEntries(entries, view?.sections, containerObject);
+    if (view?.form && typeof view.form === 'object') {
+      const formObject = viewObjectName(view.form) ?? containerObject;
+      addSectionList(index, view.form.sections, formObject);
+      addSectionEntries(entries, view.form.sections, formObject);
+    }
+    if (view?.formViews && typeof view.formViews === 'object') {
+      for (const form of Object.values<any>(view.formViews)) {
+        if (!form || typeof form !== 'object') continue;
+        const formObject = viewObjectName(form) ?? containerObject;
+        addSectionList(index, form.sections, formObject);
+        addSectionEntries(entries, form.sections, formObject);
+      }
+    }
+  }
+
+  // (b) authored page sections — a record page's `record:details`.
+  //
+  // Reuses `@objectstack/lint`'s shared page traversal rather than growing a
+  // private copy. That walk exists precisely because duplicating it produced a
+  // dead rule once already (#3583): components hang off `regions[].components`
+  // AND `slots.<slot>` (which may be a bare component, not an array), sub-trees
+  // live inside the untyped `properties` bag at the positions spec's
+  // `pageComponentSlotPositions()` derives (`page:tabs` →
+  // `properties.items[].children`, `page:card` → `properties.footer`, every
+  // container → `properties.children`), and source-authored pages (`kind: 'html' | 'react'`) hold only a
+  // DERIVED region cache that the author never wrote — scaffolding translation
+  // keys off that cache would invent an authoring surface.
+  //
+  // It also resolves each component's OWN binding
+  // (`dataSource.object` → `properties.object` → the page's `object`), which a
+  // page-level-only binding would get wrong rather than merely miss: a
+  // `record:details` retargeted at another object would key its headings under
+  // the page's object, and no bundle entry there would ever resolve.
+  const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
+  for (let pi = 0; pi < pages.length; pi++) {
+    const page = pages[pi];
+    if (!page || typeof page !== 'object') continue;
+    for (const walked of walkPageComponents(page, `pages[${pi}]`)) {
+      if (!walked.objectName) continue;
+      const props = walked.component.properties;
+      if (!props || typeof props !== 'object' || Array.isArray(props)) continue;
+      addSectionList(index, (props as Record<string, unknown>).sections, walked.objectName);
+    }
+  }
+
+  for (const [objectName, sections] of index) {
+    for (const [sectionName, label] of sections) {
+      pushDerived(
+        out,
+        ['objects', objectName, '_sections', sectionName, 'label'],
+        // Seed mirrors the renderer's own fallback (`s.label || s.name`).
+        inlineText(label) ?? sectionName,
+        label,
+        'section',
+        { objectName },
+      );
+    }
+  }
+
+  // Authored copy only (`pushEntry`): the resolver translates an entry string
+  // only where the entry authors one, so a key for a string nobody wrote is
+  // one nothing reads.
+  for (const [objectName, sections] of entries) {
+    for (const [sectionName, fields] of sections) {
+      for (const [fieldName, copy] of fields) {
+        for (const attr of SECTION_ENTRY_ATTRS) {
+          pushEntry(
+            out,
+            ['objects', objectName, '_sections', sectionName, 'fields', fieldName, attr],
+            copy[attr],
+            'section',
+            { objectName },
+          );
+        }
+      }
+    }
+  }
+}
+
+// ─── Object filter-preset tabs (`objects.<o>._tabs.<tab>.label`) ───────
+//
+// The writing half of the `_tabs` slot `ObjectTranslationDataSchema` declares
+// and `resolveTabLabel` reads (#5377). Declared, written and read in one PR,
+// which is the whole point: a slot with no extractor is a key a translator has
+// to know exists, and that is most of why the tab bar stayed English.
+//
+// Scope matches the resolver exactly — a list page's
+// `interfaceConfig.userFilters.tabs`, the one `ViewTabSchema` carrier anything
+// renders. `ListViewSchema.tabs` has no reader in either repo; scaffolding keys
+// for it would fill every bundle with entries no screen can ever show, and the
+// coverage gate would then demand translations for them.
+//
+// A tab that references a saved view still gets its own entry. The resolver
+// falls back to the referenced view's label when `_tabs` is empty, so the key
+// is genuinely optional — but it is the only way to give a tab a label that
+// DIFFERS from the view it opens, and a skeleton that omitted it would hide
+// that from the translator.
+
+/** Emit `objects.<object>._tabs.<tab>.label` for every rendered preset tab. */
+function walkObjectTabs(config: any, out: ExpectedEntry[]): void {
+  const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
+  // One tab name may be authored on several pages over the same object (a
+  // shared "urgent" preset); collect first so the key is emitted once, the
+  // same way `walkObjectSections` de-duplicates a heading.
+  const index = new Map<string, Map<string, AuthoredLabel>>();
+
+  for (const page of pages) {
+    if (!page || typeof page !== 'object') continue;
+    const cfg = page.interfaceConfig;
+    const tabs = cfg?.userFilters?.tabs;
+    if (!Array.isArray(tabs)) continue;
+    // The page's own source binding first, then its record binding — the order
+    // `translatePage` resolves the object in.
+    const objectName = inlineText(cfg?.source) ?? inlineText(page.object);
+    if (objectName === undefined) continue;
+
+    let tabsForObject = index.get(objectName);
+    if (!tabsForObject) index.set(objectName, (tabsForObject = new Map()));
+
+    for (const tab of tabs) {
+      if (!tab || typeof tab !== 'object') continue;
+      const tabName = inlineText(tab.name);
+      if (tabName === undefined) continue;
+      // A localized-map label is already multilingual, so it seeds nothing —
+      // but it IS authored, and is carried through as such so coverage counts
+      // the locales it holds instead of filing it as a label nobody wrote
+      // (#14749).
+      const authored = asAuthoredLabel(tab.label);
+      if (!tabsForObject.has(tabName)) tabsForObject.set(tabName, authored);
+      else if (tabsForObject.get(tabName) === undefined && authored !== undefined) {
+        tabsForObject.set(tabName, authored);
+      }
+    }
+  }
+
+  for (const [objectName, tabs] of index) {
+    for (const [tabName, label] of tabs) {
+      pushDerived(
+        out,
+        ['objects', objectName, '_tabs', tabName, 'label'],
+        // Seed mirrors the renderer's own fallback (`tab.label || tab.name`).
+        inlineText(label) ?? tabName,
+        label,
+        'view',
+        { objectName },
+      );
+    }
+  }
+}
+
+/**
+ * Translation groups the shipped liveness ledger warns an author for authoring.
+ * Today the set is empty: `flows`, the one group ever warned, is `live` now
+ * that both its halves are read, so nothing is gated.
+ *
+ * ## Why the walk surface is gated on this at all (#11624)
+ *
+ * `os lint` runs the coverage gate built on this walker AND
+ * `lintLivenessProperties` in ONE pass, and before this gate existed they
+ * pointed opposite ways on the same keys: omit `flows.<f>.screens.<n>.title`
+ * from a bundle and the coverage gate reported `i18n/missing-flow`; author it
+ * and the liveness rule reported `liveness-planned-property` ("sets `flows` but
+ * this translation property is planned"). Measured on one stack, one run: 4
+ * demand-side findings against 2 warn-side findings, and no third option — the
+ * CLI has no per-rule suppression, only `--skip-i18n`, which silences the whole
+ * `i18n/missing-*` family. Under `--i18n-strict` the demand side is an error,
+ * so a project could be *forced* to author keys it is then warned for.
+ *
+ * ⛔ The warn side was not the bug, and it was not softened. While the
+ * console's screen-flow runner read only `screens`, a translated flow `label`
+ * really was stored and never shown, and the group-level warn said so. The
+ * demand was the premature half, and it is the half this gate holds back.
+ * The runner now names the flow by `flows.<flow>.label` too, so the row is
+ * `live` and the warn and the gate are gone together.
+ *
+ * ## Shape
+ *
+ * Group-general, not `flows`-specific, and read from the ledger rather than a
+ * switch of our own: when the `flows` row flipped to `live` and dropped its
+ * `authorWarn`, the bucket turned itself back on with no edit here — and any
+ * FUTURE group that acquires a warn is covered on the day it is marked, rather
+ * than re-opening this collision one group at a time.
+ *
+ * The join is on the group (`path[0]`) and stops there deliberately: for
+ * file-authored bundles the warn side only ever fires at that depth. Its
+ * `getNested` fans out over ARRAYS, and a translation group is a record keyed
+ * by target name, so a warned child row (`flows.label`) resolves
+ * `data.flows.label` — a path no real bundle has — and warns nobody. Matching
+ * deeper here would suppress keys nothing warns about.
+ *
+ * Unreadable ledger ⇒ empty set ⇒ nothing is gated, which is also the state in
+ * which the warn side warns on nothing. The two halves go quiet together; the
+ * one thing that must never happen is one of them speaking alone.
+ */
+export function authorWarnedTranslationGroups(): ReadonlySet<string> {
+  const warned = authorWarnedProperties('translation');
+  // Top-level groups only — see the `getNested` note above.
+  return new Set([...warned].filter((path) => !path.includes('.')));
+}
+
+/**
+ * Write `pages.<page>.components.<id>.<key>` for every component
+ * `translatePage` addresses — and only those (commit 8b236c826).
+ *
+ * BOTH halves of that sentence are imported from `@objectstack/spec`, so
+ * neither can drift. The KEY list is {@link PAGE_COMPONENT_COPY_KEYS}; the
+ * WALK — which components carry those keys — is `walkAddressedPageComponents`,
+ * the same traversal `translatePage` itself runs (commit c45d8e6b4, completing the key
+ * list's precedent). The walk owns the roots (`regions[].components[]` AND
+ * `slots.<slot>`), the descent (the authorable slot positions spec derives
+ * from the component rows — `properties.children`, a card's
+ * `properties.footer`, a panel's `properties.items[].children` — depth-capped,
+ * cycle-guarded) and the ruled
+ * collision arbitration (commit 901355c3b: root level wins outright; among nested
+ * components, document-order first sighting) — this function used to
+ * hand-mirror all five and now owns none of them. What it still owns:
+ *
+ *   - the emission exception: a ROOT-LEVEL `page:header` — a region's entry
+ *     or a `slots.<slot>` entry — emits nothing here (its copy is offered
+ *     under `pages.<page>.title` / `.subtitle` instead — emitting both would
+ *     offer one string under two keys), but the walk still counts its id as
+ *     root-level, so a nested namesake stays blocked;
+ *   - the `label` either/or: `label` may be authored on the component itself
+ *     or in its props — the same either/or `translatePage` resolves back onto.
+ *
+ * ⛔ Deliberately NOT `@objectstack/lint`'s `walkPageComponents`. Its descent
+ * is no longer WIDER than the resolver's — since #20940 both read spec's one
+ * derived slot list, and `page:card`'s `properties.body` / `.footer` were the
+ * last positions lint walked and the resolver did not (`slots.<slot>` roots
+ * and `properties.items[].children` closed at #16772) — but it is still
+ * NARROWER in one way (it skips `kind: 'html' | 'react'` pages, which
+ * `translatePage` walks), and a mismatch in either direction is one half of
+ * the failure pair `PAGE_COMPONENT_COPY_KEYS`' own JSDoc names.
+ */
+function emitPageComponentCopy(out: ExpectedEntry[], page: any, name: string): void {
+  walkAddressedPageComponents(page, (component, { id, nested, addressed }) => {
+    if (addressed && (nested || component.type !== PAGE_HEADER_COMPONENT_TYPE)) {
+      const props = component.properties ?? {};
+      for (const key of PAGE_COMPONENT_COPY_KEYS) {
+        const value = key === 'label' && isAuthored(component.label)
+          ? component.label
+          : props[key];
+        // `pushEntry` filters: a plain string seeds a bundle row, an inline
+        // locale map is recorded as authored-with-no-seed, anything else
+        // records nothing (#14749).
+        pushEntry(out, ['pages', name, 'components', id as string, key], value, 'page');
+      }
+      // A `page:tabs` component's tab labels, keyed by each item's `value`
+      // under the tabs component's id — the key `translatePage` reads. An
+      // item without a `value` gets no slot: its renderer token is
+      // index-derived, and an array index is never a bundle key (#14749).
+      if (component.type === PAGE_TABS_COMPONENT_TYPE && Array.isArray(props.items)) {
+        for (const item of props.items as unknown[]) {
+          const value = pageTabItemKey(item);
+          if (value === undefined) continue;
+          pushEntry(
+            out,
+            ['pages', name, 'components', id as string, 'items', value, 'label'],
+            (item as Record<string, unknown>).label,
+            'page',
+          );
+        }
+      }
+      // An `object-form`'s thank-you panel, under the form component's id —
+      // the key `translatePage` reads, by the form view's panel's rules.
+      if (component.type === PAGE_FORM_COMPONENT_TYPE) {
+        pushThankYouPanel(out, ['pages', name, 'components', id as string], props.submitBehavior, 'page');
+      }
+    }
+    return component;
+  });
+}
+
+/** The one component type whose copy is addressed by PAGE name, not by id. */
+const PAGE_HEADER_COMPONENT_TYPE = 'page:header';
+
+/** Options shared by the two surfaces built on {@link collectExpectedEntries}. */
+export interface ExpectedEntryOptions {
+  /**
+   * Translation groups to leave out of the walk. Defaults to
+   * {@link authorWarnedTranslationGroups}. Pass an empty set to walk the whole
+   * declared surface — what the gated groups look like the day their ledger row
+   * goes `live`.
+   */
+  warnedGroups?: ReadonlySet<string>;
+}
+
+/**
+ * Collect every translatable entry from a normalized stack config.
+ *
+ * Groups the liveness ledger warns authors for authoring are left out — see
+ * {@link authorWarnedTranslationGroups}. This is the single place the gate
+ * lives, so `os lint`'s coverage report and `os i18n extract`'s skeleton can
+ * never disagree about which keys an author is being asked for.
+ */
+export function collectExpectedEntries(
+  config: any,
+  opts: ExpectedEntryOptions = {},
+): ExpectedEntry[] {
+  const out: ExpectedEntry[] = [];
+
+  // ── Objects ───────────────────────────────────────────────────────
+  const objects: any[] = Array.isArray(config?.objects) ? config.objects : [];
+  for (const obj of objects) {
+    if (!obj?.name) continue;
+    const objectName = obj.name as string;
+
+    pushDerived(out, ['objects', objectName, 'label'], inlineText(obj.label) ?? objectName, obj.label, 'object', { objectName });
+    pushOptional(out, ['objects', objectName, 'pluralLabel'], obj.pluralLabel, 'object', { objectName });
+    pushOptional(out, ['objects', objectName, 'description'], obj.description, 'object', { objectName });
+
+    // Fields (always a record on normalized schemas)
+    if (obj.fields && typeof obj.fields === 'object') {
+      for (const [fieldName, raw] of Object.entries<any>(obj.fields)) {
+        const field = raw ?? {};
+        pushDerived(
+          out,
+          ['objects', objectName, 'fields', fieldName, 'label'],
+          inlineText(field.label) ?? fieldName,
+          field.label,
+          'field',
+          { objectName },
+        );
+
+        // `inlineHelpText` is the key `FieldSchema` spells help text with, so it
+        // is the authored default-locale text of `help` — after `help`, before
+        // `description` — exactly as the authored label is for `label` (#15711).
+        //
+        // The FIRST AUTHORED link wins, not the first defined one: the console
+        // draws `inlineHelpText || description` (`fieldHelpText` in
+        // `@object-ui/fields`), so an empty `inlineHelpText` reads as absent
+        // there and the description is the line people see. A `??` chain
+        // stopped at that `''` and scaffolded no seed, leaving the drawn
+        // description out of the bundle (#29221). `asAuthoredLabel` is the one
+        // "authored" test this file uses (a non-empty string or a non-empty
+        // inline locale map); whitespace-only text stays authored, as it does
+        // for the console's `||` and the resolver's non-empty check.
+        pushOptional(
+          out,
+          ['objects', objectName, 'fields', fieldName, 'help'],
+          asAuthoredLabel(field.help) ?? asAuthoredLabel(field.inlineHelpText) ?? asAuthoredLabel(field.description),
+          'field',
+          { objectName },
+        );
+        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'placeholder'], field.placeholder, 'field', { objectName });
+        // The inline child grid's heading, drawn on the PARENT's form but
+        // addressed by the child field that declares it (`translateObject`).
+        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'inlineTitle'], field.inlineTitle, 'field', { objectName });
+        // The related list's title on the parent's record page, addressed the
+        // same way: by the child field that declares it.
+        pushOptional(out, ['objects', objectName, 'fields', fieldName, 'relatedListTitle'], field.relatedListTitle, 'field', { objectName });
+
+        // Options — accept either `{value, label}[]` arrays or a record map.
+        //
+        // An option whose label is absent — or byte-equal to its own machine
+        // value, which is what `Field.select(['pending'])` normalizes a bare
+        // string into — is seeded from the value but recorded as DERIVED
+        // (#8543): the seed keeps the skeleton usable, while `inline` stays
+        // unset so the coverage gate never demands a translation of a machine
+        // identifier, and nothing downstream mistakes the copied value for
+        // deliberately-authored display text. Authored English for a select
+        // belongs on the option (or in the contract beside the vocabulary —
+        // see `APPROVAL_STATUS_LABELS` in @objectstack/spec/contracts), where
+        // this walk sees it as a real label.
+        const pushOption = (value: string, label: unknown): void => {
+          const path = ['objects', objectName, 'fields', fieldName, 'options', value];
+          const authored = inlineText(label);
+          if (authored !== undefined && authored !== value) {
+            pushEntry(out, path, authored, 'option', { objectName });
+          } else {
+            // A locale-map option label is authored text in every locale it
+            // carries — it cannot be "byte-equal to the machine value", so the
+            // #8543 derived rule above has nothing to say about it.
+            pushDerived(out, path, value, inlineLocaleMap(label) ? label : undefined, 'option', { objectName });
+          }
+        };
+        const opts = field.options;
+        if (Array.isArray(opts)) {
+          for (const opt of opts) {
+            if (opt && typeof opt === 'object' && 'value' in opt) {
+              pushOption(String(opt.value), opt.label);
+            } else if (typeof opt === 'string') {
+              pushOption(opt, undefined);
+            }
+          }
+        } else if (opts && typeof opts === 'object') {
+          for (const [value, label] of Object.entries<any>(opts)) {
+            pushOption(value, label);
+          }
+        }
+      }
+    }
+
+    // Object-nested listViews (object-protocol view bundle).
+    if (obj.listViews && typeof obj.listViews === 'object') {
+      for (const [viewName, raw] of Object.entries<any>(obj.listViews)) {
+        pushViewEntries(out, objectName, viewName, raw ?? {});
+      }
+    }
+
+    // Inline object-level actions (some schemas declare them on the object).
+    if (Array.isArray(obj.actions)) {
+      for (const action of obj.actions) {
+        if (!action?.name) continue;
+        const aname = action.name as string;
+        const aroot = ['objects', objectName, '_actions', aname];
+        pushDerived(out, [...aroot, 'label'], inlineText(action.label) ?? aname, action.label, 'action', { objectName });
+        pushOptional(out, [...aroot, 'description'], actionCopy(action.description), 'action', { objectName });
+        pushOptional(out, [...aroot, 'confirmText'], actionCopy(action.confirmText), 'action', { objectName });
+        pushOptional(out, [...aroot, 'successMessage'], actionCopy(action.successMessage), 'action', { objectName });
+        pushOptional(out, [...aroot, 'disabledReason'], action.disabledReason, 'action', { objectName });
+        pushActionSubmitText(out, aroot, action, 'action', objectName);
+        pushActionCancelText(out, aroot, action, 'action', objectName);
+        pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
+        pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+        pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+        pushActionPreflight(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+      }
+    }
+
+    // Custom validation-rule rejection messages (`_validations.<rule>.message`).
+    pushValidationMessages(out, objectName, obj.validations, 0);
+  }
+
+  // ── Top-level views ──────────────────────────────────────────────
+  // Two shapes reach `config.views`, and only one of them has a `name`:
+  //
+  //   1. An independent ViewItem — carries a top-level `name` and binds to its
+  //      object via `object`.
+  //
+  //   2. The aggregated View CONTAINER `defineView()` emits:
+  //      `{ list, listViews, formViews }`. Per spec (`view.zod.ts`) it has NO
+  //      top-level `name` — it is keyed implicitly by its target object, which
+  //      lives at `list.data.object` (objectql's `resolveMetadataItemName`
+  //      says the same).
+  //
+  // Guarding the loop on `view.name` therefore skipped every container, and a
+  // container is what `defineView()` — i.e. every example and every app that
+  // authors views this way — actually produces. Objects do not carry
+  // `listViews` once compiled either, so BOTH view branches were dead and
+  // `i18n/missing-view` had zero producers repo-wide while the ratchet
+  // reported green (#4123).
+  //
+  // A container's form views (`formViews.*`, the default `form`) emit the
+  // `_views` tails `translateView` overlays — the form heading `title` and the
+  // thank-you panel's `submitBehavior.title` / `.message` (see
+  // `pushFormViewCopy`). Their `label` / `description` stay
+  // unemitted: a container form entry carries no label, and nothing a form
+  // renders reads a `_views` description.
+  const views: any[] = Array.isArray(config?.views) ? config.views : [];
+  for (const view of views) {
+    const containerObject = viewObjectName(view);
+    if (!containerObject) continue;
+
+    if (view.name) {
+      pushViewEntries(out, containerObject, view.name, view);
+      // A `viewKind: 'form'` item carries its form under `config`, title and
+      // thank-you panel included.
+      if (view.viewKind === 'form' && view.config && typeof view.config === 'object') {
+        pushFormViewCopy(out, containerObject, view.name, view.config);
+      }
+      continue;
+    }
+
+    pushContainerFormTitles(out, containerObject, view);
+
+    // The container's default list, keyed exactly as the runtime registry keys
+    // it — see `defaultListViewKey`. `undefined` means the container declares
+    // no default list; a key the container's own `listViews` also declares
+    // means the composer collapsed the two, and the loop below emits it.
+    if (view.list && typeof view.list === 'object') {
+      const key = defaultListViewKey(containerObject, view);
+      const collapsedIntoListViews =
+        key !== undefined
+        && view.listViews
+        && typeof view.listViews === 'object'
+        && Object.prototype.hasOwnProperty.call(view.listViews, key);
+      if (key !== undefined && !collapsedIntoListViews) {
+        pushViewEntries(out, viewObjectName(view.list) ?? containerObject, key, view.list);
+      }
+    }
+    if (view.listViews && typeof view.listViews === 'object') {
+      for (const [viewName, raw] of Object.entries<any>(view.listViews)) {
+        // A named list view may retarget another object via its own `data`.
+        pushViewEntries(out, viewObjectName(raw) ?? containerObject, viewName, raw ?? {});
+      }
+    }
+  }
+
+  // ── Top-level actions ────────────────────────────────────────────
+  const actions: any[] = Array.isArray(config?.actions) ? config.actions : [];
+  for (const action of actions) {
+    if (!action?.name) continue;
+    const objectName = action.objectName ?? action.object;
+    const root = objectName
+      ? ['objects', objectName as string, '_actions', action.name]
+      : ['globalActions', action.name];
+    const kind: ExpectedEntry['source'] = objectName ? 'action' : 'globalAction';
+    pushDerived(out, [...root, 'label'], inlineText(action.label) ?? action.name, action.label, kind, { objectName });
+    // `description` is OPTIONAL-not-derived, exactly like confirmText: the
+    // param dialog falls back to its own generic `actionDialog.description`
+    // string when the action declares none, so an undeclared description is
+    // not an i18n gap to seed (`pushDerived` would invent an English source
+    // string nothing authored). #7367.
+    pushOptional(out, [...root, 'description'], actionCopy(action.description), kind, { objectName });
+    pushOptional(out, [...root, 'confirmText'], actionCopy(action.confirmText), kind, { objectName });
+    pushOptional(out, [...root, 'successMessage'], actionCopy(action.successMessage), kind, { objectName });
+    // [#26619] OPTIONAL-not-derived like `description`: an action that gives no
+    // reason shows the console's own default sentence, so there is no gap to
+    // seed for it.
+    pushOptional(out, [...root, 'disabledReason'], action.disabledReason, kind, { objectName });
+    pushActionSubmitText(out, root, action, kind, objectName);
+    pushActionCancelText(out, root, action, kind, objectName);
+    pushActionOutcomeMessages(out, root, action, kind, objectName);
+    pushActionParams(out, root, action, kind, objectName);
+    pushActionResultDialog(out, root, action, kind, objectName);
+    pushActionPreflight(out, root, action, kind, objectName);
+  }
+
+  // ── Apps + navigation ────────────────────────────────────────────
+  const apps: any[] = Array.isArray(config?.apps) ? config.apps : [];
+  for (const app of apps) {
+    if (!app?.name) continue;
+    const appName = app.name as string;
+    if (app.label) pushEntry(out, ['apps', appName, 'label'], app.label, 'app', { appName });
+    if (app.description) {
+      pushEntry(out, ['apps', appName, 'description'], app.description, 'app', { appName });
+    }
+    const nav: any[] = Array.isArray(app.navigation) ? app.navigation : [];
+    walkNavigation(nav, appName, out);
+  }
+
+  // ── Contributed navigation (ADR-0029 D7, #24993) ─────────────────
+  // An item a package injects into another package's app never enters that
+  // app's authored `navigation`: the runtime folds it in on every read
+  // (`SchemaRegistry.applyNavContributions`) and `translateApp` then resolves
+  // its label from `apps.<target>.navigation.<id>.label` — the key
+  // `translation-target-unknown` already accepts for a contributed item
+  // (#18203). Walked AFTER the apps' own trees and by the same
+  // `walkNavigation`, so a contributed group's children follow the rule an own
+  // group's do, and an id an app also declares keeps its own entry
+  // (`dedupeByPath`, first emission wins).
+  for (const contribution of navigationContributionsOf(config)) {
+    const targetApp = contribution?.app;
+    if (typeof targetApp !== 'string' || targetApp.length === 0) continue;
+    if (Array.isArray(contribution.items)) walkNavigation(contribution.items, targetApp, out);
+  }
+
+  // ── Dashboards + widgets ─────────────────────────────────────────
+  const dashboards: any[] = Array.isArray(config?.dashboards) ? config.dashboards : [];
+  for (const dash of dashboards) {
+    if (!dash?.name) continue;
+    const name = dash.name as string;
+    if (dash.label) pushEntry(out, ['dashboards', name, 'label'], dash.label, 'dashboard');
+    if (dash.description) {
+      pushEntry(out, ['dashboards', name, 'description'], dash.description, 'dashboard');
+    }
+    const widgets: any[] = Array.isArray(dash.widgets) ? dash.widgets : [];
+    for (const w of widgets) {
+      if (!w?.id && !w?.name) continue;
+      const wid = (w.id ?? w.name) as string;
+      if (w.title) pushEntry(out, ['dashboards', name, 'widgets', wid, 'title'], w.title, 'widget');
+      if (w.description) {
+        pushEntry(out, ['dashboards', name, 'widgets', wid, 'description'], w.description, 'widget');
+      }
+    }
+    // Global-filter copy (#16772) — `dashboards.<name>.globalFilters.<key>`,
+    // the filter bar drawn above the widget titles. The KEY is imported from
+    // `@objectstack/spec` (`name`, else `field`) so the extractor offers the
+    // entry `translateDashboard` reads and never a neighbour of it; an option
+    // is keyed by its `value` spelled as a string, the resolver's own
+    // spelling. `optionsFrom` options are fetched rows and have no key.
+    const globalFilters: any[] = Array.isArray(dash.globalFilters) ? dash.globalFilters : [];
+    for (const filter of globalFilters) {
+      if (!filter || typeof filter !== 'object') continue;
+      const key = globalFilterKey(filter);
+      if (key === undefined) continue;
+      pushEntry(out, ['dashboards', name, 'globalFilters', key, 'label'], filter.label, 'dashboard');
+      const options: any[] = Array.isArray(filter.options) ? filter.options : [];
+      for (const option of options) {
+        if (!option || typeof option !== 'object') continue;
+        const { value } = option;
+        if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue;
+        pushEntry(out, ['dashboards', name, 'globalFilters', key, 'options', String(value)], option.label, 'dashboard');
+      }
+    }
+  }
+
+  // ── Analytics datasets (`datasets.<name>.…`) ─────────────────────
+  walkDatasets(config, out);
+
+  // ── Reports (`reports.<name>.…`) ─────────────────────────────────
+  walkReports(config, out);
+
+  // ── Shared option lists (`picklists.<name>.…`) ────────────────────
+  walkPicklists(config, out);
+
+  // ── Security catalog (`positions.<name>.…`, `permissions.<name>.…`) ─
+  walkSecurityCatalog(config, out);
+
+  // ── Doc books (`books.<name>.…`) ──────────────────────────────────
+  walkBooks(config, out);
+
+  // ── Pages + their `page:header` copy ──────────────────────────────
+  const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
+  for (const page of pages) {
+    if (!page?.name) continue;
+    const name = page.name as string;
+    if (page.label) pushEntry(out, ['pages', name, 'label'], page.label, 'page');
+    if (page.description) {
+      pushEntry(out, ['pages', name, 'description'], page.description, 'page');
+    }
+    // Header copy is authored inside the page's `page:header` component but
+    // is addressed by page name — `translatePage` overlays it back onto every
+    // ROOT-LEVEL header: a region's entry, or a `slots.<slot>` entry on a
+    // `kind: 'slotted'` page (#16772). Which components are root level is the
+    // shared walk's to say (`nested: false`), not a second loop's — the loop
+    // this replaced read `page.regions` by hand and would have offered
+    // nothing for the `slots.header` the resolver now translates.
+    walkAddressedPageComponents(page, (component, { nested }) => {
+      if (!nested && component?.type === PAGE_HEADER_COMPONENT_TYPE) {
+        const props = component.properties ?? {};
+        // `title` duplicating `label` is the common case and resolves via the
+        // label fallback — only emit it when the two genuinely differ.
+        if (!sameAuthored(props.title, page.label)) {
+          pushEntry(out, ['pages', name, 'title'], props.title, 'page');
+        }
+        pushEntry(out, ['pages', name, 'subtitle'], props.subtitle, 'page');
+      }
+      return component;
+    });
+
+    // Per-component copy, addressed by the component's own id (#6080). Without
+    // this pass the face exists but nothing writes the skeleton, so a
+    // translator would have to know the keys to hand-write them — which is
+    // most of the reason the copy went untranslated in the first place.
+    //
+    // `page:header` is deliberately skipped AT REGION LEVEL: its copy is
+    // addressed by page name above, and emitting it here too would offer one
+    // string under two keys. A NESTED `page:header` is a different component —
+    // `translatePage`'s page-name route stops at region level, so a nested one
+    // is reachable by the id route ONLY and must be offered here (commit 8b236c826).
+    emitPageComponentCopy(out, page, name);
+  }
+
+  // ── Screen flows (`flows.<flow>.screens.<node>.…`, #7646 / #11287) ─
+  walkScreenFlows(config, out);
+
+  // ── Hook refusal catalogues (`hooks.<hook>.refusals.<CODE>.message`) ─
+  walkHookRefusals(config, out);
+
+  // ── Object sections (fieldGroups + authored form/page sections) ───
+  // Deliberately a pass of its own: the two authoring surfaces live in
+  // `objects`, `views` and `pages`, and one section may be declared by more
+  // than one of them — collecting first and emitting once keeps a heading
+  // from being counted twice against coverage.
+  walkObjectSections(config, out);
+
+  // ── Object filter-preset tabs (`objects.<o>._tabs.<tab>.label`) ───
+  walkObjectTabs(config, out);
+
+  // ── Metadata configuration forms (Studio admin UI) ────────────────
+  // Registry-driven: always included, independent of stack config. These
+  // emit under `metadataForms.<type>.*` so the generic renderer can pick
+  // up localized labels for the admin editor that authors objects, agents,
+  // flows, etc.
+  walkMetadataForms(out);
+
+  const warnedGroups = opts.warnedGroups ?? authorWarnedTranslationGroups();
+  const walked = warnedGroups.size === 0 ? out : out.filter((entry) => !warnedGroups.has(entry.path[0]));
+  return dedupeByPath(walked);
+}
+
+/**
+ * Collapse entries that address the same key to one.
+ *
+ * **One path is one demand.** A translation bundle has exactly one slot per
+ * path, so an author owes exactly one string for it no matter how many places
+ * in the walk arrived at that slot. The walk does not have that property on its
+ * own, because a translation key is derived from *where the string is
+ * addressed*, not from *which declaration was being read* when it was reached
+ * — and two declarations can address one slot:
+ *
+ *   - **Two carriers, one action.** The normalized config attaches an object's
+ *     actions to the object (`obj.actions`) *and* to the top-level `actions`
+ *     list — measured to be the SAME object reference, not a copy — so the two
+ *     action branches above both emit `objects.<o>._actions.<a>.*`.
+ *   - **Two declarations, one form field.** `field.form.ts` and
+ *     `object.form.ts` each declare `deleteBehavior` twice, gated on
+ *     `visibleWhen` (`lookup` vs `master_detail`). Both variants render into
+ *     the same key, because {@link walkFormField} keys on the field path.
+ *     Config-independent: it duplicates six entries on *every* config,
+ *     including an empty one.
+ *
+ * Neither is an authoring mistake and neither is fixable where it originates —
+ * they are two correct declarations of one displayed string. So the walker owns
+ * the collapse.
+ *
+ * **De-duplicating HERE rather than in the report** is what makes both
+ * consumers honest with one change. `computeI18nCoverage` counted the same
+ * missing key twice, so translating one string moved
+ * `pnpm check:i18n-coverage`'s ratchet by two while its report called the
+ * number "untranslated declared strings". `extractTranslations` counted them
+ * twice too, in `totalExpected` and in the per-locale `counts` it reports —
+ * over-reporting by 101 keys on app-showcase against the 1531 leaves it
+ * actually wrote, because `setDeep` had already collapsed them on the way into
+ * the bundle. A de-duplication at the reporting seam would have fixed the first
+ * and left the second, and would have left the registry-driven family
+ * duplicated in perpetuity — it never reaches `os lint`'s report, which hides
+ * the `metadataForms` bucket unless `--include-platform` is passed.
+ *
+ * **First emission wins.** Walk order is deterministic, so the rule is
+ * deterministic. It is also lossless on everything measured: all 372 duplicate
+ * paths across the three baselined example configs, and all 6 registry ones,
+ * carry byte-identical {@link ExpectedEntry} records — for the action family
+ * necessarily so, since both carriers hold one reference. Where two emissions
+ * ever *do* disagree, the disagreement is already unresolvable downstream: one
+ * bundle slot can serve only one string, so the choice is which of two
+ * colliding declarations to seed from, not whether to drop a demand.
+ */
+function dedupeByPath(entries: ExpectedEntry[]): ExpectedEntry[] {
+  const seen = new Set<string>();
+  const out: ExpectedEntry[] = [];
+  for (const entry of entries) {
+    // `\u0000` cannot occur in a path segment, so joining on it cannot make two
+    // different paths collide the way a `.` join would (`['a.b']` vs `['a','b']`).
+    const key = entry.path.join('\u0000');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out;
+}
+
+// ─── Analytics datasets (`datasets.<name>.…`) ──────────────────────────
+
+/**
+ * Emit the dataset copy surface (#14253's resolver, #14376's walk):
+ *
+ *   datasets.<name>.label
+ *   datasets.<name>.description
+ *   datasets.<name>.dimensions.<dimension>.label
+ *   datasets.<name>.dimensions.<dimension>.description
+ *   datasets.<name>.measures.<measure>.label
+ *   datasets.<name>.measures.<measure>.description
+ *
+ * **Why a dataset is a display surface at all.** It reads like a back-office
+ * definition, but a measure label is drawn ON THE DASHBOARD — under every
+ * metric tile and on every chart axis. `translateDataset` is registered in
+ * `METADATA_DOCUMENT_TRANSLATORS`, so a served dataset is already localized at
+ * the REST boundary; this pass is the half that writes the skeleton.
+ *
+ * **Top level, not under `dashboards`.** A dataset is the one definition every
+ * presentation binds to BY REFERENCE (ADR-0021 D1): the same measure is drawn
+ * by N widgets across M dashboards, so addressing it under a dashboard would
+ * ask for the same string once per presentation and leave a dataset no
+ * dashboard references unaddressable.
+ *
+ * **`pushOptional`, not `pushDerived`, for every key here.** These six are
+ * `I18nLabelSchema` at the authoring site, so a value may already be an inline
+ * `{ en, 'zh-CN' }` map (#5728) — not source text to scaffold from, and
+ * `inlineText` narrows it away. And no renderer fallback is measured for a
+ * member that declares no `label` at all, so there is no reader-visible string
+ * to seed one from: recording the key without an `inline` keeps the coverage
+ * gate quiet about a string nobody wrote while still noticing a bundle that
+ * authors it. It is the same posture the resolver takes — `translateDataset`
+ * writes only where the bundle answered.
+ *
+ * A member's `description` is its business definition (ADR-0149 D1), display
+ * text the resolver overlays like `label`. A member's `synonyms` emit nothing:
+ * they are matched in every language at once and are never translated, so the
+ * translation group declares no key for them.
+ */
+function walkDatasets(config: any, out: ExpectedEntry[]): void {
+  const datasets: any[] = Array.isArray(config?.datasets) ? config.datasets : [];
+  for (const dataset of datasets) {
+    if (!dataset || typeof dataset !== 'object') continue;
+    const name = dataset.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['datasets', name, 'label'], dataset.label, 'dataset');
+    pushOptional(out, ['datasets', name, 'description'], dataset.description, 'dataset');
+    for (const group of ['dimensions', 'measures'] as const) {
+      const members: any[] = Array.isArray(dataset[group]) ? dataset[group] : [];
+      for (const member of members) {
+        if (!member || typeof member !== 'object') continue;
+        const memberName = member.name;
+        if (typeof memberName !== 'string' || memberName.length === 0) continue;
+        pushOptional(out, ['datasets', name, group, memberName, 'label'], member.label, 'dataset');
+        pushOptional(out, ['datasets', name, group, memberName, 'description'], member.description, 'dataset');
+      }
+    }
+  }
+}
+
+// ─── Shared option lists (`picklists.<name>.…`) ────────────────────────
+
+/**
+ * Emit the picklist copy surface:
+ *
+ *   picklists.<name>.label
+ *   picklists.<name>.options.<value>
+ *
+ * A picklist is translated ONCE: every field that references it inherits the
+ * option labels (`translateObject`), so the keys live under the list and not
+ * under each field. A picklist-bound field declares no `options` of its own,
+ * so the field walk above emits nothing for it — this walk is the only
+ * producer of those keys. A `picklistExtensions` entry adds options to a list
+ * another package owns, and they are served as that list's options, so their
+ * labels are keyed under the extended list's name.
+ *
+ * Both labels are plain strings at the authoring site, so `pushEntry` — with
+ * the #8543 derived rule a field option follows: an option whose label is
+ * absent or equals its own machine value is seeded from the value and never
+ * demanded as a translation.
+ */
+function walkPicklists(config: any, out: ExpectedEntry[]): void {
+  const walkOptions = (name: string, options: unknown): void => {
+    if (!Array.isArray(options)) return;
+    for (const option of options) {
+      if (!option || typeof option !== 'object' || typeof option.value !== 'string') continue;
+      const path = ['picklists', name, 'options', option.value];
+      const authored = inlineText(option.label);
+      if (authored !== undefined && authored !== option.value) {
+        pushEntry(out, path, authored, 'picklist');
+      } else {
+        pushDerived(out, path, option.value, inlineLocaleMap(option.label) ? option.label : undefined, 'picklist');
+      }
+    }
+  };
+  const picklists: any[] = Array.isArray(config?.picklists) ? config.picklists : [];
+  for (const picklist of picklists) {
+    if (!picklist || typeof picklist !== 'object') continue;
+    const name = picklist.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushEntry(out, ['picklists', name, 'label'], picklist.label, 'picklist');
+    walkOptions(name, picklist.options);
+  }
+  const extensions: any[] = Array.isArray(config?.picklistExtensions) ? config.picklistExtensions : [];
+  for (const extension of extensions) {
+    if (!extension || typeof extension !== 'object') continue;
+    const name = extension.extend;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    walkOptions(name, extension.options);
+  }
+}
+
+// ─── Reports (`reports.<name>.…`) ──────────────────────────────────────
+
+/**
+ * Emit the report copy surface:
+ *
+ *   reports.<name>.label / .description
+ *   reports.<name>.blocks.<block_name>.label / .description
+ *
+ * Read off the stack's `reports[]` and each joined report's `blocks[]`. Served through `translateReport`,
+ * registered in `METADATA_DOCUMENT_TRANSLATORS`, so the REST boundary
+ * localizes `GET /meta/report` (the list the console's report index and report
+ * page read); this pass is the half that writes the skeleton and lets
+ * `os i18n check` see the gap.
+ *
+ * `pushOptional` for both keys: a report's `description` is optional at the
+ * authoring site, so a string nobody wrote is recorded without an `inline` and
+ * never demanded as a translation. A report's `label` is required, so it is
+ * always authored text. A block's `label` is optional (the renderer falls back
+ * to the block's machine `name`), so a block without one is recorded the same
+ * way and never demanded. The embedded chart's copy is not on this face.
+ */
+function walkReports(config: any, out: ExpectedEntry[]): void {
+  const reports: any[] = Array.isArray(config?.reports) ? config.reports : [];
+  for (const report of reports) {
+    if (!report || typeof report !== 'object') continue;
+    const name = report.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['reports', name, 'label'], report.label, 'report');
+    pushOptional(out, ['reports', name, 'description'], report.description, 'report');
+    const blocks: any[] = Array.isArray(report.blocks) ? report.blocks : [];
+    for (const block of blocks) {
+      if (!block || typeof block !== 'object') continue;
+      const blockName = block.name;
+      if (typeof blockName !== 'string' || blockName.length === 0) continue;
+      pushOptional(out, ['reports', name, 'blocks', blockName, 'label'], block.label, 'report');
+      pushOptional(out, ['reports', name, 'blocks', blockName, 'description'], block.description, 'report');
+    }
+  }
+}
+
+// ─── Security catalog (`positions.<name>.…`, `permissions.<name>.…`) ───
+
+/**
+ * Emit the security-catalog copy surface:
+ *
+ *   positions.<name>.label / .description
+ *   permissions.<name>.label / .description
+ *
+ * Read off the stack's `positions[]` and `permissions[]` (the permission-set
+ * collection — the bundle group is spelled as the stack spells it). Both are
+ * served through `translatePosition` / `translatePermissionSet`, registered in
+ * `METADATA_DOCUMENT_TRANSLATORS`, so the REST boundary localizes them; this
+ * pass is the half that writes the skeleton and lets `os i18n check` see the
+ * gap.
+ *
+ * `pushOptional` for every key: a permission set's `label` and both
+ * `description`s are optional at the authoring site, and no renderer fallback
+ * for an absent one is measured, so a string nobody wrote is recorded without
+ * an `inline` and never demanded as a translation. A position's `label` is
+ * required, so it is always authored text.
+ */
+function walkSecurityCatalog(config: any, out: ExpectedEntry[]): void {
+  const groups = [
+    { group: 'positions', items: config?.positions, source: 'position' },
+    { group: 'permissions', items: config?.permissions, source: 'permission' },
+  ] as const;
+  for (const { group, items, source } of groups) {
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
+      const name = item.name;
+      if (typeof name !== 'string' || name.length === 0) continue;
+      pushOptional(out, [group, name, 'label'], item.label, source);
+      pushOptional(out, [group, name, 'description'], item.description, source);
+    }
+  }
+}
+
+// ─── Doc books (`books.<name>.…`) ──────────────────────────────────────
+
+/**
+ * [#26690] Emit a doc book's spine copy: `books.<book>.label` /
+ * `.description` and `books.<book>.groups.<key>.label`, the keys
+ * `translateBook` reads. A group is addressed by its stable `key`, never its
+ * position. The book's own label and description are optional on the schema,
+ * so they are recorded with {@link pushOptional}; a group's label is required,
+ * so it is the author's literal ({@link pushEntry}).
+ */
+function walkBooks(config: any, out: ExpectedEntry[]): void {
+  const books: any[] = Array.isArray(config?.books) ? config.books : [];
+  for (const book of books) {
+    if (!book || typeof book !== 'object') continue;
+    const name = book.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['books', name, 'label'], book.label, 'book');
+    pushOptional(out, ['books', name, 'description'], book.description, 'book');
+    const groups: any[] = Array.isArray(book.groups) ? book.groups : [];
+    for (const group of groups) {
+      if (!group || typeof group !== 'object') continue;
+      const key = group.key;
+      if (typeof key !== 'string' || key.length === 0) continue;
+      pushEntry(out, ['books', name, 'groups', key, 'label'], group.label, 'book');
+    }
+  }
+}
+
+// ─── Screen flows (`flows.<flow>.screens.<node_id>.…`) ─────────────────
+
+/**
+ * The one flow-node type whose copy the bundle addresses. Spelled once here
+ * rather than at each guard; the resolver's own constant is module-private,
+ * and `translateScreenNode` filters on exactly this value.
+ */
+const SCREEN_NODE_TYPE = 'screen';
+
+/**
+ * [#22450] The node whose message `flows.<flow>.refusals.<node_id>.message`
+ * addresses: an `end` node declaring `outcome: 'refused'` (`EndConfigSchema`).
+ */
+const END_NODE_TYPE = 'end';
+const REFUSED_OUTCOME = 'refused';
+
+/**
+ * [#28251] The node whose message `flows.<flow>.notices.<node_id>.message`
+ * addresses: a `save_notice` node (`SaveNoticeConfigSchema`).
+ */
+const SAVE_NOTICE_NODE_TYPE = 'save_notice';
+
+/**
+ * Depth ceiling for the region recursion, mirroring the ceiling the spec-side
+ * walks use (`conversions/walk.ts`, `automation/control-flow.zod.ts`) and for
+ * the same reason: a stack handed to `defineStack` is hand-built objects rather
+ * than parsed JSON, so a region that contains itself is reachable and would
+ * otherwise be unbounded recursion on the extract path.
+ */
+const MAX_REGION_DEPTH = 32;
+
+/**
+ * Every flow node of one flow, container FIRST and depth-first — **including
+ * the nodes nested inside ADR-0031 structured regions** (`loop.config.body`,
+ * `parallel.config.branches[]`, `try_catch.config.try`/`.catch`), to any depth.
+ *
+ * **WHERE a region lives is imported, never restated.**
+ * {@link FLOW_REGION_SLOTS_BY_TYPE} (`@objectstack/spec/automation`) is the one
+ * declaration of that fact, and `automation/region-slots.ts` is explicit that
+ * the *table* is the shared thing while the *walks* are deliberately not merged
+ * — they take different inputs and yield different units (a graph, a
+ * copy-on-write rewrite, a node with a diagnostic path). This pass is a fourth
+ * unit again: it collects nodes to harvest KEYS from, rewriting nothing. So it
+ * reads that table exactly as `packages/lint`'s `walkFlowNodes` does, and a
+ * local copy of the slot list — the defect this walker's own card is an
+ * instance of, one package over — is what the import exists to prevent.
+ *
+ * ⚠️ The region-bearing descent could NOT be imported: `mapFlowNodeList`
+ * (`spec/conversions/walk.ts`) is reachable from no `exports` subpath of
+ * `@objectstack/spec` by deliberate design — its docblock says so and
+ * `packages/spec/api-surface/*.json` lists none of its symbols — and
+ * `packages/lint`'s `walkFlowNodes` is not exported from that package's entry
+ * either. Both would have to widen a package's public surface to be reused
+ * here, so the shared table is the whole of what can honestly be shared.
+ *
+ * A value that is not region-shaped passes through untouched: `config` is an
+ * open record and `body` in particular is also an ordinary key elsewhere (an
+ * `http` node's request payload), so the shape is checked, never assumed.
+ */
+function collectFlowNodesDeep(nodes: unknown): any[] {
+  const out: any[] = [];
+
+  const visit = (list: unknown, depth: number): void => {
+    if (!Array.isArray(list) || depth > MAX_REGION_DEPTH) return;
+    for (const node of list) {
+      if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+      out.push(node);
+
+      // Keyed off the node's own `type` through the Map, never an object
+      // literal: `type` is author-controlled and an open namespace (ADR-0018),
+      // so a lookup on a plain object would resolve `'constructor'` through
+      // `Object`'s prototype chain and hand this walk something that is not a
+      // slot list.
+      const slots = typeof node.type === 'string' ? FLOW_REGION_SLOTS_BY_TYPE.get(node.type) : undefined;
+      if (!slots) continue;
+      const config = node.config;
+      if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+
+      for (const { key, arity } of slots) {
+        const raw = (config as any)[key];
+        if (arity === 'many') {
+          // `parallel`: an array of regions, each with its own `nodes`.
+          if (!Array.isArray(raw)) continue;
+          for (const branch of raw) visitRegion(branch, depth + 1);
+        } else {
+          visitRegion(raw, depth + 1);
+        }
+      }
+    }
+  };
+
+  const visitRegion = (region: unknown, depth: number): void => {
+    if (!region || typeof region !== 'object' || Array.isArray(region)) return;
+    visit((region as any).nodes, depth);
+  };
+
+  visit(nodes, 0);
+  return out;
+}
+
+/**
+ * Emit the screen-flow copy surface (#7646, resolver landed in #11287).
+ *
+ * **The hole this closes.** A `type: 'screen'` flow is a wizard the user
+ * reads — a heading and a list of labelled inputs — and this walker had no
+ * pass for it, so `os lint` could not report a screen-flow copy gap and
+ * `os i18n extract` never scaffolded the keys. HotCRM measured
+ * `0 i18n/missing-*` on a tree whose six screen dialogs rendered English in
+ * all four locales: the gate was green because the surface was invisible to
+ * it, not because the app was translated.
+ *
+ * **The key face is IMPORTED, never restated.** {@link FLOW_SCREEN_COPY_KEYS}
+ * and {@link FLOW_SCREEN_FIELD_COPY_KEYS} are exported by
+ * `@objectstack/spec/system` precisely so this scaffolder and the resolver
+ * that reads the bundle cannot drift — a local copy, however correct on the
+ * day it is written, is the drift the export exists to make impossible. The
+ * schema↔list agreement is pinned spec-side in `translation.test.ts`.
+ *
+ * Addressing (`translation.zod.ts`, `flows`): flow by `Flow.name`, screen by
+ * `FlowNode.id` (the client's `ScreenSpec.nodeId`), field by
+ * `ScreenFieldConfig.name` — every level an identifier some consumer already
+ * holds at render time.
+ *
+ * Two seeding rules worth stating, both measured against what the reader sees
+ * rather than against which key the author happened to fill in:
+ *
+ * - **A screen's `title` falls back to the node `label`.** The executor builds
+ *   the wire title as `config.title ?? node.label` (`ScreenSpec.title`), and
+ *   the engine picks the translated `title` template for whichever of the two
+ *   it renders (#22507) — one key covers both. So the seed, and the `inline`
+ *   the coverage gate judges, is that same pair: a screen with only a canvas
+ *   label still shows English text a translator owes a translation for.
+ * - **A screen's `description` is asked for only where it is authored.** The
+ *   engine translates body text only where the screen authors one (#22507), so
+ *   the seed is the authored TEMPLATE, holes and all — a translator keeps the
+ *   `{{ }}` holes, and the schema judges the translation as the same text
+ *   slot, like a refusal message.
+ * - **A field's `label` falls back to its `name`.** `ScreenFieldConfig.label`
+ *   is optional and forwarded as-is (`ScreenFieldSpec.label`), so the runner
+ *   renders the field name when the author wrote no label. That is a derived
+ *   fallback nobody authored — {@link pushDerived}, so the skeleton stays
+ *   usable while the gate demands no translation of a string that does not
+ *   exist.
+ *
+ * A screen node whose `waitForInput` is `false` is deliberately NOT skipped:
+ * `translateFlow` overlays every screen node, and a walker that skipped one
+ * would re-open the extractable-but-ungated gap in miniature.
+ *
+ * **Every screen node, at any DEPTH** (#17511). The node universe comes from
+ * {@link collectFlowNodesDeep}, not from `flow.nodes` flat: a `type: 'screen'`
+ * node inside an ADR-0031 region is a real screen — the executor pauses on it
+ * and the client receives its `ScreenSpec.nodeId` — so `translateFlow` overlays
+ * it and the bundle key is live for it. The flat walk reached the container and
+ * stopped, which was the same extractable-but-ungated gap the paragraph above
+ * refuses, one level in and worse: with no entry emitted there is no skeleton
+ * key for a translator to fill AND no coverage row to demand it, so the hole
+ * was invisible to the mechanism built to report holes.
+ *
+ * **Depth does not enter the key, on purpose.** The entry stays
+ * `flows.<flow>.screens.<node_id>.…` at every depth because that is what the
+ * resolver reads: `lookupFlowScreenCopy(bundle, flowName, nodeId)` is keyed by
+ * node id alone and, as `translateFlow`'s docblock puts it, "the bundle schema
+ * is keyed by node id and knows nothing about depth". A path segment for the
+ * region would offer a key nothing resolves — precisely the producer/consumer
+ * drift the imported key face exists to prevent. Consequence for a node id
+ * REPEATED at two depths: both screens address one bundle slot, so
+ * {@link dedupeByPath} collapses them to a single entry, first emission wins,
+ * and the walk is outer-before-inner so which one that is stays deterministic.
+ * That is not a loss — one slot can serve only one string, and the resolver
+ * overlays that string onto both nodes.
+ */
+function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
+  const flows: any[] = Array.isArray(config?.flows) ? config.flows : [];
+  for (const flow of flows) {
+    const flowName = typeof flow?.name === 'string' && flow.name.length > 0 ? flow.name : undefined;
+    if (!flowName) continue;
+    const scope: EntryScope = { flowName };
+
+    const nodes: any[] = collectFlowNodesDeep(flow.nodes);
+
+    // `flows.<flow>.label` — `lookupFlowLabel`'s key. `Flow.label` is required
+    // by the schema, so this is authored text in practice; `pushOptional`
+    // keeps a label-less flow from seeding an empty string anyway.
+    //
+    // Demanded for a flow with a `screen` node or an `approval` node, at any
+    // depth of the same node universe the walks below read. The predicate
+    // mirrors the two readers of the key, and nothing wider:
+    //
+    // - the console's `FlowRunner` names the flow by it, in its header and its
+    //   completion toast, and the runner opens only on a run paused at a screen;
+    // - [#24916] the approvals door names a request's flow by it in the
+    //   reader's locale (`plugin-approvals` `reader-locale-labels.ts`, the
+    //   inbox, the record's approval panel and the request page), and a request
+    //   exists only where an `approval` node opened one.
+    //
+    // A flow with neither (record-triggered, scheduled or an API flow that
+    // only does work) has no surface that shows its translated label: the
+    // console's launch hosts toast the action's copy or the flow's own
+    // `successMessage` / `errorMessage`, never its label. Demanding one would
+    // ask an author for a string that is stored and never read, so `Flow.label`
+    // being required by the schema is not the test. When a reader of such a
+    // flow's label lands, this predicate widens in the same change as that
+    // reader.
+    const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
+    const approvalNodes = nodes.filter((node) => node && typeof node === 'object' && node.type === APPROVAL_NODE_TYPE);
+    if (hasScreen || approvalNodes.length > 0) {
+      pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
+    }
+
+    // `flows.<flow>.successMessage` / `.errorMessage` (#22507) — the terminal
+    // toasts, seeded from the flow's own text and emitted ONLY where the flow
+    // authors one: `translateFlow` overlays a toast only there, so a key for a
+    // flow with none would ask for a string nothing shows. Each predicate
+    // mirrors the reader of its toast. The completion toast is drawn by the
+    // console's screen-flow runner alone (a launch that completes without
+    // pausing toasts the invoking ACTION's message), so it is demanded for a
+    // flow with a screen, like the label. The failure toast is drawn wherever
+    // the console reports a failed run — the runner's resume and both launch
+    // hosts, for a flow of any type started by a click — so it is demanded for
+    // every flow, like a refusal.
+    for (const key of FLOW_TERMINAL_MESSAGE_KEYS) {
+      if (key === 'successMessage' && !hasScreen) continue;
+      const authored = inlineText(flow[key]);
+      if (authored !== undefined) pushEntry(out, ['flows', flowName, key], authored, 'flow', scope);
+    }
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || node.type !== SCREEN_NODE_TYPE) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      // No id, no key: `translateScreenNode` cannot address the node either.
+      if (!nodeId) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      const screenRoot = ['flows', flowName, 'screens', nodeId];
+
+      for (const key of FLOW_SCREEN_COPY_KEYS) {
+        // Raw, not `inlineText`-narrowed: the fallback still picks the FIRST
+        // authored value, in either authorized form (#14749).
+        const authored = key === 'title'
+          ? (asAuthoredLabel(cfg[key]) ?? asAuthoredLabel(node.label))
+          : asAuthoredLabel(cfg[key]);
+        // [#22507] Body text is read only where the screen authors one (the
+        // engine never adds it), so an unauthored `description` is not even a
+        // seed-less entry: a bundle externalizing one would otherwise be
+        // demanded in every locale for a string nothing shows.
+        if (key === 'description' && authored === undefined) continue;
+        pushOptional(out, [...screenRoot, key], authored, 'flow', scope);
+      }
+
+      const fields: any[] = Array.isArray(cfg.fields) ? cfg.fields : [];
+      for (const field of fields) {
+        const fieldName = typeof field?.name === 'string' && field.name.length > 0 ? field.name : undefined;
+        // An item with an empty name is dropped by the runner too.
+        if (!fieldName) continue;
+        const fieldRoot = [...screenRoot, 'fields', fieldName];
+        for (const key of FLOW_SCREEN_FIELD_COPY_KEYS) {
+          const authored = asAuthoredLabel(field[key]);
+          if (key === 'label') {
+            pushDerived(out, [...fieldRoot, key], inlineText(authored) ?? fieldName, authored, 'flow', scope);
+          } else {
+            pushOptional(out, [...fieldRoot, key], authored, 'flow', scope);
+          }
+        }
+        // `…fields.<field>.options.<value>` (#22507) — each option's label,
+        // keyed by its value read as text through the one key function
+        // `translateFlow` looks it up by (`flowScreenFieldOptionKey`), so the
+        // skeleton offers exactly the keys the resolver reads.
+        const options: any[] = Array.isArray(field.options) ? field.options : [];
+        for (const option of options) {
+          if (!option || typeof option !== 'object') continue;
+          pushEntry(out, [...fieldRoot, 'options', flowScreenFieldOptionKey(option.value)], option.label, 'flow', scope);
+        }
+      }
+    }
+
+    // `flows.<flow>.refusals.<node_id>.message` (#22450) — the message of every
+    // `end` node declaring `outcome: 'refused'`, at any depth of the same node
+    // universe. The engine reads that key (`flowRefusalMessageKey`) in the
+    // run's locale before it renders the holes, so the seed is the authored
+    // TEMPLATE, holes and all: a translator keeps the `{{ }}` holes, and the
+    // schema judges the translation as the same text slot. Unlike the flow
+    // `label`, this is demanded for a flow with no screen too: the trigger and
+    // action doors start any flow by name for a person, and the refusal is the
+    // answer that person reads (hotcrm's `quote_generation` refuses before its
+    // first screen). A run no person started carries no locale and stores the
+    // authored message.
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || node.type !== END_NODE_TYPE) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      if (cfg.outcome !== REFUSED_OUTCOME) continue;
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'refusals', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
+    }
+
+    // [#28251] `flows.<flow>.notices.<node_id>.message` — the message of every
+    // `save_notice` node, at any depth of the same node universe. The engine
+    // reads that key (`flowNoticeMessageKey`) in the WRITER's locale before it
+    // renders the holes, so the seed is the authored template, holes and all,
+    // exactly as for a refusal: the person who made the record write reads it.
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || node.type !== SAVE_NOTICE_NODE_TYPE) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'notices', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
+    }
+
+    // [#24916] `flows.<flow>.approvals.<node_id>.label` — an `approval` node's
+    // step label, the name its request shows the submitter and the approvers.
+    // The approvals door reads that key in the reader's locale for the
+    // request's `current_step`, which is the node's `FlowNode.id`, and its step
+    // progress names every approval step the same way; the stored
+    // `current_step_label` is the authored `FlowNode.label` the seed carries.
+    // The key's one leaf is `label` because the node config declares no
+    // person-facing heading of its own (`translation.zod.ts`, `approvals`).
+    // Same node universe as the walks above, so the walk reaches every id
+    // `os validate` accepts the key for.
+    for (const node of approvalNodes) {
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      // No id, no key: the request's `current_step` could not name the node.
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'approvals', nodeId, 'label'], node.label, 'flow', scope);
+    }
+  }
+}
+
+/**
+ * Emit `hooks.<hook>.refusals.<CODE>.message` for every entry a hook's refusal
+ * catalogue declares (#26170, maintainer ruling 6431311681 letter A), seeded
+ * with the declared message.
+ *
+ * The sandboxed body runner reads exactly that key (`hookRefusalMessageKey`)
+ * in the caller's locale when the body throws the entry's code, so each
+ * declared entry is one demand, counted by the coverage gate under its own
+ * `hook` bucket. Keyed by hook name, not by the objects the hook binds, so a
+ * hook bound to several objects or to `'*'` is asked for one translation per
+ * code. A hook that declares no `refusals` has no key here: its throws carry
+ * no address a bundle could reach.
+ */
+function walkHookRefusals(config: any, out: ExpectedEntry[]): void {
+  const hooks: any[] = Array.isArray(config?.hooks) ? config.hooks : [];
+  for (const hook of hooks) {
+    const hookName = typeof hook?.name === 'string' && hook.name.length > 0 ? hook.name : undefined;
+    if (!hookName) continue;
+    const refusals = hook.refusals;
+    if (!refusals || typeof refusals !== 'object' || Array.isArray(refusals)) continue;
+    for (const [code, entry] of Object.entries<any>(refusals)) {
+      pushOptional(out, ['hooks', hookName, 'refusals', code, 'message'], inlineText(entry?.message), 'hook');
+    }
+  }
+}
+
+/**
+ * Iterate the canonical metadata form registry and emit translation entries
+ * for every metadata type's display label/description, plus the section and
+ * field labels of any registered {@link FormView} layout.
+ *
+ * Mirrors the lookup contract enforced by `resolveMetadataFormLabels` /
+ * `resolveMetadataTypeLabel` in `@objectstack/spec/system/i18n-resolver`:
+ *
+ *   metadataForms.<type>.label
+ *   metadataForms.<type>.description
+ *   metadataForms.<type>.sections.<sectionName>.label
+ *   metadataForms.<type>.sections.<sectionName>.description
+ *   metadataForms.<type>.fields.<dotPath>.label
+ *   metadataForms.<type>.fields.<dotPath>.helpText
+ *   metadataForms.<type>.fields.<dotPath>.placeholder
+ *
+ * Section names follow the same normalization rule the resolver uses when
+ * `section.name` is absent: `label.toLowerCase().replace(/&/g,'and').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')`.
+ *
+ * Composite / repeater sub-fields are walked recursively with dot-path
+ * accumulation (`fields.items.label` etc.), matching the runtime
+ * `translateFormField` walker.
+ */
+function walkMetadataForms(out: ExpectedEntry[]): void {
+  // 1) Type-level labels (covers every registry entry, not just types
+  //    that have a form — the resolver translates `/meta` entry labels
+  //    even for form-less types like `datasource`, `job`, `translation`).
+  for (const entry of DEFAULT_METADATA_TYPE_REGISTRY) {
+    const type = entry.type;
+    pushEntry(out, ['metadataForms', type, 'label'], entry.label ?? type, 'metadataType', { metadataType: type });
+    pushOptional(out, ['metadataForms', type, 'description'], (entry as any).description, 'metadataType', { metadataType: type });
+  }
+
+  // 2) Section + field labels for every registered form.
+  for (const [type, form] of Object.entries(METADATA_FORM_REGISTRY)) {
+    const sections: any[] = [
+      ...(Array.isArray(form?.sections) ? form.sections : []),
+      ...(Array.isArray((form as any)?.groups) ? (form as any).groups : []),
+    ];
+    for (const section of sections) {
+      if (!section || typeof section !== 'object') continue;
+      const sectionName = normalizeSectionName(section);
+      if (sectionName) {
+        pushOptional(out, ['metadataForms', type, 'sections', sectionName, 'label'], section.label, 'metadataFormSection', { metadataType: type });
+        pushOptional(out, ['metadataForms', type, 'sections', sectionName, 'description'], section.description, 'metadataFormSection', { metadataType: type });
+      }
+      if (Array.isArray(section.fields)) {
+        for (const child of section.fields) walkFormField(child, type, '', out);
+      }
+    }
+  }
+}
+
+/** Recursive walker for FormField nodes, accumulating dot-path. */
+function walkFormField(field: any, type: string, parentPath: string, out: ExpectedEntry[]): void {
+  if (!field || typeof field !== 'object') return;
+  const name = typeof field.field === 'string' ? field.field : undefined;
+  const path = name ? (parentPath ? `${parentPath}.${name}` : name) : parentPath;
+  if (path) {
+    // A form field that omits `label` is still labelled on screen — the
+    // renderer humanizes its path ("name" → "Name"). That derived text IS the
+    // source string, so other locales genuinely owe it a translation.
+    pushEntry(out, ['metadataForms', type, 'fields', path, 'label'], inlineText(field.label) ?? humanizeFieldPath(path), 'metadataFormField', { metadataType: type });
+    pushOptional(out, ['metadataForms', type, 'fields', path, 'helpText'], field.helpText, 'metadataFormField', { metadataType: type });
+    pushOptional(out, ['metadataForms', type, 'fields', path, 'placeholder'], field.placeholder, 'metadataFormField', { metadataType: type });
+  }
+  if (Array.isArray(field.fields)) {
+    for (const child of field.fields) walkFormField(child, type, path, out);
+  }
+}
+
+/** Match the metadata form renderer's fallback label for fields without an explicit label. */
+export function humanizeFieldPath(path: string): string {
+  const leaf = path.split('.').pop() ?? path;
+  return leaf
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Section-name derivation mirroring `resolveMetadataFormLabels` so the
+ * extractor emits keys at the exact same paths the resolver looks them up.
+ */
+function normalizeSectionName(section: any): string | undefined {
+  if (typeof section.name === 'string' && section.name.length > 0) return section.name;
+  if (typeof section.label !== 'string') return undefined;
+  return section.label
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function walkNavigation(nav: any[], appName: string, out: ExpectedEntry[]): void {
+  for (const item of nav) {
+    if (!item) continue;
+    const id = item.id ?? item.name;
+    if (id && item.label) {
+      pushEntry(out, ['apps', appName, 'navigation', id, 'label'], item.label, 'navigation', { appName });
+    }
+    if (Array.isArray(item.items)) walkNavigation(item.items, appName, out);
+    if (Array.isArray(item.children)) walkNavigation(item.children, appName, out);
+  }
+}
+
+/**
+ * Every `navigationContributions[]` entry the stack carries, from the two
+ * carriers `translation-target-unknown` reads (`contributedNavItemsByApp` in
+ * `@objectstack/lint`'s `validate-translation-references.ts`), so the keys
+ * coverage expects are the keys that rule accepts:
+ *
+ *   1. `manifest.navigationContributions` — where a single-`defineStack`
+ *      project's contributions live;
+ *   2. `packages[].manifest.navigationContributions` — the ADR-0130 D4 artifact
+ *      entry, whose `manifest` is the assembled package body. On a
+ *      `composeStacks(…, { manifest: 'preserve' })` stack this is the only
+ *      place a module's contributions sit: the singular top-level `manifest`
+ *      is one package's copy (the `'last'` pick), usually the app's.
+ *
+ * Both are read unconditionally, as the rule reads them. Where the top-level
+ * manifest IS a copy of a contributing package's, the two carriers yield the
+ * same items and `dedupeByPath` keeps one entry per key.
+ *
+ * ⛔ The rule's reader is not imported: it is module-private to
+ * `@objectstack/lint`. This copy is held to it by
+ * `test/i18n-contributed-nav-coverage.test.ts`, which runs the rule over a
+ * bundle carrying every contributed key this walk expects.
+ *
+ * Not seen, here as there: a contribution registered imperatively from a
+ * plugin's `init` (`engine.registerAppNavContribution`) is not metadata;
+ * `packages/cli/scripts/check-app-nav-i18n.mjs` boots a composition to judge
+ * that population.
+ */
+function navigationContributionsOf(config: any): any[] {
+  const out: any[] = [];
+  const add = (list: unknown): void => {
+    if (Array.isArray(list)) out.push(...list);
+  };
+  add(config?.manifest?.navigationContributions);
+  const packages: unknown[] = Array.isArray(config?.packages) ? config.packages : [];
+  for (const entry of packages) add((entry as any)?.manifest?.navigationContributions);
+  return out;
+}

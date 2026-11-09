@@ -12,7 +12,8 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, GetMetaItemRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { isMatchKeySets } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
-import { isUniqueViolationError, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault } from '@objectstack/types';
+import { isFederatedObject, resolveTenantFieldName } from '../security/tenant-field.js';
+import { isUniqueViolationError, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault, resolveThrownHttpError, UNDECLARED_HOOK_REFUSAL_CODE } from '@objectstack/types';
 
 /**
  * import-runner — the shared row-processing core for bulk import.
@@ -527,6 +528,17 @@ export function sanitizeRowError(raw: unknown): string {
  * rule applies: a sandboxed error the door answers with a 5xx takes the door's
  * sentence. ⛔ Still not "every door 5xx": a driver error is neither a sandbox
  * origin nor a sandbox fault, and its row keeps {@link sanitizeRowError}'s text.
+ *
+ * ## An undeclared hook abort is `HOOK_ABORTED`, as on every other write door (#29978)
+ *
+ * A sandboxed body's free-text refusal that declared no code answers
+ * {@link UNDECLARED_HOOK_REFUSAL_CODE} on `/data`, `/createMany`, `/batch` and
+ * the per-object batch row. This row said `IMPORT_ROW_FAILED`, so an import
+ * client branching on `code` could not tell a business rule's refusal from any
+ * other failed row. {@link isUndeclaredHookAbort} now picks that code where
+ * the row had none of its own: a finding's code and a code the body declared
+ * still win, and every other failure keeps `IMPORT_ROW_FAILED`. The row's
+ * sentence is unchanged; it was already the hook's.
  */
 function toFailedResult(rowNo: number, err: unknown, objectName: string): ImportRowResult {
   const e = err as { code?: unknown; message?: unknown; fields?: unknown; field?: unknown } | null | undefined;
@@ -537,7 +549,7 @@ function toFailedResult(rowNo: number, err: unknown, objectName: string): Import
     if (adopted !== undefined) return adopted;
   }
   const thrownCode = isEngineDuplicateRecordEnvelope(e) ? 'UNIQUE_VIOLATION' : e?.code;
-  const code = first?.code ?? thrownCode ?? 'IMPORT_ROW_FAILED';
+  const code = first?.code ?? thrownCode ?? (isUndeclaredHookAbort(err) ? UNDECLARED_HOOK_REFUSAL_CODE : 'IMPORT_ROW_FAILED');
   const field = first?.field != null && first.field !== '' ? first.field : e?.field;
   const sandboxed = isSandboxOrigin(err) || isSandboxOwnFault(err);
   const sandboxFault = sandboxed && door.status >= 500 ? String(door.body.error) : undefined;
@@ -546,6 +558,24 @@ function toFailedResult(rowNo: number, err: unknown, objectName: string): Import
     row: rowNo, ok: false, action: 'failed', error: message, code: String(code),
     ...(field != null && field !== '' ? { field: String(field) } : {}),
   };
+}
+
+/**
+ * [#29978] Is this row failure a hook ABORT that declared no code?
+ *
+ * Asked of `resolveThrownHttpError`, which declares
+ * {@link UNDECLARED_HOOK_REFUSAL_CODE} and answers it for exactly that throw:
+ * a sandboxed body's business refusal ({@link sandboxBusinessMessage}
+ * answered), no `code` spelled, served at a 4xx. The fallback is `400`, the
+ * status the data doors serve an undeclared sandbox refusal at, so a refusal
+ * that declared no status resolves into the 4xx band, and one that declared a
+ * 5xx stays a fault. This is the test the per-object batch row's
+ * `toRowApiError` (`@objectstack/metadata-protocol`) restates; that package
+ * sits above this one, so the resolver is the shared judge both reach.
+ * ⛔ Never a second reading of `innerMessage`, `code` or the status here.
+ */
+function isUndeclaredHookAbort(err: unknown): boolean {
+  return resolveThrownHttpError(err, 400).code === UNDECLARED_HOOK_REFUSAL_CODE;
 }
 
 /** The head of a `fields` list when it is a finding (an object); a bare name or an empty list is none. */
@@ -645,6 +675,47 @@ async function servesReferenceTarget(p: ImportProtocolLike, target: string): Pro
     fields,
     uniqueFields: Object.keys(fields ?? {}).filter((f) => isUniqueReferenceField(fields?.[f])),
   };
+}
+
+/**
+ * The column an update or upsert import's match lookup scopes by, and the
+ * organization it scopes to; `null` when the lookup is the key alone.
+ *
+ * Why: the record a key names is the one in the organization a created row
+ * would be stamped with, the context's `tenantId` (the engine's write target
+ * in every posture). The key's unique index leads with that column, and under
+ * the `single` posture the engine adds no tenant scope to a read (ADR-0131
+ * D11), so a lookup on the key alone scanned the table once per row. Scoped,
+ * it is one index probe.
+ *
+ * The column is the engine's own answer, read off the target's declaration:
+ * a federated object (`isFederatedObject`) has none the platform may scope by,
+ * and otherwise `resolveTenantFieldName` decides (`tenancy.enabled: false`,
+ * then a declared `tenancy.tenantField`, then `organization_id`). Both are the
+ * engine's bindings, which live in this package for exactly this asker.
+ *
+ * ⛔ The scope only ever narrows the lookup, never widens it: no organization
+ * in the context, no declaration to read, or a read that fails, and the lookup
+ * is the key alone, as before. A NULL tenant value is matched by nothing here:
+ * NULL is not an owner (ADR-0131 D1), so it is not the caller's organization.
+ */
+async function matchScopeOf(
+  p: ImportProtocolLike,
+  objectName: string,
+  context: { tenantId?: unknown } | undefined,
+): Promise<{ field: string; organization: string } | null> {
+  const tenantId = context?.tenantId;
+  if (typeof tenantId !== 'string' || tenantId === '') return null;
+  if (typeof p.getMetaItem !== 'function') return null;
+  let item: unknown;
+  try {
+    item = ((await p.getMetaItem({ type: 'object', name: objectName })) as { item?: unknown } | undefined)?.item;
+  } catch {
+    return null;
+  }
+  if (!item || typeof item !== 'object' || isFederatedObject(item)) return null;
+  const field = resolveTenantFieldName(item);
+  return field ? { field, organization: tenantId } : null;
 }
 
 /**
@@ -915,12 +986,18 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       const v = data[f];
       return !(v === undefined || v === null || v === '');
     }));
+  // The organization the match lookup is scoped to ({@link matchScopeOf}),
+  // read from the target's declaration once per import, on the first lookup.
+  let matchScope: Promise<{ field: string; organization: string } | null> | undefined;
   const findExisting = async (
     data: Record<string, any>,
   ): Promise<{ match: Record<string, any> | 'blank' | 'none' | 'ambiguous'; keySet: string[] }> => {
     const keySet = keySetOf(data);
     if (!keySet) return { match: 'blank', keySet: [] };
     const filter: Record<string, any> = {};
+    const scope = await (matchScope ??= matchScopeOf(p, objectName, context));
+    // A key set that names the tenant column keeps the row's own value.
+    if (scope && !keySet.includes(scope.field)) filter[scope.field] = scope.organization;
     for (const f of keySet) filter[f] = data[f];
     const r = await p.findData(findArgsBase({
       object: objectName,

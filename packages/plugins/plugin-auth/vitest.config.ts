@@ -64,6 +64,25 @@ export default defineConfig({
         find: /^@objectstack\/plugin-hono-server$/,
         replacement: path.resolve(here, '../plugin-hono-server/src/index.ts'),
       },
+      // `rate-limit-storage.shared-redis.test.ts` composes a replica's cache:
+      // the cluster plugin with the REAL redis driver, then the REAL
+      // `CacheServicePlugin`, whose adapter choice is the subject. Same reason
+      // and the same anchoring as the entries above (`service-cluster`
+      // publishes a `/testing` subpath the anchor must not swallow). All three
+      // through source also keeps ONE instance of `@objectstack/service-cluster`
+      // — the one the driver registers into and `defineCluster()` reads.
+      {
+        find: /^@objectstack\/service-cache$/,
+        replacement: path.resolve(here, '../../services/service-cache/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/service-cluster$/,
+        replacement: path.resolve(here, '../../services/service-cluster/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/service-cluster-redis$/,
+        replacement: path.resolve(here, '../../services/service-cluster-redis/src/index.ts'),
+      },
     ],
   },
 });

@@ -30,10 +30,12 @@ import {
     type HttpDeliveryStatus,
     type HttpReapOptions,
     type HttpDueWorkOptions,
+    type HttpNextDueOptions,
     type IHttpOutbox,
     type RedeliverOptions,
     type UndeliverableHttpInput,
 } from './http-outbox.js';
+import { earliestDueAt } from './next-due.js';
 import { SYS_HTTP_DELIVERY } from './objects/http-delivery.object.js';
 
 export interface SqlHttpOutboxOptions {
@@ -242,6 +244,30 @@ export class SqlHttpOutbox implements IHttpOutbox {
             limit: 1,
         }, { context: DISPATCHER_SYSTEM_CONTEXT });
         return due.length > 0;
+    }
+
+    /**
+     * [#29919] Two reads, asked only after a tick that found nothing: the
+     * earliest future `next_retry_at` of a `pending` row in any partition, and
+     * the oldest `in_flight` claim, on the reaper's `status, claimed_at` index.
+     * The first sorts the deferred `pending` rows; there are none on an idle
+     * outbox.
+     */
+    async nextDueAt(opts: HttpNextDueOptions): Promise<number | null> {
+        const now = opts.now ?? Date.now();
+        const deferred = await this.engine.find(this.objectName, {
+            where: { status: 'pending', next_retry_at: { $gt: now } },
+            fields: ['next_retry_at'],
+            orderBy: [{ field: 'next_retry_at', order: 'asc' }],
+            limit: 1,
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
+        const claimed = await this.engine.find(this.objectName, {
+            where: { status: 'in_flight' },
+            fields: ['claimed_at'],
+            orderBy: [{ field: 'claimed_at', order: 'asc' }],
+            limit: 1,
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
+        return earliestDueAt(deferred[0]?.next_retry_at, claimed[0]?.claimed_at, opts.claimTtlMs);
     }
 
     async claim(opts: HttpClaimOptions): Promise<HttpDelivery[]> {

@@ -47,7 +47,7 @@
  * rejects it, the server's `.strict()` parse rejects it, and this resolver
  * names it via {@link RESOLVED_ONLY_PARAM_KEYS} rather than reading it.
  */
-import { EXPANDABLE_FIELD_TYPES, actionCopySource, toPredicateRecord } from '@object-ui/core';
+import { EXPANDABLE_FIELD_TYPES, actionCopySource, isActionCopyEnvelope, toPredicateRecord } from '@object-ui/core';
 import type { ActionParamDef, ActionParamOption } from '@object-ui/core';
 // The form's widget fold. Imported from the barrel this module is re-exported
 // by — a cycle in the SOURCE graph only, and a call-time one: nothing at this
@@ -162,6 +162,14 @@ export interface RawActionParam {
    */
   label?: I18nLabel;
   type?: string;
+  /**
+   * Widget override — the spec's `ActionParamSchema.widget`, the same key and
+   * meaning as `FieldSchema.widget`: a registered field widget that draws the
+   * param instead of its `type` default (`'permission-ref'` on a `text`
+   * param). Copied onto `ActionParamDef.widget`; `paramToField()` decides
+   * whether it names a registered widget.
+   */
+  widget?: string;
   required?: boolean;
   /**
    * Option list authored inline on the param. Speaks the same vocabulary as the
@@ -178,9 +186,10 @@ export interface RawActionParam {
   placeholder?: string;
   /**
    * The hint under the input. A `template` slot since objectstack#27948: the
-   * bare string, or the parsed `{ dialect: 'template', source }` envelope a
-   * served param carries; read through `actionCopySource`, so the resolved
-   * param's `helpText` is always the text.
+   * bare string, the parsed `{ dialect: 'template', source }` envelope a
+   * served param carries, or (objectstack#28266) an inline per-locale map,
+   * resolved for {@link ResolveActionParamsContext.locale} like `label` — so
+   * the resolved param's `helpText` is always the text.
    */
   helpText?: unknown;
   defaultValue?: unknown;
@@ -355,6 +364,12 @@ function warnResolvedOnlyKeys(param: RawActionParam): void {
 /** Field metadata as exposed by `useMetadata().objects[].fields`. */
 interface RuntimeField {
   type?: string;
+  /**
+   * `@objectstack/spec`'s `FieldSchema.widget`, the field's input override.
+   * A field-backed param that inherits the field's `type` inherits this with
+   * it (see {@link inheritedWidget}).
+   */
+  widget?: string;
   label?: string;
   required?: boolean;
   placeholder?: string;
@@ -573,6 +588,32 @@ function storedRow(
 }
 
 /**
+ * The widget a FIELD-BACKED param is drawn with: its own `widget`, else the
+ * field's — but the field's only while the param also inherits the field's
+ * `type`.
+ *
+ * The spec resolves a field-backed param's "widget mapping from object
+ * metadata" (`ActionParamSchema`), and the field's `widget` is that mapping.
+ * (A param that restates the field's own `type`, in any spelling the param-type
+ * fold maps onto the same widget, still inherits it.)
+ * It is a mapping FOR the field's type, though: the record form draws it over
+ * a value of that type, and the server validates the param's value by the
+ * param's `type` (ADR-0104 D2). A param that overrides `type` asks for a
+ * different value, so a widget picked for the field's value is not inherited
+ * onto it; the param names its own `widget` if it wants one.
+ */
+function inheritedWidget(param: RawActionParam, field: RuntimeField): string | undefined {
+  if (param.widget !== undefined) return param.widget;
+  // Compared through the one param-type fold, so a param that restates the
+  // field's type in an alias spelling (`reference` on a `lookup` field) still
+  // restates it.
+  if (param.type === undefined) return field.widget;
+  const restated = field.type !== undefined
+    && resolveParamWidgetType(param.type) === resolveParamWidgetType(field.type);
+  return restated ? field.widget : undefined;
+}
+
+/**
  * Resolve a single raw param against object metadata. Inline params pass
  * through (with safe defaults); field-backed params inherit from the
  * referenced field and accept inline overrides on top.
@@ -605,6 +646,17 @@ export function resolveActionParam(
   const authoredLabel = resolveInlineI18nLabel(param.label, ctx.locale);
   /** Inline options, with each authored label narrowed to the resolved side. */
   const authoredOptions = resolveOptionLabels(param.options, ctx.locale);
+  /**
+   * The authored hint, narrowed to the resolved side the same way: the bare
+   * string or the `template` envelope's `source`, else an inline per-locale map
+   * (objectstack#28266 — the form an inline action, which no bundle reaches,
+   * writes its hint in) resolved for the active language. An envelope with no
+   * `source` gives `undefined`, never a map limb's guess, so a field-backed
+   * param still falls back to the field's help line.
+   */
+  const authoredHelpText = isActionCopyEnvelope(param.helpText)
+    ? actionCopySource(param.helpText)
+    : resolveInlineI18nLabel(param.helpText as I18nLabel | undefined, ctx.locale);
 
   // Inline param — no field reference, just normalise.
   if (!param.field) {
@@ -615,13 +667,16 @@ export function resolveActionParam(
       required: param.required ?? false,
       options: authoredOptions,
       placeholder: param.placeholder,
-      helpText: actionCopySource(param.helpText),
+      helpText: authoredHelpText,
       defaultValue: rowDefault ?? param.defaultValue,
       visible: normaliseVisible(param.visible),
       // This output is built key by key, so an authored key that is not
       // copied here never reaches the dialog — which is how `carryOver` went
       // unhonoured until objectui#6246. Same line on the two branches below.
       carryOver: param.carryOver,
+      // Same key-by-key copy: without this line an authored `widget` never
+      // reached the dialog, which drew the `type` widget whatever it named.
+      widget: param.widget,
       multiple: param.multiple,
       accept: param.accept,
       maxSize: param.maxSize,
@@ -675,10 +730,13 @@ export function resolveActionParam(
       required: param.required ?? false,
       options: authoredOptions,
       placeholder: param.placeholder,
-      helpText: actionCopySource(param.helpText),
+      helpText: authoredHelpText,
       defaultValue: rowDefault ?? param.defaultValue,
       visible: normaliseVisible(param.visible),
       carryOver: param.carryOver,
+      // Kept for parity; the dialog refuses an unresolved param before it
+      // builds any widget, so nothing draws it.
+      widget: param.widget,
       multiple: param.multiple,
       accept: param.accept,
       maxSize: param.maxSize,
@@ -840,11 +898,12 @@ export function resolveActionParam(
     // form shares (`fieldHelpText`, objectui#12213): the spec's
     // `inlineHelpText`, then `description`, an empty string reading as absent.
     // A served `help` key is not read.
-    helpText: actionCopySource(param.helpText) ?? fieldHelpText(field),
+    helpText: authoredHelpText ?? fieldHelpText(field),
     defaultValue: rowDefault ?? param.defaultValue ?? field.defaultValue,
     visible: normaliseVisible(param.visible),
     // A declaration of the PARAM, never inherited from the field.
     carryOver: param.carryOver,
+    widget: inheritedWidget(param, field),
     // Widget config inherited from the field for every type (not just
     // lookup): multi-value shape and upload constraints (ADR-0059).
     multiple: param.multiple ?? field.multiple,

@@ -7,8 +7,8 @@
  */
 
 /**
- * objectui#10783 — a `currency` grid column's width is its currency's ISO 4217
- * minor unit, and a `scale` on the column decides nothing.
+ * objectui#10783 — a `currency` grid column's width is its currency's CLDR
+ * fraction digits, and a `scale` on the column decides nothing.
  *
  * `currencyWidth` used to read the column's `scale` first, so an authored
  * `scale` beat the minor unit on both faces: the value a computed amount is

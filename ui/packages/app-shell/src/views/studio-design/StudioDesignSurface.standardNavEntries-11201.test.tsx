@@ -60,10 +60,19 @@ const OBJECT_DEFS = [{ name: 'account', label: 'Account' }, { name: 'draft_thing
 
 const ZH_CN: TranslationData = { objects: { account: { label: '客户' } } } as TranslationData;
 
-function metadata() {
+/**
+ * The served objects, per language: the server translates what it serves under
+ * the request's language from the same catalog the console loads, so a zh-CN
+ * session holds the zh-CN label (objectstack#30311).
+ */
+function servedObjects(language: string) {
+  return language === 'zh-CN' ? OBJECT_DEFS.map((o) => (o.name === 'account' ? { ...o, label: '客户' } : o)) : OBJECT_DEFS;
+}
+
+function metadata(language: string) {
   return {
     apps: [],
-    objects: OBJECT_DEFS,
+    objects: servedObjects(language),
     dashboards: [],
     reports: [],
     pages: [],
@@ -108,7 +117,7 @@ function renderSidebar(items: Array<Record<string, unknown>>, language: string) 
   render(
     <I18nProvider instance={i18nIn(language)} persistLanguage={false}>
       <MemoryRouter initialEntries={['/apps/acme']}>
-        <MetadataCtx.Provider value={metadata() as never}>
+        <MetadataCtx.Provider value={metadata(language) as never}>
           <Sidebar items={items as unknown as NavigationItem[]} />
         </MetadataCtx.Provider>
       </MemoryRouter>

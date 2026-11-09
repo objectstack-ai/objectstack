@@ -141,8 +141,43 @@ a grouped aggregate, and sits outside every filter on the pair until it holds a 
 The code is the one you give with `--code`, and it is never derived: not from the
 `defaultCurrency` the field had under `fixed`, not from the organization's currency.
 One run writes one code, so if the stored amounts are in more than one currency, split
-those rows with your own writes first. See
+those rows with your own writes first. Each organization has its own home currency, so
+on a database whose rows belong to more than one organization, run it once per
+organization with `--org <id>` and the code that organization's rows are in: a run
+naming no organization there is refused before any write and lists each organization's
+codeless row count, and `--all-organizations` writes the one code into every
+organization's rows when it really is right for all of them. See
 [`os migrate record-currency-codes`](/docs/deployment/cli#os-migrate-record-currency-codes).
+With no shell on the deployment (a hosted organization), an organization admin holding
+`setup.write` runs the same backfill for their current organization's rows with
+`POST /api/v1/meta/_migrate-record-currency-codes` and the body
+`{ "object", "field", "code", "apply" }`, a preview unless `apply` is `true`.
+
+### Re-pointing `currencyField` on a field that already holds rows
+
+The amount is a bare number, and its currency is whatever the field `currencyField` names
+holds. Pointing an existing record-mode amount at another field (another sibling, or a
+`master_detail` child's `PARENT_FIELD.CODE_FIELD` path, in either direction) converts no
+stored amount: every row keeps its number and is read in the currency the new field
+holds. A row whose old and new codes differ now displays, filters and groups under a
+currency it was not entered in.
+
+1. **The save answers 409 `destructive_change`.** Saving the re-pointed object reports
+   the finding `currency_field_repointed` on the amount field. The save reads no row, so
+   it reports the finding whether or not the table holds any. Re-submit with `force`
+   (`?force=true` on `PUT /api/v1/meta/:type/:name`) to make the change. An identical
+   pointer is not a re-point, and neither is a new field or an object saved for the
+   first time.
+2. **A new sibling code field that is blank** leaves its rows codeless, with the same
+   consequences as a switch into record mode. Fill it with the backfill above
+   (`os migrate record-currency-codes`, or its REST door). A path stores no code on the
+   child, so there is nothing to backfill: each row follows its parent record.
+3. **Stored home amounts are not re-rated.** If the amount declares `homeAmount`, its
+   stored home amounts and rates were converted from the old code. Re-derive them from
+   the new one with
+   [`os migrate recompute-home-amounts`](#recomputing-stored-home-amounts), which is a
+   shell command with no REST door. If the save also removes `homeAmount`, nothing
+   re-rates them.
 
 ### Aggregating a record-mode amount
 
@@ -300,10 +335,11 @@ document date, the engine computes the home amount:
   `date` document date is its own day.
 - **The home amount** is the amount **divided by** the rate, computed in exact decimal
   arithmetic and rounded once, half away from zero, to the home currency's decimal
-  places as CLDR gives them (its fraction digits): 0 for JPY, 2 for USD and CNY, 3 for
-  KWD. For a few currencies CLDR's count differs from ISO 4217's minor units (IQD, HUF,
-  COP, IDR and PKR among them), and CLDR's applies. USD 10,000 at a rate of 0.1389 into
-  CNY stores ¥71,994.24.
+  places as CLDR gives them (its fraction digits, not ISO 4217's minor units): 0 for JPY,
+  2 for USD and CNY, 3 for KWD. For sixteen currencies the two differ, and CLDR's count
+  applies: IQD has 0 (ISO 4217: 3), and AFN, ALL, COP, HUF, IDR, IRR, KPW, LAK, LBP, MGA,
+  MMK, PKR, SOS, SYP and YER have 0 (ISO 4217: 2), so a home amount in any of them is
+  rounded to whole units. USD 10,000 at a rate of 0.1389 into CNY stores ¥71,994.24.
 - **The rate field** stores the rate row's own value, unrounded, so the stored home
   amount always reproduces from the stored amount and rate.
 - **An amount in the home currency itself** stores rate `1` and needs no rate row.
@@ -317,7 +353,8 @@ same path as a single write.
 
 A rate row corrected later does not rewrite the amounts already converted with it: an
 update that does not touch the amount, its code or its document date leaves the stored
-home amount and rate as they are.
+home amount and rate as they are. To bring stored rows up to the rates in force now, run
+the [recompute](#recomputing-stored-home-amounts).
 
 An update by filter (`multi: true`) writes one patch to every matched row, so it is
 refused, with `VALIDATION_FAILED`, when the patch would convert the rows to different home
@@ -335,6 +372,36 @@ Each refusal is answered before anything is written, and the row is not stored:
 
 The `validate()` preview, and an import's dry run, answer the same refusals for the same
 rows.
+
+### Recomputing stored home amounts
+
+`os migrate recompute-home-amounts` brings the stored home amounts of an object up to the
+rates in force now: after a rate row is corrected or added, or after a home amount is
+declared on an object that already holds rows.
+
+```bash
+os migrate recompute-home-amounts --object invoice                          # Report: what would change, what cannot be converted
+os migrate recompute-home-amounts --object invoice --since 2026-01-01       # Only documents dated on or after January 1
+os migrate recompute-home-amounts --object invoice --apply                  # Write the changes (prompts)
+```
+
+Each row is converted exactly as a write converts it, in its own organization's home
+currency at that organization's rates, and an applied row holds what a fresh write of it
+would store, so what reads the home field (formulas, roll-ups, the audit trail) follows as
+it does for a fresh write. The row's `updated_at` is kept: an integration that syncs by
+`updated_at` does not see the recomputed value until it resyncs the object. `--since` compares the **document date** (the field `homeAmount.rateDate`
+names), read as the day the write reads it. The report counts each organization apart and
+lists every row that changes, with its stored and new values.
+
+**A row that cannot be converted is listed and left as stored**, never filled with a rate
+of 1, a later rate or a zero. The report names each one and why: no rate in force on its
+document date (add the rate), an amount with no currency code (run
+[`os migrate record-currency-codes`](#switching-a-field-that-already-holds-rows) first: no
+rate can help a row that names no currency; give it `--org` for each organization's
+code), no document date, or no home currency. Until
+a re-run converts them, a total over the home field leaves those rows out, so the command
+keeps exiting 1 while any is listed, and the applied run's audit entry records them. The
+full reference is [`os migrate recompute-home-amounts`](/docs/deployment/cli#os-migrate-recompute-home-amounts).
 
 ### Totals in the home currency
 

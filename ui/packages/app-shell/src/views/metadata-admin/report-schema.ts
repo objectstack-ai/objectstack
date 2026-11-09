@@ -24,6 +24,8 @@
 import { z } from 'zod';
 import { ReportSchema, reportForm as specReportForm } from '@objectstack/spec/ui';
 import type { FormViewSpec } from './SchemaForm.js';
+import type { SupportedLocale } from './i18n.js';
+import { localizeMetadataForm } from './metadata-form-i18n.js';
 
 type JsonSchema = Record<string, any>;
 
@@ -76,7 +78,7 @@ let _reportForm: FormViewSpec | undefined;
  *    schema carries it and no section declares it, so the render-time scope
  *    filter stays editable in the meantime.
  */
-export function getReportForm(): FormViewSpec | undefined {
+function bundledReportForm(): FormViewSpec | undefined {
   if (_reportForm) return _reportForm;
   if (!specReportForm || typeof specReportForm !== 'object') return undefined;
   const clone = JSON.parse(JSON.stringify(specReportForm)) as FormViewSpec;
@@ -116,4 +118,25 @@ export function getReportForm(): FormViewSpec | undefined {
   );
   _reportForm = clone;
   return _reportForm;
+}
+
+/** One localized copy per locale, for the reason `getDashboardForm`'s cache is keyed. */
+const _localizedReportForm = new Map<string, FormViewSpec | undefined>();
+
+/**
+ * The pruned authoring form with the active locale's `metadataForms.report`
+ * strings overlaid (`localizeMetadataForm`, objectui#7254), so the panel
+ * speaks the language of the Studio around it. A locale the overlay does not
+ * carry gets the spec's English, the same object as before.
+ */
+export function getReportForm(locale?: SupportedLocale | string): FormViewSpec | undefined {
+  const cacheKey = String(locale ?? '');
+  if (_localizedReportForm.has(cacheKey)) return _localizedReportForm.get(cacheKey);
+  const localized = localizeMetadataForm(
+    bundledReportForm() as unknown as Record<string, unknown> | undefined,
+    'report',
+    locale,
+  ) as unknown as FormViewSpec | undefined;
+  _localizedReportForm.set(cacheKey, localized);
+  return localized;
 }

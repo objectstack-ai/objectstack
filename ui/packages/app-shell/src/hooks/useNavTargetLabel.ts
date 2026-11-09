@@ -37,10 +37,16 @@
  * Nothing is written back and nothing is memoised across metadata versions, so
  * a renamed target shows its new name on the next render (the ruling accepts a
  * reload). A metadata label that is an inline locale map resolves through the
- * spec's own `resolveI18nLabel` in the active language, and the result passes
- * through the same convention-based bundle lookup (`useObjectLabel`) the rest
- * of the console applies to object / view / dashboard names, so the nav shows
- * the name the target's own page shows.
+ * spec's own `resolveI18nLabel` in the active language. A served label is
+ * already translated by the server, by its label order for an overridden item,
+ * and is drawn as given: an object's (every object in the cache is a served
+ * document), a served view's (`isServedView`, the question the object page's
+ * view tabs ask) and a dashboard's (objectstack#30244, objectstack#30311). The
+ * convention-based bundle lookup (`useObjectLabel`) is asked only for text no
+ * server translated: a view the client derived, a pending draft's label, or a
+ * target with no served label. Running the bundle over a served label was a
+ * second translation pass in which the base package's string won a rename
+ * back.
  *
  * A target with no label answers `undefined` — the renderer then falls through
  * the spec's ladder and, at the bottom, to the target's machine name.
@@ -65,23 +71,22 @@
 
 import { createContext, useContext, useMemo } from 'react';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
-import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 import { resolveViewId } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { NavLabelTarget, NavTargetLabelResolver } from '@object-ui/layout';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { bundledFirst, useBundledReads } from '../providers/bundledReads.js';
 import { readObjectsByName, useReadItemsByName } from './useObjectPresence.js';
+import { isServedView } from './useServedViewItems.js';
+import { metadataText } from './servedObjectLabel.js';
 
-/**
- * A metadata label (plain string or inline locale map) as display text, or
- * `undefined` when there is none. Shared with `useRecentItemLabel`, which asks
- * the same question of a page or a report (objectui#11678).
- */
-export function metadataText(label: unknown, language: string | undefined): string | undefined {
-  const text = resolveInlineI18nLabel(label as Parameters<typeof resolveInlineI18nLabel>[0], language);
-  return typeof text === 'string' && text.trim() !== '' ? text : undefined;
-}
+export {
+  metadataText,
+  servedObjectLabel,
+  servedObjectPluralLabel,
+  type ObjectLabelLookup,
+  type ObjectPluralLabelLookup,
+} from './servedObjectLabel.js';
 
 /** `''` from a bundle lookup that found nothing and had no metadata to fall back to. */
 function nonEmpty(text: string | undefined): string | undefined {
@@ -139,6 +144,41 @@ function listViewsOf(def: LabelledRecord | undefined): Record<string, LabelledRe
   return views && typeof views === 'object' ? (views as Record<string, LabelledRecord | undefined>) : {};
 }
 
+/** One identity for an absent read. */
+const NO_ITEMS: readonly unknown[] = Object.freeze([]);
+
+/**
+ * What a `view` target reads (objectstack#30311): its object, with the views
+ * merged in, and the two served reads `isServedView` asks of it — the
+ * `/meta/view` documents and the object documents as served, before the merge.
+ * By name, all three come from the one names-only scope read
+ * `readObjectsByName` makes; otherwise from the whole lists, as
+ * `useServedViewItems` reads them outside an app scope.
+ */
+function readViewTarget(
+  metadata: ReturnType<typeof useMetadata>,
+  byName: boolean,
+  objectName: string,
+): { objects: readonly unknown[]; served: { views: readonly unknown[]; objects: readonly unknown[] } } {
+  const { readObjectScope, getTypeStatus } = metadata;
+  if (byName && readObjectScope && getTypeStatus?.('object') === 'idle' && objectName) {
+    // `views` rides beside the published shape for this package's own readers.
+    const scope = readObjectScope({ names: [objectName] }) as { objects: unknown[]; served?: unknown; views?: unknown };
+    return {
+      objects: scope.objects,
+      served: {
+        views: Array.isArray(scope.views) ? scope.views : NO_ITEMS,
+        objects: Array.isArray(scope.served) ? scope.served : NO_ITEMS,
+      },
+    };
+  }
+  const objects = byName ? readObjectsByName(metadata, [objectName], { views: true }) : metadata.objects;
+  return {
+    objects: objects ?? NO_ITEMS,
+    served: { views: metadata.getItemsByType?.('view') ?? NO_ITEMS, objects: metadata.getItemsByType?.('object') ?? NO_ITEMS },
+  };
+}
+
 /**
  * How the resolver reads an object (objectstack#29121). By default from the
  * whole `objects` list, as the Studio's and the search page's callers do. With
@@ -169,15 +209,24 @@ export function useNavTargetLabel(options?: NavTargetLabelOptions): NavTargetLab
         case 'object': {
           const objects = byName ? readObjectsByName(metadata, [target.objectName]) : metadata.objects;
           const def = findByName(objects, target.objectName);
-          const text =
-            metadataText(def?.label, language) ?? draftText(drafts, 'object', target.objectName, language);
-          return nonEmpty(objectLabel({ name: target.objectName, label: text ?? '' }));
+          // A served object's label is already translated (objectstack#30311):
+          // drawn as given. A pending draft's label, which no server
+          // translated, still goes through the bundle.
+          return metadataText(def?.label, language)
+            ?? nonEmpty(objectLabel({
+              name: target.objectName,
+              label: draftText(drafts, 'object', target.objectName, language) ?? '',
+            }));
         }
         case 'view': {
-          const objects = byName ? readObjectsByName(metadata, [target.objectName], { views: true }) : metadata.objects;
+          const { objects, served } = readViewTarget(metadata, byName, target.objectName);
           const views = listViewsOf(findByName(objects, target.objectName));
           const id = resolveViewId(target.viewName, Object.keys(views), target.objectName);
           const text = metadataText(id ? views[id]?.label : undefined, language);
+          // A served view's label is already translated (objectstack#30311),
+          // as its tab on the object page draws it; a view the client derived
+          // still goes through the bundle.
+          if (text !== undefined && isServedView(served, target.objectName, id)) return text;
           return nonEmpty(viewLabel(target.objectName, target.viewName, text ?? ''));
         }
         case 'dashboard': {
@@ -186,9 +235,14 @@ export function useNavTargetLabel(options?: NavTargetLabelOptions): NavTargetLab
           const def = bundledFirst(bundledReads, 'dashboard', target.dashboardName, () =>
             byName ? readItemsByName('dashboard', [target.dashboardName], () => metadata.dashboards) : metadata.dashboards,
           );
-          const text =
-            metadataText(def?.label, language) ?? draftText(drafts, 'dashboard', target.dashboardName, language);
-          return nonEmpty(dashboardLabel({ name: target.dashboardName, label: text ?? '' }));
+          // A served dashboard's label is already translated
+          // (objectstack#30244): drawn as given. A pending draft's label,
+          // which no server translated, still goes through the bundle.
+          return metadataText(def?.label, language)
+            ?? nonEmpty(dashboardLabel({
+              name: target.dashboardName,
+              label: draftText(drafts, 'dashboard', target.dashboardName, language) ?? '',
+            }));
         }
         case 'reportIndex':
           return nonEmpty(t('sidebar.allReports', { defaultValue: 'All reports' }));

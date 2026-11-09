@@ -96,6 +96,75 @@ export {
 // stay private to the engine.
 export { findPackageHeldSecurityCatalogNames } from './registry.js';
 
+// [#31575, ADR-0150 D3/D4] The ONE package-scoped resolver for behavioural
+// metadata: the caller package's own item, else the unique holder in its
+// declared dependency closure (plus `sys`), else a refusal naming every
+// candidate. Exported for the readers epic #31527's later children switch to
+// it (runtime indexes, doors, stored references); no reader calls it yet.
+// [#31716, child R2] The rule is `@objectstack/core`'s and the closure walk
+// `@objectstack/metadata-core`'s, both inside the lean `./core` entry's
+// admitted set (ADR-0076 D2); this module is objectql's two adapters over
+// them (the registry's holders, the engine's function holders) and re-exports
+// the rest under the names R published.
+export {
+  resolvePackageScopedName,
+  resolvePackageScopedFunction,
+  resolvePackageScopedHolders,
+  packageScopedHolderSource,
+  packageResolutionClosure,
+  packageScopedRefusalMessage,
+  describePackageScopedHolder,
+  isPackageScopedType,
+  isPackageScopedResolvableType,
+  isPlatformRequestedBareName,
+  ENGINE_FUNCTION_TYPE,
+  PACKAGE_SCOPED_TYPES,
+  PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE,
+  KERNEL_NAMESPACE,
+} from './package-scoped-resolver.js';
+export type {
+  PackageScopedType,
+  PackageScopedHolder,
+  PackageScopedQuery,
+  PackageScopedHoldersQuery,
+  PackageScopedHolderSource,
+  PackageScopedResolvableType,
+  PackageClosureRegistry,
+  PackageResolutionClosureOf,
+  PackageScopedFunctionQuery,
+  PackageScopedFunctionEngine,
+  PackageScopedRegistry,
+  PackageScopedResolution,
+  PackageScopedResolutionStep,
+  PackageScopedRefusal,
+  PackageScopedRefusalReason,
+} from './package-scoped-resolver.js';
+
+// [#31680, ADR-0150 D3] Child E8: the by-name readers of the presentation and
+// AI types consult `(package, name)` through the resolver above — the types
+// wired, the read every reader shares, and the coded refusal it throws.
+export {
+  PACKAGE_SCOPED_READ_TYPES,
+  isPackageScopedReadType,
+  readPackageScopedItem,
+  PackageScopedNameRefusedError,
+} from './package-scoped-read.js';
+export type { PackageScopedReadType } from './package-scoped-read.js';
+
+// [#31673, ADR-0150 D4] The action engine's `(package, objectName, name)` key:
+// the declaration half — which package's action a bare name on an object means
+// to a caller, resolved by the resolver above over the items that own that
+// object — and the handler half, the coordinate a registered handler belongs
+// to. On this barrel only, for the same reason as the resolver.
+export {
+  resolveActionByPackage,
+  actionOwnerScopedRegistry,
+  actionHolderCoordinate,
+} from './action-package-addressing.js';
+export type { ActionPackageQuery } from './action-package-addressing.js';
+export { actionHandlerCoordinate, ENVIRONMENT_ACTION_COORDINATE, HOST_ACTION_COORDINATE } from './action-handler-coordinate.js';
+export type { ExecuteActionOptions } from './engine-actions.js';
+
 // [#15204 W2] Every `(type, name)` a manifest declares, read from the sources
 // the engine's registration seams read. Exported for the install-local door
 // (`@objectstack/cloud-connection`), which refuses a catalog-carrying package
@@ -133,6 +202,24 @@ export type {
 // words. A consumer calls this; it does not re-derive the check.
 export { viewContainerNameRefusal } from './view-container-name-refusal.js';
 export type { ViewContainerNameRefusal } from './view-container-name-refusal.js';
+// [ADR-0150 D2, child N] Inside one namespace, a `(type, name)` of the twelve
+// uncovered bucket 2/3 types has one package holder. Exported because
+// `os validate` is the second door that asks it — of an artifact's packages, in
+// the order the boot installs them — and it must answer with the package door's
+// predicate and sentence. A consumer calls these; it does not re-derive the rule.
+export {
+  NAMESPACE_UNIQUE_TYPES,
+  namespacePackageOf,
+  namespaceNameConflicts,
+  namespaceNameConflictMessage,
+  residualNamespacePackageOf,
+} from './namespace-co-owner-names.js';
+export type {
+  NamespaceNameConflict,
+  NamespacePackage,
+  NamespaceUniqueType,
+  ResidualItems,
+} from './namespace-co-owner-names.js';
 
 // [ADR-0130 D4] The residual-picklist refusal the `manifest` service throws: a
 // composed stack's top-level picklist that no package body declares and no
@@ -194,6 +281,9 @@ export { RELATION_FILTER_ID_CAP } from './relation-filter-lowering.js';
 // instead. The class stays exported exactly as it was — this adds an
 // affordance, it removes nothing.
 export { SummaryRecomputeError, SUMMARY_RECOMPUTE_CODE } from './summary-errors.js';
+// [#29527] The QuickJS runner asks it of a host call's rejection, so a sandboxed
+// body that lets a converted refusal leave hands back the engine's own error.
+export { isUnlandedWriteRefusal } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
 // [#5126] Thrown by `update` when `options.strictReadonlyWrites` is set and the
 // payload would have had read-only fields stripped. Exported so an in-process
@@ -528,6 +618,26 @@ export type {
     SummaryBackfillLogger,
     SummaryBackfillOptions,
 } from './summary-backfill.js';
+// [#29961] The backfill behind `os migrate stored-expressions`: stored computed
+// fields over rows no write has computed since the field was declared, and the
+// boot advisory naming it. Same split as the roll-up backfill above.
+export {
+    backfillStoredExpressions,
+    formatStoredExpressionBackfillReport,
+    storedExpressionBackfillComplete,
+    announceStoredExpressionHoles,
+    sampleStoredExpressionHoles,
+} from './stored-expression-backfill.js';
+export type {
+    StoredExpressionBackfillReport,
+    StoredExpressionBackfillFieldOutcome,
+    StoredExpressionBackfillFailure,
+    StoredExpressionFault,
+    StoredExpressionBackfillEngine,
+    StoredExpressionBackfillLogger,
+    StoredExpressionBackfillOptions,
+    StoredExpressionHoleSample,
+} from './stored-expression-backfill.js';
 // [ADR-0144, ruling 6492000994] The explicit code backfill behind
 // `os migrate record-currency-codes`: rows stored before an amount switched to
 // `currencyMode: 'record'`. Same split as the roll-up backfill above.
@@ -542,7 +652,32 @@ export type {
     RecordCurrencyBackfillEngine,
     RecordCurrencyBackfillLogger,
     RecordCurrencyBackfillOptions,
+    RecordCurrencyBackfillOrganization,
+    RecordCurrencyBackfillOrganizationsRefusal,
 } from './record-currency-backfill.js';
+// [ADR-0144 D5, D7 parameter 1, Open item 8] The explicit recompute of stored
+// home amounts behind `os migrate recompute-home-amounts`: the write's own
+// projection over stored rows. Same split as the two backfills above.
+export {
+    recomputeHomeAmounts,
+    assertHomeAmountRecomputeSince,
+    formatHomeAmountRecomputeReport,
+    homeAmountRecomputeComplete,
+    HOME_AMOUNT_SKIP_REASONS,
+} from './home-amount-recompute.js';
+export type {
+    HomeAmountRecomputeReport,
+    HomeAmountRecomputeChange,
+    HomeAmountRecomputeSkip,
+    HomeAmountSkipReason,
+    HomeAmountRecomputeOrganization,
+    HomeAmountRecomputeFailure,
+    HomeAmountRecomputeAudit,
+    HomeAmountRecomputeEngine,
+    HomeAmountRecomputeLogger,
+    HomeAmountRecomputeOptions,
+} from './home-amount-recompute.js';
+export type { HomeAmountReads, HomeAmountServing, ExchangeRateRow } from './home-amount-projection.js';
 export { summaryEmptySetValue, summaryNullIsBackfillable, aggregateSummaryValue } from './summary-aggregate.js';
 export type { SummaryDescriptor, SummaryAggregateEngine } from './summary-aggregate.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';
@@ -582,7 +717,27 @@ export type {
   LifecycleFloorViolation,
 } from './lifecycle/lifecycle-service.js';
 export { parseLifecycleDuration } from './lifecycle/duration.js';
+// [#30237, ADR-0148 D3] What a host hands `ObjectQLPlugin`'s `recycleBinRetention`.
+export type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
+export type { RecycleBinRemovalOptions } from './recycle-bin/purge.js';
+export type { RecycleBinRestoreOptions, RecycleBinRestoreResult } from './recycle-bin/restore.js';
+export type { RecycleBinDeleteObservability, RecycleBinListOptions, RecycleBinListResult, RecycleBinListedEntry } from './recycle-bin/list.js';
+export { RECYCLE_BIN_LIST_DEFAULT_LIMIT, RECYCLE_BIN_LIST_MAX_LIMIT } from './recycle-bin/list.js';
+// [ADR-0148 D3, ruling A recorded in 6691358077] The one refusal of an
+// app-authored permanent delete: the engine applies it to an app-authored
+// hook's api, and the runtime's sandbox to every body's.
+export { refuseAppAuthoredPermanentDelete } from './recycle-bin/app-authored-delete.js';
 export { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
+// [#30208] The key columns of the three lifecycle map settings, served from the
+// running system; `ObjectQLPlugin` registers them with the settings service.
+export {
+  lifecycleObjectKeySource,
+  lifecycleClassKeySource,
+  type LifecycleKeySource,
+  type LifecycleKeyAnswer,
+  type LifecycleKeyOption,
+  type LifecycleKeyRegistryLike,
+} from './lifecycle/lifecycle-key-options.js';
 
 // [#4551] Read-only referential-integrity audit — the reporting half of the
 // `isSystem` exemption #4441 deliberately left in the write-path guard.
@@ -720,3 +875,26 @@ export type { AuthzInvalidationBridgeOptions } from './authz-invalidation-bridge
 // package's published surface is exactly what it was.
 export { resolveArtifactPackageOrder } from '@objectstack/core';
 export type { ArtifactPackageError } from '@objectstack/core';
+
+// [ADR-0142 D5, ruling A on organization-authored routing] What the save guard
+// of an organization's own `sys_assignment_rule` row (`@objectstack/plugin-sharing`)
+// asks of the assignment seam, so the row is judged by the paths the engine
+// evaluates it by: the table name, the CEL compile of `criteria` / `load`, and
+// the one "active member of the organization" predicate for a user target.
+export {
+  ASSIGNMENT_RULE_OBJECT,
+  assignmentExpressionRefusals,
+  organizationMemberStanding,
+} from './assignment-rules.js';
+export type { OrganizationMemberStanding } from './assignment-rules.js';
+
+// [#31715] The schema-migration lock: `ObjectQLPlugin.start()` takes it around
+// the boot's schema sync, and `@objectstack/cli` takes the same one on
+// `os migrate apply` — one name and one key, so the two exclude each other.
+export {
+  acquireSchemaMigrationLock,
+  SCHEMA_MIGRATION_LOCK_NAME,
+  SCHEMA_MIGRATION_LOCK_WAIT_MS,
+  SCHEMA_MIGRATION_PG_LOCK_KEY,
+} from './schema-migration-lock.js';
+export type { SchemaMigrationLock } from './schema-migration-lock.js';

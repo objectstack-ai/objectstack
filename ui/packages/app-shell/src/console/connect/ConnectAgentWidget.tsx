@@ -9,17 +9,38 @@
  * the deployment's default-on MCP surface into a three-minute connect flow
  * for people who don't know what MCP is:
  *
+ *   0. on top, in plain words, what a connected assistant can do (look up,
+ *      create, change and delete the records you may, run actions — always
+ *      as you), a few example requests to paste into the client, and which
+ *      one to try first to see the connection work. Once the person has
+ *      connected, that line names the assistant (or API key) and when it last
+ *      made a call instead, read from the records themselves
+ *      (`useConnectedAccess`), never derived from a click. Protocol words
+ *      (MCP, OAuth, Streamable HTTP) appear only where a client's own form
+ *      or menu asks for them,
  *   1. the environment's MCP URL (from `/discovery` → `routes.mcp`) + copy,
- *   2. per-client connect cards (claude.ai / Claude Desktop / Claude Code /
- *      Cursor deeplink / VS Code / Codex CLI) with copy-paste-ready content —
- *      OAuth is the default story on every card (the deployment is its own
- *      authorization server; you sign in as yourself),
- *   3. the portable SKILL.md download (`GET /api/v1/mcp/skill`),
+ *   2. the portable SKILL.md download (`GET /api/v1/mcp/skill`), beside the
+ *      URL, for everyone,
+ *   3. a picker that asks which client the person uses and shows only that
+ *      client's steps — Claude (claude.ai / Claude Desktop and Claude Code),
+ *      the Codex app, Cursor, then the Chinese clients WorkBuddy, Doubao Work
+ *      and QwenWork. The choice is the reader's, kept on this browser
+ *      (`CONNECT_CLIENT_PREFERENCE`); switching is one click.
+ *      OAuth is the default story for every client (the deployment is its own
+ *      authorization server; you sign in as yourself); the Chinese clients'
+ *      steps name the API-key header as the fallback for a client version
+ *      without the OAuth flow. claude.ai (web) and Doubao Work's cloud tasks
+ *      connect from their vendor's servers, so on an address that is not
+ *      public HTTPS (`deploymentReach.ts`) both are marked not available,
+ *      with the reason and what makes them available; the local clients stay
+ *      as they are,
  *   4. API-key minting for headless callers (CI, machine accounts) via the
- *      existing `POST /api/v1/keys` — shown once, copy-once. As on Setup →
- *      API Keys → Create Key, the key must be named (Create stays disabled
- *      on a blank name; nothing is minted under a default name), and an
- *      in-app confirm naming the key stands between the click and the mint.
+ *      existing `POST /api/v1/keys`, in a collapsed "Advanced: scripts and CI"
+ *      section at the bottom — no client, so not a peer of the clients.
+ *      Shown once, copy-once. As on Setup → API Keys → Create Key, the key
+ *      must be named (Create stays disabled on a blank name; nothing is
+ *      minted under a default name), and an in-app confirm naming the key
+ *      stands between the click and the mint.
  *
  * When `/discovery` does not advertise `routes.mcp` (deployment opted out via
  * `OS_MCP_SERVER_ENABLED=false`) the widget renders a disabled empty state —
@@ -42,21 +63,45 @@ import {
   CardTitle,
   Badge,
   Button,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
   Input,
+  cn,
   Skeleton,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from '@object-ui/components';
 import {
+  Ban,
   Bot,
   Check,
+  CheckCircle2,
+  ChevronRight,
   Copy,
   Download,
   ExternalLink,
   KeyRound,
   AlertCircle,
+  Sparkles,
 } from 'lucide-react';
 import { TokenStorage } from '@object-ui/auth';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { formatDateTime, useObjectTranslation } from '@object-ui/i18n';
 import { ComponentRegistry } from '@object-ui/core';
+import { notifyDataChanged } from '@object-ui/react';
+import { useWorkspacePreference } from '../../utils/workspacePreference.js';
+import {
+  CONNECT_CLIENT_IDS,
+  CONNECT_CLIENT_PREFERENCE,
+  DEFAULT_CONNECT_CLIENT,
+  isConnectClientId,
+  type ConnectClientId,
+} from './connectClientPreference.js';
+import { isPublicHttpsAddress } from './deploymentReach.js';
+import { AuthorizedAccessList } from './AuthorizedAccessList.js';
+import { useConnectedAccess, type ConnectedEntry } from './connectedAccess.js';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 
@@ -101,7 +146,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 function Snippet({ text }: { text: string }) {
   return (
     <div className="flex items-start gap-2">
-      <pre className="flex-1 overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs leading-relaxed">
+      <pre className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded-md bg-muted px-3 py-2 text-xs leading-relaxed">
         <code>{text}</code>
       </pre>
       <CopyButton text={text} />
@@ -109,11 +154,120 @@ function Snippet({ text }: { text: string }) {
   );
 }
 
+/**
+ * Form-based clients (a "new connector" dialog rather than a config file):
+ * the values to type into each field, each one copyable on its own.
+ */
+function FieldRows({ rows }: { rows: Array<{ label: string; value: string }> }) {
+  return (
+    <dl className="space-y-1.5">
+      {rows.map((row) => (
+        <div key={row.label} className="flex items-center gap-2">
+          <dt className="w-24 shrink-0 text-xs text-muted-foreground">{row.label}</dt>
+          <dd className="min-w-0 flex-1 break-all rounded-md bg-muted px-3 py-1.5 font-mono text-xs">
+            {row.value}
+          </dd>
+          <CopyButton text={row.value} />
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** The scheme and host a reader recognises (`http://localhost:3000`), not the full MCP path. */
+function addressOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * A way in this deployment's address cannot offer: what is not available,
+ * why in one sentence, and what makes it available.
+ */
+function Unavailable({ title, reason, remedy }: { title: string; reason: string; remedy: string }) {
+  return (
+    <div role="note" className="flex gap-2 rounded-md border border-dashed px-3 py-2 text-xs">
+      <Ban className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <div className="space-y-0.5">
+        <div className="font-medium">{title}</div>
+        <p className="text-muted-foreground">{reason}</p>
+        <p className="text-muted-foreground">{remedy}</p>
+      </div>
+    </div>
+  );
+}
+
+/** The example requests the capabilities card offers, in the order shown; the first is the one to try first. */
+const EXAMPLE_REQUEST_KEYS = [
+  'connectAgent.capabilities.example1',
+  'connectAgent.capabilities.example2',
+  'connectAgent.capabilities.example3',
+] as const;
+
+/**
+ * Under the example requests: once the person has connected, which assistant
+ * (or API key) and when it last made a call, the most recent call first; with
+ * nothing connected, or when that cannot be read, which request to try first.
+ * Nothing while the read is out, so the line does not flip after a moment.
+ */
+function ConnectedStatus() {
+  const { t, language } = useObjectTranslation();
+  const access = useConnectedAccess();
+  if (access.state === 'loading') return null;
+  if (access.state === 'unknown' || !access.connected) {
+    return <p className="text-xs text-muted-foreground">{t('connectAgent.capabilities.tryFirst')}</p>;
+  }
+  const [latest, ...others] = access.entries;
+  return (
+    <div role="status" className="flex gap-2 rounded-md border px-3 py-2 text-xs" data-testid="connected-status">
+      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+      <div className="space-y-0.5">
+        <p className="font-medium">{connectedSentence(latest, t)}</p>
+        <p className="text-muted-foreground">
+          {latest.lastUsedAt
+            ? t(
+                latest.lastUsedPrecision === 'hour'
+                  ? 'connectAgent.capabilities.lastCallHour'
+                  : 'connectAgent.capabilities.lastCallAt',
+                { time: formatDateTime(latest.lastUsedAt, { locale: language }) },
+              )
+            : t('connectAgent.capabilities.noCallYet')}
+        </p>
+        {others.length > 0 ? (
+          <p className="text-muted-foreground">{t('connectAgent.capabilities.moreConnected')}</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function connectedSentence(entry: ConnectedEntry, t: (key: string, options?: Record<string, unknown>) => string): string {
+  if (entry.kind === 'apiKey') {
+    return t('connectAgent.capabilities.connectedKey', { name: entry.name ?? entry.id });
+  }
+  return t('connectAgent.capabilities.connected', { name: entry.name ?? t('connectAgent.access.unnamed') });
+}
+
+/** The `mcpServers` JSON shape most clients import, with the client's own transport spelling. */
+function mcpServersJson(type: string | null, url: string): string {
+  const server = type ? { type, url } : { url };
+  return JSON.stringify({ mcpServers: { objectstack: server } }, null, 2);
+}
+
 export function ConnectAgent() {
   const { t } = useObjectTranslation();
   const [loading, setLoading] = useState(true);
   const [mcpUrl, setMcpUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [client, setClient] = useWorkspacePreference(
+    CONNECT_CLIENT_PREFERENCE,
+    'user',
+    DEFAULT_CONNECT_CLIENT,
+  );
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // API-key minting state
   const [keyName, setKeyName] = useState('');
@@ -141,6 +295,10 @@ export function ConnectAgent() {
   }, []);
 
   const skillUrl = mcpUrl ? `${mcpUrl}/skill` : null;
+  // claude.ai (web) and Doubao Work's cloud tasks connect from their vendor's
+  // servers: they reach only a public HTTPS address.
+  const cloudReachable = mcpUrl ? isPublicHttpsAddress(mcpUrl) : false;
+  const shownAddress = mcpUrl ? addressOf(mcpUrl) : '';
 
   const cursorDeeplink = useMemo(() => {
     if (!mcpUrl) return null;
@@ -148,6 +306,17 @@ export function ConnectAgent() {
     const config = btoa(JSON.stringify({ url: mcpUrl }));
     return `cursor://anysphere.cursor-deeplink/mcp/install?name=objectstack&config=${encodeURIComponent(config)}`;
   }, [mcpUrl]);
+
+  // Brand names stay as the client spells them; the two Chinese clients'
+  // names are translated (their English names differ from their Chinese ones).
+  const clientLabels: Record<ConnectClientId, string> = {
+    claude: 'Claude',
+    codex: 'Codex',
+    cursor: 'Cursor',
+    workbuddy: 'WorkBuddy',
+    doubao: t('connectAgent.doubao.title'),
+    qwenwork: t('connectAgent.qwenwork.title'),
+  };
 
   const mintKey = async (name: string) => {
     // A key is always minted under the name the administrator typed — never
@@ -169,6 +338,8 @@ export function ConnectAgent() {
       const data = json?.data ?? json;
       setMinted({ name: data?.name ?? name, key: data?.key ?? '' });
       setKeyName('');
+      // The mint bypasses the adapter, so tell the key list below it changed.
+      notifyDataChanged({ objectName: 'sys_api_key' });
     } catch (e: any) {
       setMintError(e?.message ?? String(e));
     } finally {
@@ -203,7 +374,37 @@ export function ConnectAgent() {
 
   return (
     <div className="space-y-4">
-      {/* ── MCP URL + skill download ─────────────────────────────────── */}
+      {/* ── What a connected assistant can do, and what to ask it first ── */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Sparkles className="h-4 w-4" />
+            {t('connectAgent.capabilities.title')}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-muted-foreground">{t('connectAgent.capabilities.body')}</p>
+          <div className="space-y-1.5">
+            <h4 className="text-xs font-medium text-muted-foreground">
+              {t('connectAgent.capabilities.examplesTitle')}
+            </h4>
+            <ul className="space-y-1.5">
+              {EXAMPLE_REQUEST_KEYS.map((key) => {
+                const request = t(key);
+                return (
+                  <li key={key} className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 rounded-md bg-muted px-3 py-1.5">{request}</span>
+                    <CopyButton text={request} />
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+          <ConnectedStatus />
+        </CardContent>
+      </Card>
+
+      {/* ── Connection address + skill download ──────────────────────── */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -228,35 +429,66 @@ export function ConnectAgent() {
         </CardContent>
       </Card>
 
-      {/* ── Per-client cards ─────────────────────────────────────────── */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Claude (claude.ai / Desktop)</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.claude.body')}</p>
-            <Snippet text={mcpUrl} />
-            <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
-          </CardContent>
-        </Card>
+      {/* ── Which client: one client's steps at a time ─────────────────── */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">{t('connectAgent.client.title')}</CardTitle>
+          <p className="text-sm text-muted-foreground">{t('connectAgent.client.hint')}</p>
+        </CardHeader>
+        <CardContent>
+          <Tabs
+            value={client}
+            onValueChange={(next) => {
+              if (isConnectClientId(next)) setClient(next);
+            }}
+          >
+            <TabsList className="h-auto flex-wrap justify-start">
+              {CONNECT_CLIENT_IDS.map((id) => (
+                <TabsTrigger key={id} value={id}>
+                  {clientLabels[id]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Claude Code</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.claudeCode.body')}</p>
-            <Snippet text={`claude mcp add --transport http objectstack ${mcpUrl}`} />
-            <p className="text-muted-foreground">{t('connectAgent.claudeCode.plugin')}</p>
-            <Snippet text={'claude plugin marketplace add objectstack-ai/claude-plugin'} />
-          </CardContent>
-        </Card>
+            {/* Claude: two ways in — the claude.ai / Desktop connector and the
+                Claude Code CLI. */}
+            <TabsContent value="claude" className="grid gap-4 text-sm lg:grid-cols-2">
+              <div className="min-w-0 space-y-2">
+                <h4 className="font-medium">claude.ai / Claude Desktop</h4>
+                <p className="text-muted-foreground">{t('connectAgent.claude.body')}</p>
+                <Snippet text={mcpUrl} />
+                {cloudReachable ? (
+                  <p className="text-xs text-muted-foreground">{t('connectAgent.claude.reachability')}</p>
+                ) : (
+                  <Unavailable
+                    title={t('connectAgent.unreachable.claudeWebTitle')}
+                    reason={t('connectAgent.unreachable.claudeWebReason', { address: shownAddress })}
+                    remedy={t('connectAgent.unreachable.remedy')}
+                  />
+                )}
+              </div>
+              <div className="min-w-0 space-y-2">
+                <h4 className="font-medium">Claude Code</h4>
+                <p className="text-muted-foreground">{t('connectAgent.claudeCode.body')}</p>
+                <Snippet text={`claude mcp add --transport http objectstack ${mcpUrl}`} />
+                <p className="text-muted-foreground">{t('connectAgent.claudeCode.plugin')}</p>
+                <Snippet text={'claude plugin marketplace add objectstack-ai/claude-plugin'} />
+              </div>
+            </TabsContent>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center justify-between text-base">
-              Cursor
+            <TabsContent value="codex" className="space-y-2 text-sm">
+              <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
+              <FieldRows
+                rows={[
+                  { label: t('connectAgent.fields.name'), value: 'objectstack' },
+                  { label: t('connectAgent.fields.transport'), value: 'Streamable HTTP' },
+                  { label: t('connectAgent.fields.url'), value: mcpUrl },
+                ]}
+              />
+              <p className="text-xs text-muted-foreground">{t('connectAgent.codex.hint')}</p>
+            </TabsContent>
+
+            <TabsContent value="cursor" className="space-y-2 text-sm">
               {cursorDeeplink && (
                 <Button variant="outline" size="sm" asChild>
                   <a href={cursorDeeplink}>
@@ -265,116 +497,133 @@ export function ConnectAgent() {
                   </a>
                 </Button>
               )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.cursor.body')}</p>
-            <Snippet
-              text={JSON.stringify({ mcpServers: { objectstack: { url: mcpUrl } } }, null, 2)}
-            />
-          </CardContent>
-        </Card>
+              <p className="text-muted-foreground">{t('connectAgent.cursor.body')}</p>
+              <Snippet text={mcpServersJson(null, mcpUrl)} />
+            </TabsContent>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">VS Code / Copilot</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.vscode.body')}</p>
-            <Snippet
-              text={JSON.stringify(
-                { servers: { objectstack: { type: 'http', url: mcpUrl } } },
-                null,
-                2,
-              )}
-            />
-          </CardContent>
-        </Card>
+            <TabsContent value="workbuddy" className="space-y-2 text-sm">
+              <p className="text-muted-foreground">{t('connectAgent.workbuddy.body')}</p>
+              <Snippet text={mcpServersJson('streamableHttp', mcpUrl)} />
+              <p className="text-xs text-muted-foreground">{t('connectAgent.workbuddy.hint')}</p>
+            </TabsContent>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Codex CLI</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.codex.body')}</p>
-            <Snippet text={`[mcp_servers.objectstack]\nurl = "${mcpUrl}"`} />
-          </CardContent>
-        </Card>
-
-        {/* ── API keys (headless) ──────────────────────────────────── */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <KeyRound className="h-4 w-4" />
-              {t('connectAgent.apiKey.title')}
-              <Badge variant="secondary">{t('connectAgent.apiKey.badge')}</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p className="text-muted-foreground">{t('connectAgent.apiKey.body')}</p>
-            {minted ? (
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                  {t('connectAgent.apiKey.showOnce', { name: minted.name })}
-                </p>
-                <Snippet text={minted.key} />
-                <Snippet text={`x-api-key: ${minted.key}`} />
-                <Button variant="outline" size="sm" onClick={() => setMinted(null)}>
-                  {t('connectAgent.apiKey.done')}
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Input
-                  value={keyName}
-                  onChange={(e: any) => setKeyName(e.target.value)}
-                  placeholder={t('connectAgent.apiKey.namePlaceholder')}
-                  className="h-8 max-w-56"
+            <TabsContent value="doubao" className="space-y-2 text-sm">
+              <p className="text-muted-foreground">{t('connectAgent.doubao.body')}</p>
+              <FieldRows
+                rows={[
+                  { label: t('connectAgent.fields.name'), value: 'objectstack' },
+                  { label: t('connectAgent.fields.transport'), value: 'HTTP' },
+                  { label: t('connectAgent.fields.url'), value: mcpUrl },
+                ]}
+              />
+              <p className="text-xs text-muted-foreground">{t('connectAgent.doubao.hint')}</p>
+              {!cloudReachable && (
+                <Unavailable
+                  title={t('connectAgent.unreachable.doubaoCloudTitle')}
+                  reason={t('connectAgent.unreachable.doubaoCloudReason', { address: shownAddress })}
+                  remedy={t('connectAgent.unreachable.remedy')}
                 />
-                <Button
-                  size="sm"
-                  onClick={() => setConfirmName(trimmedKeyName)}
-                  disabled={minting || !trimmedKeyName}
-                >
-                  {minting ? t('connectAgent.apiKey.minting') : t('connectAgent.apiKey.mint')}
-                </Button>
-              </div>
-            )}
-            <AlertDialog
-              open={confirmName !== null}
-              onOpenChange={(open) => {
-                if (!open) setConfirmName(null);
-              }}
-            >
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>
-                    {t('connectAgent.apiKey.confirmTitle', { name: confirmName ?? '' })}
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>{t('connectAgent.apiKey.body')}</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={() => {
-                      const name = confirmName ?? '';
-                      setConfirmName(null);
-                      void mintKey(name);
-                    }}
+              )}
+            </TabsContent>
+
+            <TabsContent value="qwenwork" className="space-y-2 text-sm">
+              <p className="text-muted-foreground">{t('connectAgent.qwenwork.body')}</p>
+              <Snippet text={mcpServersJson('streamable-http', mcpUrl)} />
+              <p className="text-xs text-muted-foreground">{t('connectAgent.qwenwork.hint')}</p>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* ── Advanced: API keys for scripts and CI, collapsed ─────────────── */}
+      <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" size="sm" className="gap-1 px-2 text-muted-foreground">
+            <ChevronRight
+              className={cn('h-4 w-4 transition-transform', advancedOpen && 'rotate-90')}
+            />
+            {t('connectAgent.advanced.title')}
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-2">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <KeyRound className="h-4 w-4" />
+                {t('connectAgent.apiKey.title')}
+                <Badge variant="secondary">{t('connectAgent.apiKey.badge')}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p className="text-muted-foreground">{t('connectAgent.apiKey.body')}</p>
+              {minted ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                    {t('connectAgent.apiKey.showOnce', { name: minted.name })}
+                  </p>
+                  <Snippet text={minted.key} />
+                  <Snippet text={`x-api-key: ${minted.key}`} />
+                  <Snippet text={`Authorization: Bearer ${minted.key}`} />
+                  <Button variant="outline" size="sm" onClick={() => setMinted(null)}>
+                    {t('connectAgent.apiKey.done')}
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={keyName}
+                    onChange={(e: any) => setKeyName(e.target.value)}
+                    placeholder={t('connectAgent.apiKey.namePlaceholder')}
+                    className="h-8 max-w-56"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => setConfirmName(trimmedKeyName)}
+                    disabled={minting || !trimmedKeyName}
                   >
-                    {t('connectAgent.apiKey.mint')}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-            {mintError && (
-              <p className="flex items-center gap-1 text-xs text-destructive">
-                <AlertCircle className="h-3.5 w-3.5" /> {mintError}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                    {minting ? t('connectAgent.apiKey.minting') : t('connectAgent.apiKey.mint')}
+                  </Button>
+                </div>
+              )}
+              <AlertDialog
+                open={confirmName !== null}
+                onOpenChange={(open) => {
+                  if (!open) setConfirmName(null);
+                }}
+              >
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      {t('connectAgent.apiKey.confirmTitle', { name: confirmName ?? '' })}
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>{t('connectAgent.apiKey.body')}</AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => {
+                        const name = confirmName ?? '';
+                        setConfirmName(null);
+                        void mintKey(name);
+                      }}
+                    >
+                      {t('connectAgent.apiKey.mint')}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+              {mintError && (
+                <p className="flex items-center gap-1 text-xs text-destructive">
+                  <AlertCircle className="h-3.5 w-3.5" /> {mintError}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* ── What can act as you: authorized assistants and API keys ──────── */}
+      <AuthorizedAccessList />
     </div>
   );
 }

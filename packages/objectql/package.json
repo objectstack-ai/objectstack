@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/objectql",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "license": "Apache-2.0",
   "description": "Isomorphic ObjectQL Engine for ObjectStack",
   "type": "commonjs",
@@ -50,6 +50,7 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
+    "@objectstack/lint": "workspace:*",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

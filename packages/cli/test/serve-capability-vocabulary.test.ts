@@ -124,6 +124,30 @@ describe('PLATFORM_CAPABILITY_PROVIDERS vs vocabulary + serve resolver (#3366)',
     }
   });
 
+  /**
+   * The reverse direction of the pin above. `serve`'s resolver stays quiet on
+   * a KNOWN token with no CAPABILITY_PROVIDERS row (it reads that as provided
+   * elsewhere: a tier block, an enterprise plugin, cloud), so an open-edition
+   * token that ships in the spec without a row here is accepted by
+   * `defineStack`, classified installable by the `os build` preflight, and then
+   * mounts nothing under `serve`, without a word. Every open-edition token is
+   * therefore either a tier token (its own block) or keyed in
+   * CAPABILITY_PROVIDERS, on the pull request that adds it.
+   */
+  it('every open-edition token has a serve mount — a provider entry or a tier, never a silent drop', () => {
+    const providerTokens = new Set(Object.keys(CAPABILITY_PROVIDERS));
+    const tierTokens = new Set(Object.keys(Serve.CAPABILITY_TO_TIER));
+    const open = Object.entries(PLATFORM_CAPABILITY_PROVIDERS).filter(([, p]) => p.edition === 'open').map(([t]) => t);
+    // Non-vacuity: the open edition is most of the vocabulary.
+    expect(open.length).toBeGreaterThan(10);
+    expect(open).toContain('push');
+    const unmounted = open.filter((token) => !providerTokens.has(token) && !tierTokens.has(token));
+    expect(
+      unmounted,
+      'open-edition tokens `serve` would accept and then mount nothing for — key each in CAPABILITY_PROVIDERS',
+    ).toEqual([]);
+  });
+
   it('tier-gated tokens carry a provider entry; ai/ai-studio are cloud-only', () => {
     for (const token of Object.keys(Serve.CAPABILITY_TO_TIER)) {
       expect(PLATFORM_CAPABILITY_PROVIDERS[token], `tier token '${token}' has no provider entry`).toBeTruthy();

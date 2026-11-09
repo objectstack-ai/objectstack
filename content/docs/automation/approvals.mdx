@@ -142,7 +142,7 @@ export const opportunityApproval: Flow = {
       config: {
         triggerType: 'record-after-update',
         objectName: 'opportunity',
-        condition: "record.amount >= 50000 && record.stage == 'proposal'",
+        condition: "record.amount != null && record.amount >= 50000 && record.stage == 'proposal'",
       },
     },
     {
@@ -455,15 +455,29 @@ What an entry that resolves to nobody leaves on the slate depends on its kind:
   decide it (the admin-override callout under
   [Acting on requests in the console](#acting-on-requests-in-the-console)).
   Beside entries that do resolve, a literal is a slot like any other, so a
-  `behavior` that needs every slot (`unanimous`) waits on it too. A `team`,
-  `position`, `department` or `org_membership_level` entry whose holder read
-  failed (`sys_team_member`, `sys_user_position`, `sys_business_unit_member`
-  or `sys_member`, and for a `department` also the `sys_business_unit` read of
-  the unit and of its child units) keeps its literal the same way. It logs `could not be
-  expanded — a directory or read-filter lookup failed` with the `error`,
-  instead of `expanded to nobody`, and never routes to the holders that
-  happened to read. An `expression` value whose `resolveAs` read failed keeps
-  its literal and logs the same line, with the `expression` source.
+  `behavior` that needs every slot (`unanimous`) waits on it too. A
+  `department` or `org_membership_level` entry whose holder read failed
+  (`sys_business_unit_member` or `sys_member`, and for a `department` also the
+  `sys_business_unit` read of the unit and of its child units) keeps its
+  literal the same way. It logs `could not be expanded — a directory or
+  read-filter lookup failed` with the `error`, instead of `expanded to
+  nobody`, and never routes to the holders that happened to read. An
+  `expression` value whose `resolveAs: 'department'` read failed keeps its
+  literal and logs the same line, with the `expression` source.
+- **A failed read behind a `team`, `position` or `queue` entry** is not an
+  empty slate, and the node does not open (ADR-0142 D6). That is a failed
+  `sys_team_member` or `sys_user_position` read, the `sys_member` read behind a
+  position, or, for a queue, a failed read of its `sys_queue` row, its
+  `sys_queue_member` rows or a member table one of its members reads. An
+  `expression` value resolved as `team` or `position`, and a cross-organization
+  read filter that fails in front of any of these entries, count the same.
+  Under every `onEmptyApprovers` value, the `fallbackApprovers` slate included,
+  the node fails with a retryable error starting `APPROVER_DIRECTORY_UNREADABLE:`
+  that names the approver and the read, and writes no request. It is not
+  opened on the rest of the slate, on the fallback or on the administrators,
+  and it is not auto-approved. Run the flow again once the directory can be
+  read. A decision on a request opened before approver snapshots existed still
+  re-reads its slate the old way, which keeps the literal.
 - **A slate left empty, or holding only literals,** goes to the node's
   `onEmptyApprovers` policy, whose four values are listed under
   [Approving across organizations](#cross-org-approvers). Under the default,
@@ -723,8 +737,9 @@ On finalization the request row gets `status: 'approved'` (or `'rejected'`),
 mirrored to the same value, and the record unlocks. The parked run resumes down
 the `approve` or `reject` branch.
 
-Statuses in full: `pending`, `approved`, `rejected`, `recalled`, `returned` —
-the `APPROVAL_STATUSES` constant in `@objectstack/spec/contracts`, which is also
+Statuses in full: `pending`, `approved`, `rejected`, `recalled`, `returned`,
+`cancelled` (the platform voided the request, for example because its record was
+deleted; `cancel_reason` on the row says why) — the `APPROVAL_STATUSES` constant in `@objectstack/spec/contracts`, which is also
 what `sys_approval_request.status` offers and what `ApprovalStatus` is derived
 from. If you add a status there, this line is a fourth copy that nothing updates
 for you.
@@ -772,6 +787,26 @@ window cancels the run; when that run is an item of a batch sign-off (a `map`
 over approval items), the recall also wakes the batch, which records the item's
 slot as the cancelled marker `{ $status: 'cancelled', $itemRunId }` and moves on
 to its next item or its end.
+
+**A request with no submitter.** A run whose trigger resolved no user (a
+schedule, time-relative or api trigger, or a record-change fired by a system
+write) opens its request with no submitter. An approver can still send it back,
+but once it is `returned` nobody can recall it: `recall` reaches a `returned`
+request for its submitter alone, never the system or the admin override, and no
+viewer sees Resubmit or Recall. Its one way out is a `resubmit` made by
+server-side code in a system context (`IApprovalService.resubmit` with
+`isSystem: true`, and an `actorId` naming the acting identity, which a system
+caller must supply). That opens the next round `pending`, again with no
+submitter, where the system or the admin override can recall it. On a flow whose
+trigger never carries a user (schedule, time-relative or api), keep the `revise`
+edge into its `approval_revise` node only when server-side code will make that
+resubmit: the window is the only shape send-back accepts, and nothing in the run
+can end it. Otherwise leave the `revise` edge off, so send-back is refused and
+approvers reject instead. A record-change flow has no submitter only when a
+system write fired it; such a round, once sent back, waits in the window for
+that server-side resubmit, or a platform operator's
+`POST /api/v1/automation/:name/runs/:runId/cancel` discards the run and leaves
+the request `returned`.
 
 The window is deliberately **not** an ordinary `wait`: `resubmit` is what
 authorizes (submitter-only), orders (latest round) and records (an audit row) the

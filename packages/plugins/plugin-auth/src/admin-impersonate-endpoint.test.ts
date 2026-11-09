@@ -78,15 +78,15 @@ const makeManager = (engine: any) =>
     plugins: { admin: true },
   } as any);
 
-const signUp = (manager: AuthManager, email: string, name: string) => {
+const signUp = async (manager: AuthManager, email: string, name: string) => {
   // [#11739] default posture invite_only: fixture users beyond the first
   // enter through the invitation carve-out (see audience-gate-test-support).
-  inviteForAudienceGate(manager, email);
+  const invitationId = await inviteForAudienceGate(manager, email);
   return manager.handleRequest(
     new Request(`${BASE}/sign-up/email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: PASSWORD, name }),
+      body: JSON.stringify({ email, password: PASSWORD, name, invitationId }),
     }),
   );
 };
@@ -281,6 +281,58 @@ describe.concurrent('ADR-0068 D2 — /admin/impersonate-user admits the ObjectSt
     expect(impersonations).toHaveLength(1);
     expect(impersonations[0].user_id).toBe(targetId);
     expect(impersonations[0].impersonated_by).toBe(adminId);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// #30851 — an identity write made from the impersonation session names the
+// administrator beside the impersonated user it is credited to. The engine's
+// `buildProvenance` copies `impersonatedBy` onto the hook context, where the
+// audit writer records it as `sys_audit_log.metadata.impersonated_by`.
+describe.concurrent('an identity write made while impersonating names the administrator', () => {
+  /** Every `sys_user` update's context, as the better-auth adapter hands it to the engine. */
+  const recordUserWrites = (engine: any) => {
+    const writes: Array<{ data: any; context: any }> = [];
+    const update = engine.update.bind(engine);
+    engine.update = async (name: string, data: any, options?: any) => {
+      if (name === 'sys_user') writes.push({ data, context: options?.context });
+      return update(name, data, options);
+    };
+    return writes;
+  };
+  const updateUser = (manager: AuthManager, bearer: string, body: Record<string, unknown>) =>
+    manager.handleRequest(
+      new Request(`${BASE}/update-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', authorization: `Bearer ${bearer}` },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  it('a rename from the impersonation session carries the administrator, read off the session and not the body', async () => {
+    const { engine, manager, adminBearer, adminId, targetId } = await arrange();
+    const writes = recordUserWrites(engine);
+    const started = await impersonate(manager, adminBearer, targetId);
+    expect(started.status).toBe(200);
+
+    const renamed = await updateUser(manager, bearerFrom(started), { name: 'Renamed by admin', impersonatedBy: 'usr_forged' });
+    expect(renamed.status).toBe(200);
+    const write = writes.find((w) => w.data?.name === 'Renamed by admin');
+    expect(write, JSON.stringify(writes)).toBeDefined();
+    expect(write!.context).toMatchObject({ isSystem: true, attributedUserId: targetId, impersonatedBy: adminId });
+    expect(write!.context.userId, 'the write still authorizes as the system').toBeUndefined();
+  });
+
+  it("CONTROL: the administrator's own rename names no administrator", async () => {
+    const { engine, manager, adminBearer, adminId } = await arrange();
+    const writes = recordUserWrites(engine);
+
+    const renamed = await updateUser(manager, adminBearer, { name: 'Renamed self' });
+    expect(renamed.status).toBe(200);
+    const write = writes.find((w) => w.data?.name === 'Renamed self');
+    expect(write, JSON.stringify(writes)).toBeDefined();
+    expect(write!.context).toMatchObject({ isSystem: true, attributedUserId: adminId });
+    expect('impersonatedBy' in write!.context).toBe(false);
   });
 });
 

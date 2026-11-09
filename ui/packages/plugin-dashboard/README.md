@@ -412,7 +412,7 @@ into each bound widget's inline query (`AND`-combined with the widget's own
   "type": "dashboard",
   "dateRange": {
     "field": "created_at",          // default binding target
-    "defaultRange": "last_30_days", // today | this_week | … | last_90_days | custom
+    "defaultRange": "last_30_days", // today | this_week | … | last_90_days | next_month | next_quarter | next_30_days | custom
     "allowCustomRange": true        // offer a custom from/to calendar
   },
   "globalFilters": [

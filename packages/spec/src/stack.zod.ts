@@ -11,13 +11,14 @@ import {
   unmanagedInstallValueCarries,
 } from './kernel/unmanaged-install';
 import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
-import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
+import { findNamespaceObjectNameClashes, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
 import { StackServerConfigSchema } from './system/stack-server.zod';
 import { StackEmailConfigSchema } from './system/email-config.zod';
 import { StackSmsConfigSchema } from './system/sms-config.zod';
+import { PushServiceConfigSchema } from './system/push-config.zod';
 import { DevLoginSchema } from './system/dev-login.zod';
 import { DemoStaffSchema } from './system/demo-staff.zod';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from './system/constants/platform-object-names';
@@ -40,7 +41,7 @@ import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
-import { InlineGridColumnSchema } from './data/field.zod';
+import { InlineGridColumnSchema, summaryFunctionReadsField, VALUE_DOMAIN_FIELD_TYPES } from './data/field.zod';
 import { AUDIT_FIELD_DEFS } from './data/injected-system-column-provenance';
 import { pageComponentSlotPositions } from './ui/component.zod';
 import { SeedSchema } from './data/seed.zod';
@@ -1132,6 +1133,24 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     ),
 
   /**
+   * Mobile push configuration — {@link PushServiceConfigSchema}, the transport
+   * selection `PushServicePlugin` (`@objectstack/service-push`) is built from.
+   * Read by `resolvePushCapabilityArg` when `objectstack serve` / `bootStack`
+   * mount the `push` capability (`requires: ['push']`); nothing reads it
+   * without that token. Secrets are named by `credentialRef` (ADR-0143 D3),
+   * never written inline: the stack definition is compiled into the published
+   * artifact. Absent reads as `{}`, the hosted relay, which sends once the
+   * server is bound to the cloud; the boot refuses it only on a deployment that
+   * declared it has no control plane (`OS_CLOUD_URL=off`).
+   */
+  push: PushServiceConfigSchema.optional()
+    .describe(
+      'Mobile push configuration, read when requires names push: transport direct with apns and/or fcm blocks, each '
+      + 'naming its secret by credentialRef (never inline). Absent or transport relay is the hosted relay, which sends '
+      + 'once the server is bound to the cloud and is refused at boot only when OS_CLOUD_URL declares no control plane',
+    ),
+
+  /**
    * ObjectAI: Artificial Intelligence Layer
    *
    * Three-tier composition (Agent → Skill → Tool) aligned with Salesforce
@@ -1298,8 +1317,9 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * using the specified conflict resolution strategy.
    * 
    * Uses the standard SeedSchema which supports:
-   * - `externalId`: Idempotency key for upsert matching (default: 'name')
-   * - `mode`: Conflict resolution (upsert, insert, ignore, replace)
+   * - `externalId`: Idempotency key that matches a record to an existing row (default: 'name')
+   * - `mode`: Conflict resolution (default `ignore`, create-only; `upsert` for
+   *   reference data a replay keeps current; `insert`, `update`, `replace`)
    * - `env`: Environment scoping (prod, dev, test)
    * 
    * @example
@@ -1307,7 +1327,6 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * data: [
    *   {
    *     object: 'account',
-   *     mode: 'upsert',
    *     externalId: 'name',
    *     records: [
    *       { name: 'Acme Corp', type: 'customer', industry: 'technology' },
@@ -1673,12 +1692,13 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   // #5051: the last key still on last-wins; aligned here, see the note above.
   i18n: 'single',
   // Deployment configuration the boot reads off the top level — one product
-  // name, one mail configuration and one SMS configuration per booted stack,
-  // so two stacks declaring different ones is a conflict to name, like
-  // `api` / `server`.
+  // name, one mail configuration, one SMS configuration and one push
+  // configuration per booted stack, so two stacks declaring different ones is
+  // a conflict to name, like `api` / `server`.
   appName: 'single',
   email: 'single',
   sms: 'single',
+  push: 'single',
 } as const satisfies Record<StackDefinitionKey, ComposeDisposition>);
 
 /**
@@ -2278,6 +2298,13 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
       'no kernel, runtime or service ever called `onDisable` (the uninvoked lifecycle '
       + 'family is retired), so a value written here goes nowhere. Do teardown inside the '
       + 'resources `onEnable` acquires.',
+    // Never a declared key. The platform's collection registries listed it until
+    // its listings were retired (ADR-0049), which is what a reader copies it from.
+    ragPipelines:
+      'there is no top-level `ragPipelines` collection — a RAG pipeline was never a metadata '
+      + 'type a stack can declare, and the registries that listed one were retired (ADR-0049). '
+      + 'Delete the key. Retrieval sources are described by the knowledge-source schemas in '
+      + '`@objectstack/spec/ai` and indexed by the knowledge service the deployment installs.',
   },
 }, {
   /** System Configuration */
@@ -2519,14 +2546,44 @@ export interface DefineStackOptions {
 function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
   const ns = config.manifest?.namespace;
-  if (!ns || !config.objects) return errors;
-
-  // Single source of the per-object prefix rule — shared verbatim with the
-  // runtime publish enforcement in MetadataManager.publishPackage.
-  for (const obj of config.objects) {
-    const err = validateObjectNamespacePrefix(obj.name, ns);
-    if (err) errors.push(err);
+  if (ns && config.objects) {
+    // Single source of the per-object prefix rule — shared verbatim with the
+    // runtime publish enforcement in MetadataManager.publishPackage.
+    for (const obj of config.objects) {
+      const err = validateObjectNamespacePrefix(obj.name, ns);
+      if (err) errors.push(err);
+    }
   }
+
+  // [ADR-0150 D6, child K] …and a namespace never equals an object name, in
+  // either direction, and no object is short-named `custom` (`NS_custom`, the
+  // namespace the ADR-0146 paired package takes): P's predicate, the one the
+  // install door, the publish doors and `os validate` / `os build` ask, over
+  // every namespace and object this ONE artifact holds — its own manifest and
+  // top-level objects, and each `packages[]` body's. ⚠️ Bound: a declared
+  // dependency carries an id and a range, never a namespace, so packages
+  // outside this artifact are judged at install, not here.
+  const namespaces: Array<{ namespace: string; packageId?: string }> = [];
+  const objects: Array<{ name: string; namespace?: string; packageId?: string }> = [];
+  const hold = (body: Record<string, unknown> | undefined, list: unknown): void => {
+    const namespace = typeof body?.namespace === 'string' && body.namespace !== '' ? body.namespace : undefined;
+    const packageId = typeof body?.id === 'string' && body.id !== '' ? body.id : undefined;
+    if (namespace && !namespaces.some((n) => n.namespace === namespace)) {
+      namespaces.push({ namespace, ...(packageId ? { packageId } : {}) });
+    }
+    for (const obj of Array.isArray(list) ? list : []) {
+      const name = isRecord(obj) && typeof obj.name === 'string' && obj.name !== '' ? obj.name : undefined;
+      if (!name || objects.some((o) => o.name === name)) continue;
+      objects.push({ name, ...(namespace ? { namespace } : {}), ...(packageId ? { packageId } : {}) });
+    }
+  };
+  for (const entry of Array.isArray((config as { packages?: unknown }).packages)
+    ? (config as { packages: unknown[] }).packages : []) {
+    const body = isRecord(entry) && isRecord(entry.manifest) ? entry.manifest : undefined;
+    hold(body, body?.objects);
+  }
+  hold(config.manifest as Record<string, unknown> | undefined, config.objects);
+  for (const clash of findNamespaceObjectNameClashes({ namespaces, objects })) errors.push(clash.message);
   return errors;
 }
 
@@ -4329,6 +4386,33 @@ function lookupAutofillTypeMismatch(
 }
 
 /**
+ * The field map the stack's two-object cross-checks resolve against: each
+ * object's `fields` from the stack's own `objects`, merged with its
+ * `objectExtensions` entries by `extend`, plus `declared`, the names the stack
+ * DECLARES. An object known only through an extension has its owner's fields
+ * elsewhere, so its merged map holds the extension's fields alone; a check
+ * that judges another field's pointer INTO an object resolves only a
+ * `declared` one, or it would refuse what the owner declares.
+ */
+function stackObjectFields(config: ObjectStackDefinition): {
+  fieldsByObject: Map<string, Record<string, unknown>>;
+  declared: Set<string>;
+} {
+  const fieldsByObject = new Map<string, Record<string, unknown>>();
+  const declared = new Set<string>();
+  for (const obj of config.objects ?? []) {
+    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
+    declared.add(obj.name);
+    fieldsByObject.set(obj.name, { ...fieldsByObject.get(obj.name), ...obj.fields });
+  }
+  for (const ext of (config as { objectExtensions?: unknown }).objectExtensions as unknown[] ?? []) {
+    if (!isRecord(ext) || typeof ext.extend !== 'string' || !isRecord(ext.fields)) continue;
+    fieldsByObject.set(ext.extend, { ...fieldsByObject.get(ext.extend), ...ext.fields });
+  }
+  return { fieldsByObject, declared };
+}
+
+/**
  * [#27945] Each `lookupAutofill` pair's `source` names a field of the object
  * the lookup references, which the picked record carries, and whose value the
  * pair's target can hold. A source the referenced object does not declare
@@ -4344,28 +4428,23 @@ function lookupAutofillTypeMismatch(
  * {@link lookupAutofillTypeMismatch}.
  *
  * Resolution is against the stack's own `objects`, merged with its
- * `objectExtensions` by name: a referenced object this stack does not declare
- * is not judged — an unresolved source is not a wrong one, the stance of
- * {@link collectHydratedInlineColumnErrors}. An undeclared source that is one
- * of the audit-provenance columns the platform injects (`created_at`, …) is
- * not judged either: every record carries it without a declaration.
+ * `objectExtensions` by name ({@link stackObjectFields}): a referenced object
+ * this stack does not declare is not judged — an unresolved source is not a
+ * wrong one, the stance of {@link collectHydratedInlineColumnErrors} — nor is
+ * one it knows only through an extension, whose owner's fields live
+ * elsewhere, so its merged map holds the extension's fields alone. An
+ * undeclared source that is one of the audit-provenance columns the platform
+ * injects (`created_at`, …) is not judged either: every record carries it
+ * without a declaration.
  */
 function collectLookupAutofillErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
-  const fieldsByObject = new Map<string, Record<string, unknown>>();
-  for (const obj of config.objects ?? []) {
-    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
-    fieldsByObject.set(obj.name, { ...fieldsByObject.get(obj.name), ...obj.fields });
-  }
-  for (const ext of (config as { objectExtensions?: unknown }).objectExtensions as unknown[] ?? []) {
-    if (!isRecord(ext) || typeof ext.extend !== 'string' || !isRecord(ext.fields)) continue;
-    fieldsByObject.set(ext.extend, { ...fieldsByObject.get(ext.extend), ...ext.fields });
-  }
+  const { fieldsByObject, declared } = stackObjectFields(config);
 
   for (const [objectName, fields] of fieldsByObject) {
     for (const [fieldName, field] of Object.entries(fields)) {
       if (!isRecord(field) || !Array.isArray(field.lookupAutofill) || typeof field.reference !== 'string') continue;
-      const referenced = fieldsByObject.get(field.reference);
+      const referenced = declared.has(field.reference) ? fieldsByObject.get(field.reference) : undefined;
       if (!referenced) continue;
       field.lookupAutofill.forEach((pair: unknown, i: number) => {
         if (!isRecord(pair) || typeof pair.source !== 'string') return;
@@ -4396,6 +4475,215 @@ function collectLookupAutofillErrors(config: ObjectStackDefinition): string[] {
           );
         }
       });
+    }
+  }
+  return errors;
+}
+
+/** A record-mode `currencyField` path `PARENT_FIELD.CODE_FIELD`, split; `undefined` for any other pointer. */
+function recordCurrencyPathOf(field: unknown): { via: string; code: string } | undefined {
+  if (!isRecord(field) || !isRecord(field.currencyConfig)) return undefined;
+  const { currencyMode, currencyField } = field.currencyConfig;
+  if (currencyMode !== 'record' || typeof currencyField !== 'string') return undefined;
+  const segments = currencyField.split('.');
+  if (segments.length !== 2 || segments.some((s) => !/^[a-z_][a-z0-9_]*$/.test(s))) return undefined;
+  return { via: segments[0]!, code: segments[1]! };
+}
+
+/**
+ * Why a child amount that follows no parent cannot be the subject of a
+ * `record` roll-up, and what to declare instead: the end of the refusal
+ * {@link collectRecordCurrencyPathErrors} (c) prints.
+ */
+function unfollowedAmountReason(childObject: string, childField: string, def: unknown): string {
+  const named = `'${childObject}.${childField}'`;
+  const config = isRecord(def) && isRecord(def.currencyConfig) ? def.currencyConfig : undefined;
+  if (config?.currencyMode === 'record' && typeof config.currencyField === 'string') {
+    return `${named} is in each '${childObject}' record's own currency (the code in '${config.currencyField}'), so the `
+      + 'roll-up would add amounts in several currencies. Make the child amount follow this record '
+      + '(`currencyField: \'MASTER_DETAIL_FIELD.CODE_FIELD\'`), or roll up a stored home-currency amount of the child '
+      + 'instead and declare that currency.';
+  }
+  if (config?.currencyMode === 'fixed' && typeof config.defaultCurrency === 'string') {
+    return `${named} is fixed to ${config.defaultCurrency}, so the total is in ${config.defaultCurrency} whatever this `
+      + `record's code holds. Declare \`currencyConfig: { currencyMode: 'fixed', defaultCurrency: '${config.defaultCurrency}' }\` `
+      + 'on the summary instead.';
+  }
+  return `${named} declares no currency that follows this record, so the total is not in the currency this record's `
+    + 'code holds. Delete `currencyConfig` on the summary, or declare `currencyMode: \'fixed\'` if every amount it reads '
+    + 'is in one currency.';
+}
+
+/**
+ * [ADR-0144 D2 and D6, amended 2026-11-09 by #31743, ruling A recorded in
+ * 6739066323] The two halves of a child that follows its parent's currency
+ * that need both objects, judged where the stack holds both — the
+ * {@link collectLookupAutofillErrors} stance, for the same reason.
+ *
+ * (a) A record-mode amount whose `currencyField` is the path
+ * `PARENT_FIELD.CODE_FIELD` names, as its second segment, a field of the
+ * object `PARENT_FIELD` references that holds an ISO 4217 code: a
+ * `VALUE_DOMAIN_FIELD_TYPES` field declaring
+ * `valueDomain: 'iso_4217_currency'` (the amended D2 note: "its second names,
+ * on that field's target object, a code field of the kind the first bullet
+ * requires"). A field that is not there, or holds no code, would leave the
+ * amount with a currency no write checks. The first segment is the amount's
+ * own object's to judge (`refuseDishonestRecordCurrencyField`,
+ * `data/object.zod.ts`), which has passed by the time this pass runs.
+ *
+ * (b) A `summary` that rolls up (`sum`, `min`, `max`, `avg`) such a
+ * following child amount through the very `master_detail` the amount's path
+ * starts with is in the parent's currency (D6, amended: "single-currency by
+ * construction, and is admitted in the parent's currency"), and says so the
+ * way an amount does: `currencyConfig: { currencyMode: 'record',
+ * currencyField: CODE_FIELD }`, naming the parent's own code field, the one
+ * the children follow. A roll-up without that declaration would show the
+ * parent's money as a bare number; one naming another code field would show
+ * it in the wrong currency.
+ *
+ * (c) A `summary` (`sum`, `min`, `max`, `avg`) declaring
+ * `currencyMode: 'record'` that is NOT that admitted roll-up is refused: the
+ * child amount it reads follows no parent (its own code field, a `fixed`
+ * code, or none), follows another object's currency, or follows this one
+ * through a `master_detail` other than the relation the roll-up is written
+ * through. The amended D6 note admits the roll-up "only through that very
+ * `master_detail` field"; every other roll-up keeps D6's first bullet, so a
+ * `record` declaration there names a currency the total is not in. This is
+ * the narrowing of the spec seat's claim amend 1 on #31958 (record
+ * 6746006322); the half one object can see (a `count` roll-up, `dynamic`, a
+ * `record` roll-up with no child amount) is the object door's
+ * (`refuseUnadmittedSummaryCurrency`, `data/object.zod.ts`). A roll-up that
+ * declares `fixed`, or no `currencyConfig`, over a child amount with its own
+ * code field is not judged here: D6's first bullet refuses it at runtime
+ * registration, and this pass does not repeat it.
+ *
+ * Resolution is against the stack's own `objects`, merged with its
+ * `objectExtensions` by name; an object this stack does not declare is not
+ * judged, nor is a parent it knows only through an extension (whose owner's
+ * fields live elsewhere), nor, for (c), a child it knows only through an
+ * extension or a child field it does not hold; and neither is a roll-up whose
+ * relationship field is neither written nor the child's one relation back to
+ * the parent.
+ */
+function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  // A parent known only through an `objectExtensions` entry has its owner's
+  // fields elsewhere: judging a code field or a roll-up against it would refuse
+  // what the owner declares. Such a parent is skipped (not in `declared`).
+  const { fieldsByObject, declared } = stackObjectFields(config);
+  const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
+  const isCodeField = (f: unknown): boolean =>
+    isRecord(f) && typeof f.type === 'string' && VALUE_DOMAIN_FIELD_TYPES.has(f.type) && f.valueDomain === 'iso_4217_currency';
+  const codeFieldsOf = (fields: Record<string, unknown>): string =>
+    ((names) => (names.length > 0
+      ? `candidates: ${names.map((n) => `'${n}'`).join(', ')}`
+      : 'it has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`'))(
+      Object.keys(fields).filter((k) => isCodeField(fields[k])));
+
+  for (const [objectName, fields] of fieldsByObject) {
+    for (const [fieldName, field] of Object.entries(fields)) {
+      // (a) The parent holds the code the path names.
+      const followed = recordCurrencyPathOf(field);
+      if (followed !== undefined) {
+        const via = hasOwnKey(fields, followed.via) ? fields[followed.via] : undefined;
+        const parentName = isRecord(via) && via.type === 'master_detail' && typeof via.reference === 'string' ? via.reference : undefined;
+        const parent = parentName === undefined || !declared.has(parentName) ? undefined : fieldsByObject.get(parentName);
+        if (parentName !== undefined && parent !== undefined) {
+          const where = `Object '${objectName}' field '${fieldName}' currencyConfig.currencyField`;
+          const code = hasOwnKey(parent, followed.code) ? parent[followed.code] : undefined;
+          if (!isRecord(code)) {
+            errors.push(
+              `${where}: '${followed.via}.${followed.code}' follows '${parentName}', the object the master_detail `
+                + `'${followed.via}' references, and '${parentName}' declares no field '${followed.code}', so the amount `
+                + `has no code to follow. Name the field of '${parentName}' that holds its ISO 4217 code — `
+                + `${codeFieldsOf(parent)}.`,
+            );
+          } else if (!isCodeField(code)) {
+            errors.push(
+              `${where}: '${followed.via}.${followed.code}' follows '${parentName}.${followed.code}', a `
+                + `'${String(code.type)}' field that does not hold an ISO 4217 code, so a write could store any value as `
+                + `the currency. A followed code field is a ${codeTypes} field declaring \`valueDomain: 'iso_4217_currency'\` `
+                + `on '${parentName}' — ${codeFieldsOf(parent)}.`,
+            );
+          }
+        }
+      }
+
+      // (b) A roll-up through that very master_detail says it is in the parent's currency.
+      if (!isRecord(field) || field.type !== 'summary' || !isRecord(field.summaryOperations)) continue;
+      if (!declared.has(objectName)) continue;
+      const ops = field.summaryOperations;
+      if (typeof ops.object !== 'string' || typeof ops.field !== 'string' || typeof ops.function !== 'string' || !summaryFunctionReadsField(ops.function)) continue;
+      const child = fieldsByObject.get(ops.object);
+      if (child === undefined) continue;
+      const summaryCurrency = isRecord(field.currencyConfig) ? field.currencyConfig : undefined;
+      // (c) A `record` roll-up that is NOT the admitted one (#31958): judged only
+      // against a child this stack declares and a child field it holds, so an
+      // unresolved or extension-only child is skipped, as (a) and (b) skip one.
+      const childField = hasOwnKey(child, ops.field) ? child[ops.field] : undefined;
+      const judgeRecord = summaryCurrency?.currencyMode === 'record' && declared.has(ops.object) && childField !== undefined;
+      const refuseRecord = (why: string): void => {
+        errors.push(
+          `Object '${objectName}' field '${fieldName}' currencyConfig: \`currencyMode: 'record'\` on a summary is admitted `
+            + `only for a roll-up through a master_detail whose child amounts follow this record's currency through that `
+            + `very field (\`currencyField: 'MASTER_DETAIL_FIELD.CODE_FIELD'\` on the child amount). This summary rolls up `
+            + `${String(ops.function)}(${ops.object}.${ops.field}), and ${why}`,
+        );
+      };
+      const amount = recordCurrencyPathOf(childField);
+      if (amount === undefined) {
+        if (judgeRecord) refuseRecord(unfollowedAmountReason(ops.object, ops.field, childField));
+        continue;
+      }
+      const amountVia = child[amount.via];
+      if (!isRecord(amountVia) || amountVia.type !== 'master_detail' || amountVia.reference !== objectName) {
+        if (judgeRecord && isRecord(amountVia) && amountVia.type === 'master_detail' && typeof amountVia.reference === 'string') {
+          refuseRecord(
+            `'${ops.object}.${ops.field}' follows the currency of '${amountVia.reference}' through '${amount.via}', not `
+              + `this record's, so the total is in no currency '${objectName}' holds. Delete \`currencyConfig\` on `
+              + `'${fieldName}', or declare \`currencyMode: 'fixed'\` if every amount is in one currency.`,
+          );
+        }
+        continue;
+      }
+      const backRelations = Object.keys(child).filter((k) => {
+        const f = child[k];
+        return isRecord(f) && (f.type === 'lookup' || f.type === 'master_detail') && f.reference === objectName;
+      });
+      const relation = typeof ops.relationshipField === 'string'
+        ? ops.relationshipField
+        : backRelations.length === 1 ? backRelations[0] : undefined;
+      if (relation !== amount.via) {
+        // A relation this pass cannot resolve (no `relationshipField`, several
+        // relations back) is skipped; a written other one is refused.
+        if (judgeRecord && relation !== undefined) {
+          refuseRecord(
+            `it rolls up through '${relation}', while '${ops.object}.${ops.field}' follows its parent's currency through `
+              + `'${amount.via}': the rows it totals hang off this record through another relation, so each may be in `
+              + `another parent's currency. Roll up through \`relationshipField: '${amount.via}'\`, or delete `
+              + `\`currencyConfig\` on '${fieldName}'.`,
+          );
+        }
+        continue;
+      }
+      // A path whose code the parent does not hold is (a)'s finding, told once at the amount.
+      if (!isCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
+      if (summaryCurrency?.currencyMode === 'record' && summaryCurrency.currencyField === amount.code) continue;
+      const spelling = `\`currencyConfig: { currencyMode: 'record', currencyField: '${amount.code}' }\``;
+      errors.push(
+        `Object '${objectName}' field '${fieldName}' currencyConfig: the summary rolls up ${String(ops.function)}`
+          + `(${ops.object}.${ops.field}) through the master_detail '${amount.via}', and '${ops.object}.${ops.field}' `
+          + `follows this record's currency ('${amount.via}.${amount.code}'), so the total is in the currency `
+          + `'${objectName}.${amount.code}' holds. `
+          + (summaryCurrency?.currencyMode === 'record' && typeof summaryCurrency.currencyField === 'string'
+            ? `It names '${String(summaryCurrency.currencyField)}' instead, and would show in another currency. `
+            : summaryCurrency?.currencyMode === 'fixed'
+              ? `It declares \`currencyMode: 'fixed'\`, and would show in that one currency whatever the parent's is. `
+              : summaryCurrency !== undefined
+                ? 'It declares `currencyMode: \'dynamic\'`, and would show in the tenant default currency whatever the parent\'s is. '
+                : 'It does not say so, and would show as a bare number. ')
+          + `Declare ${spelling} on '${fieldName}'.`,
+      );
     }
   }
   return errors;
@@ -5160,6 +5448,11 @@ function validateCrossReferences(
   // Validate each lookup-pick autofill source against the referenced object
   // (#27945) — the half the object's own parse cannot see.
   errors.push(...collectLookupAutofillErrors(config));
+
+  // Validate a record-mode `currencyField` path and the roll-ups over it
+  // against the parent object (ADR-0144 D2 and D6, amended) — the halves the
+  // object's own parse cannot see.
+  errors.push(...collectRecordCurrencyPathErrors(config));
 
   // Validate seed data → object references. ARTIFACT-SCOPED (#18202).
   errors.push(...collectSeedDataObjectErrors(config, artifactScope));
@@ -6026,7 +6319,8 @@ const warnedEmailTemplateFloors = new Set<string>();
  * `IEmailService.sendTemplate` reads one row at one tag exactly. For a call
  * that NAMES a locale, over the built-in registry template loader, it folds
  * that locale against the bundle's tags (`resolveBundleLocale`: exact,
- * case-insensitive, base language, variant expansion), then the stack's
+ * case-insensitive, platform table language, base language, variant
+ * expansion), then the stack's
  * declared fallback locale (`i18n.fallbackLocale`, else `defaultLocale`) the
  * same way, then the literal `en-US` (#28880); a replacement `TemplateLoader`
  * matches the named tag exactly and retries only `en-US`. So a bundle with no

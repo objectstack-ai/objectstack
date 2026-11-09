@@ -5,9 +5,9 @@
 // records, GENERATED from the records themselves (#26076, maintainer ruling A,
 // 门禁不加).
 //
-//   node scripts/adr-index.mjs               # (re)write docs/adr/README.md from the records
+//   node scripts/adr-index.mjs               # (re)write docs/adr/README.md from the records; exit 1 when that dropped a field
 //   node scripts/adr-index.mjs --check       # exit 1 when the committed index is stale or a record is unreadable
-//   node scripts/adr-index.mjs --report      # REPORT-ONLY (the lint ADR step's call): `::warning::` lines, exit 0 always
+//   node scripts/adr-index.mjs --report      # the lint ADR step's call: `::warning::` lines, exit 0 except on a DROPPED field
 //   node scripts/adr-index.mjs --json        # the parsed registry, machine-readable, on stdout
 //   node scripts/adr-index.mjs --self-test   # verify the generator itself
 //
@@ -52,9 +52,19 @@
 //     registry's.
 //   - REPORT-ONLY in CI. The lint ADR step calls `--report`, which prints
 //     `::warning::` annotations for a stale index or an unreadable record and
-//     exits 0 whatever it finds; `--check` is the gate's spelling, kept for the
-//     day a maintainer names one (pm-dispatch ④: 新增门禁默认否, and the ruling
-//     said so explicitly).
+//     exits 0 on them; `--check` is the gate's spelling, kept for the day a
+//     maintainer names one (pm-dispatch ④: 新增门禁默认否, and the ruling said
+//     so explicitly). ONE finding exits non-zero in every mode, `--report`
+//     included: a DROPPED field (#30916). The index carried a Date, Supersedes
+//     or Superseded-by cell and the regeneration empties it — not a stale index
+//     but a fact the registry already published going missing with nothing
+//     else to say so. That hardens the existing check; it adds no gate.
+//   - The header is a BLOCK, not a line window (#30916): every line before the
+//     first heading that follows the title. It used to be the first 40 lines,
+//     so a longer status note pushed ADR-0146's `Supersedes` line past the
+//     window and the regenerated index emptied its cell while every mode still
+//     exited 0. A `**Key**:` line under a section heading is body prose, never
+//     a header field.
 //   - `docs/adr/PRIORITIZATION.md`, the retired review that used to sit in the
 //     registry, left when this index arrived; the one rule it still carried —
 //     status hygiene on landing an implementation — lives in `CONVENTIONS`
@@ -70,7 +80,7 @@
 // the lane the maintainer kept advisory, and must not go quiet either.
 
 import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
 export const ADR_DIR = 'docs/adr';
@@ -99,8 +109,14 @@ export const STATUS_KEYWORDS = Object.freeze([
 ]);
 /** The keyword column of a record whose status line is missing or whose value names no keyword. */
 export const UNPARSED = 'Unparsed';
-/** A record's header: the lines read for `**Key**:` fields (date, supersedes, superseded by). */
-const HEADER_WINDOW = 40;
+/** The index columns a record's header fields fill, by cell position in a record row. Emptying one is a DROPPED field (#30916). */
+const FIELD_COLUMNS = Object.freeze([
+  [3, 'Date'],
+  [4, 'Supersedes'],
+  [5, 'Superseded by'],
+]);
+/** What a field cell holds when the record states nothing. */
+const EMPTY_CELL = '—';
 /** How far into a status value a keyword may sit — `The DECISION is Accepted …` counts, a keyword in sentence three does not. */
 const KEYWORD_WINDOW = 80;
 const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
@@ -113,10 +129,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'supersession references are extracted, not invented': 8,
   'shared numbers and versions group side by side, registries never merge': 6,
   'rendering is deterministic and lists both registries': 7,
-  'drift verdicts: --check reds, --report never does': 4,
+  'drift verdicts: --check reds, --report reds only on a dropped field': 5,
+  'the header block is read whole, up to the first heading — no line window (#30916)': 6,
+  'dropped fields: a regeneration that empties a cell the index carried exits non-zero (#30916)': 7,
   'Live tree: the generator reads the real registry (the records themselves are --report\'s business)': 4,
 });
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 let selfTestReachedVerdict = false;
 
@@ -134,6 +152,34 @@ export function headerFields(lines) {
     if (m) out.push({ key: m[1].trim(), value: m[2].trim() });
   }
   return out;
+}
+
+/**
+ * A record's header block: every line before the first heading that follows
+ * the title — the whole file when no heading does. No line window (#30916): a
+ * window counts lines, so a status note grown past it silently drops the
+ * fields under it, and a header has no length a window could promise.
+ * @param {string[]} lines
+ * @returns {string[]}
+ */
+export function headerBlock(lines) {
+  const title = lines.findIndex((l) => /^#[ \t]+\S/.test(l));
+  const end = lines.findIndex((l, i) => i > title && /^#{1,6}[ \t]/.test(l));
+  return end < 0 ? lines : lines.slice(0, end);
+}
+
+/**
+ * A header blockquote that NOTIFIES a supersession: `superseded` stated inside
+ * a bold span (`> **🔶 Cloud-owned — superseded in part by cloud ADR-0025 …**`,
+ * `… is **superseded on styling**`). A blockquote that only mentions the word
+ * in plain prose is not one: ADR-0126's amendment note says a DRAFT of
+ * ADR-0131 "marked this record Superseded", which the 40-line window used to
+ * hide by accident (line 44) and a whole-block read must not turn into a
+ * Superseded-by cell (#30916).
+ * @param {string} line
+ */
+export function isSupersessionNotice(line) {
+  return /^>[ \t]*\*\*/.test(line) && /\*\*[^*]*\bsuperseded\b[^*]*\*\*/i.test(line);
 }
 
 /**
@@ -231,7 +277,7 @@ export function parseRecord(name, text) {
     }
   }
   const keyword = statusValue === null ? UNPARSED : statusKeywordOf(statusValue);
-  const header = lines.slice(0, HEADER_WINDOW);
+  const header = headerBlock(lines);
   const fields = headerFields(header);
   const dateField = fields.find((f) => /^(date|decided|日期)$/i.test(f.key));
   const date = (dateField && ISO_DATE.exec(dateField.value)?.[0]) ?? (statusValue && ISO_DATE.exec(statusValue)?.[0]) ?? null;
@@ -245,7 +291,7 @@ export function parseRecord(name, text) {
   const supersededBy = uniq([
     ...supersededByFields.flatMap((f) => refsIn(f.value)),
     ...(statusValue && /\bsuperseded\b/i.test(statusValue) ? refsIn(afterSuperseded(statusValue)) : []),
-    ...header.filter((l) => /^>[ \t]*\*\*[^\n]*\bsuperseded\b/i.test(l)).flatMap((l) => refsIn(afterSuperseded(l))),
+    ...header.filter(isSupersessionNotice).flatMap((l) => refsIn(afterSuperseded(l))),
   ]);
   const supersededByText = supersededByFields.map((f) => f.value).join(' · ');
 
@@ -454,12 +500,59 @@ export function renderIndex({ root, ui }) {
 // ── Verdicts ───────────────────────────────────────────────────────────────
 
 /**
+ * The record rows of an index text, keyed by the row's link target
+ * (`./0146-….md`, `../../ui/docs/adr/0053-….md`), each the row's six cells.
+ * Escaped pipes (`\\|`) stay inside their cell. `null` text has no rows.
+ * @param {string | null} text
+ * @returns {Map<string, string[]>}
+ */
+export function indexRows(text) {
+  const rows = new Map();
+  if (text === null) return rows;
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('| [')) continue;
+    const cells = line.split(/(?<!\\)\|/).slice(1, -1).map((c) => c.trim());
+    const link = cells.length === 6 ? /^\[[^\]]*\]\(([^)]+)\)$/.exec(cells[0]) : null;
+    if (link) rows.set(link[1], cells);
+  }
+  return rows;
+}
+
+/**
+ * The DROPPED fields (#30916): a Date, Supersedes or Superseded-by cell the
+ * committed index carried that the regeneration empties, on a record both
+ * still list. A changed value is not a drop, and neither is a row that went
+ * away with its record — only a fact the index published turning into `—`.
+ * @param {string | null} committed
+ * @param {string} expected
+ * @returns {{ file: string, column: string, was: string }[]}
+ */
+export function droppedFields(committed, expected) {
+  const after = indexRows(expected);
+  const out = [];
+  for (const [link, cells] of indexRows(committed)) {
+    const now = after.get(link);
+    if (!now) continue;
+    for (const [at, column] of FIELD_COLUMNS) {
+      if (cells[at] !== EMPTY_CELL && now[at] === EMPTY_CELL) out.push({ file: posix.join(ADR_DIR, link), column, was: cells[at] });
+    }
+  }
+  return out;
+}
+
+/** One dropped field, as a line a reader acts on. */
+function droppedMessage(d) {
+  return `the index carried its ${d.column} cell (${d.was}) and the regeneration empties it — a header field is no longer read (#30916); restore the field in the record's header, above its first heading, or, if the drop is deliberate, regenerate and commit`;
+}
+
+/**
  * What a run has to say about the tree: the records that did not parse, the
- * files in a registry that are not records, and whether the committed index
- * equals the rendering. Pure, so the self-test can drive it.
+ * files in a registry that are not records, whether the committed index
+ * equals the rendering, and the fields the rendering would drop. Pure, so the
+ * self-test can drive it.
  * @param {{ root: { records: any[], foreign: string[] }, ui: { records: any[], foreign: string[] } }} registries
  * @param {string | null} committed  the index file's current text, or null when absent
- * @returns {{ expected: string, stale: boolean, problems: string[] }}
+ * @returns {{ expected: string, stale: boolean, problems: string[], dropped: { file: string, column: string, was: string }[] }}
  */
 export function verdict(registries, committed) {
   const expected = renderIndex({ root: registries.root.records, ui: registries.ui.records });
@@ -477,7 +570,18 @@ export function verdict(registries, committed) {
     for (const f of reg.foreign) problems.push(`${dir}/${f}: not a record filename (\`NNNN-kebab-slug.md\`) and not the index — left out of the index`);
   }
   if (registries.root.records.length === 0) problems.push(`${ADR_DIR}/: no records found — run from the repository root`);
-  return { expected, stale: committed !== expected, problems };
+  return { expected, stale: committed !== expected, problems, dropped: droppedFields(committed, expected) };
+}
+
+/**
+ * `--report`'s exit code: 0 whatever it warns about — a stale index, an
+ * unparsed record, a red self-test (#26076, ruling A: 门禁不加) — except a
+ * DROPPED field, the one finding that loses a fact the index already published
+ * (#30916). `null` (the registries could not be read) is a warning, exit 0.
+ * @param {{ dropped: unknown[] } | null} v
+ */
+export function reportExitCode(v) {
+  return v !== null && v.dropped.length > 0 ? 1 : 0;
 }
 
 function readRegistries(root) {
@@ -496,12 +600,18 @@ function modeWrite(root) {
   writeFileSync(join(root, INDEX_PATH), v.expected);
   for (const p of v.problems) console.log(`adr-index: note — ${p}`);
   console.log(`adr-index: ${v.stale ? 'wrote' : 'unchanged'} ${INDEX_PATH} (${v.expected.split('\n').length} lines).`);
+  for (const d of v.dropped) console.error(`adr-index: ✗ ${d.file}: ${droppedMessage(d)}`);
+  if (v.dropped.length) {
+    console.error(`adr-index: ✗ ${v.dropped.length} field(s) dropped — the index above is written; read its diff before committing it.`);
+    return 1;
+  }
   return 0;
 }
 
 function modeCheck(root) {
   const v = verdict(readRegistries(root), readCommitted(root));
   for (const p of v.problems) console.error(`adr-index: ✗ ${p}`);
+  for (const d of v.dropped) console.error(`adr-index: ✗ ${d.file}: ${droppedMessage(d)}`);
   if (v.stale) {
     console.error(`adr-index: ✗ ${INDEX_PATH} is stale — run \`node ${SELF_PATH}\` (pnpm adr:index) and commit the result.`);
   }
@@ -512,7 +622,9 @@ function modeCheck(root) {
 
 function modeReport(root) {
   // Report-only by construction: every finding below is a warning annotation,
-  // and the exit code is 0 whatever was found (#26076, ruling A: 门禁不加).
+  // and the exit code is 0 whatever was found (#26076, ruling A: 门禁不加) —
+  // except a DROPPED field, an error annotation and exit 1 (#30916;
+  // `reportExitCode`).
   const lines = [];
   const warn = (file, message) => {
     console.log(`::warning file=${file}::adr-index: ${message}`);
@@ -532,24 +644,31 @@ function modeReport(root) {
   if (v) {
     for (const p of v.problems) warn(p.split(':')[0], p.slice(p.indexOf(':') + 2));
     if (v.stale) warn(INDEX_PATH, `stale — a record changed and the index did not; run \`pnpm adr:index\` and commit (report-only, not a gate: #26076)`);
+    for (const d of v.dropped) {
+      console.log(`::error file=${d.file}::adr-index: ${droppedMessage(d)}`);
+      lines.push(`- \`${d.file}\`: **dropped** — ${droppedMessage(d)}`);
+    }
   }
+  const code = reportExitCode(v);
   const ok = lines.length === 0;
   console.log(
     ok
       ? `adr-index --report: OK — ${INDEX_PATH} is current, every record parsed, self-test ${st.checked} assertions green. Report-only: this line never reds the step.`
-      : `adr-index --report: ${lines.length} warning(s) above. Report-only: exit 0 by design (#26076, 门禁不加); \`node ${SELF_PATH} --check\` is the gate's spelling if one is ever named.`,
+      : code
+        ? `adr-index --report: ${v.dropped.length} dropped field(s) above — exit 1: the regeneration loses a fact the index carried (#30916). Every other finding stays report-only (#26076, 门禁不加).`
+        : `adr-index --report: ${lines.length} warning(s) above. Report-only: exit 0 by design (#26076, 门禁不加); \`node ${SELF_PATH} --check\` is the gate's spelling if one is ever named.`,
   );
   if (process.env.GITHUB_STEP_SUMMARY) {
     try {
       appendFileSync(
         process.env.GITHUB_STEP_SUMMARY,
-        `### ADR index (report-only)\n\n${ok ? `✓ \`${INDEX_PATH}\` current, every record parsed.` : lines.join('\n')}\n\n`,
+        `### ADR index (report-only${code ? ' — a dropped field fails it' : ''})\n\n${ok ? `✓ \`${INDEX_PATH}\` current, every record parsed.` : lines.join('\n')}\n\n`,
       );
     } catch {
       /* the summary is a courtesy, never a verdict */
     }
   }
-  return 0;
+  return code;
 }
 
 function modeJson(root) {
@@ -687,7 +806,7 @@ export function runSelfTest() {
       assert('summary-counts-by-keyword', a.includes('| Proposed | 1 |') && a.includes('| Draft | 1 |') && a.includes(`| **${UNPARSED}** | 1 |`) && a.includes('| **Total** | **4** |'), a.slice(a.indexOf('## Summary'), a.indexOf('## Shared')));
     }
 
-    battery('drift verdicts: --check reds, --report never does');
+    battery('drift verdicts: --check reds, --report reds only on a dropped field');
     {
       const reg = { root: { records: [rec('0001-a.md', canonical('Accepted'))], foreign: [] }, ui: { records: [], foreign: [] } };
       const v1 = verdict(reg, null);
@@ -696,7 +815,46 @@ export function runSelfTest() {
       assert('matching-index-is-current', v2.stale === false, 'byte-equal index is current');
       const v3 = verdict({ root: { records: [rec('0001-a.md', '# x\n')], foreign: ['notes.md'] }, ui: { records: [], foreign: [] } }, null);
       assert('problems-name-the-unparsed-record-and-the-foreign-file', v3.problems.some((p) => p.includes('0001-a.md') && p.includes(UNPARSED)) && v3.problems.some((p) => p.includes('notes.md')), JSON.stringify(v3.problems));
-      assert('report-mode-is-exit-zero-by-construction', /return 0;\s*}\s*function modeJson/.test(readFileSync(join(process.cwd(), SELF_PATH), 'utf8')) && !/process\.exit\(1\)[^\n]*report/.test(readFileSync(join(process.cwd(), SELF_PATH), 'utf8')), 'modeReport must end in `return 0` and never exit 1');
+      assert('report-exit-is-zero-on-every-finding-but-a-drop', reportExitCode({ stale: true, problems: ['x'], dropped: [] }) === 0 && reportExitCode(null) === 0, 'a stale index, an unparsed record or unreadable registries warn and exit 0 (#26076, 门禁不加)');
+      const source = readFileSync(join(process.cwd(), SELF_PATH), 'utf8');
+      const reportBody = source.slice(source.indexOf('function modeReport('), source.indexOf('function modeJson('));
+      assert('report-mode-exits-only-through-reportExitCode', /const code = reportExitCode\(v\);/.test(reportBody) && /return code;\s*}\s*$/.test(reportBody) && !/process\.exit|return [01];/.test(reportBody), 'modeReport must return reportExitCode(v) and nothing else');
+    }
+
+    battery('the header block is read whole, up to the first heading — no line window (#30916)');
+    {
+      // The #30916 shape: a status note long enough to push the fields under
+      // it past line 40, where the old window stopped reading.
+      const note = Array.from({ length: 45 }, (_, i) => `  note line ${i + 1} of a long status note.`).join('\n');
+      const long = `# ADR-0042: Answer everything\n\n**Status**: Accepted — amended.\n${note}\n**Date**: 2026-11-01\n**Supersedes**: [ADR-0126](./0126-x.md), ADR-0131\n\n---\n\n## Context\n\n**Supersedes**: ADR-0001\n`;
+      const r = rec('0042-answer.md', long);
+      assert('supersedes-past-line-40-is-read', JSON.stringify(r.supersedes) === JSON.stringify(['ADR-0126', 'ADR-0131']) && long.split('\n').findIndex((l) => l.startsWith('**Supersedes**')) >= 40, JSON.stringify(r.supersedes));
+      assert('date-past-line-40-is-read', r.date === '2026-11-01', JSON.stringify(r.date));
+      assert('the-index-keeps-the-cell', renderIndex({ root: [r], ui: [] }).includes('| 2026-11-01 | ADR-0126, ADR-0131 | — |'), 'the row a regeneration writes carries the field');
+      assert('a-key-under-a-heading-is-body-prose', !r.supersedes.includes('ADR-0001') && headerBlock(long.split('\n')).every((l) => !l.startsWith('## ')), 'the block ends at the first heading after the title');
+      const noticeAt = (line) => rec('0042-answer.md', `# ADR-0042: x\n\n**Status**: Accepted\n${note}\n\n---\n\n${line}\n\n## TL;DR\n`).supersededBy;
+      assert('a-supersession-notice-past-line-40-is-read', JSON.stringify(noticeAt('> **🔶 Cloud-owned — superseded in part by cloud ADR-0025 (2026-06-25).** The runtime moved.')) === JSON.stringify(['cloud ADR-0025']) && JSON.stringify(noticeAt('> **Amendment (2026-06-30 — ADR-0065 styling correction).** The framing is **superseded on styling**.')) === JSON.stringify(['ADR-0065']), 'a notice states the word in bold, wherever the header puts it');
+      assert('a-plain-prose-mention-is-not-a-notice', noticeAt('> **Amended 2026-09-04 by [ADR-0131](./0131-x.md) D6**: a draft of ADR-0131 marked this record Superseded; the maintainer kept it.').length === 0, 'ADR-0126 line 44: the word in prose names no superseding record');
+    }
+
+    battery('dropped fields: a regeneration that empties a cell the index carried exits non-zero (#30916)');
+    {
+      const withField = rec('0042-answer.md', canonical('Accepted', '**Date**: 2026-06-01\n**Supersedes**: ADR-0040\n'));
+      const moved = rec('0042-answer.md', `${canonical('Accepted', '**Date**: 2026-06-01\n')}\n**Supersedes**: ADR-0040\n`);
+      const before = renderIndex({ root: [withField], ui: [rec('0053-nav.md', canonical('Superseded by ObjectUI ADR-0054', '**Date**: 2026-06-18\n'))] });
+      const rows = indexRows('| [ADR-0011](./0011-pipe.md) | A \\| B | Accepted | — | — | — |\n| Status | Records |\n|---|---|---|---|---|---|\n');
+      assert('index-rows-are-keyed-by-link-with-escaped-pipes-kept', rows.size === 1 && rows.get('./0011-pipe.md')?.[1] === 'A \\| B' && indexRows(null).size === 0, JSON.stringify([...rows]));
+      const d = droppedFields(before, renderIndex({ root: [moved], ui: [rec('0053-nav.md', canonical('Superseded by ObjectUI ADR-0054', '**Date**: 2026-06-18\n'))] }));
+      assert('an-emptied-supersedes-cell-is-a-drop', JSON.stringify(d) === JSON.stringify([{ file: 'docs/adr/0042-answer.md', column: 'Supersedes', was: 'ADR-0040' }]), JSON.stringify(d));
+      const ui = droppedFields(before, renderIndex({ root: [withField], ui: [rec('0053-nav.md', canonical('Accepted'))] }));
+      assert('ui-date-and-superseded-by-drops-name-the-ui-file', JSON.stringify(ui.map((x) => [x.file, x.column])) === JSON.stringify([['ui/docs/adr/0053-nav.md', 'Date'], ['ui/docs/adr/0053-nav.md', 'Superseded by']]), JSON.stringify(ui));
+      const changed = rec('0042-answer.md', canonical('Accepted', '**Date**: 2026-06-02\n**Supersedes**: ADR-0041\n'));
+      assert('a-changed-value-is-not-a-drop', droppedFields(before, renderIndex({ root: [changed], ui: [] })).length === 0, 'a different fact is an edit the diff shows, not a loss');
+      assert('a-filled-cell-and-a-removed-row-are-not-drops', droppedFields(renderIndex({ root: [moved], ui: [] }), before).length === 0 && droppedFields(before, renderIndex({ root: [], ui: [] })).length === 0, 'only value → em dash on a row both indexes list');
+      const reg = (r) => ({ root: { records: [r], foreign: [] }, ui: { records: [], foreign: [] } });
+      const v = verdict(reg(moved), renderIndex({ root: [withField], ui: [] }));
+      assert('verdict-carries-the-drop-and-report-exits-1', v.dropped.length === 1 && v.stale === true && reportExitCode(v) === 1, JSON.stringify(v.dropped));
+      assert('a-current-index-drops-nothing', verdict(reg(withField), renderIndex({ root: [withField], ui: [] })).dropped.length === 0 && verdict(reg(withField), null).dropped.length === 0, 'no committed index, or an equal one, has nothing to drop');
     }
 
     battery('Live tree: the generator reads the real registry (the records themselves are --report\'s business)');

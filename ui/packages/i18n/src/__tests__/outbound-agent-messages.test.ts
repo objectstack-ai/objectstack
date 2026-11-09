@@ -16,12 +16,18 @@
  * (`packages/app-shell/src/console/ai/outboundAgentText.ts`) that reads the two
  * gate packs directly and never calls `t()` for these keys:
  *
- *     zh conversation -> the `zh` pack's value        // matches the gate
+ *     zh conversation -> the `zh-Hans` pack's value   // matches the gate
  *     anything else   -> the `en` pack's value        // matches the gate
  *
  * ## What this test guarantees, stated as what it asserts
  *
- * Exactly two packs define these keys: `en` and `zh`. That is the whole claim.
+ * Exactly two packs define these keys: `en` and `zh-Hans` (the Simplified pack,
+ * exported as `zh`). That is the whole claim. Every other pack is judged — the
+ * population is `builtInLocales`, typed on the platform locale table, so a pack
+ * the table gains is judged on the run that first sees it (objectstack#30511).
+ * The generated `zh-Hant` pack is one of them: `scripts/zh-hant.mjs` drops these
+ * lines from it (`GATE_ONLY_KEYS`), since a Traditional copy would be a third
+ * spelling the gate does not recognise.
  * It is NOT "a `t()` lookup MISSes in every non-Chinese pack" — the wording this
  * header carried until #3896, which was false for `zh` and was the premise the
  * bug hid behind: `zh` defines all four, so the `t()` fallback HIT and a zh
@@ -41,7 +47,7 @@
  * that deletes the offending entry here — not before.
  */
 import { describe, it, expect } from 'vitest';
-import { en, zh, ja, ko, de, fr, es, pt, ru, ar } from '../locales';
+import { builtInLocales, en, zh } from '../locales';
 
 const OUTBOUND_KEYS = [
   'console.ai.planApproveMessage',
@@ -52,8 +58,10 @@ const OUTBOUND_KEYS = [
   'console.ai.changesConfirmMessage',
 ] as const;
 
-const GATE_LOCALES: Record<string, unknown> = { en, zh };
-const NON_GATE_LOCALES: Record<string, unknown> = { ja, ko, de, fr, es, pt, ru, ar };
+const GATE_LOCALES: Record<string, unknown> = { en, 'zh-Hans': zh };
+const NON_GATE_LOCALES: Record<string, unknown> = Object.fromEntries(
+  Object.entries(builtInLocales).filter(([tag]) => !Object.prototype.hasOwnProperty.call(GATE_LOCALES, tag)),
+);
 
 function lookup(pack: unknown, dotted: string): unknown {
   return dotted
@@ -62,6 +70,11 @@ function lookup(pack: unknown, dotted: string): unknown {
 }
 
 describe('outbound agent messages stay on gate-recognised languages', () => {
+  it('judges every non-gate pack, the generated zh-Hant one included', () => {
+    expect(Object.keys(NON_GATE_LOCALES)).toContain('zh-Hant');
+    expect(Object.keys(NON_GATE_LOCALES)).toHaveLength(Object.keys(builtInLocales).length - 2);
+  });
+
   it.each(Object.keys(NON_GATE_LOCALES))(
     'the %s pack defines none of them — a value there could never be sent',
     (lang) => {
@@ -73,7 +86,7 @@ describe('outbound agent messages stay on gate-recognised languages', () => {
   );
 
   it.each(Object.keys(GATE_LOCALES))('the %s pack defines all of them', (lang) => {
-    // Both halves are load-bearing since #3896: the resolver reads `zh` for a
+    // Both halves are load-bearing since #3896: the resolver reads `zh-Hans` for a
     // Chinese conversation and `en` for every other one, so a key missing from
     // either pack drops that language onto the resolver's fallback table.
     for (const k of OUTBOUND_KEYS) {
@@ -91,7 +104,7 @@ describe('outbound agent messages stay on gate-recognised languages', () => {
     const labels = aiLabels.filter((k) => !outboundLeaf.has(k));
     expect(labels.length).toBeGreaterThan(20);
     for (const k of labels) {
-      expect((de as any).console.ai[k], `de is missing console.ai.${k}`).toBeTypeOf('string');
+      expect((builtInLocales.de as any).console.ai[k], `de is missing console.ai.${k}`).toBeTypeOf('string');
     }
   });
 });

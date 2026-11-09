@@ -26,12 +26,6 @@
  * `ui/index.ts`: `src/index.ts` star-exports `./ui` and `./custom` side by side,
  * so exporting `Resizable*` from both would collide (TS2308).
  */
-import type * as React from 'react';
-
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../ui/resizable';
-
-/** Kept on the public surface (it is exported from the package root) even though
- *  the wrapper it was introduced for is gone. */
-export type ResizableHandleProps = React.ComponentProps<typeof ResizableHandle>;
 
 export { ResizableHandle, ResizablePanel, ResizablePanelGroup };

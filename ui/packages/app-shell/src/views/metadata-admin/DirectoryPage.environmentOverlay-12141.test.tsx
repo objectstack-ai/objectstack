@@ -14,7 +14,8 @@
  *
  *  - the five overlay types (`view`, `dashboard`, `report`, `translation`,
  *    `email_template`), served as the S2 server writes them, are badged
- *    writable and counted by "Writable only";
+ *    writable and counted by "Hide read-only" (objectstack#29705 renamed the
+ *    filter and capitalised the words: the pillars' Writable and Read-only);
  *  - a type whose ONLY open door is the overlay flag — `agent` elevated by the
  *    `OS_METADATA_WRITABLE` hatch, which grants no runtime create — is badged
  *    writable and counted, so the disjunction reads the new field and not just
@@ -124,21 +125,21 @@ describe('DirectoryPage — the type tiles read `allowEnvironmentOverlay` (objec
     renderDirectory();
 
     for (const type of OVERLAY_TYPES) {
-      const badge = within(await tile(type)).getByText('writable');
+      const badge = within(await tile(type)).getByText('Writable');
       expect(badge).toHaveAttribute('title', 'Writable per ADR-0005 overlay opt-in');
     }
 
-    const hatched = within(await tile('agent')).getByText('writable');
+    const hatched = within(await tile('agent')).getByText('Writable');
     const title = hatched.getAttribute('title') ?? '';
     expect(title).toContain(HATCH_TITLE_FRAGMENT);
     expect(title).toContain('never an item a package ships');
     expect(title).not.toContain('OBJECTSTACK_METADATA_WRITABLE');
 
-    expect(within(await tile('api')).getByText('read-only')).toBeInTheDocument();
-    expect(within(await tile('api')).queryByText('writable')).toBeNull();
+    expect(within(await tile('api')).getByText('Read-only')).toBeInTheDocument();
+    expect(within(await tile('api')).queryByText('Writable')).toBeNull();
 
-    // "Writable only" counts the five and the hatched type: six of seven.
-    expect(screen.getByRole('button', { name: /Writable only \(6\)/ })).toBeInTheDocument();
+    // "Hide read-only" counts the five and the hatched type: six of seven.
+    expect(screen.getByRole('button', { name: /Hide read-only \(6\)/ })).toBeInTheDocument();
   });
 
   it('the hatch-elevated type served WITHOUT the field is read-only and not counted', async () => {
@@ -146,9 +147,9 @@ describe('DirectoryPage — the type tiles read `allowEnvironmentOverlay` (objec
     served = [withoutField, API];
     renderDirectory();
 
-    expect(within(await tile('agent')).getByText('read-only')).toBeInTheDocument();
-    expect(within(await tile('agent')).queryByText('writable')).toBeNull();
-    expect(screen.getByRole('button', { name: /Writable only \(0\)/ })).toBeInTheDocument();
+    expect(within(await tile('agent')).getByText('Read-only')).toBeInTheDocument();
+    expect(within(await tile('agent')).queryByText('Writable')).toBeNull();
+    expect(screen.getByRole('button', { name: /Hide read-only \(0\)/ })).toBeInTheDocument();
   });
 });
 
@@ -165,12 +166,12 @@ describe('PageShell — the header badge reads `allowEnvironmentOverlay` (object
 
   it.each(OVERLAY_TYPES)('%s: badged writable from the registry opt-in', (type) => {
     renderShell(overlayEntry(type));
-    expect(screen.getByText('writable')).toHaveAttribute('title', 'Writable per ADR-0005 overlay opt-in');
+    expect(screen.getByText('Writable')).toHaveAttribute('title', 'Writable per ADR-0005 overlay opt-in');
   });
 
   it('a hatch-elevated type: the tooltip names OS_METADATA_WRITABLE and what it opens', () => {
     renderShell(HATCHED_AGENT);
-    const title = screen.getByText('writable').getAttribute('title') ?? '';
+    const title = screen.getByText('Writable').getAttribute('title') ?? '';
     expect(title).toContain(HATCH_TITLE_FRAGMENT);
     expect(title).toContain('never an item a package ships');
     expect(title).not.toContain('OBJECTSTACK_METADATA_WRITABLE');
@@ -178,14 +179,14 @@ describe('PageShell — the header badge reads `allowEnvironmentOverlay` (object
 
   it('negative control: `api` without the field is badged read-only', () => {
     renderShell(API);
-    expect(screen.getByText('read-only')).toBeInTheDocument();
-    expect(screen.queryByText('writable')).toBeNull();
+    expect(screen.getByText('Read-only')).toBeInTheDocument();
+    expect(screen.queryByText('Writable')).toBeNull();
   });
 
   it('the hatch-elevated entry served WITHOUT the field is not badged writable', () => {
     const { allowEnvironmentOverlay: _omitted, ...withoutField } = HATCHED_AGENT;
     renderShell(withoutField);
-    expect(screen.queryByText('writable')).toBeNull();
-    expect(screen.getByText('read-only')).toBeInTheDocument();
+    expect(screen.queryByText('Writable')).toBeNull();
+    expect(screen.getByText('Read-only')).toBeInTheDocument();
   });
 });

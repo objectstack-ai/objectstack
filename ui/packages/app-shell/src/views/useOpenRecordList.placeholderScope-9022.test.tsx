@@ -44,11 +44,12 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { composeDrillFilter } from '@object-ui/core';
 import { FilterScopeProvider } from '@object-ui/react';
+import { PermissionProvider } from '@object-ui/permissions';
 import { parseUrlFilterTriples } from './drillUrlFilters';
-import { useOpenRecordList } from './useOpenRecordList';
+import { useOpenRecordList, useRecordListDrillNavigation } from './useOpenRecordList';
 
 /**
  * Noon UTC in the middle of Q2 2026, so the quarter-start macro has ONE right
@@ -173,5 +174,131 @@ describe('useOpenRecordList — the drilled URL carries the RESOLVED scope (obje
     expect(destinationScope(result.current.search)).toEqual([
       ['owner_id', '=', '{current_user_id}'],
     ]);
+  });
+});
+
+/**
+ * objectstack#30654 — the drill escape hatch offers a destination only when the
+ * list route can say the drill filter EXACTLY.
+ *
+ * A drill filter is the bucket AND the widget's filter AND the measure's drill
+ * scope. The route's grammar holds one value per param and had no `$in` until
+ * objectstack#30743, so
+ * writing such a filter through the bare encoder kept the later of two
+ * conditions on one field (or skipped the `$in`) and opened a WIDER list than
+ * the drawer: the app-showcase "Paid Rate by Status" Sent bar's Paid Invoices
+ * drawer lists 0 rows (`status = sent` AND the scope `status = paid`), and the
+ * list it opened showed every sent invoice. Here the host answers
+ * `canOpenRecordList: false` for those, and `openRecordList` refuses to
+ * navigate on them, so neither door lands on a wider list.
+ */
+describe('useRecordListDrillNavigation — only an exact list destination is offered (objectstack#30654)', () => {
+  function harness(wrap?: (node: ReactElement) => ReactElement) {
+    const Scope = wrapperFor({ currentUserId: 'usr_42', currentOrgId: 'org_7' });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <Scope>{wrap ? wrap(<>{children}</>) : children}</Scope>
+    );
+    return renderHook(
+      () => {
+        const nav = useRecordListDrillNavigation();
+        const { pathname, search } = useLocation();
+        return { ...nav, url: `${pathname}${search}` };
+      },
+      { wrapper },
+    );
+  }
+  const START = '/apps/crm/dashboard/pipeline';
+
+  it('the repro shape — bucket status = sent AND scope status = paid — offers no destination', () => {
+    const { result } = harness();
+    // What a measure-scoped drill hands the host: the scope composed with the bucket.
+    const drill = composeDrillFilter({ status: 'paid' }, { status: 'sent' });
+
+    expect(result.current.canOpenRecordList('invoice', drill)).toBe(false);
+    act(() => result.current.openRecordList('invoice', drill));
+    expect(result.current.url).toBe(START);
+  });
+
+  it('an $in scope opens exactly that set since objectstack#30743, one repeated param per member', () => {
+    const { result } = harness();
+    const drill = composeDrillFilter({ status: { $in: ['paid', 'sent'] } }, { region: 'west' });
+
+    expect(result.current.canOpenRecordList('invoice', drill)).toBe(true);
+    act(() => result.current.openRecordList('invoice', drill));
+    expect(result.current.url).toBe(
+      '/apps/crm/invoice/data?filter%5Bstatus%5D%5Bin%5D=paid&filter%5Bstatus%5D%5Bin%5D=sent&filter%5Bregion%5D=west',
+    );
+  });
+
+  it('a bucket on a yes/no field opens the list with a BOOLEAN comparand (objectstack#30743)', () => {
+    const { result } = harness();
+    const drill = composeDrillFilter({ status: 'paid' }, { is_overdue: false });
+
+    expect(result.current.canOpenRecordList('invoice', drill)).toBe(true);
+    act(() => result.current.openRecordList('invoice', drill));
+    expect(result.current.url).toBe(
+      '/apps/crm/invoice/data?filter%5Bstatus%5D=paid&filter%5Bis_overdue%5D%5Bbool%5D=false',
+    );
+  });
+
+  it('a `$ne` on a boolean still offers no destination: the route would read it back as text', () => {
+    const { result } = harness();
+    const drill = composeDrillFilter({ is_overdue: { $ne: true } }, { region: 'west' });
+
+    expect(result.current.canOpenRecordList('invoice', drill)).toBe(false);
+    act(() => result.current.openRecordList('invoice', drill));
+    expect(result.current.url).toBe(START);
+  });
+
+  it('CONTROL — a plain equality bucket keeps byte-for-byte the URL it opened before', () => {
+    const { result } = harness();
+
+    expect(result.current.canOpenRecordList('invoice', { status: 'sent' })).toBe(true);
+    act(() => result.current.openRecordList('invoice', { status: 'sent' }));
+    expect(result.current.url).toBe('/apps/crm/invoice/data?filter%5Bstatus%5D=sent');
+  });
+
+  it('CONTROL — the same condition twice is still one exact param', () => {
+    const { result } = harness();
+    const drill = composeDrillFilter({ status: 'sent' }, { status: 'sent' });
+
+    expect(result.current.canOpenRecordList('invoice', drill)).toBe(true);
+    act(() => result.current.openRecordList('invoice', drill));
+    expect(result.current.url).toBe('/apps/crm/invoice/data?filter%5Bstatus%5D=sent');
+  });
+
+  it('resolves placeholders BEFORE judging, with the scope the navigate arm resolves them with', () => {
+    const { result } = harness();
+    // Two comparands on `owner_id` only while the token is unresolved: resolved,
+    // both are `usr_42`, one exact param.
+    const drill = composeDrillFilter({ owner_id: '{current_user_id}' }, { owner_id: 'usr_42' });
+
+    expect(result.current.canOpenRecordList('opportunity', drill)).toBe(true);
+    act(() => result.current.openRecordList('opportunity', drill));
+    expect(destinationScope(result.current.url.slice(result.current.url.indexOf('?')))).toEqual([
+      ['owner_id', '=', 'usr_42'],
+    ]);
+  });
+
+  it('a condition on a field the viewer cannot read offers no destination (the list page drops it)', () => {
+    const { result } = harness((node) => (
+      <PermissionProvider
+        roles={[]}
+        userRoles={['viewer']}
+        permissions={
+          [
+            {
+              object: 'invoice',
+              roles: { viewer: { actions: ['read'], fieldPermissions: [{ field: 'margin', read: false }] } },
+            },
+          ] as never
+        }
+      >
+        {node}
+      </PermissionProvider>
+    ));
+
+    expect(result.current.canOpenRecordList('invoice', { status: 'sent' })).toBe(true);
+    expect(result.current.canOpenRecordList('invoice', composeDrillFilter({ margin: { $gte: 10 } }, { status: 'sent' }))).toBe(false);
   });
 });

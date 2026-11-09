@@ -47,6 +47,8 @@
  * logged" can never pass on a harness that never published at all.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // cannot accept a call ObjectQL refuses. From `@objectstack/metadata-core`, not

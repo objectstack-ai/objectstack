@@ -14,12 +14,14 @@ import { ViewSwitcher } from './ViewSwitcher';
 import { ObjectGallery } from './ObjectGallery';
 
 export { ListView, ListViewBlock, ViewSwitcher, ObjectGallery };
-export { ViewSwitcherDropdown } from './ViewSwitcher';
-export { TabBar, TabBarSelect } from './components/TabBar';
+// `ViewSwitcherDropdown`, `TabBarSelect` and `evaluateConditionalFormatting`
+// left this entry with zero importers outside the package; their modules keep
+// them for `ListView` and the package's own tests.
+export { TabBar } from './components/TabBar';
 export type { TabBarProps, ViewTab } from './components/TabBar';
 export { UserFilters } from './UserFilters';
 export type { UserFiltersProps, UserFiltersHandle } from './UserFilters';
-export { evaluateConditionalFormatting, normalizeFilterCondition, normalizeFilters } from './ListView';
+export { normalizeFilterCondition, normalizeFilters } from './ListView';
 // The provider-less fallback table, exported so objectui#4401's mirror gate can
 // compare it against the `en` pack from a package that depends on both.
 export { LIST_DEFAULT_TRANSLATIONS } from './ListView';

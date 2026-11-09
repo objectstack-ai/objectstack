@@ -14,8 +14,9 @@
  * Real subjects: `useRecentItemLabel`, `MetadataProvider` and the i18n
  * provider, over a fake adapter that records each read. What the rows print is
  * pinned beside the reads: the same text the whole list gave, in en and in
- * zh-CN (an inline locale map, and a translation bundle key), and the machine
- * name while nothing has landed.
+ * zh-CN (an inline locale map, and a label the server translated under the
+ * request's language, which the row draws as served: objectstack#30244), and
+ * the machine name while nothing has landed.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -42,7 +43,20 @@ const ITEMS: Record<string, Array<Record<string, unknown>>> = {
   ],
 };
 
-function makeAdapter(calls: string[]) {
+/**
+ * What the server serves under `language`: it translates a label its catalog
+ * carries (the report's), so a zh-CN session reads the zh-CN text.
+ */
+function servedItems(language: string): Record<string, Array<Record<string, unknown>>> {
+  if (language !== 'zh-CN') return ITEMS;
+  return {
+    ...ITEMS,
+    report: ITEMS.report.map((it) => (it.name === 'q3_results' ? { ...it, label: '第三季度结果' } : it)),
+  };
+}
+
+function makeAdapter(calls: string[], language = 'en') {
+  const items = servedItems(language);
   return {
     clearCache: vi.fn(),
     invalidateCache: vi.fn(),
@@ -50,11 +64,11 @@ function makeAdapter(calls: string[]) {
       meta: {
         getItems: (type: string) => {
           calls.push(type);
-          return Promise.resolve({ type, items: structuredClone(ITEMS[type] ?? []) });
+          return Promise.resolve({ type, items: structuredClone(items[type] ?? []) });
         },
         getItem: (type: string, name: string) => {
           calls.push(`${type}/${name}`);
-          const item = (ITEMS[type] ?? []).find((it) => it.name === name);
+          const item = (items[type] ?? []).find((it) => it.name === name);
           if (!item) return Promise.reject(Object.assign(new Error('not found'), { status: 404, code: 'NOT_FOUND' }));
           return Promise.resolve({ item: structuredClone(item) });
         },
@@ -69,7 +83,7 @@ function wrapperFor(calls: string[], language = 'en') {
     detectBrowserLanguage: false,
     resources: { 'zh-CN': { showcase: { reports: { q3_results: { label: '第三季度结果' } } } } },
   });
-  const adapter = makeAdapter(calls);
+  const adapter = makeAdapter(calls, language);
   return ({ children }: { children: ReactNode }) => (
     <I18nProvider instance={i18n} persistLanguage={false}>
       <MetadataProvider adapter={adapter}>{children}</MetadataProvider>
@@ -101,7 +115,7 @@ describe('recent dashboard / page / report rows read their item by name (objects
     expect(calls.filter((c) => c.includes('/')).sort()).toEqual(['dashboard/pipeline', 'page/welcome', 'report/q3_results']);
   });
 
-  it('zh-CN: an inline locale map and a translation bundle key read as the list gave them', async () => {
+  it('zh-CN: an inline locale map and a served translation read as the list gave them', async () => {
     const calls: string[] = [];
     const { result } = renderHook(() => useRecentItemLabel(), { wrapper: wrapperFor(calls, 'zh-CN') });
     await waitFor(() => expect(ROWS.map((row) => result.current(row))).toEqual(['Pipeline', '欢迎', '第三季度结果']));

@@ -50,6 +50,7 @@ import {
     FLOW_CLONE_MUTATED_FIELDS,
     FLOW_CLONE_NAME_TAKEN_STATUS,
     FLOW_CLONE_NOTICE,
+    FLOW_CLONE_NOTICE_CODE,
     FLOW_CLONE_STATUS,
 } from '../flow-clone.js';
 
@@ -500,6 +501,27 @@ describe('#12156 — the source, the notice, and the gate', () => {
         // `flow-clone.ts`'s TSDoc.
         expect(notice.match(/[.!?](\s|$)/g)).toHaveLength(1);
         expect(notice).not.toMatch(/\b(draft|status|off-switch|lifecycle|Studio)\b/i);
+    });
+
+    it('[#29727] names the notice by a stable code beside it, and the notice stays byte-identical', async () => {
+        // A console shows the notice in its own language by mapping the code;
+        // `notice` stays the English fallback for a code it does not know.
+        const source = packagedExemplar();
+        const { dispatcher } = makeDispatcher([source]);
+
+        const result = await dispatcher.handleAutomation(clonePath(source.name as string), 'POST', NEW, CTX);
+        const data = (result.response?.body?.data ?? {}) as Record<string, unknown>;
+
+        expect(result.response?.status).toBe(200);
+        expect(FLOW_CLONE_NOTICE_CODE).toBe('FLOW_CLONE_DISABLED_COPY');
+        expect(data.noticeCode).toBe(FLOW_CLONE_NOTICE_CODE);
+        // CONTROL: the English sentence is exactly the one served before the
+        // code arrived, spelled out here rather than read off the constant.
+        expect(data.notice).toBe(
+            'The copy is switched off and does not run until you switch it on, '
+            + 'and it still uses the same subflows, actions and objects as the original.',
+        );
+        expect(Object.keys(data).sort()).toEqual(['flow', 'notice', 'noticeCode', 'packageId']);
     });
 
     it('is admin copy: it names controls, never an endpoint or a request body', async () => {

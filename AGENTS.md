@@ -284,10 +284,10 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
     its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
     the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
-    (人合: every register row except `.claude/**`): those four lift only for an
+    (人合: every register row except `.claude/**` and Tier S workflow edits): those four lift only for an
     authorized APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is
     spent once per PR — the OWNING seat then lands it, later pushes included; the click stays the maintainer's.
-    **Tier S** (席内达档复核落地: all of
+    **Tier S** (席内达档复核落地: objectstack workflow edits `readWorkflowDiff` reads as Tier S, and all of
     `.claude/**`): those four lift once the PR thread or its card carries a `## Contract review` record for the PR's
     current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict and every check is green — the owning
     seat then lands it through the queue; the post-merge audit is the compensating control. A PR whose only governed
@@ -400,8 +400,8 @@ a PM dispatch sets the assignee (step 1) and posts the `Claim:` naming the dev's
 both on the dev's behalf. A dispatched executor inherits both records: it verifies that the
 newest `Claim:` names its branch (on a mismatch it stops and reports), posts no second claim —
 the dispatch's `Claim:` is its identity and its own record is the report comment — and it ⛔ never
-writes the card's assignee (the PR's assignee mirrors the card's, set by the executor at
-pr_create) and ⛔ never yields a card it was dispatched to. Before writing code, re-read
+writes the card's assignee (the PR's is the claim's `Account:`, carried by `pr_create`; hand-over is the seat's,
+`.claude/agents/os-dev.md` rule 2) and ⛔ never yields a card it was dispatched to. Before writing code, re-read
 the comments — the comments decide, not the field: a `Claim:` from another session or branch
 (other than the dispatch that sent you) means taken whatever the field says — pick another or
 ask, ⛔ never reassign; a bare assignee with no `Claim:` under it is a dispatch's step 1, not a
@@ -501,19 +501,19 @@ Even inside your own worktree, operate defensively:
    the owning seat, or the maintainer's merge or enqueue. Read the PR's file list (`get_files`), **its author and
    its size** before you arm anything.
 
-   **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure
-   yet"; `in_progress` is not a pass, and arming a red PR hides it
-   ([why](docs/agents/multi-agent-discipline.md#arming-a-red-pr-hides-it)). Always read *two* things:
-   the queue branch **and** `origin/main`. And **the queue enforces only the required
-   set** — ten contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`,
-   `Test Core`, `Build Core`, `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`,
-   `Build & E2E UI` and `Live E2E UI`; a check outside those ten is advisory
-   ([why that matters](docs/agents/multi-agent-discipline.md#advisory-checks-ride-through)). A required context is
-   matched by check-run name, so a rename detaches its gate silently — treat those ten names as contract.
-   **Two speeds** — PR and queue runs carry the fast set; `main`'s scheduled and push runs carry the full
-   battery ([detail](docs/agents/multi-agent-discipline.md#two-speeds-which-runs-carry-which-battery)).
-   **Main-red:** a full-battery red is its lane's first work — triage files it under
-   the main-red convention, the lane's next PR fixes it, and ⛔ no lane PR arms the queue meanwhile.
+   **Green means the gate-carrying jobs' `conclusion` is `success`** — not "no failure yet"; `in_progress` is not a
+   pass, and arming a red PR hides it ([why](docs/agents/multi-agent-discipline.md#arming-a-red-pr-hides-it)). Always
+   read *two* things: the queue branch **and** `origin/main`. And **the queue enforces only the required set** —
+   eleven contexts block: `Lint & Repo Gates` (all `check:*` gates), `TypeScript Type Check`, `Test Core`, `Build Core`,
+   `Governed Surface Queue Guard`, `Lint UI`, `Type Check UI`, `Test UI`, `Build & E2E UI`, `Live E2E UI` and
+   `Dogfood Regression Gate`; a check outside those eleven is advisory ([why that
+   matters](docs/agents/multi-agent-discipline.md#advisory-checks-ride-through)). A required context is matched by
+   check-run name, so a rename detaches its gate silently — treat those eleven names as contract. **Two speeds** —
+   PR runs carry the fast set, queue runs add the dogfood shards; `main`'s scheduled runs carry the full battery, and a
+   push run carries it by running the main-only jobs and borrowing the rest from the green queue runs of its commits
+   ([detail](docs/agents/multi-agent-discipline.md#two-speeds-which-runs-carry-which-battery)). **Main-red:** a
+   full-battery red is its lane's first work — triage files it under the main-red convention, the lane's next PR fixes
+   it, and ⛔ no lane PR arms the queue meanwhile.
 
    **Re-arm awareness** ([measured](docs/agents/multi-agent-discipline.md#re-arm-awareness)): a red queue build
    ejects your entry and drops auto-merge, and collateral eviction is silent — neither on `main` nor in the
@@ -724,8 +724,8 @@ test regenerate; the wrapper reports all three each run rather than staying sile
 | `packages/core/**` | Kernel Engineer | Runtime logic OK here |
 | `packages/runtime/**` | Runtime Engineer | Bootstrap, plugin registration |
 | `packages/rest/**` | API Engineer | Route gen, middleware |
-| `packages/plugins/**` | Plugin Developer | Implements spec contracts |
-| `packages/services/**` | Service Engineer | Kernel-managed services |
+| `packages/plugins/**` | Plugin Developer | Implements spec contracts. A new package here is named by its kind (`embedder-*`, `knowledge-*`, …); drivers and connectors have their own directories (`packages/drivers/driver-*`, `packages/connectors/connector-*`). The `plugin-` prefix is frozen to the ten that carry it today (`plugin-approvals`, `plugin-audit`, `plugin-auth`, `plugin-dev`, `plugin-email`, `plugin-hono-server`, `plugin-pinyin-search`, `plugin-security`, `plugin-sharing`, `plugin-webhooks`) and is never coined again; none of the ten is renamed |
+| `packages/services/**` | Service Engineer | Kernel-managed services. A new one (fills a `core-services` slot, registers a service, or holds transports/credentials) is `@objectstack/service-<name>` in `packages/services/service-<name>`. For any new package, in this row or the one above: a package name in an ADR is a proposal; where the tree's precedent differs, the PR that creates the package follows the precedent and amends that ADR's status line in the same change |
 | `packages/adapters/**` | Integration Engineer | Framework bindings, zero business logic |
 | `packages/client*/**` | SDK Engineer | Public API, DX, type safety |
 | `apps/docs/**` | Docs Engineer | Fumadocs + Next.js, MDX |

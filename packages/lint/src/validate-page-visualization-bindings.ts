@@ -101,7 +101,7 @@
  */
 
 import { SYSTEM_FIELDS } from './system-fields.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 
 export const PAGE_VISUALIZATION_WITHOUT_BINDING = 'page/visualization-without-binding';
 
@@ -406,11 +406,27 @@ export function validatePageVisualizationBindings(stack: AnyRec): PageVisualizat
   const findings: PageVisualizationFinding[] = [];
   if (!isRec(stack)) return findings;
 
+  // [#30608] Each object twice: as declared (skip 2's question, the object's
+  // own list views) and as SERVED (`objectsAsServed`, the package's one fold;
+  // `served[i]` is the served form of `declared[i]`), the merged object the
+  // renderer derives from. So a field an `objectExtensions` entry of the same
+  // artifact adds can supply the binding, and an owner's field an extension
+  // re-declares is derived on the extension's type, which replaces the owner's
+  // definition whole (the registry's `mergeObjectDefinitions`). The fold keeps
+  // the owner's field order, an extension's fields after it, as the merged
+  // map does. A type is the field's definition, so a field two packages tie on
+  // is left out of the derivation, and an object carrying one is not reported
+  // when the derivation misses: the tied field may be the one that binds.
   const objects = new Map<string, AnyRec>();
-  for (const obj of recordsOf(stack.objects)) {
+  const servedObjects = new Map<string, AnyRec>();
+  const servedFold = objectsAsServed(stack);
+  const withoutTied = objectsWithoutTiedFields(servedFold);
+  recordsOf(stack.objects).forEach((obj, i) => {
     const name = strName(obj.name);
-    if (name && !objects.has(name)) objects.set(name, obj);
-  }
+    if (!name || objects.has(name)) return;
+    objects.set(name, obj);
+    servedObjects.set(name, withoutTied[i]);
+  });
 
   const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
@@ -427,11 +443,15 @@ export function validatePageVisualizationBindings(stack: AnyRec): PageVisualizat
     const objectName = strName(cfg.source) ?? strName(page.object);
     if (!objectName) continue;
     // Skip 2 — an object this stack does not define, or one with no readable
-    // field map. Both are unknowable here, never a miss.
+    // field map. Both are unknowable here, never a miss. [#30608] Asked of the
+    // DECLARED object: one that declares no field (an introspected schema)
+    // stays unjudged when an extension adds to it, as the write and readonly
+    // rules keep such an object; the derivation itself reads the served one.
     const obj = objects.get(objectName);
     if (!obj) continue;
-    const fields = derivableFields(obj);
-    if (!fields) continue;
+    if (!derivableFields(obj)) continue;
+    const fields = derivableFields(servedObjects.get(objectName) ?? obj) ?? [];
+    const tiedOnObject = (servedFold.tied.get(objectName)?.size ?? 0) > 0;
 
     // Skip 4 — a `sourceView` naming a view this stack does not declare. The
     // runtime hydrates a stored body over the network, so the block may exist
@@ -456,6 +476,9 @@ export function validatePageVisualizationBindings(stack: AnyRec): PageVisualizat
 
       if (referencedView && viewSuppliesBinding(referencedView, predicate)) continue;
       if (deriveBinding(fields, predicate)) continue;
+      // [#30608] A tied field is served with a definition the stack does not
+      // state; it may supply this binding, so a miss is not a verdict.
+      if (tiedOnObject) continue;
 
       const leading = ai === 0;
       findings.push({

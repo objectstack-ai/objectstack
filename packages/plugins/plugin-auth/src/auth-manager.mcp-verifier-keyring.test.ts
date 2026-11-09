@@ -103,8 +103,28 @@ async function verifierRig() {
 
   const manager = new AuthManager({ secret: SECRET, baseUrl: BASE, dataEngine: engine as never } as never);
   const api: any = await manager.getApi();
+  // [objectstack-ai/cloud#3606, ruling A] The consent these tokens are minted
+  // under, stored where the provider stores it: the verifier reads it on
+  // every call, through the same engine.
+  await (engine as any).insert(
+    'sys_oauth_consent',
+    { client_id: CLIENT, user_id: USER, scopes: JSON.stringify(['data:read']), created_at: new Date(Date.now() - 60_000) },
+    SYS,
+  );
+  // [objectstack-ai/cloud#3820, card 2] …and the client it was granted to,
+  // enabled: the verifier reads the client row before the consent.
+  await (engine as any).insert(
+    'sys_oauth_application',
+    { id: `app_${CLIENT}`, client_id: CLIENT, name: 'Keyring Probe', redirect_uris: JSON.stringify(['http://localhost:56789/cb']) },
+    SYS,
+  );
 
-  /** A token for this deployment's MCP resource, signed by the jwt plugin with the stored key. */
+  /**
+   * A token for this deployment's MCP resource, signed by the jwt plugin with
+   * the stored key. It carries `iat`, as every access token the provider mints
+   * does: the jwt plugin stamps none unless the payload names one, and the
+   * verifier refuses a token it cannot date against its consent (ruling A).
+   */
   const mint = async (): Promise<string> =>
     (await api.signJWT({
       body: {
@@ -114,6 +134,7 @@ async function verifierRig() {
           scope: 'data:read',
           iss: manager.getAuthIssuer(),
           aud: manager.getMcpResourceUrl(),
+          iat: Math.floor(Date.now() / 1000),
         },
       },
     })).token;
@@ -244,6 +265,13 @@ describe('[#24186] the bound on the fresh read an unknown key earns', () => {
         return state.answer(state.reads);
       },
     } as any);
+    // The consent these tokens are minted under (ruling A): a standing grant,
+    // under an enabled client (cloud#3820 card 2: the client row is read
+    // first), so each leg counts key-set reads and nothing else decides its answer.
+    const consent = { clientId: CLIENT, userId: USER, referenceId: null, createdAt: new Date(Date.now() - 60_000) };
+    vi.spyOn(manager, 'getAuthContext').mockResolvedValue({
+      adapter: { findMany: async () => [{ ...consent }], findOne: async () => ({ clientId: CLIENT, disabled: false }) },
+    });
     const token = (privateKey: CryptoKey, kid: string) => {
       const now = Math.floor(Date.now() / 1000);
       return new SignJWT({ scope: 'data:read', azp: CLIENT })

@@ -8,10 +8,15 @@
  * owner can still change it later, in organization settings (`SettingsPage`'s
  * slug input).
  *
+ * For a user with no organization yet — the dialog that opens right after
+ * sign-up — the name is prefilled (`firstOrganizationName`), so one click
+ * continues; the field stays editable and nothing is created until the user
+ * clicks. Creating a further organization opens with an empty name.
+ *
  * @module
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -29,6 +34,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { Loader2 } from 'lucide-react';
 import { provisionProductionEnvironment } from './provisionEnvironment.js';
 import { resolveOrgErrorMessage } from './orgErrorMessage.js';
+import { emailDomain, isPublicMailboxDomain, registrableLabel } from '../../utils/emailDomain.js';
 
 /**
  * Convert a display name to a URL-friendly slug.
@@ -136,13 +142,45 @@ interface CreateWorkspaceDialogProps {
   onCreated?: (org: AuthOrganization) => void;
 }
 
+/**
+ * The name a user's FIRST organization is prefilled with: a work e-mail names
+ * the company from its domain's registrable label, capitalised
+ * (`jane@acme.com` → `Acme`); a public mailbox — or a label that would not
+ * read as typed (punycode, `xn--…`) — names no company, so it takes the
+ * generic default `fallback`. An address with no domain gives nothing.
+ */
+function firstOrganizationName(email: string | null | undefined, fallback: string): string {
+  const domain = emailDomain(email);
+  if (domain === undefined) return '';
+  if (isPublicMailboxDomain(domain)) return fallback;
+  const label = registrableLabel(domain);
+  if (!label || label.startsWith('xn--')) return fallback;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 export function CreateWorkspaceDialog({
   open,
   onOpenChange,
   onCreated,
 }: CreateWorkspaceDialogProps) {
   const { t } = useObjectTranslation();
-  const { createOrganization, getAuthConfig } = useAuth();
+  const { createOrganization, getAuthConfig, user, organizations, isOrganizationsLoading } = useAuth();
+
+  // Prefill only a FIRST organization (maintainer ruling objectstack-ai/cloud#3559
+  // A scopes the default to the naming step after sign-up): a known-empty list,
+  // not one still loading. A second organization derived from the same e-mail
+  // would only repeat the first one's name.
+  const isFirstOrganization =
+    Array.isArray(organizations) && organizations.length === 0 && !isOrganizationsLoading;
+  const defaultName =
+    isFirstOrganization && user
+      ? firstOrganizationName(user.email, t('workspace.default', { defaultValue: 'My Organization' }))
+      : '';
+  // Read when the dialog opens, never after: creating the organization moves
+  // `organizations` off zero mid-submit, and the name being submitted must not
+  // change under the user.
+  const defaultNameRef = useRef(defaultName);
+  defaultNameRef.current = defaultName;
 
   const [name, setName] = useState('');
   // The slug is not asked for (objectui#11659): it is derived from the name on
@@ -173,10 +211,10 @@ export function CreateWorkspaceDialog({
     };
   }, [open, getAuthConfig]);
 
-  // Reset form when dialog opens
+  // Reset form when dialog opens: the first-organization default, else empty.
   useEffect(() => {
     if (open) {
-      setName('');
+      setName(defaultNameRef.current);
       setError(null);
     }
   }, [open]);

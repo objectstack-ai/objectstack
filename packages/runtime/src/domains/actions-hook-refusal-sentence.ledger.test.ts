@@ -30,6 +30,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { ROUTE_LEDGER } from '../route-ledger.js';
@@ -53,10 +54,15 @@ const NOT_AN_INVOCATION: ReadonlyMap<string, string> = new Map([
 const ACTION_ROWS = ROUTE_LEDGER.filter((row) => row.domain === '/actions');
 const INVOCATION_ROWS = ACTION_ROWS.filter((row) => !NOT_AN_INVOCATION.has(row.route));
 
-/** `POST /actions/:object/:action/:recordId` → `/actions/mz_task/mz_reopen/t1`; literals stay. */
+/**
+ * `POST /actions/:object/:action/:recordId` → `/actions/mz_task/mz_reopen/t1`; literals stay.
+ * [ADR-0150 D5] An addressed row's `:ns` is driven as `_env`: the declarations
+ * below are the environment's own (no package holds them).
+ */
 function concretePath(route: string): string {
     const [, pattern] = route.split(' ');
     return pattern
+        .replace(':ns', '_env')
         .replace(':object', OBJECT)
         .replace(':action', ACTION)
         .replace(':recordId', RECORD);
@@ -102,6 +108,8 @@ function makeDispatcher() {
     const metadata: any = {
         load: vi.fn(async (type: string, name: string) => global(type, name)),
         loadDiagnosed: vi.fn(async (type: string, name: string) => ({ data: global(type, name), degraded: false, errors: [] })),
+        // The addressed rows collect the standalone declarations (ADR-0150 D5).
+        loadMany: vi.fn(async (type: string) => (type === 'action' ? [global(type, ACTION)] : [])),
         listObjects: vi.fn(async () => [objectDef]),
         getObject: vi.fn(async (n: string) => (n === OBJECT ? objectDef : undefined)),
     };

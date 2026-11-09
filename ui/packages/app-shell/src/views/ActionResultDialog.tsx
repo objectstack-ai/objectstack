@@ -153,7 +153,12 @@ export function ActionResultDialog({ state, onAcknowledge }: ActionResultDialogP
   );
 }
 
-function ResultField({
+/**
+ * One field of an action's answer, drawn in its declared format. Exported for
+ * the param dialog's preflight panel (objectstack#31808), whose `fields` are
+ * this dialog's own row and format set, so the two draw a format alike.
+ */
+export function ResultField({
   field,
   value,
   defaultFormat,

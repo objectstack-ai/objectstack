@@ -20,7 +20,7 @@ describe('SpecifierType', () => {
       'group', 'child_pane', 'info_banner', 'title_value',
       'text', 'textarea', 'password', 'email', 'url', 'phone',
       'number', 'toggle', 'select', 'radio', 'multiselect',
-      'slider', 'color', 'json', 'action_button',
+      'slider', 'color', 'json', 'map', 'action_button',
     ];
     for (const k of kinds) {
       expect(() => SpecifierType.parse(k)).not.toThrow();
@@ -195,6 +195,71 @@ describe('SpecifierSchema — layout-only specifiers', () => {
   });
 });
 
+describe('SpecifierSchema — `map`, keyed rows with typed value columns (#30208, ADR-0007 amended 2026-11-08)', () => {
+  const quotas = {
+    type: 'map',
+    key: 'quotas',
+    label: 'Row quotas',
+    keyColumn: { label: 'Object' },
+    columns: [{ name: 'rows', label: 'Max rows', kind: 'positive_integer' }],
+  } as const;
+  const overrides = {
+    type: 'map',
+    key: 'retention_overrides',
+    label: 'Retention overrides',
+    keyColumn: { label: 'Object' },
+    columns: [
+      { name: 'maxAge', label: 'Keep for', kind: 'duration' },
+      { name: 'expireAfter', label: 'Expire after', kind: 'duration' },
+    ],
+  } as const;
+
+  it('parses a one-column and a several-column map, keeping the columns as declared', () => {
+    const one = SpecifierSchema.parse(quotas);
+    expect(one.type).toBe('map');
+    expect(one.keyColumn).toEqual({ label: 'Object' });
+    expect(one.columns).toEqual([{ name: 'rows', label: 'Max rows', kind: 'positive_integer' }]);
+    const several = SpecifierSchema.parse(overrides);
+    // camelCase survives: the column name is the stored property.
+    expect(several.columns!.map((c) => c.name)).toEqual(['maxAge', 'expireAfter']);
+  });
+
+  it('is value-bearing: a map without a key is refused', () => {
+    const { key: _key, ...keyless } = quotas;
+    expect(() => SpecifierSchema.parse(keyless)).toThrow(/requires a 'key'/);
+  });
+
+  it('refuses a map without columns, with an empty column list, or without a key column', () => {
+    const { columns: _c, ...noColumns } = quotas;
+    expect(() => SpecifierSchema.parse(noColumns)).toThrow(/requires at least one value column in 'columns'/);
+    expect(() => SpecifierSchema.parse({ ...quotas, columns: [] })).toThrow(/requires at least one value column/);
+    const { keyColumn: _k, ...noKeyColumn } = quotas;
+    expect(() => SpecifierSchema.parse(noKeyColumn)).toThrow(/requires a 'keyColumn'/);
+  });
+
+  it('refuses a column kind outside the closed set, and a duplicate column', () => {
+    expect(() => SpecifierSchema.parse({
+      ...quotas, columns: [{ name: 'rows', label: 'Rows', kind: 'number' }],
+    })).toThrow();
+    expect(() => SpecifierSchema.parse({
+      ...overrides, columns: [overrides.columns[0], overrides.columns[0]],
+    })).toThrow(/Duplicate map column 'maxAge'/);
+  });
+
+  it('refuses `columns` and `keyColumn` on any other type', () => {
+    expect(() => SpecifierSchema.parse({
+      type: 'json', key: 'quotas', label: 'Row quotas', columns: quotas.columns,
+    })).toThrow(/must not declare 'columns' \(only a 'map' may\)/);
+    expect(() => SpecifierSchema.parse({
+      type: 'text', key: 'x', label: 'X', keyColumn: { label: 'Object' },
+    })).toThrow(/must not declare 'keyColumn'/);
+  });
+
+  it('`json` stays in the set for raw config', () => {
+    expect(SpecifierSchema.parse({ type: 'json', key: 'raw', label: 'Raw' }).type).toBe('json');
+  });
+});
+
 describe('SpecifierValueDomainSchema — the closed standard-domain vocabulary', () => {
   it('accepts exactly the three domains with measured authoring pull', () => {
     for (const d of ['iana_time_zone', 'iso_4217_currency', 'iso_3166_alpha2']) {
@@ -301,6 +366,46 @@ describe('Specifier.valueDomain — a declared standard domain is the boundary, 
       })
     ).toThrow();
   });
+});
+
+describe('Specifier.confirmOffText — a toggle asks before it goes off (#30418, ruling 6657805240)', () => {
+  const toggle = { type: 'toggle', key: 'email_password_enabled', label: 'Enable email/password login' } as const;
+
+  it('is accepted on a toggle and keeps its text', () => {
+    const parsed = SpecifierSchema.parse({ ...toggle, confirmOffText: 'People will need another way in.' });
+    expect(parsed.confirmOffText).toBe('People will need another way in.');
+  });
+
+  it('accepts an inline locale map, as every other I18nLabel does', () => {
+    const text = { en: 'People will need another way in.', 'zh-CN': '用户将需要其他登录方式。' };
+    expect(SpecifierSchema.parse({ ...toggle, confirmOffText: text }).confirmOffText).toEqual(text);
+  });
+
+  it('absent still parses, and asks nothing', () => {
+    const parsed = SpecifierSchema.parse(toggle);
+    expect(parsed.confirmOffText).toBeUndefined();
+  });
+
+  // One value-bearing input type, one select, two layout types: each is refused
+  // at the key, by a message that names the key and the type it sits on.
+  for (const spec of [
+    { type: 'text', key: 'smtp_host', label: 'Host' },
+    { type: 'select', key: 'provider', label: 'Provider', options: [{ value: 'smtp', label: 'SMTP' }] },
+    { type: 'group', label: 'Email and password' },
+    { type: 'action_button', id: 'test', label: 'Send test email', handler: { kind: 'navigate', url: '/x' } },
+  ] as const) {
+    it(`is refused on a '${spec.type}' specifier, at the key, naming the key and the type`, () => {
+      expect(SpecifierSchema.safeParse(spec).success, 'control: the bare specifier parses').toBe(true);
+      const result = SpecifierSchema.safeParse({ ...spec, confirmOffText: 'Sure?' });
+      expect(result.success).toBe(false);
+      const issues = result.success ? [] : result.error.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe('custom');
+      expect(issues[0].path).toEqual(['confirmOffText']);
+      expect(issues[0].message).toContain(`'${spec.type}'`);
+      expect(issues[0].message).toContain(`'confirmOffText'`);
+    });
+  }
 });
 
 describe('`visible` — the settings visibility grammar, narrowed to what the save-time evaluator runs', () => {

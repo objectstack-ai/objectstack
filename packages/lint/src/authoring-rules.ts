@@ -140,6 +140,7 @@ import { validateSecurityPosture, validateSecurityRoleWord } from './validate-se
 import { validateOrgAxisRedLines } from './validate-org-axis-red-lines.js';
 import { validateSharingRuleEnforceability } from './validate-sharing-rule-enforceability.js';
 import { validateExternalOwnerSharing } from './validate-external-owner-sharing.js';
+import { validateRollupSourceVisibility } from './validate-rollup-source-visibility.js';
 import { validateRlsPredicateEnforceability } from './validate-rls-predicate-enforceability.js';
 import {
   validateMembershipKeyDeclarations,
@@ -333,6 +334,13 @@ export interface AuthoringRuleContext {
    * object-action passes (`runStackExpressionPasses`, `StackExpressionOptions`). The entry-level
    * `runtimeTypes` can say that an object write reaches the rule; it cannot say
    * which of the rule's passes judge that write.
+   *
+   * [#30172] `validateEmailTemplateHoleGrammar` reads its presence only, for
+   * the snapshot's objects: at the publish door they are the live object
+   * universe, the whole of what an `option:object.field` hole can resolve to,
+   * so a name it does not carry is refused there; on the CLI commands they are
+   * one app's declaration, and the object-reference ladder (sibling packages,
+   * platform names, a platform-prefixed name advised at `warning`) applies.
    */
   runtimeWriteType?: string;
   /**
@@ -407,10 +415,13 @@ export interface AuthoringRuleContext {
    * [#24668] a list view bound to it is refused `list-view-object-unknown`
    * (the reference-integrity suite reads a set `runtimeWriteType` beside an
    * absent `packageScope` as that whole collection). Read
-   * by two rules: `validateListViewFieldRefs` (through the reference-integrity
+   * by three rules: `validateListViewFieldRefs` (through the reference-integrity
    * suite), which refuses a list view bound outside the closure instead of
-   * skipping it, and [#24669] `validateFlowTriggerReadiness`, which refuses a
-   * flow whose trigger object is outside it instead of advising.
+   * skipping it, [#24669] `validateFlowTriggerReadiness`, which refuses a
+   * flow whose trigger object is outside it instead of advising, and
+   * [#30172] `validateEmailTemplateHoleGrammar`, which refuses an
+   * `option:object.field` hole naming an object outside it with the closure
+   * verdict and the declare-the-dependency remedy, not as an unknown object.
    */
   packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
   /**
@@ -1249,8 +1260,14 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // tier 1 («the parsers load NEVER») from a standing fact into a red. The
     // measurement that named their bridge named `validateStackExpressions`, a
     // CEL-only rule, for exactly this reason.
+    // [#30023] `page` joins, NARROW by the same mechanism: a page write reaches
+    // exactly `validateSortableFields`, the one member that declares `page`,
+    // so a stored page sort naming a field the list door refuses
+    // (`sortable: false`, a `formula`, and since #30093 a field the object
+    // does not have, as `page-field-unknown`) is refused at publish rather
+    // than at its first fetch. Every other member keeps its declaration.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report', 'page'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`
@@ -1464,7 +1481,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // (`validateFlowApiTriggerSecret`), because it reads a context input this entry
   // has no use for (#20611). None of those verdicts
   // can be changed by installing a package, so there is no reading under which
-  // the flow fires. `flow-trigger-unknown-object` deliberately stayed `warning`
+  // the flow fires. [#30283] `flow-time-relative-object-mismatch` gates on the
+  // same question without being a never-fire verdict: a time-relative start
+  // whose `objectName` is not the swept object, which the run never binds while
+  // the expression checks type its conditions against it. `flow-trigger-unknown-object` deliberately stayed `warning`
   // (the object may come from another installed package — a hedge this rule
   // cannot decide), as did `flow-draft-status-ambiguous` (draft flows DO fire;
   // that one is ambiguity of intent, not a dead flow). [#24669] The hedge is
@@ -2532,6 +2552,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateExternalOwnerSharing(stack),
   },
+  // A roll-up `summary` a permission set reads, over child data the same set
+  // cannot read — a hidden source field, an unreadable child object, or child
+  // rows a row-level policy narrows. The roll-up keeps its documented
+  // semantics (system-elevated, the whole child collection, the parent field's
+  // own FLS on read); this tells the author so where they configure the set.
+  // Advisory: the pair is legal and often meant.
+  {
+    name: 'validateRollupSourceVisibility',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-rollup-source-visibility.ts',
+    surfaces: CLI_ONLY,
+    // The precedent the reason below names is #17936, the measured crossing of
+    // `validateRetiredPermissionResidue` onto `permission` writes.
+    surfaceReason:
+      'Advisory-tier rule over permission-set × summary-field pairs: it cannot refuse a write. CLI-only ' +
+      'because the crossing it would take is unmeasured: nothing yet measures, per write, what a ' +
+      '`permission` save hands this rule (the set, and the parent and child objects it judges the set ' +
+      'against), which is the measurement taken before `validateRetiredPermissionResidue` crossed on ' +
+      '`permission` writes. Crossing on `permission` writes is therefore a separate decision with that ' +
+      'precedent; crossing on `object` writes as well would fall under the RUNTIME_OBJECT_ADVISORY_VOLUME ' +
+      'fence. Never a bare `runtimeTypes` edit.',
+    run: (stack) => validateRollupSourceVisibility(stack),
+  },
   // #4983 — the sibling surface of the rule above, and ADR-0056 D4's gate,
   // which had never been wired to anything: `isSupportedRlsExpression` existed
   // solely so an authoring command could reject a predicate the runtime drops,
@@ -2680,20 +2725,30 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // chains a second formatter is refused, naming the one-formatter rule and
   // the "branch in the caller"
   // remedy (the renderer printed `0 | number:2`); a formatter name outside
-  // `TEMPLATE_FORMATTERS` is refused, listing the known formatters
+  // `MAIL_TEMPLATE_FORMATTERS` is refused, listing the known formatters
   // (`known-formatter`; the renderer printed the raw value); a `currency` argument that
   // is neither a literal ISO 4217 code nor a marked `@path` into the send's
   // data is refused, naming `CURRENCY_ARGUMENT_RULE` (the renderer printed the
   // amount in USD); and a marked path the template's declared `variables` do
-  // not cover is refused (`currency-code-path-undeclared`). Gating: no reading
-  // of such a hole renders as its author wrote it.
+  // not cover is refused (`currency-code-path-undeclared`); and an `option`
+  // argument that is not a bare `object.field`, or names an object the stack
+  // does not have, a field it does not have or a field with no options, is
+  // refused (`option-field-shape`, `option-object-unknown`,
+  // `option-field-unknown`, `option-field-no-options`), naming
+  // `OPTION_ARGUMENT_RULE`. Gating: no reading of such a hole renders as its
+  // author wrote it.
   //
   // Runtime publish gate: the same door and shape as the placement rule above
   // — each written template is judged on its own, so the door's verdict and
   // the whole-stack verdict are one value. A stored template is judged at its
   // next publish, and until then the renderer refuses the hole at send
   // (`TEMPLATE_INVALID`). MEASURED first: no shipped template, example or
-  // fixture in this repository writes a hole it refuses.
+  // fixture in this repository writes a hole it refuses. An `option` hole's
+  // object is judged at the gate against the live universe alone (a set
+  // `ctx.runtimeWriteType`), where a name it does not carry is refused — under
+  // a stated closure (`ctx.packageScope`) as outside it, the remedy being to
+  // declare the dependency; the CLI commands walk the object-reference ladder
+  // and advise on rung ④.
   {
     name: 'validateEmailTemplateHoleGrammar',
     tier: 'gating',
@@ -2702,7 +2757,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-email-template-hole-grammar.ts',
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['email_template'],
-    run: (stack) => validateEmailTemplateHoleGrammar(stack),
+    run: (stack, ctx) =>
+      validateEmailTemplateHoleGrammar(stack, {
+        liveUniverse: ctx.runtimeWriteType !== undefined,
+        ...(ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
+      }),
   },
   // [#28473] ADR-0146 D3: a package whose `manifest.namespace` is too long to
   // have a paired customization namespace (`customizationNamespace` answers

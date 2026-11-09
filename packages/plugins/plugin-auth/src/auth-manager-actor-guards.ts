@@ -26,7 +26,7 @@
  * caller awaits the same promise the body settles, with no extra wrapper. A
  * method is handed over as a closure that calls it on the manager at call
  * time, so a test double or spy set on the manager is still the one the body
- * reaches — `resolveActor` included, which three of the guards ask through
+ * reaches — `resolveActor` included, which four of the guards ask through
  * the manager rather than calling the function here directly.
  *
  * Each field was checked on its own: `orgRolesMap` and
@@ -126,7 +126,15 @@ export interface ActorGuardHost {
 export async function resolveActor(
   ctx: any,
   options?: { failedReadThrows?: boolean },
-): Promise<{ userId: string; activeOrgId?: string } | null> {
+): Promise<{ userId: string; activeOrgId?: string; impersonatedBy?: string } | null> {
+  // The administrator an impersonation session names (better-auth's admin
+  // plugin stamps `impersonatedBy` on the session row), read off the SESSION
+  // only: the attribution seam carries it beside the user as the
+  // attribution-only `impersonatedBy` of an identity write.
+  const impersonatorOn = (session: any): { impersonatedBy?: string } => {
+    const by = session?.impersonatedBy ?? session?.impersonated_by;
+    return typeof by === 'string' && by.trim().length > 0 ? { impersonatedBy: by.trim() } : {};
+  };
   try {
     const { getSessionFromCtx } = await import('better-auth/api');
     const s: any = await getSessionFromCtx(ctx as any);
@@ -136,6 +144,7 @@ export async function resolveActor(
         userId: String(userId),
         activeOrgId:
           s?.session?.activeOrganizationId ?? s?.activeOrganizationId ?? undefined,
+        ...impersonatorOn(s?.session),
       };
     }
   } catch { /* fall through to explicit token resolution */ }
@@ -181,6 +190,7 @@ export async function resolveActor(
             userId,
             activeOrgId:
               sess.activeOrganizationId ?? sess.active_organization_id ?? undefined,
+            ...impersonatorOn(sess),
           };
         }
       }
@@ -453,7 +463,7 @@ export async function assertRevokeSessionIdentifiesRecord(this: Pick<ActorGuardH
 }
 
 /** The body of `AuthManager#assertAdminRevokeUserSessionIdentifiesRecord`; the method's docblock there is its contract. */
-export async function assertAdminRevokeUserSessionIdentifiesRecord(ctx: any): Promise<void> {
+export async function assertAdminRevokeUserSessionIdentifiesRecord(this: Pick<ActorGuardHost, 'resolveActor'>, ctx: any): Promise<void> {
   const token = ctx?.body?.sessionToken;
   if (typeof token !== 'string') return; // vendor's body schema answers 400
 
@@ -464,8 +474,19 @@ export async function assertAdminRevokeUserSessionIdentifiesRecord(ctx: any): Pr
     // a demoted caller the vendor is about to refuse).
     const { getAuthoritativeSessionFromCtx } = await import('better-auth/api');
     const s: any = await getAuthoritativeSessionFromCtx(ctx).catch(() => null);
+    let caller: any = s?.user;
+    // The bearer lane: this hook runs before better-auth folds an
+    // `Authorization: Bearer` token into the session cookie, so the read
+    // above sees no session for a caller signed in by bearer alone. The
+    // caller is then the user the shared actor resolver names, read back
+    // from the store (`findUserById`), so the role graded below is the
+    // stored one, as on the cookie lane.
+    if (!caller?.id) {
+      const actor = await this.resolveActor(ctx);
+      if (actor?.userId) caller = await ctx.context.internalAdapter.findUserById(actor.userId);
+    }
     // No resolvable caller → the vendor's adminMiddleware issues the 401.
-    if (!s?.user?.id) return;
+    if (!caller?.id) return;
 
     // The vendor's own permission question, with the vendor's own inputs:
     // the LIVE admin-plugin options (the object the mounted plugin retains)
@@ -475,7 +496,7 @@ export async function assertAdminRevokeUserSessionIdentifiesRecord(ctx: any): Pr
       (p: any) => p?.id === 'admin',
     )?.options;
     const { defaultRoles } = await import('better-auth/plugins/admin/access');
-    if (!adminMayRevokeUserSessions(s.user, adminOptions, defaultRoles as any)) return;
+    if (!adminMayRevokeUserSessions(caller, adminOptions, defaultRoles as any)) return;
 
     const found = await ctx.context.internalAdapter.findSession(token);
     admitted = anySessionCarriesToken(found);

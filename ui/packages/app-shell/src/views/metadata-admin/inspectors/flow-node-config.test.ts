@@ -7,8 +7,16 @@ import {
   isFieldVisible,
   getFieldValue,
   configKeyOf,
+  localizeFlowFields,
   type FlowConfigField,
 } from './flow-node-config';
+import { translateNodeHint, translateNodeLabel } from '../i18n';
+// The palette rows (`engine.flowNode.*`) live in `@object-ui/i18n`'s `studio`
+// namespace, whose `zh` catalogue is fetched on demand (objectstack#25922):
+// until it lands a zh lookup answers from `en`. Resident before any case, so
+// the zh rows read synchronously whatever else shares this worker.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 describe('start node trigger-field gating (#5)', () => {
   const fields = fieldsForNodeType('start');
@@ -374,5 +382,28 @@ describe('server configSchema ↔ hand-written field merge (framework#4045)', ()
     expect(merged.some((f) => f.path.join('.') === 'config.url')).toBe(false);
     // …while the top-level timeoutMs, which no configSchema can describe, stays.
     expect(merged.some((f) => f.path.join('.') === 'timeoutMs')).toBe(true);
+  });
+});
+
+describe('engine-published descriptor fields read in zh-CN (objectstack#30039)', () => {
+  const served = (id: string, label: string): FlowConfigField => ({ id, path: ['config', id], label, kind: 'text' });
+
+  it("notify's Template / Template data and save_notice's Message are worded for the author", () => {
+    const notify = localizeFlowFields('notify', [served('template', 'Template'), served('templateData', 'Template Data')], 'zh-CN');
+    expect(notify.map((f) => f.label)).toEqual(['邮件模板', '模板数据']);
+    expect(notify[0]!.help).toMatch(/[一-鿿]/);
+    const notice = localizeFlowFields('save_notice', [served('message', 'Message')], 'zh-CN');
+    expect(notice[0]!.label).toBe('提示内容');
+  });
+
+  it('an English console keeps the descriptor English — the control', () => {
+    const fields = [served('template', 'Template')];
+    expect(localizeFlowFields('notify', fields, 'en')).toBe(fields);
+    expect(translateNodeLabel('save_notice', 'en', 'Save notice')).toBe('Save notice');
+  });
+
+  it('the palette names the save_notice node in Chinese, hint included', () => {
+    expect(translateNodeLabel('save_notice', 'zh-CN', 'Save notice')).toBe('保存提示');
+    expect(translateNodeHint('save_notice', 'zh-CN', 'Tell the person…')).toMatch(/[一-鿿]/);
   });
 });

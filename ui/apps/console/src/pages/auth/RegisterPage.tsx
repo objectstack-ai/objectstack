@@ -23,6 +23,8 @@
  *    verification mail's link so it survives the inbox (objectui#10893).
  *  - Replays an `/oauth2/authorize` query string when the user landed
  *    here mid-SSO so the IdP can continue the flow post-signup.
+ *  - Forwards to the mobile sign-in hand-off when `?redirect=` names it,
+ *    exactly as `/login` does (#29971, `./handoffRedirect`).
  *  - Draws `/login`'s footer under the form — the locale switch and the
  *    privacy / terms links the server's auth config serves, from the same
  *    reader (#25885): sign-up is where a visitor accepts the terms.
@@ -31,6 +33,14 @@
  *    `SELF_REGISTRATION_CLOSED` re-reads the preview, so an invitation that
  *    went away meanwhile ends the same way and a live one names the address
  *    it was sent to (#27509).
+ *  - Registered from an invitation link, accepts THAT invitation as the new
+ *    account and enters its organization, instead of stopping on the accept
+ *    page and then on "Invitation accepted" (#30125, app-shell's
+ *    `useInvitationSignUpJoin`). An address the server refuses goes on to the
+ *    accept page as before, which shows the refusal.
+ *  - A language picked in the footer's menu before signing up is saved as the
+ *    new person's own (app-shell's `saveSignInLanguagePick`), awaited before
+ *    every exit of the post-signup step, as `/login` does (#30338).
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -48,13 +58,18 @@ import {
   useBootstrapStatus,
   InvitationGoneNotice,
   invitationArrivalCopy,
+  invitationIdOf,
   useInvitationArrival,
+  useInvitationSignUpJoin,
+  hasSignInLanguagePick,
+  saveSignInLanguagePick,
 } from '@object-ui/app-shell';
 import { AuthLayout } from './AuthLayout';
 import { followOauthAuthorize } from './followAuthorize';
+import { handoffMarkQuery, useHandoffRedirect, verificationCallbackURL } from './handoffRedirect';
 // Was a second module-private copy of LoginPage's helper; both now share one
 // implementation — objectui#4181. Behaviour here is unchanged.
-import { withConsoleBase, withConsoleBaseRootRelative } from '../../utils/consoleBase';
+import { withConsoleBase } from '../../utils/consoleBase';
 import { ServerUnreachable } from './LoginPage';
 import { AuthFooter, readLegalLinks } from './AuthFooter';
 
@@ -77,6 +92,7 @@ export function RegisterPage() {
   const redirect = params.get('redirect');
   const {
     user,
+    session,
     isLoading,
     organizations,
     isOrganizationsLoading,
@@ -84,6 +100,11 @@ export function RegisterPage() {
     switchOrganization,
     getAuthConfig,
   } = useAuth();
+  // #29971 — the mobile sign-in hand-off, as on `/login`: a sign-up from the
+  // system auth session ends there too, and a session too old for it keeps
+  // the form up (see `./handoffRedirect`).
+  const handoff = useHandoffRedirect(redirect, { user, session, isLoading });
+  const signUpNeeded = !user || handoff.holdForSignIn;
 
   // The public auth config and where its read stands (objectui#11806), as on
   // `/login`: `loading` until `getAuthConfig()` settles, `failed` once it
@@ -105,6 +126,16 @@ export function RegisterPage() {
   const [autoSelectingOrg, setAutoSelectingOrg] = useState(false);
   // Fire the OAuth hand-off fetch at most once (see LoginPage).
   const ssoHandoffStartedRef = useRef(false);
+  // And the mobile sign-in hand-off navigation.
+  const mobileHandoffStartedRef = useRef(false);
+  // And the entry into the organization an invitation sign-up joined (#30125).
+  const invitationEntryStartedRef = useRef(false);
+  // #30338 — a language picked on this page, saved as the new person's own
+  // before any exit below navigates away (as on `/login`). The ref is the
+  // once-only latch; the state re-runs the post-signup effect when the save
+  // has settled.
+  const signInPickSaveRef = useRef<'idle' | 'saving' | 'settled'>('idle');
+  const [signInPickSaved, setSignInPickSaved] = useState(false);
 
   // See LoginPage: `isLoading` is overloaded (initial session check + every
   // in-flight signUp). Latch once the first check resolves so a failed
@@ -143,7 +174,7 @@ export function RegisterPage() {
   const bootstrap = useBootstrapStatus(
     configRead === 'known' &&
       hasBootstrapped &&
-      !user &&
+      signUpNeeded &&
       needsBootstrapProbe(authConfig, invitationRedirect),
   );
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
@@ -153,17 +184,40 @@ export function RegisterPage() {
   const invitationCopy = invitationRedirect
     ? invitationArrivalCopy('register', invitationArrival.preview, t)
     : null;
+  // #30125 — the sign-up made on this page from an invitation link accepts it.
+  const invitationJoin = useInvitationSignUpJoin(redirect);
 
   // Sign-up switched off — bounce to /login.
   useEffect(() => {
     if (signUpOffer !== 'closed') return;
-    const search = redirect ? `?redirect=${encodeURIComponent(redirect)}` : '';
+    const search = redirect ? `?redirect=${encodeURIComponent(redirect)}${handoffMarkQuery(redirect)}` : '';
     navigate(`/login${search}`, { replace: true });
   }, [signUpOffer, navigate, redirect]);
 
   // Post-signup orchestration mirrors LoginPage exactly.
   useEffect(() => {
     if (!user) return;
+
+    // 0. A language picked on this page while signed out (#30338): saved as
+    //    this person's own when they have none, and AWAITED before every exit
+    //    below — each leaves by a full navigation, which ends the page-load
+    //    that knows the pick was made here, and a write sent beside it races
+    //    the unload. Without a pick nothing is sent and nothing waits. A failed
+    //    save does not hold the sign-up: the pick still applies on this device.
+    //    A session the hand-off would refuse is not a sign-in yet: skipped.
+    if (signInPickSaveRef.current === 'saving') return;
+    if (
+      signInPickSaveRef.current === 'idle' &&
+      !handoff.holdForSignIn &&
+      hasSignInLanguagePick()
+    ) {
+      signInPickSaveRef.current = 'saving';
+      void saveSignInLanguagePick(String(user.id)).finally(() => {
+        signInPickSaveRef.current = 'settled';
+        setSignInPickSaved(true);
+      });
+      return;
+    }
 
     if (typeof window !== 'undefined') {
       const sp = new URLSearchParams(window.location.search);
@@ -174,6 +228,29 @@ export function RegisterPage() {
         }
         return;
       }
+    }
+
+    // #29971 — the mobile sign-in hand-off, before the organization steps,
+    // by script from this page (see LoginPage).
+    if (handoff.target) {
+      if (handoff.holdForSignIn) return;
+      if (!mobileHandoffStartedRef.current) {
+        mobileHandoffStartedRef.current = true;
+        window.location.assign(handoff.target);
+      }
+      return;
+    }
+
+    // #30125 — registered from an invitation link: hold while the acceptance
+    // is in flight, then enter the organization it joined. A refusal falls
+    // through to the steps below, which open the accept page as before.
+    if (invitationJoin === 'joining') return;
+    if (invitationJoin === 'joined') {
+      if (!invitationEntryStartedRef.current) {
+        invitationEntryStartedRef.current = true;
+        window.location.assign(withConsoleBase('/'));
+      }
+      return;
     }
 
     if (!activeOrganization) {
@@ -203,11 +280,15 @@ export function RegisterPage() {
     autoSelectingOrg,
     redirect,
     switchOrganization,
+    handoff.target,
+    handoff.holdForSignIn,
+    invitationJoin,
+    signInPickSaved,
   ]);
 
   // The first session check has answered and nobody is signed in: the page is
   // talking to a visitor, so a failed config read is theirs to see.
-  const awaitingSession = (isLoading && !hasBootstrapped) || !!user;
+  const awaitingSession = (isLoading && !hasBootstrapped) || !signUpNeeded;
   if (!awaitingSession && serverUnreachable) {
     return (
       <AuthLayout formWidth="md">
@@ -233,15 +314,15 @@ export function RegisterPage() {
     );
   }
 
-  const loginUrl = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
+  const loginUrl = redirect ? `/login?redirect=${encodeURIComponent(redirect)}${handoffMarkQuery(redirect)}` : '/login';
   const legalLinks = readLegalLinks(authConfig);
   // objectui#10893 — when the server gates sign-in on email verification, the
   // mail's link is the only road back, so it must carry `?redirect=` (e.g. the
   // invitation the user registered from). Only a safe in-app target is
   // forwarded; anything else would be refused by the server and fail sign-up.
-  const verificationCallbackURL = isSafeRedirect(redirect)
-    ? withConsoleBaseRootRelative(redirect)
-    : undefined;
+  // A hand-off `redirect` returns to the "go back to the app" landing instead
+  // (#30157, `./handoffRedirect` rule 6).
+  const mailCallbackURL = verificationCallbackURL(redirect);
 
   // #27509 — the server no longer knows this invitation: no form to fill.
   if (invitationRedirect && invitationArrival.gone) {
@@ -306,7 +387,10 @@ export function RegisterPage() {
               })
         }
         loginUrl={loginUrl}
-        verificationCallbackURL={verificationCallbackURL}
+        verificationCallbackURL={mailCallbackURL}
+        // The sign-up presents the invitation its link names: under
+        // `invite_only` the server admits a sign-up only by it.
+        invitationId={invitationIdOf(redirect) ?? undefined}
         linkComponent={RouterLink}
         // Server refusal `code` → localized end-user text: the one map both
         // register pages pass, owned by `@object-ui/app-shell` (objectui#11030).
@@ -325,7 +409,7 @@ export function RegisterPage() {
           const sp = new URLSearchParams();
           sp.set('email', email);
           if (redirect) sp.set('redirect', redirect);
-          navigate(`/verify-email-prompt?${sp.toString()}`, { replace: true });
+          navigate(`/verify-email-prompt?${sp.toString()}${handoffMarkQuery(redirect)}`, { replace: true });
         }}
         labels={{
           nameLabel: t('auth.register.nameLabel', { defaultValue: 'Name' }),

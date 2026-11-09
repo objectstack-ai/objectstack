@@ -45,13 +45,13 @@ maintainer can read in five minutes and a year from now. Write
 
 **Status:** complete | complete with N open decisions
 **Spec:** <installed @objectstack/spec version>  ·  **Chain:** 16 → 18
-**Verified:** `os validate` green · `tsc --noEmit` green · replay-from-17 applies 0 mechanical changes
+**Verified:** `os validate` green · `tsc --noEmit` green · replay 16 → 18 applies 0 mechanical changes
 
 ## 1 · Mechanical (applied by the chain)
 
 | Site | Change | Conversion |
 |:--|:--|:--|
-| `objects[crm_lead].fields.name` | `required: true` → `+ storage.notNull: true` | `field-required-notnull-explicit` |
+| `sharingRules[0].accessLevel` | `'full'` → `'edit'` | `sharing-rule-access-level-full-to-edit` |
 | … | | |
 
 _N sites, M conversions. Ported into sources from `os migrate meta --out`._
@@ -70,7 +70,7 @@ _N sites, M conversions. Ported into sources from `os migrate meta --out`._
 
 | Item | Site | Options | Recommendation | Blocking? |
 |:--|:--|:--|:--|:--|
-| `agent.tools` → which skill | `src/ai/support-bot.ts:12` | `case_management` · new skill | `case_management` | no — parses without it |
+| `agent.tools` → which skill | `src/ai/support-bot.ts:12` | `crm_case_management` · new skill | `crm_case_management` | no — parses without it |
 
 ## 4 · Pending, per deployment
 
@@ -110,10 +110,10 @@ export const Lead = ObjectSchema.create({
 
 // Agent capability is reached through skills — there is no inline tool list.
 export const SupportBot = defineAgent({
-  name: 'support_bot',
+  name: 'crm_support_bot',
   label: 'Support Bot',
   role: 'Front-line support triage',
   instructions: 'Answer support questions and open cases when needed.',
-  skills: ['case_management'],
+  skills: ['crm_case_management'],
 });
 ```

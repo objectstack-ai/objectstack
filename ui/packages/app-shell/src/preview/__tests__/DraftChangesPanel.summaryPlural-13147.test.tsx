@@ -95,6 +95,15 @@ describe('Pending changes summary — each type agrees with its count (objectui#
     await waitFor(() => expect(summary).toHaveTextContent(/^2 项 · 流程 2$/));
   });
 
+  it('objectstack#29902: three hook drafts read "3 items · 3 hooks"', async () => {
+    const summary = await summaryFor([
+      { type: 'hook', name: 'h_a' },
+      { type: 'hook', name: 'h_b' },
+      { type: 'hook', name: 'h_c' },
+    ]);
+    expect(summary).toHaveTextContent(/^3 items · 3 hooks$/);
+  });
+
   it('CONTROL: a type with no count family keeps its raw name, unpluralised', async () => {
     const summary = await summaryFor([
       { type: 'st_unknown_kind', name: 'u_a' },

@@ -167,7 +167,7 @@ describe('[#28844] MCP update_record / delete_record answer a write applied unde
   it('delete_record, stdio bridge: the success result, the delete applied once', async () => {
     const rows = new Map([['c2', { id: 'c2', name: 'c2', amount: 135 }]]);
     const writes: string[] = [];
-    const result = await callTool(stdioBridge(rows, writes), 'delete_record', { objectName: 'qsf_child', recordId: 'c2' });
+    const result = await callTool(stdioBridge(rows, writes), 'delete_record', { objectName: 'qsf_child', recordId: 'c2', confirm: true });
     expect(result.isError, result.content[0]?.text).toBeFalsy();
     expect(JSON.parse(result.content[0]!.text)).toEqual({ object: 'qsf_child', id: 'c2', success: true });
     expect(writes).toEqual(['delete:c2']);
@@ -183,7 +183,7 @@ describe('[#28844] MCP update_record / delete_record answer a write applied unde
     const updated = await callTool(bridge, 'update_record', { objectName: 'qsf_child', recordId: 'r1', data: { amount: 6 } });
     expect(updated.isError, updated.content[0]?.text).toBeFalsy();
     expect(JSON.parse(updated.content[0]!.text)).toEqual(answers.update);
-    const removed = await callTool(bridge, 'delete_record', { objectName: 'qsf_child', recordId: 'r2' });
+    const removed = await callTool(bridge, 'delete_record', { objectName: 'qsf_child', recordId: 'r2', confirm: true });
     expect(removed.isError, removed.content[0]?.text).toBeFalsy();
     expect(JSON.parse(removed.content[0]!.text)).toEqual(answers.remove);
   });

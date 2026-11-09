@@ -123,6 +123,7 @@ import {
 import { builtinAggregateLabels, useSafeFieldLabel, useSafeTranslate, useDisplayLocale, useObjectTranslation, pickLocalized } from '@object-ui/i18n';
 import { useDataInvalidation, classifyLoadError } from '@object-ui/react';
 import { mergeFilters } from './mergeFilters';
+import { measureDrillScope, sharedMeasureDrillScope, scopeDrillFilter, type MeasureDrillScope } from './measureDrillScope';
 import { useDatasetDimensionMeta, type DatasetDimensionMeta } from './useDatasetDimensionLabels';
 import {
   ReportExportControl,
@@ -167,6 +168,8 @@ interface DatasetCapableSource {
     dimensionFields?: Record<string, string>;
     drillRawRows?: Row[];
     drillRanges?: Array<Record<string, DatasetDrillRange>>;
+    /** Per measure, the list filter that selects its records (see `measureDrillScope.ts`). */
+    drillScopes?: Record<string, Record<string, unknown>>;
     totals?: DatasetResultTotals[];
   }>;
 }
@@ -622,6 +625,7 @@ function useDatasetRows(
     dimensionFields?: Record<string, string>;
     drillRawRows?: Row[];
     drillRanges?: Array<Record<string, DatasetDrillRange>>;
+    drillScopes?: unknown;
     totals?: DatasetResultTotals[];
     error?: string;
     /** The query was refused because this viewer may not read the data (objectui#12330). */
@@ -720,6 +724,7 @@ function useDatasetRows(
             dimensionFields: res?.dimensionFields,
             drillRawRows: Array.isArray(res?.drillRawRows) ? res.drillRawRows : undefined,
             drillRanges: Array.isArray(res?.drillRanges) ? res.drillRanges : undefined,
+            drillScopes: res?.drillScopes,
             totals: Array.isArray(res?.totals) ? res.totals : undefined,
           });
         }
@@ -770,10 +775,18 @@ function useDatasetRows(
  * the rule `toFilterNodeSafely` states.
  */
 function drillFilterOrRefusal(
-  ...args: Parameters<typeof buildDatasetDrillFilter>
+  scope: MeasureDrillScope,
+  rawRow: Record<string, unknown> | undefined,
+  drillDims: string[],
+  dimensionFields: Record<string, string>,
+  runtimeFilter: Record<string, unknown> | undefined,
+  rawRanges: Record<string, DatasetDrillRange> | undefined,
 ): Record<string, unknown> | null {
   try {
-    return buildDatasetDrillFilter(...args);
+    // objectstack-ai/objectstack#30615 — the clicked measure's scope joins the
+    // report scope BEFORE the bucket: bucket AND runtimeFilter AND scope. A
+    // `{}` scope leaves `runtimeFilter` untouched (`scopeDrillFilter`).
+    return buildDatasetDrillFilter(rawRow, drillDims, dimensionFields, scopeDrillFilter(runtimeFilter, scope), rawRanges);
   } catch (error) {
     if (!(error instanceof FilterOperatorError)) throw error;
     console.warn(`[DatasetReportRenderer] drill-down refused — the drilled list cannot be scoped: ${error.message}`);
@@ -930,13 +943,34 @@ function DatasetReportTable({
 
   // Drilling needs at least one dimension to scope by.
   const canDrill = !!onDrill && rows.length > 0;
+  // objectstack-ai/objectstack#30615 — which measures a click can stand for.
+  // An answer that names its `object` (an ADR-0021 D2 server) states each
+  // measure's record list in `drillScopes`; a measure it gives no entry for
+  // offers no drill, and an answer with no `drillScopes` at all gives none.
+  // A line holds every measure, so the LINE drills only when they all share
+  // one scope; otherwise each measure CELL that has an entry drills on its own
+  // and the line itself does not. An answer with no `object` (an older server)
+  // keeps the host's own fallback drill, unchanged.
+  const scopeFor = (measures: readonly string[]): MeasureDrillScope | undefined =>
+    state.object ? sharedMeasureDrillScope(state.drillScopes, measures) : {};
+  const lineDrills = canDrill && scopeFor(values) !== undefined;
+  const cellDrills = (measure: string) =>
+    canDrill && !lineDrills && !!state.object && measureDrillScope(state.drillScopes, measure) !== undefined;
   // Dims the server can map to object fields → raw-value (drill-correct) filter.
   const drillDimsAll = state.dimensionFields ? rows.filter((d) => d in state.dimensionFields!) : [];
   // `dims` is the grouping the clicked line stands for: every `rows` dimension
   // for a data row, the prefix for a subtotal row, whose drill scopes by the
   // prefix values alone (read off the group's first row, which carries them)
   // and by the span of its `members`' ranges (`spanDrillRanges`).
-  const drill = (row: Row, index: number, dims: readonly string[] = rows, members?: readonly number[]) => {
+  const drill = (
+    row: Row,
+    index: number,
+    dims: readonly string[] = rows,
+    members?: readonly number[],
+    measures: readonly string[] = values,
+  ) => {
+    const scope = scopeFor(measures);
+    if (scope === undefined) return;
     const groupKey: Record<string, unknown> = {};
     for (const dim of dims) groupKey[dim] = row[dim];
     const drillDims = drillDimsAll.filter((d) => dims.includes(d));
@@ -953,10 +987,14 @@ function DatasetReportTable({
     const hasRange = !!rowRanges && Object.keys(rowRanges).length > 0;
     let objectFilter: Record<string, unknown> | undefined;
     if (state.object && (drillDims.length > 0 || hasRange)) {
-      const built = drillFilterOrRefusal(state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges);
+      const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges);
       // Refused: no drill at all — see `drillFilterOrRefusal`.
       if (built === null) return;
       objectFilter = built;
+    } else if (Object.keys(scope).length > 0) {
+      // No exact bucket filter to carry the scope, and the host's groupKey
+      // fallback rebuilds the list from the bucket ALONE: no drill.
+      return;
     }
     onDrill!({ dataset, groupKey, runtimeFilter, object: state.object, objectFilter });
   };
@@ -1087,18 +1125,23 @@ function DatasetReportTable({
               return (
                 <tr
                   key={`s-${line.level}-${i}`}
-                  className={`border-t bg-muted/20 font-medium${canDrill ? ` ${DRILL_CLASS}` : ''}`}
+                  className={`border-t bg-muted/20 font-medium${lineDrills ? ` ${DRILL_CLASS}` : ''}`}
                   data-testid="dataset-report-subtotal-row"
                   // The subtotal stands for its prefix grouping, so its drill
                   // scopes by the prefix alone, over the whole group.
-                  onClick={canDrill ? () => drill(state.rows[i], i, prefix, line.members) : undefined}
+                  onClick={lineDrills ? () => drill(state.rows[i], i, prefix, line.members) : undefined}
                 >
                   {line.level > 0 && <td colSpan={line.level} />}
                   <td colSpan={rows.length - line.level} className="px-2 py-1 whitespace-nowrap">
                     {subtotalText}
                   </td>
                   {values.map((measure) => (
-                    <td key={measure} className="px-2 py-1 tabular-nums whitespace-nowrap">
+                    <td
+                      key={measure}
+                      className={`px-2 py-1 tabular-nums whitespace-nowrap${cellDrills(measure) ? ` ${DRILL_CLASS}` : ''}`}
+                      data-testid={cellDrills(measure) ? 'dataset-drill-cell' : undefined}
+                      onClick={cellDrills(measure) ? () => drill(state.rows[i], i, prefix, line.members, [measure]) : undefined}
+                    >
                       {fmt(measure, total?.[measure])}
                     </td>
                   ))}
@@ -1108,20 +1151,30 @@ function DatasetReportTable({
             return (
               <tr
                 key={i}
-                className={`border-t${canDrill ? ` ${DRILL_CLASS}` : ''}`}
-                data-testid={canDrill ? 'dataset-drill-row' : undefined}
+                className={`border-t${lineDrills ? ` ${DRILL_CLASS}` : ''}`}
+                data-testid={lineDrills ? 'dataset-drill-row' : undefined}
                 // The drill payload is built from the row AS THE SERVER SENT IT
                 // (`state.rows[i]`), never from the displayed one: `groupKey` and
                 // `objectFilter` are identity keys the host filters records with,
                 // and translating those would address nothing (objectui#4263 /
                 // #4273's convention, restated for #4330).
-                onClick={canDrill ? () => drill(state.rows[i], i) : undefined}
+                onClick={lineDrills ? () => drill(state.rows[i], i) : undefined}
               >
-                {columns.map((c) => (
-                  <td key={c} className="px-2 py-1 tabular-nums whitespace-nowrap">
-                    {values.includes(c) ? fmt(c, displayRows[i][c], state.rows[i]) : detailDimension(c, i)}
-                  </td>
-                ))}
+                {columns.map((c) => {
+                  const cellDrill = values.includes(c) && cellDrills(c);
+                  return (
+                    <td
+                      key={c}
+                      className={`px-2 py-1 tabular-nums whitespace-nowrap${cellDrill ? ` ${DRILL_CLASS}` : ''}`}
+                      data-testid={cellDrill ? 'dataset-drill-cell' : undefined}
+                      // objectstack-ai/objectstack#30615 — the cell stands for
+                      // ITS measure, so its list is that measure's records.
+                      onClick={cellDrill ? () => drill(state.rows[i], i, rows, undefined, [c]) : undefined}
+                    >
+                      {values.includes(c) ? fmt(c, displayRows[i][c], state.rows[i]) : detailDimension(c, i)}
+                    </td>
+                  );
+                })}
               </tr>
             );
           })}
@@ -1993,17 +2046,27 @@ function DatasetMatrixTable({
   const drillDims = state.dimensionFields
     ? [...rows, ...columnsAcross].filter((d) => d in state.dimensionFields!)
     : [];
-  const drillCell = (rowKey: Row, colKey: Row, index: number) => {
+  // objectstack-ai/objectstack#30615 — a cell stands for ONE measure, and
+  // drills only when the answer states that measure's record list (an answer
+  // with no `object`, an older server, keeps the host's fallback drill).
+  const cellScope = (measure: string): MeasureDrillScope | undefined =>
+    state.object ? measureDrillScope(state.drillScopes, measure) : {};
+  const drillCell = (rowKey: Row, colKey: Row, index: number, measure: string) => {
+    const scope = cellScope(measure);
+    if (scope === undefined) return;
     // objectstack-ai/objectstack#1752: include the date-bucket range sidecar so an "X by time" cell scopes
     // to the clicked time bucket, not every bucket in that row/column.
     const cellRanges = state.drillRanges?.[index];
     const hasRange = !!cellRanges && Object.keys(cellRanges).length > 0;
     let objectFilter: Record<string, unknown> | undefined;
     if (state.object && (drillDims.length > 0 || hasRange)) {
-      const built = drillFilterOrRefusal(state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges);
+      const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges);
       // Refused: no drill at all — see `drillFilterOrRefusal`.
       if (built === null) return;
       objectFilter = built;
+    } else if (Object.keys(scope).length > 0) {
+      // The host's groupKey fallback cannot carry the scope: no drill.
+      return;
     }
     onDrill!({ dataset, groupKey: { ...rowKey, ...colKey }, runtimeFilter, object: state.object, objectFilter });
   };
@@ -2112,13 +2175,13 @@ function DatasetMatrixTable({
               {cellCols.map((cc) => {
                 const entry = pivot.cells.get(pivotCellKey(rh.id, cc.col.id));
                 const value = entry?.row[cc.measure];
-                const clickable = canDrill && entry != null;
+                const clickable = canDrill && entry != null && cellScope(cc.measure) !== undefined;
                 return (
                   <td
                     key={`${cc.col.id}-${cc.measure}`}
                     className={`px-2 py-1 text-right tabular-nums whitespace-nowrap${clickable ? ` ${DRILL_CLASS}` : ''}`}
                     data-testid={clickable ? 'dataset-drill-cell' : undefined}
-                    onClick={clickable ? () => drillCell(rh.key, cc.col.key, entry!.index) : undefined}
+                    onClick={clickable ? () => drillCell(rh.key, cc.col.key, entry!.index, cc.measure) : undefined}
                   >
                     {formatMeasure(value, measureField(cc.measure)?.format, measureField(cc.measure)?.currency, measureField(cc.measure)?.percentScale, displayLocale)}
                   </td>

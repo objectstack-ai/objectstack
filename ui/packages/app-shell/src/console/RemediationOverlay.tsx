@@ -248,6 +248,30 @@ function TotpQr({ uri }: { uri: string }) {
   );
 }
 
+/**
+ * What the authenticator step says when the server refuses it, in the user's
+ * language where the refusal is one the console can name:
+ *
+ * - `404`: the `/two-factor/*` endpoints are not mounted, i.e. two-factor is off
+ *   on this deployment, so no password or code the user types can succeed. The
+ *   sentence says that and who can change it, instead of `… failed (404)`.
+ * - `INVALID_PASSWORD`: the password confirmation was wrong (the same sentence
+ *   the password screen uses).
+ *
+ * Any other refusal keeps the server's own message; an error with none falls
+ * back to FALLBACK_KEY.
+ */
+function enrollRefusalMessage(
+  err: unknown,
+  t: ReturnType<typeof useObjectTranslation>['t'],
+  fallbackKey: string,
+): string {
+  const { status, code } = (err ?? {}) as { status?: unknown; code?: unknown };
+  if (status === 404) return t('auth.remediation.mfa.unavailable');
+  if (code === 'INVALID_PASSWORD') return t('auth.remediation.password.wrongPassword');
+  return err instanceof Error && err.message ? err.message : t(fallbackKey);
+}
+
 function MfaEnrollForm({ message }: { message: string }) {
   const { enrollTotp, verifyTotp, setRemediationRequired } = useAuth();
   const { t } = useObjectTranslation();
@@ -268,7 +292,7 @@ function MfaEnrollForm({ message }: { message: string }) {
       setBackupCodes(codes ?? []);
       setStep('verify');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('auth.remediation.mfa.enrollFailed'));
+      setError(enrollRefusalMessage(err, t, 'auth.remediation.mfa.enrollFailed'));
     } finally {
       setBusy(false);
     }
@@ -282,7 +306,7 @@ function MfaEnrollForm({ message }: { message: string }) {
       setRemediationRequired(null);
       window.location.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('auth.remediation.mfa.invalidCode'));
+      setError(enrollRefusalMessage(err, t, 'auth.remediation.mfa.invalidCode'));
       setBusy(false);
     }
   };

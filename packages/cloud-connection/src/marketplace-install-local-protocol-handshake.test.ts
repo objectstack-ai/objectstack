@@ -96,17 +96,28 @@ function makeRawApp() {
  * hand back every writer the install path can reach, so a refusal can be
  * checked for having written nothing at all.
  */
-async function mount(dir: string, opts: { controlPlaneUrl?: string } = {}) {
+async function mount(dir: string, opts: { controlPlaneUrl?: string; unmanagedImport?: boolean } = {}) {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
     const registry: any[] = [];
     const register = vi.fn((m: any) => { registry.push({ manifest: m }); });
     const syncSchemas = vi.fn(async () => undefined);
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    // [#30326] The protocol's copy-once import, for an `unmanaged` install.
+    const importUnmanagedPackage = vi.fn(async (request: any) => ({
+        sourcePackageId: request.manifest.id,
+        sourceVersion: request.manifest.version,
+        targetPackageId: `${request.manifest.id}-copy`,
+        namespace: request.manifest.namespace,
+        copiedCount: 0,
+        copied: [],
+        strippedLocks: [],
+    }));
     const services: Record<string, any> = {
         manifest: { register },
         auth: installerAuthService(),
         objectql: withInstallerGrants({ syncSchemas, registry: { getAllPackages: () => registry } }),
+        ...(opts.unmanagedImport ? { protocol: { importUnmanagedPackage } } : {}),
     };
     const ctx = {
         hook: (e: string, h: any) => hooks.set(e, h),
@@ -518,5 +529,69 @@ describe('[#26480] a package AHEAD of this runtime is told to upgrade, never to 
         expect(said[0]).toContain('OS_PROTOCOL_INCOMPATIBLE');
         expect(said[0]).not.toContain('migrate meta');
         expect(said[0]).toMatch(new RegExp(`upgrade the runtime to protocol ${NEW_MAJOR}`, 'i'));
+    });
+});
+
+describe('[#30326] an install the handshake admitted UNCHECKED says so in its answer, not only in the server log', () => {
+    /** The card's reproduction: a package that declares no protocol range at all. */
+    const UNDECLARED_ID = 'com.example.qanorange';
+    const UNDECLARED = { id: UNDECLARED_ID, name: 'No range', version: '6.0.0', scope: 'project', type: 'app' };
+
+    /** The notice the answer carries for a package the handshake could not check. */
+    function expectSkipped(res: { payload: any; status: number }, expected: Record<string, unknown>) {
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.success).toBe(true);
+        const notice = res.payload.data.protocolCheckSkipped;
+        expect(notice, JSON.stringify(res.payload.data)).toBeDefined();
+        const { message, ...machine } = notice;
+        expect(machine).toEqual({ protocolVersion: PROTOCOL_VERSION, ...expected });
+        expect(message).toContain(`'${expected.packageId}'`);
+        expect(message).toContain(`protocol ${PROTOCOL_VERSION} without a compatibility check`);
+    }
+
+    it('no engines.protocol (inline manifest): 200 with `protocolCheckSkipped` reason `no-range`, and the log line stays', async () => {
+        const h = await mount(dir);
+        const res = await h.install({ manifest: UNDECLARED });
+        expectSkipped(res, { reason: 'no-range', packageId: UNDECLARED_ID });
+        expect(h.installRegistrations().map((m) => m.id)).toEqual([UNDECLARED_ID]);
+        const said = h.logger.warn.mock.calls.map(([m]) => String(m)).filter((m) => m.includes('[protocol]'));
+        expect(said).toHaveLength(1);
+        expect(said[0]).toContain(`package '${UNDECLARED_ID}' declares no engines.protocol range`);
+    });
+
+    it('the compiled artifact `os package install <file>` sends answers the same notice', async () => {
+        const h = await mount(dir);
+        const res = await h.install({
+            manifest: { manifest: UNDECLARED, id: UNDECLARED_ID, version: UNDECLARED.version, objects: [] },
+        });
+        expectSkipped(res, { reason: 'no-range', packageId: UNDECLARED_ID });
+    });
+
+    it('a range the handshake cannot read: reason `unparsed-range`, with the range and where it was declared', async () => {
+        const h = await mount(dir);
+        const res = await h.install({ manifest: { ...UNDECLARED, engines: { protocol: 'workspace:*' } } });
+        expectSkipped(res, {
+            reason: 'unparsed-range',
+            packageId: UNDECLARED_ID,
+            requiredRange: 'workspace:*',
+            rangeSource: 'engines.protocol',
+        });
+    });
+
+    it('an `unmanaged` install of the same package carries the notice too', async () => {
+        const h = await mount(dir, { unmanagedImport: true });
+        const res = await h.install({
+            manifest: { ...UNDECLARED, namespace: 'qanorange', installModes: ['managed', 'unmanaged'] },
+            installMode: 'unmanaged',
+        });
+        expect(res.payload.data?.installMode, JSON.stringify(res.payload)).toBe('unmanaged');
+        expectSkipped(res, { reason: 'no-range', packageId: UNDECLARED_ID });
+    });
+
+    it(`control: under ${CURRENT_RANGE} the range is checked, and the answer has no \`protocolCheckSkipped\` key`, async () => {
+        const h = await mount(dir);
+        const res = await h.install({ manifest: { ...UNDECLARED, engines: { protocol: CURRENT_RANGE } } });
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(Object.keys(res.payload.data)).not.toContain('protocolCheckSkipped');
     });
 });

@@ -18,7 +18,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuSubContent,
   ContextMenuShortcut
-} from '../../ui';
+} from '../../ui/context-menu';
 import { renderChildren } from '../../lib/utils';
 // Same-package sibling import, the path `renderers/complex/data-table.tsx`
 // already uses. `icon` on a menu item is an authored lucide NAME. The twin

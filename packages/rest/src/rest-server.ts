@@ -337,6 +337,10 @@ import {
     type SecurityExplainRouteHost,
     type SecurityRouteHost,
 } from './security-routes.js';
+// [#30205] A user's assigned work: the per-object counts and the bounded hand-over.
+import { registerUserWorkEndpoints, type UserWorkRouteHost } from './user-work-routes.js';
+// [#30237] The recycle bin's doors under `{data}/:object/recycle-bin`.
+import { registerRecycleBinEndpoints, type RecycleBinRouteHost } from './recycle-bin-routes.js';
 // [#23050 slice 7] The discovery and OpenAPI routes' bodies moved to one module — see its header.
 import {
     registerDiscoveryEndpoints,
@@ -366,6 +370,7 @@ import {
 // [#23050 slice 13b] The `/meta` per-item reads (`/references`, `/layers`, the book tree
 // and the item read) moved to their own module — see its header.
 import { registerMetaItemReadRoutes, type MetaItemReadRouteHost } from './meta-item-read-routes.js';
+import { registerMetaQualifiedItemRoute } from './meta-qualified-item-route.js';
 // [#23050 slice 13c] The `/meta` per-item writes (the item save and the reset) moved to
 // their own module — see its header.
 import { registerMetaItemWriteRoutes, type MetaItemWriteRouteHost } from './meta-item-write-routes.js';
@@ -381,6 +386,11 @@ import {
 // [#23050 slice 13e] The `/meta` object state-machine read moved to its own module — see its
 // header.
 import { registerMetaObjectStateRoute, type MetaObjectStateRouteHost } from './meta-object-state-routes.js';
+// [ADR-0144, ruling 6670707546 item B] The record-currency code backfill door — see its header.
+import {
+    registerMetaRecordCurrencyBackfillRoute,
+    type MetaRecordCurrencyBackfillRouteHost,
+} from './meta-record-currency-backfill-route.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -2086,6 +2096,12 @@ export class RestServer {
      *  /security/suggested-bindings (D5/D9) and /security/explain (D6)
      *  routes (plugin-security). */
     private securityServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
+    /**
+     * [#30955] `audit` service resolver — the compliance ledger's writers
+     * (plugin-audit). Read by the export door, which hands the slot's
+     * `recordDataExport` one event per export it streams.
+     */
+    private auditServiceProvider?: (environmentId?: string) => Promise<any | undefined>;
     /** Sync probe: is a kernel service registered? Single-env path for nav
      *  capability gates (ADR-0057 D10) — resolveExecCtx sets no kernel in
      *  single-kernel deployments, so this prevents the gate failing open. */
@@ -2148,6 +2164,11 @@ export class RestServer {
          * providers would silently re-bind every positional argument after it.
          */
         tenancyServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
+        /**
+         * [#30955] Appended LAST for the #15256 reason above: the `audit` slot
+         * the export door records each export through.
+         */
+        auditServiceProvider?: (environmentId?: string) => Promise<any | undefined>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -2169,6 +2190,7 @@ export class RestServer {
         this.requestEnvResolver = requestEnvResolver;
         this.metadataServiceProvider = metadataServiceProvider;
         this.tenancyServiceProvider = tenancyServiceProvider;
+        this.auditServiceProvider = auditServiceProvider;
     }
 
     /**
@@ -2815,7 +2837,9 @@ export class RestServer {
      * every other permission gate here and `/me/permissions`' documented
      * fail-open. Service PRESENT but unable to answer → fail CLOSED: it resolves
      * permission sets to decide, and a resolution failure must never read as a
-     * grant (ADR-0049).
+     * grant (ADR-0049). A service that is registered but cannot be RESOLVED is
+     * not "no security service": {@link resolveSecurityService} refuses the
+     * request first (`503`), before this gate is asked anything.
      */
     private async enforceExportPermission(
         req: any,
@@ -2872,7 +2896,8 @@ export class RestServer {
      *
      * Fail stance, as {@link enforceExportPermission}'s: no security service,
      * or one without `explain`, → allow (no permission sets exist to deny
-     * with); `explain` throwing → deny, never read as a grant. One direction is
+     * with); `explain` throwing → deny, never read as a grant; a service that
+     * cannot be resolved → the resolver's `503`. One direction is
      * stricter than a write: `explain` denies a caller whose permission sets
      * resolve EMPTY, where the middleware skips its CRUD gate — reachable only
      * on a deployment that configures no baseline set at all, and in the closed
@@ -3473,11 +3498,15 @@ export class RestServer {
                 accessToken: 'withhold',
                 // OAuth access tokens are honoured on the `/mcp` door alone
                 // (`acceptOAuthAccessToken`), precisely so coarse tool-family
-                // scopes cannot ride onto REST. [ADR-0090 D10 rule 5] The agent
-                // principal (`principalKind: 'agent'`, `onBehalfOf`,
-                // `oauthScopes`) is represented here for one caller only: an
-                // agent a forward credential carried. Its ceiling is derived
-                // from the consented scopes exactly as the MCP door derives it.
+                // scopes cannot ride onto REST. [ADR-0090 D10 rule 5] The
+                // OAuth-delegated agent principal (`principalKind: 'agent'`,
+                // `onBehalfOf`, `oauthScopes`) is represented here for one
+                // caller only: an agent a forward credential carried. Its
+                // ceiling is derived from the consented scopes exactly as the
+                // MCP door derives it. [ADR-0151 D3] An AI service account's
+                // own API key is the other agent provenance on this face: the
+                // assembler stamps it from the account's row, with no
+                // `onBehalfOf` and no OAuth input.
                 oauth: forwardAgent
                     ? {
                         userId: forwardAgent.userId,
@@ -3495,6 +3524,15 @@ export class RestServer {
                 // credential of its own admitted it here, and the key-management
                 // rule must not read it as a signed-in session.
                 onAdmission: forwardAgent ? undefined : (admission) => { admittedBy = admission.credential; },
+                // [#31821] The transport's own peer address, for the
+                // `credential_use` row an admitted API key writes. The auth
+                // service applies the deployment's trust rule to it and the
+                // headers; this door reads no forwarded header as an address.
+                transport: {
+                    remoteAddress: typeof req?.remoteAddress === 'string' && req.remoteAddress
+                        ? req.remoteAddress
+                        : undefined,
+                },
             });
             if (!base) return undefined;
 
@@ -3660,9 +3698,13 @@ export class RestServer {
             navPruneLogged: this.navPruneLogged,
             isItemOfDisabledPackage: async ({ type, name, packageId }) => {
                 if (typeof p.getMetaItem !== 'function') return false;
+                // [#30218] The REQUEST's environment's engine, through the
+                // shared resolver: the raw `undefined` of the unscoped mount
+                // asked the host kernel's registry whether an environment's
+                // package is disabled.
                 const ql = await wiredEngineOrLoud(
                     Boolean(this.objectQLProvider),
-                    () => this.objectQLProvider!(environmentId),
+                    async () => this.objectQLProvider!(await this.resolveRequestEnvironmentId(environmentId, req)),
                 );
                 const registry = (ql as any)?.registry;
                 if (typeof registry?.isPackageDisabled !== 'function') return false;
@@ -3709,9 +3751,17 @@ export class RestServer {
                     mayWriteItem: RestServer.metaSaveVerdict(caller).allowed,
                 });
             },
+            // [#30192] The REQUEST's environment, through the shared resolver,
+            // as every other `security` consumer asks it: the raw `undefined`
+            // of the unscoped mount read the host's occupant.
             resolveSecurityService: async () => (
-                this.securityServiceProvider ? this.securityServiceProvider(environmentId) : undefined
+                this.securityServiceProvider
+                    ? this.securityServiceProvider(await this.resolveRequestEnvironmentId(environmentId, req))
+                    : undefined
             ),
+            // [#30126 row 12] A refusal's `errors.*` override, as the import
+            // runner's messages resolve theirs.
+            resolveMessageTranslator: () => this.resolveMessageTranslator(environmentId, req),
         };
     }
 
@@ -4273,6 +4323,8 @@ export class RestServer {
                     undefined,
                     runtimeDocument,
                 ),
+            // [ADR-0106 D1] The `action` item step's masker, the list chain's own.
+            resolveObjectMasker: () => this.resolveObjectMasker(environmentId, req, 'object'),
         };
     }
 
@@ -4341,13 +4393,25 @@ export class RestServer {
             ...metaReadGate.metaMemberSelector(req.query),
             ...(environmentId ? { environmentId } : {}),
         };
-        const layered = await p.getMetaItemLayered(layeredRequest);
+        // [#29814] The pending draft layer, asked for only when this caller may
+        // read pending drafts — the admission every draft switch in this file
+        // carries in its own declaration ({@link mayReadPendingDrafts}). A
+        // caller it does not admit is answered the layers without a `draft`
+        // key, byte-identical to a read that never asked for one, so the answer
+        // says nothing about whether a draft exists.
+        const layeredCaller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+        const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
+        const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
         // the shared chain. The stored-version doors honour the author
         // exemption, so the caller carries this transport's save-door
         // admission (`metaItemReadGateSources(…, true)`).
         const answer = await metaReadGate.createMetaLayeredAnswer(
-            this.metaItemReadGateSources(environmentId, req, p, true),
+            {
+                ...this.metaItemReadGateSources(environmentId, req, p, true),
+                // [ADR-0106 D1] The `action` layers step's masker, the list chain's own.
+                resolveObjectMasker: () => this.resolveObjectMasker(environmentId, req, 'object'),
+            },
             {
                 metaType: RestServer.metaTypeSingular(req.params.type),
                 name: req.params.name,
@@ -4390,7 +4454,11 @@ export class RestServer {
      * The returned function REJECTS with {@link ObjectSchemaMaskEvaluationError}
      * on D6 tier 3 — the security service threw. Call sites answer 5xx via
      * {@link sendFieldVisibilityFault}; they must never fall back to the
-     * unmasked body.
+     * unmasked body. This resolution itself rejects with
+     * {@link AuthzStoreUnavailableError} — D6 tier 3 as well — when the caller's
+     * context or the environment's security service cannot be resolved; call
+     * sites rethrow it to the route's `503`. Only a security service that is
+     * NOT REGISTERED reaches tier 1.
      */
     private async resolveObjectMasker(
         environmentId: string | undefined,
@@ -4950,6 +5018,7 @@ export class RestServer {
             this.registerAnalyticsEndpoints(bp);
             this.registerSecurityEndpoints(bp);
             this.registerSecurityExplainEndpoints(bp);
+            this.registerUserWorkEndpoints(bp);
             // Data-action routes (e.g. GET /data/:object/export, POST
             // /data/:object/import) use static-literal action segments that
             // MUST be registered BEFORE the greedy GET /data/:object/:id
@@ -4962,6 +5031,13 @@ export class RestServer {
             // no greedy 2-segment `:object/:id` routes (only literal actions and
             // deeper `:id/clone`, `:id/shares` paths), so it cannot shadow any
             // CRUD literal.
+            // [#30237] The recycle bin's doors: `GET` / `DELETE
+            // {data}/:object/recycle-bin` are two-segment literals beside the
+            // greedy `{data}/:object/:id`, so they register before the CRUD
+            // routes, as the data actions do. Served with the CRUD surface.
+            if (this.config.api.enableCrud) {
+                this.registerRecycleBinEndpoints(bp);
+            }
             this.registerDataActionEndpoints(bp);
             // [#27627] `POST /data/:object/:id/page` — a deeper literal under
             // `:id`, like `:id/clone`, so it shadows no CRUD route either way.
@@ -5498,7 +5574,7 @@ export class RestServer {
             metaItemAnswerSources: (...a) => this.metaItemAnswerSources(...a),
             sendMetaReadRefusal: (...a) => RestServer.sendMetaReadRefusal(...a),
         };
-        registerMetaItemReadRoutes.call(itemReadHost, scope);
+        const readMetaItem = registerMetaItemReadRoutes.call(itemReadHost, scope);
 
         // [#27627] The app metadata bundle (`GET {metaPath}/app/:appId/bundle`), in
         // `meta-app-bundle-routes.ts`: every member is the item read's own answer,
@@ -5578,9 +5654,24 @@ export class RestServer {
         const objectStateHost: MetaObjectStateRouteHost = {
             routeManager: this.routeManager,
             get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
         };
         registerMetaObjectStateRoute.call(objectStateHost, scope);
+
+        // [ADR-0144, ruling 6670707546 item B] The tenant-admin door for the
+        // record-currency code backfill (`POST {metaPath}/_migrate-record-currency-codes`),
+        // in `meta-record-currency-backfill-route.ts`, behind the maintenance switch as
+        // `_migrate-stored` is. A literal `POST` path no `:type` mount captures, so its
+        // place in the order is free; built here, inside the umbrella's swap, so the route
+        // manager it captures is the wrapping registrar. Read that module's header.
+        const recordCurrencyBackfillHost: MetaRecordCurrencyBackfillRouteHost = {
+            routeManager: this.routeManager,
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+        };
+        registerMetaRecordCurrencyBackfillRoute.call(recordCurrencyBackfillHost, scope);
 
         // [#23050 slice 13e] The published read (`GET {metaPath}/:type/:name/published`)
         // moved to `meta-item-history-routes.ts`, beside the history family, and is registered
@@ -5599,9 +5690,24 @@ export class RestServer {
             metaItemReadGate: (...a) => this.metaItemReadGate(...a),
             maskObjectDocument: (...a) => this.maskObjectDocument(...a),
             get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveMetadataService: (...a) => this.resolveMetadataService(...a),
+            metaListSource: (...a) => this.metaListSource(...a),
         };
         registerMetaItemPublishedRoute.call(itemPublishedHost, scope);
+
+        // [ADR-0150 D5, epic #31527 child G1] The qualified by-name read,
+        // `GET /meta/:type/:ns/:name`, answered through the item read's own
+        // handler. ⛔ LAST, after every `/meta` route above: the route
+        // manager's first match must be each literal three-segment sibling
+        // (`/history`, `/audit`, `/diff`, `/published`, `/references`,
+        // `/layers`, `/publish`, `/rollback`, `book/:name/tree`), which keep
+        // their routes (ruling Q1 on #31691).
+        registerMetaQualifiedItemRoute.call(
+            { routeManager: this.routeManager, resolveProtocol: (...a) => this.resolveProtocol(...a) },
+            scope,
+            readMetaItem,
+        );
 
         // ── RETIRED: the compound `/:type/:section/:name` arities ──────────
         //
@@ -5724,6 +5830,7 @@ export class RestServer {
             resolveMessageTranslator: (...a) => this.resolveMessageTranslator(...a),
             resolveSecurityService: (...a) => this.resolveSecurityService(...a),
             resolveI18nService: (...a) => this.resolveI18nService(...a),
+            resolveAuditService: (...a) => this.resolveAuditService(...a),
             extractLocale: (...a) => this.extractLocale(...a),
             answerImportTemplate: (...a) => this.answerImportTemplate(...a),
         };
@@ -5743,6 +5850,7 @@ export class RestServer {
             routeManager: this.routeManager,
             get approvalsServiceProvider() { return readApprovalsServiceProvider(); },
             resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
             enforceApiAccess: (...a) => this.enforceApiAccess(...a),
@@ -5874,11 +5982,31 @@ export class RestServer {
 
     /**
      * [#3547] Resolve the environment's `security` service — the ENVIRONMENT's
-     * kernel service first (its evaluator / FieldMasker are bound to that
-     * kernel's data engine), the host provider as the single-kernel fallback.
-     * Mirrors the resolver in registerSecurityExplainEndpoints. Returns
-     * `undefined` when no security service is reachable (no plugin-security /
-     * single-kernel without a provider), so callers degrade gracefully.
+     * kernel service (its evaluator / FieldMasker are bound to that kernel's
+     * data engine).
+     *
+     * [#30192] The provider resolves the environment's kernel itself
+     * (`rest-api-plugin`'s environment-scoped seam), so this asks it for the
+     * REQUEST's environment, the shared resolver's answer, and nothing else.
+     * The host's occupant is never a fallback.
+     *
+     * A door whose environment's security service cannot be resolved refuses
+     * rather than proceeds. The two answers are told apart by the registry's
+     * own "never registered" brand, never by message text:
+     *
+     *  - NOT REGISTERED → `undefined`: no provider is wired, the environment's
+     *    kernel registers no `security` service (the provider absorbs the
+     *    branded rejection), or that branded rejection reaches this resolver.
+     *    The deployment has no permission posture at all (no plugin-security,
+     *    or a single kernel without one), and each caller's documented
+     *    degradation for that case stands (ADR-0106 D6 tier 1).
+     *  - REGISTERED BUT UNRESOLVABLE → {@link AuthzStoreUnavailableError}, the
+     *    door's `503 SERVICE_UNAVAILABLE`: every other rejection — a registered
+     *    factory that threw, or the environment's kernel failing to be
+     *    acquired at this step. An unhealthy security service must not open a
+     *    door (ADR-0106 D6 tier 3), and a resolution failure never reads as a
+     *    grant (ADR-0049). The same classification the tenancy read makes
+     *    (`resolveAnonymousFormTenancy`).
      *
      * Typed as a PARTIAL {@link ISecurityService}: an implementation may omit a
      * method it cannot honour, so every call site must keep feature-detecting
@@ -5888,16 +6016,36 @@ export class RestServer {
         environmentId?: string,
         req?: any,
     ): Promise<Partial<ISecurityService> | undefined> {
+        if (!this.securityServiceProvider) return undefined;
         try {
             const envId = await this.resolveRequestEnvironmentId(environmentId, req);
-            if (envId && envId !== 'platform' && this.kernelManager) {
-                const kernel = await this.kernelManager.getOrCreate(envId);
-                const svc = await kernel.getServiceAsync<any>('security').catch(() => undefined);
-                if (svc) return svc;
-            }
-        } catch { /* fall back to the host provider */ }
-        if (!this.securityServiceProvider) return undefined;
-        try { return await this.securityServiceProvider(environmentId); }
+            return await this.securityServiceProvider(envId);
+        } catch (err) {
+            if (isServiceNotRegisteredError(err)) return undefined;
+            throw new AuthzStoreUnavailableError('security', err);
+        }
+    }
+
+    /**
+     * [#30955] Resolve the environment's `audit` service — the compliance
+     * ledger's writers, which plugin-audit registers on the kernel that holds
+     * `sys_audit_log`. Asked for the REQUEST's environment, the shared
+     * resolver's answer, exactly as {@link resolveSecurityService} is.
+     *
+     * Returns `undefined` when no audit service is reachable: a deployment
+     * without plugin-audit has no ledger at all, so there is nothing to record
+     * an export in, as for every other ledger row on such a host. Never
+     * throws: recording an export must not change the export's answer.
+     */
+    private async resolveAuditService(
+        environmentId?: string,
+        req?: any,
+    ): Promise<unknown> {
+        if (!this.auditServiceProvider) return undefined;
+        try {
+            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
+            return await this.auditServiceProvider(envId);
+        }
         catch { return undefined; }
     }
 
@@ -5954,6 +6102,7 @@ export class RestServer {
         const host: EmailRouteHost = {
             routeManager: this.routeManager,
             get emailServiceProvider() { return readEmailServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6124,12 +6273,10 @@ export class RestServer {
         // [#23050 slice 5] The body moved to `analytics-routes.ts`. This literal
         // hands it every member it reads — the list IS its dependency on this
         // class (see `AnalyticsRouteHost`, and that module's header for why
-        // `kernelManager` and `analyticsServiceProvider` are getters).
-        const readKernelManager = () => this.kernelManager;
+        // `analyticsServiceProvider` is a getter).
         const readAnalyticsServiceProvider = () => this.analyticsServiceProvider;
         const host: AnalyticsRouteHost = {
             routeManager: this.routeManager,
-            get kernelManager() { return readKernelManager(); },
             get analyticsServiceProvider() { return readAnalyticsServiceProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
@@ -6165,23 +6312,87 @@ export class RestServer {
      * oneself, and the anonymous `guest` posture is not this endpoint's
      * business) and returns 501 when no security service exposing `explain`
      * is mounted (a deployment without `@objectstack/plugin-security`).
+     *
+     * The same family serves the caller's delegable scope
+     * (`GET {basePath}/security/my-delegable-scope`) and one user's effective
+     * permission sets with their origins
+     * (`GET {basePath}/security/users/:id/effective-access`, the service's
+     * `describeEffectiveAccess`, gated by explain's caller gate in the
+     * SERVICE; an unknown id answers the same 403 as a forbidden one).
      */
     private registerSecurityExplainEndpoints(basePath: string): void {
         // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
         // hands it every member it reads — the list IS its dependency on this
-        // class (see `SecurityExplainRouteHost`, and that module's header for why
-        // `kernelManager` and `securityServiceProvider` are getters).
-        const readKernelManager = () => this.kernelManager;
-        const readSecurityServiceProvider = () => this.securityServiceProvider;
+        // class (see `SecurityExplainRouteHost`). The `security` slot is read through
+        // {@link resolveSecurityService}, the server's one resolver, so this
+        // family classifies a rejection exactly as every other door does.
         const host: SecurityExplainRouteHost = {
             routeManager: this.routeManager,
-            get kernelManager() { return readKernelManager(); },
-            get securityServiceProvider() { return readSecurityServiceProvider(); },
-            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveSecurityService: (...a) => this.resolveSecurityService(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
         registerSecurityExplainEndpoints.call(host, basePath);
+    }
+
+    /**
+     * [#30205] Register a user's assigned-work routes:
+     *
+     *   GET  {basePath}/security/users/:id/assigned-work
+     *   POST {basePath}/security/users/:id/assigned-work/transfer   body: { toUserId, objects? }
+     *
+     * The first answers, per object and user field, how many records hold the
+     * user (the owner field and every app user field), counted as the caller
+     * can read them. The second hands up to 500 of those records to another
+     * active user per call, each as an ordinary update under the caller's
+     * context, and answers what moved, what failed and how many remain.
+     * Neither touches the ban. `@objectstack/core`'s `user-assigned-work.ts`
+     * holds the rules.
+     */
+    private registerUserWorkEndpoints(basePath: string): void {
+        // [#30205] The body lives in `user-work-routes.ts`. This literal hands it
+        // every member it reads (see `UserWorkRouteHost`); the engine provider
+        // FIELD goes as a getter, read when a handler reads it.
+        const readObjectQLProvider = () => this.objectQLProvider;
+        const host: UserWorkRouteHost = {
+            routeManager: this.routeManager,
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+        };
+        registerUserWorkEndpoints.call(host, basePath);
+    }
+
+    /**
+     * [#30237, ADR-0148] Register the recycle bin's doors under the data
+     * surface: list and empty an object's bin, restore and purge one entry.
+     *
+     *   GET    {basePath}/data/:object/recycle-bin
+     *   DELETE {basePath}/data/:object/recycle-bin
+     *   POST   {basePath}/data/:object/recycle-bin/:entryId/restore
+     *   DELETE {basePath}/data/:object/recycle-bin/:entryId
+     *
+     * Each calls the engine's own verb as the caller. Answers 501 when the
+     * environment's engine has no recycle bin.
+     */
+    private registerRecycleBinEndpoints(basePath: string): void {
+        // The body lives in `recycle-bin-routes.ts`. This literal hands it
+        // every member it reads (see `RecycleBinRouteHost`); the engine
+        // provider FIELD goes as a getter, read when a handler reads it.
+        const readObjectQLProvider = () => this.objectQLProvider;
+        const host: RecycleBinRouteHost = {
+            config: this.config,
+            routeManager: this.routeManager,
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            enforceApiAccess: (...a) => this.enforceApiAccess(...a),
+            resolveSecurityService: (...a) => this.resolveSecurityService(...a),
+        };
+        registerRecycleBinEndpoints.call(host, basePath);
     }
 
     /**
@@ -6210,6 +6421,7 @@ export class RestServer {
             config: this.config,
             routeManager: this.routeManager,
             get sharingServiceProvider() { return readSharingServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6237,6 +6449,7 @@ export class RestServer {
         const host: SharingRuleRouteHost = {
             routeManager: this.routeManager,
             get sharingRulesServiceProvider() { return readSharingRulesServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6278,12 +6491,12 @@ export class RestServer {
     private registerSecurityEndpoints(basePath: string): void {
         // [#23050 slice 6] The body moved to `security-routes.ts`. This literal
         // hands it every member it reads — the list IS its dependency on this
-        // class (see `SecurityRouteHost`, and that module's header for why
-        // `securityServiceProvider` is a getter).
-        const readSecurityServiceProvider = () => this.securityServiceProvider;
+        // class (see `SecurityRouteHost`). The `security` slot is read through
+        // {@link resolveSecurityService}, the server's one resolver, so this
+        // family classifies a rejection exactly as every other door does.
         const host: SecurityRouteHost = {
             routeManager: this.routeManager,
-            get securityServiceProvider() { return readSecurityServiceProvider(); },
+            resolveSecurityService: (...a) => this.resolveSecurityService(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6316,6 +6529,7 @@ export class RestServer {
         const host: ApprovalsRouteHost = {
             routeManager: this.routeManager,
             get approvalsServiceProvider() { return readApprovalsServiceProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
@@ -6336,6 +6550,7 @@ export class RestServer {
             routeManager: this.routeManager,
             protocol: this.protocol,
             get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
             resolveExecCtx: (...a) => this.resolveExecCtx(...a),
             enforceAuth: (...a) => this.enforceAuth(...a),

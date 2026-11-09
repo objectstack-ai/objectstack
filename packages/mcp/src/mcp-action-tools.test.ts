@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
@@ -231,16 +231,121 @@ describe('MCP action tools (list_actions / run_action)', () => {
     expect(json.result.content[0].text).toMatch(/requires capability/i);
   });
 
+  // [#31272] A fault answers what the `/meta` door answers: its text is
+  // withheld from the agent and logged for the operator.
   it('surfaces list_actions bridge errors as tool errors', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const failing = {
       ...bridge,
       async listActions() {
         throw new Error('metadata unavailable');
       },
     };
-    const { status, json } = await call(runtime, toolsCall(7, 'list_actions', {}), failing);
-    expect(status).toBe(200);
+    try {
+      const { status, json } = await call(runtime, toolsCall(7, 'list_actions', {}), failing);
+      expect(status).toBe(200);
+      expect(json.result.isError).toBe(true);
+      expect(JSON.parse(json.result.content[0].text)).toEqual({
+        error: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 },
+      });
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(String(log.mock.calls[0]![0])).toContain('metadata unavailable');
+    } finally {
+      log.mockRestore();
+    }
+  });
+});
+
+// [ADR-0150 D2/D5/D6] An action is addressed by (namespace, name): the listing
+// names each row's namespace and derived face, a face two actions derive is
+// refused once naming both (neither row is dropped), and `run_action` forwards
+// the exact qualifier only when the caller gives one.
+describe('MCP action tools: namespace and face (ADR-0150)', () => {
+  let runtime: MCPServerRuntime;
+  // The wire answer, read as the JSON-RPC envelope it is.
+  const callJson = async (body: unknown, bridge: unknown): Promise<any> => (await call(runtime, body, bridge)).json;
+
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+  });
+
+  function pairBridge(rows: any[]) {
+    const bridge = makeBridge();
+    return Object.assign(bridge, {
+      async listActions() {
+        bridge.calls.push(['listActions']);
+        return rows;
+      },
+    });
+  }
+
+  const digest = (namespace: string) => ({
+    name: 'send_digest',
+    objectName: 'global',
+    namespace,
+    face: `${namespace}-send_digest`,
+    label: 'Send digest',
+    type: 'script',
+    requiresRecord: false,
+    requiresConfirmation: false,
+  });
+
+  it('list_actions lists both holders of one name, each with its namespace and face', async () => {
+    const bridge = pairBridge([digest('crm'), digest('hr')]);
+    const json = await callJson(toolsCall(1, 'list_actions', {}), bridge);
+    const payload = JSON.parse(json.result.content[0].text);
+    expect(payload.actions.map((a: any) => [a.namespace, a.face])).toEqual([
+      ['crm', 'crm-send_digest'],
+      ['hr', 'hr-send_digest'],
+    ]);
+    expect(payload.totalCount).toBe(2);
+    expect(payload).not.toHaveProperty('refusedFaces');
+  });
+
+  it('a face two actions derive is refused once, naming both, and neither row is dropped', async () => {
+    const twin = (namespace: string) => ({ ...digest(namespace), face: 'shared-face' });
+    const bridge = pairBridge([twin('crm'), twin('hr'), digest('ops')]);
+    const json = await callJson(toolsCall(2, 'list_actions', {}), bridge);
+    const payload = JSON.parse(json.result.content[0].text);
+    expect(payload.totalCount).toBe(3);
+    expect(payload.actions.map((a: any) => a.namespace)).toEqual(['crm', 'hr', 'ops']);
+    expect(payload.actions.map((a: any) => a.face)).toEqual([undefined, undefined, 'ops-send_digest']);
+    expect(payload.refusedFaces).toHaveLength(1);
+    expect(payload.refusedFaces[0].face).toBe('shared-face');
+    expect(payload.refusedFaces[0].reason).toContain('namespace "crm"');
+    expect(payload.refusedFaces[0].reason).toContain('namespace "hr"');
+  });
+
+  it('run_action forwards namespace to the bridge when given', async () => {
+    const bridge = makeBridge();
+    const json = await callJson(toolsCall(3, 'run_action', { actionName: 'send_digest', namespace: 'hr' }), bridge);
+    expect(json.result.isError).toBeFalsy();
+    const runCall = bridge.calls.find((c) => c[0] === 'runAction');
+    expect(runCall[1]).toBe('send_digest');
+    expect(runCall[2].namespace).toBe('hr');
+  });
+
+  it('CONTROL: run_action without namespace reaches the bridge with no namespace key', async () => {
+    const bridge = makeBridge();
+    await call(runtime, toolsCall(4, 'run_action', { actionName: 'complete_task', recordId: 't1' }), bridge);
+    const runCall = bridge.calls.find((c) => c[0] === 'runAction');
+    expect(Object.keys(runCall[2])).not.toContain('namespace');
+  });
+
+  it('a bridge refusal of a bare two-holder name reaches the caller as a coded tool error', async () => {
+    const bridge = Object.assign(makeBridge(), {
+      async runAction() {
+        throw Object.assign(
+          new Error('The name "send_digest" is held by 2 packages: "com.crm" and "com.hr".'),
+          { code: 'RESOURCE_CONFLICT', status: 409 },
+        );
+      },
+    });
+    const json = await callJson(toolsCall(5, 'run_action', { actionName: 'send_digest' }), bridge);
     expect(json.result.isError).toBe(true);
-    expect(json.result.content[0].text).toContain('metadata unavailable');
+    const text = json.result.content[0].text;
+    expect(text).toContain('RESOURCE_CONFLICT');
+    expect(text).toContain('com.crm');
+    expect(text).toContain('com.hr');
   });
 });

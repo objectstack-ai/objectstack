@@ -186,6 +186,10 @@ export function rewriteSites(sf, method, table, className = CLASS_NAME) {
                 const member = table.instance.get(name);
                 if (!member) { refuse(node, `\`this.${name}\` names no declared instance member`); return; }
                 if (table.statics.has(name)) { refuse(node, `\`${name}\` is both an instance and a static member: the host cannot carry both`); return; }
+                // [#30518] A method's host entry is a forwarding closure, always a function, so a
+                // method read other than as a callee (`typeof this.m`, `const f = this.m`) would
+                // read the closure, not the instance's member. Same rule as a private static below.
+                if (member.kind === 'method' && !isCallee(p)) { refuse(node, `instance method \`${name}\` read as a value: the host carries a method as a forwarding closure, so only a call is in the closed set`); return; }
                 sites.push({ start: node.getStart(sf), end: node.getEnd(), text: HOST_PARAM, kind: 'member', member: name });
                 useInstance(name, isAssignmentTarget(p) ? 'write' : isCallee(p) ? 'call' : 'read');
                 ts.forEachChild(p, (c) => { if (c !== node) visit(c); });

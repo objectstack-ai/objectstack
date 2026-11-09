@@ -1,6 +1,6 @@
 import React from 'react';
 import { Avatar, AvatarFallback, AvatarImage, Button } from '@object-ui/components';
-import { useUpload } from '@object-ui/providers';
+import { useUpload } from './UploadProvider.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Upload, X, Loader2, Lock } from 'lucide-react';
 import { FieldWidgetComponentProps } from './types.js';

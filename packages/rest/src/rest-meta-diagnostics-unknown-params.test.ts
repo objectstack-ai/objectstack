@@ -196,7 +196,7 @@ describe('[#27633] an unknown parameter name is refused, not ignored into a full
         expect(answer.body.error.message).toContain('Supported parameters: package, severity, type.');
     });
 
-    it('?packageId= (the `_drafts` spelling, never read here) answers 400 INVALID_REQUEST', async () => {
+    it('?packageId= (the retired `_drafts` spelling, never read here) answers 400 INVALID_REQUEST', async () => {
         const { diagnostics } = boot();
         expectRefusal(await diagnostics({ packageId: PACKAGE_ID }), 'INVALID_REQUEST');
     });

@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaItemOpensFormEditor,
   areaItemPillarPath,
   areaLocationRedirect,
   isStudioAllPackagesScope,
@@ -116,5 +117,33 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
     expect(open('flow', '?review=1')).toBeNull();
     // Control: the same item without them opens the pillar.
     expect(open('flow', '?review=0')).not.toBeNull();
+  });
+});
+
+describe('areaItemOpensFormEditor — a read-only package’s dataset opens its Customize door (objectstack#30064)', () => {
+  const at = (type: string, readOnly: boolean, search = '') => ({
+    packageId: PKG,
+    type,
+    search: new URLSearchParams(search),
+    readOnly,
+  });
+
+  it('a dataset opens the form editor on a read-only package, and the generic page on a writable one', () => {
+    expect(areaItemOpensFormEditor(at('dataset', true))).toBe(true);
+    expect(areaItemOpensFormEditor(at('dataset', false))).toBe(false);
+    expect(areaItemOpensFormEditor({ packageId: PKG, type: 'dataset', search: new URLSearchParams() })).toBe(false);
+  });
+
+  it('keeps the form editor’s exceptions: the cross-package leg, the environment scope and the draft review', () => {
+    expect(areaItemOpensFormEditor({ ...at('dataset', true), packageId: null })).toBe(false);
+    expect(areaItemOpensFormEditor(at('dataset', true, 'scope=environment'))).toBe(false);
+    expect(areaItemOpensFormEditor(at('dataset', true, 'review=1'))).toBe(false);
+  });
+
+  it('leaves an email template and a translation where they were, on either kind of package', () => {
+    for (const type of ['email_template', 'translation']) {
+      expect(areaItemOpensFormEditor(at(type, true))).toBe(true);
+      expect(areaItemOpensFormEditor(at(type, false))).toBe(true);
+    }
   });
 });

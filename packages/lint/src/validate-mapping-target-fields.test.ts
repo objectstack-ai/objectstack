@@ -181,22 +181,31 @@ describe('validateMappingTargetFields', () => {
   });
 
   it('folds fields an objectExtensions entry merges into the object — from the stack and from a sibling package', () => {
-    const stack = {
+    const mappings = [mapping([
+      { source: 'Tier', target: 'sla_tier' },
+      { source: 'Region', target: 'region' },
+    ])];
+    // [#30383] Read through the shared fold, as the registry registers them:
+    // the stack's own entries when it carries no `packages[]`, and every
+    // body's when it does (an artifact's top level repeats its bodies).
+    expect(validateMappingTargetFields({
       objects: [contact],
-      objectExtensions: [{ extend: 'crm_contact', fields: { sla_tier: { type: 'text' } } }],
-      packages: [{ manifest: { objectExtensions: [{ extend: 'crm_contact', fields: { region: { type: 'text' } } }] } }],
-      mappings: [mapping([
-        { source: 'Tier', target: 'sla_tier' },
-        { source: 'Region', target: 'region' },
-      ])],
-    };
-    expect(validateMappingTargetFields(stack)).toEqual([]);
+      objectExtensions: [{ extend: 'crm_contact', fields: { sla_tier: { type: 'text' }, region: { type: 'text' } } }],
+      mappings,
+    })).toEqual([]);
+    expect(validateMappingTargetFields({
+      objects: [contact],
+      packages: [
+        { manifest: { objects: [contact], objectExtensions: [{ extend: 'crm_contact', fields: { sla_tier: { type: 'text' } } }] } },
+        { manifest: { objectExtensions: [{ extend: 'crm_contact', fields: { region: { type: 'text' } } }] } },
+      ],
+      mappings,
+    })).toEqual([]);
   });
 
   it('CONTROL — `packages: undefined` (absent) stays silent — the only value this reader treats as absent', () => {
-    // `full_name`, not `sla_tier`: `sla_tier` resolves via the STACK's own
-    // top-level `objectExtensions` (the test above, :173) — `region` is the
-    // one that needs a package (:174). Either way, with `packages` genuinely
+    // `full_name`, not `sla_tier`: `sla_tier` resolves only through an
+    // `objectExtensions` entry (the test above). With `packages` genuinely
     // absent this control needs a field `contact` declares on its own, so a
     // real finding can't masquerade as the reader silently accepting the
     // shape.

@@ -45,7 +45,10 @@
  * Under a wall, the doors that write the environment's metadata ask a second
  * predicate after their capability gate, {@link walledCatalogWriteVerdict}:
  * the `/meta` item write doors, `POST /meta/_migrate-stored`, the `/packages`
- * write doors, the `/automation` definition writes and `install-local`.
+ * write doors, the `/automation` definition writes, `install-local`, the
+ * external-table import (the REST route and the MCP `import_object` tool),
+ * the federated catalog refresh and the datasource admin routes that write a
+ * datasource record (`@objectstack/service-datasource`).
  *
  * ── Refusal messages (#7450) ──────────────────────────────────────────────
  *
@@ -181,8 +184,13 @@ export const PLATFORM_OPERATOR_POSTURE = 'PLATFORM_ADMIN';
  * `/meta` item write doors on both transports (save, reset, publish,
  * rollback), `POST /meta/_migrate-stored` on both transports, the `/packages`
  * write doors, the `/automation` definition writes,
- * `install-local` (install, upgrade, uninstall) and the permission-set clone
- * door. (The security plugin's data door on the catalog objects asked it too,
+ * `install-local` (install, upgrade, uninstall), the permission-set clone
+ * door, the external-table import on both of its doors (the REST route and
+ * the MCP `import_object` tool, which save an `object` into the catalog), and
+ * the federated catalog refresh (which saves an `external_catalog`), and the
+ * datasource admin routes that write a datasource record (create, update,
+ * remove, migrate-credential: a `datasource` item). (The
+ * security plugin's data door on the catalog objects asked it too,
  * until those objects retired — ADR-0131 D3, C3 stage 8: no `sys_position`,
  * `sys_permission_set` or `sys_capability` write reaches the engine, so a
  * position, set or capability is written through the `/meta` doors above.)

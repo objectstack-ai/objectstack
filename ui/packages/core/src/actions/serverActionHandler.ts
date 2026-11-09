@@ -307,7 +307,14 @@ export function createServerActionHandler(config: ServerActionHandlerConfig): Se
           ...(outcome.fieldErrors ? { fieldErrors: outcome.fieldErrors } : {}),
         };
       }
-      const shouldRefresh = action.refreshAfter !== false;
+      // A declared `operation: 'update'` wrote the record it addresses — that
+      // write is the action's whole definition — so its success is a record
+      // change whatever `refreshAfter` says, exactly as a client-side
+      // `dataSource.update` reaches every reader through the mutation bridge
+      // with no flag to consult. `refreshAfter` keeps governing every other
+      // dispatch: the spec defaults it to `false`, so a parsed non-update
+      // action with no `refreshAfter: true` still sends no re-read.
+      const shouldRefresh = action.operation === 'update' || action.refreshAfter !== false;
       if (shouldRefresh) onRefresh?.();
       // `data` carries the ACTION ENVELOPE (`{ success, data }`), the level
       // `ActionResult.data` has always carried; consumers reading the

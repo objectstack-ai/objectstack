@@ -351,6 +351,68 @@ export const MYSQL_CELL = dialectCell('mysql');
 /** The Postgres cell. `.url` is the provisioned URL (or `undefined`) for `skipIf`. */
 export const PG_CELL = dialectCell('pg');
 
+// ── The FEDERATION cell: SQL Server (#31327) ─────────────────────────────────
+//
+// Not a member of {@link DIALECT_CELLS}, and deliberately so. Every consumer of
+// that list builds its fixture with `initObjects` — a MANAGED table — and the
+// `mssql` client is federation-only: the driver refuses to emit managed DDL on
+// it. Adding it there would turn every managed matrix red for a reason that is
+// the contract, not a defect. The SQL Server cell runs the shared case-sets the
+// way a federated datasource meets them instead: over tables created by raw
+// DDL and bound with `registerExternalObject`
+// (`sql-driver-mssql-federation-conformance.test.ts`).
+//
+// Opt-in, like the other live cells: `OS_TEST_MSSQL_URL`, spelled
+// `mssql://user:password@host:port/database?encrypt=false&trustServerCertificate=true`.
+// Unset, the cell is a named SKIP; under `OS_EXPECT_MSSQL_FEDERATION=1` (a
+// runner that provisioned the server) it is a named failure instead. No CI job
+// provisions it today, so a green CI run says nothing about SQL Server — the
+// coverage reporter prints that line.
+
+const MSSQL_URL = process.env.OS_TEST_MSSQL_URL;
+
+/** `1` when the runner provisioned SQL Server and a missing URL is a runner defect. */
+export const EXPECT_MSSQL_FEDERATION = process.env.OS_EXPECT_MSSQL_FEDERATION === '1';
+
+/**
+ * `mssql://user:password@host:port/database?encrypt=…&trustServerCertificate=…`
+ * → the knex `mssql` (tedious) connection object. tedious reads no URL, which
+ * is also why the spec's `mssql` config refuses one; this parser exists for
+ * the test env var only.
+ */
+export function mssqlConnectionFromUrl(url: string): Record<string, unknown> {
+  const u = new URL(url);
+  const flag = (name: string, fallback: boolean): boolean => {
+    const v = u.searchParams.get(name);
+    return v === null ? fallback : v === 'true' || v === '1';
+  };
+  return {
+    server: u.hostname,
+    port: u.port ? Number(u.port) : 1433,
+    user: decodeURIComponent(u.username),
+    password: decodeURIComponent(u.password),
+    database: decodeURIComponent(u.pathname.replace(/^\//, '')) || 'master',
+    options: {
+      encrypt: flag('encrypt', false),
+      trustServerCertificate: flag('trustServerCertificate', true),
+    },
+  };
+}
+
+/** The SQL Server federation cell — see the block above for why it stands apart. */
+export const MSSQL_FEDERATION_CELL = {
+  id: 'mssql' as const,
+  label: 'live sql server (federation)',
+  env: 'OS_TEST_MSSQL_URL',
+  url: MSSQL_URL,
+  available: !!MSSQL_URL,
+  config: (): SqlDriverConfig => ({
+    client: 'mssql',
+    connection: mssqlConnectionFromUrl(MSSQL_URL!) as any,
+    schemaMode: 'external',
+  }),
+};
+
 /**
  * Declare a cell nobody provisioned: REPORTED, never omitted.
  *
@@ -367,15 +429,23 @@ export const PG_CELL = dialectCell('pg');
  * @param matrix which matrix this cell belongs to, e.g. `temporal conformance`
  *   — it names both the suite and the failure message.
  */
-export function declareUnprovisionedCell(cell: DialectCell, matrix: string): void {
+export function declareUnprovisionedCell(cell: DialectCell | FederationDialectCell, matrix: string): void {
+  // [#31328] A federation cell answers to its OWN expectation flag: the job
+  // that provisions Postgres and MySQL does not provision Oracle, so
+  // `OS_EXPECT_LIVE_DIALECT_MATRIX=1` must not turn the Oracle cell red there.
+  const expected = 'expectEnv' in cell ? process.env[cell.expectEnv] === '1' : EXPECT_LIVE_DIALECTS;
+  const flag = 'expectEnv' in cell ? cell.expectEnv : 'OS_EXPECT_LIVE_DIALECT_MATRIX';
   describe(`sql-driver — ${matrix} matrix (${cell.label})`, () => {
-    it.skipIf(!EXPECT_LIVE_DIALECTS)(
+    it.skipIf(!expected)(
       `is provisioned — set ${cell.env} to run this cell of the D-A3 driver axis`,
       () => {
         expect.fail(
-          `${cell.env} is unset while OS_EXPECT_LIVE_DIALECT_MATRIX=1: this runner declared it ` +
-            `provisions live Postgres and MySQL, so the ${cell.label} cell of the ${matrix} ` +
-            `matrix must not be skipped (ADR-0053 D-A3 "Postgres at minimum").`,
+          'expectEnv' in cell
+            ? `${cell.env} is unset while ${flag}=1: this runner declared it provisions the ` +
+                `${cell.label} cell of the ${matrix} matrix, so it must not be skipped.`
+            : `${cell.env} is unset while OS_EXPECT_LIVE_DIALECT_MATRIX=1: this runner declared it ` +
+                `provisions live Postgres and MySQL, so the ${cell.label} cell of the ${matrix} ` +
+                `matrix must not be skipped (ADR-0053 D-A3 "Postgres at minimum").`,
         );
       },
     );
@@ -503,10 +573,10 @@ export const LIVE_CELL_TIMEOUT_MS = 60_000;
  *   failure message, exactly as in {@link declareUnprovisionedCell}.
  * @param measure declares the suites for a cell that CAN run right now.
  */
-export function declareDialectCell(
-  cell: DialectCell,
+export function declareDialectCell<C extends DialectCell | FederationDialectCell = DialectCell>(
+  cell: C,
   matrix: string,
-  measure: (cell: DialectCell) => void,
+  measure: (cell: C) => void,
 ): void {
   if (!cell.available) {
     declareUnprovisionedCell(cell, matrix);
@@ -666,3 +736,66 @@ export function assertThreeWayZoneSkew(cell: DialectCell, server: ServerZone): v
       `disagree, or a value folded through the wrong one still lands on the right answer`,
   ).not.toBe(proc.offsetMinutes);
 }
+
+// ── Federation-only cells (#31328, ADR-0015 §4.6) ───────────────────────────
+//
+// A dialect `driver-sql` speaks ONLY to an external datasource. It is NOT in
+// {@link DIALECT_CELLS}, and cannot be: every suite that iterates that list
+// builds its fixture with `initObjects` (managed DDL), which a federation-only
+// dialect refuses by name. Its suites therefore create the remote tables with
+// raw DDL, bind them as external objects, and name this cell by itself.
+//
+// Its own expectation flag, for the reason `declareUnprovisionedCell` states.
+
+/** The federation-only dialects. Kept apart from {@link DialectId} on purpose (see above). */
+export type FederationDialectId = 'oracle';
+
+export interface FederationDialectCell {
+  id: FederationDialectId;
+  label: string;
+  env: string;
+  /** `1` in this env var turns an unprovisioned cell into a failure. */
+  expectEnv: string;
+  url?: string;
+  available: boolean;
+  live: true;
+  /** Fresh driver config for this cell — always `schemaMode: 'external'`. */
+  config(): SqlDriverConfig;
+}
+
+const ORACLE_URL = process.env.OS_TEST_ORACLE_URL;
+
+/**
+ * `oracle://user:password@host:port/service` → node-oracledb's connection
+ * object. An Oracle connect string is not a URL, so the test URL is a
+ * convenience spelling decoded here, once.
+ */
+export function oracleConnectionFromUrl(url: string): { user: string; password: string; connectString: string } {
+  const u = new URL(url);
+  if (u.protocol !== 'oracle:') throw new Error(`OS_TEST_ORACLE_URL must be oracle://user:password@host:port/service, got ${u.protocol}`);
+  return {
+    user: decodeURIComponent(u.username),
+    password: decodeURIComponent(u.password),
+    connectString: `${u.hostname}:${u.port || '1521'}${u.pathname}`,
+  };
+}
+
+/**
+ * The Oracle cell (gvenzl/oracle-free in development). One schema — the
+ * connecting user's — so a suite owns its tables by a name prefix rather than
+ * by a per-file schema.
+ */
+export const ORACLE_CELL: FederationDialectCell = {
+  id: 'oracle',
+  label: 'live oracle',
+  env: 'OS_TEST_ORACLE_URL',
+  expectEnv: 'OS_EXPECT_LIVE_ORACLE',
+  url: ORACLE_URL,
+  available: !!ORACLE_URL,
+  live: true,
+  config: () => ({
+    client: 'oracledb',
+    connection: oracleConnectionFromUrl(ORACLE_URL!),
+    schemaMode: 'external',
+  } as SqlDriverConfig),
+};

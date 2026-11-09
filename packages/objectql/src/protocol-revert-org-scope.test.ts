@@ -47,6 +47,8 @@
  * writer/reader key agreement it pins is the env-wide one.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { ServiceObject } from '@objectstack/spec/data';

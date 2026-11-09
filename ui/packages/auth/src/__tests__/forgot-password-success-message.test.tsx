@@ -23,7 +23,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AuthProvider } from '../AuthProvider';
 import { ForgotPasswordForm } from '../ForgotPasswordForm';
 import type { AuthClient, AuthPublicConfig } from '../types';
@@ -108,5 +108,89 @@ describe('ForgotPasswordForm — success message substitution (objectui#4135)', 
 
     const description = await screen.findByText(/no marker left to fill/i);
     expect(occurrences(description.textContent ?? '', 'control@example.com')).toBe(1);
+  });
+});
+
+/**
+ * objectstack#30366 — on a deployment that sends no mail the success screen
+ * must not say a reset link was sent. The server reports this as
+ * `features.emailDelivery` on `/auth/config`; only an explicit `false` swaps
+ * the text, and the swap depends on the deployment alone, so a known and an
+ * unknown address read the same (no account-existence oracle).
+ */
+describe('ForgotPasswordForm — success screen on a deployment that sends no mail (objectstack#30366)', () => {
+  function renderWithConfig(
+    getConfig: AuthClient['getConfig'],
+    props: React.ComponentProps<typeof ForgotPasswordForm> = {},
+  ) {
+    const client = createMockClient({ getConfig });
+    const view = render(
+      <AuthProvider authUrl="/api/auth" client={client}>
+        <ForgotPasswordForm {...props} />
+      </AuthProvider>,
+    );
+    return { client, view };
+  }
+
+  const noMail = () => vi.fn().mockResolvedValue({ features: { emailDelivery: false } } as AuthPublicConfig);
+
+  it('says a reset link cannot be emailed and to ask an administrator when emailDelivery is false', async () => {
+    const getConfig = noMail();
+    renderWithConfig(getConfig);
+    await waitFor(() => expect(getConfig).toHaveBeenCalled());
+    await submit('someone@example.com');
+
+    expect(await screen.findByText("A reset link can't be emailed here")).toBeTruthy();
+    const description = screen.getByText(/doesn't send email/);
+    expect(description.textContent).toMatch(/administrator/);
+    expect(description.textContent).toMatch(/Setup → Users/);
+    expect(description.textContent).not.toContain('someone@example.com');
+    expect(screen.queryByText('Check your email')).toBeNull();
+    expect(screen.queryByText(/We've sent a password reset link/)).toBeNull();
+  });
+
+  it('reads a known and an unknown address the same: the text follows the deployment, not the address', async () => {
+    // The reset request answers both alike (the server's no-oracle rule); the
+    // screen must add no difference of its own, address substitution included.
+    const screens: string[] = [];
+    for (const address of ['known@example.com', 'nobody-here@example.com']) {
+      const getConfig = noMail();
+      const { client, view } = renderWithConfig(getConfig);
+      await waitFor(() => expect(getConfig).toHaveBeenCalled());
+      await submit(address);
+      await screen.findByText("A reset link can't be emailed here");
+      expect(client.forgotPassword).toHaveBeenCalledWith(address);
+      screens.push(view.container.textContent ?? '');
+      view.unmount();
+    }
+    expect(screens[0]).toBe(screens[1]);
+    expect(screens[0]).not.toContain('@example.com');
+  });
+
+  it('uses caller-supplied translated labels for the no-delivery screen', async () => {
+    const getConfig = noMail();
+    renderWithConfig(getConfig, {
+      labels: { noDeliveryTitle: 'NO-MAIL TITLE', noDeliveryDescription: 'NO-MAIL BODY' },
+    });
+    await waitFor(() => expect(getConfig).toHaveBeenCalled());
+    await submit('someone@example.com');
+
+    expect(await screen.findByText('NO-MAIL TITLE')).toBeTruthy();
+    expect(screen.getByText('NO-MAIL BODY')).toBeTruthy();
+  });
+
+  it.each([
+    ['emailDelivery is true', () => vi.fn().mockResolvedValue({ features: { emailDelivery: true } } as AuthPublicConfig)],
+    ['the server sends no emailDelivery key (older server)', () => vi.fn().mockResolvedValue({ features: {} } as AuthPublicConfig)],
+    ['the config fetch fails', () => vi.fn().mockRejectedValue(new Error('offline'))],
+  ])('keeps the "check your email" screen when %s', async (_label, makeGetConfig) => {
+    const getConfig = makeGetConfig();
+    renderWithConfig(getConfig);
+    await waitFor(() => expect(getConfig).toHaveBeenCalled());
+    await submit('someone@example.com');
+
+    expect(await screen.findByText('Check your email')).toBeTruthy();
+    expect(screen.getByText(/We've sent a password reset link to someone@example.com/)).toBeTruthy();
+    expect(screen.queryByText("A reset link can't be emailed here")).toBeNull();
   });
 });

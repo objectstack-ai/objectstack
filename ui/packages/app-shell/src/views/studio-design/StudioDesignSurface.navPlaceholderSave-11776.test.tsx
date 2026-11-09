@@ -73,7 +73,9 @@ const mockClient = vi.hoisted(() => {
     layered: vi.fn(async (type: string, name: string) => {
       if (server.failRead && server.failRead.key === k(type, name)) throw server.failRead.error;
       const eff = server.active.get(k(type, name)) ?? null;
-      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, editable: true, deletable: true, resettable: false, lock: 'none' };
+      // As the server serves an admitted author: the pending draft as stored (objectstack#30859).
+      const draft = server.drafts.get(k(type, name)) ?? null;
+      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, draft, editable: true, deletable: true, resettable: false, lock: 'none' };
     }),
     getDraft: vi.fn(async (type: string, name: string) => {
       const draft = server.drafts.get(k(type, name));

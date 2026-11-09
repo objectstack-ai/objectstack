@@ -37,6 +37,10 @@ vi.mock('../previews/useObjectFields', () => ({
 }));
 
 import { ObjectFieldInspector } from './ObjectFieldInspector';
+// The pinyin dictionary a Chinese label derives through, resident before any
+// case, as it is once a Console door has fetched it (objectstack#29690).
+import { loadHanRomanizer } from '../romanizeHan';
+await loadHanRomanizer();
 
 afterEach(cleanup);
 
@@ -136,10 +140,25 @@ describe('ObjectFieldInspector — API name follows the label while the label ow
     expect(controlFor('API name')).toHaveValue('priority');
   });
 
-  it('leaves the placeholder name in place for a label with no Latin slug', () => {
+  // A Chinese label derives through its pinyin since objectstack#29690 (the
+  // next block); a Japanese one is the label that still derives nothing.
+  it('leaves the placeholder name in place for a label that derives no name', () => {
     render(<Host fields={{ field_6: { type: 'text', label: '' } }} id="field_6" />);
-    typeInto('Label', '健康评分');
-    expect(controlFor('Label')).toHaveValue('健康评分');
+    typeInto('Label', 'ヘルススコア');
+    expect(controlFor('Label')).toHaveValue('ヘルススコア');
     expect(controlFor('API name')).toHaveValue('field_6');
+  });
+});
+
+describe('ObjectFieldInspector — a Chinese label derives the API name by pinyin (objectstack#29690)', () => {
+  it('a fresh field_N follows the label keystroke by keystroke, and the name stays editable', () => {
+    render(<Host fields={{ field_6: { type: 'text', label: '' } }} id="field_6" />);
+    typeInto('Label', '客户列表');
+    expect(controlFor('Label')).toHaveValue('客户列表');
+    expect(controlFor('API name')).toHaveValue('kehu_liebiao');
+    // The author's own name wins, and the label no longer moves it.
+    fireEvent.change(controlFor('API name'), { target: { value: 'customer_list' } });
+    typeInto('Label', '客户列表二');
+    expect(controlFor('API name')).toHaveValue('customer_list');
   });
 });

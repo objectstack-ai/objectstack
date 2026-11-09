@@ -22,6 +22,7 @@
 
 import * as React from 'react';
 import { SchemaForm } from '../SchemaForm.js';
+import { fallbackFormPatch } from './fallbackFormPatch.js';
 import { getPageSchema, getPageForm, PAGE_FIELDS_OWNED_ELSEWHERE } from '../page-schema.js';
 import { mergeServerFields } from '../mergeServerFields.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
@@ -38,7 +39,7 @@ export function PageDefaultInspector({
     () =>
       mergeServerFields({
         bundledSchema: getPageSchema(),
-        bundledForm: getPageForm(),
+        bundledForm: getPageForm(locale),
         serverSchema,
         excludeFields: PAGE_FIELDS_OWNED_ELSEWHERE,
         sectionTitle: t('engine.inspector.moreFields', locale),
@@ -61,7 +62,7 @@ export function PageDefaultInspector({
       value={draft}
       hiddenFields={[...PAGE_FIELDS_OWNED_ELSEWHERE]}
       readOnly={readOnly}
-      onChange={(next) => onPatch(next)}
+      onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
     />
   );
 }

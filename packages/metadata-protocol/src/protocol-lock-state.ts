@@ -19,6 +19,11 @@
  * stored row it judges, and does not decline a shipped flow name's row that
  * the one served-override predicate (`isServedOverrideRowOf`) admits for the
  * shipping package — its declared `.custom` override, the packaged flow.
+ * [#30065] The same admission holds for an `action` name's declared
+ * override (ADR-0146 D9's `action` paragraph). Unlike the sealed row-served
+ * types, an action's override row keeps its bare registry entry, as a flow's
+ * does: the object read's `actions`, the run doors' first rung and the
+ * authored-action handler resync read the registry, not the row.
  *
  * ## How the moved bodies reach the class
  *
@@ -34,7 +39,8 @@
  * keeps calling the class method, the REST and runtime published doors among
  * them.
  *
- * The bodies read no field, so the host carries no getter.
+ * One body reads a field, `engine` (the registry the customization pair
+ * lookup reads, `installedManifestsOfEngine`), handed over as a getter.
  *
  * The one module-level declaration of `protocol.ts` the bodies read,
  * `canonicalMetaType`, stays there, where code that did not move reads it too,
@@ -50,6 +56,8 @@ import { canonicalMetaType } from './protocol.js';
 import type { ItemLock } from './item-lock.js';
 import { isOriginGatedType } from './packaged-base-regime.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
+import { servesSealedOverrideRow } from './protocol-package-bindings.js';
 import { isCodeArtifactBody } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import {
@@ -68,6 +76,7 @@ import type { resolveLockState } from '@objectstack/spec/kernel';
  * here too, and naming a member the class does not have is a compile error.
  */
 export interface LockStateHost {
+    readonly engine: ObjectStackProtocolImplementation['engine'];
     declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
     isDeclaredCodeDatasource: ObjectStackProtocolImplementation['isDeclaredCodeDatasource'];
     isSealedManagedItem: ObjectStackProtocolImplementation['isSealedManagedItem'];
@@ -137,17 +146,30 @@ export function isStoredFlowEntryOfShippedName(
 
 /** The body of `ObjectStackProtocolImplementation#declinesStoredRow`; the method's docblock there is its contract. */
 export function declinesStoredRow(
-    this: Pick<LockStateHost, 'isDeclaredCodeDatasource' | 'isShippedFlowName' | 'isUnservedSealedOverlay' | 'packagedArtifactOwner'>,
+    this: Pick<LockStateHost, 'engine' | 'isDeclaredCodeDatasource' | 'isShippedFlowName' | 'isUnservedSealedOverlay' | 'packagedArtifactOwner'>,
     type: string, name: unknown, row?: ServedOverrideRow): boolean {
+    const installed = installedManifestsOfEngine(this.engine);
     if (this.isShippedFlowName(type, name)) {
         // [#28412, ADR-0146 D9 item 1] …except the one row that IS the
         // packaged flow now: the shipping package's declared override, judged
         // on the row's own `package_id` and body by the one served-override
         // predicate. Every other stored row of the name stays declined.
-        return !isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: 'flow', name: name as string }));
+        return !isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: 'flow', name: name as string }), installed);
     }
     if (typeof name !== 'string' || name === '') return false;
-    return this.isDeclaredCodeDatasource(type, name) || this.isUnservedSealedOverlay(type, name);
+    if (this.isDeclaredCodeDatasource(type, name)) return true;
+    if (!this.isUnservedSealedOverlay(type, name)) return false;
+    // [#29613, ADR-0146 D8 item 2] …except, for a page, app, dataset, doc,
+    // book or [#30062] mapping, the shipping package's declared override: judged as the flow's
+    // above, on the row's own `package_id` and body, against the package
+    // that ships the name. The reads then serve it from its row, as they
+    // serve a dashboard's. Every other sealed row of the name stays declined.
+    // [#30065, ADR-0146 D9 `action`] …and for an `action`, judged the same
+    // way: its declared override is served over the base's name from its
+    // row, so the layered read's `effective` and a by-name read answered by
+    // the metadata service see it as the registry's readers do.
+    return !((servesSealedOverrideRow(type) || canonicalMetaType(type) === 'action')
+        && isServedOverrideRowOf(row, this.packagedArtifactOwner({ type, name }), installed));
 }
 
 /** The body of `ObjectStackProtocolImplementation#isUnservedSealedOverlay`; the method's docblock there is its contract. */

@@ -4,15 +4,15 @@
  *
  * Two signals, in priority order:
  *   1. AUTHORITATIVE — GET /cloud/environment-entitlements (org-scoped, computed
- *      by the same helper the create guard uses). Gives plan + dev-create
- *      capability precisely, including the seat-scaled / subscription cases the
- *      client can't derive from rows.
+ *      by the same helper the create guard uses). Gives whether the org already
+ *      owns its production environment, plus the plan and the role-trimmed URLs
+ *      the client can't derive from rows.
  *   2. FALLBACK — when that endpoint is unavailable (older control plane / error,
  *      or a success body that doesn't carry the `{ success, data }` envelope),
  *      derive `hasProductionEnv` from the org's env rows via the data API (which
  *      is org-scoped on the control plane). This keeps the critical
  *      "set up your production environment" path working without a backend deploy;
- *      free-vs-paid is left unknown, and a stray create POST is caught by the
+ *      the plan is left unknown, and a stray create POST is caught by the
  *      entitlement dialog safety net.
  *
  * Returns `null` when disabled (not the environment list) so callers can cheaply
@@ -95,11 +95,10 @@ async function resolveEntitlements(opts: EntitlementsResolveOptions): Promise<En
       return {
         ready: true,
         hasProductionEnv: data.hasProductionEnv === true,
-        canCreateDevelopmentEnv: data.development?.canCreate,
         plan: data.plan,
-        // Verbatim, like `contactSalesUrl`: absent stays absent, and the
-        // toolbar's locked plan-tier mark is then not drawn (objectui#10437,
-        // objectui#12983: cloud sends it to managers only).
+        // Verbatim, like `contactSalesUrl`: absent stays absent, and nothing
+        // composes a default in its place (objectui#10437; cloud sends it to
+        // managers only).
         upgradeUrl: data.upgradeUrl,
         contactSalesUrl: data.contactSalesUrl,
         // Verbatim, like `upgradeUrl`: absent stays absent, and the
@@ -123,14 +122,12 @@ async function resolveEntitlements(opts: EntitlementsResolveOptions): Promise<En
       return {
         ready: true,
         hasProductionEnv,
-        canCreateDevelopmentEnv: undefined,
         source: 'derived',
       };
     } catch {
       return {
         ready: false,
         hasProductionEnv: false,
-        canCreateDevelopmentEnv: undefined,
         source: 'unknown',
       };
     }

@@ -57,7 +57,7 @@ import type {
 } from '@objectstack/driver-sql';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { ORGANIZATION_OWNERSHIP_MIGRATION_ID, StorageNameMapping } from '@objectstack/spec/system';
-import { isDevelopmentBoot } from '@objectstack/core';
+import { isDevelopmentBoot, isFederatedObject } from '@objectstack/core';
 import {
   doctorNodeEnv,
   provenanceOf,
@@ -66,6 +66,7 @@ import {
 } from '../commands/doctor.js';
 import { describeDriverConnection, describeDriverSqliteFile } from './connection-display.js';
 import { reserveStdoutForJson } from './json-stdout.js';
+import { acquireSchemaMigrationLock } from './schema-migration-lock.js';
 import {
   buildSchemaMigrationPlugins,
   measureComposedCoverage,
@@ -784,7 +785,7 @@ function findDeclaredDatasourceDrivers(
   if (!Array.isArray(objects) || typeof engine?.getDriverForObject !== 'function') return [];
   const found = new Map<string, SqlDriverLike>();
   for (const obj of objects as Array<{ name?: unknown; external?: unknown }>) {
-    if (obj?.external != null || typeof obj?.name !== 'string') continue;
+    if (isFederatedObject(obj) || typeof obj?.name !== 'string') continue;
     const driver = engine.getDriverForObject(obj.name);
     const name = driver?.name;
     if (typeof name !== 'string' || !connected.has(name) || found.has(name) || planned.includes(driver)) continue;
@@ -1392,6 +1393,10 @@ export async function bootSchemaStack(
   // Registered here, after the data stack, for the same reason `extraPlugins`
   // is: the presence tests it performs read what `createStandaloneStack`
   // produced, and the DDL deferral above must already be armed.
+  // [#31411] A composition that refuses (`composeServedPlatform`'s AI
+  // auto-inject refusal, a provider that does not export its plugin) throws
+  // before the stack starts: give stdout back first, or the reservation above
+  // outlives the command and swallows the next writer's document.
   const composition = opts.composeHostStack === true
     ? await buildSchemaMigrationPlugins({
         basePlugins: stack.plugins,
@@ -1409,6 +1414,9 @@ export async function bootSchemaStack(
         ...(opts.composeServedPlatform === true
           ? { servedPlatform: { artifactRequires: stack.requires } }
           : {}),
+      }).catch((error: unknown) => {
+        releaseStdout();
+        throw error;
       })
     : {
         plugins: [], hostConfigPath: null, hostConfigLoaded: false, hostConfigError: null,
@@ -1462,6 +1470,21 @@ export async function bootSchemaStack(
     : [];
   const plannedDrivers: SqlDriverLike[] = [...servedDrivers, ...declaredDrivers.map((d) => d.driver)];
 
+  // [#31598] One migrator per database at a time. A boot that can apply — a
+  // deferred boot that is not a read-only probe, as `os migrate apply` is —
+  // takes the schema-migration lock on the primary HERE: after a boot that held
+  // its DDL back, before the first read of what is pending, so a migrator that
+  // waited reads only the work the other one left. Released by `shutdown()`,
+  // and by {@link underLock} when this boot throws after taking it.
+  const migrationLock = deferral && opts.readOnlyProbe !== true
+    ? await acquireSchemaMigrationLock(driver, { database: describeDb(driver), warn: (line) => console.warn(line) })
+    : null;
+  const underLock = <T>(work: Promise<T>): Promise<T> =>
+    work.catch(async (error: unknown) => {
+      await migrationLock?.release();
+      throw error;
+    });
+
   // #13028 — the composed host declared its objects in `init()`; the pass that
   // hands them to their driver lives in `ObjectQLPlugin.start()`, which the
   // declaration-phase composition suppressed (and which a host bringing its
@@ -1481,7 +1504,7 @@ export async function bootSchemaStack(
     );
   }
   if (composedHost) {
-    const measured = await measureComposedCoverage(kernel, plannedDrivers, defer, { ddlFree: skipSchemaSync });
+    const measured = await underLock(measureComposedCoverage(kernel, plannedDrivers, defer, { ddlFree: skipSchemaSync }));
     composition.coverage = measured.coverage;
     composition.notes.push(...measured.notes);
   }
@@ -1494,7 +1517,7 @@ export async function bootSchemaStack(
   // [#21391] Every datasource the deferral armed, not only the default's.
   const pendingSchemaWork: PendingSchemaWork[] = [];
   for (const d of deferral?.drivers ?? []) {
-    if (d.previewDeferredSchemaWork) pendingSchemaWork.push(...(await d.previewDeferredSchemaWork()));
+    if (d.previewDeferredSchemaWork) pendingSchemaWork.push(...(await underLock(d.previewDeferredSchemaWork())));
   }
   // [#23022] …and the one table outside the object set, `sys_packages`, which
   // no driver deferral can see. Read-only here; `flushSchemaDdl` creates it.
@@ -1503,7 +1526,7 @@ export async function bootSchemaStack(
   // included: `nonObjectTables` below names the table from it whether or not
   // anything is planned for it.
   const packageStorage = findPackageStorage(kernel);
-  let packageTable = defer && packageStorage ? await planPackageTable(packageStorage, composition.notes) : null;
+  let packageTable = defer && packageStorage ? await underLock(planPackageTable(packageStorage, composition.notes)) : null;
   if (packageTable) pendingSchemaWork.push(packageTable.work);
   sortPendingSchemaWork(pendingSchemaWork);
   // [#21529] The tables the held-back sync would create: measured absent.
@@ -1643,7 +1666,13 @@ export async function bootSchemaStack(
      * `destroy()` closes the ones it owns); a second disconnect is a no-op.
      */
     shutdown: async () => {
-      deferral?.release();
+      // [#31598] The migration lock first, in `finally`: whatever the rest of
+      // the teardown does, the next migrator waiting on it may go.
+      try {
+        deferral?.release();
+      } finally {
+        await migrationLock?.release();
+      }
       try { await kernel.shutdown(); } catch { /* teardown is best-effort */ }
       // [#22579] The sibling is a `DriverPlugin` driver, which owns no teardown
       // of its own: the same backstop as the primary's.
@@ -1696,6 +1725,33 @@ export async function bootSchemaStack(
 async function loadIsInPlaceSchemaWork(): Promise<(kind: PendingSchemaWork['kind']) => boolean> {
   const { isInPlaceSchemaWork } = await import('@objectstack/driver-sql');
   return isInPlaceSchemaWork;
+}
+
+/** [#30636] The driver's refusal classifier, loaded at the point of use for the reason above. */
+async function loadIsRefusedSchemaWork(): Promise<(kind: PendingSchemaWork['kind']) => boolean> {
+  const { isRefusedSchemaWork } = await import('@objectstack/driver-sql');
+  return isRefusedSchemaWork;
+}
+
+/**
+ * [#30636] Split what {@link SchemaStack.flushSchemaDdl} returned into the
+ * work it performed and the tables the sync refused and left as they were
+ * (`refuse_table`). A refusal is never performed work: `os migrate apply`
+ * names each one and ends PARTIAL.
+ */
+export async function splitRefusedSchemaWork(
+  work: PendingSchemaWork[],
+): Promise<{ performed: PendingSchemaWork[]; refused: PendingSchemaWork[] }> {
+  const isRefusedSchemaWork = await loadIsRefusedSchemaWork();
+  return {
+    performed: work.filter((w) => !isRefusedSchemaWork(w.kind)),
+    refused: work.filter((w) => isRefusedSchemaWork(w.kind)),
+  };
+}
+
+/** [#30636] One refused table, as the plan and `os migrate apply` name it. */
+export function describeRefusedSchemaWork(p: PendingSchemaWork): string {
+  return `${p.table} [${p.kind}: ${p.columns.join(', ')} — ${formatRows(p.rows)} row(s)]`;
 }
 
 const CATEGORY_ORDER: DriftCategory[] = ['safe', 'needs_confirm', 'destructive'];
@@ -1765,6 +1821,30 @@ export function collectDriftApplyLimits(
 }
 
 /**
+ * [#30636] Mark every drift entry on a table the schema sync refuses
+ * (`refuse_table` in `work`) with that refusal as its apply limit, in place.
+ * `os migrate apply` applies no drift on a refused table — it is left exactly
+ * as it is — so the listing must not offer `--allow-destructive` for it (the
+ * `_id` column such a table carries reads as an orphaned column to drop).
+ * Read by `os migrate plan` and by the listing `os migrate apply` prints
+ * before its prompt; `apply` itself withholds those entries from the driver.
+ */
+export async function addRefusedTableLimits(
+  limits: Map<ManagedDriftEntry, string>,
+  drift: readonly ManagedDriftEntry[],
+  work: PendingSchemaWork[],
+): Promise<void> {
+  const { refused } = await splitRefusedSchemaWork(work);
+  if (refused.length === 0) return;
+  const tables = new Set(refused.map((p) => p.table));
+  for (const d of drift) {
+    if (tables.has(d.table)) {
+      limits.set(d, `the schema sync refuses the table '${d.table}' (listed under Refused) and leaves it exactly as it is`);
+    }
+  }
+}
+
+/**
  * [#23925] The {@link renderPlan} `describe` for those entries: the finding
  * without its `--allow-destructive` sentence, then the driver's limit, so the
  * listing never offers a remedy that database does not have. Every other
@@ -1808,8 +1888,9 @@ export async function renderPendingSchemaWork(pending: PendingSchemaWork[]): Pro
   if (pending.length === 0) return;
 
   const isInPlaceSchemaWork = await loadIsInPlaceSchemaWork();
-  const additive = pending.filter((p) => !isInPlaceSchemaWork(p.kind));
-  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind));
+  const { performed: work, refused } = await splitRefusedSchemaWork(pending);
+  const additive = work.filter((p) => !isInPlaceSchemaWork(p.kind));
+  const inPlace = work.filter((p) => isInPlaceSchemaWork(p.kind));
 
   if (additive.length > 0) {
     console.log(`  ${chalk.bold('New (additive — created when you apply)')}`);
@@ -1827,6 +1908,25 @@ export async function renderPendingSchemaWork(pending: PendingSchemaWork[]): Pro
     for (const p of inPlace) {
       // A MySQL widen is `ALTER … MODIFY`, i.e. a full table rebuild holding a
       // metadata lock — worth saying outright, not just implying via the count.
+      // [#30636] An empty `_id`-keyed table is dropped and recreated: say so,
+      // rather than listing every declared column as if each were converged.
+      if (p.kind === 'rebuild_table') {
+        console.log(
+          `    ${chalk.yellow('~')} ${chalk.yellow(p.table)} ` +
+          `${chalk.dim(`[${p.kind}: empty table dropped and recreated, ${p.columns.length} column(s)]`)}`,
+        );
+        continue;
+      }
+      // [cloud#3652 D3] A declared rename: the old column renamed to the field
+      // that declares `renamedFrom`, its values kept. No row is rewritten.
+      if (p.kind === 'rename_columns') {
+        const renames = p.renames ?? p.columns.map((to) => ({ from: '?', to }));
+        console.log(
+          `    ${chalk.yellow('~')} ${chalk.yellow(p.table)} ` +
+          `${chalk.dim(`[${p.kind}: ${renames.map((r) => `${r.from} → ${r.to}`).join(', ')} — values carried, declared by renamedFrom]`)}`,
+        );
+        continue;
+      }
       const cost = p.kind === 'widen_datetime_columns' || p.kind === 'widen_time_columns'
         ? `${formatRows(p.rows)} row table rebuild`
         : `${formatRows(p.rows)} row update(s)`;
@@ -1834,6 +1934,17 @@ export async function renderPendingSchemaWork(pending: PendingSchemaWork[]): Pro
         `    ${chalk.yellow('~')} ${chalk.yellow(p.table)} ` +
         `${chalk.dim(`[${p.kind}: ${p.columns.join(', ')} — ${cost}]`)}`,
       );
+    }
+    console.log('');
+  }
+
+  // [#30636] Work the sync will NOT do: each table it refuses, with the
+  // refusal's own text (rendered by the driver, the text `apply` reports).
+  if (refused.length > 0) {
+    console.log(`  ${chalk.bold('Refused (left exactly as it is when you apply)')}`);
+    for (const p of refused) {
+      console.log(`    ${chalk.red('✗')} ${chalk.red(describeRefusedSchemaWork(p))}`);
+      if (p.refusal) console.log(`        ${chalk.dim(p.refusal)}`);
     }
     console.log('');
   }
@@ -1854,11 +1965,19 @@ export async function summarizePendingSchemaWork(pending: PendingSchemaWork[]): 
   // Only mentioned when there is some, so the common in-sync summary is
   // unchanged — but never omitted when there is, which is the #3954 point.
   const isInPlaceSchemaWork = await loadIsInPlaceSchemaWork();
-  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind));
+  const inPlace = pending.filter((p) => isInPlaceSchemaWork(p.kind) && p.kind !== 'rebuild_table' && p.kind !== 'rename_columns');
   if (inPlace.length > 0) {
     const cols = inPlace.reduce((n, p) => n + p.columns.length, 0);
     const rows = inPlace.reduce((n, p) => n + (p.rows ?? 0), 0);
     parts.push(`${cols} temporal column(s) to converge in place (~${formatRows(rows)} rows)`);
   }
+  // [#30636] Named only when there are some, like the in-place count above.
+  const rebuilds = pending.filter((p) => p.kind === 'rebuild_table').length;
+  if (rebuilds > 0) parts.push(`${rebuilds} empty table(s) to rebuild`);
+  // [cloud#3652 D3] Named only when there are some, like the counts above.
+  const renamed = pending.filter((p) => p.kind === 'rename_columns').reduce((n, p) => n + p.columns.length, 0);
+  if (renamed > 0) parts.push(`${renamed} column(s) to carry by a declared rename`);
+  const { refused } = await splitRefusedSchemaWork(pending);
+  if (refused.length > 0) parts.push(`${refused.length} table(s) REFUSED`);
   return parts.join(', ');
 }

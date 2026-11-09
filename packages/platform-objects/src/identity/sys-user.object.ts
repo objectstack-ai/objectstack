@@ -1,7 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
+import { PLATFORM_ADMIN_USERS_GATE } from './platform-admin-action-gate.js';
+import {
+  INVITATION_ROLE_OPTIONS, MEMBERSHIP_ROLE_ADMIN, MEMBERSHIP_ROLE_OWNER, mapMembershipRole,
+} from '@objectstack/spec/identity';
 import { INVITE_USER_OUTCOME_MESSAGES } from './invite-outcome-messages.js';
 import { MEMBERSHIP_ROLE_PARAM_HELP } from './membership-role-help.js';
 
@@ -47,6 +50,19 @@ export const SYS_USER_LOCALE_TAG_PATTERN = '^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*
  * returns `temporaryPassword` only when it generated one: the instruction
  * shows exactly when there is a password to copy.
  */
+/**
+ * [ADR-0151 D1/D4] Who is offered the AI service account actions: a platform
+ * administrator, or an owner or admin of the current organization (the
+ * grades `isOrgAdminGrade` admits, read here off `current_user.positions` as
+ * the `requiresMembershipReach` sugar reads them). Display only: the
+ * plugin-auth doors judge the caller themselves, and a key's door also
+ * admits the account's accountable owner.
+ */
+const SERVICE_ACCOUNT_ADMIN_VISIBLE = [
+  'current_user.isPlatformAdmin == true',
+  ...[MEMBERSHIP_ROLE_OWNER, MEMBERSHIP_ROLE_ADMIN].map((grade) => `'${mapMembershipRole(grade)}' in current_user.positions`),
+].join(' || ');
+
 const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
 
 /**
@@ -191,6 +207,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/ban-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4), then a user not banned yet —
       // see the block header above. A null `banned` reads as not banned.
       visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned != true',
@@ -207,7 +225,7 @@ export const SysUser = ObjectSchema.create({
       // and nothing is POSTed until that one dialog's own Confirm.
       // NB: the top-level `description` (#7367), never `ai.description` — that
       // one is the LLM-facing tool contract and is shown to no user.
-      description: 'Ban this user? They will be signed out and unable to sign in until unbanned.',
+      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.',
       params: [
         { name: 'banReason', label: 'Ban Reason', type: 'text', required: false },
       ],
@@ -216,7 +234,7 @@ export const SysUser = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Ban a user (the record; optionally banReason): they are signed out and cannot sign in until unbanned. Platform administrators only. Ask the human to confirm before calling.',
+          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys, OAuth access tokens and token refreshes are refused until unbanned; the keys work again after the unban. Platform administrators only. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
@@ -228,6 +246,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/unban-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4), then a banned user — see the
       // block header above.
       visible: 'current_user.isPlatformAdmin == true && has(record.banned) && record.banned == true',
@@ -255,6 +275,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/unlock-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4), then an account that can hold
       // a lock. `unlockUser` clears TWO stages: this row's `locked_until`
       // (the password check) and `sys_two_factor.locked_until` (the second
@@ -294,6 +316,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/admin/create-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the block header above —
       // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on):
       // a managed environment's users come from the identity provider.
@@ -355,8 +379,12 @@ export const SysUser = ObjectSchema.create({
         // field-backed: the grant object lives in plugin-security, whose
         // metadata the console need not have loaded on this list, and an
         // unresolvable field-backed param makes the dialog refuse the whole
-        // action. The grant column is a text field anyway (its picker is a
-        // widget hint params do not inherit), so nothing is lost.
+        // action. The value is a permission set's NAME, a `text` value like
+        // the grant column it lands in, and `widget: 'permission-ref'` draws
+        // the grant column's own picker (ADR-0131 D4): a searchable list of
+        // the security catalog's sets, each shown by its label, that submits
+        // the chosen set's name. So the administrator picks what Setup shows
+        // and never types a machine name.
         // The route writes the grant under the administrator's OWN context in
         // the same transaction as the account: the delegated-administration
         // gate and the catalog name check judge it as they judge Setup's
@@ -364,6 +392,7 @@ export const SysUser = ObjectSchema.create({
         {
           name: 'permissionSet',
           type: 'text',
+          widget: 'permission-ref',
           label: 'Permission Set',
           required: false,
           helpText: 'Optional. Grants this permission set to the new user, so they can open their apps on first sign-in.',
@@ -402,6 +431,8 @@ export const SysUser = ObjectSchema.create({
       // legacy role scalar), can mint a temporary password, and stamps
       // must_change_password.
       target: '/api/v1/auth/admin/set-user-password',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the block header above —
       // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on).
       // Console only: the server keeps answering it on an `env_native` row, so
@@ -467,6 +498,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/impersonate-user',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the block header above.
       visible: 'current_user.isPlatformAdmin == true',
       requiresFeature: 'admin',
@@ -517,6 +550,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/admin/set-user-manager',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       recordIdParam: 'userId',
       successMessage: 'Manager updated',
       refreshAfter: true,
@@ -596,6 +631,8 @@ export const SysUser = ObjectSchema.create({
       locations: ['list_toolbar'],
       type: 'api',
       target: '/api/v1/auth/admin/list-platform-admins',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       visible: 'current_user.isPlatformAdmin == true',
       // A read: the Users list behind the dialog is not reloaded.
       refreshAfter: false,
@@ -607,6 +644,88 @@ export const SysUser = ObjectSchema.create({
         acknowledge: 'Close',
         fields: [
           { path: 'entries', label: 'Platform administrators', format: 'code-list' },
+        ],
+      },
+    },
+
+    // ── AI service accounts (ADR-0151) ───────────────────────────────
+    //
+    // An AI service account is a `sys_user` row of kind `agent`: a registered
+    // principal of its own that acts only through its own API keys, under the
+    // agent ceiling, and never signs in. These two actions are its
+    // registration and its key mint (plugin-auth `service-account-doors.ts`).
+    // Each door reads the caller from the session and judges them itself;
+    // `visible` is display only. No `ai` block: an account and its keys are
+    // a person's decision, so both stay human-only.
+    {
+      name: 'register_service_account',
+      label: 'Register AI Service Account',
+      icon: 'bot',
+      variant: 'secondary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/service-account/register',
+      // Offered in a cloud-managed environment too: an account is no person
+      // the identity provider brings, and a licence plugin observes or
+      // refuses the registration on its own `sys_user` write (ADR-0151 D7).
+      visible: SERVICE_ACCOUNT_ADMIN_VISIBLE,
+      description:
+        'Register an AI service account in this organization: an identity of its own for an agent that runs '
+        + 'without a person, acting only through API keys created for it. It can do nothing until it is granted '
+        + 'permission sets, and it never holds administrator access.',
+      successMessage: 'AI service account registered',
+      refreshAfter: true,
+      params: [
+        {
+          name: 'name',
+          label: 'Name',
+          type: 'text',
+          required: true,
+          helpText: 'What the agent is and what it is for. This name is how the account is recognised in the user list and the audit trail.',
+        },
+        {
+          name: 'ownerId',
+          label: 'Accountable Owner',
+          type: 'lookup',
+          reference: 'sys_user',
+          required: false,
+          helpText: 'The person accountable for this account, a member of this organization. Leave empty to be the owner yourself.',
+        },
+      ],
+    },
+    {
+      name: 'create_service_account_key',
+      label: 'Create API Key',
+      icon: 'key-round',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/service-account/create-key',
+      // An AI service account's row only. Its owner is admitted by the door
+      // too; this term offers it to administrators and to the owner.
+      visible: `has(record.principal_kind) && record.principal_kind == "agent" && ((${SERVICE_ACCOUNT_ADMIN_VISIBLE}) || (has(record.accountable_user_id) && record.accountable_user_id == current_user.id))`,
+      recordIdParam: 'userId',
+      description:
+        'Create an API key for this AI service account. The key acts as the account, with the account\'s own '
+        + 'grants, in the account\'s organization.',
+      refreshAfter: false,
+      params: [
+        { name: 'name', label: 'Key Name', type: 'text', required: true },
+        {
+          name: 'expires_at',
+          label: 'Expires At',
+          type: 'datetime',
+          required: false,
+          helpText: 'Leave empty for the default lifetime set under Setup → Authentication → API keys (Default key lifetime, 90 days unless changed). A date later than the Maximum key lifetime there is refused.',
+        },
+      ],
+      resultDialog: {
+        title: 'API key created',
+        description: 'Copy the key now — it is shown only once and cannot be recovered. If it leaks, revoke it and create a new one.',
+        acknowledge: 'I have saved the key',
+        fields: [
+          { path: 'key', label: 'API Key', format: 'secret' },
+          { path: 'expires_at', label: 'Expires At', format: 'text' },
         ],
       },
     },
@@ -981,7 +1100,7 @@ export const SysUser = ObjectSchema.create({
       defaultValue: false,
       readonly: true, // ADR-0092 — toggled via Ban/Unban actions (session side effects)
       group: 'Account',
-      description: 'When true, the user cannot sign in. Toggle via Ban User / Unban User actions.',
+      description: 'When on, the user cannot sign in. Use the Ban User / Unban User actions to change it.',
     }),
 
     ban_reason: Field.text({
@@ -1085,8 +1204,8 @@ export const SysUser = ObjectSchema.create({
       readonly: true,
       group: 'Admin',
       description:
-        'When true, the user is blocked (403 PASSWORD_RESET_REQUIRED) until they change ' +
-        'their password. Stamped by the admin user-management routes; system-managed.',
+        'When on, the user must change their password before they can continue. ' +
+        'Turned on when an administrator creates or imports the account, or resets its password; system-managed.',
     }),
 
     // ADR-0069 D3 — when enforced MFA first applied to this user; starts the
@@ -1132,6 +1251,44 @@ export const SysUser = ObjectSchema.create({
         'Whether this user holds an AI seat. A seat grants the `ai_seat` ' +
         'capability, which opens the AI assistants in the app (build and ask). ' +
         'How many users can hold one is limited by the seats your license includes.',
+    }),
+
+    // ── Principal kind (ADR-0151 D1) ─────────────────────────────
+    // `agent` marks an AI service account: a registered principal of its own
+    // that never signs in and acts only through its own API keys. The kind is
+    // written in the insert that creates the row and never changes, for any
+    // caller (`service-account-identity.ts` in plugin-auth holds both rules,
+    // and refuses every session and sign-in credential for an `agent` row).
+    // An absent value reads as `human`, so every existing row keeps its
+    // meaning. Owned by objectql (better-auth is oblivious to this column —
+    // like `ai_access`).
+    principal_kind: Field.select({
+      label: 'Principal Kind',
+      required: false,
+      readonly: true, // ADR-0092 — born with the row, immutable (ADR-0151 D1)
+      group: 'System',
+      defaultValue: 'human',
+      options: [
+        { label: 'Person', value: 'human' },
+        { label: 'AI Service Account', value: 'agent' },
+      ],
+      description:
+        'Whether this user is a person or an AI service account. An AI service account never signs in and ' +
+        'acts only through its own API keys. Set when the user is created; it never changes.',
+    }),
+
+    // The person accountable for an AI service account (ADR-0151 D1): required
+    // on an `agent` row, absent on a `human` row, always a person. Their grants
+    // never flow to the account and never bound it — accountability, not
+    // authority.
+    accountable_user_id: Field.lookup('sys_user', {
+      label: 'Accountable Owner',
+      required: false,
+      readonly: true, // ADR-0092 — set at registration; changed only by an administrator's change-owner act
+      group: 'System',
+      description:
+        'For an AI service account, the person accountable for it. Empty for a person. The owner\'s own ' +
+        'permissions never pass to the account.',
     }),
 
     // ── Profile ──────────────────────────────────────────────────

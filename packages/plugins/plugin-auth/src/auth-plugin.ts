@@ -2,7 +2,19 @@
 
 // [#25083] `isCloudManaged`: the ONE accessor the cloud-managed doors below ask.
 import { serveAgentForwardAtIdentityMount } from './agent-forward-identity-view.js';
-import { Plugin, PluginContext, IHttpServer, isCloudManaged, resolveRequestExecutionContext, type RequestAuthService } from '@objectstack/core';
+import {
+  Plugin,
+  PluginContext,
+  IHttpServer,
+  isCloudManaged,
+  resolveRequestExecutionContext,
+  isAuthzStoreUnavailableError,
+  isApiKeyLifecycleRefusalError,
+  AUTHZ_STORE_UNAVAILABLE_CODE,
+  AUTHZ_STORE_UNAVAILABLE_MESSAGE,
+  AUTHZ_STORE_UNAVAILABLE_STATUS,
+  type RequestAuthService,
+} from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
 import {
   AuthConfig,
@@ -42,6 +54,7 @@ import {
   readMcpServerEnabledEnv,
   isOAuthEligibleBaseUrl,
   ipMatchesRange,
+  unreadableIpRangeEntries,
   // [#16384] The one place `'/api/v1/auth'` is written — see its docblock in
   // auth-manager.ts. This file no longer carries an independent copy.
   DEFAULT_AUTH_BASE_PATH,
@@ -52,7 +65,9 @@ import { ensureDefaultOrganizationExists } from './default-organization-invarian
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
 import { runAttributedToUser } from './auth-actor-attribution.js';
 import { withSystemContext } from './objectql-adapter.js';
-import type { AuthEventAuditSurface } from './auth-session-audit.js';
+import { signInClientFingerprint, type AuthEventAuditSurface } from './auth-session-audit.js';
+import { ipRefusalAuditBoundFor, isSignInEndpoint, recordDeploymentListRefusal } from './ip-allow-list-refusal-audit.js';
+import type { OrganizationAddressReaderContext } from './client-address-read.js';
 import { createTenancyService, type TenancyService } from './tenancy-service.js';
 import {
   isMembershipPolicy,
@@ -68,19 +83,30 @@ import {
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
+import {
+  bindOrganizationAccessPolicy,
+  type OrganizationAccessPolicySecuritySurface,
+} from './organization-access-policy-binding.js';
+import { MFA_REQUIREMENT_LEVELS, readMfaRequirementLevel } from './organization-access-policy.js';
+import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollment-predicate.js';
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
+import { registerServiceAccountRowGuard } from './service-account-identity.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
+import { registerServiceAccountOwnerLeavesTrigger } from './service-account-owner-leaves.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
+import { registerUserLocaleCaseFold } from './sys-user-locale-case.js';
 import { registerSessionFirstActivity } from './session-first-activity.js';
 import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
-import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain, type AuthRequestHandler } from './register-sso-provider.js';
+import { createEngineSsoProviderConfigReader, runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runSetSsoGroupsClaim, runShowSsoGroupsClaim, runVerifyDomain, type AuthRequestHandler, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
+import { oneAccountReadFaultAtMount, oneAccountRefusalAtMount } from './one-account-per-request.js';
+import { answerOneTimeTokenHandoff } from './one-time-token-handoff.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import {
   seedCreatedOrganizationCurrency,
@@ -106,7 +132,15 @@ import {
   reportIfNoSignInAccountExists,
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
-import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
+import {
+  providerCredentialIndex,
+  providerCredentialsFrom,
+  registerSignInMethodFloor,
+  reportIfNoSignInMethodAtBoot,
+  ssoProviderDeleteRefusal,
+  type SignInMethodFloorDeps,
+} from './sign-in-method-floor.js';
+import { judgePlatformAdmin, judgeHeldSession, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
   probeDemoStaffPriorLogin,
@@ -118,6 +152,21 @@ import {
 } from './demo-staff.js';
 import { cloudManagedRefusal } from './cloud-managed.js';
 import { registerCopyInvitationLinkAction } from './invitation-link-action.js';
+import {
+  ALLOWED_IP_RANGES_ENV,
+  allowedIpRangesWritePredicate,
+  readAllowedIpRanges,
+  type AllowedIpRangesReading,
+} from './allowed-ip-ranges.js';
+import {
+  AUTH_SETTING_RESTORE,
+  captureDeclaredAuthOptions,
+  copyDeclared,
+  restoreGroupKeys,
+  type DeclaredAuthOptions,
+} from './auth-settings-declared.js';
+import { FORWARDED_CLIENT_ADDRESS_HEADERS } from './client-address-forwarding.js';
+import { runAtMountDoor } from './request-client-address.js';
 import {
   runAdminBanUser,
   runAdminUnbanUser,
@@ -171,6 +220,17 @@ interface SettingsReadSurface {
     value: unknown,
     ctx?: Record<string, unknown>,
   ): Promise<unknown>;
+  /**
+   * [#30203] Register a rule that may refuse a change to one key, asked before
+   * the write lands (`SettingsService.registerWritePredicate`). Optional, like
+   * `subscribe`.
+   */
+  registerWritePredicate?(
+    namespace: string,
+    key: string,
+    predicate: (input: unknown) => unknown,
+    options?: { requestHeaders?: readonly string[] },
+  ): void;
 }
 
 /** [#23367] The auth setting that records when the API-key lifecycle policy took effect. */
@@ -332,6 +392,23 @@ export interface AuthPluginOptions extends Partial<AuthConfig> {
    * @default true
    */
   registerOrganizationRecordPage?: boolean;
+
+  /**
+   * Whether `baseUrl` is the HOST's own loopback fallback rather than a
+   * configured origin. `os serve` sets it when none of `OS_AUTH_URL`,
+   * `BETTER_AUTH_URL` or `OS_BASE_URL` is set and it filled `baseUrl` with
+   * `http://localhost:<port>` itself.
+   *
+   * Only such a base URL, or no `baseUrl` at all, has its port corrected on
+   * `kernel:ready` to the one the HTTP server actually bound (a dev server that
+   * shifted off a busy port, or `--port 0`). A configured `baseUrl` is the
+   * deployment's public origin and is kept as written, `http://localhost`
+   * included: behind a proxy that publishes `http://localhost` while the app
+   * listens on :3000, a corrected origin would send invite links and auth mail
+   * to a port nobody published.
+   * @default false
+   */
+  baseUrlDefaulted?: boolean;
 
   /**
    * The stack's `demoStaff`: demo accounts the development boot creates for
@@ -527,8 +604,28 @@ export class AuthPlugin implements Plugin {
    * present.
    */
   private allowListUndeterminedWarned = false;
+  /** Set once the settings pass has said that `auth.mfa_required` reads a toggle spelling. */
+  private legacyMfaRequiredNoted = false;
   private allowListUntrustedHeaderWarned = false;
+  /** The applied allow-list value whose unreadable value or entries were last reported, so one is reported once. */
+  private allowListUnreadableReportedFor: string | undefined;
+  /**
+   * [#30203, #30312] What the deployment itself declared (plugin options and
+   * `auth:configure` handlers) for every option an `auth.*` setting can drive,
+   * taken before any setting is applied: what the running value returns to when
+   * the stored key is cleared or restored to its default.
+   */
+  private declaredAuthOptions: DeclaredAuthOptions = {};
+  /**
+   * [#30203, #30312] The `auth.*` keys whose stored value the running config
+   * was last given (or whose restore the manager refused): a key leaving this
+   * set by resolving `source: 'default'` hands its value back to the
+   * declaration. Boot never restores, so an unset key costs nothing.
+   */
+  private authSettingsFromStore = new Set<string>();
   private configuredSocialProviders: SocialProviderConfig | undefined;
+  /** Whether each provider declared at boot holds a credential pair (the sign-in floor's count). */
+  private bootProviderCredentials: ReadonlyMap<string, boolean> = new Map();
   // ADR-0092 D6 — the EFFECTIVE better-auth secondaryStorage (host-supplied or
   // the kernel-cache adapter wired in init). The identity write guard's
   // session-snapshot refresh reads through this; undefined = refresh no-ops.
@@ -726,6 +823,7 @@ export class AuthPlugin implements Plugin {
     this.configuredSocialProviders = authConfig.socialProviders
       ? { ...authConfig.socialProviders }
       : undefined;
+    this.bootProviderCredentials = providerCredentialIndex(authConfig.socialProviders, authConfig.oidcProviders);
 
     // [ADR-0105 D8] Lazy handle to plugin-security's `invitation-placement`
     // service. LAZY on purpose: plugin-security starts after plugin-auth, so
@@ -739,6 +837,21 @@ export class AuthPlugin implements Plugin {
             'invitation-placement',
           )) ?? ctx.getService?.('invitation-placement');
         return svc as never;
+      } catch {
+        return undefined;
+      }
+    };
+
+    // [ADR-0090 D12] Lazy handle to the `security` service's organization
+    // boundary predicate, for the identity-provider group mapping (its save
+    // door and the SCIM group projection). Feature-detected: a security
+    // service without the member, or none at all, answers `undefined`, and
+    // both callers then fail closed.
+    authConfig.organizationBoundary = async () => {
+      try {
+        const svc = ctx.getService<{ organizationBoundaryFailure?: (setName: string) => Promise<string | null> }>('security');
+        const judge = svc?.organizationBoundaryFailure;
+        return typeof judge === 'function' ? { organizationBoundaryFailure: (setName: string) => judge.call(svc, setName) } : undefined;
       } catch {
         return undefined;
       }
@@ -764,11 +877,18 @@ export class AuthPlugin implements Plugin {
       logger: ctx.logger,
     });
 
+    this.declaredAuthOptions = captureDeclaredAuthOptions(authConfig);
     // Initialize auth manager with data engine
     this.authManager = new AuthManager(authConfig);
     // ADR-0092 D6 — remember the storage better-auth will actually use so the
     // identity write guard can keep cached session snapshots coherent.
     this.effectiveSecondaryStorage = authConfig.secondaryStorage;
+    // [#30300] Deleting the last identity provider is judged by the same
+    // sign-in method floor as the auth settings save (`sign-in-method-floor.ts`).
+    const floorDeps = this.signInMethodFloorDeps(ctx, this.authManager);
+    this.authManager.setSsoProviderDeleteFloor((providerId, locale) =>
+      ssoProviderDeleteRefusal(floorDeps, providerId, locale),
+    );
 
     // Register auth service
     ctx.registerService('auth', this.authManager);
@@ -862,6 +982,33 @@ export class AuthPlugin implements Plugin {
     // `AuthPluginOptions.registerOrganizationRecordPage`.
     const registerOrganizationRecordPage = this.options.registerOrganizationRecordPage !== false;
 
+    const accessControlNavItems = [
+      ...(this.authManager.isSsoWired()
+        ? [
+            {
+              id: 'nav_sso_providers',
+              type: 'object',
+              label: 'SSO Providers',
+              objectName: 'sys_sso_provider',
+              icon: 'log-in',
+              requiredPermissions: ['manage_platform_settings'],
+            },
+          ]
+        : []),
+      ...(this.authManager.isScimWired()
+        ? [
+            {
+              id: 'nav_scim_credentials',
+              type: 'object',
+              label: 'SCIM Credentials',
+              objectName: 'sys_scim_connection_credential',
+              icon: 'key-round',
+              requiredPermissions: ['manage_platform_settings'],
+            },
+          ]
+        : []),
+    ];
+
     ctx.getService<{ register(m: any): void }>('manifest').register({
       // The header, `objects` and `objectExtensions`, from the ONE builder
       // `IdentityObjectsPlugin` registers on its own in a reduced kernel, so the
@@ -905,13 +1052,25 @@ export class AuthPlugin implements Plugin {
       dashboards: [SystemOverviewDashboard],
       // ADR-0021 — datasets backing the System Overview dashboard's widgets.
       datasets: SystemOverviewDatasets,
-      // ADR-0135 D6 / cloud#551 — surface "SSO Providers" (sys_sso_provider) in the
-      // Setup app's Access Control group, but ONLY when the external-IdP RP is
-      // wired (self-host `OS_SSO_ENABLED`, or the cloud per-env `planAllowsSso`
-      // arriving via `plugins.sso`). Without the gate the entry would render an
-      // empty list + a "Register" button whose endpoint 404s when SSO is off.
-      // Owning-plugin-contributes pattern (ADR-0029 K2), mirroring plugin-security.
-      ...(this.authManager.isSsoWired()
+      // Setup > Access Control entries for the identity surfaces this plugin
+      // owns (owning-plugin-contributes, ADR-0029 K2, mirroring
+      // plugin-security). Each is contributed only while its capability is
+      // wired, so no entry opens a list whose actions can only fail:
+      // - ADR-0135 D6 / cloud#551 — "SSO Providers" (sys_sso_provider), only
+      //   when the external-IdP RP is wired (self-host `OS_SSO_ENABLED`, or the
+      //   cloud per-env `planAllowsSso` arriving via `plugins.sso`). Without
+      //   the gate the entry would render an empty list + a "Register" button
+      //   whose endpoint 404s when SSO is off.
+      // - [#31123] "SCIM Credentials" (sys_scim_connection_credential, where
+      //   the Mint / Revoke Credential actions live), only when SCIM is wired:
+      //   `isScimWired()` is the same answer the `/admin/scim/mint-credential`
+      //   door reads before refusing 503, so the entry and the door cannot
+      //   disagree. Same gate as SSO Providers; the doors keep their own.
+      // Both labels are translated in `@objectstack/platform-objects`
+      // (`apps.setup.navigation`), pinned there by
+      // `setup-nav-dead-key-tombstone.test.ts`'s conditional list, because no
+      // boot of `check:app-nav-i18n` merges a gated-off entry.
+      ...(accessControlNavItems.length > 0
         ? {
             navigationContributions: [
               {
@@ -919,16 +1078,7 @@ export class AuthPlugin implements Plugin {
                 group: 'group_access_control',
                 // After Roles/Permission-Sets (100) and Sharing (200), near API Keys (300).
                 priority: 250,
-                items: [
-                  {
-                    id: 'nav_sso_providers',
-                    type: 'object',
-                    label: 'SSO Providers',
-                    objectName: 'sys_sso_provider',
-                    icon: 'log-in',
-                    requiredPermissions: ['manage_platform_settings'],
-                  },
-                ],
+                items: accessControlNavItems,
               },
             ],
           }
@@ -1194,10 +1344,12 @@ export class AuthPlugin implements Plugin {
         //    `setDefaultLocale`; the CLI passes `config.i18n.defaultLocale`),
         //    and is the bare `en` when the app declares nothing.
         //  - `localization.locale` (ADR-0053) is the workspace's RUNTIME
-        //    language — Setup, Localization, tenant-scoped — whose four
-        //    options are exactly `AUTH_EMAIL_TEMPLATE_LOCALES`. It is
-        //    already the authority for auth SMS (#2815) and for audit
-        //    activity summaries (framework#3039).
+        //    language — Setup, Localization, tenant-scoped — whose options
+        //    are the deployment's locale list (#30286), so it may name a
+        //    language the auth mail rows do not ship (see
+        //    `AUTH_EMAIL_TEMPLATE_LOCALES`). It is already the authority for
+        //    auth SMS (#2815) and for audit activity summaries
+        //    (framework#3039).
         //
         // A workspace that declared Chinese therefore received Chinese SMS
         // and ENGLISH mail. The workspace setting now outranks the
@@ -1357,12 +1509,15 @@ export class AuthPlugin implements Plugin {
         }
 
         if (httpServer) {
-          // Auto-detect the actual server URL when no explicit baseUrl was
-          // configured, or when the configured baseUrl uses a different port
-          // than the running server (e.g. port 3000 configured but 3002 bound).
+          // Auto-detect the actual server URL ONLY when no base URL was
+          // configured: no `baseUrl` option, or one the host filled from its
+          // own loopback fallback (`baseUrlDefaulted`). A configured base URL
+          // is the public origin and is kept as written, `http://localhost`
+          // included (see `AuthPluginOptions.baseUrlDefaulted`).
           // getPort() is optional on IHttpServer; duck-type check for it.
           const serverWithPort = httpServer as IHttpServer & { getPort?: () => number };
-          if (this.authManager && typeof serverWithPort.getPort === 'function') {
+          const baseUrlConfigured = !!this.options.baseUrl && this.options.baseUrlDefaulted !== true;
+          if (!baseUrlConfigured && this.authManager && typeof serverWithPort.getPort === 'function') {
             const actualPort = serverWithPort.getPort();
             if (actualPort) {
               const configuredUrl = this.options.baseUrl || 'http://localhost:3000';
@@ -1477,6 +1632,23 @@ export class AuthPlugin implements Plugin {
           { hasEmailTransport, hasFederatedSignIn, ownerAccountState },
           ctx.logger,
         );
+      }
+
+      // [#30300, ruling A] "Is there ANY way to sign in?" — the question the
+      // account report above does not ask: a redeploy that drops the last
+      // identity provider while email and password is off boots a deployment
+      // that serves no sign-in method at all, and said nothing. Said at
+      // `error` in every posture, NEVER refused: a platform-SSO tenant that
+      // signs in through a door this plugin cannot see must keep booting.
+      // Judged after the auth settings are applied, by the same floor as the
+      // settings save (`sign-in-method-floor.ts`).
+      if (this.authManager) {
+        try {
+          await this.ensureAuthSettingsBound(ctx);
+        } catch {
+          // The binding reports its own failure; judge what is in force.
+        }
+        await reportIfNoSignInMethodAtBoot(this.signInMethodFloorDeps(ctx, this.authManager), ctx.logger);
       }
     });
 
@@ -1846,11 +2018,28 @@ export class AuthPlugin implements Plugin {
           packageId: 'com.objectstack.plugin-auth.member-role-canonical',
           logger: ctx.logger,
         });
+        // `sys_user.locale` is stored in its BCP-47 case (`zh-cn` → `zh-CN`) on
+        // every ObjectQL write, at priority 5 like the role fold above: the
+        // console picks a UI language by exact match, so a mis-cased stored
+        // tag rendered English. The fold is `LocaleSchema`'s, the one #29833
+        // gave translation locales. See sys-user-locale-case.ts.
+        registerUserLocaleCaseFold(engine, {
+          packageId: 'com.objectstack.plugin-auth.user-locale-case',
+          logger: ctx.logger,
+        });
         // [Ruling 6355206139 E5/E6] The `external` role is held alone, and its
         // holder is never placed in the organization's business units — at
         // priority 6, judging the canonical spelling the hook above wrote.
         registerExternalMembershipGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.external-membership',
+        });
+        // [ADR-0151 D1] A user's principal kind is fixed when the row is
+        // created, and an AI service account names a person accountable for
+        // it — for every writer, the system included, ahead of every other
+        // `sys_user` hook (priority 4). See service-account-identity.ts.
+        registerServiceAccountRowGuard(engine, {
+          packageId: 'com.objectstack.plugin-auth.service-account-row',
+          logger: ctx.logger,
         });
         registerIdentityWriteGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.identity-write-guard',
@@ -1917,6 +2106,12 @@ export class AuthPlugin implements Plugin {
           packageId: 'com.objectstack.plugin-auth.membership-ended-session',
           logger: ctx.logger,
         });
+        // [ADR-0151 D6] An AI service account whose accountable owner leaves
+        // its organization is suspended, on the same two sys_member seams.
+        registerServiceAccountOwnerLeavesTrigger(engine, {
+          packageId: 'com.objectstack.plugin-auth.service-account-owner-leaves',
+          logger: ctx.logger,
+        });
       } catch {
         // Engine not available (mock mode) — permission-set defaults remain
         // the only gate, exactly the pre-guard status quo.
@@ -1963,6 +2158,33 @@ export class AuthPlugin implements Plugin {
   private ensureAuthSettingsBound(ctx: PluginContext): Promise<void> {
     this.authSettingsBinding ??= this.bindAuthSettings(ctx);
     return this.authSettingsBinding;
+  }
+
+  /**
+   * [#30202, #30300] The facts the sign-in method floor reads, live: the
+   * manager's advertisement, the data engine `sys_sso_provider` is read from,
+   * the host handoff declaration, and the boot credential index. One builder
+   * for the three doors that judge by it — the auth settings save, the delete
+   * of an identity provider, and the boot report — so they cannot drift apart.
+   */
+  private signInMethodFloorDeps(ctx: PluginContext, manager: AuthManager): SignInMethodFloorDeps {
+    return {
+      publicConfig: () => manager.getPublicConfig(),
+      engine: () => {
+        try {
+          return ctx.getService<IDataEngine>('objectql');
+        } catch {
+          return undefined;
+        }
+      },
+      hostSignInHandoff: this.options.hostSignInHandoff === true,
+      stackConfiguredGoogle: () => !!this.configuredSocialProviders?.google,
+      // Read when judged: the index is set in init, after `auth:configure`.
+      providerHasCredentials: (provider) => providerCredentialsFrom(this.bootProviderCredentials)(provider),
+      env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
+      // [#30312] A cleared toggle returns to the declaration: judge it there.
+      declaredEmailPasswordEnabled: () => this.declaredAuthOptions.emailAndPassword?.enabled !== false,
+    };
   }
 
   /**
@@ -2036,6 +2258,10 @@ export class AuthPlugin implements Plugin {
     }
     if (!settings || typeof settings.getNamespace !== 'function') return;
 
+    // The save door refuses turning off the last sign-in method, before the
+    // value is stored; the pass below would only apply it. See the module.
+    registerSignInMethodFloor(settings, this.signInMethodFloorDeps(ctx, this.authManager), ctx.logger);
+
     const applySettings = async (): Promise<void> => {
       if (!this.authManager) return;
       const authManager = this.authManager;
@@ -2049,6 +2275,18 @@ export class AuthPlugin implements Plugin {
         }
 
         const isExplicit = (key: string) => (sources[key] ?? 'default') !== 'default';
+        // [#30312] A key the running config took from the store that now
+        // resolves `source: 'default'` (cleared, or the namespace restored to
+        // its defaults) hands its value back to the deployment's declaration in
+        // this same pass, through the piece a save of it travels. Without this,
+        // every branch below skipped it and the last stored value ruled until a
+        // restart while the console showed the default. See auth-settings-declared.ts.
+        const declared = this.declaredAuthOptions;
+        const restoring = (key: string) => !isExplicit(key) && this.authSettingsFromStore.has(key);
+        const groupRestoring = (group: 'rateLimit' | 'google'): string[] => {
+          const keys = restoreGroupKeys(group);
+          return keys.some(isExplicit) ? [] : keys.filter(restoring);
+        };
         const asBoolean = (value: unknown, fallback: boolean): boolean => {
           if (typeof value === 'boolean') return value;
           if (typeof value === 'string') return value.toLowerCase() !== 'false';
@@ -2201,15 +2439,41 @@ export class AuthPlugin implements Plugin {
         // gated users would have no way to comply. [#20412] So the enforcement
         // and the plugin are ONE piece: a refused plugins block leaves MFA at
         // its standing value too, never enforced without its enrollment path.
+        // The env var OS_AUTH_TWO_FACTOR outranks this piece's plugin flag, so
+        // under a pin to off the save itself is refused, before this pass
+        // (mfa-required-enrollment-predicate.ts).
+        //
+        // [ruling 「可以，按三档做（推荐）」] Three levels: `off`,
+        // `administrators`, `everyone`. Either level that requires anything is
+        // one piece with the enrollment path. A toggle spelling can only come
+        // from the env override (a stored toggle is rewritten to a level at
+        // boot, `migrateLegacyMfaRequiredSetting`); it keeps its meaning and is
+        // reported once. A value that is no level keeps the level in force.
         if (isExplicit('mfa_required')) {
-          const on = asBoolean(values.mfa_required, false);
-          if (on) {
-            refusable.push({
-              key: 'mfa_required',
-              patch: { mfaRequired: true, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
-            });
+          const read = readMfaRequirementLevel(values.mfa_required);
+          if (!read) {
+            ctx.logger.error(
+              `[auth] mfa_required '${String(values.mfa_required)}' is not a multi-factor requirement level — IGNORED, `
+                + `the deployment keeps its current level ('${authManager.getDeploymentAccessFloor().mfaRequirement}'). `
+                + `Set auth.mfa_required (or OS_AUTH_MFA_REQUIRED) to one of: ${MFA_REQUIREMENT_LEVELS.join(', ')}.`,
+            );
           } else {
-            patch.mfaRequired = false;
+            if (read.legacy && !this.legacyMfaRequiredNoted) {
+              this.legacyMfaRequiredNoted = true;
+              ctx.logger.warn(
+                `[auth] auth.mfa_required reads '${String(values.mfa_required)}', a value from before the setting `
+                  + `had levels; it is read as '${read.level}'. Set OS_AUTH_MFA_REQUIRED (or the setting) to one of `
+                  + `${MFA_REQUIREMENT_LEVELS.join(', ')}: the toggle spelling is accepted for one major release.`,
+              );
+            }
+            if (read.level !== 'off') {
+              refusable.push({
+                key: 'mfa_required',
+                patch: { mfaRequirement: read.level, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
+              });
+            } else {
+              patch.mfaRequirement = 'off';
+            }
           }
         }
         if (isExplicit('mfa_grace_period_days')) {
@@ -2254,9 +2518,6 @@ export class AuthPlugin implements Plugin {
           const d = asPositiveInt(values.session_refresh_days);
           if (d !== undefined) session.updateAge = d * 86_400;
         }
-        if (Object.keys(session).length > 0) {
-          patch.session = session as AuthManagerOptions['session'];
-        }
 
         // Session controls (ADR-0069 D4) — idle / absolute / concurrent. 0 = off;
         // non-negative reader so an explicit 0 disables.
@@ -2278,12 +2539,12 @@ export class AuthPlugin implements Plugin {
         }
 
         // Network gating (ADR-0069 D5) — parse the CIDR/IP textarea into a list.
+        // [#30203] A cleared value hands the gate back to the deployment's own
+        // declaration at once (the restore arms below).
         if (isExplicit('allowed_ip_ranges')) {
-          const raw = asTrimmedString(values.allowed_ip_ranges) ?? '';
-          patch.allowedIpRanges = raw
-            .split(/[\n,]+/)
-            .map((r) => r.trim())
-            .filter(Boolean);
+          const reading = readAllowedIpRanges(values.allowed_ip_ranges);
+          patch.allowedIpRanges = reading.ranges;
+          this.reportUnreadableAllowList(ctx, reading, values.allowed_ip_ranges, sources.allowed_ip_ranges === 'env');
         }
 
         // Anti-abuse (ADR-0069 D2) — account lockout (custom, per-identity)
@@ -2358,11 +2619,81 @@ export class AuthPlugin implements Plugin {
             : undefined;
         }
 
-        const audienceKeys = [
-          'audience_posture',
-          'audience_allowed_email_domains',
-          'audience_self_registration_permission_set',
-        ];
+        // [#30312] The restore arms: each key that left the store goes back to
+        // its declared value through the same piece a save of it rides, so a
+        // refusable block is judged on a restore exactly as on a save.
+        const restoredInPatch: string[] = [];
+        let sessionRestoring = false;
+        for (const [key, arm] of Object.entries(AUTH_SETTING_RESTORE)) {
+          if (!restoring(key)) continue;
+          switch (arm.via) {
+            case 'patch':
+              (patch as Record<string, unknown>)[arm.field] = copyDeclared(declared[arm.field]);
+              restoredInPatch.push(key);
+              break;
+            case 'emailAndPassword':
+              // The declared verification flag is the deployment's own
+              // declaration, as it was at boot (#20389).
+              emailAndPasswordField(
+                key,
+                { [arm.field]: declared.emailAndPassword?.[arm.field] },
+                arm.field === 'requireEmailVerification' ? { requireEmailVerificationFrom: 'deployment' } : undefined,
+              );
+              break;
+            case 'plugins':
+              refusable.push({
+                key,
+                patch: {
+                  plugins: {
+                    [arm.field]: (declared.plugins as Record<string, unknown> | undefined)?.[arm.field],
+                  } as AuthManagerOptions['plugins'],
+                },
+              });
+              break;
+            case 'session':
+              sessionRestoring = true;
+              restoredInPatch.push(key);
+              break;
+            case 'mfaRequirement':
+              // As a save of the declared value: a level that requires anything
+              // is one piece with its enrollment path; off leaves enrolled
+              // factors verifiable.
+              if (declared.mfaRequirement && declared.mfaRequirement !== 'off') {
+                refusable.push({
+                  key,
+                  patch: { mfaRequirement: declared.mfaRequirement, plugins: { twoFactor: true } as AuthManagerOptions['plugins'] },
+                });
+              } else {
+                patch.mfaRequirement = declared.mfaRequirement;
+                restoredInPatch.push(key);
+              }
+              break;
+            case 'group':
+              break;
+          }
+        }
+        // Session lifetime rides one `session` block, merged over the declared
+        // one: a stored field overrides its declared twin, the rest stand.
+        if (Object.keys(session).length > 0 || sessionRestoring) {
+          const merged = { ...(declared.session ?? {}), ...session };
+          patch.session = (Object.keys(merged).length > 0 ? merged : copyDeclared(declared.session)) as
+            AuthManagerOptions['session'];
+        }
+        const rateLimitRestoring = groupRestoring('rateLimit');
+        if (rateLimitRestoring.length > 0) {
+          patch.rateLimit = copyDeclared(declared.rateLimit);
+          restoredInPatch.push(...rateLimitRestoring);
+        }
+        const googleRestoring = groupRestoring('google');
+        if (googleRestoring.length > 0) {
+          const configured = this.configuredSocialProviders ? { ...this.configuredSocialProviders } : undefined;
+          patch.socialProviders = configured && Object.keys(configured).length > 0 ? configured : undefined;
+          restoredInPatch.push(...googleRestoring);
+        }
+        // Keys whose restore the manager refused: still owed on the next pass.
+        const owed: string[] = [];
+
+        const audienceKeys = restoreGroupKeys('audience');
 
         // [#20412] Each piece is applied in its own `try`, so a refusal is
         // contained to the piece it names. `error`, not `warn` (AGENTS.md,
@@ -2378,6 +2709,7 @@ export class AuthPlugin implements Plugin {
           try {
             authManager.applyConfigPatch(piece, options);
           } catch (refusal: any) {
+            owed.push(...keys.filter(restoring));
             const named = keys.map((key) => `auth.${key}`).join(', ');
             ctx.logger.error(
               `[auth] auth settings REFUSED (${named}) — the standing runtime value keeps ruling while the settings ` +
@@ -2389,9 +2721,12 @@ export class AuthPlugin implements Plugin {
         if (Object.keys(patch).length > 0) {
           const pieceKeys = new Set(refusable.map((piece) => piece.key));
           applyPiece(
-            Object.keys(values).filter(
-              (key) => isExplicit(key) && !pieceKeys.has(key) && !audienceKeys.includes(key),
-            ),
+            [
+              ...Object.keys(values).filter(
+                (key) => isExplicit(key) && !pieceKeys.has(key) && !audienceKeys.includes(key),
+              ),
+              ...restoredInPatch,
+            ],
             patch,
           );
         }
@@ -2429,6 +2764,24 @@ export class AuthPlugin implements Plugin {
         // Missing required siblings are NOT guessed: the patch goes out
         // without them and `applyConfigPatch` refuses the merged result
         // (standing config keeps ruling — refusing to OPEN fails closed).
+        // [#30312] No posture stored any more (cleared, or the namespace
+        // restored) while an audience key had been: the declared audience comes
+        // back whole, judged by the same merged-result validation. A sibling
+        // still stored without a posture is then IGNORED as below.
+        if (!isExplicit('audience_posture')) {
+          const audienceRestoring = audienceKeys.filter(restoring);
+          if (audienceRestoring.length > 0) {
+            try {
+              authManager.applyConfigPatch({ audience: copyDeclared(declared.audience) });
+            } catch (audienceErr: any) {
+              owed.push(...audienceRestoring);
+              ctx.logger.error(
+                `[auth] audience settings REFUSED — the standing posture ('${authManager.getAudience().posture}') keeps ruling. ` +
+                  String(audienceErr?.message ?? audienceErr),
+              );
+            }
+          }
+        }
         if (audienceKeys.some((key) => isExplicit(key))) {
           const rawPosture = values.audience_posture;
           if (!isExplicit('audience_posture')) {
@@ -2482,6 +2835,11 @@ export class AuthPlugin implements Plugin {
             }
           }
         }
+
+        this.authSettingsFromStore = new Set([
+          ...Object.keys(AUTH_SETTING_RESTORE).filter(isExplicit),
+          ...owed,
+        ]);
       } catch (err: any) {
         // [#20412] A refusal no longer reaches here — each piece above
         // contains its own. What does is a pass that failed as a whole, the
@@ -2497,12 +2855,77 @@ export class AuthPlugin implements Plugin {
       }
     };
 
+    // [#30203] A console save of an allow-list that leaves out the saving
+    // request's own address is refused, naming the address (`allowed-ip-ranges.ts`).
+    if (typeof settings.registerWritePredicate === 'function') {
+      try {
+        settings.registerWritePredicate(
+          'auth',
+          'allowed_ip_ranges',
+          allowedIpRangesWritePredicate(() => this.authManager),
+          // Only the forwarded-address headers the address rule reads reach it.
+          { requestHeaders: FORWARDED_CLIENT_ADDRESS_HEADERS },
+        );
+      } catch (err: any) {
+        ctx.logger.warn(
+          '[auth] allowed_ip_ranges: the save-time check was NOT registered '
+            + `(${String(err?.message ?? err)}), so the settings console accepts an allow-list that leaves out `
+            + "the saving administrator's own address. The allow-list itself is still enforced.",
+        );
+      }
+    }
+
+    // The save door refuses turning `mfa_required` on while OS_AUTH_TWO_FACTOR
+    // pins enrollment off; the pass below would store it and enforce nothing.
+    // See mfa-required-enrollment-predicate.ts.
+    registerMfaRequiredEnrollmentPredicate(settings, ctx.logger);
+
+    // [ADR-0069 TL;DR 6] Each organization's own access policy: the reader the
+    // manager asks per request, the save checks that hold it to the floor, and
+    // the one-off moves of the toggle-era values onto the levels.
+    await this.bindOrganizationAccessPolicy(ctx, settings);
+
     await applySettings();
     if (typeof settings.subscribe === 'function') {
       settings.subscribe('auth', () => {
         void applySettings();
       });
       ctx.logger.info('Auth: bound to settings namespace=auth');
+    }
+  }
+
+  /**
+   * [ADR-0069 TL;DR 6] Each organization's own access policy: the one-off
+   * moves of the toggle-era MFA values, the per-request reader, the save
+   * checks and the change listener. See organization-access-policy-binding.ts.
+   */
+  private async bindOrganizationAccessPolicy(ctx: PluginContext, settings: SettingsReadSurface): Promise<void> {
+    if (!this.authManager) return;
+    const manager = this.authManager;
+    try {
+      await bindOrganizationAccessPolicy({
+        settings,
+        manager,
+        engine: () => manager.getDataEngine(),
+        security: () => {
+          try {
+            return ctx.getService<OrganizationAccessPolicySecuritySurface>('security');
+          } catch {
+            return undefined;
+          }
+        },
+        logger: {
+          info: (m) => ctx.logger.info(m),
+          warn: (m) => ctx.logger.warn(m),
+          error: (m) => ctx.logger.error(m),
+        },
+      });
+    } catch (err: any) {
+      ctx.logger.error(
+        `[auth] organization access policies are NOT bound (${String(err?.message ?? err)}): each organization's own `
+          + 'IP ranges, session limits and multi-factor level are not applied, while the deployment\'s values (the '
+          + 'auth settings) still are. Remedy: restore the settings service and restart.',
+      );
     }
   }
 
@@ -2980,6 +3403,107 @@ export class AuthPlugin implements Plugin {
   }
 
   /**
+   * ADR-0069 D5 — name what the gate cannot read in an applied
+   * `allowed_ip_ranges` value: a value that is not text (`readAllowedIpRanges`,
+   * which hands the gate a list that admits nobody for it), or the entries of a
+   * list that name no range (`unreadableIpRangeEntries`, the gate's own
+   * reading). The save check refuses both, so this is a value it never judged:
+   * one stored by an earlier release, or pinned by `OS_AUTH_ALLOWED_IP_RANGES`.
+   * Such a value or entry matches no address at the gate while the setting
+   * reads as set, so `error` (AGENTS.md, degradation log levels), once per
+   * distinct value, with the fix in the same line.
+   */
+  private reportUnreadableAllowList(
+    ctx: PluginContext,
+    reading: AllowedIpRangesReading,
+    raw: unknown,
+    fromEnv: boolean,
+  ): void {
+    if (reading.notText) {
+      let spelled: string;
+      try {
+        spelled = JSON.stringify(raw);
+      } catch {
+        spelled = String(raw);
+      }
+      const notTextKey = `not text: ${spelled}`;
+      if (notTextKey === this.allowListUnreadableReportedFor) return;
+      this.allowListUnreadableReportedFor = notTextKey;
+      const kind = reading.notText === 'object' ? 'an object' : `a ${reading.notText}`;
+      ctx.logger.error(
+        `[auth] allowed_ip_ranges (ADR-0069 D5) holds a value that is not text (${kind}), so it names no list, ` +
+          'and sign-in is admitted from no address while it is in force. Fix: save the list in the settings ' +
+          'console as text, one entry per line or comma-separated, or clear it; locked out, start the server ' +
+          `with ${ALLOWED_IP_RANGES_ENV} set to an empty value.`,
+      );
+      return;
+    }
+    const { ranges } = reading;
+    const unreadable = unreadableIpRangeEntries(ranges);
+    const key = unreadable.length > 0 ? JSON.stringify(ranges) : undefined;
+    if (key === this.allowListUnreadableReportedFor) return;
+    this.allowListUnreadableReportedFor = key;
+    if (!key) return;
+    const named = unreadable.map((entry) => JSON.stringify(entry)).join(', ');
+    ctx.logger.error(
+      `[auth] allowed_ip_ranges (ADR-0069 D5) holds ${unreadable.length === 1 ? 'an entry' : 'entries'} that ` +
+        `${unreadable.length === 1 ? 'is' : 'are'} not an IP address or a CIDR range: ${named}. ` +
+        `${unreadable.length === 1 ? 'It matches' : 'Each matches'} no address, so sign-in is admitted only from ` +
+        "the list's other entries, if any, while the settings console shows the list as in force. Fix: " +
+        (fromEnv
+          ? `correct ${ALLOWED_IP_RANGES_ENV} (read at startup) `
+          : 'correct the stored list in the settings console ') +
+        'so each entry is an address, or an address, "/" and a prefix length in decimal digits (0 to 32 for IPv4, ' +
+        '0 to 128 for IPv6), or clear it' +
+        (fromEnv ? '.' : `; locked out, start the server with ${ALLOWED_IP_RANGES_ENV} set to an empty value.`),
+    );
+  }
+
+  /**
+   * The caller of a raw mount as the settings door resolves a SAVING caller:
+   * the platform's one composition (`resolveRequestExecutionContext`) with the
+   * settings door's parameter set (`service-settings`'
+   * `verifiedContextFromRequest`), so a capability judged here is the one the
+   * same caller's settings save is judged by — resolved for the caller's
+   * current organization, a session or an API key admitting them, and the
+   * ADR-0069 posture that holds the credential carried as `authGate` for the
+   * route to refuse. `undefined` when the request resolves no principal.
+   * ⛔ An unreachable permission store throws (`AuthzStoreUnavailableError`):
+   * an outage, never a caller with no capability.
+   */
+  private async resolveOrganizationSettingsCaller(
+    headers: Headers,
+    // [#31898] The raw-app request's peer address (`readTransportPeerAddress(c)`),
+    // for the `credential_use` row an API key this door admits writes.
+    remoteAddress: string | undefined,
+  ): Promise<OrganizationAddressReaderContext | undefined> {
+    const context = await resolveRequestExecutionContext({
+      headers,
+      ql: this.authManager!.getDataEngine(),
+      authService: this.authManager as unknown as RequestAuthService,
+      tenancy: () => this.tenancy ?? undefined,
+      anonymous: 'fail-closed',
+      authGate: 'resolved',
+      credentials: 'api-key-and-session',
+      sessionApi: 'optional',
+      session: 'request',
+      localization: 'withhold',
+      requestLocale: undefined,
+      accessToken: 'withhold',
+      oauth: undefined,
+      onAdmission: undefined,
+      // [#31898] The transport's own peer address, for the `credential_use` row
+      // an admitted API key writes; the auth service applies the trust rule.
+      transport: { remoteAddress },
+    });
+    if (!context) return undefined;
+    return {
+      systemPermissions: context.systemPermissions ?? [],
+      ...(context.authGate ? { authGate: context.authGate } : {}),
+    };
+  }
+
+  /**
    * ADR-0069 D5 — the operator-facing explanation of an allow-list refusal,
    * for the two cases where the reason is not simply "an address outside the
    * ranges". Logged at `warn` (a refusal the requester was told about, not a
@@ -3028,6 +3552,42 @@ export class AuthPlugin implements Plugin {
         + 'address.',
       { judgedAddress: ip },
     );
+  }
+
+  /**
+   * [#30924] ADR-0069 D5 — the `login_failed` row of a sign-in the
+   * deployment's allow-list refused (`ip-allow-list-refusal-audit.ts`): a
+   * `/sign-in/*` endpoint only, counted by the per-address bound, and written
+   * detached from the refusal, so the answer, and the time it takes, do not
+   * depend on whether the identifier names an account. No `audit` service ⇒
+   * nothing is counted or read.
+   */
+  private auditAllowListRefusal(
+    ctx: PluginContext,
+    mgr: AuthManager,
+    c: any,
+    endpoint: string,
+    ip: string | undefined,
+  ): void {
+    if (!isSignInEndpoint(endpoint)) return;
+    let sink: AuthEventAuditSurface | undefined;
+    try {
+      sink = ctx.getService<AuthEventAuditSurface>('audit');
+    } catch {
+      return;
+    }
+    if (!sink || typeof sink.recordAuthEvent !== 'function') return;
+    const attempts = ipRefusalAuditBoundFor(sink).admit(ip, (line) => ctx.logger.warn(line));
+    if (attempts === undefined) return;
+    const request: Request = c.req.raw;
+    void recordDeploymentListRefusal(sink, {
+      request,
+      endpoint,
+      attempts,
+      fingerprint: signInClientFingerprint({ headers: request.headers }, ip),
+      resolveAccount: (email) => mgr.resolveRefusedSignInAccountId(email),
+      debug: (line, meta) => ctx.logger.debug(line, meta),
+    });
   }
 
   /**
@@ -3116,6 +3676,7 @@ export class AuthPlugin implements Plugin {
       const ip = mgr.resolveClientAddress({ headers, ...transportOf(c) });
       if (!mgr.isClientIpAllowed(ip)) {
         this.explainAllowListRefusal(ctx, mgr, ip, headers);
+        this.auditAllowListRefusal(ctx, mgr, c, path.startsWith(basePath) ? path.slice(basePath.length) : path, ip);
         return c.json(
           { success: false, error: { code: 'IP_NOT_ALLOWED', message: 'Sign-in is not allowed from your network.' } },
           403,
@@ -3140,6 +3701,58 @@ export class AuthPlugin implements Plugin {
     // yields: every branch of the seam hands the request on to `next`.
     if (typeof rawApp.use === 'function') {
       rawApp.use(`${basePath}/*`, (c: any, next: () => Promise<void>) => serveAgentForwardAtIdentityMount(c, next));
+    }
+
+    // ── ADR-0069 TL;DR 6, D5 — the organization's IP list at this mount ────
+    // An objectstack mount below reads its caller's session IN PROCESS
+    // (`gateAdmin`, and every raw route that reads it itself), and that read
+    // carries no request: `customSession` judged the organization's session
+    // limits on it but not the organization's IP list, which it judges only
+    // with the address a door established. This carries this request's
+    // address, by the one trust rule the D5 gate above judged it by
+    // (`resolveClientAddress`), to those reads (`runAtMountDoor`): a session
+    // the organization's list no longer admits is ended on its read here as on
+    // the better-auth-served door. The catch-all hands its request to
+    // `handleRequest`, which judges by the request as before.
+    if (typeof rawApp.use === 'function') {
+      rawApp.use(`${basePath}/*`, async (c: any, next: () => Promise<void>) => {
+        const mgr = this.authManager;
+        if (!mgr || typeof mgr.resolveClientAddress !== 'function') return next();
+        const address = mgr.resolveClientAddress({ headers: (c.req.header() ?? {}) as Record<string, string>, ...transportOf(c) });
+        return runAtMountDoor(address, () => next());
+      });
+    }
+
+    // ── An auth request is judged and executed as one account ─────────────
+    // A request whose session cookie and bearer token name two different
+    // signed-in accounts is refused HERE, ahead of every route below — the
+    // raw ObjectStack mounts, which read their caller in process, and the
+    // vendor catch-all alike — with `401 CREDENTIALS_NAME_DIFFERENT_ACCOUNTS`
+    // in the ADR-0112 envelope. The judgment is the before-hook's own
+    // (`one-account-per-request.ts`); asked here, a raw mount answers it with
+    // its code instead of meeting it as a throw from its session read. A
+    // request that carries one credential, or two that name one account, is
+    // handed on with nothing read. Fail-closed, as the before-hook is: a
+    // request carrying both credentials whose judgment could not be reached
+    // (no auth context to read with, or any other fault on the way) is
+    // answered `503 SERVICE_UNAVAILABLE` and goes no further.
+    if (typeof rawApp.use === 'function') {
+      rawApp.use(`${basePath}/*`, async (c: any, next: () => Promise<void>) => {
+        const mgr = this.authManager;
+        const headers: Headers | undefined = c.req.raw?.headers;
+        if (!mgr || typeof mgr.getAuthContext !== 'function' || !headers?.get?.('authorization') || !headers?.get?.('cookie')) {
+          return next();
+        }
+        let refusal: Awaited<ReturnType<typeof oneAccountRefusalAtMount>>;
+        try {
+          refusal = await oneAccountRefusalAtMount(headers, await mgr.getAuthContext());
+        } catch {
+          const fault = oneAccountReadFaultAtMount();
+          return c.json(fault.body, fault.status);
+        }
+        if (refusal) return c.json(refusal.body, refusal.status);
+        return next();
+      });
     }
 
     // Register /config before the wildcard so it takes precedence.
@@ -3348,7 +3961,14 @@ export class AuthPlugin implements Plugin {
       const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
       const verdict = judgePlatformAdmin(session);
       if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
-      return verdict.actor;
+      // An impersonation session names the administrator at the keyboard; the
+      // route's identity writes carry it beside the admitted actor as the
+      // attribution-only `impersonatedBy` (`runAttributedToUser`), read off
+      // this session and never off the body. Authorization is unchanged.
+      const impersonatedBy = session?.session?.impersonatedBy;
+      return typeof impersonatedBy === 'string' && impersonatedBy.trim() !== ''
+        ? { ...verdict.actor, impersonatedBy: impersonatedBy.trim() }
+        : verdict.actor;
     };
 
     // ── [#24877] ADR-0069 D5/D7 — better-auth's universal handler for the
@@ -3476,7 +4096,7 @@ export class AuthPlugin implements Plugin {
         // Attribution only — the route's own authorization already happened
         // in `gateAdmin`. Opening the actor seam here credits the `sys_user`
         // row to the admin instead of recording it as the system.
-        const { status, body } = await runAttributedToUser(actor.id, () =>
+        const { status, body } = await runAttributedToUser(actor, () =>
           runSetUserManager(
             {
               getDataEngine: () => this.authManager!.getDataEngine() as any,
@@ -3518,6 +4138,308 @@ export class AuthPlugin implements Plugin {
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
+
+    // ────────────────────────────────────────────────────────────────────
+    // ADR-0151 D1/D4 — register an AI service account, and mint its keys.
+    //
+    // A person signed in, read from the better-auth session, so an API key
+    // never reaches these routes and an AI service account (which never holds
+    // a session) never calls them. Anonymous is 401, a held session is refused
+    // with its posture; who may act (an organization or platform
+    // administrator; for a key, also the account's owner) is the handler's
+    // to judge, against `sys_member` (service-account-doors.ts). Writes run
+    // as the system, attributed to the person.
+    const serviceAccountCaller = async (
+      c: any,
+    ): Promise<import('./service-account-doors.js').ServiceAccountCaller | Response> => {
+      const authApi = await this.authManager!.getApi();
+      const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+      const user = session?.user;
+      if (!user?.id) {
+        return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
+      }
+      const held = judgeHeldSession(user);
+      if (held) return c.json(held.body, held.status);
+      const activeOrganizationId = (session?.session as { activeOrganizationId?: unknown } | undefined)?.activeOrganizationId;
+      const impersonatedBy = session?.session?.impersonatedBy;
+      return {
+        id: user.id,
+        isPlatformAdmin: isPlatformAdminUser(user),
+        activeOrganizationId: typeof activeOrganizationId === 'string' && activeOrganizationId !== '' ? activeOrganizationId : null,
+        ...(typeof impersonatedBy === 'string' && impersonatedBy.trim() !== '' ? { impersonatedBy: impersonatedBy.trim() } : {}),
+      };
+    };
+    type ServiceAccountDeps = import('./service-account-doors.js').ServiceAccountDoorDeps
+      & import('./service-account-lifecycle.js').ServiceAccountLifecycleDeps;
+    const serviceAccountDeps = (): ServiceAccountDeps => ({
+      getDataEngine: () => this.authManager!.getDataEngine() as any,
+      addMember: async ({ userId, organizationId }) => {
+        const authApi: any = await this.authManager!.getApi();
+        await authApi.addMember({ body: { userId, role: 'member', organizationId } });
+      },
+      runAtomically: async <T,>(work: () => Promise<T>): Promise<T> => {
+        const engine = this.authManager!.getDataEngine() as
+          | { transaction?: <R>(callback: (trxCtx: any, info: any) => Promise<R>) => Promise<R> }
+          | undefined;
+        if (typeof engine?.transaction !== 'function') return work();
+        return engine.transaction(async () => work());
+      },
+      resolveApiKeyLifecyclePolicy: () => this.authManager!.resolveApiKeyLifecyclePolicy(),
+    });
+    const serviceAccountRoute = (
+      path: string,
+      run: (
+        deps: ServiceAccountDeps,
+        caller: import('./service-account-doors.js').ServiceAccountCaller,
+        request: Request,
+      ) => Promise<import('./admin-user-endpoints.js').EndpointResult>,
+    ) => async (c: any) => {
+      try {
+        const caller = await serviceAccountCaller(c);
+        if (caller instanceof Response) return caller;
+        const { status, body } = await runAttributedToUser(caller, () => run(serviceAccountDeps(), caller, c.req.raw));
+        return c.json(body, status as any);
+      } catch (error) {
+        // An unreadable membership or policy is an outage, never a caller
+        // without standing: answered 503 in the shared seam's words.
+        if (isAuthzStoreUnavailableError(error)) {
+          return c.json(
+            { success: false, error: { code: AUTHZ_STORE_UNAVAILABLE_CODE, message: AUTHZ_STORE_UNAVAILABLE_MESSAGE } },
+            AUTHZ_STORE_UNAVAILABLE_STATUS,
+          );
+        }
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error(`[AuthPlugin] service-account/${path} failed`, err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The request could not be completed.' } }, 500);
+      }
+    };
+    rawApp.post(`${basePath}/service-account/register`, serviceAccountRoute('register', async (deps, caller, request) => {
+      const { runRegisterServiceAccount } = await import('./service-account-doors.js');
+      return runRegisterServiceAccount(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/create-key`, serviceAccountRoute('create-key', async (deps, caller, request) => {
+      const { runCreateServiceAccountKey } = await import('./service-account-doors.js');
+      return runCreateServiceAccountKey(deps, caller, request);
+    }));
+    // [ADR-0151 D6] The lifecycle: suspend (the owner or an administrator),
+    // resume, set-owner and retire (an administrator), and one key's revoke
+    // and restore (the owner or an administrator). Same session-only caller
+    // (service-account-lifecycle.ts).
+    rawApp.post(`${basePath}/service-account/suspend`, serviceAccountRoute('suspend', async (deps, caller, request) => {
+      const { runSuspendServiceAccount } = await import('./service-account-lifecycle.js');
+      return runSuspendServiceAccount(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/resume`, serviceAccountRoute('resume', async (deps, caller, request) => {
+      const { runResumeServiceAccount } = await import('./service-account-lifecycle.js');
+      return runResumeServiceAccount(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/set-owner`, serviceAccountRoute('set-owner', async (deps, caller, request) => {
+      const { runSetServiceAccountOwner } = await import('./service-account-lifecycle.js');
+      return runSetServiceAccountOwner(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/retire`, serviceAccountRoute('retire', async (deps, caller, request) => {
+      const { runRetireServiceAccount } = await import('./service-account-lifecycle.js');
+      return runRetireServiceAccount(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/revoke-key`, serviceAccountRoute('revoke-key', async (deps, caller, request) => {
+      const { runRevokeServiceAccountKey } = await import('./service-account-lifecycle.js');
+      return runRevokeServiceAccountKey(deps, caller, request);
+    }));
+    rawApp.post(`${basePath}/service-account/restore-key`, serviceAccountRoute('restore-key', async (deps, caller, request) => {
+      const { runRestoreServiceAccountKey } = await import('./service-account-lifecycle.js');
+      return runRestoreServiceAccountKey(deps, caller, request);
+    }));
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#30398] ADR-0069 D5 — admin: the caller's own address as the
+    // `auth.allowed_ip_ranges` save check and the sign-in gate judge it, so
+    // Setup can show it before a save rather than the save refusal naming it
+    // after. The shared gate first, then the read, which takes the address from
+    // the save check's own call on this request's headers and transport peer
+    // (client-address-read.ts). Closed, empty query set; no body is read.
+    rawApp.get(`${basePath}/admin/client-address`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runClientAddressRead } = await import('./client-address-read.js');
+        const answer = runClientAddressRead(this.authManager!, {
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+          transport: { headers: (c.req.header() ?? {}) as Record<string, string>, ...transportOf(c) },
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] admin/client-address failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // ADR-0069 TL;DR 6 — the same address, read by an ORGANIZATION
+    // administrator before saving the organization's `access_policy` Allowed
+    // IP ranges, whose save check judges it. Gated to the caller who may save
+    // that list (`setup.write` in their current organization), resolved by the
+    // platform's one composition; then the read above, unchanged: the caller's
+    // own address only, closed and empty query set, no body
+    // (client-address-read.ts).
+    rawApp.get(`${basePath}/client-address`, async (c: any) => {
+      try {
+        const { judgeOrganizationAddressReader, runClientAddressRead } = await import('./client-address-read.js');
+        const refusal = judgeOrganizationAddressReader(
+          await this.resolveOrganizationSettingsCaller(c.req.raw.headers, readTransportPeerAddress(c)),
+          judgeHeldSession,
+        );
+        if (refusal) return c.json(refusal.body, refusal.status);
+        const answer = runClientAddressRead(this.authManager!, {
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+          transport: { headers: (c.req.header() ?? {}) as Record<string, string>, ...transportOf(c) },
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        // An unreachable permission store is an outage, never a caller with
+        // no capability: answered 503 in the shared seam's words.
+        if (isAuthzStoreUnavailableError(error)) {
+          return c.json(
+            { success: false, error: { code: AUTHZ_STORE_UNAVAILABLE_CODE, message: AUTHZ_STORE_UNAVAILABLE_MESSAGE } },
+            AUTHZ_STORE_UNAVAILABLE_STATUS,
+          );
+        }
+        // An API key its own lifecycle refuses (revoked, expired, inactive) is
+        // the caller's refusal, never a fault: relayed as the error declares it,
+        // its status, code and located message, as the settings door relays it.
+        if (isApiKeyLifecycleRefusalError(error)) {
+          return c.json({ success: false, error: { code: error.code, message: error.message } }, error.status);
+        }
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] client-address failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Your client address could not be read.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#30918] admin: the AI assistants (OAuth clients) another person has
+    // authorized, per organization, and when each was last used. Read only.
+    // The shared gate first, so a caller outside a platform administrator's
+    // reach gets one refusal whoever `userId` names and whether or not that
+    // person exists; then the closed query set { userId } (authorized-clients-read.ts).
+    rawApp.get(`${basePath}/admin/authorized-clients`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { authorizedClientsDepsFor, runAdminAuthorizedClientsRead } = await import('./authorized-clients-read.js');
+        const answer = await runAdminAuthorizedClientsRead(authorizedClientsDepsFor(this.authManager!), actor, {
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] admin/authorized-clients failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorized clients could not be read.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#31048] admin: withdraw one of the AI assistants another person
+    // authorized, by the consent id the read above answers. The read's own
+    // gate first, ahead of any body read, so a caller outside a platform
+    // administrator's reach gets one refusal whoever the body names and
+    // whether or not the person or the consent exists (authorized-clients-withdraw.ts).
+    rawApp.post(`${basePath}/admin/authorized-clients/withdraw`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { authorizedClientWithdrawDepsFor, runAdminAuthorizedClientWithdraw } = await import('./authorized-clients-withdraw.js');
+        const answer = await runAdminAuthorizedClientWithdraw(authorizedClientWithdrawDepsFor(this.authManager!), actor, {
+          raw: c.req.raw,
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] admin/authorized-clients/withdraw failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorized client could not be withdrawn.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#30958] ADR-0134 — admin: mint and revoke the bearer credentials SCIM
+    // connections authenticate with. The SCIM plugin verifies against
+    // `sys_scim_connection_credential` rows, which the data API never creates
+    // or updates (engine-owned, list only), so these two mounts are the
+    // credential lifecycle's only door. Same family as `set-user-manager`: the
+    // shared platform-admin gate runs first, ahead of any body read, and the
+    // store writes are credited to the admin. The minted bearer is answered
+    // once, `no-store`, and kept nowhere; see `scim-connection-admin.ts`.
+    {
+      const scimCredentialDeps = (actor: PlatformAdminActor): import('./scim-connection-admin.js').ScimCredentialAdminDeps => ({
+        getDataEngine: () => this.authManager!.getDataEngine(),
+        isScimEnabled: () => this.authManager!.isScimWired(),
+        mint: (engine, input) => this.authManager!.mintScimConnectionCredential(engine, input),
+        attributed: (fn) => runAttributedToUser(actor, fn),
+        logger: { warn: (m) => ctx.logger.warn(m), error: (m) => ctx.logger.error(m) },
+      });
+      rawApp.post(`${basePath}/admin/scim/mint-credential`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runMintScimCredential } = await import('./scim-connection-admin.js');
+          const { status, body, headers } = await runMintScimCredential(scimCredentialDeps(actor), actor, c.req.raw);
+          return c.json(body, status as any, headers);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/scim/mint-credential failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+      rawApp.post(`${basePath}/admin/scim/revoke-credential`, async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const { runRevokeScimCredential } = await import('./scim-connection-admin.js');
+          const { status, body } = await runRevokeScimCredential(scimCredentialDeps(actor), actor, c.req.raw);
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error('[AuthPlugin] admin/scim/revoke-credential failed', err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      });
+
+      // [ADR-0134 D4, filled for permission sets] The identity-provider group
+      // mapping door: which ordinary permission set a SCIM connection's group,
+      // or an SSO provider's sign-in group claim (ruling record 6718355623,
+      // item 3: the same mapping, no second model), grants. The same gate as the credential door above, then the save
+      // refuses any set outside the organization boundary (judged by the
+      // `security` service), so an IdP group never confers administrator
+      // standing. See `idp-group-mapping-admin.ts`.
+      const groupMappingDeps = (actor: PlatformAdminActor): import('./idp-group-mapping-admin.js').IdpGroupMappingAdminDeps => ({
+        getDataEngine: () => this.authManager!.getDataEngine(),
+        isScimEnabled: () => this.authManager!.isScimWired(),
+        isSsoEnabled: () => this.authManager!.isSsoWired(),
+        boundary: () => this.authManager!.organizationBoundaryJudge(),
+        reconcile: (domain) => this.authManager!.reconcileScimProjectionDomain(domain),
+        attributed: (fn) => runAttributedToUser(actor, fn),
+        logger: { warn: (m) => ctx.logger.warn(m), error: (m) => ctx.logger.error(m) },
+      });
+      const groupMappingHandler = (
+        label: string,
+        runner: 'runSetIdpGroupMapping' | 'runDeleteIdpGroupMapping',
+      ) => async (c: any) => {
+        try {
+          const actor = await gateAdmin(c);
+          if (actor instanceof Response) return actor;
+          const door = await import('./idp-group-mapping-admin.js');
+          const { status, body } = await door[runner](groupMappingDeps(actor), actor, c.req.raw);
+          return c.json(body, status as any);
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error(`[AuthPlugin] ${label} failed`, err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        }
+      };
+      rawApp.post(`${basePath}/admin/scim/set-group-mapping`, groupMappingHandler('admin/scim/set-group-mapping', 'runSetIdpGroupMapping'));
+      rawApp.post(`${basePath}/admin/scim/delete-group-mapping`, groupMappingHandler('admin/scim/delete-group-mapping', 'runDeleteIdpGroupMapping'));
+    }
 
     // ────────────────────────────────────────────────────────────────────
     // #2766 V1 — admin direct user management. `sys_user` CRUD is suppressed
@@ -3585,6 +4507,9 @@ export class AuthPlugin implements Plugin {
             accessToken: 'withhold',
             oauth: undefined,
             onAdmission: undefined,
+            // [#31898] `'session-only'` reads no API key, so no `credential_use` row is
+            // written here and no transport is handed.
+            transport: undefined,
           });
           return context as Record<string, unknown> | undefined;
         },
@@ -3623,7 +4548,7 @@ export class AuthPlugin implements Plugin {
           // binds in `user.create.after` — are credited to the admin instead
           // of recorded as the system. Attribution only: the route's own
           // authorization already happened above, and the writes stay system.
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminCreateUser(
               {
                 ...adminUserDeps(),
@@ -3698,7 +4623,7 @@ export class AuthPlugin implements Plugin {
           // write is driven server-side and never passes through
           // `AuthManager.handleRequest`, so the request-scoped actor seam is
           // not open unless we open it here.
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminBanUser(adminBanDeps(), actor, c.req.raw),
           );
           return c.json(body, status as any);
@@ -3715,7 +4640,7 @@ export class AuthPlugin implements Plugin {
           if (actor instanceof Response) return actor;
           const unavailable = await adminPluginMissing(c);
           if (unavailable) return unavailable;
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminUnbanUser(adminBanDeps(), actor, c.req.raw),
           );
           return c.json(body, status as any);
@@ -3913,7 +4838,7 @@ export class AuthPlugin implements Plugin {
           })();
           // [#4586] Same seam as create-user: server-side better-auth calls,
           // credited to the admin who ran the import.
-          const { status, body } = await runAttributedToUser(actor.id, () =>
+          const { status, body } = await runAttributedToUser(actor, () =>
             runAdminImportUsers(
             {
               getAuthApi: () => this.authManager!.getApi() as any,
@@ -3967,7 +4892,7 @@ export class AuthPlugin implements Plugin {
         // and never passes through `AuthManager.handleRequest`, so open the
         // attribution seam here — the `sys_member` row this creates is
         // credited to the admin instead of recorded as the system.
-        const { status, body } = await runAttributedToUser(actor.id, () =>
+        const { status, body } = await runAttributedToUser(actor, () =>
           runOrganizationAddMember({ getAuthApi: () => this.authManager!.getApi() as any }, c.req.raw),
         );
         return c.json(body, status as any);
@@ -4010,6 +4935,60 @@ export class AuthPlugin implements Plugin {
         ctx.logger.error('[AuthPlugin] organization/invitation-preview failed', err);
         // A signed-out caller is told the read failed, never why.
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The invitation preview is unavailable.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // The mobile sign-in hand-off: a session signed in in the SYSTEM browser
+    // is handed to a REGISTERED app scheme as a single-use, one-minute token
+    // the app redeems at better-auth's own `/one-time-token/verify`, bound to
+    // the shell's PKCE challenge so an intercepted callback cannot be
+    // redeemed. Mounted unconditionally: with no registered scheme every
+    // target is refused with a 400 that says how to register one. Only a session
+    // signed in within the last five minutes is handed off, and a cross-site
+    // navigation is refused (ruling A). A page navigation without such a session
+    // goes to this deployment's sign-in page and comes back, so the app opens this
+    // route and never names the Console's. The reasons for every answer live in
+    // `one-time-token-handoff.ts`, whose `answerOneTimeTokenHandoff` is this
+    // route's whole body and the package export a host that forwards the auth
+    // routes to a manager it did not mount calls. Ledgered in auth-route-ledger.ts.
+    let reportedNoHandoffSignInPage = false;
+    rawApp.get(`${basePath}/one-time-token/handoff`, async (c: any) => {
+      try {
+        const answer = await answerOneTimeTokenHandoff(
+          this.authManager!,
+          {
+            url: c.req.url,
+            headers: c.req.raw.headers,
+            queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+          },
+          {
+            authMountPath: basePath,
+            server: rawApp,
+            serverEnv: c.env,
+            onUnserved: (path, reason) => {
+              if (reportedNoHandoffSignInPage) return;
+              reportedNoHandoffSignInPage = true;
+              ctx.logger.warn(
+                `[AuthPlugin] one-time-token/handoff: this server does not serve a sign-in page at ${path} (${reason}), ` +
+                  'so a signed-out browser that opens the mobile sign-in hand-off sees a JSON 401 instead of a sign-in form. ' +
+                  'Mount the Console, or set uiBasePath to where it is mounted. Reported once.',
+              );
+            },
+          },
+        );
+        if (answer.status === 302) {
+          return new Response(null, { status: 302, headers: answer.headers });
+        }
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] one-time-token/handoff failed', err);
+        return c.json(
+          { success: false, error: { code: 'INTERNAL_ERROR', message: 'The sign-in hand-off is unavailable.' } },
+          500,
+          { 'Cache-Control': 'no-store' },
+        );
       }
     });
 
@@ -4080,6 +5059,43 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/verify-domain bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // The provider's groups claim (`mapping.extraFields.groups`, the member an
+    // SSO sign-in reads its IdP groups from): show it, and set or clear it, for
+    // the `sys_sso_provider` "Show Groups Claim" / "Edit Groups Claim" actions.
+    // Both read the stored blob through the system read seam and answer only
+    // the claim name; the set bridge writes through the vendor's own
+    // /sso/update-provider (`register-sso-provider.ts`). Same ADR-0068 D4
+    // platform-admin gate as the other `/admin/sso/*` bridges, judged first.
+    const readSsoProviderConfigs = createEngineSsoProviderConfigReader(
+      () => this.authManager!.getDataEngine() as unknown as SsoProviderConfigEngine | undefined,
+    );
+    rawApp.post(`${basePath}/admin/sso/get-groups-claim`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runShowSsoGroupsClaim(c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/get-groups-claim bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    rawApp.post(`${basePath}/admin/sso/set-groups-claim`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runSetSsoGroupsClaim(handleWithTransportOf(c), c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/set-groups-claim bridge failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });
@@ -4268,6 +5284,50 @@ export class AuthPlugin implements Plugin {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sys-session/revoke failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#30918] The caller's own authorized AI assistants (OAuth consents),
+    // with each one's display name, scopes, organization, grant time and last
+    // verified MCP call. Keyed by the session's subject and nothing else: the
+    // query set is closed and empty, so `?userId=` is refused, never ignored.
+    // Outside `/admin/` because it admits every signed-in person; another
+    // person's grants are the admin door above. See authorized-clients-read.ts.
+    rawApp.get(`${basePath}/authorized-clients`, async (c: any) => {
+      try {
+        const { authorizedClientsDepsFor, runOwnAuthorizedClientsRead } = await import('./authorized-clients-read.js');
+        const answer = await runOwnAuthorizedClientsRead(authorizedClientsDepsFor(this.authManager!), {
+          headers: c.req.raw.headers,
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] authorized-clients failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorized clients could not be read.' } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#31048] Withdraw one of the caller's own authorized AI assistants, by
+    // the consent id the read above answers: the consent and the client's
+    // refresh family go, so the assistant's token is refused on its next MCP
+    // call. Only the session subject's own consent is withdrawn; an id naming
+    // no consent and one naming another person's read the same 404. Another
+    // person's grant is the admin door above. See authorized-clients-withdraw.ts.
+    rawApp.post(`${basePath}/authorized-clients/withdraw`, async (c: any) => {
+      try {
+        const { authorizedClientWithdrawDepsFor, runOwnAuthorizedClientWithdraw } = await import('./authorized-clients-withdraw.js');
+        const answer = await runOwnAuthorizedClientWithdraw(authorizedClientWithdrawDepsFor(this.authManager!), {
+          raw: c.req.raw,
+          queries: (c.req.queries() ?? {}) as Record<string, string[]>,
+        });
+        return c.json(answer.body, answer.status as any, answer.headers);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] authorized-clients/withdraw failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The authorized client could not be withdrawn.' } }, 500);
       }
     });
 

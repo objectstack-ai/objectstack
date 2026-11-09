@@ -34,6 +34,7 @@ import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ObjectQL } from '@objectstack/objectql';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { installAuditWriters } from '@objectstack/plugin-audit';
 import { SysAttachment } from '@objectstack/platform-objects/audit';
@@ -518,5 +519,306 @@ describe('the file-attachments writer AS THE REQUESTING USER: assertMayAttach an
     );
     expect([r.code, r.status]).toEqual(['FILES_DISABLED', 403]);
     await expectNothingLeft(ql, storage);
+  });
+});
+
+describe('attachFileAs for a member who cannot read sys_file: the verb vouches for the one file it created', () => {
+  // A member as a real deployment holds one: the create grant on
+  // `sys_attachment` and none on `sys_file`. The middleware below stands in for
+  // the object-permission layer: a non-system read of `sys_file` is refused
+  // outright, as an ungranted object read is (`PERMISSION_DENIED` / 403), and
+  // so is Bob's read of the parent object. The write-time reference check asks
+  // the caller's read door for every `lookup` value, `sys_attachment.file_id`
+  // included.
+  const ALICE = { userId: 'usr_alice', tenantId: 'org_a', positions: ['org_member'] };
+  const BOB = { userId: 'usr_bob', tenantId: 'org_a', positions: ['org_member'] };
+  const asCaller = (a: IFileAttachmentService) => a as IFileAttachmentService & ICallerFileAttachmentService;
+  const READS = new Set(['find', 'findOne', 'count', 'aggregate']);
+  const readRefusal = (object: string) =>
+    Object.assign(new Error(`[Security] Access denied: read on ${object}`), {
+      name: 'PermissionDeniedError', code: 'PERMISSION_DENIED', status: 403, statusCode: 403,
+    });
+
+  async function bootMember(opts: { sharing?: unknown } = {}) {
+    const booted = await boot(opts);
+    booted.ql.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+      if (READS.has(ctx.operation) && ctx.context?.isSystem !== true) {
+        if (ctx.object === 'sys_file') throw readRefusal('sys_file');
+        if (ctx.object === 'att_case' && ctx.context?.userId === BOB.userId) throw readRefusal('att_case');
+      }
+      await next();
+    });
+    return booted;
+  }
+
+  /** A committed file the member owns, written by the system as the upload doors write one. */
+  const seedOwnFile = (ql: ObjectQL) =>
+    ql.insert('sys_file', {
+      id: 'file_alice', key: 'attachments/file_alice/n.txt', name: 'n.txt', mime_type: 'text/plain', size: 1,
+      scope: 'attachments', acl: 'private', status: 'committed', owner_id: 'usr_alice', organization_id: 'org_a',
+    }, SYS);
+
+  it('precondition: the member cannot read sys_file, not even the file they own', async () => {
+    const { ql } = await bootMember();
+    await seedOwnFile(ql);
+    const err = await refusalOf(ql.findOne('sys_file', { where: { id: 'file_alice' }, context: ALICE }));
+    expect([err.code, err.status]).toEqual(['PERMISSION_DENIED', 403]);
+  });
+
+  it('attaches as the member: one committed sys_file owned by them, one sys_attachment stamped uploaded_by them', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const out = await asCaller(attachments).attachFileAs(input(), ALICE as never);
+    const files = await rows(ql, 'sys_file');
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({ id: out.fileId, status: 'committed', owner_id: 'usr_alice', organization_id: 'org_a' });
+    const links = await rows(ql, 'sys_attachment');
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({
+      id: out.attachmentId, parent_object: 'att_case', parent_id: 'case_a', file_id: out.fileId,
+      uploaded_by: 'usr_alice', organization_id: 'org_a',
+    });
+    expect(await storedKeys(storage)).toEqual([files[0].key]);
+  });
+
+  it('a producer’s sequence (assertMayAttach, then attachFileAs — the print archive’s) attaches as the member', async () => {
+    const sharing = { checkEdit: vi.fn(async () => 'allow') };
+    const { ql, attachments } = await bootMember({ sharing });
+    await asCaller(attachments).assertMayAttach('att_case', 'case_a', ALICE as never);
+    const out = await asCaller(attachments).attachFileAs(input({ filename: 'printed.pdf', mimeType: 'application/pdf' }), ALICE as never);
+    const [link] = await rows(ql, 'sys_attachment');
+    expect(link).toMatchObject({ id: out.attachmentId, file_id: out.fileId, uploaded_by: 'usr_alice' });
+  });
+
+  it('control: a member the attach rule refuses is still refused, by assertMayAttach and by attachFileAs, and nothing is left', async () => {
+    const sharing = { checkEdit: vi.fn(async () => 'deny') };
+    const { ql, attachments, storage } = await bootMember({ sharing });
+    const pre = await refusalOf(asCaller(attachments).assertMayAttach('att_case', 'case_a', ALICE as never));
+    expect([pre.code, pre.status]).toEqual(['ATTACHMENT_PARENT_ACCESS', 403]);
+    const r = await refusalOf(asCaller(attachments).attachFileAs(input(), ALICE as never));
+    expect([r.code, r.status]).toEqual(['ATTACHMENT_PARENT_ACCESS', 403]);
+    await expectNothingLeft(ql, storage);
+  });
+
+  it('control: a parent the member cannot read is refused RECORD_NOT_FOUND / 404, and nothing is left', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const r = await refusalOf(asCaller(attachments).attachFileAs(input(), BOB as never));
+    expect([r.code, r.status]).toEqual(['RECORD_NOT_FOUND', 404]);
+    await expectNothingLeft(ql, storage);
+  });
+
+  /** What the member's own `sys_attachment` insert through the data engine answers. */
+  async function directInsertRefusal(ql: ObjectQL, fileId: string) {
+    const err = await refusalOf(
+      ql.insert(
+        'sys_attachment',
+        { parent_object: 'att_case', parent_id: 'case_a', file_id: fileId, file_name: 'direct.eml' },
+        { context: ALICE },
+      ),
+    );
+    const envelope = resolveThrownHttpError(err);
+    return {
+      code: envelope.code,
+      status: envelope.status,
+      fields: ((err as any).fields ?? []).map((f: any) => [f.field, f.code]),
+    };
+  }
+  const REFERENCE_NOT_FOUND = { code: 'VALIDATION_FAILED', status: 400, fields: [['file_id', 'reference_not_found']] };
+
+  it('control: the member’s own insert of sys_attachment through the data engine, naming a file they cannot read, is refused reference_not_found', async () => {
+    const { ql } = await bootMember();
+    await seedOwnFile(ql);
+    expect(await directInsertRefusal(ql, 'file_alice')).toEqual(REFERENCE_NOT_FOUND);
+    expect(await rows(ql, 'sys_attachment')).toEqual([]);
+  });
+
+  it('the vouch is the verb’s call alone: after attachFileAs, the member’s own insert naming the same file is refused reference_not_found', async () => {
+    const { ql, attachments } = await bootMember();
+    const out = await asCaller(attachments).attachFileAs(input(), ALICE as never);
+    expect(await directInsertRefusal(ql, out.fileId)).toEqual(REFERENCE_NOT_FOUND);
+    expect(await rows(ql, 'sys_attachment')).toHaveLength(1);
+  });
+});
+
+describe('attachUploadAs: a member attaches their own pending browser upload, and the commit is the attach', () => {
+  // The same member posture as above: the create grant on `sys_attachment`,
+  // nothing on `sys_file` (a non-system read of it is refused outright), and
+  // Bob cannot read the parent object. The upload is seeded as the presigned
+  // door leaves one: a `pending` row owned by the uploader in the
+  // `attachments` scope, and its bytes at its key.
+  const ALICE = { userId: 'usr_alice', tenantId: 'org_a', positions: ['org_member'] };
+  const BOB = { userId: 'usr_bob', tenantId: 'org_a', positions: ['org_member'] };
+  const asCaller = (a: IFileAttachmentService) => a as IFileAttachmentService & ICallerFileAttachmentService;
+  const READS = new Set(['find', 'findOne', 'count', 'aggregate']);
+  const readRefusal = (object: string) =>
+    Object.assign(new Error(`[Security] Access denied: read on ${object}`), {
+      name: 'PermissionDeniedError', code: 'PERMISSION_DENIED', status: 403, statusCode: 403,
+    });
+
+  async function bootMember(opts: { sharing?: unknown; security?: unknown } = {}) {
+    const booted = await boot(opts);
+    booted.ql.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+      if (READS.has(ctx.operation) && ctx.context?.isSystem !== true) {
+        if (ctx.object === 'sys_file') throw readRefusal('sys_file');
+        if (ctx.object === 'att_case' && ctx.context?.userId === BOB.userId) throw readRefusal('att_case');
+      }
+      await next();
+    });
+    return booted;
+  }
+
+  const BYTES = Buffer.from('hello');
+  /** A pending upload, as the presigned door and the raw PUT leave one. */
+  async function seedUpload(
+    ql: ObjectQL,
+    storage: IStorageService,
+    over: { id?: string; owner?: string; scope?: string; status?: string; bytes?: boolean } = {},
+  ) {
+    const id = over.id ?? 'upl_alice';
+    const scope = over.scope ?? 'attachments';
+    const key = `${scope}/${id}.txt`;
+    await ql.insert('sys_file', {
+      id, key, name: 'notes.txt', mime_type: 'text/plain', size: BYTES.byteLength, scope, acl: 'private',
+      status: over.status ?? 'pending', owner_id: over.owner ?? ALICE.userId, organization_id: 'org_a',
+    }, SYS);
+    if (over.bytes !== false) await storage.upload(key, BYTES, { contentType: 'text/plain' });
+    return id;
+  }
+  const target = (fileId: string, over: Record<string, unknown> = {}) => ({ fileId, parentObject: 'att_case', parentId: 'case_a', ...over });
+  const answer = (err: { code?: string; status?: number; message?: string }) => ({ code: err.code, status: err.status });
+  const fileRow = async (ql: ObjectQL, id: string) => (await rows(ql, 'sys_file')).find((f) => f.id === id);
+
+  /** A refused attach leaves the upload as it was: pending, bytes stored, nothing attached. */
+  async function expectUploadUntouched(ql: ObjectQL, storage: IStorageService, id: string) {
+    const file = await fileRow(ql, id);
+    expect(file?.status).toBe('pending');
+    expect(await storedKeys(storage)).toContain(file!.key);
+    expect(await rows(ql, 'sys_attachment')).toEqual([]);
+  }
+
+  it('attaches as the member: the upload is committed and attached in one call, uploaded_by them, and sys_file stays unreadable to them', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage);
+    const out = await asCaller(attachments).attachUploadAs(target(fileId, { eTag: 'etag-1' }), ALICE as never);
+    expect(out).toEqual({ fileId, attachmentId: expect.any(String), size: BYTES.byteLength });
+    expect(await fileRow(ql, fileId)).toMatchObject({ status: 'committed', etag: 'etag-1', owner_id: ALICE.userId });
+    const links = await rows(ql, 'sys_attachment');
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({
+      id: out.attachmentId, parent_object: 'att_case', parent_id: 'case_a', file_id: fileId,
+      file_name: 'notes.txt', uploaded_by: ALICE.userId, organization_id: 'org_a',
+    });
+    const err = await refusalOf(ql.findOne('sys_file', { where: { id: fileId }, context: ALICE }));
+    expect(answer(err)).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+  });
+
+  it('control: another user’s pending upload is refused with the upload ownership rule’s one answer, and is left as it was', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage, { id: 'upl_bob', owner: BOB.userId });
+    const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), ALICE as never));
+    expect(answer(err)).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    await expectUploadUntouched(ql, storage, fileId);
+  });
+
+  it('control: an id that names no file gets exactly the answer another user’s upload gets', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const others = await seedUpload(ql, storage, { id: 'upl_bob', owner: BOB.userId });
+    const a = await refusalOf(asCaller(attachments).attachUploadAs(target(others), ALICE as never));
+    const b = await refusalOf(asCaller(attachments).attachUploadAs(target('upl_nowhere'), ALICE as never));
+    expect([b.code, b.status, (b as Error).message]).toEqual([a.code, a.status, (a as Error).message]);
+    expect(await rows(ql, 'sys_attachment')).toEqual([]);
+  });
+
+  it('control: a committed upload is refused RESOURCE_CONFLICT / 409 — only the upload this call commits is vouched for', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage, { status: 'committed' });
+    const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), ALICE as never));
+    expect(answer(err)).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(await rows(ql, 'sys_attachment')).toEqual([]);
+  });
+
+  it('control: a pending upload something already holds is refused RESOURCE_CONFLICT / 409, and no second attachment is written', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage);
+    await ql.insert('sys_attachment', { parent_object: 'att_case', parent_id: 'case_a', file_id: fileId, file_name: 'n.txt', organization_id: 'org_a' }, SYS);
+    const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), ALICE as never));
+    expect(answer(err)).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(await rows(ql, 'sys_attachment')).toHaveLength(1);
+    expect((await fileRow(ql, fileId))?.status).toBe('pending');
+  });
+
+  it('control: an upload outside the attachments scope is refused INVALID_REQUEST / 400', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage, { scope: 'user' });
+    const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), ALICE as never));
+    expect(answer(err)).toEqual({ code: 'INVALID_REQUEST', status: 400 });
+    expect(await rows(ql, 'sys_attachment')).toEqual([]);
+  });
+
+  it('control: an upload whose bytes the backend does not hold is refused RESOURCE_CONFLICT / 409 and stays pending', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage, { bytes: false });
+    const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), ALICE as never));
+    expect(answer(err)).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect((await fileRow(ql, fileId))?.status).toBe('pending');
+    expect(await rows(ql, 'sys_attachment')).toEqual([]);
+  });
+
+  it('control: a member the attach rule refuses is refused ATTACHMENT_PARENT_ACCESS / 403, and the upload is left as it was', async () => {
+    const sharing = { checkEdit: vi.fn(async () => 'deny') };
+    const { ql, attachments, storage } = await bootMember({ sharing });
+    const fileId = await seedUpload(ql, storage);
+    const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), ALICE as never));
+    expect(answer(err)).toEqual({ code: 'ATTACHMENT_PARENT_ACCESS', status: 403 });
+    await expectUploadUntouched(ql, storage, fileId);
+  });
+
+  it('control: a member without the permission to create an attachment is refused PERMISSION_DENIED / 403, and the upload is left as it was', async () => {
+    const security = { explain: vi.fn(async () => ({ allowed: false })) };
+    const { ql, attachments, storage } = await bootMember({ security });
+    const fileId = await seedUpload(ql, storage);
+    const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), ALICE as never));
+    expect(answer(err)).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(security.explain).toHaveBeenCalledWith({ object: 'sys_attachment', operation: 'create' }, ALICE);
+    await expectUploadUntouched(ql, storage, fileId);
+  });
+
+  it('control: a parent object without enable.files is refused FILES_DISABLED / 403 by the insert’s own gate, and the upload is left as it was', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage);
+    const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId, { parentObject: 'att_memo', parentId: 'memo_a' }), ALICE as never));
+    expect(answer(err)).toEqual({ code: 'FILES_DISABLED', status: 403 });
+    await expectUploadUntouched(ql, storage, fileId);
+  });
+
+  it('control: a parent the member cannot read is refused, and the upload is left as it was', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage, { id: 'upl_bob', owner: BOB.userId });
+    const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), BOB as never));
+    expect(err.status).toBe(err.code === 'RECORD_NOT_FOUND' ? 404 : 403);
+    expect(['RECORD_NOT_FOUND', 'ATTACHMENT_PARENT_ACCESS']).toContain(err.code);
+    await expectUploadUntouched(ql, storage, fileId);
+  });
+
+  it('the vouch is the verb’s call alone: after attachUploadAs, the member’s own insert naming the same file is refused reference_not_found', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage);
+    await asCaller(attachments).attachUploadAs(target(fileId), ALICE as never);
+    const err = await refusalOf(
+      ql.insert('sys_attachment', { parent_object: 'att_case', parent_id: 'case_a', file_id: fileId, file_name: 'direct.txt' }, { context: ALICE }),
+    );
+    const envelope = resolveThrownHttpError(err);
+    expect([envelope.code, envelope.status]).toEqual(['VALIDATION_FAILED', 400]);
+    expect(((err as any).fields ?? []).map((f: any) => [f.field, f.code])).toEqual([['file_id', 'reference_not_found']]);
+    expect(await rows(ql, 'sys_attachment')).toHaveLength(1);
+  });
+
+  it('control: the system context and a context without a user are refused PERMISSION_DENIED / 403', async () => {
+    const { ql, attachments, storage } = await bootMember();
+    const fileId = await seedUpload(ql, storage);
+    for (const context of [{ isSystem: true }, { tenantId: 'org_a' }]) {
+      const err = await refusalOf(asCaller(attachments).attachUploadAs(target(fileId), context as never));
+      expect(answer(err)).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    }
+    await expectUploadUntouched(ql, storage, fileId);
   });
 });

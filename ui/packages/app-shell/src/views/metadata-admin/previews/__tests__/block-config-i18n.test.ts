@@ -626,9 +626,20 @@ function shippedLiteralKeys(): Map<string, string[]> {
       }
       if (!/\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) continue;
       if (/\.(test|spec)\.[tj]sx?$/.test(entry.name)) continue;
+      // tsup's transient bundle of a package's `tsup.config.ts`, written and
+      // deleted mid-build by a concurrent shard (#30256): skipped by name.
+      if (/\.bundled_[^./]+\.mjs$/.test(entry.name)) continue;
       if (full === I18N_SOURCE_PATH) continue; // the DEFINITION site, not a reader
       if (full === STUDIO_HOME_PATH.en || full === STUDIO_HOME_PATH.zh) continue; // likewise
-      const content = readFileSync(full, 'utf8');
+      // A file that vanished between list and read is not a reader; any other
+      // read fault still fails the walk.
+      let content: string;
+      try {
+        content = readFileSync(full, 'utf8');
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
+        throw err;
+      }
       if (!content.includes(PREFIX)) continue;
       for (const m of content.matchAll(/['"`](engine\.inspector\.pageBlock\.[A-Za-z0-9_.:$-]+)['"`]/g)) {
         const rel = path.relative(ROOT, full).split('\\').join('/');

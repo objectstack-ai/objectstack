@@ -549,7 +549,8 @@ const schema: ObjectGridBlockNode = {
     objectName: 'users',
     columns: ['name', 'email'],
     selection: { type: 'multiple' },
-    bulkActions: ['delete', 'export'],
+    // `deactivate` is an action the `users` object declares.
+    bulkActions: ['delete', 'deactivate'],
   } satisfies ObjectGridProps,
 };
 ```
@@ -757,6 +758,13 @@ const schema: ObjectGridBlockNode = {
 themselves live in the object's action set, so the same action behaves identically
 wherever it is offered. They are `string[]`, not inline definitions with callbacks.
 
+Each name must name an action the object declares; `'edit'` and `'delete'` are the
+built-in exceptions. A name the object does not declare draws nothing: no row-menu
+entry and no selection-bar button, and in development the console logs one warning
+naming it. That includes a misspelling and an action a disabled package withholds,
+which the server leaves out of the object. A runner handler registered under a bare
+name is not a declaration and does not bring the entry back.
+
 ```typescript
 import type { ObjectGridBlockNode } from '@object-ui/types';
 import type { ObjectGridProps } from '@objectstack/spec/ui';
@@ -766,9 +774,10 @@ const schema: ObjectGridBlockNode = {
   properties: {
     objectName: 'users',
     columns: ['name', 'email'],
-    rowActions: ['view', 'edit', 'delete'],
+    // `deactivate` is an action the `users` object declares.
+    rowActions: ['deactivate', 'edit', 'delete'],
     selection: { type: 'multiple' },
-    bulkActions: ['delete', 'export'],
+    bulkActions: ['delete', 'deactivate'],
   } satisfies ObjectGridProps,
 };
 ```

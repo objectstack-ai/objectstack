@@ -23,6 +23,8 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { FilterScopeProvider } from '@object-ui/react';
 import { ComponentRegistry } from '@object-ui/core';
+import { I18nProvider } from '@object-ui/i18n';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RelatedList } from '../RelatedList';
 import { RelatedListEnlargedContext } from '../relatedListCompact';
 
@@ -178,5 +180,103 @@ describe('the enlarged related list draws the board toolbar (objectstack#27524)'
     await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
     expect(toolbar()).toBeNull();
     expect(screen.getByLabelText('2 records')).toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#30069 — 导出 asks the list page's question. `ListView`'s
+ * `exportPermitted` reads the child object's effective API operation set
+ * (`/me/permissions` `apiOperations`); the related table reads the same
+ * `usePermissions()` source, so a reader the list page hides 导出 from sees no
+ * 导出 here either, and a reader who may export still exports this relation's
+ * rows alone. A refusal that still reaches the table — the server's 403 —
+ * reads in the Console's language, never as the route's English sentence.
+ */
+describe('the related table asks the list page\'s export question (objectstack#30069)', () => {
+  const SERVER_SENTENCE = "Export is not permitted on object 'task' for this user";
+
+  function grant(apiOperations: string[]): MePermissionsAuthenticatedResponse {
+    return {
+      authenticated: true,
+      userId: 'u-1',
+      tenantId: null,
+      hasAnyQueue: false,
+      positions: [],
+      permissionSets: ['rep'],
+      objects: {
+        task: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false, apiOperations },
+      },
+      fields: {},
+    } as MePermissionsAuthenticatedResponse;
+  }
+
+  function renderUnder(perms: MePermissionsAuthenticatedResponse, language = 'en') {
+    const dataSource = dataSourceFor();
+    render(
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
+        <MePermissionsProvider initialPermissions={perms}>
+          <FilterScopeProvider currentUserId="u-1">
+            <RelatedListEnlargedContext.Provider value>
+              <RelatedList
+                title="Tasks"
+                type="table"
+                api="task"
+                objectName="task"
+                referenceField="lead"
+                parentId="L-1"
+                pageSize={25}
+                columns={[{ field: 'subject', label: 'Subject' }, { field: 'due_date', label: 'Due' }]}
+                dataSource={dataSource as never}
+              />
+            </RelatedListEnlargedContext.Provider>
+          </FilterScopeProvider>
+        </MePermissionsProvider>
+      </I18nProvider>,
+    );
+    return dataSource;
+  }
+
+  it('a reader without export sees no 导出, and nothing is asked of the export route', async () => {
+    const dataSource = renderUnder(grant(['get', 'list', 'create', 'update']));
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    expect(toolbar()).not.toBeNull();
+    expect(document.querySelector('[data-related-enlarged-export]')).toBeNull();
+    expect(dataSource.exportDownload).not.toHaveBeenCalled();
+  });
+
+  it('a reader with export sees 导出 and exports this relation\'s rows alone', async () => {
+    const dataSource = renderUnder(grant(['get', 'list', 'export']));
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() });
+    const button = document.querySelector('[data-related-enlarged-export]');
+    expect(button).not.toBeNull();
+    fireEvent.click(button!);
+    await waitFor(() => expect(dataSource.exportDownload).toHaveBeenCalledTimes(1));
+    const [resource, request] = dataSource.exportDownload.mock.calls[0] as unknown as [string, { filter: unknown }];
+    expect(resource).toBe('task');
+    // The parent scope: the lead this record page is about, and only it.
+    expect(JSON.stringify(request.filter)).toContain('"lead"');
+    expect(JSON.stringify(request.filter)).toContain('L-1');
+  });
+
+  it('the server\'s 403 reads in the Console\'s language, not as the route\'s English sentence', async () => {
+    const dataSource = renderUnder(grant(['get', 'list', 'export']), 'zh');
+    dataSource.exportDownload.mockRejectedValueOnce(
+      Object.assign(new Error(SERVER_SENTENCE), { code: 'EXPORT_NOT_PERMITTED', status: 403 }),
+    );
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    fireEvent.click(document.querySelector('[data-related-enlarged-export]')!);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('你没有导出这些记录的权限。如需导出，请联系管理员。');
+    expect(alert.textContent).not.toContain(SERVER_SENTENCE);
+  });
+
+  it('control: a failure that is not a refusal still says the server\'s sentence', async () => {
+    const dataSource = renderUnder(grant(['get', 'list', 'export']));
+    dataSource.exportDownload.mockRejectedValueOnce(Object.assign(new Error('Export timed out'), { status: 504 }));
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    fireEvent.click(document.querySelector('[data-related-enlarged-export]')!);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('Export timed out');
   });
 });

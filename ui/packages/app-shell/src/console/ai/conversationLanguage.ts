@@ -12,6 +12,8 @@
 // pack's translation of them becomes reachable (objectui#3837 removed the one
 // label that had drifted in here).
 
+import { isHitlContinuation } from '@object-ui/plugin-chatbot/core';
+
 /** A message shape both the floating panel and the full-page chat can supply. */
 interface LangProbeMessage {
   role?: string;
@@ -49,6 +51,11 @@ export function detectConversationLanguage(
     if (!m || m.role !== 'user') continue;
     const text = userText(m);
     if (!text.trim()) continue;
+    // objectstack#30223 — the English follow-up the chat sends the model after
+    // 确认 / 取消 is not the person's turn. Read as one, it turned a Chinese
+    // conversation's outbound text English whenever the action's result
+    // carried no Chinese.
+    if (isHitlContinuation(text)) continue;
     return /[一-鿿]/.test(text) ? 'zh-CN' : undefined;
   }
   return undefined;

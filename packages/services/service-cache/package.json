@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-cache",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "license": "Apache-2.0",
   "description": "Cache Service for ObjectStack — implements ICacheService with in-memory and Redis adapters",
   "type": "module",
@@ -27,10 +27,13 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/observability": "workspace:*",
+    "@objectstack/service-cluster": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/service-cluster-redis": "workspace:*",
     "@types/node": "^26.6.5",
+    "ioredis-mock": "^8.13.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

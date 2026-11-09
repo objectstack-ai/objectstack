@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 
 import { ApiErrorSchema } from '@objectstack/spec/api';
 
-import { extractFieldErrors, classifyLoadError, declaredUserMessage, delegationScopeMessage, isPermissionError } from './error-message';
+import { extractFieldErrors, classifyLoadError, answeredLoadFailure, declaredUserMessage, delegationScopeMessage, isPermissionError } from './error-message';
 
 describe('extractFieldErrors', () => {
   // The wire shape the server actually sends: `@objectstack/rest` serves a
@@ -338,5 +338,60 @@ describe('delegationScopeMessage', () => {
 
   it('answers null for a scope refusal with no usable text, so the caller still says something', () => {
     expect(delegationScopeMessage({ code: 'DELEGATION_SCOPE_VIOLATION', httpStatus: 403, message: '' })).toBeNull();
+  });
+});
+
+/**
+ * objectstack#29704 — the one rule the list page, the record page, the app page
+ * and the related list share for "did a server answer this failed read?".
+ */
+describe('answeredLoadFailure', () => {
+  it("answers a 404 OBJECT_NOT_FOUND's code and sentence (the adapter's raw read shape)", () => {
+    const err = Object.assign(new Error("Object 'qazh_q_zh' is not registered"), {
+      status: 404,
+      code: 'OBJECT_NOT_FOUND',
+    });
+    expect(answeredLoadFailure(err)).toEqual({
+      code: 'OBJECT_NOT_FOUND',
+      message: "Object 'qazh_q_zh' is not registered",
+    });
+  });
+
+  it('reads the body the client parks under `details`: {error:{code,message}} lifted to code + sentence', () => {
+    const err = Object.assign(new Error('Request failed'), {
+      httpStatus: 500,
+      details: { code: 'INTERNAL_ERROR', message: 'The database is restarting' },
+    });
+    expect(answeredLoadFailure(err)).toEqual({ code: 'INTERNAL_ERROR', message: 'The database is restarting' });
+  });
+
+  it('reads a wrapped {error:{code,message}} body a transport parked under `details` unlifted', () => {
+    const err = Object.assign(new Error('Request failed with status 404'), {
+      status: 404,
+      details: { success: false, error: { code: 'OBJECT_NOT_FOUND', message: "Object 'qazh_q_zh' is not registered" } },
+    });
+    expect(answeredLoadFailure(err)).toEqual({
+      code: 'OBJECT_NOT_FOUND',
+      message: "Object 'qazh_q_zh' is not registered",
+    });
+  });
+
+  it('counts `HTTP <status>` in the message as answered and reads the JSON tail', () => {
+    const err = new Error('ApiDataSource: HTTP 500 Internal Server Error — {"error":"The database is restarting"}');
+    expect(answeredLoadFailure(err)).toEqual({ code: null, message: 'The database is restarting' });
+  });
+
+  it('CONTROL: a request that got no answer answers null, whatever its message says', () => {
+    expect(answeredLoadFailure(new TypeError('Failed to fetch'))).toBeNull();
+    expect(answeredLoadFailure(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }))).toBeNull();
+  });
+
+  it('CONTROL: junk input answers null', () => {
+    for (const junk of [null, undefined, 'HTTP 500', 42]) expect(answeredLoadFailure(junk)).toBeNull();
+  });
+
+  it('CONTROL: it is not a classifier — the kind of an answered 404 is still `network`', () => {
+    const err = Object.assign(new Error('missing'), { status: 404, code: 'OBJECT_NOT_FOUND' });
+    expect(classifyLoadError(err)).toBe('network');
   });
 });

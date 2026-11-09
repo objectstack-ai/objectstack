@@ -1,0 +1,111 @@
+{
+  "name": "@objectstack/scenarios",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "description": "Run the open ObjectStack scenario cards end to end from npm: `npx @objectstack/scenarios run` builds an app from each card's prompt with your local Claude Code login, scores it and writes one run record per card. Also the scenario-card schema and loader (computed truths over seed rows) and the deterministic scorer (`@objectstack/scenarios/score`, `./score/full`). Ships the open card library (docs/qa/scenarios) as package data, never a private overlay; refuses an API-billed login. A devx instrument, not a protocol: packages/spec carries no obligation for this format.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "objectstack-scenarios": "./bin/objectstack-scenarios.js"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./score": {
+      "import": {
+        "types": "./dist/score.d.ts",
+        "default": "./dist/score.js"
+      },
+      "require": {
+        "types": "./dist/score.d.cts",
+        "default": "./dist/score.cjs"
+      }
+    },
+    "./score/full": {
+      "import": {
+        "types": "./dist/score-full.d.ts",
+        "default": "./dist/score-full.js"
+      },
+      "require": {
+        "types": "./dist/score-full.d.cts",
+        "default": "./dist/score-full.cjs"
+      }
+    },
+    "./runner": {
+      "import": {
+        "types": "./dist/runner.d.ts",
+        "default": "./dist/runner.js"
+      },
+      "require": {
+        "types": "./dist/runner.d.cts",
+        "default": "./dist/runner.cjs"
+      }
+    },
+    "./export": {
+      "import": {
+        "types": "./dist/export.d.ts",
+        "default": "./dist/export.js"
+      },
+      "require": {
+        "types": "./dist/export.d.cts",
+        "default": "./dist/export.cjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup && node scripts/pack-library.mjs && node ../../../scripts/check-dts-emitted.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "run-scenarios": "tsx src/runner/cli.ts",
+    "export-gallery": "tsx src/export/cli.ts",
+    "gallery-refresh": "tsx src/export/refresh-cli.ts"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/formula": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
+    "@objectstack/plugin-sharing": "workspace:*",
+    "@objectstack/spec": "workspace:*",
+    "playwright-core": "1.63.0",
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "objectstack",
+    "qa",
+    "scenarios",
+    "eval"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/qa/scenarios"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

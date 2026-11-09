@@ -24,6 +24,8 @@
  * `publish-package-drafts-response-conformance.test.ts` — copied, not shared,
  * so each file can fail on its own; this package carries no sqlite driver).
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -192,7 +194,7 @@ describe('publish-drafts seedApplied counts what was written', () => {
         const { p, engine } = await makeProtocol();
         await stage(p, [{ type: 'seed', name: 'r_good', item: goodSeed(['R1', 'R2']) }]);
         const first: any = await p.publishPackageDrafts({ packageId: PKG });
-        expect(first.seedApplied).toEqual({ success: true, inserted: 2, updated: 0 });
+        expect(first.seedApplied).toEqual({ success: true, inserted: 2, updated: 0, landed: expect.any(Array) }); // [#30348] ids pinned in publish-seed-receipt-landed-ids.test.ts
 
         // The same natural keys with a changed column: an upsert UPDATE each.
         await stage(p, [
@@ -226,7 +228,7 @@ describe('publish-drafts seedApplied counts what was written', () => {
         const res: any = await p.publishPackageDrafts({ packageId: PKG });
 
         expect(await rowsAtEngine(engine)).toEqual(['R1', 'R2', 'R3']);
-        expect(res.seedApplied).toEqual({ success: true, inserted: 3, updated: 0 });
+        expect(res.seedApplied).toEqual({ success: true, inserted: 3, updated: 0, landed: expect.any(Array) }); // [#30348] ids pinned in publish-seed-receipt-landed-ids.test.ts
     });
 
     it('the FIRST seed fails, a good one follows: nothing was written, and the receipt says 0', async () => {

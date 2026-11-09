@@ -1,5 +1,7 @@
 /**
- * Full key parity across all ten locale packs (objectui#2872 P3).
+ * Full key parity across every locale pack (objectui#2872 P3) — one per tag of
+ * the platform locale table (`PLATFORM_LOCALES` in `@objectstack/spec/system`),
+ * which the population below is read from (objectstack#30511).
  *
  * This replaces the four-namespace ratchet added in objectui#2905. That one was
  * deliberately scoped because the eight non-Chinese packs were still ~277 keys
@@ -72,7 +74,7 @@
  *     `resolvesLeaf` would also make it report a complete-but-baseless family as
  *     `missing-key`, whose remediation text reads "The key exists in no locale pack" —
  *     false for a family nine packs define.
- *   - Here, the rule is pack-intrinsic: it walks all ten packs' own key sets, needs no
+ *   - Here, the rule is pack-intrinsic: it walks every pack's own key set, needs no
  *     call site to exist, and fails in `pnpm test` at PR time.
  *
  * ## The third invariant: every family carries every category its language selects (objectui#11432)
@@ -101,12 +103,13 @@
  * real instance over the shipped packs — is `plural-categories-11432.test.ts`.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 /**
  * Text the console SENDS to the agent rather than displays. These are absent
- * from the eight non-gate packs ON PURPOSE: the console resolves them from the
- * `en`/`zh` packs by the CONVERSATION's language (objectui#3896), so a value in
+ * from every non-gate pack ON PURPOSE: the console resolves them from the
+ * `en`/`zh-Hans` packs by the CONVERSATION's language (objectui#3896), so a value in
  * any other pack is unreachable, and the cloud confirm gate only recognises
  * those two languages anyway — see `outbound-agent-messages.test.ts`, which owns
  * that invariant and asserts it in both directions. Excluded here so the two
@@ -196,7 +199,11 @@ describe('all locale packs are at full key parity with en (objectui#2872)', () =
     // If a refactor breaks `keyPaths`, every diff below becomes trivially empty
     // and the suite would pass while asserting nothing.
     expect(EN.size).toBeGreaterThan(2000);
-    expect(OTHER_LOCALES).toHaveLength(9);
+    // The population is the platform locale table, tag for tag and in its
+    // order: a language the table gains with no pack here is a red line, not a
+    // pack this suite quietly never compares (objectstack#30511).
+    expect(Object.keys(builtInLocales)).toEqual([...PLATFORM_LOCALE_TAGS]);
+    expect(OTHER_LOCALES).toHaveLength(PLATFORM_LOCALE_TAGS.length - 1);
   });
 
   it.each(OTHER_LOCALES)('%s defines every en key', (lang) => {
@@ -263,12 +270,12 @@ describe('every plural family carries a base key (objectui#3863)', () => {
   it('the walk finds the families it is meant to judge — not an empty assertion', () => {
     // Without this, deleting every plural family (or breaking `familiesOf`) would
     // make the rule below trivially green. The count is `en`'s and parity carries it
-    // to the other nine; it is a floor, not a pin, so a new family does not have to
+    // to every other pack; it is a floor, not a pin, so a new family does not have to
     // edit this line — only a family DISAPPEARING has to be explained.
     expect(familiesOf(builtInLocales.en).size).toBeGreaterThanOrEqual(5);
-    expect(ALL_LOCALES).toHaveLength(10);
+    expect(ALL_LOCALES).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     // The suffix list is i18next's, which takes it from `Intl.PluralRules`. Compared
-    // as sets against the union of all ten packs' languages so a CLDR category this
+    // as sets against the union of every pack's language so a CLDR category this
     // repo can actually meet cannot be missing from the list above.
     const categories = new Set(
       ALL_LOCALES.flatMap((l) => new Intl.PluralRules(l).resolvedOptions().pluralCategories),
@@ -294,9 +301,9 @@ describe('every plural family carries a base key (objectui#3863)', () => {
     );
   });
 
-  it('the rule bites — five of the ten packs select categories beyond one/other', () => {
+  it('the rule bites — five of the packs select categories beyond one/other', () => {
     // Why the per-language slots are not cosmetic, stated as data rather than prose.
-    // `en`/`de` and `zh`/`ja`/`ko` are fully served by `_one`/`_other`; these five
+    // `en`/`de` and `zh-Hans`/`zh-Hant`/`ja`/`ko` are fully served by `_one`/`_other`; these five
     // are the packs that need the extra slots the section below requires, and that
     // the base key alone served — in-language but in one form — before objectui#11432.
     const reachable = ALL_LOCALES.filter((l) =>
@@ -304,10 +311,10 @@ describe('every plural family carries a base key (objectui#3863)', () => {
         .resolvedOptions()
         .pluralCategories.some((c) => c !== 'one' && c !== 'other'),
     );
-    expect(reachable.sort()).toEqual(['ar', 'es', 'fr', 'pt', 'ru']);
+    expect(reachable.sort()).toEqual(['ar', 'es', 'fr', 'pt-BR', 'ru']);
     // …and `ru`/`ar` meet them at everyday counts, which is what made the
     // one-form base a user-visible defect rather than a theoretical one:
-    // `fr`/`es`/`pt` only use `many` at exact millions.
+    // `fr`/`es`/`pt-BR` only use `many` at exact millions.
     expect(new Intl.PluralRules('ru').select(3)).toBe('few');
     expect(new Intl.PluralRules('ru').select(7)).toBe('many');
     expect(new Intl.PluralRules('ar').select(2)).toBe('two');
@@ -326,7 +333,7 @@ describe('every plural family carries every CLDR category its language selects (
     // Floors, not pins: a new family raises them for free; only a family or a pack
     // DISAPPEARING has to be explained.
     expect(EN_FAMILIES.size).toBeGreaterThanOrEqual(5);
-    expect(ALL_LOCALES).toHaveLength(10);
+    expect(ALL_LOCALES).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     const judged = ALL_LOCALES.reduce(
       (n, l) => n + familiesFor(l).size * requiredSuffixes(l).length,
       0,
@@ -336,7 +343,8 @@ describe('every plural family carries every CLDR category its language selects (
     // than `en`, `zh` fewer. A `requiredSuffixes` that returned a constant would make
     // this file a hand-kept list in disguise.
     expect(requiredSuffixes('en')).toEqual(['_one', '_other']);
-    expect(requiredSuffixes('zh')).toEqual(['_other']);
+    expect(requiredSuffixes('zh-Hans')).toEqual(['_other']);
+    expect(requiredSuffixes('zh-Hant')).toEqual(['_other']);
     expect(requiredSuffixes('ru').sort()).toEqual(['_few', '_many', '_one', '_other']);
     expect(requiredSuffixes('ar')).toHaveLength(6);
     // i18next ordinal families (`_ordinal_one`, …) follow `{ type: 'ordinal' }` rules,

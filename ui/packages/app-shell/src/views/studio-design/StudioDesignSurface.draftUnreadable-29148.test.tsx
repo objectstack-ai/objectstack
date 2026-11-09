@@ -15,6 +15,10 @@
  * is not shown to edit, the strip says why with the server's sentence behind
  * Details, and no save is sent, so the draft keeps its keys and its gate.
  *
+ * objectstack#30859 — at the APP and its LEAF, a pending draft served
+ * translated (zh-CN) is edited and saved as stored, with the author's labels;
+ * one whose stored copy the layers do not serve installs no buffer.
+ *
  * The client is a server double: `layered` serves the published row,
  * `getDraft` serves the stored draft row raw, resolves `null` for none (the
  * client's reading of a 404), or refuses it as the read gate does (an `Error`
@@ -49,6 +53,13 @@ const server = vi.hoisted(() => ({
   drafts: new Map<string, Record<string, unknown>>(),
   /** Draft rows whose read is refused as the audience gate refuses it. */
   gated: new Set<string>(),
+  /**
+   * objectstack#30859 — what the `?state=draft` read serves in place of the
+   * stored draft (its translation for the console's locale), and the drafts
+   * whose stored copy the layered read serves as its `draft` layer.
+   */
+  servedAs: new Map<string, Record<string, unknown>>(),
+  draftLayer: new Set<string>(),
   saves: [] as Array<{ type: string; name: string; body: Record<string, unknown>; opts: Record<string, unknown> | undefined }>,
 }));
 
@@ -67,7 +78,18 @@ const mockClient = vi.hoisted(() => {
     references: vi.fn(async () => []),
     layered: vi.fn(async (type: string, name: string) => {
       const eff = server.active.get(k(type, name)) ?? null;
-      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, editable: true, deletable: true, resettable: false, lock: 'none' };
+      const stored = server.draftLayer.has(k(type, name)) ? server.drafts.get(k(type, name)) : undefined;
+      return {
+        code: null,
+        overlay: eff,
+        overlayScope: eff ? 'env' : null,
+        effective: eff,
+        ...(stored ? { draft: { ...stored } } : {}),
+        editable: true,
+        deletable: true,
+        resettable: false,
+        lock: 'none',
+      };
     }),
     getDraft: vi.fn(async (type: string, name: string) => {
       if (server.gated.has(k(type, name))) {
@@ -77,7 +99,7 @@ const mockClient = vi.hoisted(() => {
           body: { success: false, error: { code: 'PERMISSION_DENIED', message: GATE_REFUSAL } },
         });
       }
-      const row = server.drafts.get(k(type, name));
+      const row = server.servedAs.get(k(type, name)) ?? server.drafts.get(k(type, name));
       return row ? { type, name, version: 'v1', item: { ...row } } : null;
     }),
     save: vi.fn(async (type: string, name: string, item: unknown, opts?: Record<string, unknown>) => {
@@ -129,9 +151,18 @@ vi.stubGlobal(
   vi.fn(async () => new Response('null', { status: 404, headers: { 'content-type': 'application/json' } })),
 );
 
-/** Canvas stand-in: prints the draft the pillar handed it. */
-function StubCanvas({ draft }: { draft: Record<string, unknown> }) {
-  return <pre data-testid="surface-draft">{JSON.stringify(draft)}</pre>;
+/** Canvas stand-in: prints the draft the pillar handed it, and patches it on a click. */
+function StubCanvas({ draft, onPatch }: { draft: Record<string, unknown>; onPatch?: (patch: Record<string, unknown>) => void }) {
+  return (
+    <>
+      <pre data-testid="surface-draft">{JSON.stringify(draft)}</pre>
+      {onPatch && (
+        <button type="button" data-testid="surface-patch" onClick={() => onPatch({ description: 'Edited here' })}>
+          patch
+        </button>
+      )}
+    </>
+  );
 }
 
 const realPreviews = { page: getMetadataPreview('page'), flow: getMetadataPreview('flow') };
@@ -165,6 +196,8 @@ beforeEach(() => {
   server.active.clear();
   server.drafts.clear();
   server.gated.clear();
+  server.servedAs.clear();
+  server.draftLayer.clear();
   server.saves.length = 0;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   registerMetadataPreview('page', StubCanvas as never);
@@ -294,5 +327,101 @@ describe('StudioDesignSurface — a draft the server refuses to read is not "no 
       timeout: 8000,
     });
     expect(screen.queryByText(t('engine.studio.refusal.draftUnreadable', 'en-US'))).toBeNull();
+  });
+});
+
+describe('StudioDesignSurface — a pending draft is edited as stored, not as served (objectstack#30859)', () => {
+  const NAV2 = [...NAV, { id: 'nav_reports', type: 'page', label: 'Reports', pageName: 'reports' }];
+  const APP_DRAFT = { ...PUBLISHED_APP, navigation: NAV2 };
+  /** The app draft as a zh-CN console's `?state=draft` read serves it. */
+  const APP_SERVED = {
+    ...PUBLISHED_APP,
+    label: '极致',
+    navigation: [
+      { ...NAV2[0], label: '主页' },
+      { ...NAV2[1], label: '报表' },
+    ],
+  };
+  const PAGE_DRAFT = { ...PUBLISHED_PAGE, blocks: [{ id: 'b1', type: 'heading', title: 'Welcome' }] };
+  const PAGE_SERVED = { ...PUBLISHED_PAGE, label: '主页', blocks: [{ id: 'b1', type: 'heading', title: '欢迎' }] };
+  const CJK = /主页|报表|极致|欢迎/;
+
+  function seedApp(stored: boolean) {
+    server.active.set(key('app', 'acme_app'), wire(PUBLISHED_APP));
+    server.drafts.set(key('app', 'acme_app'), wire(APP_DRAFT));
+    server.servedAs.set(key('app', 'acme_app'), wire(APP_SERVED));
+    if (stored) server.draftLayer.add(key('app', 'acme_app'));
+    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
+  }
+
+  it('Interfaces pillar, APP, zh-CN: the nav shows and saves the author’s labels, never the served translation', async () => {
+    seedApp(true);
+    renderInterfaces();
+
+    await screen.findByRole('button', { name: 'Home Page' }, { timeout: 8000 });
+    expect(screen.getByRole('button', { name: 'Reports Page' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /主页|报表/ })).toBeNull();
+    expect(mockClient.layered).toHaveBeenCalledWith('app', 'acme_app', { packageId: PKG });
+
+    await userEvent.click(screen.getByTitle(t('engine.studio.if.editNavTitle', 'en-US')));
+    const removes = await screen.findAllByRole('button', { name: 'Remove nav item' }, { timeout: 8000 });
+    await userEvent.click(removes[removes.length - 1]);
+    await pastTheAutosave();
+
+    const appSaves = server.saves.filter((x) => x.type === 'app');
+    expect(appSaves).toHaveLength(1);
+    expect(appSaves[0].body.label).toBe('Acme');
+    expect((appSaves[0].body.navigation as Array<{ label: string }>).map((n) => n.label)).toEqual(['Home']);
+    expect(JSON.stringify(appSaves[0].body)).not.toMatch(CJK);
+  });
+
+  it('Interfaces pillar, APP: a pending draft the layers do not serve installs no nav buffer, says why, and saves nothing', async () => {
+    seedApp(false);
+    renderInterfaces();
+
+    expect(
+      await screen.findByText(t('engine.studio.refusal.draftUnreadable', 'en-US'), undefined, { timeout: 8000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /主页|报表/ })).toBeNull();
+    expect(screen.queryByTestId('surface-draft')).toBeNull();
+    expect(screen.queryByTitle(t('engine.studio.if.editNavTitle', 'en-US'))).toBeNull();
+    await pastTheAutosave();
+    expect(server.saves).toEqual([]);
+  });
+
+  it('Interfaces pillar, LEAF, zh-CN: the canvas gets and saves the stored page draft, never the served translation', async () => {
+    server.active.set(key('app', 'acme_app'), wire(PUBLISHED_APP));
+    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
+    server.drafts.set(key('page', 'home'), wire(PAGE_DRAFT));
+    server.servedAs.set(key('page', 'home'), wire(PAGE_SERVED));
+    server.draftLayer.add(key('page', 'home'));
+    renderInterfaces();
+
+    await waitFor(
+      () => expect(JSON.parse(screen.getByTestId('surface-draft').textContent ?? '{}')).toStrictEqual(wire(PAGE_DRAFT)),
+      { timeout: 8000 },
+    );
+    await userEvent.click(screen.getByTestId('surface-patch'));
+    await pastTheAutosave();
+
+    const pageSaves = server.saves.filter((x) => x.type === 'page');
+    expect(pageSaves).toHaveLength(1);
+    expect(pageSaves[0].body).toMatchObject({ label: 'Home', description: 'Edited here', blocks: PAGE_DRAFT.blocks });
+    expect(JSON.stringify(pageSaves[0].body)).not.toMatch(CJK);
+  });
+
+  it('Interfaces pillar, LEAF: a pending page draft the layers do not serve installs no buffer, says why, and saves nothing', async () => {
+    server.active.set(key('app', 'acme_app'), wire(PUBLISHED_APP));
+    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
+    server.drafts.set(key('page', 'home'), wire(PAGE_DRAFT));
+    server.servedAs.set(key('page', 'home'), wire(PAGE_SERVED));
+    renderInterfaces();
+
+    expect(
+      await screen.findByText(t('engine.studio.refusal.draftUnreadable', 'en-US'), undefined, { timeout: 8000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/欢迎/)).toBeNull();
+    await pastTheAutosave();
+    expect(server.saves).toEqual([]);
   });
 });

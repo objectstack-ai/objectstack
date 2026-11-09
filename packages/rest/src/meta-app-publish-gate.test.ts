@@ -364,14 +364,19 @@ describe('#7566 — `GET /meta/app?id=` narrows the list instead of being droppe
         }
     });
 
-    it('a bracketed `id` key on another list type is not read, as no other `id` spelling is (control)', async () => {
+    // [#29236] The list declares its closed query set: a bracketed `id` on a
+    // type that reads no `id` is a name the list does not read, refused by
+    // recognition (not with the app list's `id` sentence), never the whole list.
+    it('a bracketed `id` key on another list type is refused as a name the list does not read', async () => {
         const { rest, protocol } = setup(['manage_users']);
         protocol.getMetaItems = vi.fn(async ({ type: t }: any) =>
             String(t ?? '').startsWith('view') ? [{ name: 'all_leads', viewKind: 'list', object: 'lead' }] : []);
         const res = await getList(rest, 'view', { 'id[]': 'nope' });
 
-        expect(res.statusCode).toBe(200);
-        expect(namesFrom(res.body)).toEqual(['all_leads']);
+        expect(res.statusCode).toBe(400);
+        expect(res.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(res.body?.error?.message).toMatch(/^The "id\[\]" query parameter is not supported by this endpoint\./);
+        expect(protocol.getMetaItems).not.toHaveBeenCalled();
     });
 
     // The same class one step down the chain: `?object[]=lead` or
@@ -413,11 +418,13 @@ describe('#7566 — `GET /meta/app?id=` narrows the list instead of being droppe
         expect(namesFrom((await getList(rest, 'view')).body).sort()).toEqual(['acct_view', 'all_leads']);
     });
 
-    it('a bracketed `object` key on another list type is not read, as no other `object` spelling is (control)', async () => {
+    // [#29236] …and so is a bracketed `object` on a type that reads no `object`.
+    it('a bracketed `object` key on another list type is refused as a name the list does not read', async () => {
         const res = await getList(setup(['manage_users']).rest, 'app', { 'object[]': 'lead' });
 
-        expect(res.statusCode).toBe(200);
-        expect(namesFrom(res.body).sort()).toEqual(['account', 'crm']);
+        expect(res.statusCode).toBe(400);
+        expect(res.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(res.body?.error?.message).toMatch(/^The "object\[\]" query parameter is not supported by this endpoint\./);
     });
 
     it('a WHITESPACE id keeps its answer — a value no app is named, so an empty list (#28548 control)', async () => {
@@ -565,7 +572,11 @@ describe('#8013 — by-name: a permission denial is REPORTED, absence still is n
         // accessor for both answers, not a second dialect to special-case.
         expect(denied.body?.success).toBe(false);
         expect(typeof refusal(denied.body).message).toBe('string');
-        expect(refusal(denied.body).message).toContain('finance');
+        // [#30126 row 12] The operation catalog's `permission_denied`, in the
+        // caller's locale (English here: the session names none). It names
+        // no app: the API name is not a person's word, and the caller named it.
+        expect(refusal(denied.body).message).toBe(
+            'You do not have permission to perform this action. Contact your administrator if you need access.');
 
         // Refused means refused: the document did not ride along with the
         // refusal, and neither did the objects it would have exposed.

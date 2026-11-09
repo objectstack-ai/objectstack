@@ -221,7 +221,7 @@ describe('objectui#13404 — the sankey footnote is translated', () => {
   it('zh reads the zh pack, with the counts filled in and the key drawn as a chip', () => {
     const { container } = withLocale('zh', THINNED);
     const note = noteOf(container)!;
-    const expected = builtInLocales.zh.chart.sankeyOmittedRows_other
+    const expected = builtInLocales['zh-Hans'].chart.sankeyOmittedRows_other
       .replace('{{shown}}', '1')
       .replace('{{total}}', '3')
       .replace('{{count}}', '2')

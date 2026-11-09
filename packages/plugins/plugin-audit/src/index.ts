@@ -4,7 +4,8 @@
  * @objectstack/plugin-audit
  *
  * Audit Plugin for ObjectStack
- * Provides the sys_audit_log system object definition for immutable audit trails.
+ * Provides the sys_audit_log system object definition: an audit trail the platform
+ * writes, read-only through the data API and in Setup.
  */
 
 export { AuditPlugin } from './audit-plugin.js';
@@ -24,6 +25,54 @@ export type {
   ActionInvocationBranch,
   ActionInvocationOutcome,
 } from './action-invocation-audit.js';
+// [#30955] The run-level `export` row writer the REST export door reaches
+// through the `audit` slot.
+export {
+  buildDataExportAuditRow,
+  createDataExportAuditWriter,
+  DATA_EXPORT_AUDIT_ACTION,
+  EXPORT_FILTER_SUMMARY_MAX_TERMS,
+  summarizeExportFilter,
+} from './data-export-audit.js';
+export type {
+  DataExportAuditEvent,
+  DataExportAuditWriter,
+  DataExportAuditWriterOptions,
+  DataExportOutcome,
+  ExportFilterSummary,
+  ExportFilterTerm,
+} from './data-export-audit.js';
+// [#31186] The `package_uninstall` row writer the uninstall verb reaches
+// through the `audit` slot; [#30964] the same writer records an unmanaged
+// install's copy as `package_unmanaged_import`.
+export {
+  buildPackageLifecycleAuditRow,
+  createPackageLifecycleAuditWriter,
+  PACKAGE_UNINSTALL_AUDIT_ACTION,
+  PACKAGE_UNMANAGED_IMPORT_AUDIT_ACTION,
+} from './package-lifecycle-audit.js';
+// [#31829] The `scim_refused` row writer plugin-auth's SCIM door reaches
+// through the `audit` slot.
+export {
+  buildScimRefusalAuditRow,
+  createScimRefusalAuditWriter,
+  SCIM_REFUSED_AUDIT_ACTION,
+  UNKNOWN_SCIM_CONNECTION,
+} from './scim-refusal-audit.js';
+export type {
+  ScimPresentedCredential,
+  ScimRefusalAuditEvent,
+  ScimRefusalAuditWriter,
+  ScimRefusalAuditWriterOptions,
+} from './scim-refusal-audit.js';
+export type {
+  PackageLifecycleAuditAction,
+  PackageLifecycleAuditEvent,
+  PackageUninstallAuditEvent,
+  PackageUnmanagedImportAuditEvent,
+  PackageLifecycleAuditWriter,
+  PackageLifecycleAuditWriterOptions,
+} from './package-lifecycle-audit.js';
 export {
   createReadAuditBatcher,
   extractDetailReadId,

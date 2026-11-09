@@ -26,6 +26,8 @@
  * name, which is the identity the base is looked up by.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { translateView, type TranslationBundle } from '@objectstack/spec/system';

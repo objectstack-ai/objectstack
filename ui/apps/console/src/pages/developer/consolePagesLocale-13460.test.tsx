@@ -66,7 +66,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const { zh, en } = builtInLocales;
+const { 'zh-Hans': zh, en } = builtInLocales;
 const zhDev = zh.console.developer;
 const enDev = en.console.developer;
 const zhSys = zh.console.system;

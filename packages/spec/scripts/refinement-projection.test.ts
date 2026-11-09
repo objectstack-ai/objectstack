@@ -29,6 +29,11 @@
  *     asserted rather than argued), and the predicate is shown STATELESS, which
  *     is what a flagless `RegExp` buys and what a JSON Schema `pattern` — which
  *     has no flags to carry — means.
+ *   - `unique-items` — over a corpus of JSON scalar lists, against a
+ *     `uniqueItems` evaluator that compares the JSON way (type, then value)
+ *     rather than through a `Set`, including `0` beside `-0` and `"1"` beside
+ *     `1`, the two places SameValueZero and JSON equality could have come
+ *     apart on scalars.
  *
  * ## Why an equality pin and not a comment
  *
@@ -59,7 +64,22 @@ import {
   dependentRequired,
   projectableRefinementOf,
   requiredOneOf,
+  UNIQUE_SCALAR_ITEMS,
+  type JsonScalar,
 } from '../src/shared/refinement-projection';
+import {
+  MAX_BUSINESS_FUNCTIONS,
+  MAX_INDUSTRIES,
+  MarketplaceBusinessFunctionsSchema,
+  MarketplaceIndustriesSchema,
+} from '../src/marketplace/taxonomy.zod';
+import {
+  CreatePackageRequestSchema,
+  PackageSchema,
+  UpdatePackageRequestSchema,
+} from '../src/marketplace/package.zod';
+import { MarketplaceListingSchema, MarketplaceSearchResponseSchema } from '../src/marketplace/marketplace.zod';
+import { TemplateManifestSchema } from '../src/marketplace/template-manifest.zod';
 import { SSLConfigSchema } from '../src/data/driver-sql.zod';
 import { NormalizedFilterSchema } from '../src/data/filter.zod';
 import { TraceSamplingConfigSchema } from '../src/system/tracing.zod';
@@ -175,6 +195,7 @@ describe('the list of projectable patterns is CLOSED', () => {
       'dependent-required',
       'banned-keys',
       'banned-key-pattern',
+      'unique-items',
     ]);
   });
 
@@ -1085,5 +1106,184 @@ describe('generator and detector project through ONE call, not two conventions',
     const census = collectDroppedRefinements('test/Coupled', schema);
     expect(census.dropped).toEqual([]);
     expect(census.projected.map((s) => s.declaredPatterns)).toEqual([['dependent-required']]);
+  });
+});
+
+/**
+ * The node's `uniqueItems` rule, evaluated the way a validator would — JSON
+ * equality (same type, then same value), ⛔ deliberately NOT a `Set`, so the
+ * pin compares two spellings of the rule rather than one spelling with itself
+ * — and refusing to report anything when the node does not carry
+ * `uniqueItems: true`, so a projection that stopped emitting fails rather than
+ * passing vacuously.
+ */
+const uniqueItemsSatisfied = (node: Record<string, unknown>, doc: readonly unknown[]): boolean => {
+  if (node.uniqueItems !== true) {
+    throw new Error('the node carries no uniqueItems: true — nothing to evaluate');
+  }
+  const jsonTypeOf = (value: unknown): string => (value === null ? 'null' : typeof value);
+  // JSON Schema compares numbers by mathematical value, so `0` and `-0` are
+  // one number; `==` on two same-typed scalars says exactly that.
+  const jsonEqual = (a: unknown, b: unknown): boolean => jsonTypeOf(a) === jsonTypeOf(b) && a == b;
+  return doc.every((item, i) => doc.slice(i + 1).every((other) => !jsonEqual(item, other)));
+};
+
+describe('unique-items: a Set and `uniqueItems` are ONE relation on JSON scalars', () => {
+  it('declares itself, and has nothing per call site to declare', () => {
+    expect(projectableRefinementOf(UNIQUE_SCALAR_ITEMS)).toEqual({ pattern: 'unique-items' });
+  });
+
+  it('emits JSON Schema`s own `uniqueItems: true`, beside the node`s own keywords', () => {
+    const node = publish(z.array(z.string()).min(1).max(3).refine(UNIQUE_SCALAR_ITEMS, 'once'));
+    expect(node).toEqual({ ...publish(z.array(z.string()).min(1).max(3)), uniqueItems: true });
+    // ⛔ Not nested: `uniqueItems` is no keyword the reference renderer reads
+    // as the node's type, so there is no `allOf` to hide it in.
+    expect(node.allOf).toBeUndefined();
+  });
+
+  it('is idempotent — the same arm twice states one rule', () => {
+    const node: Record<string, unknown> = { type: 'array', items: { type: 'string' } };
+    emitProjectableRefinement(node, { pattern: 'unique-items' });
+    emitProjectableRefinement(node, { pattern: 'unique-items' });
+    expect(node).toEqual({ type: 'array', items: { type: 'string' }, uniqueItems: true });
+  });
+
+  it('the predicate and the keyword agree on every scalar list in the corpus', () => {
+    const node = publish(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])).refine(UNIQUE_SCALAR_ITEMS));
+    const corpus: JsonScalar[][] = [
+      [],
+      ['sales'],
+      ['sales', 'marketing'],
+      ['sales', 'sales'],
+      ['sales', 'marketing', 'sales'],
+      ['Sales', 'sales'],
+      ['1', 1],
+      [1, 1],
+      [0, -0],
+      [1, 1.0],
+      [true, 1],
+      [true, true],
+      [false, 0, '', null],
+      [null, null],
+    ];
+    for (const list of corpus) {
+      // Through a JSON round trip on purpose: the domain is the document an
+      // author writes, and `JSON.parse` is what turns `1.0` into `1`.
+      const asJson = JSON.parse(JSON.stringify(list)) as JsonScalar[];
+      // Equality, not implication: the arm is exact, so a one-sided pin would
+      // pass a projection that had stopped narrowing at all.
+      expect(uniqueItemsSatisfied(node, asJson), `disagreement on ${JSON.stringify(asJson)}`)
+        .toBe(UNIQUE_SCALAR_ITEMS(asJson));
+    }
+    // `-0` survives `JSON.parse`, so the one SameValueZero-vs-`===` pair is
+    // asserted on the value itself rather than on its serialisation.
+    const negativeZero = JSON.parse('[0,-0]') as number[];
+    expect(Object.is(negativeZero[1], -0)).toBe(true);
+    expect(UNIQUE_SCALAR_ITEMS(negativeZero)).toBe(false);
+    expect(uniqueItemsSatisfied(node, negativeZero)).toBe(false);
+  });
+
+  it('⛔ an array of OBJECTS cannot compose it — the compile-time half of the exactness argument', () => {
+    // Two equal objects parsed from one document are two members to a `Set`
+    // and one value to `uniqueItems`; the scalar parameter type keeps that
+    // disagreement out of the published file.
+    // @ts-expect-error — `{ a: string }` is not a JSON scalar
+    z.array(z.object({ a: z.string() })).refine(UNIQUE_SCALAR_ITEMS);
+    const twins = JSON.parse('[{"a":"x"},{"a":"x"}]') as unknown[];
+    expect(new Set(twins).size).toBe(2);
+  });
+});
+
+describe('the LIVE seam: the marketplace taxonomy facets publish their no-duplicates rule', () => {
+  /** Every published schema the ledger named for the facets, with its own sites. */
+  const SEAMS: ReadonlyArray<readonly [string, z.ZodType, readonly string[]]> = [
+    ['marketplace/MarketplaceBusinessFunctions', MarketplaceBusinessFunctionsSchema, ['']],
+    ['marketplace/MarketplaceIndustries', MarketplaceIndustriesSchema, ['']],
+    ['marketplace/Package', PackageSchema, ['businessFunctions', 'industries']],
+    ['marketplace/CreatePackageRequest', CreatePackageRequestSchema, ['businessFunctions', 'industries']],
+    ['marketplace/UpdatePackageRequest', UpdatePackageRequestSchema, ['businessFunctions', 'industries']],
+    ['marketplace/MarketplaceListing', MarketplaceListingSchema, ['businessFunctions', 'industries']],
+    ['marketplace/TemplateManifest', TemplateManifestSchema, ['businessFunctions', 'industries']],
+    [
+      'marketplace/MarketplaceSearchResponse',
+      MarketplaceSearchResponseSchema,
+      ['items.element.businessFunctions', 'items.element.industries'],
+    ],
+  ];
+
+  it('both facet schemas state the rule, and keep the array shape they always stated', () => {
+    const facets: Array<readonly [z.ZodType, number]> = [
+      [MarketplaceBusinessFunctionsSchema, MAX_BUSINESS_FUNCTIONS],
+      [MarketplaceIndustriesSchema, MAX_INDUSTRIES],
+    ];
+    for (const [schema, max] of facets) {
+      const node = publish(schema);
+      expect(node.type).toBe('array');
+      expect((node.items as Record<string, unknown>).enum).toBeInstanceOf(Array);
+      expect(node.maxItems).toBe(max);
+      expect(node.uniqueItems).toBe(true);
+    }
+    expect(publish(MarketplaceBusinessFunctionsSchema).minItems).toBe(1);
+  });
+
+  it('a schema that EMBEDS a facet states the rule at the facet`s own property', () => {
+    const props = publish(PackageSchema).properties as Record<string, Record<string, unknown>>;
+    expect(props.businessFunctions.uniqueItems).toBe(true);
+    expect(props.industries.uniqueItems).toBe(true);
+  });
+
+  it('⛔ the Zod parse is unchanged — it still refuses a duplicate and accepts the same lists', () => {
+    // The helper's predicate became a DECLARED one; the rule it enforces must
+    // not have moved. Same corpus, same verdicts, and the refusal still names
+    // the key with the helper's own message.
+    const verdicts: Array<readonly [unknown, boolean]> = [
+      [['sales'], true],
+      [['sales', 'marketing'], true],
+      [['sales', 'marketing', 'it'], true],
+      [['sales', 'sales'], false],
+      [['sales', 'marketing', 'sales'], false],
+      [[], false],
+      [['sales', 'marketing', 'it', 'hr'], false],
+      [['not-a-function'], false],
+    ];
+    for (const [list, accepted] of verdicts) {
+      expect(MarketplaceBusinessFunctionsSchema.safeParse(list).success, JSON.stringify(list)).toBe(accepted);
+    }
+    expect(MarketplaceIndustriesSchema.safeParse([]).success).toBe(true);
+    expect(MarketplaceIndustriesSchema.safeParse(['retail', 'retail']).success).toBe(false);
+    const refused = MarketplaceBusinessFunctionsSchema.safeParse(['sales', 'sales']);
+    expect(refused.success).toBe(false);
+    expect(refused.error?.issues.map((issue) => [issue.code, issue.message])).toEqual([
+      ['custom', '`businessFunctions` lists a value more than once; list each value once.'],
+    ]);
+  });
+
+  it('⛔ the runtime and the emitted keywords agree on every facet list in the corpus', () => {
+    const node = publish(MarketplaceIndustriesSchema);
+    const corpus: string[][] = [
+      [],
+      ['retail'],
+      ['retail', 'logistics'],
+      ['retail', 'retail'],
+      ['retail', 'logistics', 'retail'],
+      ['manufacturing', 'retail', 'logistics'],
+    ];
+    for (const list of corpus) {
+      // Uniqueness only, deliberately: every list here is valid in every other
+      // respect, so the runtime's verdict is the duplicates rule's verdict.
+      expect(uniqueItemsSatisfied(node, list), `disagreement on ${JSON.stringify(list)}`)
+        .toBe(MarketplaceIndustriesSchema.safeParse(list).success);
+    }
+  });
+
+  it('their eight ledger rows are gone because every site now reads `projected`, naming the arm', () => {
+    for (const [defKey, schema, paths] of SEAMS) {
+      const census = collectDroppedRefinements(defKey, schema);
+      expect(census.dropped, defKey).toEqual([]);
+      for (const path of paths) {
+        const site = census.projected.find((s) => s.path === path);
+        expect(site?.declaredPatterns, `${defKey} @ ${JSON.stringify(path)}`).toEqual(['unique-items']);
+      }
+    }
   });
 });

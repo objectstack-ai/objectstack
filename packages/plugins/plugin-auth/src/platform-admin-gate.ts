@@ -68,6 +68,13 @@ type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>
 export interface PlatformAdminActor {
   id: string;
   email?: string;
+  /**
+   * The administrator impersonating {@link id} when the gated session is an
+   * impersonation session — attribution only, set by the route's gate from
+   * that session (never by {@link judgePlatformAdmin}, whose verdict it does
+   * not enter), and carried onto the route's identity writes.
+   */
+  impersonatedBy?: string;
 }
 
 /** ADR-0112 refusal envelope — the ObjectStack shape, not better-auth's. */

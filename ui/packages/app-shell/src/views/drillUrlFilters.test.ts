@@ -12,6 +12,8 @@ import {
   parseUrlFilterTriples,
   parseUrlEqualityFilterTriples,
   URL_FILTER_OPS,
+  URL_COMPARE_OPS,
+  URL_LIST_OPS,
   serializeDrillFilterParams,
   deleteFieldFilterParams,
   groupFilterChips,
@@ -595,6 +597,135 @@ describe('the is-empty operator pair: `filter[<field>][empty]=true|false` (objec
     // `ObjectDataPage` inverts this map to bridge a triple to the spec's alias
     // spelling; an `empty` entry would hand "Save as view" an alias the rule
     // schema refuses.
+    expect({ ...URL_FILTER_OPS }).toEqual({ gte: '>=', lte: '<=', gt: '>', lt: '<' });
+  });
+});
+
+/**
+ * objectstack#30743 — a boolean comparand, `$ne`, the text operators and the
+ * two membership operators get a spelling. Each is pinned against the node
+ * `convertFiltersToAST` lowers the same condition to (what the drill drawer
+ * queries), so the list and the drawer ask one question.
+ */
+describe('the boolean, negation, text and membership spellings (objectstack#30743)', () => {
+  const written = (filter: Record<string, unknown>) =>
+    decodeURIComponent(serializeDrillFilterParams(filter).toString());
+  const roundTrip = (filter: Record<string, unknown>) =>
+    parseUrlFilterTriples(serializeDrillFilterParams(filter));
+
+  it('writes a boolean into the `[bool]` slot, not as equality text', () => {
+    expect(written({ is_active: true })).toBe('filter[is_active][bool]=true');
+    expect(written({ is_active: false })).toBe('filter[is_active][bool]=false');
+  });
+
+  it('reads the `[bool]` slot back as the BOOLEAN the drawer compares with', () => {
+    expect(roundTrip({ is_active: true })).toEqual([convertFiltersToAST({ is_active: true })]);
+    expect(roundTrip({ is_active: false })).toEqual([convertFiltersToAST({ is_active: false })]);
+    expect(parse('filter[is_active][bool]=true')).toEqual([['is_active', '=', true]]);
+  });
+
+  it('reads only the two boolean spellings in that slot; anything else is dropped, never text', () => {
+    for (const v of ['TRUE', '1', 'yes', 'True', 'false ']) {
+      expect(parse(`filter[is_active][bool]=${encodeURIComponent(v)}`)).toEqual([]);
+    }
+  });
+
+  it('CONTROL: `filter[field]=true` still means the string "true"', () => {
+    expect(parse('filter[name]=true')).toEqual([['name', '=', 'true']]);
+  });
+
+  it.each([
+    [{ status: { $ne: 'void' } }, 'filter[status][ne]=void'],
+    [{ name: { $contains: 'acme' } }, 'filter[name][contains]=acme'],
+    [{ name: { $notContains: 'acme' } }, 'filter[name][notcontains]=acme'],
+    [{ code: { $startsWith: 'INV' } }, 'filter[code][startswith]=INV'],
+    [{ code: { $endsWith: '-X' } }, 'filter[code][endswith]=-X'],
+    [{ email: { $icontains: 'ACME' } }, 'filter[email][icontains]=ACME'],
+  ])('writes %j as `%s` and reads it back as the drawer\'s node', (filter, url) => {
+    expect(written(filter)).toBe(url);
+    expect(roundTrip(filter)).toEqual([convertFiltersToAST(filter)]);
+  });
+
+  it('writes a set as one repeated param per member, read back as ONE triple in URL order', () => {
+    const filter = { status: { $in: ['paid', 'sent,partly'] } };
+    expect(written(filter)).toBe('filter[status][in]=paid&filter[status][in]=sent,partly');
+    expect(roundTrip(filter)).toEqual([convertFiltersToAST(filter)]);
+    const not = { stage: { $nin: ['lost', 'void'] } };
+    expect(roundTrip(not)).toEqual([convertFiltersToAST(not)]);
+  });
+
+  it('keeps a set where its first member sat among the other conditions', () => {
+    expect(parse('filter[status][in]=a&filter[region]=west&filter[status][in]=b')).toEqual([
+      ['status', 'in', ['a', 'b']],
+      ['region', '=', 'west'],
+    ]);
+  });
+
+  it('keeps `in` and `nin` on one field as two triples, and two fields as two sets', () => {
+    expect(parse('filter[s][in]=a&filter[s][nin]=b&filter[t][in]=c&filter[s][in]=d')).toEqual([
+      ['s', 'in', ['a', 'd']],
+      ['s', 'nin', ['b']],
+      ['t', 'in', ['c']],
+    ]);
+  });
+
+  it('writes the whole set or nothing: an empty set, an empty member or a boolean member writes no param', () => {
+    expect(written({ status: { $in: [] } })).toBe('');
+    expect(written({ status: { $in: ['a', ''] } })).toBe('');
+    expect(written({ status: { $in: ['a', true] } })).toBe('');
+  });
+
+  it('a later source REPLACES an earlier set on the same field, as every other param does', () => {
+    expect(written({ $and: [{ status: { $in: ['a', 'b'] } }, { status: { $in: ['c'] } }] })).toBe(
+      'filter[status][in]=c',
+    );
+  });
+
+  it('writes nothing for a `$ne` the route would read back as text (a boolean)', () => {
+    expect(written({ is_active: { $ne: true } })).toBe('');
+  });
+
+  it('the new lookups have no prototype either: an inherited member is not a suffix', () => {
+    for (const name of Object.getOwnPropertyNames(Object.prototype)) {
+      expect(parse(`filter[amount][${name}]=1`)).toEqual([]);
+    }
+    expect(Object.getPrototypeOf(URL_COMPARE_OPS)).toBeNull();
+    expect(Object.getPrototypeOf(URL_LIST_OPS)).toBeNull();
+  });
+
+  it('renders the operator label beside the comparand; a set joins its members', () => {
+    expect(
+      groupFilterChips([
+        ['status', 'in', ['paid', 'sent']],
+        ['stage', 'nin', ['lost']],
+        ['owner', '!=', 'u1'],
+        ['name', 'contains', 'acme'],
+        ['is_active', '=', true],
+      ]),
+    ).toEqual([
+      { field: 'status', textKey: 'filterBuilder.operators.in', text: 'paid, sent' },
+      { field: 'stage', textKey: 'filterBuilder.operators.not_in', text: 'lost' },
+      { field: 'owner', textKey: 'filterBuilder.operators.not_equals', text: 'u1' },
+      { field: 'name', textKey: 'filterBuilder.operators.contains', text: 'acme' },
+      { field: 'is_active', text: '= true' },
+    ]);
+  });
+
+  it('removing the chip clears every member of a set with the same prefix delete', () => {
+    const params = new URLSearchParams('filter[status][in]=a&filter[status][in]=b&filter[stage]=won');
+    deleteFieldFilterParams(params, 'status');
+    expect(params.toString()).toBe('filter%5Bstage%5D=won');
+  });
+
+  it('CONTROL: the equality-only route still executes none of the new suffixes', () => {
+    expect(
+      parseUrlEqualityFilterTriples(
+        new URLSearchParams('filter[a][bool]=true&filter[b][in]=x&filter[c][ne]=y&filter[d][contains]=z'),
+      ),
+    ).toEqual([]);
+  });
+
+  it('CONTROL: the range vocabulary did not grow', () => {
     expect({ ...URL_FILTER_OPS }).toEqual({ gte: '>=', lte: '<=', gt: '>', lt: '<' });
   });
 });

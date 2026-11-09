@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 
 import { CurrencyConfigSchema } from './field.zod';
 import { ObjectSchema } from './object.zod';
+import { ObjectStackDefinitionSchema } from '../stack.zod';
 
 const HOME = { field: 'amount_home', rateDate: 'invoice_date', rateField: 'amount_rate' } as const;
 const RECORD = { currencyMode: 'record', currencyField: 'currency_code', homeAmount: HOME } as const;
@@ -254,5 +255,59 @@ describe('the object judges what `homeAmount` names', () => {
     expect(issues.map((i) => i.path)).toEqual([AT]);
     expect(issues[0]!.code).toBe('custom');
     expect(issues[0]!.message).toMatch(/^`amount\.currencyConfig\.homeAmount` is declared on a `formula` field of object `invoice`, which computes its value on read/);
+  });
+});
+
+// #30103 — ruling 6469382727: an exchange rate carries scale 12. The engine
+// stores the rate row's own value in the rate field whatever `scale` the field
+// declares, so a declared `scale` below 12 only rounds the rate a reader sees.
+// Judged through the stack parse `os validate` and `os compile` run
+// (`ObjectStackDefinitionSchema.safeParse`), so the pins hold the door an
+// author actually meets, not only the object schema.
+describe('`homeAmount.rateField` declares no `scale` below the rate\'s twelve decimals', () => {
+  const stackIssues = (rate: Record<string, unknown>): Array<{ code: string; path: string; message: string }> => {
+    const r = ObjectStackDefinitionSchema.safeParse({ objects: [invoice({ amount_rate: { ...BASE_FIELDS.amount_rate, ...rate } })] });
+    if (r.success) return [];
+    return r.error.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message }));
+  };
+
+  it('refuses `scale: 4`, at the pointer, naming the field and the floor 12, with the prescription', () => {
+    const issues = stackIssues({ scale: 4 });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('custom');
+    expect(issues[0]!.path).toBe(`objects.0.${AT}.rateField`);
+    expect(issues[0]!.message).toMatch(
+      /^`amount\.currencyConfig\.homeAmount\.rateField` names `amount_rate`, a `number` field declaring `scale: 4`, below the 12 decimal places an exchange rate carries\./,
+    );
+    expect(issues[0]!.message).toContain('Declare `scale: 12` (or more) on `amount_rate`, or delete its `scale`');
+    // A runtime string carries no tracker number.
+    expect(issues[0]!.message).not.toMatch(/#\d/);
+  });
+
+  it('refuses every declared `scale` below 12 (0 and 11, the edges)', () => {
+    for (const scale of [0, 11]) {
+      const issues = stackIssues({ scale });
+      expect(issues.map((i) => i.path), String(scale)).toEqual([`objects.0.${AT}.rateField`]);
+      expect(issues[0]!.message).toContain(`declaring \`scale: ${scale}\``);
+    }
+  });
+
+  it.each([12, 14])('accepts `scale: %i` — the full rate shows, padded at most', (scale) => {
+    expect(stackIssues({ scale })).toEqual([]);
+  });
+
+  it('accepts an undeclared `scale`: a `number` field then declares no fixed width and shows every stored digit', () => {
+    expect('scale' in BASE_FIELDS.amount_rate).toBe(false);
+    expect(stackIssues({})).toEqual([]);
+  });
+
+  it('judges the shared column once: two amounts storing one rate into a `scale: 4` field meet one issue', () => {
+    const r = ObjectStackDefinitionSchema.safeParse({ objects: [invoice({
+      amount_rate: { ...BASE_FIELDS.amount_rate, scale: 4 },
+      tax: { type: 'currency', label: 'Tax', currencyConfig: { ...RECORD, homeAmount: { ...HOME, field: 'tax_home' } } },
+      tax_home: { type: 'currency', label: 'Tax (home)', readonly: true },
+    })] });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => i.path.join('.'))).toEqual([`objects.0.${AT}.rateField`]);
   });
 });

@@ -521,7 +521,9 @@ describe('[#5860] the skip list is declared on the registration face', () => {
       // auth noise, and ADR-0057 operational telemetry.
       expect(excluded).toContain('sys_audit_log');
       expect(excluded).toContain('sys_activity');
-      expect(excluded).toContain('sys_comment');
+      // A comment is a person's act, so its writes are mirrored like any other
+      // (ruling 「A 评论也记审计和动态」): it is not on the list.
+      expect(excluded).not.toContain('sys_comment');
       expect(excluded).toContain('sys_job_queue');
       expect(excluded).not.toContain('biz_task');
       // Commit 69787f07b refuses both of these at registration; a spread of the real skip
@@ -609,7 +611,7 @@ describe('[#5860] the skip list is declared on the registration face', () => {
     await engine.insert('biz_task', { title: 'unrelated', status: 'todo' });
     expect(emit).not.toHaveBeenCalled();
 
-    // And sys_comment stays out of the ledger — it has its own feed.
-    expect(auditRowsFor(storeFor, 'sys_comment')).toEqual([]);
+    // And the comment write itself is in the ledger, like any mirrored write.
+    expect(auditRowsFor(storeFor, 'sys_comment').map((r) => r.action)).toEqual(['create']);
   });
 });

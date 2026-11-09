@@ -68,7 +68,7 @@ import { defineSharingRule } from '@objectstack/spec/security';
  */
 export const NewInquiryFieldOpsRule = defineSharingRule({
   type: 'criteria',
-  name: 'share_new_inquiries_with_field_ops',
+  name: 'showcase_share_new_inquiries_with_field_ops',
   label: 'New Inquiries → Field Operations (BU subtree)',
   description:
     'Share incoming (status=new) inquiries with the Field Operations business-unit subtree for triage.',
@@ -102,14 +102,14 @@ export const NewInquiryFieldOpsRule = defineSharingRule({
  */
 export const KeyAccountQualifiedContactRule = defineSharingRule({
   type: 'criteria',
-  name: 'share_key_account_qualified_contacts_with_managers',
+  name: 'showcase_share_key_account_qualified_contacts_with_managers',
   label: 'Key-Account Qualified Contacts → Managers',
   description:
     'Share qualified contacts at the key account with managers (compound condition, ADR-0058 D3).',
   object: 'showcase_contact',
   condition: "record.stage == 'qualified' && record.company == 'Northwind'",
   accessLevel: 'read',
-  sharedWith: { type: 'position', value: 'manager' },
+  sharedWith: { type: 'position', value: 'showcase_manager' },
   active: true,
 });
 

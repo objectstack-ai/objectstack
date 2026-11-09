@@ -15,7 +15,8 @@
  * userFilterConditions)`. The registered `object-gantt` renderer forwards no
  * host prop and runs its OWN query, `$filter: schema.filter`
  * (`ObjectGantt.reload`; the no-host-prop half is pinned in
- * `plugin-gantt/src/ObjectGantt.hostDataProp-7210.test.tsx`). The gantt node
+ * the `ObjectGantt.hostDataProp-7210` block of
+ * `plugin-gantt/src/ObjectGantt.harness.test.tsx`). The gantt node
  * carried only the AUTHORED `schema.filter`, so both controls changed
  * `ListView`'s fetch and nothing drawn on screen.
  *

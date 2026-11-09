@@ -19,7 +19,9 @@
  *      · `sys_audit_log` with `action: 'config_change'` — the platform-wide
  *        compliance ledger, via {@link SettingsAuditSink}. This is what the
  *        shipped `config_changes` list view and any
- *        `$filter={"action":"config_change"}` read.
+ *        `$filter={"action":"config_change"}` read. It carries the value
+ *        before and after the write, readable for a key that is not
+ *        secret-valued (#30923).
  *      · `sys_setting_audit` with `action: 'set' | 'reset'` — the
  *        settings-specific append-only trail, via {@link SettingsAuditWriter},
  *        carrying `namespace`/`key`/`scope`/`old_hash`/`new_hash`/`source`
@@ -91,12 +93,34 @@ export interface SettingsContext {
 export interface SettingsDisplayOptions {
   /**
    * The caller's display language (BCP-47), for prose a
-   * {@link SettingsWritePredicate} refusal or a {@link SettingsLiveStatusProvider}
-   * statement composes. The settings routes pass it from the request
-   * (`Accept-Language`, else `?locale`). Absent, such prose is written in
-   * English.
+   * {@link SettingsWritePredicate} refusal, a {@link SettingsLiveStatusProvider}
+   * statement or a {@link SettingsActionHandler} answer composes. The settings
+   * routes pass it from the request (`Accept-Language`, else `?locale`).
+   * Absent, such prose is written in English.
    */
   locale?: string;
+}
+
+/**
+ * [#30203] The HTTP request a write arrived on: its headers and the
+ * transport's own peer address (`IHttpRequest.headers` / `remoteAddress`).
+ * It identifies and authorizes nothing (that is {@link SettingsContext}'s), and
+ * it is never stored or logged.
+ */
+export interface SettingsRequestTransport {
+  headers?: Record<string, string | string[] | undefined>;
+  remoteAddress?: string;
+}
+
+/** How a settings WRITE is carried out beyond its context: its prose, and the request it arrived on. */
+export interface SettingsWriteOptions extends SettingsDisplayOptions {
+  /**
+   * [#30203] The request the write arrived on. The settings routes set it on a
+   * save, for a {@link SettingsWritePredicate} that judges the change against
+   * the caller's own connection (plugin-auth's `allowed_ip_ranges`, which must
+   * not lock out the address saving it). Absent on an in-process write.
+   */
+  transport?: SettingsRequestTransport;
 }
 
 /** Storage row shape used by both the engine and the in-memory store. */
@@ -235,8 +259,40 @@ export interface SettingsAuditSink {
     actor?: string;
     action: 'set' | 'reset';
     valueDigest: string;
+    /**
+     * [#30923] The value the write stored, READABLE — the after half of the
+     * `config_change` row (ADR-0007 § Audit & history: every write records its
+     * before and after).
+     *
+     * Present only on a `set` of a key that is not secret-valued. A
+     * secret-valued key is one its manifest declares `encrypted: true`, which
+     * `type: 'password'` forces (the service's `encryptedKeys`): its write is
+     * described by `valueDigest` alone, masked `<encrypted:…>`, and never by
+     * this field. Absent on a `reset`, which stores nothing.
+     */
+    value?: unknown;
+    /**
+     * [#30923] What the write REPLACED — the before half: the value the same
+     * stored row (the one `recordId` names) held before this write.
+     *
+     * `null` when that row held no value: a first write, or a row an earlier
+     * reset cleared. Otherwise `digest` fingerprints the previous value,
+     * masked exactly as `valueDigest` is, and `value` is the previous value
+     * READABLE, present only when neither the key nor the row it replaced
+     * (a row stored `encrypted: true`) is secret-valued.
+     */
+    previous?: { value?: unknown; digest: string } | null;
     encrypted: boolean;
     requestId?: string;
+    /**
+     * The id of the stored settings row the write landed on: a `sys_setting`
+     * row for a tenant or user value, a `sys_platform_setting` row for a global
+     * one. Recorded as the ledger row's `record_id`, beside the object
+     * `scope` selects, so the ledger names the settings row the same way the
+     * CRUD mirror's row about that write does. `null` or absent when the store
+     * returned no id (the in-memory fallback).
+     */
+    recordId?: string | null;
   }): Promise<void> | void;
 }
 
@@ -334,6 +390,11 @@ export type SettingsActionHandler = (input: {
   values: Record<string, unknown>;
   payload?: unknown;
   ctx: SettingsContext;
+  /**
+   * The language the answer's `message` is written in — the caller sees it as
+   * the action's toast. {@link SettingsDisplayOptions.locale}.
+   */
+  locale?: string;
 }) => Promise<SettingsActionResult> | SettingsActionResult;
 
 /**
@@ -357,6 +418,33 @@ export interface SettingsWritePredicateInput {
   ctx: SettingsContext;
   /** The language the refusal is written in — {@link SettingsDisplayOptions.locale}. */
   locale?: string;
+  /**
+   * [#30203] The request the write arrived on ({@link SettingsWriteOptions.transport}),
+   * narrowed to the headers this predicate declared at registration
+   * ({@link SettingsWritePredicateOptions.requestHeaders}); absent on an
+   * in-process write.
+   */
+  transport?: SettingsRequestTransport;
+  /**
+   * Every key this write sets in the namespace, this one among them, with the
+   * value it would store (`null` clears; a secret as submitted, as `next`
+   * carries it). `setMany` always passes it. A rule that spans keys judges the
+   * state AFTER the whole write from it: asked one key at a time against the
+   * values in force, two changes can each pass while together they break the
+   * rule.
+   */
+  batch?: Readonly<Record<string, unknown>>;
+}
+
+/** [#30203] How a {@link SettingsWritePredicate} is registered. */
+export interface SettingsWritePredicateOptions {
+  /**
+   * The request headers the predicate reads, lower-case. Only these reach its
+   * `transport.headers`, so a credential header (`cookie`, `authorization`, an
+   * API key) never reaches a predicate that did not name it. None named: the
+   * predicate sees the peer address and no header.
+   */
+  requestHeaders?: readonly string[];
 }
 
 /**
@@ -424,6 +512,52 @@ export type SettingsLiveStatusProvider = (input: {
   /** The language the statement is written in — {@link SettingsDisplayOptions.locale}. */
   locale?: string;
 }) => Promise<SettingsLiveStatus | undefined> | SettingsLiveStatus | undefined;
+
+/** One option a {@link SettingsOptionSource} serves: the stored value and its name. */
+export interface SettingsServedOption {
+  value: string;
+  label: string;
+}
+
+/** What a {@link SettingsOptionSource} answers for one select key. */
+export interface SettingsOptionSourceAnswer {
+  /** The options the page offers, in order. */
+  options: SettingsServedOption[];
+  /**
+   * Whether a write of `value` is accepted. Holds for every offered value, and
+   * may hold for a second spelling of one (a stored `en-US` where `en` is
+   * offered). A value it refuses is answered `invalid_option`, as a value
+   * outside a declared table is.
+   */
+  admits(value: string): boolean;
+}
+
+/**
+ * Serves the options of one option-bearing key from the running system, in
+ * place of the manifest's declared `options`. The declared table stays the
+ * answer whenever the source answers `undefined` (the service it reads is
+ * absent from the composition).
+ *
+ * Asked at the moment it is used, never recorded: on each save (the write's
+ * acceptance), on each read of an `OS_*` override, on each page read, and on
+ * each manifest read (`getManifest`, `listManifests`, `GET /api/settings`),
+ * so every reader of the key's options is told the table a save judges. It
+ * is not asked when the manifest registers, because what it reads registers
+ * later in the boot, so an `OS_*` override of such a key is judged when it is
+ * read.
+ */
+export type SettingsOptionSource = (input: {
+  /**
+   * The key's value in effect on the page being served, so the answer can
+   * offer it as stored: under its own spelling when it is a second spelling
+   * of an offered value, and named as no longer offered when it is not
+   * admitted. Absent when a write or an override is judged, and when a
+   * manifest is read outside a page (`getManifest`, `listManifests`).
+   */
+  current?: unknown;
+  /** The language the page is read in, {@link SettingsDisplayOptions.locale}. */
+  locale?: string;
+}) => SettingsOptionSourceAnswer | undefined;
 
 /**
  * The `info_banner` id that carries a namespace's live status. Reserved: a
@@ -545,7 +679,11 @@ export function envKeyOf(namespace: string, key: string): string {
   return `OS_${slug}`;
 }
 
-/** Thrown when a caller tries to write a value pinned by env. */
+/**
+ * Thrown when a caller tries to write a value pinned by env (`locked-by-env`;
+ * a clear — `null` / `undefined` — is not refused, it clears the stored value
+ * beneath the pin), or past a locked row (`locked-by-<scope>`).
+ */
 export class SettingsLockedError extends Error {
   readonly code = 'SETTINGS_LOCKED' as const;
   constructor(

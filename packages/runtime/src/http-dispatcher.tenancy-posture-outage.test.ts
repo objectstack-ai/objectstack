@@ -46,6 +46,8 @@ function qlWith() {
             { id: 'k_ex', key: hashApiKey(RAW_EXMEMBER), revoked: false, user_id: 'u_exmember', active_organization_id: 'org_A', expires_at: FUTURE },
         ],
         sys_member: [{ user_id: 'u_exmember', organization_id: 'org_B' }],
+        // The key's owner exists: an API key authenticates only as an owner who exists.
+        sys_user: [{ id: 'u_exmember' }],
         sys_user_permission_set: [], sys_permission_set: [],
         sys_position: [], sys_position_permission_set: [], sys_user_position: [],
     };

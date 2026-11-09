@@ -1299,8 +1299,9 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // members name.
   { type: 'queue', label: 'Queue', description: 'A named set of people records can sit in until one of them takes the record; organizations staff their own in Setup', filePatterns: ['**/*.queue.ts', '**/*.queue.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 16, domain: 'security' },
   // [ADR-0142 D5] Declared assignment rules — code-only for the `queue`
-  // reason, and declared only: organization-authored routing is deferred
-  // (merge question 11). `loadOrder: 17` — after `queue`, which an entry's
+  // reason; an organization authors its own as `sys_assignment_rule` rows,
+  // which the engine evaluates before these and which may not take a declared
+  // rule's name. `loadOrder: 17` — after `queue`, which an entry's
   // target names. Disabled through the activation ledger or `active: false`;
   // customized by a clone under a new name, never by an overlay.
   { type: 'assignment_rule', label: 'Assignment Rule', description: 'A rule a package declares to route new records to a queue or a person', filePatterns: ['**/*.assignment-rule.ts', '**/*.assignment-rule.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 17, domain: 'security' },

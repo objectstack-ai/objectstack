@@ -16,8 +16,11 @@
  *      action (spec 17 retired `action.bulkEnabled` as a tombstone). Both
  *      names used to dispatch as `{ type: '<name>' }` and never run; the
  *      buttons also carried none of the def's label / icon / params.
- *   2. `legacy_only_handler` resolves to no declared action and stays a
- *      by-name dispatch — it must still render ALONGSIDE the two defs above.
+ *   2. `not_declared` names no action the object declares, so the bar draws
+ *      NO button for it (the spec: a bare name "names an action the object
+ *      declares"), and the browser console logs one warning naming it. An
+ *      action a disabled package withholds reads the same way: it leaves the
+ *      served object, so its name draws nothing (objectstack#30169).
  *   3. Record `t3` fails server-side (422), proving per-record attribution: the
  *      result panel reports 4/5 with an error row rather than a blanket success.
  *   4. Rich `bulkActionDefs` with picker params (#3064 / ADR-0059): `Set
@@ -237,8 +240,9 @@ const schema: any = {
     { field: 'progress', label: 'Progress' },
   ],
   pagination: { pageSize: 50 },
-  // Bare names: two resolve to declared actions, one doesn't.
-  bulkActions: ['bulk_mark_done', 'bulk_recalc_estimate', 'legacy_only_handler'],
+  // Bare names: two resolve to declared actions; `not_declared` names nothing
+  // the object declares, so it draws no button and warns once in the console.
+  bulkActions: ['bulk_mark_done', 'bulk_recalc_estimate', 'not_declared'],
   // Rich defs with picker params — the shared-field-widget surface (#3064).
   bulkActionDefs: [
     // Aggregate mode (#3139): names the declared action, ONE dispatch for the
@@ -285,8 +289,9 @@ function Demo() {
           Select rows → the bar shows <b>Mark Done</b> and <b>Recalculate Estimate</b> (names
           from the view&apos;s <code>bulkActions</code>, promoted to their declared object
           actions), <b>Export Zip</b> (an <code>execution: &apos;aggregate&apos;</code> def —
-          ONE dispatch carrying every selected id, #3139) and <b>Legacy Only
-          Handler</b> (unresolvable, dispatched by name).
+          ONE dispatch carrying every selected id, #3139). The view also names{' '}
+          <code>not_declared</code>, which the object does not declare: no button, and one
+          warning in the browser console.
         </p>
       </header>
 
@@ -324,16 +329,7 @@ function Demo() {
 
 createRoot(document.getElementById('root')!).render(
   <I18nProvider resources={{ en }} language="en">
-    {/* A handler registered under a bare NAME — the compat path that legacy
-        `bulkActions` entries must keep working for. */}
-    <ActionProvider
-      handlers={{
-        legacy_only_handler: async () => {
-          pushLog({ url: '(runner handler)', recordId: 'all-selected', params: '{}', status: 200 });
-          return { success: true };
-        },
-      }}
-    >
+    <ActionProvider>
       <Demo />
     </ActionProvider>
   </I18nProvider>,

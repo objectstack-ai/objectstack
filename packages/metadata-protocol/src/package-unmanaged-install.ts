@@ -40,7 +40,7 @@
  *  - the artifact envelope (`packages`, a nested `manifest`), because one
  *    import copies one package.
  *
- * ## Translations are copied; seeds and deployment configuration are not
+ * ## Translations are copied; seeds only when the door asks; deployment configuration never
  *
  *  - `translations` (i18n bundles) are COPIED, converted: each locale of each
  *    bundle becomes one `translation` item named `<namespace>_<locale>` (the
@@ -51,9 +51,19 @@
  *    ledger entry, so its bundles live where environment translations live —
  *    in the environment ledger, reloaded at every boot by the
  *    authored-translation sync;
- *  - `data` (seed datasets) is data, never a metadata item (the artifact loader
- *    says so beside its collection map), so a copy of the metadata cannot carry
- *    it; the install door that calls this verb states what it did with it;
+ *  - `data` (seed datasets) is data, never a metadata item of the package (the
+ *    artifact loader says so beside its collection map), so a copy of the
+ *    metadata does not carry it; the install door that calls this verb states
+ *    what it did with it. [#30808] When that door ASKS for the sample data
+ *    (`seedData`, door-stated like `actor`, off by default), each dataset is
+ *    written into the base as one `seed` item ({@link unmanagedSeedItems}) — the
+ *    copy's SEED RECEIPT in the environment ledger. The door loads the rows
+ *    from those stored bodies, owned by the installer, and the purge door
+ *    deletes exactly them by the same `externalId` match it runs for a managed
+ *    install's ledger body, so no row gains a marker key. Under a rename only
+ *    the dataset's `object` follows the copy's object name: the records are
+ *    data, written verbatim, so each `externalId` value stays the one the
+ *    package shipped;
  *  - deployment configuration (`i18n`, `requires`, `datasourceMapping`, `api`,
  *    …) is read by the BOOT of the stack that declares it, never by an install
  *    of a package, in either mode.
@@ -109,6 +119,12 @@ import { ASSEMBLED_VIEW_ITEMS_KEY, expandViewContainer, isAggregatedViewContaine
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
+import {
+    METADATA_ITEM_NAME_STORAGE_LIMIT,
+    PLATFORM_RESERVED_NAMESPACES,
+    planNamespaceRename,
+    type NamespaceRename,
+} from './package-namespace-rename.js';
 
 /**
  * Every collection the import copies: manifest key → metadata type. The
@@ -134,14 +150,29 @@ export interface UnmanagedImportItem {
     body: Record<string, unknown>;
     /** The view names a container expands into (empty for every other item). */
     expands: readonly string[];
+    /**
+     * [#30794] The name the PACKAGE declares the item under, when the copy is
+     * renamed into a `targetNamespace` and `name` is its copy name; absent
+     * when the copy keeps the source's names.
+     */
+    sourceName?: string;
 }
 
 /** Everything the import needs from the body, judged. */
 export interface UnmanagedImportPlan {
     sourcePackageId: string;
     sourceVersion?: string;
-    /** The base's namespace — the source's, declared or derived from its id. */
+    /** The base's namespace — the request's `targetNamespace`, else the source's. */
     namespace: string;
+    /** The source's namespace, declared or derived from its id. */
+    sourceNamespace: string;
+    /**
+     * [#30794] The rename into {@link namespace}, when it differs from the
+     * source's — the duplicate's own engine (`package-namespace-rename.ts`).
+     * Every item's `name` and `expands` are already its copy names; the
+     * caller rewrites each body with it after converting it.
+     */
+    rename?: NamespaceRename;
     targetPackageId: string;
     /** The manifest the new base is installed with. */
     baseManifest: Record<string, unknown>;
@@ -345,6 +376,18 @@ export function planUnmanagedImport(
     options: {
         targetPackageId?: string;
         targetName?: string;
+        /**
+         * [#30794] The namespace the copy is renamed into; absent keeps the
+         * source's. Judged here, by the manifest key's own declaration.
+         */
+        targetNamespace?: string;
+        /**
+         * [#30808] The install door asked for the package's sample data: each
+         * `data` dataset is planned as a `seed` item of the base, after every
+         * other item ({@link unmanagedSeedItems}). Absent or `false`, `data` is
+         * left to the door, as before.
+         */
+        seedData?: boolean;
         isRuntimeCreatable: (type: string) => boolean;
         loadOrderOf: (type: string) => number;
         /**
@@ -422,8 +465,20 @@ export function planUnmanagedImport(
                     });
                 }
                 break;
-            case 'base':
             case 'door':
+                // [#30808] Asked for, the sample data is copied as `seed` items —
+                // refused whole if that type ever stops being one the save door
+                // may create, as `translations` is above.
+                if (key === SEED_DATA_KEY && options.seedData === true && unmanagedInstallValueCarries(value)
+                    && !options.isRuntimeCreatable(UNMANAGED_SEED_TYPE)) {
+                    findings.push({
+                        key,
+                        reason: `the sample data was asked for and is copied as '${UNMANAGED_SEED_TYPE}' items, and the `
+                            + `metadata-type registry declares '${UNMANAGED_SEED_TYPE}' runtime-uncreatable`,
+                    });
+                }
+                break;
+            case 'base':
             case 'deployment':
                 break;
             default:
@@ -432,16 +487,57 @@ export function planUnmanagedImport(
     }
     if (findings.length > 0) throw unmanagedInstallUncopyable(sourcePackageId, findings);
 
-    // The namespace is the SOURCE's (the stage-0 ACCEPT's Q3): every copied
-    // object name carries its prefix, and the base must own that prefix for
-    // the save door's namespace rule to admit them.
-    const namespace = stringKey(manifest, 'namespace') ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
-    if (namespace === undefined) {
+    // The SOURCE's namespace: every name the package declares carries its
+    // prefix. Without a `targetNamespace` it is the base's too (the stage-0
+    // ACCEPT's Q3): the base must own that prefix for the save door's
+    // namespace rule to admit the copied object names.
+    const sourceNamespace = stringKey(manifest, 'namespace') ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
+    if (sourceNamespace === undefined) {
         throw invalidRequest(
             `Cannot determine the namespace of package '${sourcePackageId}': it declares none, and none derives `
             + 'from its id. Declare `namespace` on the package — every copied object name carries it.',
         );
     }
+
+    // [#30794] ⭐ RENAME-ON-INSTALL, UNMANAGED ONLY. A `targetNamespace` is the
+    // base's namespace and the prefix every copied object name takes, so it
+    // is parsed by the manifest key's own declaration
+    // (`ManifestSchema.shape.namespace`, never a hand-copied regex) and ⛔
+    // refused, never sanitised — the rule `duplicatePackage` keeps for its
+    // own `targetNamespace`. A platform-reserved namespace is shared by many
+    // packages, so it is refused too. Q3's reason for keeping the source
+    // namespace is that a copy INTO an existing base breaks that base's
+    // namespace on export; a copy into a NEW base under a namespace of its
+    // own breaks nothing, and the renamed copy's names are the copy's own.
+    const targetNamespace = options.targetNamespace;
+    if (targetNamespace !== undefined) {
+        const declared = ManifestSchema.shape.namespace.safeParse(targetNamespace);
+        if (!declared.success) {
+            const rule = declared.error.issues[0]?.message ?? 'See `manifest.namespace`';
+            // `INVALID_REQUEST` / 400 with `details.targetNamespace`, as the
+            // documented refusal row and the rename refusal below answer: a
+            // code-less 400 reaches the boundary as the status-derived
+            // `VALIDATION_ERROR`, and the install-local door withholds its reason.
+            throw refusal(
+                'INVALID_REQUEST',
+                400,
+                `Invalid package namespace '${targetNamespace}' on \`targetNamespace\`. ${rule}. It becomes the `
+                + 'copy\'s `manifest.namespace` and the prefix of every copied object name.',
+                { targetNamespace },
+            );
+        }
+        if (PLATFORM_RESERVED_NAMESPACES.has(targetNamespace)) {
+            throw refusal(
+                'INVALID_REQUEST',
+                400,
+                `\`targetNamespace\` '${targetNamespace}' is a platform-reserved namespace `
+                + `(${[...PLATFORM_RESERVED_NAMESPACES].map((ns) => `'${ns}'`).join(', ')}), which many packages share, `
+                + 'so it cannot carry one copy\'s names. Name a namespace of the copy\'s own.',
+                { targetNamespace },
+            );
+        }
+    }
+    const namespace = targetNamespace ?? sourceNamespace;
 
     // The target: a NEW base whose id differs from the source (Q3).
     const targetPackageId = options.targetPackageId ?? `${sourcePackageId}-copy`;
@@ -462,13 +558,63 @@ export function planUnmanagedImport(
     // lock dropped listed in write order (the D6 lock-fork ruling, record
     // 6119681934). After the sort, so the list reads in the order items land.
     const strippedLocks: UnmanagedImportStrippedLock[] = [];
-    const items = enumerateItems(manifest, options.loadOrderOf, namespace).map((item) => {
+    let items = enumerateItems(manifest, options.loadOrderOf, sourceNamespace).map((item) => {
         const { body, stripped } = stripUnmanagedImportLock(
             item.type, item.name, item.body, options.protectionDeclarationOf(item.type),
         );
         if (stripped) strippedLocks.push(stripped);
         return body === item.body ? item : { ...item, body };
     });
+
+    // [#30794] ⭐ THE RENAME RUNS AFTER THE VIEW CONTAINERS ARE EXPANDED, through
+    // the duplicate's own engine. The items above are named as the package
+    // declares them — a container under the object it binds, the names it
+    // expands into listed, each locale's translations under
+    // `<sourceNamespace>_<locale>` — which is the set of rows a stored base
+    // holds, so the engine renames exactly what `duplicatePackage` renames:
+    // a container follows its object, every name it expands into takes its
+    // object's copy name (`<object>.<viewKey>`), and a translation item is
+    // named `<targetNamespace>_<locale>` with the object keys inside it
+    // renamed. Every refusal the names alone can answer is raised here,
+    // before the base exists: an object whose copy name is claimed, and a
+    // copy name the item grammar or the storage identifier limit refuses.
+    // The bodies are rewritten by the caller, after each is converted to
+    // today's protocol — the order the duplicate rewrites in.
+    let rename: NamespaceRename | undefined;
+    if (namespace !== sourceNamespace) {
+        const planned = planNamespaceRename({
+            sourcePackageId,
+            sourceNamespace,
+            targetNamespace: namespace,
+            items: items.map((item) => ({ type: item.type, name: item.name, body: item.body })),
+            retryVerb: 'install',
+        });
+        const refused: UnmanagedImportRenameRefusal[] = [];
+        for (const item of items) {
+            const reason = (item.type === 'object' ? planned.objectRefusal(item.name) : undefined)
+                ?? planned.copyNameRefusal(item.type, item.name);
+            if (reason !== undefined) refused.push({ type: item.type, name: item.name, reason });
+            for (const view of item.expands) {
+                const expanded = planned.copyNameRefusal('view', view);
+                if (expanded !== undefined) refused.push({ type: 'view', name: view, reason: expanded });
+            }
+        }
+        if (refused.length > 0) throw unmanagedInstallRenameRefusal(sourcePackageId, namespace, refused);
+        items = items.map((item) => ({
+            ...item,
+            name: planned.copyName(item.type, item.name),
+            expands: item.expands.map((view) => planned.copyName('view', view)),
+            sourceName: item.name,
+        }));
+        rename = planned;
+    }
+    // [#30808] The sample data, when the door asked for it: one `seed` item per
+    // dataset, after every other item, so each object a dataset fills is
+    // written (and its table made) before the seed naming it.
+    if (options.seedData === true && unmanagedInstallValueCarries(manifest[SEED_DATA_KEY])) {
+        const objectRenames = rename?.objectRenames;
+        items = [...items, ...unmanagedSeedItems(manifest[SEED_DATA_KEY], (object) => objectRenames?.get(object) ?? object)];
+    }
     const sourceVersion = stringKey(manifest, 'version');
     const baseManifest: Record<string, unknown> = {
         ...identity,
@@ -480,6 +626,8 @@ export function planUnmanagedImport(
         sourcePackageId,
         ...(sourceVersion !== undefined ? { sourceVersion } : {}),
         namespace,
+        sourceNamespace,
+        ...(rename !== undefined ? { rename } : {}),
         targetPackageId,
         baseManifest,
         items,
@@ -487,8 +635,107 @@ export function planUnmanagedImport(
     };
 }
 
+/** [#30794] One item the rename into a `targetNamespace` cannot copy, and why. */
+export interface UnmanagedImportRenameRefusal {
+    type: string;
+    name: string;
+    reason: string;
+}
+
+/**
+ * [#30794] The rename refusal: the package cannot be copied into
+ * `targetNamespace` as it declares its names, naming every item. Raised before
+ * the base exists — by the planner for what the names alone answer, and by the
+ * import for a reference collision a converted body meets. `INVALID_REQUEST` /
+ * 400, the code the body's own unwritable names answer
+ * ({@link enumerateItems}).
+ */
+export function unmanagedInstallRenameRefusal(
+    sourcePackageId: string,
+    targetNamespace: string,
+    refused: UnmanagedImportRenameRefusal[],
+): Error {
+    const shown = refused.slice(0, 3).map((r) => r.reason).join(' ');
+    const more = refused.length > 3 ? ` (+${refused.length - 3} more)` : '';
+    return refusal(
+        'INVALID_REQUEST',
+        400,
+        `Package '${sourcePackageId}' cannot be installed unmanaged into namespace '${targetNamespace}': `
+        + `${refused.length} item(s) cannot be renamed. ${shown}${more} Nothing was installed.`,
+        { targetNamespace, refused },
+    );
+}
+
 /** The metadata type a `translations` bundle's locales are copied as. */
 const TRANSLATION_TYPE = 'translation';
+
+/** [#30808] The package body key that carries the seed datasets. */
+const SEED_DATA_KEY = 'data';
+
+/** [#30808] The metadata type a seed dataset is copied as when the door asks for the sample data. */
+export const UNMANAGED_SEED_TYPE = 'seed';
+
+/**
+ * [#30808] The `data` datasets as the copy's `seed` items — the seed receipt
+ * the install door loads the rows from and the purge door deletes them by.
+ *
+ *  - Each dataset is ONE item, in declaration order, named after the object it
+ *    fills as the copy names it: `<object>_seed`, then `<object>_seed_2`, … for
+ *    a second dataset of one object (a per-locale pair, say).
+ *  - The body is the dataset as the package declared it, with `object` set to
+ *    the copy's name for it (`copyObjectName`, the rename's own object map).
+ *    ⛔ Nothing else is rewritten: the records are data, not metadata, so the
+ *    rename engine's free-text rewrite — which turns any value spelled like a
+ *    source object name into the copy's — never reaches them, and every
+ *    `externalId` value (the purge's identity) is the one the package shipped.
+ *  - A dataset that is not an object, or names no object or no records, refuses
+ *    the import before anything is written (`INVALID_REQUEST` / 400), as an
+ *    unnamed item does; so does an item name the save door's grammar refuses.
+ */
+export function unmanagedSeedItems(
+    value: unknown,
+    copyObjectName: (object: string) => string,
+): UnmanagedImportItem[] {
+    const problems: string[] = [];
+    if (!Array.isArray(value)) {
+        problems.push(`\`${SEED_DATA_KEY}\` is not an array of seed datasets`);
+    }
+    const items: UnmanagedImportItem[] = [];
+    const perObject = new Map<string, number>();
+    (Array.isArray(value) ? value : []).forEach((dataset: unknown, index) => {
+        if (!isPlainRecord(dataset)) {
+            problems.push(`\`${SEED_DATA_KEY}[${index}]\` is not a seed dataset object`);
+            return;
+        }
+        if (typeof dataset.object !== 'string' || dataset.object === '') {
+            problems.push(`\`${SEED_DATA_KEY}[${index}]\` names no \`object\``);
+            return;
+        }
+        if (!Array.isArray(dataset.records)) {
+            problems.push(`\`${SEED_DATA_KEY}[${index}]\` (object '${dataset.object}') has no \`records\` array`);
+            return;
+        }
+        const object = copyObjectName(dataset.object);
+        const nth = (perObject.get(object) ?? 0) + 1;
+        perObject.set(object, nth);
+        const name = nth === 1 ? `${object}_seed` : `${object}_seed_${nth}`;
+        if (!METADATA_ITEM_NAME_PATTERN.test(name) || name.length > METADATA_ITEM_NAME_STORAGE_LIMIT) {
+            problems.push(`\`${SEED_DATA_KEY}[${index}]\` would be copied as the seed item ${JSON.stringify(name)}, which is not a legal metadata item name`);
+            return;
+        }
+        items.push({ type: UNMANAGED_SEED_TYPE, name, key: SEED_DATA_KEY, body: { ...dataset, object }, expands: [] });
+    });
+    if (problems.length > 0) {
+        const shown = problems.slice(0, 5).join('; ');
+        throw refusal(
+            'INVALID_REQUEST',
+            400,
+            `The package's sample data cannot be copied as written: ${shown}`
+            + `${problems.length > 5 ? ` (+${problems.length - 5} more)` : ''}. Nothing was installed.`,
+        );
+    }
+    return items;
+}
 
 /** A plain `{ … }` object — the shape a bundle, and each group in it, takes. */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

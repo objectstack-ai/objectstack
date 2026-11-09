@@ -1,12 +1,75 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { SystemObjectName } from '@objectstack/spec/system';
+import {
+  SysMigration,
+  SysMigrationJournal,
+  SysPlatformSetting,
+  SysPlatformSettingAudit,
+  SysSecret,
+  SysSetting,
+  SysSettingAudit,
+} from '@objectstack/platform-objects/system';
+import { SIGN_IN_STAMP_EVENT } from '../sign-in-stamp.js';
+
+/**
+ * The platform objects whose rows the default `recent` view leaves out: the
+ * rows one act writes beside the row that records it. Measured on a fresh
+ * showcase boot:
+ *
+ *  - a settings write records `config_change`, and ALSO writes the stored
+ *    setting (`sys_setting`, the global rung's `sys_platform_setting`, a
+ *    secret's ciphertext in `sys_secret`) and the settings trail's own entry
+ *    (`sys_setting_audit` / `sys_platform_setting_audit`), each mirrored here;
+ *  - the first sign-in through the console mints the token-signing key
+ *    (`sys_jwks`) under the signing-in person's id, beside its `login` row;
+ *  - a boot writes the data-migration ledger (`sys_migration`,
+ *    `sys_migration_journal`).
+ *
+ * The two settings stores are listed apart, in
+ * {@link AUDIT_LOG_SETTINGS_STORE_OBJECTS}: the `config_change` row itself
+ * names one of them as its object, so the view leaves out their other rows and
+ * keeps that one.
+ *
+ * The sign-in stamp on `sys_user` is the third such row, and it is left out by
+ * its mark instead (`sign-in-stamp.ts`): `sys_user` itself stays in, because an
+ * administrator's edit of a user is an act.
+ *
+ * Read from the definitions and the protocol's name constants. Deliberately not
+ * a name prefix and not the identity domain: `sys_*` also names objects whose
+ * writes are acts (a member's role, a sharing rule, a user's ban).
+ * `sys-audit-log-default-view.integration.test.ts` holds the view to it on a
+ * real engine and driver.
+ */
+export const AUDIT_LOG_DEFAULT_VIEW_EXCLUDED_OBJECTS: readonly string[] = Object.freeze([
+  SysSecret.name,
+  SysSettingAudit.name,
+  SysPlatformSettingAudit.name,
+  SystemObjectName.JWKS,
+  SysMigration.name,
+  SysMigrationJournal.name,
+]);
+
+/**
+ * The settings stores a `config_change` row names as its object
+ * (`config-change-audit.ts` in service-settings): `sys_setting` for a tenant or
+ * user value, `sys_platform_setting` for a global one. The default view keeps
+ * the `config_change` row and leaves out the store's own mirrored write.
+ */
+export const AUDIT_LOG_SETTINGS_STORE_OBJECTS: readonly string[] = Object.freeze([
+  SysSetting.name,
+  SysPlatformSetting.name,
+]);
 
 /**
  * sys_audit_log — System Audit Log Object
  *
- * Immutable audit trail for all significant platform events.
- * Records who did what, when, and the before/after state.
+ * Audit trail for all significant platform events: who did what, when, and
+ * the before/after state. The platform writes these rows, and they are
+ * read-only through the data API and in Setup. Platform code running in a
+ * system context (retention archive-then-delete, redaction migrations) can
+ * still change or delete them, and nothing records that it did.
  *
  * Every field is `readonly: true` — audit logs are written only by
  * internal system hooks, never via UI forms. API exposes only `get` + `list`.
@@ -38,7 +101,7 @@ export const SysAuditLog = ObjectSchema.create({
     retention: { maxAge: '90d' },
     archive: { after: '90d', to: 'archive', keep: '7y' },
   },
-  description: 'Immutable audit trail for platform events',
+  description: 'Audit trail of platform events. Rows are written only by the platform and are read-only through the data API and in Setup.',
   displayNameField: 'action',
   nameField: 'action', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   // [#24611] No `titleFormat`. It read `{action} · {object_name}`, but the
@@ -59,6 +122,16 @@ export const SysAuditLog = ObjectSchema.create({
   // `object_name` for that cell without a column (objectui#13036). A list
   // view never shows the type half, which would draw the stored API name as
   // text (`sys-audit-log-pointer-pair.test.ts`).
+  //
+  // `recent` is the FIRST declared view, so it is the list Setup's 审计日志
+  // opens with no view named. It keeps every act and leaves out the rows an act
+  // writes beside it (`AUDIT_LOG_DEFAULT_VIEW_EXCLUDED_OBJECTS`, the settings
+  // stores' rows other than `config_change`, and the sign-in stamp by its
+  // `metadata.event`). `metadata` is not a value-bearing column
+  // (`parent-field-query-guard.ts` names only `old_value` / `new_value`), so
+  // every reader may run the filter; the `or` keeps the rows with no metadata,
+  // which a bare `not_contains` would drop. Nothing changes in what is written:
+  // `all_events` lists every row.
   listViews: {
     recent: {
       type: 'grid',
@@ -66,6 +139,21 @@ export const SysAuditLog = ObjectSchema.create({
       label: 'Recent',
       data: { provider: 'object', object: 'sys_audit_log' },
       columns: ['created_at', 'action', 'record_id', 'user_id'],
+      filter: [
+        { field: 'object_name', operator: 'not_in', value: [...AUDIT_LOG_DEFAULT_VIEW_EXCLUDED_OBJECTS] },
+        {
+          or: [
+            { field: 'object_name', operator: 'not_in', value: [...AUDIT_LOG_SETTINGS_STORE_OBJECTS] },
+            { field: 'action', operator: 'equals', value: 'config_change' },
+          ],
+        },
+        {
+          or: [
+            { field: 'metadata', operator: 'is_null' },
+            { field: 'metadata', operator: 'not_contains', value: SIGN_IN_STAMP_EVENT },
+          ],
+        },
+      ],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
       emptyState: { title: 'No audit events', message: 'Activity will appear here as users interact with the platform.' },
@@ -144,20 +232,32 @@ export const SysAuditLog = ObjectSchema.create({
       name: 'config_changes',
       label: 'Config',
       data: { provider: 'object', object: 'sys_audit_log' },
-      // [#24611] No Object column. Its rows carry no `record_id`, so no pointer
-      // names their target, and the column drew one of three stored API names
+      // [#24611] No Object column: it drew one of three stored API names
       // (`sys_setting`, `sys_platform_setting` for a global-scope change,
-      // `sys_user` for an import). Which setting changed is in `metadata` and
-      // `new_value`, and the row's page still shows `object_name` and the
-      // `tenant_id` a global change leaves empty.
+      // `sys_user` for an import) as text. A `config_change` row names the
+      // settings row it changed as its `record_id` (service-settings'
+      // `config-change-audit.ts`), so the row's page draws that pair as the
+      // setting's card and lists the ledger's other rows about the same
+      // setting, the mirror's row with the value among them
+      // (`sys-audit-log.page.ts`). An `import` row, and a `config_change` row
+      // written before its writer recorded the id, carry no `record_id`.
+      // Which setting changed is also in `metadata`, and the row's page shows
+      // the `tenant_id` a global change leaves empty.
       columns: ['created_at', 'action', 'user_id'],
-      // `export` removed (#8147) — retired from the enum, nothing ever wrote it.
       // `import` KEPT deliberately: `plugin-auth`'s admin user-import writes a
       // real run-level row (`admin-import-users.ts`, `action: 'import'` with
       // `record_id: null`), pinned by the W4 case in
       // `packages/qa/dogfood/test/admin-identity-audit-trail.dogfood.test.ts`.
       // This view is the only shipped surface that lists those rows.
-      filter: [{ field: 'action', operator: 'in', value: ['config_change', 'import'] }],
+      //
+      // [#30955] `export` is BACK, writer-first. #8147 took it out of this
+      // filter (and the enum) because nothing wrote it; its writer is now
+      // plugin-audit's `data-export-audit.ts` (`recordDataExport` on the
+      // `audit` slot), called by the REST export door on every export it
+      // streams. Its row has the `import` row's run-level shape (`record_id:
+      // null`, the object in `object_name`), so it is listed here beside it;
+      // the row's page shows the object, the format and the row count.
+      filter: [{ field: 'action', operator: 'in', value: ['config_change', 'import', 'export'] }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -198,11 +298,28 @@ export const SysAuditLog = ObjectSchema.create({
 
     // ADR-0087 retirement (#8147, ruling 2026-08-12): `export` and
     // `permission_change` left this enum. Neither had a writer anywhere in the
-    // repo — the only two `sys_audit_log` writers are `audit-writers.ts` (whose
-    // `actionFor` emits create/update/delete and nothing else) and
-    // `plugin-auth`'s admin user-import. A declared action nothing ever writes
-    // is an empty widget and a filter that can never match: 审计面宁窄勿谎.
-    // Permission-object writes are already on the ledger as create/update rows.
+    // repo at the time — the only two `sys_audit_log` writers were
+    // `audit-writers.ts` (whose `actionFor` emits create/update/delete and
+    // nothing else) and `plugin-auth`'s admin user-import. A declared action
+    // nothing ever writes is an empty widget and a filter that can never
+    // match: 审计面宁窄勿谎. Permission-object writes are already on the ledger
+    // as create/update rows, so `permission_change` stays retired.
+    //
+    // [#30955] `export` comes back WRITER-FIRST, the only way a value is
+    // allowed back onto this surface. Its writer is `data-export-audit.ts`
+    // (`createDataExportAuditWriter`, `recordDataExport` on the `audit` slot),
+    // called by the REST export door (`GET /data/:object/export`, in
+    // `@objectstack/rest`'s `data-action-routes.ts`): one run-level row
+    // (`record_id: null`, the exported object in `object_name`) per export
+    // that cleared the door's gates and began reading, for every object, this
+    // ledger included. It records the format, the row count, the row limit and
+    // whether the file was truncated at it, the filter as field names and
+    // operators only, whether a search term applied (never the term) and the
+    // outcome; never an exported value. A request the door refused writes no
+    // row. Its shipped surface is the `config_changes` list view above, beside
+    // the `import` row of the same shape, and the `all_events` view; `recent`
+    // lists it too, except an export of an object that view leaves out
+    // (`AUDIT_LOG_DEFAULT_VIEW_EXCLUDED_OBJECTS`, the settings stores).
     //
     // ADR-0087 retirement (#8315, the same ruling carried by triage): `restore`
     // left this enum for the same reason and by the same measurement. It was
@@ -276,6 +393,59 @@ export const SysAuditLog = ObjectSchema.create({
     // above, as for `platform_admin_standing_change`. No new column: the
     // surface rides `metadata` beside `performed_by` / `on_behalf_of`.
     //
+    // [#31186] `package_uninstall` joins the enum WRITER-FIRST. Its writer is
+    // `package-lifecycle-audit.ts` (`createPackageLifecycleAuditWriter`, on the
+    // `audit` slot), called by the uninstall verb (`deletePackage` in
+    // `@objectstack/metadata-protocol`) once per package it uninstalled, from
+    // every door that reaches the verb: one row about the package itself, which
+    // `sys_packages`'s raw-SQL delete never produced. The row names no record
+    // (`sys_packages` is not an object) and no organization (an uninstall is
+    // environment-wide), so it is a deployment-level row; the package, its
+    // version and the environment ride `metadata`. Its shipped surfaces are the
+    // unfiltered `recent` and `all_events` views above, as for
+    // `platform_admin_standing_change`.
+    //
+    // [#30964, cloud#3624 ruling A] `package_unmanaged_import` joins the enum
+    // WRITER-FIRST. Its writer is the same `package-lifecycle-audit.ts`, called
+    // by the install-local door's unmanaged branch (`installUnmanaged` in
+    // `@objectstack/cloud-connection`) once per copy it attempted, from both
+    // doors that reach it (`POST /marketplace/install-local` and the copy an
+    // unmanaged grant on `POST /cloud-connection/install` hands it): one row
+    // with the copy's result — the new base, its namespace, the items copied,
+    // `success` or `failure` — which only the environment knows. Like
+    // `package_uninstall`, it names no record and no organization (a
+    // deployment-level row), and its shipped surfaces are the unfiltered
+    // `recent` and `all_events` views above.
+    //
+    // [#31796] `credential_use` joins the enum WRITER-FIRST. Its writer is
+    // `credential-use-audit.ts` (`createCredentialUseAuditWriter` on the
+    // `audit` slot, fed by `installCredentialUseAudit`'s stamp hook): one row
+    // per credential per use window, written when a credential's own throttled
+    // use stamp lands — `sys_api_key.last_used_at` (the shared key-admission
+    // seam, every door that admits a key) and `sys_oauth_consent.last_used_at`
+    // (the `/mcp` door's OAuth token use) — plus, for a `skip_consent` OAuth
+    // client with no consent row, plugin-auth's hand-off at the same stamp
+    // point. The row names the credential's owner (`user_id`, `actor`), the
+    // credential row (`object_name` / `record_id`), its kind and the window in
+    // `metadata`; never a secret, a token, a hash or a prefix. Its shipped
+    // surfaces are the unfiltered `recent` and `all_events` views above, as for
+    // `platform_admin_standing_change`.
+    //
+    // [#31829] `scim_refused` joins the enum WRITER-FIRST. Its writer is
+    // `scim-refusal-audit.ts` (`createScimRefusalAuditWriter`, on the `audit`
+    // slot), called by plugin-auth's SCIM door for each `/scim/v2/*` request it
+    // answered 400 or above, bounded per connection: one row naming the
+    // connection (`actor` `svc:scim:CONNECTION_ID` and
+    // `metadata.scim_connection_id`, or `unknown` when the bearer verified as
+    // none), the resource and method, the status, the SCIM `scimType` or the
+    // machine code, and the client address — never the body, the bearer or an
+    // attribute value. It names no record and no organization (a
+    // deployment-level row). Its shipped surfaces are the unfiltered `recent`
+    // and `all_events` views above. ⛔ It is deliberately NOT added to the
+    // `auth_events` filter: that view answers 「who signed in, out, or failed
+    // to」 by `user_id`, and a SCIM refusal names no user — an identity
+    // provider's provisioning call is not a sign-in.
+    //
     // Each option carries a label (#27855): the list, the detail and the System
     // Overview "Audit Events by Action" chart (whose dimension resolves through
     // these options) read it, where the bare-array shorthand made the label the
@@ -293,8 +463,13 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'Account Locked', value: 'account_locked' },
           { label: 'Config Change', value: 'config_change' },
           { label: 'Import', value: 'import' },
+          { label: 'Export', value: 'export' },
           { label: 'Platform Admin Standing Change', value: 'platform_admin_standing_change' },
           { label: 'Action Invocation', value: 'action_invocation' },
+          { label: 'Package Uninstall', value: 'package_uninstall' },
+          { label: 'Package Unmanaged Import', value: 'package_unmanaged_import' },
+          { label: 'Credential Use', value: 'credential_use' },
+          { label: 'SCIM Refused', value: 'scim_refused' },
         ],
         label: 'Action',
         required: true,

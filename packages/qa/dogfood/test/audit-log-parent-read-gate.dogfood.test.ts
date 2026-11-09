@@ -7,9 +7,11 @@
 // ledger rows about records it can read, plus the rows that are about no
 // record. This file drives that on a real org-bound boot — better-auth
 // sign-ups, the platform permission sets plus one explicit ledger read grant,
-// plugin-audit's real CRUD mirror and auth-event sink writing the rows, and
-// service-settings writing a run-level `config_change` row — through every
-// generic door that reads the object:
+// plugin-audit's real CRUD mirror and auth-event sink writing the rows,
+// an action invoked with no subject record writing a run-level
+// `action_invocation` row, and
+// service-settings writing a `config_change` row that names the settings row
+// it changed — through every generic door that reads the object:
 //
 //   GET  /data/sys_audit_log              list (+ its `total`)
 //   GET  /data/sys_audit_log/:id          by id
@@ -43,6 +45,27 @@ import { catalogPermissionSet } from './catalog-permission-set.js';
 const SYS = { isSystem: true } as const;
 const LEDGER = 'sys_audit_log';
 const READER_EMAIL = 'ledger-gate-reader@verify.test';
+/**
+ * A run-level row: the action door's `action_invocation` row for an action
+ * invoked with no subject record names no record (`action-invocation-audit.ts`).
+ * The settings write that once supplied this file's run-level row now names
+ * the settings row it changed (#30209), and this boot carries no other
+ * run-level producer, so the fixture declares one object-scoped action.
+ */
+const RUN_LEVEL = 'action_invocation';
+const RUN_LEVEL_ACTION = 'cmt_ledger_ping';
+const gateStack = {
+  ...commentsFixtureStack,
+  actions: [
+    {
+      name: RUN_LEVEL_ACTION,
+      label: 'Ledger gate fixture: a run with no subject record',
+      objectName: 'cmt_open',
+      type: 'script',
+      body: { language: 'js', source: 'return { ok: true };', capabilities: [] },
+    },
+  ],
+};
 
 /** The grant under test: object-level read on the ledger, nothing more. */
 const ledgerReaderSet: PermissionSet = PermissionSetSchema.parse({
@@ -62,12 +85,13 @@ describe('[#21175] sys_audit_log: a ledger reader reads the rows about records i
   let privateId: string; // cmt_private, owned by the admin — the reader cannot read it
   let openId: string; // cmt_open, created by the reader — the reader reads it
   let goneId: string; // cmt_open, created and deleted by the admin
+  let settingRef: { object: string; id: string }; // the settings row the PUT below wrote
 
   const ledgerAtRest = (where: Record<string, unknown>): Promise<Row[]> =>
     ql.find(LEDGER, { where, context: { ...SYS } });
 
   beforeAll(async () => {
-    stack = await bootStack(commentsFixtureStack as never, {
+    stack = await bootStack(gateStack as never, {
       security: new SecurityPlugin({
         defaultPermissionSets: [...securityDefaultPermissionSets, cmtFixtureBaselineSet, ledgerReaderSet],
         fallbackPermissionSet: cmtFixtureBaselineSet.name,
@@ -96,14 +120,20 @@ describe('[#21175] sys_audit_log: a ledger reader reads the rows about records i
     openId = await idOf(await stack.apiAs(readerTok, 'POST', '/data/cmt_open', { name: 'shared board' }));
     goneId = await idOf(await stack.apiAs(adminTok, 'POST', '/data/cmt_open', { name: 'board, gone' }));
     expect((await stack.apiAs(adminTok, 'DELETE', `/data/cmt_open/${goneId}`)).status).toBeLessThan(300);
-    // A run-level row, from its real producer: a settings write is a
-    // `config_change` row that names no record.
+    // A settings write, from its real producer: a `config_change` row that
+    // names the settings row it changed (#30209), so it is a row ABOUT a record.
     const put = await stack.raw('/api/settings/branding', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminTok}` },
       body: JSON.stringify({ workspace_name: 'Ledger gate fixture' }),
     });
     expect(put.status, await put.clone().text()).toBe(200);
+    const [change] = await ledgerAtRest({ action: 'config_change' });
+    settingRef = { object: String(change?.object_name), id: String(change?.record_id) };
+    // A run-level row, from its real producer: the action door ledgers an
+    // invocation with no subject record as a row naming no record.
+    const ran = await stack.apiAs(adminTok, 'POST', `/actions/cmt_open/${RUN_LEVEL_ACTION}`, {});
+    expect(ran.status, await ran.clone().text()).toBe(200);
 
     await assertArmed([
       principalArmed({
@@ -131,9 +161,11 @@ describe('[#21175] sys_audit_log: a ledger reader reads the rows about records i
           private: (await ledgerAtRest({ object_name: 'cmt_private', record_id: privateId })).length,
           open: (await ledgerAtRest({ object_name: 'cmt_open', record_id: openId })).length,
           gone: (await ledgerAtRest({ object_name: 'cmt_open', record_id: goneId })).length,
-          aboutNoRecord: (await ledgerAtRest({ action: 'config_change' })).filter((r) => r.record_id == null).length,
+          aboutNoRecord: (await ledgerAtRest({ action: RUN_LEVEL })).filter((r) => r.record_id == null).length,
+          configChange: (await ledgerAtRest({ action: 'config_change', object_name: settingRef.object, record_id: settingRef.id })).length,
+          settingRow: (await ql.find(settingRef.object, { where: { id: settingRef.id }, context: { ...SYS } })).length,
         }),
-        armed: (o) => o.private === 2 && o.open >= 1 && o.gone === 2 && o.aboutNoRecord >= 1,
+        armed: (o) => o.private === 2 && o.open >= 1 && o.gone === 2 && o.aboutNoRecord >= 1 && o.configChange >= 1 && o.settingRow === 1,
       }),
     ]);
   }, 180_000);
@@ -196,8 +228,19 @@ describe('[#21175] sys_audit_log: a ledger reader reads the rows about records i
   });
 
   it('a row about no record is still served to the ledger reader', async () => {
-    const [runLevel] = (await ledgerAtRest({ action: 'config_change' })).filter((r) => r.record_id == null);
+    const [runLevel] = (await ledgerAtRest({ action: RUN_LEVEL })).filter((r) => r.record_id == null);
     expect((await stack.apiAs(readerTok, 'GET', `/data/${LEDGER}/${runLevel.id}`)).status).toBe(200);
+  });
+
+  it('a config_change row follows the gate on the settings row it names; the admin is served it', async () => {
+    const [change] = await ledgerAtRest({ action: 'config_change', object_name: settingRef.object, record_id: settingRef.id });
+    const parent = (await stack.apiAs(readerTok, 'GET', `/data/${settingRef.object}/${settingRef.id}`)).status;
+    const row = (await stack.apiAs(readerTok, 'GET', `/data/${LEDGER}/${change.id}`)).status;
+    expect(row).toBe(parent === 200 ? 200 : 404);
+    // The reader holds no read on the settings store, so the ledger-only read
+    // no longer reaches the row; the admin's audit capability does.
+    expect(parent).not.toBe(200);
+    expect((await stack.apiAs(adminTok, 'GET', `/data/${LEDGER}/${change.id}`)).status).toBe(200);
   });
 
   it('a row about a record that no longer exists is not served to the reader; the admin, a default holder of the ledger audit capability, is served it', async () => {

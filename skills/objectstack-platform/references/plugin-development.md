@@ -351,9 +351,8 @@ descriptor) was itself dead: no endpoint ever served it. Runtime capability disc
 
 The live toggle surfaces are runtime configuration, not authored metadata:
 
-- **`feature_flags` settings manifest** (`@objectstack/service-settings`) — org-tunable
-  toggles like `ai_enabled` / `beta_*`, resolvable at runtime and env-overridable via
-  `OS_FEATURE_FLAGS_*` (ADR-0007 settings cascade).
+- **Org toggles** — no shared flags namespace exists; a plugin that needs one declares
+  its own `SettingsManifest` and registers it on the `settings` service (ADR-0007 cascade).
 - **Auth capability gates** — `requiresFeature` on actions/params lowers to the
   `PUBLIC_AUTH_FEATURES` registry (`kernel/public-auth-features.ts`), the fixed
   deployment-level flags plugin-auth advertises to anonymous clients.

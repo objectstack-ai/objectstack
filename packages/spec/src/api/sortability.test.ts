@@ -27,8 +27,10 @@ import {
   resolveObjectSortability,
   ObjectSortabilitySchema,
   FIELD_UNSORTABLE_VIRTUAL_TYPE,
+  FIELD_UNSORTABLE_AUTHOR_DECLARED,
   FIELD_SORTABLE_UNPROVISIONED_ANCHOR,
 } from './sortability.zod';
+import { FieldSchema } from '../data/field.zod';
 import { SEARCH_VIRTUAL_TYPES } from '../data/search-fields';
 
 /** The #10235 oracle shape: a formula column displayed in a shipped grid. */
@@ -111,6 +113,58 @@ describe('resolveObjectSortability — the closed category set', () => {
   });
 });
 
+describe('the author-declared category — `field.sortable: false` (#29896)', () => {
+  it('marks a stored column the author declared `sortable: false` unsortable, with its own reason', () => {
+    const { fields } = resolveObjectSortability({
+      name: 'x',
+      fields: { nosort: { type: 'text', sortable: false }, name: { type: 'text' } },
+    });
+    expect(fields.nosort).toEqual({ sortable: false, reason: FIELD_UNSORTABLE_AUTHOR_DECLARED });
+    // CONTROL: the neighbour with no `sortable` key keeps today's answer.
+    expect(fields.name).toEqual({ sortable: true });
+  });
+
+  it('reads the PARSED field too: the schema default `sortable: true` keeps a field sortable', () => {
+    const parsed = (raw: Record<string, unknown>) => FieldSchema.parse({ name: 'f', ...raw });
+    const { fields } = resolveObjectSortability({
+      name: 'x',
+      fields: {
+        unset: parsed({ type: 'text' }),
+        on: parsed({ type: 'text', sortable: true }),
+        off: parsed({ type: 'text', sortable: false }),
+      },
+    });
+    expect(fields.unset).toEqual({ sortable: true });
+    expect(fields.on).toEqual({ sortable: true });
+    expect(fields.off).toEqual({ sortable: false, reason: FIELD_UNSORTABLE_AUTHOR_DECLARED });
+  });
+
+  it('only the literal `false` counts — no truthiness reading of the key', () => {
+    const { fields } = resolveObjectSortability({
+      name: 'x',
+      fields: { a: { type: 'text', sortable: 0 }, b: { type: 'text', sortable: null } },
+    });
+    expect(fields.a).toEqual({ sortable: true });
+    expect(fields.b).toEqual({ sortable: true });
+  });
+
+  it('a virtual field also marked `sortable: false` keeps the storage reason', () => {
+    const { fields } = resolveObjectSortability({
+      name: 'x',
+      fields: { v: { type: 'formula', sortable: false } },
+    });
+    expect(fields.v).toEqual({ sortable: false, reason: FIELD_UNSORTABLE_VIRTUAL_TYPE });
+  });
+
+  it('reads the array field-map shape as well', () => {
+    const { fields } = resolveObjectSortability({
+      name: 'x',
+      fields: [{ name: 'nosort', type: 'text', sortable: false }],
+    });
+    expect(fields.nosort).toEqual({ sortable: false, reason: FIELD_UNSORTABLE_AUTHOR_DECLARED });
+  });
+});
+
 describe('the unprovisioned injected-anchor category — accepted, caveated, never refused', () => {
   /** An ADR-0015 external object as the registry serves it: injected anchors present. */
   const EXTERNAL = {
@@ -176,6 +230,7 @@ describe('wire validity — the projection parses under its own schema', () => {
       fields: { name: { type: 'text' } },
     }],
     ['fieldless document', { name: 'bare' }],
+    ['author-declared unsortable field', { name: 'x', fields: { nosort: { type: 'text', sortable: false } } }],
   ])('%s', (_label, doc) => {
     const projection = resolveObjectSortability(doc);
     const parsed = ObjectSortabilitySchema.safeParse(projection);

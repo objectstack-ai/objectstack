@@ -41,13 +41,15 @@ const codeIsTyped: [
 ] = [false, false, false];
 const standardCode: ApiError = { code: 'VALIDATION_ERROR', message: 'x' };
 const registeredCode: ApiError['code'] = 'INVALID_ARTIFACT_PACKAGES';
+// The package disable door's 409 for a dependent validation rule: a ledger row the type accepts.
+const disableRefusalCode: ApiError['code'] = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
 // @ts-expect-error -- `code` is a vocabulary member, not a number.
 const numericCode: ApiError = { code: 42, message: 'x' };
 // @ts-expect-error -- nor a string outside the vocabulary.
 const inventedCode: ApiError = { code: 'NOT_A_REGISTERED_CODE', message: 'x' };
 // @ts-expect-error -- the same `code` reaches every envelope built on `BaseResponseSchema`.
 const envelopeNumericCode: BaseResponse = { success: false, error: { code: 42, message: 'x' } };
-void [codeIsTyped, standardCode, registeredCode, numericCode, inventedCode, envelopeNumericCode];
+void [codeIsTyped, standardCode, registeredCode, disableRefusalCode, numericCode, inventedCode, envelopeNumericCode];
 
 // ── `makeApiErrorSchema`: standard catalogue ∪ the caller's codes ─────────────────────────────
 
@@ -87,6 +89,7 @@ describe('ApiError.code is typed as the vocabulary its schema parses against', (
   it('every body the type admits parses', () => {
     expect(ApiErrorSchema.safeParse(standardCode).success).toBe(true);
     expect(ApiErrorSchema.safeParse({ code: registeredCode, message: 'x' }).success).toBe(true);
+    expect(ApiErrorSchema.safeParse({ code: disableRefusalCode, message: 'x' }).success).toBe(true);
     expect(AcmeApiErrorSchema.safeParse(acmeSupplied).success).toBe(true);
     expect(AcmeApiErrorSchema.safeParse(acmeStandard).success).toBe(true);
   });

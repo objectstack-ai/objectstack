@@ -671,7 +671,7 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
         o === 'sys_user' && (verb === 'create' || verb === 'delete') ? 405 : row[verb] ? 'allow' : 'deny';
       if (o === 'sys_user_position') {
         const created = await stack.apiAs(delegateTok, 'POST', `/data/${o}`, {
-          user_id: targetId, position: 'contributor', business_unit_id: 'bu_west_coast',
+          user_id: targetId, position: 'showcase_contributor', business_unit_id: 'bu_west_coast',
         });
         const own = String(idOf(await send(o, 'create', created, expectOf('create'))));
         await send(o, 'read', await stack.apiAs(delegateTok, 'GET', `/data/${o}`), expectOf('read'));

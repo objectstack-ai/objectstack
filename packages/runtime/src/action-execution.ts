@@ -15,7 +15,7 @@
  * here; that stays with the route handlers.
  */
 
-import { validateActionParams, type ActionSession, type ResolvedActionParam } from '@objectstack/spec/ui';
+import { validateActionParams, resolveI18nLabel, type ActionSession, type I18nLabel, type ResolvedActionParam } from '@objectstack/spec/ui';
 import { templateSlotSource } from '@objectstack/spec/automation';
 // [#15124] The facade's `find` judges its own parameter against the SAME
 // declaration its type names, so the refusal and the type cannot drift apart.
@@ -24,6 +24,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { IHttpServer, IObjectQLEngine, InternalFieldEvaluationQuery, QueryEvaluationGate, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
+import { renderOperationMessage } from '@objectstack/spec/system';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
 // retries have to agree on it, and two doors each writing their own 'confirm'
@@ -50,6 +51,11 @@ import { markAppAutomationElevation } from '@objectstack/core';
 // Managing API keys is a signed-in-session act: the one rule this door's
 // per-object gate asks beside the exposure decision, shared with `RestServer`.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
+import {
+    PackageScopedNameRefusedError,
+    packageScopedHolderSource,
+    resolvePackageScopedHolders,
+} from '@objectstack/core';
 // [#9446] The ONE #9378 status table. Imported rather than re-read here: this
 // door's blanket `FLOW_FAILED` was the second of three readings of one engine
 // result, and a second definition of the rule is what let the doors diverge.
@@ -82,14 +88,19 @@ import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stor
 import { actorUserFromExecutionContext, resolveActorDisplayName } from './security/actor-user.js';
 import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
+import { admittingCredentialKind, type AdmittingCredentialKind } from './security/admitting-credential.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
     actionHandlerObjectKeys,
+    actionHolderCoordinate,
     isObjectLessActionKey,
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
+    resolveActionByPackage,
     resolveActionHandlerKeys,
     standaloneActionOwnerKey,
     SummaryRecomputeError,
+    type PackageScopedRefusal,
+    type PackageScopedRegistry,
 } from '@objectstack/objectql';
 import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [#28861] A landed write answers its success to the action handler's code.
@@ -983,6 +994,30 @@ export function actionPermissionError(_deps: ActionExecutionDeps, actionDef: any
 }
 
 /**
+ * [#30771] {@link actionPermissionError} as the ADR-0112 refusal the MCP
+ * `run_action` door throws: `403`, the standard code for it, and the gate's
+ * own sentence — the status `POST /actions/...` answers for the same
+ * declaration. `null` when the gate admits the caller. One reading of one
+ * declaration, so the by-name call and the MCP tool layer's scoped pre-screen
+ * (`McpActionBridge.capabilityRefusal`) answer a gated action alike.
+ */
+export interface ActionPermissionRefusal {
+    code: string;
+    status: 403;
+    message: string;
+}
+
+export function actionPermissionRefusal(
+    deps: ActionExecutionDeps,
+    actionDef: any,
+    ec: any,
+    objectName?: string,
+): ActionPermissionRefusal | null {
+    const message = actionPermissionError(deps, actionDef, ec, objectName);
+    return message ? { code: standardErrorCodeForHttpStatus(403), status: 403, message } : null;
+}
+
+/**
  * [ADR-0126 §8 item 2] The activation refusal a DISABLED packaged action is
  * answered with — `409 ACTION_DISABLED`.
  *
@@ -1380,6 +1415,32 @@ function unresolvedApiTargetRecordRefusal(name: string, target: string, missing:
 }
 
 /**
+ * [#29881] The refusal for an action declared `execution: 'perRecord'` called
+ * with no record id (an empty one is none): `undefined` when the action is not
+ * declared per-record, or an id was given. The declaration is the action's own
+ * statement that its body runs on ONE record (`ActionSchema.execution`), so a
+ * call naming none is refused at the door, naming `recordId`, before anything
+ * runs — the #28932 shape, read from the declaration instead of a `target`
+ * token. Without it the body ran and failed on its own: a flow endpoint
+ * answered `400 FLOW_FAILED` naming the flow's internal node.
+ *
+ * Read by the api arm ({@link buildApiActionRequest}) and the flow arm
+ * ({@link dispatchFlowAction}); both doors reach both. An `aggregate` action,
+ * or one that declares no `execution`, runs record-less as before (#29173).
+ */
+export function perRecordActionRecordIdRefusal(action: any, recordId: unknown): ApiActionRequestRefusal | undefined {
+    if (action?.execution !== 'perRecord') return undefined;
+    if (recordId !== undefined && recordId !== null && recordId !== '') return undefined;
+    const name: string = action?.name ?? 'unknown';
+    return {
+        status: 400,
+        message:
+            `Action '${name}' is declared \`execution: 'perRecord'\` — it runs on one record — and no \`recordId\` was given. ` +
+            `Pass the id of the record to run it on as \`recordId\`. Nothing was run.`,
+    };
+}
+
+/**
  * Assemble the request a same-origin `type: 'api'` action makes — method,
  * path and JSON body — from its DECLARATION and the dispatch inputs, by the
  * same rules the console's api handler applies at a click
@@ -1428,6 +1489,10 @@ export function buildApiActionRequest(
     // An empty id is no id: `${ctx.recordId}` and `{id}` stay unresolved, and
     // are refused below by name, rather than blanked into a path naming no record.
     const routedRecordId: unknown = input.recordId || (input.record as any)?.id || undefined;
+    // [#29881] A per-record action names its record whatever its `target`
+    // says: with none, nothing is forwarded.
+    const perRecordRefusal = perRecordActionRecordIdRefusal(action, routedRecordId);
+    if (perRecordRefusal) return perRecordRefusal;
     let path = substituteApiTargetTokens(target, {
         param: input.params,
         ctx: {
@@ -1564,9 +1629,10 @@ function isIdentityRouteTarget(path: string): boolean {
  * envelope carries its `oauthScopes`; such a token is honoured on the MCP
  * endpoint alone), else what the door's admission recorded — `api_key` or
  * `session`. `undefined` when the door recorded nothing (an anonymous caller,
- * whom the door's own floor answers first).
+ * whom the door's own floor answers first). The one reading is
+ * {@link admittingCredentialKind}, which the environment-membership gate takes too.
  */
-export type ApiForwardCredentialKind = 'session' | 'api_key' | 'oauth';
+export type ApiForwardCredentialKind = AdmittingCredentialKind;
 
 /** Which kind of door an api action's `target` is served by, for the forward. */
 export type ApiForwardTargetDoor = 'identity' | 'mcp' | 'platform';
@@ -1655,8 +1721,7 @@ export function apiForwardAgentOf(requestContext: HttpProtocolContext | undefine
 
 /** The kind of credential that admitted this request's caller (see {@link ApiForwardCredentialKind}). */
 export function apiForwardCredentialKind(requestContext: HttpProtocolContext | undefined): ApiForwardCredentialKind | undefined {
-    if (Array.isArray(requestContext?.executionContext?.oauthScopes)) return 'oauth';
-    return requestContext?.admission?.credential;
+    return admittingCredentialKind(requestContext);
 }
 
 /**
@@ -2586,6 +2651,14 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     },
 ): Promise<any> {
     const { objectName, subject, params, recordId, ec, envId } = wiring;
+    // [#29881] A per-record flow action with no record id is refused before
+    // the flow starts: no run exists, and no node's diagnostic reaches the caller.
+    const perRecordRefusal = perRecordActionRecordIdRefusal(action, recordId);
+    if (perRecordRefusal) {
+        throw Object.assign(new Error(perRecordRefusal.message), {
+            code: standardErrorCodeForHttpStatus(perRecordRefusal.status), status: perRecordRefusal.status,
+        });
+    }
     const record = subject.record;
     const automation = await resolveAutomationService(deps, requestContext, envId);
     if (!automation) {
@@ -2677,10 +2750,21 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         // door's twin (`buildAutomationContext`): never re-derived or raised,
         // absent when the request carries none. See `AutomationContext.posture`.
         ...(typeof ec?.posture === 'string' && ec.posture.length > 0 ? { posture: ec.posture } : {}),
+        // [ADR-0151 D3] An AI service account's kind, the trigger door's twin
+        // (`buildAutomationContext`): the run carries the account's grants, so
+        // without the kind it would be evaluated as a person's (the member
+        // baseline, no agent ceiling). Only the account (`agent` with no
+        // `onBehalfOf`); an OAuth-delegated agent is forwarded as before.
+        ...(ec?.principalKind === 'agent' && !ec?.onBehalfOf ? { principalKind: 'agent' as const } : {}),
         // [#22450] The caller's already-resolved language, the trigger door's
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.
         ...(typeof ec?.locale === 'string' && ec.locale.length > 0 ? { locale: ec.locale } : {}),
+        // [#30213] The administrator an impersonation session names, the
+        // trigger door's twin (`buildAutomationContext`): attribution only, so
+        // the flow's own writes record who was at the keyboard. Absent on the
+        // user's own click. See `AutomationContext.impersonatedBy`.
+        ...(typeof ec?.impersonatedBy === 'string' && ec.impersonatedBy.trim() ? { impersonatedBy: ec.impersonatedBy.trim() } : {}),
         params: runParams,
         // [#19846] Which of those keys the CALLER supplied, stated here where it
         // is known rather than inferred downstream from the merged bag.
@@ -2872,7 +2956,9 @@ export function actionConfirmationRefusal(
     };
 }
 
-export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any, objectName: string, flow?: any): any {
+export function summarizeAction(
+    deps: ActionExecutionDeps, action: any, obj: any, objectName: string, flow?: any, objectOf?: ActionParamObjectLookup,
+): any {
     // [#15079] `operation` before `type`, on the LISTING face. A declarative
     // update always requires a current record — that is contract point 7, and
     // the executor refuses without one — so the answer cannot be left to
@@ -2890,7 +2976,7 @@ export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any
     const description =
         (typeof action?.ai?.description === 'string' ? action.ai.description : undefined) ??
         (typeof action?.label === 'string' ? action.label : undefined);
-    const params = summarizeActionParams(deps, action, obj, flow);
+    const params = summarizeActionParams(deps, action, obj, flow, objectOf);
     return {
         name: action.name,
         objectName,
@@ -2926,20 +3012,62 @@ export function jsonTypeOf(_deps: ActionExecutionDeps, t: string | undefined): '
     }
 }
 
-export function summarizeActionParams(deps: ActionExecutionDeps, action: any, obj: any, flow?: any): any[] {
-    const fields: Record<string, any> = obj?.fields ?? {};
+/**
+ * Resolves an object definition by name — the objects an action's
+ * `objectOverride` params name. `undefined` when there is no such object.
+ */
+export type ActionParamObjectLookup = (objectName: string) => any;
+
+/**
+ * [ADR-0106 D1 · ADR-0104 D2] The field one declared param binds: its `field`
+ * on the object the param names — the `objectOverride` object when one is
+ * named and `objectOf` resolves it, otherwise the action's own `obj`. A param
+ * whose `objectOverride` names an object `objectOf` does not resolve (or a
+ * call with no `objectOf`) keeps the own object's same-named field, the
+ * reading every caller had before the override was honoured here.
+ */
+function boundParamField(p: any, obj: any, objectOf?: ActionParamObjectLookup): any {
+    const fieldRef: unknown = p?.field;
+    if (typeof fieldRef !== 'string' || fieldRef === '') return undefined;
+    const override: unknown = p?.objectOverride;
+    if (typeof override === 'string' && override !== '' && objectOf) {
+        const target = objectOf(override);
+        if (target && typeof target === 'object') return target.fields?.[fieldRef];
+    }
+    return obj?.fields?.[fieldRef];
+}
+
+/**
+ * [#27948, #28266] The text of a param's `helpText` for the agent-facing tool
+ * schema: the bare string or the `template` envelope's `source`; else, for the
+ * inline locale map the slot also takes, its source-language entry through the
+ * shared `resolveI18nLabel` order (no locale ⇒ `en`, then `default`, then any
+ * entry). An envelope with no `source` is not a map, and gives nothing.
+ */
+function paramHelpText(value: unknown): string | undefined {
+    const source = templateSlotSource(value);
+    if (source !== undefined) return source;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    if ('dialect' in value || 'source' in value) return undefined;
+    return resolveI18nLabel(value as I18nLabel, undefined);
+}
+
+export function summarizeActionParams(
+    deps: ActionExecutionDeps, action: any, obj: any, flow?: any, objectOf?: ActionParamObjectLookup,
+): any[] {
     const out: any[] = [];
     for (const p of (Array.isArray(action?.params) ? action.params : [])) {
         const fieldRef: string | undefined = p?.field;
-        const field = fieldRef ? fields[fieldRef] : undefined;
+        const field = boundParamField(p, obj, objectOf);
         const name: string | undefined = p?.name ?? fieldRef;
         if (!name) continue;
         const type = jsonTypeOf(deps, p?.type ?? field?.type);
         const label = typeof p?.label === 'string' ? p.label : field?.label;
         // A param's `helpText` is a `template` slot (#27948, ruling A): the
         // parsed value is `{ dialect: 'template', source }`, so the tool
-        // schema reads its text, never the object.
-        const help = templateSlotSource(p?.helpText) ?? field?.description;
+        // schema reads its text, never the object — or an inline locale map
+        // (#28266), read in the platform's source language.
+        const help = paramHelpText(p?.helpText) ?? field?.description;
         const description = [label, help].filter(Boolean).join(' — ') || undefined;
         const optionSource = p?.options ?? field?.options;
         const enumVals = Array.isArray(optionSource)
@@ -3044,7 +3172,10 @@ function collectScreenFieldSpecs(flow: any): Map<string, any> {
  * options/required from the referenced object field; an inline param
  * carries them directly (inline overrides win). `obj` is the action's
  * parent object schema (holds `.fields`); pass `undefined` for a global
- * action with only inline params.
+ * action with only inline params. A param bound through `objectOverride`
+ * inherits from that object's field when `objectOf` resolves it
+ * ({@link boundParamField}); without `objectOf` — the run doors' call through
+ * {@link enforceActionParams} — it reads the own object's same-named field.
  *
  * ⛔ [#18199] THE `multiple` READ BELOW IS NOT THE MULTI-VALUE QUESTION — do not
  * "align" it on `isMultiValueField` because it matched a grep for
@@ -3062,12 +3193,13 @@ function collectScreenFieldSpecs(flow: any): Map<string, any> {
  * would stop carrying what the author wrote, and the predicate would then be
  * applied to its own output.
  */
-export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: any, obj: any): ResolvedActionParam[] {
-    const fields: Record<string, any> = obj?.fields ?? {};
+export function resolveDeclaredActionParams(
+    _deps: ActionExecutionDeps, action: any, obj: any, objectOf?: ActionParamObjectLookup,
+): ResolvedActionParam[] {
     const out: ResolvedActionParam[] = [];
     for (const p of (Array.isArray(action?.params) ? action.params : [])) {
         const fieldRef: string | undefined = p?.field;
-        const field = fieldRef ? fields[fieldRef] : undefined;
+        const field = boundParamField(p, obj, objectOf);
         const name: string | undefined = p?.name ?? fieldRef;
         if (!name) continue;
         out.push({
@@ -3667,6 +3799,88 @@ export function refuseDeniedSubjectLoad(
 }
 
 /**
+ * [#30848] The declarative update's object-level update refusal, judged before
+ * its subject-load verdict is: the data door's order, "the update is judged
+ * before the record is looked up" (`http-protocol.mdx`).
+ *
+ * ## What was wrong
+ *
+ * A caller who may read an object but holds no edit grant on it, writing a
+ * row their scope hides (or an id that names nothing), was answered
+ * `404 RECORD_NOT_FOUND` by a declarative `operation: 'update'` action,
+ * through REST `/actions` and MCP `run_action` both, while the data door
+ * answered the same write `403 PERMISSION_DENIED` (`PATCH /data`, MCP
+ * `update_record`). The action door consumed {@link refuseDeniedSubjectLoad}'s
+ * 404 first, so the write, which would have been refused for the object
+ * before any row was read, was never asked. On a row the caller can see, the
+ * write is asked and both doors already answered 403.
+ *
+ * ## The ask, and why it is not a second decision
+ *
+ * Asked only when the subject load was denied: on a delivered row the write
+ * below carries the caller's identity and the data plane answers its own
+ * refusal, the same one this ask stands in for. The question is the security
+ * service's `explain` for `update` on the object, the contract's "would the
+ * middleware allow this operation?" bottom line, computed by the enforcement
+ * walk and not re-derived here from permission sets (the REST import-template
+ * gate asks `create` the same way). ⛔ No row is named: the answer must not
+ * depend on whether the id names a row, or the door becomes an existence
+ * oracle.
+ *
+ * - `allowed` ⇒ no refusal here; the caller who may update the object keeps
+ *   the not-found answer, one answer for a hidden row and a missing id.
+ * - a denial, or an `explain` that throws ⇒ the data door's own refusal:
+ *   `403 PERMISSION_DENIED` with the middleware's user-facing sentence
+ *   (`permission_denied`, the caller's locale, the deployment's override).
+ *   A throw is a denial, never read as a grant.
+ * - no security service, or one without `explain` ⇒ no refusal here: no
+ *   permission set exists to deny with, as the data door. (A system context
+ *   is `explain`'s own bypass, as it is the middleware's: asked, not skipped.)
+ */
+export async function refuseUngrantedDeclarativeUpdate(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext | undefined,
+    objectName: string,
+    ec: any,
+    envId?: string,
+): Promise<void> {
+    let security: { explain?: (request: { object: string; operation: string }, context?: any) => Promise<{ allowed?: boolean } | undefined> } | undefined;
+    try {
+        security = await deps.resolveService(requestContext as HttpProtocolContext, 'security', envId);
+    } catch {
+        security = undefined;
+    }
+    if (!security || typeof security.explain !== 'function') return;
+    let allowed: boolean;
+    try {
+        allowed = (await security.explain({ object: objectName, operation: DECLARATIVE_UPDATE_OPERATION }, ec))?.allowed === true;
+    } catch {
+        allowed = false;
+    }
+    if (allowed) return;
+    let translate: ((key: string, locale: string, params?: Record<string, unknown>) => string) | undefined;
+    try {
+        const i18n: { t?: unknown } | null | undefined = await deps.resolveService(requestContext as HttpProtocolContext, 'i18n', envId);
+        if (i18n && typeof i18n.t === 'function') {
+            const t = i18n.t as (key: string, locale: string, params?: Record<string, unknown>) => string;
+            translate = (key, locale, params) => t.call(i18n, key, locale, params);
+        }
+    } catch {
+        translate = undefined;
+    }
+    const message = renderOperationMessage(
+        { messageKey: 'permission_denied' },
+        { locale: typeof ec?.locale === 'string' ? ec.locale : undefined, translate },
+    );
+    throw Object.assign(new Error(message), {
+        name: 'PermissionDeniedError',
+        code: 'PERMISSION_DENIED',
+        status: 403,
+        statusCode: 403,
+    });
+}
+
+/**
  * Contract point 3 as the two action doors' dispatch reads it, for every
  * branch: {@link refuseDeniedSubjectLoad}, except for a same-origin
  * `type: 'api'` forward that needs nothing from the row.
@@ -3715,10 +3929,19 @@ export function refuseDeniedSubjectLoadBeforeDispatch(
  * `type: 'api'` action (the doors refuse an off-origin one earlier) whose
  * request can be built without the row. A declarative update is never one,
  * whatever its `type` says: `operation` before `type`.
+ *
+ * [#29881] Nor is an action declared `execution: 'perRecord'`: it says it runs
+ * on that record, so a record the caller's scope does not resolve (an unknown
+ * id, or a row it cannot read: one answer, by design) gets the door's own
+ * `404 RECORD_NOT_FOUND` before anything runs, as a flow or script body does,
+ * instead of whatever its target's body made of the missing row (a flow
+ * endpoint answered `400 FLOW_FAILED` naming its internal node). The #28657
+ * approvals shape declares no `execution`, and keeps forwarding.
  */
 export function forwardsOnDeniedSubjectLoad(action: any): boolean {
     return !isDeclarativeUpdateAction(action)
         && action?.type === 'api'
+        && action?.execution !== 'perRecord'
         && isSameOriginApiTarget(action?.target)
         && !apiActionRequestReadsSubjectRow(action);
 }
@@ -3811,9 +4034,9 @@ export type FlowStartRecordKeys = ReadonlyArray<readonly [key: string, value: un
  *
  * The object the start names is not always the object the run reads. A flow's
  * own definition can state that it reads a start input as the id of a row of
- * a fixed object ({@link flowDeclaredRecordReads}: a CRUD node's `filter.id`,
- * a screen edit form's `recordId`, handed on through `subflow` and `map`
- * inputs). Every such input the start hands the run (`start.inputs`, the
+ * a fixed object ({@link flowDeclaredRecordReads}: the input's own
+ * `objectName` declaration, a CRUD node's `filter.id`, a screen edit form's
+ * `recordId`, handed on through `subflow` and `map` inputs). Every such input the start hands the run (`start.inputs`, the
  * `params` the run's input variables are bound from, row slots included) is
  * judged against THAT object too, by the same load and the same refusals: the
  * value must be one record id (a list of ids where the flow reads a list), or
@@ -4036,6 +4259,11 @@ function declarativeUpdateRefusal(message: string, status: number): Error {
  * inventing a 403 for the pair would answer a question the platform declines to
  * answer everywhere else. See the note on `loadActionSubjectRecord`.
  *
+ * [#30848] Except for a caller who may not update the OBJECT at all: the data
+ * door refuses that write `403` before it looks the record up, so the pair
+ * gets that 403 here too ({@link refuseUngrantedDeclarativeUpdate}), one
+ * answer for both members of the pair, and the pair stays undistinguished.
+ *
  * ## What is NOT checked here
  *
  * `visible` — contract point 6. It is a per-record UI predicate the client
@@ -4114,6 +4342,14 @@ export async function executeDeclarativeUpdateAction(
     // the flow door and the script/body door now call too. Behaviour here is
     // unchanged to the byte — what changed is that this is no longer the only
     // door that reads the verdict, so the rule cannot be inert two doors over.
+    //
+    // [#30848] …but the object-level update refusal comes first, as at the
+    // data door: a caller with no edit grant gets the write's 403 whether or
+    // not the id names a row it can read. Asked only on a denied load: a
+    // delivered row reaches the write below, which answers that 403 itself.
+    if (subject.recordLoadDenied) {
+        await refuseUngrantedDeclarativeUpdate(_deps, wiring.requestContext, objectName, ec, envId);
+    }
     refuseDeniedSubjectLoad(objectName, recordId, subject);
 
     // ── contract point 2: ONE data-plane update, AS THE CALLER ───────────────
@@ -4217,7 +4453,17 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // param on any action that declares params (and on a declarative update
     // that declares none, #24268), and silently accepted on a handler action
     // that declares none — one placement, two opposite behaviours.
-    input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
+    input: {
+        objectName?: string;
+        /**
+         * [ADR-0150 D5] The namespace of the package whose action is meant —
+         * the exact qualifier ({@link resolveActionByName}). Omitted, the bare
+         * name resolves as before.
+         */
+        namespace?: string;
+        recordId?: string;
+        params?: Record<string, unknown>;
+    } & AIActionConfirmation,
     wiring: {
         driver: any;
         envId?: string;
@@ -4242,8 +4488,20 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     const recordId = typeof input?.recordId === 'string' && input.recordId.length > 0 ? input.recordId : undefined;
 
     // Resolve the action def by declarative name (optionally scoped).
+    // [ADR-0150 D5] A namespace maps to its packages through the registry's
+    // namespace table (`getNamespaceOwners`), the table the install gate keeps.
+    const namespace = typeof input?.namespace === 'string' ? input.namespace : undefined;
+    let qualifier: { namespace: string; namespaceOwners: (namespace: string) => readonly string[] } | undefined;
+    if (namespace !== undefined) {
+        const registry: any = (await deps.getObjectQL(requestContext, envId).catch(() => undefined))?.registry;
+        qualifier = {
+            namespace,
+            namespaceOwners: (ns) => (typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(ns) : []),
+        };
+    }
+    const objectsListing = await readObjects?.();
     const resolved = await resolveActionByName(
-        deps, meta, name, input?.objectName, await readObjects?.(), await readActions?.(),
+        deps, meta, name, input?.objectName, objectsListing, await readActions?.(), qualifier,
     );
     if (!resolved) {
         throw new Error(
@@ -4252,7 +4510,25 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
                 : `Action '${name}' not found`,
         );
     }
-    const { action, objectName, obj } = resolved;
+    // [ADR-0150 D4] Set only for a qualified call: the resolved holder's
+    // package, whose handler the dispatch runs (the engine's package key).
+    const { action, packageId } = resolved;
+    let { objectName, obj } = resolved;
+    // [ADR-0150 D5, child G1] A qualified call on an object that reached the
+    // holder's OBJECT-LESS declaration (`addressedActionHits`' fallback) keeps
+    // the caller's object as its subject, as the REST door keeps the routed
+    // one (`resolveAddressedRouteActionDeclaration`): every gate below judges
+    // that object, the record id is loaded from it, and the handler runs under
+    // it. So `run_action(name, { namespace, objectName, recordId })` and
+    // `POST /actions/:ns/:object/:action/:recordId` are the same call. The bare
+    // arm has no fallback (it answers not-found), so this never fires on it.
+    const askedObject = typeof input?.objectName === 'string' && input.objectName !== '' ? input.objectName : undefined;
+    if (qualifier && askedObject && !isObjectLessActionKey(askedObject) && isObjectLessActionKey(objectName)) {
+        objectName = askedObject;
+        obj = (objectsListing ?? []).find((o: any) => o?.name === askedObject)
+            ?? (typeof meta?.getObject === 'function' ? await meta.getObject(askedObject) : undefined)
+            ?? obj;
+    }
 
     // Fail-closed on system-object actions, PER ACTION (#27681): a `sys_*`
     // action passes only on its author's `ai.exposed` opt-in, and every gate
@@ -4272,9 +4548,12 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     const exposureError = actionAiExposureError(deps, action, objectName);
     if (exposureError) throw new Error(exposureError);
 
-    // ADR-0066 D4 capability gate — same declaration the REST route enforces.
-    const gateError = actionPermissionError(deps, action, ec, objectName);
-    if (gateError) throw new Error(gateError);
+    // ADR-0066 D4 capability gate — same declaration the REST route enforces,
+    // thrown with the REST door's `403` and its standard code (#30771).
+    const gateRefusal = actionPermissionRefusal(deps, action, ec, objectName);
+    if (gateRefusal) {
+        throw Object.assign(new Error(gateRefusal.message), { code: gateRefusal.code, status: gateRefusal.status });
+    }
 
     // [ADR-0126 §8 item 2] ACTIVATION CONSULT — door 2 of 2. A packaged action
     // the installation switched off is refused here, before the param contract
@@ -4295,6 +4574,17 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         // gets a clean tool-error instead of a 500 (the #7535/#8055 shape).
         if (refusal) {
             throw Object.assign(new Error(refusal.message), { code: refusal.code, status: refusal.status });
+        }
+
+        // The handler the script dispatch below reaches may be one a DIFFERENT
+        // declared action owns: that owner's gates apply too, at the same
+        // point the REST `/actions` door asks the same function.
+        const ownerRefusal = await actionHandlerOwnerRefusal(deps, requestContext, {
+            ql: activationEngine, action, objectName, candidates: resolveActionHandlerKeys(action), ec, envId, obj,
+            ...(packageId !== undefined ? { packageId } : {}),
+        });
+        if (ownerRefusal) {
+            throw Object.assign(new Error(ownerRefusal.message), { code: ownerRefusal.code, status: ownerRefusal.status });
         }
     }
 
@@ -4365,6 +4655,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     try {
         answer = await dispatchAdmittedBusinessAction(deps, requestContext, name, {
             action, objectName, recordId, params, subject, ec, driver, envId, callData,
+            ...(packageId !== undefined ? { packageId } : {}),
         });
     } catch (err) {
         // [#28856] A refusal carrying the action's answer is answered as the
@@ -4422,9 +4713,15 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
         driver: any;
         envId?: string;
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: ExecutionContext) => Promise<any>;
+        /**
+         * [ADR-0150 D4] The package of the declaration a qualified call
+         * resolved ({@link invokeBusinessAction}): the engine runs that
+         * package's handler. Omitted, the unqualified handler, as before.
+         */
+        packageId?: string;
     },
 ): Promise<any> {
-    const { action, objectName, recordId, params, subject, ec, driver, envId, callData } = admitted;
+    const { action, objectName, recordId, params, subject, ec, driver, envId, callData, packageId } = admitted;
     const record = subject.record;
 
     // ── declarative update ── [#15079] BEFORE the `type` switch below, and
@@ -4548,7 +4845,14 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
     console.info(
         `[action-audit] MCP run_action '${action.name}' on '${objectName}' — body executes TRUSTED ` +
         `(system-elevated context, RLS/FLS-bypassing) for user '${ec?.userId ?? 'anonymous'}'` +
-        (ec?.principalKind === 'agent' ? ` (AGENT on behalf of '${ec?.onBehalfOf?.userId ?? 'unknown'}')` : ''),
+        // [ADR-0151 D3] An agent names a person it acts for only when it is
+        // OAuth-delegated; an AI service account is its own subject, so the
+        // user above IS the agent and no one stands behind it.
+        (ec?.principalKind === 'agent'
+            ? ec?.onBehalfOf
+                ? ` (AGENT on behalf of '${ec.onBehalfOf.userId ?? 'unknown'}')`
+                : ' (AGENT: an AI service account, acting for itself)'
+            : ''),
     );
     const actionContext: any = {
         record,
@@ -4573,10 +4877,21 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
     // [ADR-0110 D2] Handler-key derivation + the probe rotation are shared with
     // the REST `/actions` route — one addressing algorithm, not two.
     const dispatch = await executeRegisteredAction(
-        deps, ql, objectName, resolveActionHandlerKeys(action), actionContext,
+        deps, ql, objectName, resolveActionHandlerKeys(action), actionContext, packageId,
     );
     if (!dispatch.dispatched) {
-        throw new Error(`No handler registered for action '${name}' on '${objectName}'`);
+        // No key carried a handler: the routing miss the REST `/actions` door
+        // answers from its own branch (`domains/actions.ts`), thrown as that
+        // answer — its sentence, `404` and the closed code the status derives
+        // (`RESOURCE_NOT_FOUND`) — so `run_action`, which reads every throw
+        // through that door's reader (`actionsDoorAnswerOf`), answers it as
+        // the door does. Thrown uncoded ("No handler registered …"), the
+        // reader answered it as the door's `400 VALIDATION_ERROR` rejection,
+        // telling the agent its input was bad, and the invocation row recorded
+        // a `500`.
+        throw Object.assign(new Error(`Action '${name}' on object '${objectName}' not found`), {
+            code: standardErrorCodeForHttpStatus(404), status: 404,
+        });
     }
     // [#11519] Same doubled post-success-navigation diagnostic as the REST
     // seam — the defect is a property of the authored action + handler pair,
@@ -4601,19 +4916,178 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
     objectName?: string,
     objects?: readonly any[],
     actions?: readonly any[],
-): Promise<{ action: any; objectName: string; obj: any } | null> {
+    /**
+     * [ADR-0150 D5] The exact qualifier: the namespace of the package whose
+     * action is meant, mapped to its packages by `namespaceOwners` (the
+     * registry's `getNamespaceOwners`). Given, only those packages'
+     * declarations answer; a namespace no installed package has is refused
+     * by name. Omitted, the bare name resolves as below.
+     */
+    qualifier?: ActionAddressQualifier,
+): Promise<{ action: any; objectName: string; obj: any; packageId?: string } | null> {
     const decls = await collectActionDeclarations(deps, meta, objects, actions);
+    if (qualifier) {
+        return 'environment' in qualifier
+            ? resolveEnvironmentActionDeclaration(decls, name, objectName)
+            : resolveQualifiedActionDeclaration(decls, name, objectName, qualifier);
+    }
     if (objectName) {
-        const hit = decls.find((d) => d.objectName === objectName && d.action?.name === name);
-        return hit ? { action: hit.action, objectName, obj: hit.obj } : null;
+        const hits = decls.filter((d) => d.objectName === objectName && d.action?.name === name);
+        if (hits.length === 0) return null;
+        // [ADR-0150 D3] Two packages' object-less action of one name: R's rule
+        // for a caller with no package, never the first listed.
+        if (isObjectLessActionKey(objectName)) return pickActionHolder(hits, name, false);
+        // ⛔ An object-bound pair two packages bind to ONE object keeps today's
+        // answer (the first declaration): its no-package refusal is the action
+        // family's own card (ADR-0150 "Covered and uncovered types", record
+        // 6729825528), not this door's.
+        return { action: hits[0].action, objectName, obj: hits[0].obj };
     }
     const matches = decls.filter((d) => d.action?.name === name);
     if (matches.length === 0) return null;
-    if (matches.length > 1) {
+    const owners = [...new Set(matches.map((m) => m.objectName))];
+    if (owners.length > 1) {
         const where = matches.map((m) => m.objectName).join(', ');
         throw new Error(`Action '${name}' exists on multiple objects (${where}); pass objectName to disambiguate`);
     }
+    if (isObjectLessActionKey(owners[0])) return pickActionHolder(matches, name, false);
     return { action: matches[0].action, objectName: matches[0].objectName, obj: matches[0].obj };
+}
+
+type ActionDeclarationRow = Awaited<ReturnType<typeof collectActionDeclarations>>[number];
+
+/**
+ * [ADR-0150 D5] The exact qualifier of a by-name action call: an installed
+ * namespace, mapped to its packages by `namespaceOwners` (the registry's
+ * `getNamespaceOwners`), or the environment (`_env`), whose own declarations
+ * alone answer. The MCP `run_action` bridge passes the first; the REST
+ * `/actions` door passes either ({@link resolveAddressedRouteActionDeclaration}).
+ */
+export type ActionAddressQualifier =
+    | { namespace: string; namespaceOwners: (namespace: string) => readonly string[] }
+    | { environment: true };
+
+/**
+ * [ADR-0150 D3] One declaration among same-named declarations of ONE owner key
+ * (an object, or the object-less key), by R's rule for a caller with no
+ * package (`resolvePackageScopedHolders`, `@objectstack/core`): the
+ * environment's own declaration, else the one package holder, else a refusal
+ * naming every holder — `409 RESOURCE_CONFLICT` ({@link PackageScopedNameRefusedError}).
+ * `qualified` (the caller named a namespace) carries the holder's package to
+ * the dispatch, so that package's handler runs; a bare call carries none and
+ * dispatches unqualified, as before.
+ */
+function pickActionHolder(
+    hits: readonly ActionDeclarationRow[],
+    name: string,
+    qualified: boolean,
+): { action: any; objectName: string; obj: any; packageId?: string } {
+    const holdings: Array<readonly [string | null, ActionDeclarationRow]> = [];
+    const held = new Set<string | null>();
+    for (const hit of hits) {
+        const holder = hit.packageId ?? null;
+        if (held.has(holder)) continue; // one holder holds a name once: its first declaration
+        held.add(holder);
+        holdings.push([holder, hit]);
+    }
+    const resolution = resolvePackageScopedHolders<ActionDeclarationRow>(
+        { type: 'action', name, callerPackageId: null },
+        packageScopedHolderSource(holdings),
+        // A caller with no package is never asked for a closure.
+        () => new Set<string>(),
+    );
+    if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+    const hit = resolution.status === 'resolved' ? resolution.item : hits[0];
+    return {
+        action: hit.action, objectName: hit.objectName, obj: hit.obj,
+        ...(qualified && hit.packageId !== undefined ? { packageId: hit.packageId } : {}),
+    };
+}
+
+/**
+ * [ADR-0150 D5] `name` in the packages `qualifier.namespace` maps to — the
+ * exact qualifier, never a closure: only those packages' declarations are
+ * candidates, bound to `objectName` first and object-less after (the order
+ * the router reaches a handler in), and R's rule picks among them
+ * ({@link pickActionHolder}): one holder answers, two — a shareable
+ * namespace's co-owners (ADR-0150 D2) — are refused naming each.
+ *
+ * Refused by name, `404`: a namespace no installed package has, and a name
+ * its packages do not declare.
+ */
+function resolveQualifiedActionDeclaration(
+    decls: readonly ActionDeclarationRow[],
+    name: string,
+    objectName: string | undefined,
+    qualifier: { namespace: string; namespaceOwners: (namespace: string) => readonly string[] },
+): { action: any; objectName: string; obj: any; packageId?: string } {
+    const { namespace } = qualifier;
+    const owners = new Set(qualifier.namespaceOwners(namespace));
+    if (owners.size === 0) {
+        throw Object.assign(
+            new Error(`No installed package has the namespace '${namespace}'; list_actions names the namespace of each action`),
+            { code: standardErrorCodeForHttpStatus(404), status: 404 },
+        );
+    }
+    const inNamespace = decls.filter((d) => d.action?.name === name && d.packageId !== undefined && owners.has(d.packageId));
+    return pickActionHolder(addressedActionHits(inNamespace, name, objectName, `namespace '${namespace}'`), name, true);
+}
+
+/**
+ * [ADR-0150 D5, child G1] `name` among the environment's own declarations
+ * (`_env`): no package's declaration is a candidate, in the same order as a
+ * namespace ({@link addressedActionHits}). Refused by name, `404`, when the
+ * environment declares none.
+ */
+function resolveEnvironmentActionDeclaration(
+    decls: readonly ActionDeclarationRow[],
+    name: string,
+    objectName: string | undefined,
+): { action: any; objectName: string; obj: any; packageId?: string } {
+    const own = decls.filter((d) => d.action?.name === name && d.packageId === undefined);
+    return pickActionHolder(addressedActionHits(own, name, objectName, 'the environment'), name, false);
+}
+
+/**
+ * [ADR-0150 D5] The declarations an addressed call reaches among `inScope`
+ * (one namespace's, or the environment's): bound to `objectName` first and
+ * object-less after — the order the engine reaches a handler in
+ * (`actionHandlerObjectKeys`) and the REST door's bare read admits a
+ * declaration in (`resolveRouteActionDeclaration`), so a qualified call
+ * reaches exactly what the bare call reaches, narrowed to its holder.
+ * Refused by name, `404`, when none answers; with no `objectName`, a name
+ * bound to several objects asks for one.
+ */
+function addressedActionHits(
+    inScope: readonly ActionDeclarationRow[],
+    name: string,
+    objectName: string | undefined,
+    where: string,
+): ActionDeclarationRow[] {
+    let hits: ActionDeclarationRow[];
+    if (objectName && !isObjectLessActionKey(objectName)) {
+        const bound = inScope.filter((d) => d.objectName === objectName);
+        hits = bound.length > 0 ? bound : inScope.filter((d) => isObjectLessActionKey(d.objectName));
+    } else if (objectName) {
+        hits = inScope.filter((d) => isObjectLessActionKey(d.objectName));
+    } else {
+        hits = [...inScope];
+        const objects = [...new Set(hits.map((d) => d.objectName))];
+        if (objects.length > 1) {
+            throw new Error(
+                `Action '${name}' exists on multiple objects in ${where} (${objects.join(', ')}); pass objectName to disambiguate`,
+            );
+        }
+    }
+    if (hits.length === 0) {
+        throw Object.assign(
+            new Error(objectName
+                ? `Action '${name}' not found on object '${objectName}' in ${where}`
+                : `Action '${name}' not found in ${where}`),
+            { code: standardErrorCodeForHttpStatus(404), status: 404 },
+        );
+    }
+    return hits;
 }
 
 /**
@@ -4653,18 +5127,25 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
  * object-less action, and an authored one, were never listed nor resolved
  * while REST's `POST /actions/global/NAME` ran them; and an artifact
  * package's action outlived the package's disable there.
+ *
+ * [ADR-0150 D4] Each row carries `packageId`: the package that holds the
+ * declaration (a standalone item's `_packageId`, an embedded one's object's),
+ * absent for the environment's own. Two packages' standalone declarations of
+ * one key are BOTH rows — the key is `(package, objectName, name)` — so a name
+ * two packages hold is listed twice and resolved by the package rule
+ * ({@link resolveActionByName}), never by which one this walk met first.
  */
 export async function collectActionDeclarations(deps: ActionExecutionDeps, 
     meta: any,
     objects?: readonly any[],
     actions?: readonly any[],
-): Promise<Array<{ action: any; objectName: string; obj: any }>> {
+): Promise<Array<{ action: any; objectName: string; obj: any; packageId?: string }>> {
     const objs: readonly any[] = objects ?? (await meta?.listObjects?.()) ?? [];
     const objByName = new Map<string, any>();
     for (const obj of objs) {
         if (typeof obj?.name === 'string') objByName.set(obj.name, obj);
     }
-    const out: Array<{ action: any; objectName: string; obj: any }> = [];
+    const out: Array<{ action: any; objectName: string; obj: any; packageId?: string }> = [];
     const seen = new Set<string>();
     for (const obj of objs) {
         const objectName: string | undefined = obj?.name;
@@ -4672,7 +5153,8 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
         for (const action of Array.isArray(obj?.actions) ? obj.actions : []) {
             if (!action || typeof action.name !== 'string') continue;
             seen.add(`${objectName}:${action.name}`);
-            out.push({ action, objectName, obj });
+            const packageId = declaringPackageOf(action) ?? declaringPackageOf(obj);
+            out.push({ action, objectName, obj, ...(packageId !== undefined ? { packageId } : {}) });
         }
     }
     let standalone: readonly any[] = [];
@@ -4685,15 +5167,26 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
             standalone = []; // no standalone-item source on this metadata service
         }
     }
+    const seenStandalone = new Set<string>();
     for (const action of standalone) {
         if (!action || typeof action.name !== 'string') continue;
         const objectName = standaloneActionObjectName(deps, action);
         const key = `${objectName}:${action.name}`;
         if (seen.has(key)) continue; // object-embedded declaration wins
-        seen.add(key);
-        out.push({ action, objectName, obj: objByName.get(objectName) });
+        const packageId = declaringPackageOf(action);
+        // One holder's key once; another package's declaration of the key is its own row.
+        const holding = `${packageId ?? ''}\u0000${key}`;
+        if (seenStandalone.has(holding)) continue;
+        seenStandalone.add(holding);
+        out.push({ action, objectName, obj: objByName.get(objectName), ...(packageId !== undefined ? { packageId } : {}) });
     }
     return out;
+}
+
+/** [ADR-0150 D4] The package a declaration row is stamped with (`_packageId`), or `undefined` for none. */
+function declaringPackageOf(row: any): string | undefined {
+    const packageId = row?._packageId;
+    return typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
 }
 
 
@@ -4808,11 +5301,24 @@ export async function executeRegisteredAction(_deps: ActionExecutionDeps,
     objectName: string,
     candidates: string[],
     actionContext: any,
+    /**
+     * [ADR-0150 D4, #31673] The package coordinate of the declaration the
+     * caller resolved ({@link resolveRouteActionDeclaration}'s `packageId`):
+     * the engine then runs that package's handler under each probed key.
+     * Omitted, the call names no package — the engine's unqualified answer,
+     * unchanged.
+     */
+    packageId?: string,
 ): Promise<{ dispatched: boolean; result?: any }> {
     for (const obj of actionHandlerObjectKeys(objectName)) {
         for (const key of candidates) {
             try {
-                return { dispatched: true, result: await ql.executeAction(obj, key, actionContext) };
+                return {
+                    dispatched: true,
+                    result: await (packageId === undefined
+                        ? ql.executeAction(obj, key, actionContext)
+                        : ql.executeAction(obj, key, actionContext, { packageId })),
+                };
             } catch (err: any) {
                 if (!isActionNotRegisteredError(err)) throw err; // real handler failure → surface
             }
@@ -4835,7 +5341,8 @@ export async function executeRegisteredAction(_deps: ActionExecutionDeps,
  * MCP `list_actions` used to admit a script action on its declaration alone
  * (`target || body`), so a declaration nothing had bound — measured: an
  * `os package install`ed package, before its bodies were bound — was listed
- * and then refused by `run_action` with "No handler registered".
+ * and then refused by `run_action` (then "No handler registered"; now the
+ * coded routing miss REST `/actions` answers, `404`).
  *
  * An engine that cannot enumerate its handlers (no `listRegisteredActions`)
  * answers `false` for everything: the listing then cannot vouch for any script
@@ -4861,6 +5368,380 @@ export function registeredActionHandlerProbe(_deps: ActionExecutionDeps,
     };
 }
 
+
+/**
+ * The handler ENTRY a script dispatch for `(objectName, candidates)` reaches:
+ * the first `object:key` pair of {@link executeRegisteredAction}'s rotation
+ * that the engine's registry holds, read from `registered` (one snapshot of
+ * `listRegisteredActions()` as a `Set` of `object:key`). `undefined` = the
+ * dispatch reaches nothing.
+ */
+function reachedHandlerEntry(registered: ReadonlySet<string>, objectName: string, candidates: string[]): string | undefined {
+    for (const obj of actionHandlerObjectKeys(objectName)) {
+        for (const key of candidates) {
+            if (registered.has(`${obj}:${key}`)) return `${obj}:${key}`;
+        }
+    }
+    return undefined;
+}
+
+/** True when a declaration is dispatched through the engine's handler registry. */
+function dispatchesThroughHandlerRegistry(action: any): boolean {
+    return !isDeclarativeUpdateAction(action) && (action?.type ?? 'script') === 'script';
+}
+
+/** The refusal {@link actionHandlerOwnerRefusal} answers — the ADR-0112 envelope's three fields. */
+export interface ActionHandlerOwnerRefusal {
+    code: string;
+    status: number;
+    message: string;
+}
+
+/** The one protocol verb {@link collectHandlerOwnerCandidates} reads: the merged listing `GET /api/v1/meta/TYPE` serves. */
+type HandlerOwnerListingRead = Partial<Pick<MetadataProtocol, 'getMetaItems'>>;
+
+/**
+ * Every declaration that could own an entry under `entryObjectKey`, as
+ * `{ action, objectName }` rows: each source a declaration is resolved from
+ * on either door, read in full, so a declaration missing from one of them is
+ * still found in another. More rows can only add gates.
+ *
+ *  - object-embedded `actions[]` — of the routed object alone when the entry
+ *    lives under a real object key (only that object's declarations rotate
+ *    to it, {@link actionHandlerObjectKeys}), of every object when the entry
+ *    is object-less: the door's resolved definition, the engine's schema, and
+ *    for an object-less entry the protocol's merged listing (or the metadata
+ *    service's) and the engine registry's;
+ *  - standalone `action` items — the protocol's merged listing (or the
+ *    metadata service's `loadMany`), and the engine registry's, a disabled
+ *    package's items included.
+ *
+ * The engine's own copies are in memory and always read. The metadata plane's
+ * listings are read beside them, and a plane listing that throws is REPORTED
+ * (`planeError`), never read as "no rows": the caller decides whether the
+ * entry it judges can have an owner the engine's copies do not hold.
+ */
+async function collectHandlerOwnerCandidates(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: { ql: any; entryObjectKey: string; routedObjectName: string; routedObject?: any; envId?: string },
+): Promise<{ rows: Array<{ action: any; objectName: string }>; planeError?: unknown }> {
+    const { ql, entryObjectKey, routedObjectName, routedObject, envId } = args;
+    const protocol = await deps.resolveService(requestContext, 'protocol', envId) as HandlerOwnerListingRead | undefined;
+    const meta = await deps.resolveService(requestContext, 'metadata', envId);
+    let planeError: unknown;
+    const fromPlane = async (read: () => Promise<any[] | undefined>): Promise<any[]> => {
+        try {
+            return (await read()) ?? [];
+        } catch (err) {
+            planeError ??= err;
+            return [];
+        }
+    };
+    const mergedListing = async (type: 'object' | 'action'): Promise<any[] | undefined> => {
+        if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
+        const answer: unknown = await protocol.getMetaItems({ type });
+        if (Array.isArray(answer)) return answer;
+        const items = (answer as { items?: unknown } | null | undefined)?.items;
+        return Array.isArray(items) ? items : [];
+    };
+    const registryListing = (type: 'object' | 'action'): any[] => {
+        const registry: any = ql?.registry;
+        if (type === 'object') return typeof registry?.getAllObjects === 'function' ? (registry.getAllObjects() ?? []) : [];
+        return typeof registry?.listItems === 'function'
+            ? (registry.listItems('action', undefined, { includeDisabledPackages: true }) ?? [])
+            : [];
+    };
+
+    const objects: any[] = [];
+    if (routedObject) objects.push(routedObject);
+    if (typeof ql?.getSchema === 'function') {
+        const schema = ql.getSchema(routedObjectName);
+        if (schema) objects.push(schema);
+    }
+    if (isObjectLessActionKey(entryObjectKey)) {
+        objects.push(...registryListing('object'));
+        objects.push(...await fromPlane(async () => (await mergedListing('object')) ?? (await meta?.listObjects?.())));
+    }
+
+    const standalone: any[] = [
+        ...registryListing('action'),
+        ...await fromPlane(async () => (await mergedListing('action')) ?? (await meta?.loadMany?.('action'))),
+    ];
+
+    const rows: Array<{ action: any; objectName: string }> = [];
+    for (const obj of objects) {
+        const objectName: unknown = obj?.name;
+        if (typeof objectName !== 'string' || objectName === '') continue;
+        for (const action of Array.isArray(obj?.actions) ? obj.actions : []) {
+            if (action && typeof action.name === 'string') rows.push({ action, objectName });
+        }
+    }
+    for (const action of standalone) {
+        if (action && typeof action.name === 'string') rows.push({ action, objectName: standaloneActionOwnerKey(action) });
+    }
+    return planeError === undefined ? { rows } : { rows, planeError };
+}
+
+/**
+ * The package label the engine plugin's authored-action resync registers a
+ * metadata-plane action's handler under (`ObjectQLPlugin`'s
+ * `resyncAuthoredActionsNow`, `registerAction(…, 'metadata-service')`). An
+ * entry carrying it was built from a plane row, so the declarations that own
+ * it are plane rows, which the engine's in-memory copies need not hold.
+ */
+const PLANE_AUTHORED_HANDLER_PACKAGE = 'metadata-service';
+
+/**
+ * [ADR-0066 D4 · ADR-0126 §8 item 2 · ADR-0110 D2] An action whose dispatch
+ * reaches a handler that a DIFFERENT declared action owns also answers with
+ * that owner's gates: its `requiredPermissions` (403 `PERMISSION_DENIED`) and
+ * its activation-ledger switch (409 `ACTION_DISABLED`), on top of the invoked
+ * declaration's own, which the door has already applied. The sets are unioned,
+ * so this only ever narrows who may run a handler — the reading
+ * `content/docs/ui/actions.mdx` already gives a `flow` action, which inherits
+ * its target flow's `requiredPermissions`.
+ *
+ * ## Owner = the entry the declaration's own dispatch reaches
+ *
+ * ADR-0110 D2 makes a handler KEY an addressing fact, not an identity — so
+ * ownership is read at the handler ENTRY the dispatch actually reaches
+ * (`object:key`, one snapshot of `listRegisteredActions()`, walked in
+ * {@link executeRegisteredAction}'s own rotation), never at every key a
+ * declaration names. A declared `script` action owns the entry ITS OWN
+ * dispatch would reach. Consequences, each pinned by
+ * `domains/action-handler-owner-gates.test.ts`:
+ *
+ *  - a declaration is one identity — its owning object key and its name — so
+ *    the same declaration reaching the population twice (object-embedded and
+ *    as a standalone copy) is the invoked one, not a second owner;
+ *  - two objects that each declare a same-named action are not coupled while
+ *    each has its own entry: each declaration's dispatch stops at its own
+ *    object's key before the object-less one;
+ *  - only `script` declarations dispatch through the registry, so a `flow`,
+ *    `api` or declarative-update declaration owns no entry, and an invocation
+ *    of one is not judged here.
+ *
+ * ## Where it sits
+ *
+ * Both doors call it right after their own D4 gate and activation consult,
+ * ahead of the param contract, the subject-record load and dispatch: a
+ * refused call reads no row and runs nothing. Owner permissions are judged
+ * before owner switches, the doors' own order, so the switch is no oracle to
+ * a caller the owner would refuse. The REST `/actions` door maps the refusal
+ * onto its envelope; the MCP `run_action` bridge throws it with `code` and
+ * `status`.
+ *
+ * ## An unreadable metadata plane
+ *
+ * The owners are read from the engine's in-memory copies and from the plane's
+ * listings ({@link collectHandlerOwnerCandidates}). The plane being down
+ * adds no dependency to a call whose handler a package or code registered:
+ * its owners are declarations the engine holds. Only an entry the
+ * authored-action resync built for ANOTHER plane declaration is refused
+ * 503 while the plane cannot be read — the one case where the owner's gates
+ * live nowhere else.
+ *
+ * `candidates` are the handler keys the door hands {@link executeRegisteredAction},
+ * so the entry judged here is the one the dispatch reaches. An engine that
+ * cannot enumerate its handlers (no `listRegisteredActions`) names no entry,
+ * and this answers `undefined`.
+ */
+export async function actionHandlerOwnerRefusal(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: {
+        ql: any;
+        action: any;
+        objectName: string;
+        candidates: string[];
+        ec: any;
+        envId?: string;
+        /** The routed object's definition, as the door resolved it. */
+        obj?: any;
+        /**
+         * [ADR-0150 D4, #31673, review 6729902179 F2] The package coordinate
+         * the dispatch names ({@link executeRegisteredAction}'s `packageId`):
+         * the handler judged is the one that call runs, read from the engine's
+         * package-keyed listing. Omitted: the unqualified slot, as before.
+         */
+        packageId?: string;
+    },
+): Promise<ActionHandlerOwnerRefusal | undefined> {
+    const { ql, action, objectName, candidates, ec, envId, obj, packageId } = args;
+    if (!dispatchesThroughHandlerRegistry(action)) return undefined;
+    if (!ql || typeof ql.listRegisteredActions !== 'function') return undefined;
+
+    const registered = new Set<string>();
+    const packageOf = new Map<string, string | undefined>();
+    const coordinateOf = new Map<string, string | undefined>();
+    const listing = (packageId === undefined ? ql.listRegisteredActions() : ql.listRegisteredActions({ packageId })) as
+        Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }>;
+    for (const row of listing) {
+        registered.add(`${row.objectName}:${row.actionName}`);
+        packageOf.set(`${row.objectName}:${row.actionName}`, row.package);
+        coordinateOf.set(`${row.objectName}:${row.actionName}`, row.coordinate);
+    }
+    const entry = reachedHandlerEntry(registered, objectName, candidates);
+    if (!entry) return undefined;
+
+    // The invoked declaration's identity: the routed object key when the routed
+    // object embeds that name (both doors resolve object-embedded first, so
+    // the invoked declaration IS that entry), else its own standalone owner
+    // key — an object-less item is routable at any object.
+    const embeddedInRouted = Array.isArray(obj?.actions)
+        && obj.actions.some((a: any) => a === action || (a && a.name === action?.name));
+    const invokedIdentity = `${embeddedInRouted ? objectName : standaloneActionOwnerKey(action)}:${action?.name}`;
+
+    const { rows: population, planeError } = await collectHandlerOwnerCandidates(deps, requestContext, {
+        ql, entryObjectKey: entry.slice(0, entry.indexOf(':')), routedObjectName: objectName, routedObject: obj, envId,
+    });
+    // A plane listing that could not be read leaves the engine's own copies,
+    // which hold every declaration a package or code registered a handler for.
+    // An entry built from a plane row is owned by the plane row it was built
+    // for (registered under that row's owner key and name): when that row is
+    // not the invoked declaration, its gates cannot be verified with the plane
+    // unread, and the call is refused rather than run ungated — ADR-0110 D3's
+    // posture for an unreadable plane.
+    if (planeError !== undefined && entry !== invokedIdentity
+        && packageOf.get(entry) === PLANE_AUTHORED_HANDLER_PACKAGE) {
+        const reason = planeError instanceof Error ? planeError.message : String(planeError);
+        return {
+            code: standardErrorCodeForHttpStatus(503),
+            status: 503,
+            message:
+                `Cannot verify which declared action owns the handler that action '${action?.name ?? 'unknown'}' ` +
+                `dispatches to — the metadata plane is unavailable (${reason}). ` +
+                'Refusing rather than running it ungated.',
+        };
+    }
+
+    // [ADR-0150 D4, #31673, review 6729902179 F2] A call naming its package
+    // runs a package's own handler (its slot, `app:<id>`, or an override bound
+    // at that package's coordinate): a declaration KNOWN to belong to another
+    // package (its `_packageId` stamp) reaches a different handler under the
+    // same key and owns none of this one. A declaration whose package is not
+    // known, and every declaration reaching a shared handler (host code, a
+    // plugin), still owns it, as on the unqualified path.
+    const dispatchedOwner = packageOf.get(entry);
+    const dispatchedPackage = packageId !== undefined && typeof dispatchedOwner === 'string' && dispatchedOwner.startsWith('app:')
+        ? coordinateOf.get(entry)
+        : undefined;
+    const ownsDispatched = (row: { action: any }): boolean => {
+        if (dispatchedPackage === undefined) return true;
+        const declared: unknown = row.action?._packageId;
+        return typeof declared !== 'string' || declared === '' || declared === dispatchedPackage;
+    };
+
+    const owners = new Map<string, { action: any; objectName: string }[]>();
+    for (const row of population) {
+        const identity = `${row.objectName}:${row.action.name}`;
+        if (identity === invokedIdentity) continue;
+        if (!ownsDispatched(row)) continue;
+        if (!dispatchesThroughHandlerRegistry(row.action)) continue;
+        if (reachedHandlerEntry(registered, row.objectName, resolveActionHandlerKeys(row.action)) !== entry) continue;
+        const copies = owners.get(identity) ?? [];
+        copies.push(row);
+        owners.set(identity, copies);
+    }
+    if (owners.size === 0) return undefined;
+
+    const via = `Action '${action?.name ?? 'unknown'}' on '${objectName}' dispatches to a handler`;
+    for (const copies of owners.values()) {
+        for (const owner of copies) {
+            const denied = actionPermissionError(deps, owner.action, ec, owner.objectName);
+            if (denied) {
+                return {
+                    code: standardErrorCodeForHttpStatus(403),
+                    status: 403,
+                    message: `${via} that action '${owner.action.name}' owns, so it is gated by that action too: ${denied}`,
+                };
+            }
+        }
+    }
+    for (const copies of owners.values()) {
+        const switchedOff = disabledActionRefusal(deps, ql, copies[0].action);
+        if (switchedOff) return switchedOff;
+    }
+    return undefined;
+}
+
+
+/** What {@link resolveRouteActionDeclaration} answers. */
+export interface RouteActionDeclaration {
+    action: any;
+    obj: any;
+    degraded?: boolean;
+    reason?: string;
+    /**
+     * [ADR-0150 D3, #31673] The caller's package resolved the name to no one
+     * declaration: every candidate named, nothing picked.
+     */
+    refusal?: PackageScopedRefusal;
+    /**
+     * [ADR-0150 D4, #31673] The package coordinate of the resolved
+     * declaration, for a caller that named its package: the handler the
+     * dispatch runs is that package's (`executeRegisteredAction`).
+     */
+    packageId?: string;
+}
+
+/** Does `ql.registry` carry the reads R's resolver needs? */
+function packageScopedRegistryOf(ql: any): PackageScopedRegistry | undefined {
+    const registry = ql?.registry;
+    return registry
+        && typeof registry.packageScopedHoldersOf === 'function'
+        && typeof registry.getPackageScopedItem === 'function'
+        && typeof registry.getEnvironmentScopedItem === 'function'
+        && typeof registry.getAllPackages === 'function'
+        && typeof registry.getPackage === 'function'
+        ? registry as PackageScopedRegistry
+        : undefined;
+}
+
+/**
+ * [ADR-0150 D3/D4, #31673] The declaration a caller of package
+ * `callerPackageId` means by `actionName` on `objectName`, resolved through R
+ * ({@link resolveActionByPackage}) over the registry's `action` items.
+ * `undefined` when no registry item holds the name — the object's own
+ * declared actions and the metadata plane's rows are then read by the rungs
+ * of {@link resolveRouteActionDeclaration}, as for any caller.
+ *
+ * A resolved package holder's item is read back through the protocol's
+ * execution face with that package as the qualifier, so a disabled package's
+ * item is withheld here exactly as the by-name read withholds it (#25308);
+ * the environment's own item through the same read, unqualified.
+ */
+async function resolveRouteActionByPackage(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: { ql: any; objectName: string; actionName: string; envId?: string; callerPackageId: string; obj: any },
+): Promise<RouteActionDeclaration | undefined> {
+    const { ql, objectName, actionName, envId, callerPackageId, obj } = args;
+    const registry = packageScopedRegistryOf(ql);
+    if (!registry) return undefined;
+    const resolution = resolveActionByPackage<any>(registry, { objectName, actionName, callerPackageId });
+    if (resolution.status === 'not-found') return undefined;
+    if (resolution.status === 'refused') return { action: undefined, obj, refusal: resolution };
+    const packageId = actionHolderCoordinate(resolution);
+    const protocol = await deps.resolveService(requestContext, 'protocol', envId) as ExposureDeclarationRead | undefined;
+    const byName = typeof protocol?.getMetaItemForExecution === 'function'
+        ? protocol.getMetaItemForExecution
+        : typeof protocol?.getMetaItem === 'function' ? protocol.getMetaItem : undefined;
+    if (!byName) return { action: resolution.item, obj, packageId };
+    let envelope: unknown;
+    try {
+        envelope = await byName.call(protocol, {
+            type: 'action', name: actionName,
+            ...(resolution.holder.kind === 'package' ? { packageId } : {}),
+        });
+    } catch (err: any) {
+        return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+    }
+    const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
+    const owner = item && typeof item === 'object' ? standaloneActionOwnerKey(item) : undefined;
+    const declared = item !== null && typeof item === 'object' && item.name === actionName
+        && (owner === objectName || isObjectLessActionKey(owner));
+    return { action: declared ? item : undefined, obj, packageId };
+}
 
 /**
  * Resolve the DECLARATION behind a `<object>/<action>` route pair — the
@@ -4892,9 +5773,18 @@ export function registeredActionHandlerProbe(_deps: ActionExecutionDeps,
  */
 export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
-    args: { ql: any; objectName: string; actionName: string; envId?: string },
-): Promise<{ action: any; obj: any; degraded?: boolean; reason?: string }> {
-    const { ql, objectName, actionName, envId } = args;
+    args: {
+        ql: any; objectName: string; actionName: string; envId?: string;
+        /**
+         * [ADR-0150 D3/D4, #31673] The package the caller belongs to — an app's
+         * navigation, a qualified address. Given, the declaration is the one
+         * {@link resolveActionByPackage} resolves for that package; omitted,
+         * the call names no package and resolves as it always has.
+         */
+        callerPackageId?: string;
+    },
+): Promise<RouteActionDeclaration> {
+    const { ql, objectName, actionName, envId, callerPackageId } = args;
 
     let obj: any;
     try {
@@ -4903,6 +5793,18 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
             ql?.registry?.getObject?.(objectName);
     } catch {
         obj = undefined; // schema unresolved → handler-only action
+    }
+
+    // [ADR-0150 D3/D4, #31673] A caller that names its package resolves the
+    // bare name by the ONE rule — its own package's declaration on this object
+    // (else object-less), else the unique holder in its declared closure, else
+    // a refusal naming every candidate — through R's resolver, never by the
+    // first match the rungs below take.
+    if (typeof callerPackageId === 'string' && callerPackageId !== '') {
+        const byPackage = await resolveRouteActionByPackage(deps, requestContext, {
+            ql, objectName, actionName, envId, callerPackageId, obj,
+        });
+        if (byPackage !== undefined) return byPackage;
     }
     const embedded = Array.isArray(obj?.actions)
         ? obj.actions.find((a: any) => a?.name === actionName)
@@ -4988,6 +5890,87 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     }
 
     return { action: undefined, obj, degraded, reason };
+}
+
+/**
+ * [commit e783e163d, #25120] One type's merged listing, as `GET /api/v1/meta/TYPE`
+ * reads it — or `undefined` when this host has no merged read to offer.
+ *
+ * The one place this package unwraps `getMetaItems`, shared by the MCP
+ * bridge's skill, object and action reads (`domains/mcp.ts`) and the REST
+ * `/actions` door's addressed call ({@link resolveAddressedRouteActionDeclaration}),
+ * so they cannot disagree about which answers they accept. Its three outcomes
+ * are the ones `readMergedSkillRows` (`domains/mcp.ts`) documents: `undefined` is STRUCTURAL absence (no
+ * protocol in the slot, or one without the list verb), and the caller answers
+ * from the metadata service exactly as before; a throw travels to the caller,
+ * ⛔ never a fallback to the un-merged read.
+ */
+export async function readMergedItems(
+    protocol: Pick<MetadataProtocol, 'getMetaItems'> | undefined | null,
+    type: 'skill' | 'object' | 'action' | 'dataset',
+): Promise<unknown[] | undefined> {
+    if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
+    const answer = await protocol.getMetaItems({ type });
+    // The declared `GetMetaItemsResponse` is `{ type, items }`, and the two
+    // other `getMetaItems` consumers in this package read `res.items` the same
+    // way. The bare-array arm matches what `packages/mcp` accepts for the stdio
+    // half of this same read: the slot is filled by name from a host-owned
+    // registry, and the two surfaces answering one question must not disagree
+    // about the shape they accept.
+    return Array.isArray(answer)
+        ? (answer as unknown[])
+        : Array.isArray(answer?.items)
+            ? answer.items
+            : [];
+}
+
+/**
+ * [ADR-0150 D5, child G1] Resolve the declaration behind an ADDRESSED
+ * `/actions` route — `/actions/:ns/:object/:action` or
+ * `/actions/_env/:object/:action` — through the same resolution the MCP
+ * `run_action` bridge's qualified call reads ({@link resolveActionByName}
+ * with its qualifier), over the same declarations: the protocol's merged
+ * object and action listings, which withhold a disabled package's
+ * (#25139, #25297), or the metadata service's on a host with none.
+ *
+ * Answers like {@link resolveRouteActionDeclaration}: the declaration and the
+ * holder's package coordinate; a `refusal` naming every holder (a shareable
+ * namespace's co-owners, ADR-0150 D2); `degraded` when the metadata plane
+ * could not answer (ADR-0110 D3). A namespace no installed package has, and a
+ * name its holder does not declare, are thrown `404` by name.
+ */
+export async function resolveAddressedRouteActionDeclaration(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: { ql: any; objectName: string; actionName: string; envId?: string; qualifier: ActionAddressQualifier },
+): Promise<RouteActionDeclaration> {
+    const { ql, objectName, actionName, envId, qualifier } = args;
+    let obj: any;
+    try {
+        obj =
+            (typeof ql?.getSchema === 'function' ? ql.getSchema(objectName) : undefined) ??
+            ql?.registry?.getObject?.(objectName);
+    } catch {
+        obj = undefined; // schema unresolved → handler-only action
+    }
+    try {
+        const protocol = await deps.resolveService(requestContext, 'protocol', envId);
+        const objects = await readMergedItems(protocol, 'object');
+        const actions = await readMergedItems(protocol, 'action');
+        const meta = objects !== undefined && actions !== undefined
+            ? undefined
+            : await deps.resolveService(requestContext, 'metadata', envId);
+        const resolved = await resolveActionByName(deps, meta, actionName, objectName, objects, actions, qualifier);
+        if (!resolved) return { action: undefined, obj };
+        return {
+            action: resolved.action,
+            obj: obj ?? resolved.obj,
+            ...(resolved.packageId !== undefined ? { packageId: resolved.packageId } : {}),
+        };
+    } catch (err: any) {
+        if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
+        if (err?.status === 404) throw err;
+        return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+    }
 }
 
 /**

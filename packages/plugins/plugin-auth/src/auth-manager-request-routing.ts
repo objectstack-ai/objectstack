@@ -66,6 +66,9 @@ import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { clientAddressStateEntries } from './request-client-address.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
+import { OAUTH_REVOKE_PATH } from './mcp-token-revocation.js';
+import { ssoCallbackOf } from './sso-oidc-refusal-cause.js';
+import type { ScimRequestScope } from './scim-connection-service.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -76,6 +79,7 @@ import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
  * why `routeOwnership` and `routeOwnershipFor` are accessors.
  */
 export interface RequestRoutingHost {
+  readonly config: AuthManager['config'];
   routeOwnership: AuthManager['routeOwnership'];
   routeOwnershipFor: AuthManager['routeOwnershipFor'];
   betterAuthEndpointPath: AuthManager['betterAuthEndpointPath'];
@@ -83,10 +87,12 @@ export interface RequestRoutingHost {
   getOrCreateAuth: AuthManager['getOrCreateAuth'];
   resolveClientAddress: AuthManager['resolveClientAddress'];
   runSubjectErasureAtomically: AuthManager['runSubjectErasureAtomically'];
+  answerOAuthTokenRevocation: AuthManager['answerOAuthTokenRevocation'];
+  runSsoCallback: AuthManager['runSsoCallback'];
 }
 
 /** The body of `AuthManager#handleRequest`; the method's docblock there is its contract. */
-export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
   // ADR-0069 D7 — the client address this request's sign-in audit stamps,
   // established ONCE, here, by the same trust rule the D5 allow-list judges
   // with (`resolveClientAddress`). Read before any rewrite below, and carried
@@ -208,6 +214,11 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEn
   // longer sign in. Nothing tells the operator, and there is no way back.
   const endpointPath = this.betterAuthEndpointPath(request);
 
+  // An enterprise SSO callback runs inside the refusal scope
+  // (`sso-oidc-refusal-cause.ts`): the OIDC callback puts the cause of a refused
+  // ID token on the redirect, and a refused SAML sign-in lands on the error URL.
+  const ssoCallback = ssoCallbackOf(endpointPath, request);
+
   // [#3653 / #14522] A SCIM protocol request (`/scim/v2/*`) runs inside
   // `scimRequestScope`, which is what makes the adapter's `transaction`
   // config open a REAL engine transaction around the vendor's provisioning
@@ -223,22 +234,63 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'betterAuthEn
   // so it is exactly as narrow as before — SCIM protocol requests only; the
   // non-SCIM flows keep their sequential posture, which the scoping note
   // records as load-bearing. Pinned by `scim-transaction-scope.test.ts`.
+  //
+  // [#31829] The same arm is where a REFUSED SCIM request is observed: it sees
+  // the vendor's final answer, and the scope object opened here is the one the
+  // bearer verifier filled with the connection. An answer of 400 or above is
+  // handed to the `audit` slot's `recordScimRefusal`, bounded and after the
+  // response (`scim-refusal-audit.ts`); the answer itself is unchanged.
   const runRequest = isScimProtocolPath(endpointPath)
     ? async (): Promise<Response> => {
         const { scimRequestScope } = await import('./scim-connection-service.js');
-        return scimRequestScope.run({ scim: true }, runHandler);
+        const scope: ScimRequestScope = { scim: true };
+        const scimResponse = await scimRequestScope.run(scope, runHandler);
+        if (scimResponse.status >= 400) {
+          const { observeScimRefusal } = await import('./scim-refusal-audit.js');
+          observeScimRefusal(
+            this.config.getAuditSink?.(),
+            scimResponse,
+            {
+              endpointPath,
+              method: request.method,
+              status: scimResponse.status,
+              ...(scope.connectionId
+                ? {
+                    connectionId: scope.connectionId,
+                    ...(scope.organizationId ? { organizationId: scope.organizationId } : {}),
+                  }
+                : { authorization: request.headers.get('authorization') }),
+              ...(clientAddress ? { clientAddress } : {}),
+            },
+            (line) => this.config.logger?.warn(line),
+          );
+        }
+        return scimResponse;
       }
-    : runHandler;
+    : ssoCallback !== undefined
+      ? (): Promise<Response> => this.runSsoCallback(ssoCallback, runHandler)
+      : runHandler;
+  // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` is answered a
+  // second time, AFTER the provider: the provider authenticates the client
+  // and answers first, unchanged, and the MCP access token it cannot revoke
+  // is revoked through its consent (`mcp-token-revocation.ts`). The request is
+  // cloned here, before the vendor reads its body, because the answer reads
+  // the token and the client credentials off the same request.
+  const revocationRequest =
+    endpointPath === OAUTH_REVOKE_PATH && request.method === 'POST' ? request.clone() : undefined;
   // [#24948] An organization delete is one unit of work on the same terms:
   // better-auth clears the caller's active organization and deletes the
   // members and invitations before the organization row, with no
   // transaction, and the engine's refusal on that last row used to leave the
   // organization standing with no owner.
-  const vendorResponse =
+  const providerResponse =
     endpointPath !== undefined &&
     (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
       ? await this.runSubjectErasureAtomically(runRequest)
       : await runRequest();
+  const vendorResponse = revocationRequest
+    ? await this.answerOAuthTokenRevocation(revocationRequest, providerResponse)
+    : providerResponse;
 
   // [#10349] The better-auth-native `/admin/` routes refuse an anonymous
   // caller through the vendor's `adminMiddleware`

@@ -138,6 +138,15 @@ vi.mock('../../../runtime-config', () => ({
 // (`useInboxBell`); this harness serves no inbox feed, so the write is stubbed.
 vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead: vi.fn() }) }));
 
+// The deployment notice reads its own state from the server for an administrator
+// (objectstack#30120); its fetch, its gate and its copy are pinned in
+// `deployment-notice/__tests__/DeploymentNotice.test.tsx`, so it is stubbed here
+// like every other source this page reads.
+vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
+
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 
 /* ── The `_drafts` double (objectui#7307) ─────────────────────────────────────
@@ -167,7 +176,7 @@ import { HomePage } from '../HomePage';
  * byte-identical output to what these cases have always rendered, while a seeded
  * one would add a banner and a `pending-drafts-publish` button to every case's
  * tree. Routes are matched on the PATHNAME because the hook appends a
- * `?packageId=` scope for package-bound callers; the full URL is what gets
+ * `?package=` scope for package-bound callers; the full URL is what gets
  * recorded.
  * ─────────────────────────────────────────────────────────────────────────── */
 

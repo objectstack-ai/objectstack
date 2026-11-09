@@ -44,7 +44,8 @@
  * script) and by nothing else — a green vitest run says nothing about them.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -532,28 +533,97 @@ describe('the barrel is the sole entry into the module cycle', () => {
     ).toEqual([]);
   });
 
-  it('no module in this repository imports the deep module except the barrel', () => {
-    // A specifier, not a mention: `scripts/measure-strict-authoring-face.mjs`
-    // shares the words in its own name and must not read as an importer.
-    const REPO_ROOT = join(PACKAGE_ROOT, '..', '..');
+  /**
+   * The repository walk is a read of a tree OTHER processes are writing. tsup
+   * bundles each package's `tsup.config.ts` to a transient
+   * `tsup.config.bundled_<hash>.mjs` next to it and deletes it when the build
+   * ends, so a listing taken during a concurrent build can name a file that is
+   * gone by the time it is read (#30256: `Test UI (4/16)`, ENOENT). Two guards,
+   * as #20225 / #20269 placed them: the transient bundle is skipped by name, and
+   * a path that vanished between list and read (ENOENT only) is not counted.
+   * Every other read fault still throws — a guard wider than ENOENT would let
+   * an unreadable importer pass as an absent one.
+   */
+  const TSUP_BUNDLED_CONFIG = /\.bundled_[^./]+\.mjs$/;
+  const SPECIFIER = /(?:from|import|require)\s*\(?\s*['"][^'"]*strict-authoring-face[^'"]*['"]/;
+  const readIfPresent = (full: string): string | undefined => {
+    try {
+      return readFileSync(full, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
+      return undefined;
+    }
+  };
+  type Listing = (dir: string) => import('node:fs').Dirent[];
+  const listDir: Listing = (dir) => readdirSync(dir, { withFileTypes: true });
+  const scanForImporters = (
+    repoRoot: string,
+    roots: readonly string[],
+    list: Listing = listDir,
+  ): { importers: string[]; scanned: number } => {
     const SKIP = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', '.next', 'build', 'test-results']);
     const SOURCE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
-    const SPECIFIER = /(?:from|import|require)\s*\(?\s*['"][^'"]*strict-authoring-face[^'"]*['"]/;
     const importers: string[] = [];
     let scanned = 0;
     const walk = (dir: string): void => {
       let entries: import('node:fs').Dirent[];
-      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      try { entries = list(dir); } catch { return; }
       for (const entry of entries) {
         if (SKIP.has(entry.name)) continue;
         const full = join(dir, entry.name);
         if (entry.isDirectory()) { walk(full); continue; }
-        if (!SOURCE.test(entry.name)) continue;
+        if (!SOURCE.test(entry.name) || TSUP_BUNDLED_CONFIG.test(entry.name)) continue;
+        const text = readIfPresent(full);
+        if (text === undefined) continue;
         scanned += 1;
-        if (SPECIFIER.test(readFileSync(full, 'utf8'))) importers.push(full.slice(REPO_ROOT.length + 1));
+        if (SPECIFIER.test(text)) importers.push(full.slice(repoRoot.length + 1));
       }
     };
-    for (const root of ['packages', 'apps', 'examples', 'scripts', 'e2e']) walk(join(REPO_ROOT, root));
+    for (const root of roots) walk(join(repoRoot, root));
+    return { importers, scanned };
+  };
+
+  it('the repository walk survives a file that vanishes mid-walk, and still throws on any other read fault', () => {
+    // A real directory whose listing is doctored: it names a transient tsup
+    // bundle and an ordinary module, neither of which is on disk at read time.
+    // The fixture specifier is split so this file never reads as an importer.
+    const IMPORT_LINE = "import { x } from './strict-authoring" + "-face';\n";
+    const root = mkdtempSync(join(tmpdir(), 'saf-8345-walk-'));
+    try {
+      mkdirSync(join(root, 'pkg'));
+      writeFileSync(join(root, 'pkg', 'real.ts'), IMPORT_LINE);
+      const ghost = (name: string): import('node:fs').Dirent =>
+        ({ name, isDirectory: () => false }) as unknown as import('node:fs').Dirent;
+      const withGhosts: Listing = (dir) =>
+        dir.endsWith('pkg') ? [...listDir(dir), ghost('tsup.config.bundled_x.mjs'), ghost('vanished.ts')] : listDir(dir);
+
+      const result = scanForImporters(root, ['pkg'], withGhosts);
+      expect(result, 'only the file that exists is counted, and it is still found').toEqual({
+        importers: ['pkg/real.ts'],
+        scanned: 1,
+      });
+
+      // The transient bundle is skipped by NAME even when it is on disk and
+      // carries a specifier — it is a build by-product, never an importer.
+      writeFileSync(join(root, 'pkg', 'tsup.config.bundled_y.mjs'), IMPORT_LINE);
+      expect(scanForImporters(root, ['pkg']).importers).toEqual(['pkg/real.ts']);
+
+      // Any fault other than ENOENT still fails the walk: a directory listed as
+      // a file reads as EISDIR.
+      mkdirSync(join(root, 'pkg', 'odd.ts'));
+      const dirAsFile: Listing = (dir) =>
+        dir.endsWith('pkg') ? listDir(dir).map((e) => (e.name === 'odd.ts' ? ghost('odd.ts') : e)) : listDir(dir);
+      expect(() => scanForImporters(root, ['pkg'], dirAsFile)).toThrow(/EISDIR/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('no module in this repository imports the deep module except the barrel', () => {
+    // A specifier, not a mention: `scripts/measure-strict-authoring-face.mjs`
+    // shares the words in its own name and must not read as an importer.
+    const REPO_ROOT = join(PACKAGE_ROOT, '..', '..');
+    const { importers, scanned } = scanForImporters(REPO_ROOT, ['packages', 'apps', 'examples', 'scripts', 'e2e']);
 
     expect(scanned, 'the scan found almost no source files — it is pointed at the wrong tree').toBeGreaterThan(1000);
     expect(importers.sort(), 'something other than the barrel now enters the cycle at the deep module')

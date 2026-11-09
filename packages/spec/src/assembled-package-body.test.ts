@@ -83,6 +83,7 @@ const ARTIFACT_ENVELOPE_KEYS = [
   'appName',       // the deployment's product name — read off the top level by the boot's mail/auth wiring
   'email',         // the deployment's mail configuration — read off the top level when the boot builds the email provider
   'sms',           // the deployment's SMS configuration — read off the top level when the boot builds the SMS provider
+  'push',          // the deployment's push configuration — read off the top level when the boot builds the push provider
 ].sort();
 
 const shapeKeys = (schema: unknown): string[] =>

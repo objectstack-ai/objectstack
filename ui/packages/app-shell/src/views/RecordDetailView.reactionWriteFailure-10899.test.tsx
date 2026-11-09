@@ -316,7 +316,7 @@ describe('a failed reaction write does not stay shown as applied (objectui#10899
     const i18n = createI18n({
       defaultLanguage: 'zh',
       detectBrowserLanguage: false,
-      resources: { zh: builtInLocales.zh as unknown as Record<string, unknown> },
+      resources: { zh: builtInLocales['zh-Hans'] as unknown as Record<string, unknown> },
     });
     expect(i18n.language).toBe('zh');
     const addLabel = i18n.t('detail.addReaction');
@@ -340,7 +340,7 @@ describe('a failed reaction write does not stay shown as applied (objectui#10899
     expect(toast.error).toHaveBeenCalledTimes(1);
     const [message] = vi.mocked(toast.error).mock.calls[0];
     expect(message).toBe(i18n.t('detail.reactionFailed'));
-    expect(message).toBe((builtInLocales.zh as any).detail.reactionFailed);
+    expect(message).toBe((builtInLocales['zh-Hans'] as any).detail.reactionFailed);
     expect(message).not.toBe((builtInLocales.en as any).detail.reactionFailed);
   });
 });

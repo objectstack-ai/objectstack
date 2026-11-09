@@ -246,7 +246,7 @@ async function authenticate(live: LiveStart): Promise<string> {
  */
 function packageInstall(appDir: string, live: LiveStart): Promise<{ exit: number | null; output: string }> {
   return new Promise((done) => {
-    const child = spawn(process.execPath, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
+    const child = spawn(process.execPath, [CLI, 'package', 'install', './dist/objectstack.json', '--url', live.base, '--email', EMAIL, '--password', PASSWORD], {
       cwd: appDir,
       env: childEnv({ NO_COLOR: '1' }),
       stdio: ['ignore', 'pipe', 'pipe'],

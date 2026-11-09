@@ -92,6 +92,13 @@ export interface RunIdentityContext {
    * run, whose `isSystem` short-circuit precedes every reader of it.
    */
   posture?: AuthzPosture;
+  /**
+   * [ADR-0151 D3] `'agent'` when the acting user is an AI service account, the
+   * kernel `ExecutionContext.principalKind`: the security plugin then applies
+   * the agent ceiling and withholds the member baseline. Present on a
+   * `runAs:'user'` run whose setup seeded it ({@link runPrincipalKind}).
+   */
+  principalKind?: 'agent';
   /** Acting user's tenant/org id. */
   tenantId?: string;
   /**
@@ -101,6 +108,14 @@ export interface RunIdentityContext {
    * state that run itself opened (the approvals record lock).
    */
   flowRunId?: string;
+  /**
+   * The administrator who made the write that started this run from an
+   * impersonation session ({@link AutomationContext.impersonatedBy}), carried
+   * as the kernel `ExecutionContext.impersonatedBy` so the audit writer names
+   * them on the run's writes. Attribution only, like {@link flowRunId}: it
+   * neither widens nor narrows what the run may touch.
+   */
+  impersonatedBy?: string;
 }
 
 /**
@@ -203,6 +218,13 @@ export interface SeededRunContext extends AutomationContext {
    */
   posture?: AuthzPosture;
   /**
+   * [ADR-0151 D3] `'agent'` when the acting user is an AI service account, as
+   * the same resolver reports it (`resolveUserAuthzGrants`' `principalKind`).
+   * Seeded with the positions and permission sets, and removed with them by
+   * the decision switch: it is the acting user's fact.
+   */
+  principalKind?: 'agent';
+  /**
    * Who TRIGGERED the run, recorded when a human decision moved the run's
    * acting identity (`userId`) to the decider (ruling A on `FlowSchema.runAs`;
    * `AutomationEngine.resolveDecisionSegmentContext` is the only writer).
@@ -249,6 +271,15 @@ export function runOrgUserIds(context: AutomationContext | undefined): string[] 
 export function runPosture(context: AutomationContext | undefined): AuthzPosture | undefined {
   const parsed = AuthzPostureSchema.safeParse((context as SeededRunContext | undefined)?.posture);
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * [ADR-0151 D3] `'agent'` when run setup seeded the acting user as an AI
+ * service account ({@link SeededRunContext.principalKind}), `undefined` for a
+ * person.
+ */
+export function runPrincipalKind(context: AutomationContext | undefined): 'agent' | undefined {
+  return (context as SeededRunContext | undefined)?.principalKind === 'agent' ? 'agent' : undefined;
 }
 
 /**
@@ -330,6 +361,13 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   // The starter's language rides into every write, on both arms — see
   // RunDataContext.locale.
   const locale = typeof context?.locale === 'string' && context.locale.length > 0 ? context.locale : undefined;
+  // The administrator at the keyboard of the impersonation session whose write
+  // started this run, onto every write the run makes, on both arms — see
+  // RunIdentityContext.impersonatedBy.
+  const impersonatedBy =
+    typeof context?.impersonatedBy === 'string' && context.impersonatedBy.trim()
+      ? context.impersonatedBy.trim()
+      : undefined;
   if (context?.runAs === 'system') {
     // Name the flow as the acting service principal (`svc:flow:<name>`,
     // ADR-0014 D2) — the audit writer falls back to `session.actor` when
@@ -385,6 +423,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       ...(context.userId ? {} : { positions: [], permissions: [] }),
       ...(flowRunId ? { flowRunId } : {}),
       ...(locale ? { locale } : {}),
+      ...(impersonatedBy ? { impersonatedBy } : {}),
     });
   }
   if (!context?.userId) {
@@ -416,9 +455,11 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   if (context.email) out.email = context.email;
   const posture = runPosture(context);
   if (posture) out.posture = posture;
+  if (runPrincipalKind(context)) out.principalKind = 'agent';
   if (context.tenantId) out.tenantId = context.tenantId;
   if (flowRunId) out.flowRunId = flowRunId;
   if (locale) out.locale = locale;
+  if (impersonatedBy) out.impersonatedBy = impersonatedBy;
   return out;
 }
 

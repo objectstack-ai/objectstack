@@ -91,6 +91,11 @@
  * a derivation chosen for convenience would not cover the served path at all —
  * that is precisely the gap #17500's `io: 'input'` pin deliberately left open.
  */
+// `@objectstack/lint` is reached through the save door's author-time gate, a
+// dynamic `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
@@ -265,10 +270,12 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // [#28519] 51 → 52: `cancelText` (the dismiss button label of the
         // action's confirm or param dialog) joined the accepted set, and the
         // sample names it.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(52);
+        // [#31840] 52 → 53: `preflight` (the same-origin read the param dialog
+        // shows before submit) joined the accepted set, and the sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(53);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides', 'preflight']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
@@ -364,6 +371,8 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // lookup fills.
     // [#29171] `field` 81 → 82: `referenceNameVisible`, a lookup's declared
     // name exposure.
+    // [#30880] `field` 82 → 83: `renamedFrom`, the earlier key(s) a package
+    // upgrade carries a field's column from (cloud#3652 ruling D3).
     // [#28022] `app` 22 → 23: `landing`, the per-audience landing list.
     // [#28404] `app` 23 → 24, `dashboard` 20 → 21, `dataset` 16 → 17, `flow`
     // 22 → 23, `page` 26 → 27, `report` 23 → 24: `overrides`, the ADR-0146 D2
@@ -372,7 +381,7 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // gain it, and their counts stay.
     // [#28979] `page` 27 → 28: `apps`, the app scope of a record page.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 82, flow: 23,
+        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 83, flow: 23,
         hook: 23, object: 49, page: 28, position: 13, report: 24, skill: 16, tool: 14,
     };
 

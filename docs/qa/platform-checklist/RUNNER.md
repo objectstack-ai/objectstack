@@ -181,19 +181,41 @@ Standing facts about the stock showcase environment that have each cost a run a
 detour. They are briefing material, not verdicts — re-confirm one only when a run
 contradicts it, and correct it here when it does.
 
-- **`view` is in the overlay-allowed set, so authoring a view on the stock read-only
-  showcase package is NOT blocked and needs no escape hatch.** The org-overridable
-  types are derived from the metadata-type registry, not a hand-written list, and are
-  exactly **`view`, `dashboard`, `report`, `translation`, `email_template`**
-  (`packages/spec/src/kernel/metadata-plugin.zod.ts` — the `allowEnvironmentOverlay: true`
-  entries; pinned by `protocol.org-scoped-write-refused.test.ts` G5). So
-  `PUT /api/v1/meta/view/<name>` answers 2xx on stock showcase with no
-  `OS_METADATA_WRITABLE` and no `?package=` trick, while the same shape on `object`,
-  `field`, `hook`, `seed`, `mapping` or `flow` is refused. ⛔ Do not record a view
-  step as `blocked(environment)` on a "the showcase package is read-only" assumption:
-  read-only-ness is per metadata TYPE here, not per package, and the read-only-package
-  lock the console renders is a *different* gate (see
-  `access-security.readonly-package-locks-studio`).
+- **Customizing a view, dashboard, report, translation or email template the stock
+  showcase ships goes into its pair, `com.example.showcase.custom`; a package-less
+  write onto a shipped name is refused.** The five overlay types are derived from the
+  metadata-type registry, not a hand-written list: **`view`, `dashboard`, `report`,
+  `translation`, `email_template`** (`packages/spec/src/kernel/metadata-plugin.zod.ts`,
+  the `allowEnvironmentOverlay: true` entries; pinned by
+  `protocol.org-scoped-write-refused.test.ts` G5). Since ADR-0146 D11 a write naming no
+  package onto an item of one of them that the read-only showcase ships, such as
+  `PUT /api/v1/meta/view/showcase_task.done` with no `?package=`, answers **403
+  `NOT_OVERRIDABLE`**, whose sentence names the pair to save into
+  (`packagelessOverlayWriteRefusal`,
+  `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts`; QA run #29890
+  met it on a view and on an email template). The working recipe:
+  `POST /api/v1/packages/com.example.showcase/ensure-customization` (201 the first
+  time, 200 after), then `PUT /api/v1/meta/<type>/<name>?package=com.example.showcase.custom`
+  with the item's body plus `overrides: { package: 'com.example.showcase', basedOn: '0.1.0' }`;
+  revert with `DELETE /api/v1/meta/<type>/<name>?package=com.example.showcase.custom`.
+  A fresh name no package ships still writes package-less (200). The same shape on
+  `object`, `field`, `hook`, `seed`, `mapping` or `flow` stays refused as before.
+  ⛔ Do not record such a step as `blocked(environment)` on a "the showcase package is
+  read-only" assumption: the pair is the door, and the read-only-package lock the
+  console renders is a *different* gate (see `access-security.readonly-package-locks-studio`).
+
+- **A fresh organization's Home carries a first-run checklist for the administrator; no
+  dialog opens over any page.** Until objectstack#30206 a one-time "Set the default
+  currency" / system timezone dialog sat over the first page an administrator opened. It
+  is gone: the same questions are rows of a card at the top of `/home`
+  (`ui/apps/console/src/pages/settings/FirstRunChecklist.tsx`,
+  `data-testid="first-run-checklist"`), shown only to a session that may write
+  `localization`, and it writes nothing until a row's own Confirm. Studio, Setup and app
+  pages open with nothing in front of them. A screenshot of Home on a fresh DB shows the
+  card above the page's sections; its close button
+  (`data-testid="first-run-checklist-dismiss"`) hides it for that organization and user in
+  that browser's `localStorage` (`os:first-run-checklist:<org>:<user>`). ⛔ Do not score a
+  Home clause FAIL because the card pushes the page's sections down.
 
 - **`objectstack verify --rls` is a separate invocation — bare `verify` prints no RLS
   section at all.** `runRlsProofs` runs only behind the flag
@@ -460,30 +482,40 @@ contradicts it, and correct it here when it does.
      bearer seam. So a session driven with the localStorage token alone gets **401
      `AUTH_REQUIRED`** from `POST /api/v1/storage/upload/presigned` while
      `GET /auth/get-session` on the same page returns 200 — a convincing fake "avatar
-     upload is broken". The Setup app's **Packaged Automation** page (component ref
-     `automation:packaged`) needs it too: every request it makes, its
-     `GET /api/v1/automation/_status` and `GET /api/v1/meta/flow` loads and its toggle
-     and clone writes, is a bare `fetch` with `credentials: 'include'` and no
-     `Authorization` header (`ui/packages/app-shell/src/views/setup/PackagedAutomationPage.tsx`),
-     so a token-only session renders a load failure ending `HTTP 401` (`automation
-     status HTTP 401` or `flow metadata HTTP 401`, whichever load is refused first) in
-     the page's `role="alert"` box instead of the flow list (QA run #27409). ⛔ Do not
-     drive any storage/upload surface or the Packaged Automation page from an injected
-     token: **sign in through the form** so both halves exist.
+     upload is broken". The Setup app's **Packaged Actions** page (component ref
+     `automation:packaged-actions`) is built the same way: its `GET /api/v1/meta/object`
+     and `GET /api/v1/data/sys_metadata_activation` loads and its
+     `POST /api/v1/actions/_activation/<object>/<action>` toggle are bare `fetch`es with
+     `credentials: 'include'` and no `Authorization` header
+     (`ui/packages/app-shell/src/views/setup/PackagedActionsSection.tsx`), so a token-only
+     session should expect a load failure ending `HTTP 401` (`object metadata HTTP 401` or
+     `activation ledger HTTP 401`) in the page's `role="alert"` box instead of the action
+     list. That is read from source; QA run #27409 measured the shape on the Packaged
+     Automation page (`automation:packaged`), which retired with ADR-0146 D11: a bookmark of
+     `/apps/<app>/component/automation/packaged` now opens Studio's Automations pillar
+     (`packagedAutomationStudioPath`,
+     `ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts`), where a
+     packaged flow's switch and its New similar are. ⛔ Do not drive any storage/upload
+     surface or the Packaged Actions page from an injected token: **sign in through the
+     form** so both halves exist.
 
 - **A stock showcase boot refuses self-registration — no item can mint a member by
   "fresh sign-up".** The showcase declares no `auth.audience`, so its posture is the
   `invite_only` default (`packages/plugins/plugin-auth/src/audience-posture.ts`:
   `resolveAudience` — undeclared ⇒ `invite_only`; the migration entry
   `audience-posture-default-invite-only` records the flip), and
-  `POST /api/v1/auth/sign-up/email` for an address holding no pending invitation answers
-  **`403 SELF_REGISTRATION_CLOSED`** (`decideAudienceAdmission` in the same file; the code
+  `POST /api/v1/auth/sign-up/email` that presents no pending invitation — an address alone
+  included — answers **`403 SELF_REGISTRATION_CLOSED`** (`decideAudienceAdmission` in the same file; the code
   is in the ADR-0112 ledger, `error-code-ledger.zod.ts`). QA run #21056 met it on every
   member persona it needed. Two doors mint one instead:
-  1. **Invite, then sign up.** As admin, `POST /api/v1/auth/organization/invite-member`
-     with `{"email": "EMAIL", "role": "member"}`; a pending, unexpired `sys_invitation`
-     row for that address is what admits the following `sign-up/email`
-     (`packages/plugins/plugin-auth/src/auth-manager.ts`, `hasPendingInvitationFor`).
+  1. **Invite, then sign up presenting the invitation.** As admin,
+     `POST /api/v1/auth/organization/invite-member` with `{"email": "EMAIL", "role": "member"}`,
+     and keep the `id` it answers: the following `sign-up/email` sends it as `invitationId`
+     beside the email (`{"email": "EMAIL", "password": "…", "name": "…", "invitationId": "ID"}`).
+     Under `invite_only` a sign-up is admitted only by the invitation it presents, pending,
+     unexpired and addressed to that email
+     (`packages/plugins/plugin-auth/src/presented-invitation.ts`); the address alone answers
+     the same 403.
      ⚠️ **The sign-up does not apply the invitation's role.** It binds the new user to the
      Default Organization as `member` whatever role was invited, and leaves the invitation
      `pending` (`reconcileMembership` in
@@ -744,20 +776,14 @@ contradicts it, and correct it here when it does.
   no test is not a pass, and here it is not a stale ref either — re-run it under the other
   setting before fixing the item.
 
-- **`scripts/qa/qa-rollup.mjs` has two blind spots a runner meets at close-out.** (1) Only a
+- **`scripts/qa/qa-rollup.mjs` has a blind spot a runner meets at close-out.** Only a
   BARE area name classifies as an area: `classifySelector('platform-core')` answers `area`,
   while `area:platform-core` — the selector spelling `checklist-select.mjs` takes — answers
   `other`, so a record titled with it rolls up outside its area (16 records of 2026-10-16,
   #23926 among them, do). Title an area run with the bare name, `QA run · platform-core (…)`,
-  as this sweep's records do. (2) Behind this container's egress proxy the roll-up dies on
-  its second page: it follows GitHub's `Link: rel="next"`, which names
-  `https://api.github.com/repositories/<id>/issues?…`, the proxy refuses numeric-id paths
-  **403** ("Numeric-ID repository paths … are not supported through this proxy"), and
-  `fetchRunRecords` throws on any non-OK page — measured at `bfc1539fe0` with 130 `qa-run`
-  records, so page 1 (100) is all it reads. The same page asked for by number on the named
-  path, `repos/objectstack-ai/objectstack/issues?labels=qa-run&state=all&per_page=100&page=2`,
-  answers 200 (#24579 §6). ⛔ That 403 says nothing about access to the repository: run the
-  roll-up where the proxy is not in the path, or read the pages by number.
+  as this sweep's records do. Its second page is read on the named `repos/OWNER/REPO` path
+  (`onPathOf`), never the numeric `repositories/<id>` path GitHub's next link names, which
+  this container's egress proxy refuses 403 — a 403 there says nothing about repository access.
 
 - **A map view shows its records as a list under a "Map failed to load" banner here, because
   the default base style is unreachable — an environment fact, not a product defect.** The

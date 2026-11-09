@@ -134,13 +134,41 @@ describe('#8145: a settings write reaches sys_audit_log as config_change', () =>
       key: 'workspace_name',
       encrypted: false,
     });
-    // A digest, never the value — the ledger describes the change, not the data.
+    // [#30923] The after, readable — `workspace_name` is not secret-valued —
+    // beside its digest (ADR-0007 § Audit & history).
+    expect(JSON.parse(String(row.new_value))).toMatchObject({ value: WORKSPACE_NAME });
     expect(JSON.parse(String(row.new_value)).digest).toBeTruthy();
     // Generous timeout so a REGRESSION reports `waitForRows`'s own message
     // ("expected at least one config_change row…") rather than vitest's 5s
     // default cutting the poll short and reporting a timeout instead. Measured
     // on `origin/main`, where this case is red: with the default it failed as a
     // bare timeout, which names neither the object nor the filter.
+  }, 30_000);
+
+  it('[#30209] the config_change row names the settings row it changed, and the mirror\'s row about that row carries the value', async () => {
+    const [change] = await waitForRows(
+      async () =>
+        (await findRows(ql, 'sys_audit_log', { action: 'config_change' })).filter((r) =>
+          String(r.metadata ?? '').includes('"key":"workspace_name"'),
+        ),
+      (r) => r.length >= 1,
+      'expected the config_change row for workspace_name',
+    );
+    const settingRows = await findRows(ql, String(change.object_name), { namespace: 'branding', key: 'workspace_name' });
+    expect(settingRows).toHaveLength(1);
+    // The pointer pair: object_name names the store, record_id the row in it.
+    expect(change.record_id).toBe(String(settingRows[0].id));
+    // The record page's same-record list keys on record_id: beside the
+    // config_change row it finds the CRUD mirror's row about the same write.
+    // [#30923] Both now carry the non-secret value: the config_change row
+    // records it readable, as ADR-0007 § Audit & history decides.
+    const mirror = (await findRows(ql, 'sys_audit_log', { record_id: change.record_id })).filter((r) =>
+      ['create', 'update'].includes(String(r.action)),
+    );
+    expect(mirror.length).toBeGreaterThanOrEqual(1);
+    expect(mirror.every((r) => r.object_name === change.object_name)).toBe(true);
+    expect(mirror.some((r) => String(r.new_value ?? '').includes(WORKSPACE_NAME))).toBe(true);
+    expect(JSON.parse(String(change.new_value)).value).toBe(WORKSPACE_NAME);
   }, 30_000);
 
   it('the shipped `config_changes` list view — its OWN declared filter — now matches', async () => {

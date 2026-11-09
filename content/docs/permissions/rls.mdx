@@ -177,8 +177,8 @@ rows. Match on `id` or `email`, which are.
 Any other `current_user.KEY` is a **membership set**: a pre-resolved array that
 lets a policy express set membership without the subqueries the grammar doesn't
 allow. Declare it first — a `membershipKeys` entry on the **roster** object whose
-rows define the set names the user column (`userField`), the reference column
-whose values form the set (`valueField`) and an optional `filter` over the
+rows define the set names the user column (`userField`), the column whose
+values form the set (`valueField`: a reference column, or `id`) and an optional `filter` over the
 roster's own columns, and every policy reads the result as `current_user.KEY`:
 
 {/* os:check */}
@@ -218,6 +218,59 @@ installed plugin registers a membership resolver that supplies the key. A key
 both sources claim resolves from neither, and a key nothing supplies, or one
 over 1,000 values, matches no rows (fail closed).
 
+**When the person is a record.** HR, service-desk and portal apps often model
+the person as a row (an `employee`, an `agent`, a `customer`) with a user column
+pointing at the sign-in. Name `id`, the roster's own primary key, as
+`valueField`, and the set holds the ids of the caller's own rows of that object,
+"the records I am":
+
+{/* os:check */}
+```typescript
+import { ObjectSchema } from '@objectstack/spec/data';
+import { definePermissionSet } from '@objectstack/spec';
+
+// Roster: the person is a record, linked to the user who signs in
+export const Employee = ObjectSchema.create({
+  name: 'employee',
+  sharingModel: 'private',
+  fields: {
+    user: { type: 'user', required: true },
+  },
+  membershipKeys: {
+    my_employee_ids: { userField: 'user', valueField: 'id' },
+  },
+});
+
+export const LeaveRequest = ObjectSchema.create({
+  name: 'leave_request',
+  sharingModel: 'public_read',
+  fields: {
+    employee: { type: 'lookup', reference: 'employee', required: true },
+  },
+});
+
+export const EmployeeSelfService = definePermissionSet({
+  name: 'employee_self_service',
+  label: 'Employee Self-Service',
+  objects: { leave_request: { allowRead: true } },
+  rowLevelSecurity: [
+    { name: 'own_leave', object: 'leave_request', operation: 'select', using: 'employee in current_user.my_employee_ids' },
+  ],
+});
+```
+
+Such a key holds ids of the roster object itself, so a policy compares it with a
+column that references the roster (the leave request's `employee`) or with the
+roster's own `id`. Tested against a column that references another object, a
+column that is not a reference, or another object's `id`, the set could never
+match, and the policy is refused (`rls-predicate-membership-key-target`). The
+key grants nothing by itself: it yields only the rows whose `userField` is the
+caller, and what a policy lets through with it is the author's choice.
+`leave_request` is `public_read` so that the policy decides which rows the
+holder reads: RLS only narrows what the org-wide default already allowed, so
+under `private` it would narrow the employee's own rows, and a request someone
+else filed for them would stay hidden.
+
 ## How policies compose
 
 ```
@@ -239,7 +292,10 @@ Layer 1 (business RLS)       ─┘
 - A superuser bypasses business policies but **not** tenant isolation —
   crossing tenants requires a genuine platform admin.
 - Children of a master-detail parent with `sharingModel: 'controlled_by_parent'`
-  derive access from the master record instead.
+  derive access from the master record instead. A child whose master is
+  optional (`required: false`, ADR-0055 §1 as amended) and empty is read by its
+  owner and by View All on the child, and written by its owner and by Modify
+  All on the child.
 
 ## The fail-closed contract
 

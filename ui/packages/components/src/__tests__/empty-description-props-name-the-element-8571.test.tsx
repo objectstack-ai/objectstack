@@ -221,9 +221,11 @@ describe('objectui#8571 — the declared intrinsic is the rendered one, across s
   });
 
   it('finds the population (guards against a broken walk)', () => {
-    // 17 agreeing members plus the ledger at the time of writing; the floor is
-    // loose so adding or removing one wrapper does not fail the wrong assertion.
-    expect(ALL_MEMBERS.filter(judged).length).toBeGreaterThanOrEqual(12);
+    // 11 judged members since the unread `item.tsx` sub-parts were deleted
+    // (objectstack#25921). The floor stays above the seven-member
+    // `Empty` family, so a walk that reaches only `empty.tsx` still fails, and
+    // is loose so adding or removing one wrapper does not fail the wrong assertion.
+    expect(ALL_MEMBERS.filter(judged).length).toBeGreaterThanOrEqual(8);
   });
 
   it('every judged member under src/custom names the intrinsic it returns, except the ledgered cards', () => {

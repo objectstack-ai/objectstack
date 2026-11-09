@@ -266,6 +266,63 @@ import { ListView } from '@object-ui/plugin-list';
 />
 ```
 
+### Host props: `addedFields` and `onAddedFieldsChange`
+
+A host that lets a reader add fields to their own list wires
+`onAddedFieldsChange`. The Hide Fields popover (the toolbar's and the Display
+panel's section) then lists, after the view's columns, every other field of the
+object the reader may read and the definition does not mark `hidden`, unticked.
+Ticking one calls `onAddedFieldsChange` with the whole new list of added names;
+the host stores it as the reader's own and appends those fields to
+`schema.columns`, naming them in `addedFields`, so unticking an added column
+takes it off the list instead of hiding it. These are React props for the host
+app, not schema keys: list metadata cannot set them. Without
+`onAddedFieldsChange` the popover lists the view's columns alone. The console
+wires both on the object list page, where the added fields are kept with the
+reader's other list preferences and cleared by "Reset to view".
+
+```tsx
+import { ListView } from '@object-ui/plugin-list';
+
+// The view declares `name` and `amount`; the reader has added `owner`.
+<ListView
+  schema={{ type: 'list-view', objectName: 'deals', columns: ['name', 'amount', 'owner'] }}
+  addedFields={['owner']}
+  onAddedFieldsChange={(added) => console.log('Added:', added)}
+/>
+```
+
+### Host props: `page` and `onPageChange`
+
+A host that keeps the reader's page itself passes `page`, a whole number from
+1 up. The page is then controlled: the list reads it on every render and keeps
+no page of its own, and every move is a call to `onPageChange` that the host
+answers by passing the new value back. The list still decides when the page
+moves: the pager, back to page 1 when the object, filters, sort, search,
+grouping, page size or view change, and to the last reachable page when a load
+comes back empty past the end. A move to the page already shown calls nothing.
+Only the paged grid reads it; the other views fetch one window and draw no
+pager. These are React props for the host app, not schema keys. Without `page`
+the list keeps its page itself and starts at 1, and `onPageChange` only reports
+the move. The console keeps the page in the address, so Back from a record
+opened as a full page, a reload and a copied link land on it.
+
+```tsx
+import { useState } from 'react';
+import { ListView } from '@object-ui/plugin-list';
+
+function TaskList() {
+  const [page, setPage] = useState(1);
+  return (
+    <ListView
+      schema={{ type: 'list-view', objectName: 'tasks', columns: ['title', 'status'] }}
+      page={page}
+      onPageChange={setPage}
+    />
+  );
+}
+```
+
 ## Schema
 
 The ListView component accepts a `ListViewSchema`, exported from

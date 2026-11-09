@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { I18N_PROBE_FLAG } from '../i18n';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
+import { I18N_PROBE_FLAG, CJK_LATIN_SPACED_KEYS, spaceLatinValueFromCjk } from '../i18n';
 import {
   createI18n,
   getDirection,
@@ -47,16 +48,17 @@ describe('@object-ui/i18n', () => {
       const i18n = createI18n({ detectBrowserLanguage: false });
       const langs = getAvailableLanguages(i18n);
       expect(langs).toContain('en');
-      expect(langs).toContain('zh');
+      expect(langs).toContain('zh-Hans');
+      expect(langs).toContain('zh-Hant');
       expect(langs).toContain('ja');
       expect(langs).toContain('ko');
       expect(langs).toContain('de');
       expect(langs).toContain('fr');
       expect(langs).toContain('es');
-      expect(langs).toContain('pt');
+      expect(langs).toContain('pt-BR');
       expect(langs).toContain('ru');
       expect(langs).toContain('ar');
-      expect(langs.length).toBeGreaterThanOrEqual(10);
+      expect(langs.length).toBeGreaterThanOrEqual(11);
     });
 
     it('translates common keys in English', () => {
@@ -192,7 +194,7 @@ describe('@object-ui/i18n', () => {
       // prompt it sends into the thread after the reject. A translation the
       // gate read as approval would turn the operator's rejection into a
       // go-ahead in that thread.
-      for (const lang of ['en', 'zh', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar']) {
+      for (const lang of ['en', 'zh-Hans', 'zh-Hant', 'ja', 'ko', 'de', 'fr', 'es', 'pt-BR', 'ru', 'ar']) {
         const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
         const msg = i18n.t('console.ai.toolDenyReason');
         expect(msg, `${lang} toolDenyReason must not fall through to its raw key`).not.toBe(
@@ -411,8 +413,8 @@ describe('@object-ui/i18n', () => {
   });
 
   describe('builtInLocales', () => {
-    it('has 10 built-in language packs', () => {
-      expect(Object.keys(builtInLocales).length).toBe(10);
+    it('has one built-in language pack per platform locale tag', () => {
+      expect(Object.keys(builtInLocales)).toEqual([...PLATFORM_LOCALE_TAGS]);
     });
 
     it('all locales have the same top-level keys', () => {
@@ -546,5 +548,52 @@ describe('@object-ui/i18n', () => {
       i18n.t('another.missing.key');
       expect(warnSpy).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('zh titles space a Latin object name from the Han text around it (#30126 item 1)', () => {
+  const zh = () => createI18n({ defaultLanguage: 'zh', detectBrowserLanguage: false });
+
+  it('a Latin label is spaced from 新建 / 编辑 / 查看 / 修改', () => {
+    const i18n = zh();
+    expect(i18n.t('form.createTitle', { object: 'Repair Ticket' })).toBe('新建 Repair Ticket');
+    expect(i18n.t('form.editTitle', { object: 'Repair Ticket' })).toBe('编辑 Repair Ticket');
+    expect(i18n.t('form.viewTitle', { object: 'Repair Ticket' })).toBe('查看 Repair Ticket');
+    expect(i18n.t('console.ai.recordWriteCreateTitle', { object: 'Repair Ticket' })).toBe('新建 Repair Ticket');
+    expect(i18n.t('console.ai.recordWriteUpdateTitle', { object: 'Repair Ticket' })).toBe('修改 Repair Ticket');
+  });
+
+  it('a Chinese label keeps the pinned unspaced title', () => {
+    expect(zh().t('form.createTitle', { object: '维修工单' })).toBe('新建维修工单');
+  });
+
+  // objectstack#30511: both Chinese packs, booted by the platform locale
+  // table's tags rather than the `zh` alias above.
+  it.each(['zh-Hans', 'zh-Hant'] as const)('the %s pack spaces a Latin label the same way', (tag) => {
+    const title = String(builtInLocales[tag].form.createTitle);
+    expect(title.endsWith('{{object}}')).toBe(true);
+    const i18n = createI18n({ defaultLanguage: tag, detectBrowserLanguage: false });
+    expect(i18n.t('form.createTitle', { object: 'Repair Ticket' })).toBe(title.replace('{{object}}', ' Repair Ticket'));
+  });
+
+  it('is opt-in by key: a key outside the table renders as authored', () => {
+    expect(CJK_LATIN_SPACED_KEYS['form.createSuccess']).toBeUndefined();
+    expect(zh().t('form.createSuccess', { object: 'Repair Ticket' })).toBe('Repair Ticket创建成功');
+  });
+
+  it('touches no other language', () => {
+    const ja = createI18n({ defaultLanguage: 'ja', detectBrowserLanguage: false });
+    expect(ja.t('form.createTitle', { object: 'Repair Ticket' })).toBe('Repair Ticketを作成');
+    const en = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
+    expect(en.t('form.createTitle', { object: 'Repair Ticket' })).toBe('Create Repair Ticket');
+  });
+
+  it('spaces each side by its own edge character', () => {
+    expect(spaceLatinValueFromCjk('新建Repair Ticket', 'Repair Ticket')).toBe('新建 Repair Ticket');
+    expect(spaceLatinValueFromCjk('Repair Ticket创建成功', 'Repair Ticket')).toBe('Repair Ticket 创建成功');
+    expect(spaceLatinValueFromCjk('新建2026预算', '2026预算')).toBe('新建 2026预算');
+    expect(spaceLatinValueFromCjk('新建预算A', '预算A')).toBe('新建预算A');
+    expect(spaceLatinValueFromCjk('新建 Repair Ticket', 'Repair Ticket')).toBe('新建 Repair Ticket');
+    expect(spaceLatinValueFromCjk('新建“Repair Ticket”', 'Repair Ticket')).toBe('新建“Repair Ticket”');
   });
 });

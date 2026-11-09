@@ -128,10 +128,20 @@ export const AssignmentRuleEntrySchema = strictObject(
  * row's organization, or a failed read leaves the row ownerless (sitting in
  * the queue when one was chosen) and is logged once.
  *
- * Assignment rules are declared only (the stack's `assignmentRules`);
- * organization-authored rules are deferred (ADR-0142 merge question 11).
- * Switched off through the activation ledger (`sys_metadata_activation`,
- * `metadata_type: 'assignment_rule'`) or `active: false`.
+ * Two sources of rules combine. A package declares rules in the stack's
+ * `assignmentRules`, the shape below; an organization authors its own as
+ * `sys_assignment_rule` rows (one rule with one entry per row), which may not
+ * take a declared rule's name. For a row of an organization the engine tries
+ * that organization's active rows first, ascending by `sort_order` and then by
+ * name, and the declared rules after them, in registry order; across both,
+ * the first entry whose `criteria` match decides, and its target stands even
+ * when it does not resolve. When the organization's rows cannot be read, the
+ * row is written as it stood rather than routed by the declared rules alone.
+ * A user target owns the row only while the user is an active member of the
+ * row's organization; one that is not leaves the row ownerless and is logged
+ * once. A declared rule is switched off through the activation ledger
+ * (`sys_metadata_activation`, `metadata_type: 'assignment_rule'`) or
+ * `active: false`; an organization's row by its own `active`.
  */
 export const AssignmentRuleSchema = lazySchema(() => strictObject(
   {

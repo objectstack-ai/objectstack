@@ -46,7 +46,10 @@ export const esES: PlatformTranslationData = {
         smtp_password: { label: 'Contraseña' },
         api_key: { label: 'Clave de API' },
         from_email: { label: 'Correo del remitente', help: 'Ejemplo: no-reply@example.com' },
-        from_name: { label: 'Nombre del remitente' },
+        from_name: {
+          label: 'Nombre del remitente',
+          help: 'Déjelo vacío para usar el nombre del producto (Marca) o, si no hay, el nombre con el que se configuró esta implantación.',
+        },
         queue_delivery: {
           label: 'Entrega mediante cola duradera',
           help: 'Entrega cada mensaje a la cola de trabajos en lugar de enviarlo en línea, de modo que una '
@@ -135,7 +138,10 @@ export const esES: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: 'Habilitar inicio de sesión con correo/contraseña' },
+        email_password_enabled: {
+          label: 'Habilitar inicio de sesión con correo/contraseña',
+          confirmOffText: 'Las personas que inician sesión con contraseña necesitarán otra forma de acceder.',
+        },
         signup_enabled: {
           label: 'Permitir el registro por correo',
           help: 'Abre el formulario de registro con correo y contraseña. A quién admite lo decide la «Audiencia de autorregistro» inferior: con «Solo por invitación», solo a una dirección con una invitación pendiente; con «Dominios de correo», a los dominios de la lista y a las direcciones invitadas; con «Abierto», a cualquiera. Desactivado, cierra el formulario con cualquier audiencia, invitaciones incluidas.',
@@ -206,6 +212,7 @@ export const esES: PlatformTranslationData = {
         },
         mfa_required: {
           label: 'Requerir autenticación multifactor',
+          options: { off: 'Desactivado', administrators: 'Administradores', everyone: 'Todos' },
           help: 'Los usuarios sin un autenticador registrado quedan bloqueados del acceso a los datos al terminar su periodo de gracia. Activarlo también habilita la función de dos factores para que los usuarios puedan registrarse.',
         },
         mfa_grace_period_days: {
@@ -346,25 +353,23 @@ export const esES: PlatformTranslationData = {
       },
     },
 
-    feature_flags: {
-      title: 'Indicadores de función',
-      description: 'Activa funciones experimentales y en beta para esta organización.',
+    access_policy: {
+      title: 'Política de acceso',
+      description: 'Las restricciones de inicio de sesión de esta organización. Los ajustes de autenticación de la implementación siempre se aplican; estos solo pueden añadirles restricciones.',
       groups: {
-        productivity: { title: 'Productividad' },
-        collaboration: { title: 'Colaboración' },
+        network: { title: 'Red', description: 'Desde dónde pueden iniciar sesión los miembros de esta organización.' },
+        sessions: { title: 'Sesiones', description: 'Cuánto dura la sesión de un miembro. Cada límite solo puede ser más corto que el de la implementación.' },
+        multi_factor: { title: 'Multifactor', description: 'Quién en esta organización debe proteger su cuenta con una app de autenticación (TOTP).' },
       },
       keys: {
-        ai_enabled: {
-          label: 'Asistente de IA',
-          help: 'Habilita el panel del asistente de IA dentro de la aplicación.',
+        allowed_ip_ranges: { label: 'Rangos de IP permitidos' },
+        session_idle_timeout_minutes: { label: 'Tiempo de inactividad (minutos)' },
+        session_absolute_max_hours: { label: 'Duración máxima de la sesión (horas)' },
+        max_concurrent_sessions_per_user: { label: 'Máximo de sesiones simultáneas por usuario' },
+        mfa_required: {
+          label: 'Exigir autenticación multifactor',
+          options: { off: 'Desactivado', administrators: 'Administradores', everyone: 'Todos' },
         },
-        kanban_swimlanes: { label: 'Carriles de Kanban' },
-        realtime_cursors: { label: 'Cursores en tiempo real' },
-        inline_comments: { label: 'Comentarios en línea' },
-      },
-      banners: {
-        beta_notice: { title: 'Atención',
-          text: 'Las funciones beta pueden cambiar sin previo aviso. Una función definida en la configuración del servidor queda fijada, activada o desactivada, en todo el despliegue y no se puede cambiar aquí.' },
       },
     },
 
@@ -588,18 +593,24 @@ export const esES: PlatformTranslationData = {
         },
         retention_overrides: {
           label: 'Sustituciones de retención',
-          help: 'Sustituciones de la ventana por objeto: { "<object>": { "maxAge": "1y", "expireAfter": "30d" } }. Las duraciones usan h/d/w/y. '
+          help: 'Sustituciones de la ventana por objeto. Las duraciones usan h/d/w/y. '
             + 'Se define por organización, de modo que una organización regulada puede conservar años y una de desarrollo, días. '
             + 'Una sustitución más corta que el mínimo que necesita una función de la plataforma (por ejemplo, la ventana de detección de duplicados de la cola de trabajos) '
             + 'se ignora y se registra como error, y se sigue aplicando la ventana predeterminada.',
+          keyColumn: { label: 'Objeto' },
+          columns: { maxAge: { label: 'Conservar filas durante' }, expireAfter: { label: 'Caducar filas tras' } },
         },
         quotas: {
           label: 'Cuotas de filas',
-          help: 'Número máximo de filas por objeto: { "<object>": 1000000 }. Superarlo genera una alerta de gobernanza: las cuotas nunca eliminan más allá de la política declarada.',
+          help: 'Número máximo de filas por objeto. Superarlo genera una alerta de gobernanza: las cuotas nunca eliminan más allá de la política declarada.',
+          keyColumn: { label: 'Objeto' },
+          columns: { max_rows: { label: 'Máx. de filas' } },
         },
         quota_defaults: {
           label: 'Cuotas predeterminadas por clase',
-          help: 'Cuotas de respaldo por clase de ciclo de vida: { "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }.',
+          help: 'Cuotas de respaldo por clase de ciclo de vida (telemetry, transient, event, audit).',
+          keyColumn: { label: 'Clase de ciclo de vida' },
+          columns: { max_rows: { label: 'Máx. de filas' } },
         },
         growth_alert_rows: {
           label: 'Umbral de alerta de crecimiento (filas por barrido)',

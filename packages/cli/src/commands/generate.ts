@@ -59,7 +59,7 @@ import { validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
 import { singularToPlural } from '@objectstack/spec/shared';
 import { printHeader, printSuccess, printError, printInfo, printStep, printWarning, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
-import { readProjectNamespace, type ProjectNamespace } from '../utils/project-namespace.js';
+import { namespacedItemName, readProjectNamespace, type ProjectNamespace } from '../utils/project-namespace.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
 import { findBarrelAliasRefusal } from '../utils/importable-binding.js';
 import {
@@ -150,15 +150,20 @@ export interface ScaffoldBinds {
  * In a project whose manifest declares a `namespace`, that is
  * `${namespace}_${name}`, which is the name `defineStack`'s namespace-prefix
  * gate demands. `namesObject` says which generators write one, so that
- * `runMetadataGeneration` reads the manifest only for those.
- * `generate-object-namespace-prefix.test.ts` pins both the prefix and the
- * flag against the templates.
+ * `runMetadataGeneration` refuses for those when the config does not load:
+ * with the namespace unknown, the object name it would write is one
+ * `defineStack` may refuse. `generate-object-namespace-prefix.test.ts` pins
+ * both the prefix and the flag against the templates.
  *
- * Only object names are prefixed. The scaffold's own `name` on an action, a
- * flow, a dashboard, an app, a skill or a picklist is not judged against the
- * namespace by any gate `os validate` runs, so it stays the name the author
- * typed. A view container writes no `name` at all: it is registered under
- * the object it binds to (#21325, see the `view` generator).
+ * The scaffold's own `name` on an action, a flow, a dashboard, an app, a
+ * skill, a picklist, a permission set or a dataset goes through
+ * {@link itemNameFor}: `${namespace}_${name}` in a namespaced project, unless
+ * the derived name already carries the namespace. Since ADR-0150 that prefix
+ * is a kept spelling, not a requirement: these types are identified by
+ * (package, name), `os lint` no longer warns on a bare one, and a prefixed
+ * name stays valid (D9). `generate-scaffold-validates.test.ts` holds every
+ * scaffold to zero findings. A view container writes no `name` at all: it is
+ * registered under the object it binds to (#21325, see the `view` generator).
  *
  * ## A binding is read off the stack, never derived from the new item's name
  *
@@ -418,8 +423,8 @@ export default ${toCamelCase(name)}Views;
      */
     namesObject: true,
     binds: { object: 'flag', flow: 'flag' },
-    itemName: (name: string) => toSnakeCase(name),
-    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+    itemName: (name: string, namespace?: string) => itemNameFor(toSnakeCase(name), namespace),
+    generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => {
       const object = requireBinding('action', bindings, 'object');
       const flow = requireBinding('action', bindings, 'flow');
       return `import * as UI from '@objectstack/spec/ui';
@@ -428,7 +433,7 @@ export default ${toCamelCase(name)}Views;
  * ${toTitleCase(name)} Action
  */
 const ${toCamelCase(name)}Action: UI.Action = {
-  name: '${toSnakeCase(name)}',
+  name: '${itemNameFor(toSnakeCase(name), namespace)}',
   label: '${toTitleCase(name)}',
   // Runs the flow named in \`target\` against the record it is invoked on.
   type: 'flow',
@@ -494,9 +499,9 @@ export default ${toCamelCase(name)}Action;
      */
     namesObject: true,
     binds: { object: 'flag' },
-    itemName: (name: string) => `${toSnakeCase(name)}_flow`,
+    itemName: (name: string, namespace?: string) => itemNameFor(`${toSnakeCase(name)}_flow`, namespace),
     requires: FLOW_SCAFFOLD_REQUIRES,
-    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+    generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => {
       const object = requireBinding('flow', bindings, 'object');
       return `import * as Automation from '@objectstack/spec/automation';
 
@@ -509,7 +514,7 @@ export default ${toCamelCase(name)}Action;
  * not load.
  */
 const ${toCamelCase(name)}Flow: Automation.Flow = {
-  name: '${toSnakeCase(name)}_flow',
+  name: '${itemNameFor(`${toSnakeCase(name)}_flow`, namespace)}',
   label: '${toTitleCase(name)} Flow',
   type: 'record_change',
   // Armed: the trigger below fires it. Set 'obsolete' to switch it off.
@@ -550,14 +555,14 @@ export default ${toCamelCase(name)}Flow;
     description: 'Analytics dashboard',
     defaultDir: 'src/dashboards',
     namesObject: false,
-    itemName: (name: string) => `${toSnakeCase(name)}_dashboard`,
-    generate: (name: string) => `import * as UI from '@objectstack/spec/ui';
+    itemName: (name: string, namespace?: string) => itemNameFor(`${toSnakeCase(name)}_dashboard`, namespace),
+    generate: (name: string, namespace?: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
  * ${toTitleCase(name)} Dashboard
  */
 const ${toCamelCase(name)}Dashboard: UI.Dashboard = {
-  name: '${toSnakeCase(name)}_dashboard',
+  name: '${itemNameFor(`${toSnakeCase(name)}_dashboard`, namespace)}',
   label: '${toTitleCase(name)} Dashboard',
   widgets: [],
 };
@@ -588,8 +593,8 @@ export default ${toCamelCase(name)}Dashboard;
      */
     namesObject: true,
     binds: { object: 'flag' },
-    itemName: (name: string) => `${toSnakeCase(name)}_app`,
-    generate: (name: string, _namespace?: string, bindings?: ScaffoldBindings) => {
+    itemName: (name: string, namespace?: string) => itemNameFor(`${toSnakeCase(name)}_app`, namespace),
+    generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => {
       const object = requireBinding('app', bindings, 'object');
       return `import * as UI from '@objectstack/spec/ui';
 
@@ -597,7 +602,7 @@ export default ${toCamelCase(name)}Dashboard;
  * ${toTitleCase(name)} App
  */
 const ${toCamelCase(name)}App: UI.App = {
-  name: '${toSnakeCase(name)}_app',
+  name: '${itemNameFor(`${toSnakeCase(name)}_app`, namespace)}',
   label: '${toTitleCase(name)}',
   navigation: [
     {
@@ -638,8 +643,8 @@ export default ${toCamelCase(name)}App;
      * harness default.
      */
     namesObject: false,
-    itemName: (name: string) => toSnakeCase(name),
-    generate: (name: string) => `import { defineSkill } from '@objectstack/spec/ai';
+    itemName: (name: string, namespace?: string) => itemNameFor(toSnakeCase(name), namespace),
+    generate: (name: string, namespace?: string) => `import { defineSkill } from '@objectstack/spec/ai';
 
 /**
  * ${toTitleCase(name)} Skill
@@ -653,7 +658,7 @@ export default ${toCamelCase(name)}App;
  * a startup error naming the key, not a field that goes missing later.
  */
 const ${toCamelCase(name)}Skill = defineSkill({
-  name: '${toSnakeCase(name)}',
+  name: '${itemNameFor(toSnakeCase(name), namespace)}',
   label: '${toTitleCase(name)}',
   description: 'One line on what this skill is for — the model routes on it.',
 
@@ -682,7 +687,7 @@ const ${toCamelCase(name)}Skill = defineSkill({
   // it (\`ai-skill-tool-unresolved\`), and at runtime the reference is dropped
   // while the instructions keep promising the capability.
   //
-  //   tools: ['action_${toSnakeCase(name)}', 'query_records'],
+  //   tools: ['action_${itemNameFor(toSnakeCase(name), namespace)}', 'query_records'],
   tools: [],
 });
 
@@ -720,18 +725,18 @@ export default ${toCamelCase(name)}Skill;
      * `FieldSchema` refuses the two together.
      */
     namesObject: false,
-    itemName: (name: string) => toSnakeCase(name),
-    generate: (name: string) => `import { definePicklist } from '@objectstack/spec/data';
+    itemName: (name: string, namespace?: string) => itemNameFor(toSnakeCase(name), namespace),
+    generate: (name: string, namespace?: string) => `import { definePicklist } from '@objectstack/spec/data';
 
 /**
  * ${toTitleCase(name)} Picklist
  *
  * A shared option list. A select field offers these options by naming the
- * list — Field.select({ picklist: '${toSnakeCase(name)}' }) — and declares no
+ * list — Field.select({ picklist: '${itemNameFor(toSnakeCase(name), namespace)}' }) — and declares no
  * \`options\` of its own: a field declaring both is refused.
  */
 const ${toCamelCase(name)}Picklist = definePicklist({
-  name: '${toSnakeCase(name)}',
+  name: '${itemNameFor(toSnakeCase(name), namespace)}',
   label: '${toTitleCase(name)}',
   options: [
     { label: 'Option A', value: 'option_a' },
@@ -741,6 +746,140 @@ const ${toCamelCase(name)}Picklist = definePicklist({
 
 export default ${toCamelCase(name)}Picklist;
 `,
+  },
+
+  permission: {
+    description: 'Permission set (what a signed-in user may do with an object)',
+    /**
+     * `src/security`, not `src/permissions`: the directory a project keeps its
+     * access rules in, the name the example apps use for it. The type key is
+     * the registry's, `permission` (`*.permission.ts`), and its stack key is
+     * `singularToPlural('permission')`, `permissions` — the collection half of
+     * that key (ADR-0090), where a permission set is the only capability
+     * container.
+     */
+    defaultDir: 'src/security',
+    /**
+     * A permission set whose `objects` map grants nothing gives a signed-in
+     * user nothing, so the scaffold grants one object: the object from
+     * `--object`, or the stack's only object, one the stack declares. The grant
+     * is read, create and edit without delete, the shape the example apps
+     * start a user's set from; the emitted comments name the bits to change.
+     *
+     * `readScope` is written, as `'own'`: on an object whose sharing model is
+     * private (the `object` scaffold's), a read grant with no depth is what
+     * `security-private-no-readscope` reports, because a holder then reads
+     * only their own records and the author may not know it. `'own'` states
+     * that same reach as a decision rather than widening it; the emitted
+     * comment names `'org'` for the author who means every record.
+     *
+     * Declared through `definePermissionSet`, so the set is parsed the moment
+     * this module loads: an unknown key (`roles`, `profiles`, `users` — none is
+     * a field of a set) is a startup error that names where that rule lives.
+     *
+     * `isDefault` is left at its default (`false`) and explained instead of
+     * written: an app-level set marked `isDefault` is bound to every signed-in
+     * user at boot, which is a decision the author takes, not one a scaffold
+     * takes for them.
+     */
+    namesObject: true,
+    binds: { object: 'flag' },
+    itemName: (name: string, namespace?: string) => itemNameFor(toSnakeCase(name), namespace),
+    generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('permission', bindings, 'object');
+      return `import { definePermissionSet } from '@objectstack/spec/security';
+
+/**
+ * ${toTitleCase(name)} Permission Set
+ *
+ * What a user holding this set may do. A user is given it by a position
+ * that lists it in \`permissionSets\`, or by an administrator in Setup; the
+ * set itself never names users. Sets a user holds are merged: a bit granted
+ * by any one of them is granted.
+ */
+const ${toCamelCase(name)}PermissionSet = definePermissionSet({
+  name: '${itemNameFor(toSnakeCase(name), namespace)}',
+  label: '${toTitleCase(name)}',
+
+  // One entry per object, keyed by its machine name. readScope is which of
+  // the object's records a holder reads: 'own' is the ones they own (plus
+  // records shared with them), 'org' is every record. Also: viewAllRecords
+  // and modifyAllRecords, which reach past the object's sharing model.
+  objects: {
+    ${tsString(object.name)}: {
+      allowRead: true,
+      allowCreate: true,
+      allowEdit: true,
+      allowDelete: false,
+      readScope: 'own',
+    },
+  },
+
+  // isDefault: true binds this set to every signed-in user when the app
+  // boots. Leave it off unless that is what you mean.
+});
+
+export default ${toCamelCase(name)}PermissionSet;
+`;
+    },
+  },
+
+  dataset: {
+    description: 'Analytics dataset (dimensions and measures dashboards bind to)',
+    defaultDir: 'src/datasets',
+    /**
+     * The analytics semantic layer (`ui/dataset.zod.ts`, ADR-0021): a
+     * dashboard or report widget names a dataset and picks its dimensions and
+     * measures by name, instead of carrying its own object, field and
+     * aggregate. Not seed data — that is the stack's `data` key.
+     *
+     * `object` is a BINDING (#21325): the object from `--object`, or the
+     * stack's only object, one the stack declares. The scaffold declares the
+     * one measure every object can answer, a record count, and groups it by
+     * the record's title field when the object has one, so a widget has a
+     * dimension and a measure to bind from the first build.
+     *
+     * Declared through `defineDataset`, which types the literal as a
+     * `Dataset`: a bare object literal handed to the stack's `datasets` key
+     * widens `aggregate` to `string` and fails the type check without
+     * `as const`.
+     */
+    namesObject: true,
+    binds: { object: 'flag' },
+    itemName: (name: string, namespace?: string) => itemNameFor(toSnakeCase(name), namespace),
+    generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => {
+      const object = requireBinding('dataset', bindings, 'object');
+      const dimension = object.displayField
+        ? `\n    { name: ${tsString(object.displayField)}, field: ${tsString(object.displayField)} },\n  `
+        : '';
+      return `import { defineDataset } from '@objectstack/spec/ui';
+
+/**
+ * ${toTitleCase(name)} Dataset
+ *
+ * The numbers a dashboard or report shows for ${tsString(object.name)}, defined once.
+ * A widget names this dataset and picks a dimension and a measure from it by
+ * name; it declares no object, field or aggregate of its own.
+ */
+const ${toCamelCase(name)}Dataset = defineDataset({
+  name: '${itemNameFor(toSnakeCase(name), namespace)}',
+  label: '${toTitleCase(name)}',
+  object: ${tsString(object.name)},
+
+  // The axes a widget groups by: a field on the object, or a path through a
+  // lookup (\`account.region\`). Declare the fields people group by.
+  dimensions: [${dimension}],
+
+  // The values a widget shows. Also: sum, avg, min and max over a numeric
+  // field (\`{ name: 'total', aggregate: 'sum', field: 'amount' }\`).
+  measures: [
+    { name: 'record_count', label: 'Records', aggregate: 'count' },
+  ],
+});
+
+export default ${toCamelCase(name)}Dataset;
+`;
+    },
   },
 };
 
@@ -957,6 +1096,17 @@ function prefixedObjectName(shortName: string, namespace?: string): string {
   return validateObjectNamespacePrefix(shortName, namespace) === null
     ? shortName
     : `${namespace}_${shortName}`;
+}
+
+/**
+ * The NON-object machine name a scaffold writes. `shortName` is the name as
+ * the generator derives it (`task_done_flow`); it gains `${namespace}_`
+ * unless it already carries the namespace (`carriesPackageNamespace`). Since
+ * ADR-0150 the prefix is a kept spelling that stays valid (D9), not one the
+ * lint asks for. With no namespace it is written as derived.
+ */
+function itemNameFor(shortName: string, namespace?: string): string {
+  return namespacedItemName(shortName, namespace);
 }
 
 /**
@@ -1451,7 +1601,7 @@ async function runMetadataGeneration(
       console.log(chalk.dim(
         // #20197: "always the same string" stopped being true for an object
         // name in a namespaced project, which gains the manifest's prefix.
-        '  write lands in the file unchanged (a namespaced project only prefixes an object name).',
+        '  write lands in the file unchanged (a namespaced project only adds its namespace prefix).',
       ));
       console.log(chalk.dim(
         // ⛔ The examples are deliberately NOT built from what the author
@@ -1469,15 +1619,17 @@ async function runMetadataGeneration(
 
     // The project's config, loaded once before anything is written.
     //
-    // Its `manifest.namespace` is applied only by a generator that writes an
-    // object machine name (#20197) — see `objectNameFor` — and only such a
-    // generator refuses when the config does not load. Every generator reads
-    // it (#20215), because whether the config loaded BEFORE this command wrote
-    // anything is what the reach check below needs: a config that loaded then
-    // and does not load once the scaffold is in place was broken by this
-    // command, and the write is taken back out. A generator that names no
-    // object still generates into a project whose config does not load, as it
-    // always has.
+    // Its `manifest.namespace` prefixes an object machine name (#20197) — see
+    // `objectNameFor` — and every other metadata name a scaffold writes (ruling
+    // C on #30798) — see `itemNameFor`. Only a generator that writes an object
+    // name refuses when the config does not load, because `defineStack`
+    // refuses an unprefixed object; a bare non-object name is a lint warning,
+    // so the others still generate into such a project, as they always have,
+    // with the name as derived. Every generator reads it (#20215), because
+    // whether the config loaded BEFORE this command wrote anything is what the
+    // reach check below needs: a config that loaded then and does not load
+    // once the scaffold is in place was broken by this command, and the write
+    // is taken back out.
     //
     // BELOW the charset gate, because the prefix is a derivation and the
     // #16726 position puts every derivation after that gate. ABOVE the render,
@@ -1510,8 +1662,8 @@ async function runMetadataGeneration(
         console.log('');
         process.exit(1);
       }
-      if (project.kind === 'loaded') namespace = project.namespace;
     }
+    if (project.kind === 'loaded') namespace = project.namespace;
 
     // The object name derived from what the author TYPED as this item's name:
     // the `object` scaffold's own name, and a view's, which names the object

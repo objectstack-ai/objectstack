@@ -40,7 +40,7 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import type { ObjectFormSchema } from '@object-ui/types';
 import { toast } from '@object-ui/components';
-import { createSafeTranslation, recordSaveMessage, useObjectLabel } from '@object-ui/i18n';
+import { createSafeTranslation, pickLocalized, recordSaveMessage, useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim } from '@object-ui/react';
 import { usePreparedFormSchema, ObjectForm, type ObjectFormComponentProps } from './ObjectForm';
 import { DrawerForm } from './DrawerForm';
@@ -100,6 +100,7 @@ function useContainerSaveFeedback(
 ): (saved: unknown) => Promise<void> {
   const { t } = useSaveFeedbackTranslation();
   const { objectLabel } = useObjectLabel();
+  const { language } = useObjectTranslation();
   const { onSuccess, submitHandler, objectName, mode, recordId, successMessage } = schema;
   const isOpen = schema.open !== false;
   const writes = !!dataSource && !submitHandler && (mode === 'create' || mode === 'edit');
@@ -127,7 +128,11 @@ function useContainerSaveFeedback(
         // The adapter caches the definition the form body already read.
         const objectDef = await Promise.resolve(dataSource.getObjectSchema?.(objectName)).catch(() => undefined);
         message = recordSaveMessage(t, {
-          label: objectDef?.name ? objectLabel(objectDef) : t('common.record'),
+          // The served label as given; the bundle only when none is served
+          // (objectstack#30390).
+          label: objectDef?.name
+            ? pickLocalized(objectDef.label, language) || objectLabel({ name: objectDef.name, label: '' })
+            : t('common.record'),
           objectDef,
           saved,
           mode,
@@ -136,7 +141,7 @@ function useContainerSaveFeedback(
       toastRecordSave(toast, message, feedback);
     }
     await onSuccess?.(saved);
-  }, [writes, dataSource, mode, successMessage, objectName, onSuccess, objectLabel, t]);
+  }, [writes, dataSource, mode, successMessage, objectName, onSuccess, objectLabel, language, t]);
 }
 
 const ObjectFormContainerBody: React.FC<ObjectFormComponentProps> = ({

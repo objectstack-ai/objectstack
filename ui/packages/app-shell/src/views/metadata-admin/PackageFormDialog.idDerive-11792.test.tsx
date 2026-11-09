@@ -27,6 +27,10 @@ import { t } from './i18n';
 // Resident before any case, so the zh rows below read synchronously.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 await loadStudioCatalogue('zh');
+// The pinyin dictionary a Chinese name derives through, resident before any
+// case, as it is once a Console door has fetched it (objectstack#29690).
+import { loadHanRomanizer } from './romanizeHan';
+await loadHanRomanizer();
 
 let localeFixture: 'en-US' | 'zh-CN' = 'en-US';
 vi.mock('./i18n', async (importOriginal) => ({
@@ -124,9 +128,11 @@ describe('New package — the id follows the display name (objectui#11792)', () 
     expect(f.ns().value).toBe('tickets');
   });
 
+  // objectstack#29690 — a Chinese name derives (last block); a Japanese one
+  // is the name that still yields no segment.
   it('leaves the id empty when the name yields no id segment, and does not submit', () => {
     const f = openCreate();
-    fireEvent.change(f.name(), { target: { value: '报修中心' } });
+    fireEvent.change(f.name(), { target: { value: 'サポートセンター' } });
     expect(f.id().value).toBe('');
     expect(f.submit()).toBeDisabled();
   });
@@ -212,5 +218,36 @@ describe('Edit and view keep the spec form’s id field (objectui#11792)', () =>
     expect(calls[0].url).toBe('/api/v1/packages/com.acme.crm');
     expect(calls[0].init.method).toBe('PATCH');
     expect(Object.keys(JSON.parse(calls[0].init.body as string)).sort()).toEqual(['description', 'name', 'version']);
+  });
+});
+
+describe('New package — a Chinese name derives the id and namespace by pinyin (objectstack#29690)', () => {
+  it('fills com.<org>.<pinyin> and the namespace from it, and Create posts them', async () => {
+    orgFixture = { id: 'org_1', name: 'Acme Inc', slug: 'acme' };
+    localeFixture = 'zh-CN';
+    const f = openCreate();
+    fireEvent.change(f.name(), { target: { value: '维修中心' } });
+    expect(f.id().value).toBe('com.acme.weixiu-zhongxin');
+    expect(isSpecId(f.id().value)).toBe(true);
+    expect(f.ns().value).toBe('weixiu_zhongxin');
+    expect(screen.queryByTestId('package-form-id-missing')).toBeNull();
+    fireEvent.click(f.submit());
+    await waitFor(() => expect(f.onSaved).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(calls[0].init.body as string).manifest).toMatchObject({
+      id: 'com.acme.weixiu-zhongxin',
+      name: '维修中心',
+      namespace: 'weixiu_zhongxin',
+    });
+  });
+
+  it('the derived id stays editable, and an edited one stops following the name', () => {
+    localeFixture = 'zh-CN';
+    const f = openCreate();
+    fireEvent.change(f.name(), { target: { value: '客户等级' } });
+    expect(f.id().value).toBe('com.kehu-dengji');
+    fireEvent.change(f.id(), { target: { value: 'com.example.tiers' } });
+    fireEvent.change(f.name(), { target: { value: '客户等级管理' } });
+    expect(f.id().value).toBe('com.example.tiers');
+    expect(f.ns().value).toBe('tiers');
   });
 });

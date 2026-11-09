@@ -214,7 +214,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "El canal: inbox (notificaciones dentro de la aplicación, siempre disponible), email (una vez configurado un servicio de correo electrónico), sms (una vez configurado un servicio de SMS) o el id de un canal que añada un plugin instalado. Escriba * para todos los canales. Un id que ningún canal usa no coincide con nada."
+        help: "El canal: inbox (notificaciones dentro de la aplicación, siempre disponible), email (una vez configurado un servicio de correo electrónico), sms (una vez configurado un servicio de SMS), push (una vez configurado un servicio push, a los dispositivos registrados del usuario) o el id de un canal que añada un plugin instalado. Escriba * para todos los canales. Un id que ningún canal usa no coincide con nada."
       },
       enabled: {
         label: "Enabled",
@@ -460,7 +460,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Configuración regional",
-        help: "Configuración regional del dispositivo en la que se muestran las notificaciones push enviadas a él."
+        help: "Configuración regional del dispositivo, tal como la indicó el registro. Se guarda para el dispositivo; ninguna notificación push se muestra según ella: llega en el idioma del destinatario (su configuración regional de usuario y, si no, la predeterminada de la implantación)."
+      },
+      origin: {
+        label: "Origen del servidor",
+        help: "El origen desde el que se cargó la consola al registrar el dispositivo (por ejemplo, https://crm.example.com). Todas las notificaciones push al dispositivo lo incluyen, de modo que una app móvil con varios servidores guardados abre la notificación en este. Vacío en un dispositivo registrado sin él."
       },
       name: {
         label: "Nombre del dispositivo"

@@ -930,10 +930,10 @@
  *
  * The repo-scoped stage is an OPTIONAL observation on the pure classifier, not a
  * required one: `classifyTransportProbe` handed no `repo` reading classifies the
- * account-scoped evidence alone, exactly as it always did. That keeps the other
- * importer of this classifier (`scripts/pm/ci-failure.mjs`, which reads the
- * Actions API and gathers its own account-scoped observations) behaving
- * identically. The guarantee that THIS script never green-lights on stage 1
+ * account-scoped evidence alone, exactly as it always did. That keeps every
+ * first-stage call identical: this script's probe and the other importer of
+ * this classifier (`scripts/pm/check-handover.mjs`) both classify account-scoped
+ * readings before any `repo` one. The guarantee that THIS script never green-lights on stage 1
  * alone therefore lives in `probeTransport` / `needsRepoProbe`, which is where
  * the gathering policy belongs — and it is pinned in the self-test.
  *
@@ -1026,8 +1026,8 @@ export const SWEEP_REPO_SHAPE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
  * A malformed value is REFUSED rather than silently replaced by the default:
  * substituting a different board for the one the caller named is how a report
  * about the wrong repo gets written, which is the disease above. The refusal
- * happens at the CLI so that importers of this module (`ci-failure.mjs` takes
- * the transport classifier) are unaffected by a variable they never read.
+ * happens at the CLI so that importers of this module that never call it
+ * (`fleet-write/dispatch.mjs`) are unaffected by a variable they never read.
  *
  * @param {Record<string, string|undefined>} [env]
  * @returns {{ repo: string, source: string, valid: boolean }}
@@ -1109,22 +1109,29 @@ export function labelNames(issue) {
  * Lane labels retired INTO another lane, read as that lane everywhere this
  * sweep compares a card's `domain:*` label with a seat's (maintainer ruling
  * 2026-10-22, letter 乙: `domain:engine`, `domain:services` and `domain:cli`
- * fold into `domain:server`). The transition is designed to interrupt nothing:
+ * fold into `domain:server`; `domain:rest`, never a lane of its own, is read
+ * the same way by the maintainer's 2026-11-06 「车道的问题同意」). The
+ * transition is designed to interrupt nothing:
  * in-flight cards keep their old label until they land, open cards are
  * relabelled in batches by triage after the merge lands, and seat posts are
- * retitled at each seat's next round — so for a while one lane is spelled four
+ * retitled at each seat's next round — so for a while one lane is spelled five
  * ways on the board. Every lane comparison below goes through
  * {@link canonicalLane}, which is what lets a `domain:server` seat count a
  * `domain:engine` queue card as its own, a seat still titled `domain:cli` see
  * a claim on a `domain:server` card, and the census count a card carrying both
  * spellings once. ⛔ An alias map, never a vocabulary: it says nothing about
  * which labels EXIST (that is `scripts/pm/ensure-pm-labels.sh`), and the
- * cleanup PR that retires the three label objects deletes these rows with them.
+ * cleanup PR that retires the label objects deletes these rows with them. The
+ * write doors (`issue-create.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`)
+ * read this same map to WRITE `domain:server` in an alias's place
+ * (`rewriteRetiredLaneLabels`, `fleet-write/dispatch.mjs`): a rewrite, never a
+ * refusal.
  */
 export const LANE_LABEL_ALIASES = Object.freeze({
   'domain:engine': 'domain:server',
   'domain:services': 'domain:server',
   'domain:cli': 'domain:server',
+  'domain:rest': 'domain:server',
 });
 
 /**
@@ -1255,7 +1262,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 //
 //   LANE     a seat as the role table spells it: `domain:` or `repo:` plus a lowercase
 //            name (`domain:engine-core` carries a hyphen, measured on the label set),
-//            `epic:#` plus the parent card, `triage`, `director`, `coordinator` or `security`
+//            `epic:#` plus the parent card, `triage`, `director`, `coordinator`, `security`, `review`, `qa` or `eval`
 //   N        the seat number, from 1
 //   ACCOUNT  the login a claim's `Account:` line carries — GitHub's own login rule
 //   SESSION  the full id, in the relay envelope's shape (`SESSION_SHAPE`, fleet-write/ops.mjs,
@@ -1279,7 +1286,7 @@ export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
 // ---------------------------------------------------------------------------
 
 /** The four parts' patterns, unanchored, in order — the ONE spelling every reader and writer composes from. */
-const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security)';
+const SIGNATURE_LANE_SOURCE = '(?:domain:[a-z][a-z0-9-]*|repo:[a-z][a-z0-9-]*|epic:#[1-9][0-9]*|triage|director|coordinator|security|review|qa|eval)';
 const SIGNATURE_ACCOUNT_SOURCE = '[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}';
 /** The relay envelope's session shape without its anchors — `SESSION_SHAPE` in `fleet-write/ops.mjs`. */
 export const SEAT_SIGNATURE_SESSION_SOURCE = 'session_[A-Za-z0-9]{6,}';
@@ -4791,11 +4798,12 @@ export const INSTRUCTION_FOUR_RULING =
  * `buildBlockingIndex` map H14 is judged against. ④ costs this patrol one
  * `Map.get` per decision card.
  *
- * The inbox label is `GOVERNED_PR_DECISION_LABEL`, deliberately NOT a second
- * spelling of the same string: H52 already reads that constant on CARDS while
- * H48 reads it on PULL REQUESTS, and the self-test pins the single-spelling
- * rule there (「the label constant is the one H48 already owns, not a second
- * spelling」). It is declared further down this file; a `const` in the temporal
+ * The inbox label is `DECISION_INBOX_LABEL`, deliberately NOT a second
+ * spelling of the same string: H52, H62 and H73 already read that constant on
+ * CARDS, and the self-test pins the single-spelling rule there (「the label
+ * constant is the card inbox one, not a second spelling」). H48 reads a
+ * DIFFERENT label on PULL REQUESTS (`GOVERNED_PR_AWAITING_MERGE_LABEL`), never
+ * this one. It is declared further down this file; a `const` in the temporal
  * dead zone is fine HERE because nothing calls this at module-evaluation time.
  *
  * A decision card with NO dependent is omitted rather than rendered empty, for
@@ -4821,7 +4829,7 @@ export function decisionDependentIndex(issues, index) {
   const rows = [];
   let inbox = 0;
   for (const issue of issues ?? []) {
-    if (!labelNames(issue ?? {}).includes(GOVERNED_PR_DECISION_LABEL)) continue;
+    if (!labelNames(issue ?? {}).includes(DECISION_INBOX_LABEL)) continue;
     inbox++;
     const dependents = index?.get?.(issue.number) ?? [];
     if (dependents.length === 0) continue;
@@ -8129,6 +8137,278 @@ export function isTriageRulingComment(body) {
   return TRIAGE_RULING_ANCHORS.some((re) => re.test(bare));
 }
 
+// ---------------------------------------------------------------------------
+// H74 — an open `pm:queue` / `pm:blocked` card with NO triage audit record in
+// EITHER channel. Maintainer word, 2026-11-03, verbatim: 「他在等,为什么没有用
+// 邮箱提醒你,是否应该立卡改进技能」.
+//
+// The shape: a lane seat files a card with its domain, its grade and `pm:queue`
+// in one write, so every triage sweep disjunct keyed on a MISSING label (H13's
+// sibling readings) passes it by, while the lane side reads 「无分诊审计评论 ⛔
+// 不得认领」 and stops. Both sides wait for the other and nothing rings; the
+// seat that noticed reported it to the maintainer instead of the triage mailbox.
+// Measured the day the word was given: fifteen open queue cards in this shape,
+// two of them p1. The protocol text now carries both halves — the lane rings
+// `Request: triage · #n · first-touch audit` in the round it finds one, and the
+// triage sweep derives the set — and this row IS the sweep's derivation, so the
+// two channels converge on one set.
+//
+// ⛔ Report-only (instrument-discipline: a report row carries no gate and no
+// label): it writes nothing and refuses nothing. Band `state`, H13's: a label
+// says 「queued」 and the record that makes a card queueable is absent.
+// ---------------------------------------------------------------------------
+
+/** The labels H74 speaks about — a card offered to a lane, or parked behind one. */
+export const H74_POPULATION_LABELS = Object.freeze(['pm:queue', 'pm:blocked']);
+
+/**
+ * Exempt by label — the filing card's own list, plus the one in-tree anchor
+ * template that is filed AS `pm:queue` and whose title the main-red regex
+ * below does not open: `fleet-patrols.yml`'s platform-checklist watchdog
+ * (title `check:platform-checklist is red on main`, routing labels
+ * `pm:queue,tooling`, identity label `platform-checklist-watchdog`). Read by
+ * its identity label the way `queue-flake-anchor` is, because the identity
+ * label is the machine's and is never graded off, while the title is one
+ * template's wording. Tracking anchors, epics, seat posts, QA runs, parked
+ * cards and both machine anchors are never first-touched the way a lane card
+ * is, so their silence is the design. Census 2026-11-03 of every
+ * `.github/workflows/**` template that files a card: only this one applies
+ * `pm:queue` on create (`test-nightly-tiers.yml` and the scheduled full-run
+ * card file without it — the full-run refresh may re-queue an unassigned card —
+ * and both titles open `: red on main`, which the regex below reads).
+ */
+export const H74_EXEMPT_LABELS = Object.freeze([
+  TRACKING_ANCHOR_LABEL,
+  'pm:epic',
+  'pm:seat',
+  'qa-run',
+  'status:parked',
+  'queue-flake-anchor',
+  'platform-checklist-watchdog',
+]);
+
+/**
+ * Exempt by title — a main-red anchor card (SKILL.md: 「main-red 锚卡,免审计评论」).
+ * The anchor has no label and no template; its spelling is measured off the
+ * board (2026-11-03, 167 title hits): a seat-filed anchor opens `main red:` /
+ * `main red (…)` / `main red since …` (#28622, #27806, #24057), and the
+ * scheduled-run anchors end their prefix with `: red on main` (#29494,
+ * #28580). ⛔ A card ABOUT main-red (`pm-dispatch(main-red): …`, #29445) opens
+ * with neither and stays in the population.
+ */
+export const H74_MAIN_RED_ANCHOR_TITLE = /^\s*main[ -]red\b|:\s*red on main\b/iu;
+
+/**
+ * The parent read answered with something other than a row or a 404 — the
+ * sub-issue relation is UNREADABLE, which the predicate reports as UNJUDGED
+ * (#4690: an unknown is never an accusation and never a clean reading).
+ */
+export const H74_PARENT_UNREADABLE = Object.freeze({ unreadable: true });
+
+/**
+ * Is this card the fleet's? An App opened it (`user.type` `Bot`, every
+ * `[bot]` login) OR its body opens with a seat signature, since seat-operated
+ * human accounts file cards too. An unreadable author reads as the fleet's,
+ * ⛔ never promoted to a human's. The reading of execution-duties.md 「非车队卡
+ * (作者非 `Bot` 且首行非席位签名)」, shared with H67's read order. Pure.
+ */
+export function isFleetCard(issue) {
+  if (readSignatureLine(issue?.body) !== null) return true;
+  const author = artefactAuthor(issue);
+  return !(author && !author.isApp);
+}
+
+/**
+ * Does this sub-issue INHERIT its parent's domain or grade (SKILL.md: 「sub-issue
+ * 承父卡域 … 免审计评论」)? True when the parent row carries one of the card's
+ * own `domain:*` or `priority:*` labels. Pure; a parent that is not a row
+ * (null, undefined, the unreadable sentinel) inherits nothing.
+ */
+export function h74InheritsFromParent(issue, parent) {
+  if (!parent || parent === H74_PARENT_UNREADABLE || !Array.isArray(parent.labels)) return false;
+  const inherited = labelNames(parent);
+  return labelNames(issue).some((l) => (l.startsWith('domain:') || l.startsWith('priority:')) && inherited.includes(l));
+}
+
+/** The heading a signed first-touch record carries — the filing card's spelling, `## Triage`. */
+const H74_AUDIT_HEADING = /^\s{0,3}#{2,6}[ \t]*Triage\b/imu;
+
+/**
+ * Is this text a triage audit record? Two shapes, both the filing card's: a body
+ * whose first line is a `triage#N` signature and which carries a `## Triage`
+ * heading (fences stripped, so a quoted record is a citation), or one of the
+ * older openings `isTriageRulingComment` already reads, signature-tolerant.
+ * Pure.
+ */
+export function isTriageAuditRecord(text) {
+  const body = String(text ?? '');
+  if (isTriageRulingComment(body)) return true;
+  const signature = readSignatureLine(body);
+  if (signature === null || signature.lane !== 'triage') return false;
+  return H74_AUDIT_HEADING.test(stripMarkdownCode(body, { inline: false }));
+}
+
+/**
+ * Does H74 speak about this card at all? ISSUES only, never a PR; an OPEN card
+ * only (the label on a closed one is residue, H22/H39's reading); a readable
+ * `labels` carrying a population label and none of the exempt ones (#4690: an
+ * unreadable `labels` is out, never read as unlabelled); a FLEET card (the
+ * filing card's 「`[maintainer]` cards」 read as SKILL.md's 非车队卡: a human
+ * author with no seat signature is never first-touched this way); not a
+ * main-red anchor card. The third exemption, a sub-issue inheriting its
+ * parent's domain or grade, costs a read and is judged in the predicate.
+ */
+export function h74SpeaksAbout(issue) {
+  if (!issue || issue.pull_request) return false;
+  if (issue.state === 'closed') return false;
+  if (!Array.isArray(issue.labels)) return false;
+  const labels = labelNames(issue);
+  if (!labels.some((l) => H74_POPULATION_LABELS.includes(l))) return false;
+  if (labels.some((l) => H74_EXEMPT_LABELS.includes(l))) return false;
+  if (!isFleetCard(issue)) return false;
+  return !H74_MAIN_RED_ANCHOR_TITLE.test(String(issue.title ?? ''));
+}
+
+/**
+ * Which cards are worth the PARENT read — H74's second gathering policy, pinned
+ * for the same reason as the first: only a card whose thread was READ and found
+ * clean would fire, so only that card buys the sub-issues parent read
+ * (`subIssueParentPath`, H45's fetch class). An unconsulted or unreadable
+ * thread buys nothing: its row is silent or UNJUDGED already.
+ */
+export function h74NeedsParentRead(issue, commentBodies) {
+  return Array.isArray(commentBodies) && h74QueuedWithoutTriageAudit(issue, commentBodies) !== null;
+}
+
+/**
+ * Which cards are worth a thread fetch — H74's gathering policy, exported and
+ * pinned for `needsMaintainerActionComments`'s reason: a policy that decides
+ * what gets READ AT ALL is where a silent hole would live. Membership, then the
+ * body not already answering.
+ */
+export function needsTriageAuditComments(issue) {
+  return h74SpeaksAbout(issue) && !isTriageAuditRecord(issue?.body);
+}
+
+/**
+ * H74 — null when clean, out of scope or UNCONSULTED; else the finding sentence.
+ *
+ * Three thread states, never two (#4690; H4/H9/H55's contract): `undefined`
+ * unconsulted — the row stays SILENT rather than fabricate a card nobody read
+ * (the summary clause counts the gap); `null` consulted and UNREADABLE — the
+ * row fires UNJUDGED, never clean; `string[]` read.
+ *
+ * `parent` carries FOUR input states (H45's three plus the unreadable
+ * sentinel): `undefined` not read — the row judges without the sub-issue
+ * exemption; `null` the documented 404, parentless; a row — exempt when the
+ * card inherits its domain or grade from it; `H74_PARENT_UNREADABLE` — the
+ * row fires UNJUDGED, never clean and never silent.
+ *
+ * ⛔ No angle-bracket fragment and no tracker number in the sentence: it is
+ * rendered into a GitHub issue body, and the card it is about is the row's
+ * own link.
+ */
+export function h74QueuedWithoutTriageAudit(issue, commentBodies, parent) {
+  if (!h74SpeaksAbout(issue)) return null;
+  if (isTriageAuditRecord(issue.body)) return null;
+  if (commentBodies === undefined) return null;
+  if (Array.isArray(commentBodies) && commentBodies.some((b) => isTriageAuditRecord(b))) return null;
+  if (h74InheritsFromParent(issue, parent)) return null;
+  const state = labelNames(issue)
+    .filter((l) => H74_POPULATION_LABELS.includes(l))
+    .map((l) => `\`${l}\``)
+    .join(' + ');
+  if (parent === H74_PARENT_UNREADABLE) {
+    return (
+      `${UNJUDGED_MARKER} ${state} card with no triage audit record in either channel (both read) whose ` +
+      'sub-issues PARENT read failed this sweep — whether it inherits a domain or grade from a parent is ' +
+      'UNJUDGED, not settled. Read the parent by hand before acting: an unreadable relation is not an ' +
+      'absent one.'
+    );
+  }
+  if (commentBodies === null) {
+    return (
+      `${UNJUDGED_MARKER} ${state} card whose body carries no triage audit record and whose comment thread ` +
+      'could NOT be read this sweep — the thread is UNJUDGED, not empty. Read it by hand before acting: an ' +
+      'unreadable channel is not an absent one.'
+    );
+  }
+  return (
+    `${state} with NO triage audit record in EITHER channel — not in the body, and not in any comment on the ` +
+    'thread (both were read): nothing opening with a `triage#N` signature and carrying a `## Triage` heading, ' +
+    'and none of the older `Triage:` record openings. The card is invisible to both sides: every triage sweep ' +
+    'disjunct keys on a MISSING label and this card has them all, while the lane side reads 「无分诊审计评论 ⛔ ' +
+    '不得认领」 and stops — each waits for the other and nothing rings. Remedy, triage side: audit it in THIS ' +
+    'round exactly as an ungraded card (first touch: domain, grade, type, `Path:`), and count it in the round ' +
+    'record. Lane side: a seat that would otherwise pull this card rings `Request: triage · #n · first-touch ' +
+    'audit` on the triage mailbox in the same round (`record-recognisers.mjs --mailbox-keys` prints the shape) ' +
+    '— ⛔ never a silent wait, and never a report to the maintainer in the mailbox\'s place. Report-only: ⛔ ' +
+    'never a label, comment or body written from this script. Exempt by design: `tracking`, `pm:epic`, ' +
+    '`pm:seat`, `qa-run`, `status:parked`, `queue-flake-anchor` and `platform-checklist-watchdog` carriers; a non-fleet card (human ' +
+    'author, no seat signature); a main-red anchor card; a sub-issue inheriting its parent\'s domain or grade.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H75 — an OPEN PR whose body states a CROSS-REPO issue as its premise, when
+// that issue CLOSED after the PR opened. Maintainer word, 2026-11-06, verbatim:
+// 「平台的问题应该在平台处理」. Measured: an app-repo PR opened 01:54Z to build a
+// workaround because a platform door "answered 501", citing the platform card;
+// that card closed 02:10Z, fixed at its source, and the PR sat on the governed
+// review route on the stale premise with nothing re-reading it.
+//
+// The anchors are the filing card's three spellings, never imagined ones
+// (`PROSE_BLOCKER_ANCHORS`'s rule). Only CROSS-REPO refs are targets: a local
+// premise is the same board's business and H19's. Targets ride H19's resolver
+// and cache, capped per PR like H4's prose candidates. ⛔ Report-only (triage:
+// 「新增门禁默认否」): the remedy is a re-measure before ACCEPT or hand-off.
+// ---------------------------------------------------------------------------
+
+/** The premise spellings H75 reads a line for: "because …", "blocked by/on …", "answers 501 (…)". */
+export const H75_PREMISE_ANCHOR = /\bbecause\b|\bblocked (?:by|on)\b|\banswer(?:s|ed)? [1-5]\d\d\b/iu;
+
+/** Every distinct CROSS-REPO ref on a premise-anchored line of a PR body, at most `H4_PROSE_CANDIDATE_CAP`. */
+export function h75PremiseTargets(pr, ownerRepo = OWNER_REPO) {
+  const out = new Map();
+  for (const raw of String(pr?.body ?? '').split(/\r?\n/)) {
+    const line = undecorateProseLine(raw);
+    if (!H75_PREMISE_ANCHOR.test(line)) continue;
+    for (const m of line.matchAll(PROSE_REF_SCAN)) {
+      if (!m[1] || /^pr$/iu.test(m[1])) continue;
+      const target = blockerTargetKey({ repo: m[1], number: m[2] }, ownerRepo);
+      if (!target.local && Number.isFinite(target.number)) out.set(target.key, target);
+    }
+  }
+  return [...out.values()].slice(0, H4_PROSE_CANDIDATE_CAP);
+}
+
+/**
+ * H75 — null when clean, else the finding sentence. A target closed BEFORE the
+ * PR opened is clean (the author wrote against a known state); an unresolved
+ * one fires UNJUDGED, never clean (#4690).
+ */
+export function h75PremiseClosedSinceOpened(pr, resolutions) {
+  const opened = Date.parse(pr?.created_at ?? '');
+  if (!Number.isFinite(opened) || !Array.isArray(resolutions)) return null;
+  const stale = resolutions.filter((r) => r?.state === 'closed' && Date.parse(r.closedAt ?? '') > opened);
+  if (stale.length) {
+    return (
+      `open PR whose body states ${stale.map((r) => `\`${r.key}\` (closed ${r.closedAt})`).join(', ')} as its ` +
+      `premise, and that issue CLOSED after this PR opened (${pr.created_at}). The reason this PR exists may be ` +
+      'gone, fixed at its source: re-measure the premise before ACCEPT or human hand-off, and when the platform ' +
+      'fixed it, withdraw the app-side workaround rather than land it. Report-only: ⛔ never a label, comment or ' +
+      'body written from this script.'
+    );
+  }
+  const unread = resolutions.filter((r) => r?.state === 'unresolved');
+  if (!unread.length) return null;
+  return (
+    `${UNJUDGED_MARKER} open PR whose body states ${unread.map((r) => `\`${r.key}\` (${r.detail})`).join(', ')} ` +
+    'as a cross-repo premise that could NOT be read this sweep — whether it closed after this PR opened is ' +
+    'UNJUDGED, not settled. Read it by hand before ACCEPT: an unreadable premise is not a live one.'
+  );
+}
+
 /**
  * The newest `Claim:` comment on a thread, WITH its timestamp — and
  * deliberately not `governingClaim`, which is the same read narrowed to claims
@@ -11108,8 +11388,11 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 //
 // A Tier H surface lands only on the maintainer's word (Prime Directive #14),
 // so the seat's review is not a merge — it is a HANDOFF, and the handoff is one
-// act with two writes: the `needs-user-decision` label puts the PR in the
-// maintainer's inbox, and a `## 维护者速读` comment is what makes reading it a
+// act with two writes: the `pm:awaiting-merge` label puts the PR in the
+// maintainer's awaiting-merge inbox (`needs-user-decision` is the decision-card
+// inbox, ISSUES only — the maintainer ruled the two inboxes apart so a count
+// of decisions owed never includes a PR), and a `## 维护者速读` comment is what
+// makes reading it a
 // two-minute job rather than a diff review. One act, two writes means exactly
 // the shapes this row reads:
 //
@@ -11136,7 +11419,7 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 // ## The three readings, each from the PR's own state
 //
 //   VERDICT  an issue-comment on the PR whose line begins `**ACCEPT**`.
-//   LABEL    `needs-user-decision` on the PR's labels — read off the LIST row,
+//   LABEL    `pm:awaiting-merge` on the PR's labels — read off the LIST row,
 //            no request.
 //   BRIEF    an issue-comment on the PR whose line begins `## 维护者速读`.
 //
@@ -11178,12 +11461,22 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
 /**
  * The label half of the verdict's second write.
  *
- * ⚠️ On a PULL REQUEST this label means「awaiting the maintainer's review」and
- * it is NOT one of the six card states — ⛔ never add it to a card-state table
- * here (H24/H29 own that vocabulary) and ⛔ never read a card's copy of it
- * through this constant.
+ * ⚠️ PULL REQUESTS ONLY: this label means「landing waits on the maintainer's own
+ * review and merge」(SKILL.md 复核 ②) and it is NOT one of the six card states —
+ * ⛔ never add it to a card-state table here (H24/H29 own that vocabulary),
+ * ⛔ never put it on an issue, and ⛔ never read the decision-card inbox
+ * through this constant: that is `DECISION_INBOX_LABEL` below. The maintainer
+ * ruled the two inboxes apart (verbatim: 「同意 pm:awaiting-merge」) so the count
+ * of decisions owed and the count of PRs awaiting a click never share a label.
  */
-export const GOVERNED_PR_DECISION_LABEL = 'needs-user-decision';
+export const GOVERNED_PR_AWAITING_MERGE_LABEL = 'pm:awaiting-merge';
+
+/**
+ * The decision-card inbox label — ISSUES only, one of the six card states.
+ * H52/H62/H73 and the ④ dependents index read cards through this constant;
+ * ⛔ never H48, whose PR-side label is `GOVERNED_PR_AWAITING_MERGE_LABEL`.
+ */
+export const DECISION_INBOX_LABEL = 'needs-user-decision';
 
 /** One comment page, and the quota backstop on the walk. */
 export const H48_COMMENTS_PAGE_SIZE = 100;
@@ -11271,7 +11564,7 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
   const verdict = latestMarkedComment(rows, ACCEPT_VERDICT_MARKER);
   if (!verdict) return null;
   const hasBrief = latestMarkedComment(rows, MAINTAINER_BRIEF_MARKER) !== null;
-  const hasLabel = labelNames(pr ?? {}).includes(GOVERNED_PR_DECISION_LABEL);
+  const hasLabel = labelNames(pr ?? {}).includes(GOVERNED_PR_AWAITING_MERGE_LABEL);
   if (hasLabel && hasBrief) return null;
 
   const surfaces = governed ?? [];
@@ -11284,17 +11577,17 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
     surfaces.length > H48_SURFACE_LIST_CAP ? `, +${surfaces.length - H48_SURFACE_LIST_CAP} more` : '';
   const when = verdict.createdAt ? ` (newest one ${verdict.createdAt})` : '';
   const missing = [
-    hasLabel ? null : `no \`${GOVERNED_PR_DECISION_LABEL}\` label`,
+    hasLabel ? null : `no \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\` label`,
     hasBrief ? null : 'no comment whose line begins `## 维护者速读`',
   ].filter(Boolean);
   const remedy = [
-    hasLabel ? null : `add \`${GOVERNED_PR_DECISION_LABEL}\``,
+    hasLabel ? null : `add \`${GOVERNED_PR_AWAITING_MERGE_LABEL}\``,
     hasBrief ? null : 'post the final 维护者速读 brief as a COMMENT',
   ].filter(Boolean);
   const cost = hasLabel
     ? 'the maintainer opens a governed diff with nothing saying what is being asked of them'
     : hasBrief
-      ? 'the inbox filter that lists what is waiting for a ruling does not list this PR'
+      ? 'the awaiting-merge filter that lists what waits on the maintainer\'s click does not list this PR'
       : 'the PR is neither listed in the inbox nor readable in two minutes once it is found';
   const briefClause = hasBrief
     ? ''
@@ -12209,7 +12502,7 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
   if (!Array.isArray(commentRows)) return null;
   if (!h52SpeaksAbout(issue)) return null;
   // The card is already IN the inbox — the state this row exists to reach.
-  if (labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL)) return null;
+  if (labelNames(issue).includes(DECISION_INBOX_LABEL)) return null;
   const report = latestDevReport(commentRows);
   if (!report) return null;
   // A payload that did not read has an UNKNOWN array — decline, never accuse.
@@ -12232,7 +12525,7 @@ export function h52OpenQuestionsUnrouted(issue, commentRows) {
     : 'none of them carries a readable `question` text';
   return (
     `the newest \`os-dev-report\` (${named}, ${stamped}) carries ${n} non-empty \`open_questions\` entry(ies) ` +
-    `while the card carries NO \`${GOVERNED_PR_DECISION_LABEL}\` label: ${listed}. So a question only the ` +
+    `while the card carries NO \`${DECISION_INBOX_LABEL}\` label: ${listed}. So a question only the ` +
     'maintainer can answer is filed, well-formed and UNREACHABLE — it is in no inbox, no candidate query and ' +
     'no staleness alert, while the card\'s own state label — whichever of the six it is — reads as work in ' +
     'progress on every board, so nothing a reader can see says a decision is owed. ⚠️ This is the shape ' +
@@ -12566,7 +12859,7 @@ export function contractReviewVerdictOf(body) {
 // remedy sentence says so rather than prescribing a relabel.
 //
 // ⛔ And no new label, by the same ruling: 「不要新增标签。你已经证明词汇表够用」.
-// `needs-user-decision` is live on cards and PRs and `pm:awaiting-maintainer`
+// `needs-user-decision` is live on cards and `pm:awaiting-maintainer`
 // is live on cards, so the state the remedy points at already exists and the
 // deliverable triage ruled for is 逐卡改判, not a new state.
 //
@@ -12667,7 +12960,7 @@ export function h54DecisionTitledQueueCard(issue) {
     'must stop saying otherwise); if it is genuinely UNRULED it belongs in the decision inbox — ' +
     '`needs-user-decision`, carrying its four-facet analysis at the moment the label lands, ⛔ not ' +
     'left for the maintainer to fill in on arrival. ⛔ No new label is needed or wanted: the ' +
-    'vocabulary already carries the state (`needs-user-decision` on cards and PRs, ' +
+    'vocabulary already carries the state (`needs-user-decision` on cards, ' +
     '`pm:awaiting-maintainer` on cards), and the ruled deliverable is 逐卡改判 rather than a new ' +
     'state. Report-only: this row writes no label, relabels nothing, and its verdict is a ' +
     'disagreement between two carriers — ⛔ never a finding that the card is mislabelled. ' +
@@ -14615,7 +14908,7 @@ export function h60ClaimBranchUnparsed(issue, governance) {
 //
 // ## Population, and why BODY only
 //
-// OPEN cards carrying `GOVERNED_PR_DECISION_LABEL` — the constant H48 and H52
+// OPEN cards carrying `DECISION_INBOX_LABEL` — the constant H52 and H73
 // already own, ⛔ never a second spelling. The listing is the UNSCOPED open one
 // (H13/H18's channel) for their reason: `needs-user-decision` is not a
 // member of `SEEN_LABEL_PAGES`, so a decision card carrying no `pm:*` state is
@@ -14756,7 +15049,7 @@ export function h62SpeaksAbout(issue) {
   if (issue?.pull_request) return false;
   if (issue?.state === 'closed') return false;
   if (!Array.isArray(issue?.labels)) return false;
-  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+  return labelNames(issue).includes(DECISION_INBOX_LABEL);
 }
 
 /**
@@ -14785,7 +15078,7 @@ export function h62DecisionCardWithoutFacetBlock(issue) {
           'exact gap #15929\'s text-level remedy left open and #16934 fell into (a card presented for ' +
           'a question ADR-0131 D8 already decides).';
   return (
-    `\`${GOVERNED_PR_DECISION_LABEL}\` and its BODY carries no \`${DECISION_FACET_MARKER}\` marker in ` +
+    `\`${DECISION_INBOX_LABEL}\` and its BODY carries no \`${DECISION_FACET_MARKER}\` marker in ` +
     'EITHER spelling — neither the plain-text line nor its HTML-comment form — so the four-facet block ' +
     '〈四棱卡面块固定形状〉 requires is not machine-findable on the card face. 「落卡即带,⛔ 不留待维护者' +
     '到场再补」: the block is a FILING duty, so a marker parked in a COMMENT is not the shape and this ' +
@@ -14906,7 +15199,7 @@ export function h73SpeaksAbout(issue) {
   if (!issue || issue.pull_request) return false;
   if (issue.state === 'closed') return false;
   if (!Array.isArray(issue.labels)) return false;
-  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+  return labelNames(issue).includes(DECISION_INBOX_LABEL);
 }
 
 /**
@@ -14936,7 +15229,7 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
       ? `owed by the ${domains.map((d) => `\`${d}\``).join(' / ')} lane seat`
       : 'owed by NO lane yet — the card carries no `domain:*` label, so the TRIAGE seat routes it first';
   return (
-    `\`${GOVERNED_PR_DECISION_LABEL}\` still on a card whose BODY carries a ruling record: ` +
+    `\`${DECISION_INBOX_LABEL}\` still on a card whose BODY carries a ruling record: ` +
     `\`${RULED_LINE_KEY}:\` ruling comment ${governing.id}, ${age}. The ruling is recorded and the exit ` +
     `out of the decision box is not: ${owes}, which moves the card in one write as the ruled letter ` +
     'says (`pm:queue`, `pm:blocked` or close) — nothing else will, because the director writes no label. ' +
@@ -14950,14 +15243,14 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
-// The stale-`finding` screen — ONE rule, two readers (#16904)
+// The stale-`finding` screen — the rule H63 reads (#16904)
 //
 // `finding` is defined by the state model as a TRANSIENT marker — 「观察类记录,
 // 恒 = 待首次定级;定级即离标;不占队列不进收件箱」 — so `label:finding` answers
 // exactly one question: what has not been graded yet. It does not. The filing
 // card measured 385 of 395 carriers already graded across both boards; a later
 // triage round re-measured 185 of 226; a hand strip cleared 38 more; and the
-// one-time sweep that closes the backlog left objectstack and objectui at 0.
+// one-time sweep that closed the backlog left objectstack and objectui at 0.
 //
 // A population that was refilled three times by hand is a population that
 // refills, and the reason is an API shape rather than carelessness: the strip
@@ -14965,29 +15258,6 @@ export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
 // the default outcome. The write-path half of that fix is its own card. This is
 // the READ half: the row that makes the refill visible on the patrol instead of
 // being re-measured by whoever next happens to look.
-//
-// ## Why the rule LIVES HERE and the sweep imports it, rather than the reverse
-//
-// `scripts/pm/sweep-stale-finding.mjs` owns the one-time strip and exports this
-// screen. Reusing it BY IMPORT is the ruling, and 「⛔ never a second copy of the
-// rule」 is the reason — but the import can only point one way, and that was
-// measured on this tree rather than assumed:
-//
-//   this file importing the sweep   a MODULE CYCLE that crashes. The sweep
-//                                   derives module-level constants from
-//                                   `PM_STATE_LABELS`, which lives here, so
-//                                   with THIS file as the entry point — every
-//                                   patrol run, every `--self-test` — the
-//                                   sweep's body evaluates first and throws
-//                                   `ReferenceError: Cannot access
-//                                   'PM_STATE_LABELS' before initialization`.
-//   the sweep importing this file   already how it works, for four symbols.
-//
-// So the rule moves DOWN to the module that already owns the vocabulary it is
-// derived from, and the sweep re-exports it under the names its own callers and
-// self-test already use. One source, one arrow, no copy — and the row's
-// population is not an approximation of the sweep's target set, it IS that set,
-// which is what lets the row say "this is what the sweep would strip today".
 //
 // ## The three `pm:*` label sets in this file are NOT this one, and must not be
 //
@@ -15107,23 +15377,19 @@ export function staleFindingScreen(issue) {
 // ---------------------------------------------------------------------------
 // H63 (#16904) — a graded card still wearing the ungraded marker
 //
-// The row over the screen above. ⛔ Report-only, like everything here: the
-// one-time sweep is the tool that strips, it is run once per board by the seat
-// that owns that board, and this row exists precisely because that run is a
-// point measurement of a population that refills. The remedy a row prescribes
-// is a grading write that also drops the marker, never a strip performed from
-// this script.
+// The row over the screen above. ⛔ Report-only, like everything here: triage
+// removes the marker by hand when it grades the card, and this row exists
+// because that step is easy to forget, so the population refills. The remedy a
+// row prescribes is a grading write that also drops the marker, never a strip
+// performed from this script.
 //
-// ## Why it fires on the SWEEP's set exactly, `pm:seat` skip included
+// ## Why it fires on the screen's set exactly, `pm:seat` skip included
 //
-// The row's job is to make the refill visible, and "the refill" is only
-// meaningful against the thing that was emptied. A row whose population were
-// merely similar would drift from the tool's over the first change to either;
-// sharing the screen makes 「what the sweep would strip today」 the row's literal
-// reading. The `pm:seat` exclusion travels with it for the same reason it
-// exists in the tool: a seat registry post is not a card in the grading pool,
-// so its marker is not an ungraded card's marker, and reporting it would send a
-// reader to strip a label that is doing its job.
+// The row's job is to make the refill visible, so its population is the
+// screen's stale set itself rather than something merely similar. The `pm:seat`
+// exclusion is part of that set: a seat registry post is not a card in the
+// grading pool, so its marker is not an ungraded card's marker, and reporting
+// it would send a reader to strip a label that is doing its job.
 //
 // ## Population and cost
 //
@@ -15156,8 +15422,8 @@ export function h63StaleFindingBesideGrade(issue) {
     'returns four wrong rows in five is discharged by sampling or skipped. Two lanes have already ' +
     'declined to dispatch a card in this shape, which is the strict reading of 不占队列. Remedy — WHO ' +
     'and HOW: the seat that next writes a grade on this card, dropping the marker in the SAME write ' +
-    '(「定级即离标」); the standing backlog is the one-time sweep\'s, run once per board by the seat ' +
-    'that owns it, ⛔ never a loop from here. ⛔ Report-only: no label is written from this script, and ' +
+    '(「定级即离标」); a carrier already in this shape is the triage round\'s to fix by hand, removing ' +
+    'the marker when it grades the card, ⛔ never a loop from here. ⛔ Report-only: no label is written from this script, and ' +
     '⛔ no grade is ever synthesised — a card with no priority has not been read and belongs in the ' +
     'ungraded pool, not in the queue. Boundaries: a card carrying ONLY the marker is the pool the ' +
     'index exists for and is clean here; a `pm:seat` post is never judged; closed-card residue is ' +
@@ -15458,6 +15724,48 @@ export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
     'is a skills-lane finding, ⛔ never an invented key. ⛔ Report-only: nothing is written from this script. ' +
     `Out of scope: a comment older than ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h (a bell is an event and ages out), a ` +
     'closed mailbox, a mailbox whose comment page could not be read (unjudged, counted in the summary).'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H76 — an OPEN PR with NO assignee, a `pm:mailbox` PR excepted. Ruling record
+// 6674390671 (letter A): a PR names its owner — the dev's `pr_create` carries
+// the claim's `Account:` as its assignee, and a hand-over (sibling takeover,
+// release, reassignment) re-assigns the PR in the same stroke as the claim
+// change (`references/execution-duties.md` 认领). The same ruling makes this
+// row report-only, ⛔ no gate. A mailbox is a seat's doorbell, never a delivery
+// (`project-forms.md` 〈信箱 PR〉), so it is exempt; its label is
+// `mailbox-open.mjs`'s MAILBOX_LABEL, handed in by the sweep, never spelled
+// here. When the sweep could not load that label the row cannot tell a mailbox
+// from a delivery, so it fires UNJUDGED, never clean (#4690). Drafts are
+// INCLUDED: a dev's PR stays a draft until its seat lands it. Free — it reads
+// the open listing already in hand.
+// ---------------------------------------------------------------------------
+
+/**
+ * H76 — null when clean or out of scope, else the finding sentence.
+ *
+ * @param {object} pr — a `/pulls?state=open` list row.
+ * @param {string} mailboxLabel — `mailbox-open.mjs`'s MAILBOX_LABEL, handed in by the sweep; anything else is unread.
+ */
+export function h76OpenPrWithoutAssignee(pr, mailboxLabel) {
+  if (!pr || pr.state === 'closed') return null;
+  if ((pr.assignees ?? []).length > 0 || pr.assignee) return null;
+  if (typeof mailboxLabel !== 'string' || mailboxLabel === '') {
+    return (
+      `${UNJUDGED_MARKER} open PR with NO assignee, and the mailbox label could not be read this sweep — ` +
+      'whether it is an exempt mailbox PR is UNJUDGED, not settled. Read its labels by hand: a mailbox is ' +
+      'exempt, any other open PR owes its owner as assignee.'
+    );
+  }
+  if (labelNames(pr).includes(mailboxLabel)) return null;
+  return (
+    'open PR with NO assignee. A PR names its owner (ruling record 6674390671): the dev\'s `pr_create` carries ' +
+    'the claim\'s `Account:`, and a hand-over (sibling takeover, release, reassignment) re-assigns the PR in the ' +
+    'same stroke as the claim change. Remedy — WHO and HOW: the seat holding the card this PR names assigns that ' +
+    'card\'s assignee through the relay (`assign` op, the PR number as `issue`); a bot PR with no card takes its ' +
+    'owning lane seat\'s account, or stays unassigned with a note. ⛔ Report-only: nothing is written from this ' +
+    `script. Out of scope: a \`${mailboxLabel}\` PR (a seat's doorbell, never a delivery).`
   );
 }
 
@@ -17329,12 +17637,8 @@ export function h67ReadOrder(issues, cap = H67_TIMELINE_READ_CAP) {
     return at === -1 ? H67_SELECTION_ORDER_LABELS.length : at;
   };
   // Non-fleet before fleet, inside one rank only; a seat-signed body or an
-  // unreadable author reads as the fleet's.
-  const fleet = (issue) => {
-    if (readSignatureLine(issue?.body) !== null) return 1;
-    const author = artefactAuthor(issue);
-    return author && !author.isApp ? 0 : 1;
-  };
+  // unreadable author reads as the fleet's (`isFleetCard`, shared with H74).
+  const fleet = (issue) => (isFleetCard(issue) ? 1 : 0);
   const age = (issue) => {
     const parsed = Date.parse(issue?.created_at ?? '');
     return Number.isFinite(parsed) ? parsed : Infinity;
@@ -17847,6 +18151,12 @@ export const SWEEP_COUNT_KEYS = [
   'awaitingUndated',
   'maintainerActionCandidates',
   'maintainerActionProbed',
+  // H74's coverage pair: body-clean `pm:queue` / `pm:blocked` cards whose thread
+  // was worth a read, and how many threads were actually read. A shortfall is
+  // not silent (an unread thread fires its own card's UNJUDGED row) but is owed
+  // for the reason every pair here is owed (#4690).
+  'triageAuditCandidates',
+  'triageAuditProbed',
   'blockerTargets',
   'blockerResolved',
   'dispatchRefTargets',
@@ -18208,6 +18518,10 @@ export function summaryLine(counts, findingCount) {
   const awaitingUndated = counts.awaitingUndated ?? 0;
   const maProbed = counts.maintainerActionProbed ?? 0;
   const maCandidates = counts.maintainerActionCandidates ?? 0;
+  // H74's pair — the same shape as H55's over the same shared cache, for a
+  // different candidate set: the queue cards no label-keyed disjunct can see.
+  const taProbed = counts.triageAuditProbed ?? 0;
+  const taCandidates = counts.triageAuditCandidates ?? 0;
   // The fourth pair, and the one whose shortfall is NOT silent: an unresolved
   // `Blocked-by:` target fires its own H19 row on the card that names it, so
   // this number is a total rather than the only place the gap is visible. It
@@ -18369,6 +18683,9 @@ export function summaryLine(counts, findingCount) {
     `\`updated_at\`, judged rather than counted; \`Maintainer-action:\` threads read on ${maProbed} of ` +
     `${maCandidates} judged candidate(s)` +
     `${maProbed < maCandidates ? " — each unread thread fires its own card's H55 row, never dropped" : ''}. ` +
+    `First-touch audits (H74): comment threads read on ${taProbed} of ${taCandidates} body-clean \`pm:queue\` / ` +
+    `\`pm:blocked\` candidate(s)` +
+    `${taProbed < taCandidates ? " — each unread thread fires its own card's UNJUDGED H74 row, never dropped" : ''}. ` +
     `Blocker liveness (H19): targets resolved on ${btResolved} of ${btTargets} distinct \`Blocked-by:\` ` +
     `target(s) named by open \`pm:blocked\` card(s)` +
     `${
@@ -18797,6 +19114,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h14Fallback', '`Blocked-by:` comment fallback read on '],
   ['h9Restart', '`Restart-when:` hold comments read on '],
   ['h55Awaiting', 'Awaiting-maintainer entries (H55): '],
+  ['h74Audit', 'First-touch audits (H74): '],
   ['h19Blockers', 'Blocker liveness (H19): '],
   ['h20Dispatch', 'Dispatch liveness (H20 + H27): '],
   ['h32Seats', 'Seat liveness (H32): '],
@@ -19021,7 +19339,7 @@ export function renderDecisionDependents(inventory, { markdown = false } = {}) {
 
   head.push(
     `Report-only and derived at READ TIME: a card below is an open ` +
-      `\`${GOVERNED_PR_DECISION_LABEL}\` card that at least one OPEN card's \`Blocked-by:\` line ` +
+      `\`${DECISION_INBOX_LABEL}\` card that at least one OPEN card's \`Blocked-by:\` line ` +
       `names, and ⛔ no priority label is written for it. The standing instruction this ` +
       `discharges, verbatim: 「${INSTRUCTION_FOUR_RULING}」 It is one lookup over the same ` +
       `reverse index H14 is judged against — no second channel and no second parser (#17968).`,
@@ -19049,7 +19367,7 @@ export function renderDecisionDependents(inventory, { markdown = false } = {}) {
   }
 
   const count =
-    `${rows.length} of ${inbox} open \`${GOVERNED_PR_DECISION_LABEL}\` card(s) have an open ` +
+    `${rows.length} of ${inbox} open \`${DECISION_INBOX_LABEL}\` card(s) have an open ` +
     `downstream dependent.`;
   const notMeasured =
     `NOT MEASURED beside it: ${unmeasured} open \`pm:blocked\` card(s) carry no machine-readable ` +
@@ -19416,6 +19734,17 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // forward motion stopped, and nothing else will move it.
   H73: 'stall',
 
+  // H74 is a `state`, H13's band for H13's reason: a label (`pm:queue` /
+  // `pm:blocked`) says the card is on a lane's board, and the record that puts a
+  // card there — the triage first touch — is absent from both channels. ⛔ Not
+  // `gate`: nothing was stripped. ⛔ Not `stall`: whether the card is actually
+  // stopped is what the lane's knock and the sweep's audit go and find out.
+  // ⛔ Not `inventory`: it alarms about one card.
+  H74: 'state',
+
+  // H75 is a `stall`, H19's band for H19's reason: the PR's premise outlived itself and nothing re-reads it.
+  H75: 'stall',
+
   // H63 is a `state`, and the other three bands are refused on their own
   // criteria. ⛔ Not `gate`: that band exists for the row that can tell a
   // STRIPPED gate from an ungated card — an ABSENCE reading as a green light —
@@ -19630,6 +19959,11 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // is stopped (not `stall`), and no write on the board repairs a sent comment
   // (not `state`) — the repair is the next bell, spelled from the table.
   H72: 'inventory',
+
+  // H76 is a `state`, H1's band for H1's reason: a live PR half-written — the
+  // owner the ruling makes it name is missing, and the repair is one relay
+  // `assign` on the board. ⛔ Not `stall`: an unowned PR can still land.
+  H76: 'state',
 });
 
 const FAMILY_BAND_RANK = new Map(HALF_STATE_FAMILY_BANDS.map((b) => [b.name, b.rank]));
@@ -20469,9 +20803,9 @@ function classifyRepoRead(tok, primary, repo) {
  *
  *   `transport` is the OPTIONAL `describeTransportRoute` reading for the route
  *   the observations were taken on (#13544). Absent, no note is folded in, no
- *   sentence changes, and every verdict is byte-identical to what it was — which
- *   is what keeps the other importer (`scripts/pm/ci-failure.mjs`, which passes
- *   no such field) unchanged.
+ *   sentence changes, and every verdict is byte-identical to what it was. Every
+ *   live caller hands one in today; the identity is what lets the self-test's
+ *   bare-observation fixtures read the classification alone, and it is pinned there.
  * @returns {{ kind: string, headline: string, detail: string[], fix: string[] } | null}
  */
 export function classifyTransportProbe(obs) {
@@ -21046,6 +21380,9 @@ async function sweep(options = {}) {
     markerNearMissAnnounced: [],
     maintainerActionCandidates: 0,
     maintainerActionProbed: 0,
+    // H74's pair, initialised on the same grounds as every counter above.
+    triageAuditCandidates: 0,
+    triageAuditProbed: 0,
     // H56's census (#17314) — how many of the comments H44 already read carry
     // a platform clock to judge a typed stamp against, and the two ways one
     // does not. Initialised so a sweep that throws early renders numbers.
@@ -22983,6 +23320,36 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   const maintainerActionFor = (issue) =>
     maintainerAction.unreadable.has(issue.number) ? null : maintainerAction.comments.get(issue.number);
 
+  // The first-touch audit thread read — H74's one purchase, the same
+  // gated-fallback pattern as H55's over the same shared cache, so a queue card
+  // H2 (assigned) or H4 (blocked, body-clean) already fetched costs no second
+  // request. Its stats pair is separate because it answers for a different
+  // candidate set, and nothing goes quiet on a failure: an unreadable thread
+  // fires its own card's UNJUDGED row, saying the channel is unjudged, not empty.
+  const triageAudit = { comments: new Map(), unreadable: new Set() };
+  const gatherTriageAuditComments = async (issue) => {
+    if (triageAudit.comments.has(issue.number) || triageAudit.unreadable.has(issue.number)) return;
+    stats.triageAuditCandidates = (stats.triageAuditCandidates ?? 0) + 1;
+    try {
+      const bodies = await commentsFor(issue);
+      stats.triageAuditProbed = (stats.triageAuditProbed ?? 0) + 1;
+      triageAudit.comments.set(issue.number, bodies);
+    } catch {
+      triageAudit.unreadable.add(issue.number);
+    }
+  };
+  /** What H74 gets for a card: `undefined` unconsulted, `null` unreadable, else the bodies. */
+  const triageAuditFor = (issue) =>
+    triageAudit.unreadable.has(issue.number) ? null : triageAudit.comments.get(issue.number);
+  /** H74's parent read — H45's fetch class and H45's 404 reading; any other failure is the sentinel. */
+  const readTriageAuditParent = async (issue) => {
+    try {
+      return await rest(subIssueParentPath(OWNER_REPO, issue.number));
+    } catch (err) {
+      return err?.status === 404 ? null : H74_PARENT_UNREADABLE;
+    }
+  };
+
   // H32's gathered seat markers (#11706), judged after the label pages finish:
   // the predicate needs the LANE INVENTORY, and that is a count over the
   // `pm:queue`/`pm:dispatched` listings which are only complete once this loop
@@ -23045,6 +23412,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (needsMaintainerActionComments(issue)) await gatherMaintainerActionComments(issue);
     const unnamedAct = h55AwaitingWithoutMaintainerAction(issue, maintainerActionFor(issue));
     if (unnamedAct) findings.push([issue, 'H55', unnamedAct]);
+    // H74 — the first-touch audit record, judged across BOTH channels on H55's
+    // gated-fetch trade: membership is free (`pm:queue` and `pm:blocked` are
+    // pages this loop consumes, so the row can never be about a card the sweep
+    // did not list), and the thread is bought only for a body-clean member
+    // (`needsTriageAuditComments`), off the shared cache.
+    if (needsTriageAuditComments(issue)) await gatherTriageAuditComments(issue);
+    const auditBodies = triageAuditFor(issue);
+    // The sub-issue exemption is the one read bought AFTER both channels are
+    // clean: the sub-issues parent (H45's fetch class, same 404 reading). Its
+    // failure is never silent — the predicate fires UNJUDGED on the sentinel.
+    const auditParent = h74NeedsParentRead(issue, auditBodies) ? await readTriageAuditParent(issue) : undefined;
+    const unaudited = h74QueuedWithoutTriageAudit(issue, auditBodies, auditParent);
+    if (unaudited) findings.push([issue, 'H74', unaudited]);
     // H29 + H30 — the same free reads, one label-set and one timestamp. Their
     // populations are covered here BY CONSTRUCTION: every H29 pair contains at
     // least one label this loop lists (the ONE-OF vocabulary is the label pages
@@ -23471,6 +23851,22 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
   }
 
+  // H76 — an open PR with no assignee, off the listing above, free. The mailbox
+  // label is imported LAZILY for H72's reason (banner above `h72NeedsThread`);
+  // a failed import leaves it unread, and every unowned PR then fires UNJUDGED.
+  {
+    let mailboxLabel = null;
+    try {
+      ({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));
+    } catch {
+      mailboxLabel = null;
+    }
+    for (const pr of seenPrs.values()) {
+      const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);
+      if (unowned) findings.push([pr, 'H76', unowned]);
+    }
+  }
+
   // H16 — the only predicate here whose input no listing carries:
   // `mergeable_state` lives on the single-PR endpoint alone. One GET per
   // CANDIDATE (the gathering policy is `h16NeedsDetail`, which answers from
@@ -23772,8 +24168,8 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // H63 (#16904) — the same listing for the same reason: `finding` is not one
     // of the labels the label loop pages, so a carrier holding no `pm:*` state
     // is first visible HERE. One label read on a row this listing already
-    // holds, through the screen the one-time sweep strips on — so the row's
-    // population IS the sweep's target set rather than an approximation of it.
+    // holds, through the stale-`finding` screen — so the row's population IS
+    // the screen's stale set rather than an approximation of it.
     const staleFinding = h63StaleFindingBesideGrade(issue);
     if (staleFinding) findings.push([issue, 'H63', staleFinding]);
     // H68 (#18901) — the class-(b) declaration with no `Seam:` line, on this
@@ -24379,6 +24775,14 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   stats.crossRepoProbed = repoReadCache.size;
   stats.crossRepoUnreadable = [...repoReadCache.values()].filter((v) => v === false).length;
 
+  // H75 — premise freshness over the open PRs listed above, on H19's resolver and cache (drafts included).
+  for (const pr of seenPrs.values()) {
+    const resolutions = [];
+    for (const target of h75PremiseTargets(pr)) resolutions.push(await resolveBlockerTarget(target));
+    const stale = h75PremiseClosedSinceOpened(pr, resolutions);
+    if (stale) findings.push([pr, 'H75', stale]);
+  }
+
   // -- H40 — the dangling-reference patrol (#13634) --------------------------
   //
   // Runs LAST, deliberately. It is the only pass here whose cost is a budget
@@ -24975,11 +25379,22 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // through this predicate — lives in record-recognisers.mjs's doorbell battery,
   // because this self-test cannot import that module (H62's banner).
   'H72 mailbox off-table bells': 20,
+  // Registered with the unowned-PR row, pin just under the count: the firing, the assignee/mailbox/closed
+  // exemptions, the unread-label UNJUDGED leg, the text, the band and the wiring.
+  'H76 unowned open PR': 11,
   // Registered with the ruled-card-in-the-box row (#29386), pin just under the
   // count: the firing case, the label / fence / anchoring / id controls each
   // beside its positive twin, the threshold boundary, the governing stamp, the
   // re-entry line, the owing seat, the live record shapes, the text, the band.
   'H73 ruled card in the decision box': 25,
+  // Registered with the first-touch audit row, pin just under the count: the
+  // firing case with both record shapes as its positive controls, the body
+  // channel, every exemption beside a non-exempt twin, the population edges,
+  // the three thread states, the text, the summary pair and the band.
+  'H74 first-touch audit': 46,
+  // Registered with the premise-freshness row, pin just under the count: the measured timeline firing, its
+  // before-open / open / local / unanchored controls, the UNJUDGED leg, the cap, the text and the band.
+  'H75 premise freshness': 15,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28030,7 +28445,7 @@ async function selfTest() {
   const facetCard = (over = {}) => ({
     number: 16934,
     state: 'open',
-    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'priority:p2' }],
+    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'priority:p2' }],
     body: '## 一句话问题\n单租户下谁是租户墙?\n',
     ...over,
   });
@@ -28055,11 +28470,11 @@ async function selfTest() {
 
   // ── Direction 2, continued: population boundaries, each with its control ──
   t('⛔ H62: a card without the decision label is out of scope', h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }] })), null);
-  t('H62 control: …and adding exactly that label to the same card fires it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }, { name: GOVERNED_PR_DECISION_LABEL }] })), 'string');
+  t('H62 control: …and adding exactly that label to the same card fires it', typeof h62DecisionCardWithoutFacetBlock(facetCard({ labels: [{ name: 'priority:p2' }, { name: DECISION_INBOX_LABEL }] })), 'string');
   t('⛔ H62: a CLOSED decision card is out — the label on it is residue, H22/H39\'s reading', h62DecisionCardWithoutFacetBlock(facetCard({ state: 'closed' })), null);
   t('⛔ H62: a PULL REQUEST row that slipped into the listing is not a card', h62DecisionCardWithoutFacetBlock(facetCard({ pull_request: {} })), null);
   t('H62 control: …and the byte-identical row WITHOUT the `pull_request` field fires, so it is the PR-ness that excluded it', typeof h62DecisionCardWithoutFacetBlock(facetCard()), 'string');
-  t('⛔ H62: …and the decision label on a PULL REQUEST is H48\'s subject, whose own constant this is', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('⛔ H62: …and the card inbox constant is `needs-user-decision`, never H48\'s PR label `pm:awaiting-merge`', [DECISION_INBOX_LABEL, GOVERNED_PR_AWAITING_MERGE_LABEL].join('|'), 'needs-user-decision|pm:awaiting-merge');
   t('⛔ H62: an UNREADABLE `labels` is excluded, never read as unlabelled (#4690)', h62DecisionCardWithoutFacetBlock(facetCard({ labels: undefined })), null);
   t('⛔ H62: a missing row does not crash', h62DecisionCardWithoutFacetBlock(undefined), null);
   t('⛔ H62: an EMPTY body is a finding, not a crash — nothing was written at all', typeof h62DecisionCardWithoutFacetBlock(facetCard({ body: null })), 'string');
@@ -28105,8 +28520,8 @@ async function selfTest() {
   // ── The row's text: the platform hazard, the remedy, the boundaries ───────
   t('H62 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row62(facetCard())), false);
   t('H62 text: …so the comment spelling is named in WORDS', row62(facetCard()).includes('HTML-comment form'), true);
-  t('H62 text: the label constant is printed, ⛔ never a re-typed literal', row62(facetCard()).includes(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
-  t('H62 text: …and it is the constant H48/H52 already own', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('H62 text: the label constant is printed, ⛔ never a re-typed literal', row62(facetCard()).includes(`\`${DECISION_INBOX_LABEL}\``), true);
+  t('H62 text: …and it is the card inbox constant H52 already owns', DECISION_INBOX_LABEL, 'needs-user-decision');
   t('H62 text: WHO acts is the FILING seat, in one body edit', row62(facetCard()).includes('the FILING seat, in one body edit'), true);
   t('H62 text: …and the prior-ruling reader is named as the paste source', row62(facetCard()).includes('check:pm-prior-rulings'), true);
   t('H62 text: ⛔ never a label written from this script', row62(facetCard()).includes('never a label written from this script'), true);
@@ -28123,10 +28538,8 @@ async function selfTest() {
 
   // -- H63 (#16904): a graded card still wearing the ungraded marker ---------
   //
-  // The row over the SHARED screen. Both directions, a lit control under every
-  // silence, and — because the point of sharing the screen is that the row and
-  // the one-time sweep can never disagree — a source-text pin that the sweep
-  // still ALIASES this definition instead of re-growing a copy of it.
+  // The row over the shared screen. Both directions, and a lit control under
+  // every silence.
   const gradedCarrier = (labels, over = {}) => ({
     number: 16904,
     state: 'open',
@@ -28143,9 +28556,9 @@ async function selfTest() {
   t('H63: …while the state row calls the trigger a position on the work state machine', row63(gradedCarrier(['finding', 'pm:queue'])).includes('a position on the work state machine'), true);
   t('H63: this very card\'s own shape fires — `finding` + `pm:queue` + `priority:p3`', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue', 'priority:p3', 'domain:skills'])), 'string');
   t('H63: …naming BOTH triggers, state first', row63(gradedCarrier(['finding', 'pm:queue', 'priority:p3'])).includes('`pm:queue`, `priority:p3`'), true);
-  t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', GOVERNED_PR_DECISION_LABEL])), 'string');
+  t('H63: every grading state is a trigger — `needs-user-decision` included', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', DECISION_INBOX_LABEL])), 'string');
 
-  // ── Direction 2: it is SILENT where the sweep leaves the card, each silence
+  // ── Direction 2: it is SILENT where the screen leaves the card, each silence
   //    with a lit control on the byte-identical card ─────────────────────────
   t('⛔ H63: `finding` ALONE is NOT a finding — that is the pool the index exists FOR', h63StaleFindingBesideGrade(gradedCarrier(['finding'])), null);
   t('H63 control: …and the same card with one grading state fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:blocked'])), 'string');
@@ -28161,10 +28574,10 @@ async function selfTest() {
   t('H63 control: …and the byte-identical OPEN row fires', typeof h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'])), 'string');
   t('⛔ H63: a PULL REQUEST row that slipped into the listing is not a card', h63StaleFindingBesideGrade(gradedCarrier(['finding', 'pm:queue'], { pull_request: {} })), null);
   t('⛔ H63: a card without the marker is not this row\'s business', h63StaleFindingBesideGrade(gradedCarrier(['pm:queue', 'priority:p2'])), null);
-  t('⛔ H63: an unreadable `labels` reads as no marker and is silent — the SCREEN\'s behaviour, shared with the tool that writes', h63StaleFindingBesideGrade(gradedCarrier([], { labels: undefined })), null);
+  t('⛔ H63: an unreadable `labels` reads as no marker and is silent — the SCREEN\'s behaviour', h63StaleFindingBesideGrade(gradedCarrier([], { labels: undefined })), null);
   t('⛔ H63: a missing row does not crash', h63StaleFindingBesideGrade(undefined), null);
 
-  // ── The screen itself, as the sweep judges it ────────────────────────────
+  // ── The screen itself ─────────────────────────────────────────────────────
   t('H63 screen: a graded carrier is `stale`', staleFindingScreen(gradedCarrier(['finding', 'pm:queue'])).verdict, 'stale');
   t('H63 screen: …the ungraded pool is `leave`, and REPORTED rather than dropped', staleFindingScreen(gradedCarrier(['finding'])).kind, 'ungraded');
   t('H63 screen: …and the seat post is `skip`, with the reason on the row', staleFindingScreen(gradedCarrier(['finding', 'pm:seat'])).detail.includes('pm:seat'), true);
@@ -28173,19 +28586,6 @@ async function selfTest() {
   t('H63 screen: ⛔ the marker is never its own trigger', GRADING_STATE_LABELS.includes(STALE_FINDING_LABEL), false);
   t('H63 screen: a priority is a grade in every spelling the board uses', priorityLabelsIn(['priority:p0', 'priority:p3']).length, 2);
   t('H63 screen: ⛔ and priority-ish prose is not a priority label', priorityLabelsIn(['priorities', 'priority', 'prioritypX']).length, 0);
-
-  // ── ONE rule, two readers: the sweep must still ALIAS this definition ─────
-  let sweepSource63 = '';
-  try {
-    sweepSource63 = readFileSync(new URL('./sweep-stale-finding.mjs', import.meta.url), 'utf8');
-  } catch {
-    sweepSource63 = '';
-  }
-  t('H63 ↔ sweep: the sweep\'s source is readable at all (an unreadable one must not pass as clean)', sweepSource63.length > 0, true);
-  t('H63 ↔ sweep: it ALIASES this screen rather than defining one', sweepSource63.includes('export const screenCard = staleFindingScreen;'), true);
-  t('H63 ↔ sweep: …and ⛔ has not re-grown a copy of the screen', /export function screenCard\s*\(/.test(sweepSource63), false);
-  t('H63 ↔ sweep: …nor a second copy of the grading vocabulary', /export const GRADING_STATE_LABELS\s*=/.test(sweepSource63), false);
-  t('H63 ↔ sweep: its target label is this constant, not a second literal', sweepSource63.includes('export const TARGET_LABEL = STALE_FINDING_LABEL;'), true);
 
   // ── ⛔ The three `pm:*` sets stay four different questions ────────────────
   t('H63: H13\'s visibility set carries the marker — which is why H13 is silent on a graded carrier', PM_STATE_LABELS.includes(STALE_FINDING_LABEL), true);
@@ -28199,7 +28599,7 @@ async function selfTest() {
   t('H63 text: ⛔ no less-than fragment — the body is written into a GitHub issue', /[<>]/.test(row63(gradedCarrier(['finding', 'pm:queue']))), false);
   t('H63 text: the state model is QUOTED, not paraphrased', row63(gradedCarrier(['finding', 'pm:queue'])).includes('定级即离标'), true);
   t('H63 text: WHO acts — the seat that next writes a grade, in the SAME write', row63(gradedCarrier(['finding', 'pm:queue'])).includes('SAME write'), true);
-  t('H63 text: …and the standing backlog is named as the one-time sweep\'s, ⛔ never a loop from here', row63(gradedCarrier(['finding', 'pm:queue'])).includes('⛔ never a loop from here'), true);
+  t('H63 text: …and a carrier already in the shape is triage\'s to fix by hand, ⛔ never a loop from here', row63(gradedCarrier(['finding', 'pm:queue'])).includes('⛔ never a loop from here'), true);
   t('H63 text: ⛔ no label is written from this script', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no label is written from this script'), true);
   t('H63 text: ⛔ and no grade is ever synthesised — the constraint a hand sweep learned by breaking it', row63(gradedCarrier(['finding', 'pm:queue'])).includes('no grade is ever synthesised'), true);
   t('H63 text: the marker constant is printed, ⛔ never a re-typed literal', row63(gradedCarrier(['finding', 'pm:queue'])).includes(`\`${STALE_FINDING_LABEL}\``), true);
@@ -28329,6 +28729,26 @@ async function selfTest() {
   b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
   b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
 
+  // -- H76: an open PR with no assignee (ruling record 6674390671, letter A). The fixture is a relay-opened dev
+  //    draft as the card measured them (26 of 27 open PRs unassigned), offline, never a live read.
+  const BATTERY76 = 'H76 unowned open PR';
+  const MAILBOX76 = 'pm:mailbox';
+  const pr76 = (extra = {}) => ({ number: 30778, state: 'open', draft: true, assignees: [], assignee: null, labels: [{ name: 'skip-changeset' }], user: { login: 'objectstack-fleet[bot]', type: 'Bot' }, ...extra });
+  const row76 = String(h76OpenPrWithoutAssignee(pr76(), MAILBOX76) ?? '');
+  b(BATTERY76, 'H76 fires: an open dev draft with no assignee and no mailbox label', row76.length > 0 && !isUnjudgedFinding(row76), true);
+  b(BATTERY76, 'H76 row: names the ruling, the claim\'s `Account:`, the relay `assign` op, the bot-PR arm and the report-only boundary', ['ruling record 6674390671', 'the claim\'s `Account:`', '`assign` op', 'owning lane seat\'s account', 'Report-only'].every((x) => row76.includes(x)), true);
+  b(BATTERY76, 'H76: a ready (non-draft) PR fires exactly like a draft — drafts are included, not the only population', typeof h76OpenPrWithoutAssignee(pr76({ draft: false }), MAILBOX76), 'string');
+  b(BATTERY76, '⛔ H76: a PR with an assignee is clean — the list field or the legacy single field', [h76OpenPrWithoutAssignee(pr76({ assignees: [{ login: 'os-elon-musk' }] }), MAILBOX76), h76OpenPrWithoutAssignee(pr76({ assignee: { login: 'os-elon-musk' } }), MAILBOX76)].join(), ',');
+  b(BATTERY76, '⛔ H76: an unassigned `pm:mailbox` PR is exempt, and its unlabelled twin is not', [h76OpenPrWithoutAssignee(pr76({ labels: [{ name: MAILBOX76 }, { name: 'pinned' }] }), MAILBOX76), typeof h76OpenPrWithoutAssignee(pr76({ labels: [{ name: 'pinned' }] }), MAILBOX76)].join(), ',string');
+  b(BATTERY76, '⛔ H76: a closed PR and a missing row are silent, never a crash', [h76OpenPrWithoutAssignee(pr76({ state: 'closed' }), MAILBOX76), h76OpenPrWithoutAssignee(undefined, MAILBOX76), h76OpenPrWithoutAssignee(null, MAILBOX76)].join(), ',,');
+  const unread76 = [null, undefined, ''].map((label) => String(h76OpenPrWithoutAssignee(pr76(), label) ?? ''));
+  b(BATTERY76, 'H76: an UNREAD mailbox label fires UNJUDGED, never clean — null, undefined and empty alike', unread76.every((t) => t.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(t)), true);
+  b(BATTERY76, '⛔ H76: …but an ASSIGNED PR stays clean with the label unread — the label is only the mailbox exemption', h76OpenPrWithoutAssignee(pr76({ assignees: [{ login: 'os-elon-musk' }] }), null), null);
+  b(BATTERY76, 'H76: not a loud finding — it never escalates a sweep', [isLoudFinding(row76), isLoudFinding(unread76[0])].join(), 'false,false');
+  b(BATTERY76, 'H76 band: registered as `state` (H1\'s), and the sweep really pushes it', `${familyBand('H76')}/${familyRegistryCoverage().emitted.includes('H76')}`, 'state/true');
+  b(BATTERY76, 'H76 wiring: every listed open PR is judged with the label taken LAZILY from mailbox-open.mjs, never spelled in the sweep', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("({ MAILBOX_LABEL: mailboxLabel } = await import('./mailbox-open.mjs'));") && src.includes('const unowned = h76OpenPrWithoutAssignee(pr, mailboxLabel);'); })(), true);
+  b(BATTERY76, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY76) && SELF_TEST_BATTERIES[BATTERY76] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
+
   // -- H73 (#29386): a RULED decision card still sitting in the decision box.
   //    Positive controls beside every negative one: the label, the fence, the
   //    anchoring, the id, the threshold, the governing stamp, the re-entry line.
@@ -28338,7 +28758,7 @@ async function selfTest() {
   const card73 = (extra = {}) => ({
     number: 28658,
     state: 'open',
-    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:server' }, { name: 'priority:p2' }],
+    labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:server' }, { name: 'priority:p2' }],
     body: `director#1 · os-support-ai · session_x\n${RULED73}\n\n## 维护者速读\n\n- 问题:…`,
     ...extra,
   });
@@ -28362,17 +28782,128 @@ async function selfTest() {
   b(BATTERY29386, 'H73: …and the list form under that line is read too', h73({ body: `${RULED73}\n\n**Prior rulings on this card:**\n- 6566731522 — the old question\n` }), null);
   b(BATTERY29386, 'H73 control: …while the same line naming a DIFFERENT ruling still fires', typeof h73({ body: `${RULED73}\n\nPrior rulings on this card: 6400000001 — another ruling.` }), 'string');
   b(BATTERY29386, 'H73 control: …and an id after a blank line below it is not that line\'s', typeof h73({ body: `Prior rulings on this card: none\n\n${RULED73}` }), 'string');
-  b(BATTERY29386, 'H73: no `domain:*` label names the TRIAGE seat instead of inventing a lane', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
-  b(BATTERY29386, 'H73: two `domain:*` labels are both named', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:spec' }, { name: 'domain:server' }] }).includes('`domain:spec` / `domain:server`'), true);
+  b(BATTERY29386, 'H73: no `domain:*` label names the TRIAGE seat instead of inventing a lane', row73({ labels: [{ name: DECISION_INBOX_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
+  b(BATTERY29386, 'H73: two `domain:*` labels are both named', row73({ labels: [{ name: DECISION_INBOX_LABEL }, { name: 'domain:spec' }, { name: 'domain:server' }] }).includes('`domain:spec` / `domain:server`'), true);
   b(BATTERY29386, '⛔ H73 population: a closed card, a PR row, an unreadable `labels`, a missing row and an empty body are all silent, none a crash', [h73({ state: 'closed' }), h73({ pull_request: {} }), h73({ labels: undefined }), h73RuledCardStillInBox(undefined, NOW73), h73({ body: null })].every((v) => v === null), true);
   b(BATTERY29386, 'H73 reader: the live shapes read — a parenthesised re-ruling note and a seconds stamp', JSON.stringify([...ruledRecords('Ruled: 6439314592 · letter A (re-ruled from B, 6435350063) · 2026-10-27T10:22Z'), ...ruledRecords('- Ruled: 6398569691 · letter A · 2026-10-25T13:58:53Z')]), JSON.stringify([{ id: '6439314592', at: at73('2026-10-27T10:22Z') }, { id: '6398569691', at: at73('2026-10-25T13:58:53Z') }]));
   b(BATTERY29386, 'H73 text: no angle-bracket fragment and no tracker number — the row is written into a GitHub issue', /[<>]/.test(row73()) || /#[0-9]/.test(row73()), false);
   b(BATTERY29386, 'H73 text: names the one-act rule, the bell, the shape\'s printout and the report-only boundary', ['ONE act (lanes/director.md)', '`Notify: ruling`', '--mailbox-keys', 'never a label written from this script'].every((x) => row73().includes(x)), true);
-  b(BATTERY29386, 'H73 text: the label is the constant H48/H52/H62 own, ⛔ never a re-typed literal', row73().startsWith(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
+  b(BATTERY29386, 'H73 text: the label is the card inbox constant H52/H62 own, ⛔ never a re-typed literal', row73().startsWith(`\`${DECISION_INBOX_LABEL}\``), true);
   b(BATTERY29386, 'H73 constants: a six-hour threshold, one standing patrol cycle', `${RULED_IN_BOX_STALE_HOURS}/${PATROL_CADENCE_HOURS}`, '6/6');
   b(BATTERY29386, 'H73 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H73')}/${familyRegistryCoverage().emitted.includes('H73')}`, 'stall/true');
   b(BATTERY29386, 'H73: not a loud finding — it never escalates a sweep', isLoudFinding(row73()), false);
   b(BATTERY29386, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY29386) && SELF_TEST_BATTERIES[BATTERY29386] > 0, true);
+
+  // -- H74: an open `pm:queue` / `pm:blocked` card with no triage audit record in
+  //    either channel. One card WITH an audit comment and one WITHOUT, as the
+  //    filing card asks, each record shape its own positive control, and every
+  //    exemption beside the non-exempt twin that still fires.
+  const BATTERY74 = 'H74 first-touch audit';
+  const SIG74 = 'triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U';
+  const LANE_SIG74 = 'domain:server#4 · os-support-ai · session_01WGufzhd2Ad9ANGTyAMW7pH';
+  const AUDIT74 = `${SIG74}\n\n## Triage\n\n- lands in domain:server; p2; Task.\nPath: none`;
+  const OLD74 = 'Triage: lands in packages/rest; p2; rationale: the route owner is the server lane.';
+  const card74 = (extra = {}) => ({
+    number: 29613,
+    state: 'open',
+    title: 'rest(record): the audit log row is dropped on bulk delete',
+    labels: [{ name: 'pm:queue' }, { name: 'domain:server' }, { name: 'priority:p2' }],
+    body: `${LANE_SIG74}\n\n## 维护者速读\n\n- 问题:…`,
+    ...extra,
+  });
+  const h74 = (comments, extra = {}) => h74QueuedWithoutTriageAudit(card74(extra), comments);
+  const row74 = (comments, extra = {}) => String(h74(comments, extra) ?? '');
+  b(BATTERY74, 'H74 fires: a queued card whose body and thread (both read) carry no audit record', typeof h74(['looks good', 'Claim: PM loop round 2']), 'string');
+  b(BATTERY74, 'H74 row: names the state label and both channels', ['`pm:queue` with NO triage audit record in EITHER channel', 'both were read'].every((x) => row74([]).includes(x)), true);
+  b(BATTERY74, '⛔ H74: a signed `## Triage` comment on the thread is the record — clean', h74(['first comment', AUDIT74]), null);
+  b(BATTERY74, '⛔ H74: the older `Triage:` opening is a record too — clean', h74([OLD74]), null);
+  b(BATTERY74, 'H74 control: the same `Triage:` opening under a LANE signature still reads (a self-triage record) — clean', h74([`${LANE_SIG74}\n\n${OLD74}\nRuling-ref: 「车道席自分诊」`]), null);
+  b(BATTERY74, 'H74 control: a triage-signed comment with NO `## Triage` heading is not a record — fires', typeof h74([`${SIG74}\n\nRound record: nothing to grade this fire.`]), 'string');
+  b(BATTERY74, 'H74: a `## Triage` heading as the FIRST line reads under the older anchor whatever the signature (H33\'s reading, kept) — clean', [h74([`${LANE_SIG74}\n\n## Triage\n\nself-triage: p2`]), h74(['## Triage\n\np2'])].join(), ',');
+  b(BATTERY74, 'H74 control: a `## Triage` heading BELOW prose is a record only under the TRIAGE signature — a lane-signed one fires', typeof h74([`${LANE_SIG74}\n\nRound note first.\n\n## Triage\n\nplease grade this`]), 'string');
+  b(BATTERY74, 'H74 control: …and the same body under the triage signature is clean, so the silence is the signature\'s', h74([`${SIG74}\n\nRound note first.\n\n## Triage\n\np2`]), null);
+  b(BATTERY74, '⛔ H74: a `## Triage` heading inside a backtick FENCE is a citation, not a record — fires', typeof h74([`${SIG74}\n\nquoting the template:\n\`\`\`\n## Triage\n\`\`\`\n`]), 'string');
+  b(BATTERY74, 'H74: a deeper heading (`### Triage`) under the triage signature reads', h74([`${SIG74}\n\n### Triage\n\np2`]), null);
+  b(BATTERY74, 'H74 body channel: a BODY that is itself the record is clean, and buys no thread', [h74(undefined, { body: AUDIT74 }), h74([], { body: AUDIT74 }), needsTriageAuditComments(card74({ body: AUDIT74 }))].join(), ',,false');
+  b(BATTERY74, 'H74 gating: a body-clean member is worth a fetch', needsTriageAuditComments(card74()), true);
+  b(BATTERY74, '⛔ H74 thread states: UNCONSULTED is silent, never a fabricated row', h74(undefined), null);
+  b(BATTERY74, 'H74 thread states: UNREADABLE fires UNJUDGED, never clean', row74(null).startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(row74(null)) && row74(null).includes('not empty'), true);
+  b(BATTERY74, 'H74 population: `pm:blocked` is spoken about too, and the row names it', row74([], { labels: [{ name: 'pm:blocked' }, { name: 'domain:spec' }] }).startsWith('`pm:blocked` with'), true);
+  b(BATTERY74, '⛔ H74 population: a `pm:dispatched` card is out of scope (its claim is H2\'s subject)', h74([], { labels: [{ name: 'pm:dispatched' }, { name: 'domain:spec' }] }), null);
+  for (const exempt of ['tracking', 'pm:epic', 'pm:seat', 'qa-run', 'status:parked', 'queue-flake-anchor', 'platform-checklist-watchdog']) {
+    b(BATTERY74, `⛔ H74 exempt: a \`${exempt}\` carrier is silent`, h74([], { labels: [{ name: 'pm:queue' }, { name: exempt }] }), null);
+  }
+  b(BATTERY74, 'H74 exempt control: the same card with an unrelated label beside `pm:queue` still fires', typeof h74([], { labels: [{ name: 'pm:queue' }, { name: 'tooling' }] }), 'string');
+  // 「`[maintainer]` cards」 read as SKILL.md's 非车队卡: a human author whose body opens with no seat signature.
+  const HUMAN74 = { login: 'yibowang', type: 'User' };
+  const APP74 = { login: 'objectstack-fleet[bot]', type: 'Bot' };
+  b(BATTERY74, '⛔ H74 exempt: a non-fleet card — human author, no seat signature — is silent, whatever its labels', h74([], { user: HUMAN74, body: '## 问题\n\n导出按钮无反应' }), null);
+  b(BATTERY74, 'H74 exempt control: the same human account with a SEAT-SIGNED body is the fleet\'s — fires', typeof h74([], { user: HUMAN74 }), 'string');
+  b(BATTERY74, 'H74 exempt control: an App author with an unsigned body is the fleet\'s — fires', typeof h74([], { user: APP74, body: '## 问题\n\n导出按钮无反应' }), 'string');
+  b(BATTERY74, '⛔ H74 exempt control: an UNREADABLE author is never promoted to a human\'s — fires', typeof h74([], { user: undefined, body: '## 问题\n\n导出按钮无反应' }), 'string');
+  b(BATTERY74, 'H74 fleet reader: the one `isFleetCard` drives H67\'s order leg too — a human card sorts before a fleet card in one rank', h67ReadOrder([{ number: 2, labels: [{ name: 'pm:queue' }], user: APP74, body: 'x' }, { number: 1, labels: [{ name: 'pm:queue' }], user: HUMAN74, body: 'x' }]).read.map((i) => i.number).join(), '1,2');
+  // A main-red anchor card, by its measured title openings.
+  for (const title of ['main red: Dogfood Regression Gate — GET /packages/:id/customizations 404s', 'main red (Dogfood Regression Gate 1/3) since 21c4bdd8: two pins', 'main red since #24009: the census still pins route-ledger.ts', 'Main-red: Spec property liveness cites a retired key', '4-hourly full run: red on main (CI)', 'nightly-tiers: red on main']) {
+    b(BATTERY74, `⛔ H74 exempt: a main-red anchor title is silent — ${title.slice(0, 24)}…`, h74([], { title }), null);
+  }
+  b(BATTERY74, 'H74 exempt control: a card ABOUT main-red (`pm-dispatch(main-red): …`) stays in the population — fires', typeof h74([], { title: 'pm-dispatch(main-red): when the anchor card closes, the held seats are rung' }), 'string');
+  b(BATTERY74, 'H74 exempt control: `red on main` without the prefix colon is prose, not an anchor — fires', typeof h74([], { title: 'rest: the export route goes red on main-like boards' }), 'string');
+  // A sub-issue inheriting its parent's domain or grade — the read bought last.
+  const domainParent = { number: 29600, labels: [{ name: 'tracking' }, { name: 'domain:server' }] };
+  const gradeParent = { number: 29601, labels: [{ name: 'tracking' }, { name: 'priority:p2' }] };
+  const strangerParent = { number: 29602, labels: [{ name: 'tracking' }, { name: 'domain:ui' }, { name: 'priority:p1' }] };
+  b(BATTERY74, '⛔ H74 exempt: a sub-issue whose parent carries its `domain:*` is silent', h74QueuedWithoutTriageAudit(card74(), [], domainParent), null);
+  b(BATTERY74, '⛔ H74 exempt: …or its `priority:*`', h74QueuedWithoutTriageAudit(card74(), [], gradeParent), null);
+  b(BATTERY74, 'H74 exempt control: a parent sharing NEITHER label inherits nothing — fires', typeof h74QueuedWithoutTriageAudit(card74(), [], strangerParent), 'string');
+  b(BATTERY74, 'H74 exempt control: a parentless card (the documented 404) fires, and an unread parent fires as before', [typeof h74QueuedWithoutTriageAudit(card74(), [], null), typeof h74([])].join(), 'string,string');
+  b(BATTERY74, 'H74 parent states: the UNREADABLE sentinel fires UNJUDGED, never clean and never silent', (() => { const r = String(h74QueuedWithoutTriageAudit(card74(), [], H74_PARENT_UNREADABLE)); return r.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(r) && r.includes('PARENT read failed'); })(), true);
+  b(BATTERY74, '⛔ H74 parent states: a parent row never EXCUSES a card an audit already answers, and never reaches an out-of-scope card', [h74QueuedWithoutTriageAudit(card74(), [AUDIT74], strangerParent), h74QueuedWithoutTriageAudit(card74({ state: 'closed' }), [], strangerParent)].join(), ',');
+  b(BATTERY74, 'H74 parent gating: only a card whose thread was READ and found clean buys the parent read', [h74NeedsParentRead(card74(), []), h74NeedsParentRead(card74(), [AUDIT74]), h74NeedsParentRead(card74(), null), h74NeedsParentRead(card74(), undefined), h74NeedsParentRead(card74({ title: 'main red: x' }), [])].join(), 'true,false,false,false,false');
+  b(BATTERY74, 'H74 inherit reader: a null, undefined or sentinel parent inherits nothing, never a crash', [h74InheritsFromParent(card74(), null), h74InheritsFromParent(card74(), undefined), h74InheritsFromParent(card74(), H74_PARENT_UNREADABLE), h74InheritsFromParent(card74(), { labels: undefined })].some(Boolean), false);
+  b(BATTERY74, '⛔ H74 population: a closed card, a PR row, an unreadable `labels` and a missing row are all silent, none a crash', [h74([], { state: 'closed' }), h74([], { pull_request: {} }), h74([], { labels: undefined }), h74QueuedWithoutTriageAudit(undefined, [])].every((v) => v === null), true);
+  b(BATTERY74, 'H74 population: a null body is no crash and no record — the card still fires on an empty thread', typeof h74([], { body: null }), 'string');
+  b(BATTERY74, 'H74 exempt list: the constant carries exactly the filing card\'s six labels plus the watchdog anchor\'s identity label', [...H74_EXEMPT_LABELS].sort().join(), ['platform-checklist-watchdog', 'pm:epic', 'pm:seat', 'qa-run', 'queue-flake-anchor', 'status:parked', 'tracking'].join());
+  // The watchdog anchor as fleet-patrols.yml files it: App author, `pm:queue,tooling` routing, identity label. Its
+  // title does NOT open the main-red regex (no colon before `red on main`), so the identity label is what exempts it.
+  const WATCHDOG74 = { title: 'check:platform-checklist is red on main', user: APP74, body: 'os-platform-checklist-watchdog\n\nThe gate is red on main.' };
+  b(BATTERY74, '⛔ H74 exempt: the platform-checklist watchdog anchor is silent by its identity label', h74([], { ...WATCHDOG74, labels: [{ name: 'platform-checklist-watchdog' }, { name: 'pm:queue' }, { name: 'tooling' }] }), null);
+  b(BATTERY74, 'H74 exempt control: the same card WITHOUT the identity label is in the population — the title alone does not exempt it', typeof h74([], { ...WATCHDOG74, labels: [{ name: 'pm:queue' }, { name: 'tooling' }] }), 'string');
+  b(BATTERY74, 'H74 exempt control: …because its title does not open the main-red regex', H74_MAIN_RED_ANCHOR_TITLE.test(WATCHDOG74.title), false);
+  b(BATTERY74, 'H74 text: no angle-bracket fragment and no tracker number — the row is written into a GitHub issue', /[<>]/.test(row74([])) || /#[0-9]/.test(row74([])) || /[<>]/.test(row74(null)) || /#[0-9]/.test(row74(null)), false);
+  b(BATTERY74, 'H74 text: names both remedies — the triage first touch and the lane\'s bell — and the report-only boundary', ['audit it in THIS round', '`Request: triage · #n · first-touch audit`', '--mailbox-keys', 'never a label, comment or body written'].every((x) => row74([]).includes(x)), true);
+  b(BATTERY74, 'H74 summary: the coverage pair is reported', saidBy('h74Audit', summaryLine({ triageAuditCandidates: 15, triageAuditProbed: 15 }, 0)).includes('comment threads read on 15 of 15 body-clean'), true);
+  b(BATTERY74, 'H74 summary: …and a shortfall says each unread thread fires its own UNJUDGED row', saidBy('h74Audit', summaryLine({ triageAuditCandidates: 15, triageAuditProbed: 12 }, 0)).includes("fires its own card's UNJUDGED H74 row"), true);
+  b(BATTERY74, 'H74 summary: both count keys ride the enumerated forwarding contract', ['triageAuditCandidates', 'triageAuditProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  b(BATTERY74, 'H74 band: registered as `state` (H13\'s), and the sweep really pushes it', `${familyBand('H74')}/${familyRegistryCoverage().emitted.includes('H74')}`, 'state/true');
+  b(BATTERY74, 'H74: not a loud finding — it never escalates a sweep', isLoudFinding(row74([])), false);
+  b(BATTERY74, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY74) && SELF_TEST_BATTERIES[BATTERY74] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
+
+  // -- H75: an open PR whose cross-repo premise closed after it opened. The fixture is the measured timeline
+  //    (cloud PR opened 2026-11-05T01:54Z; the platform card it cites closed 02:10Z), offline, never a live read.
+  const BATTERY75 = 'H75 premise freshness';
+  const CLOUD75 = 'objectstack-ai/cloud';
+  const pr75 = (body, extra = {}) => ({ number: 3595, created_at: '2026-11-05T01:54:00Z', body, ...extra });
+  const BODY75 = "Builds a cloud-only path because the environment's HTTP door answered 501 (objectstack#30192).";
+  const res75 = (state, closedAt = null, extra = {}) => [{ ...blockerTargetKey({ repo: 'objectstack', number: 30192 }, CLOUD75), state, closedAt, detail: null, ...extra }];
+  const keys75 = (body, repo = CLOUD75) => h75PremiseTargets(pr75(body), repo).map((t) => t.key).join();
+  b(BATTERY75, 'H75 targets: the measured body names the platform card in full owner/repo form', keys75(BODY75), 'objectstack-ai/objectstack#30192');
+  b(BATTERY75, 'H75 targets: "blocked by" and "because" anchor a line too, decorated or not', [keys75('Blocked by `objectstack#7`.'), keys75('**Because** objectstack-ai/objectstack#8 refuses.')].join(), 'objectstack-ai/objectstack#7,objectstack-ai/objectstack#8');
+  b(BATTERY75, '⛔ H75 targets: a LOCAL ref is not a cross-repo premise, bare or repo-qualified', [keys75('because #30192 answered 501'), keys75('because objectstack#30192 answered 501', 'objectstack-ai/objectstack')].join(), ',');
+  b(BATTERY75, '⛔ H75 targets: a cross-repo ref on an UNANCHORED line is no premise', keys75('Follow-up to objectstack#30192.'), '');
+  b(BATTERY75, 'H75 targets: the per-PR cap bounds requests', h75PremiseTargets(pr75(`because ${[1, 2, 3, 4, 5, 6, 7].map((n) => `objectstack#${n}`).join(' ')}`), CLOUD75).length, H4_PROSE_CANDIDATE_CAP);
+  const fired75 = String(h75PremiseClosedSinceOpened(pr75(BODY75), res75('closed', '2026-11-05T02:10:00Z')) ?? '');
+  b(BATTERY75, 'H75 fires: the premise closed sixteen minutes after the PR opened', fired75.length > 0, true);
+  b(BATTERY75, 'H75 row: names the target, both stamps, the re-measure and the report-only boundary', ['`objectstack-ai/objectstack#30192` (closed 2026-11-05T02:10:00Z)', '(2026-11-05T01:54:00Z)', 're-measure the premise before ACCEPT', 'never a label, comment or body written'].every((x) => fired75.includes(x)), true);
+  b(BATTERY75, '⛔ H75: a premise that closed BEFORE the PR opened is clean', h75PremiseClosedSinceOpened(pr75(BODY75), res75('closed', '2026-11-05T01:50:00Z')), null);
+  b(BATTERY75, '⛔ H75: a premise still OPEN is clean', h75PremiseClosedSinceOpened(pr75(BODY75), res75('open')), null);
+  const unread75 = String(h75PremiseClosedSinceOpened(pr75(BODY75), res75('unresolved', null, { detail: 'HTTP 404' })) ?? '');
+  b(BATTERY75, 'H75: an UNRESOLVED premise fires UNJUDGED, never clean', unread75.startsWith(UNJUDGED_MARKER) && isUnjudgedFinding(unread75) && unread75.includes('(HTTP 404)'), true);
+  b(BATTERY75, 'H75: a closed premise leads even beside an unresolved one', String(h75PremiseClosedSinceOpened(pr75(BODY75), [...res75('closed', '2026-11-05T02:10:00Z'), ...res75('unresolved')])).startsWith('open PR whose body'), true);
+  b(BATTERY75, '⛔ H75: no targets, an unreadable open stamp or a missing row is silent, never a crash', [h75PremiseClosedSinceOpened(pr75(BODY75), []), h75PremiseClosedSinceOpened(pr75(BODY75, { created_at: undefined }), res75('closed', '2026-11-05T02:10:00Z')), h75PremiseClosedSinceOpened(undefined, undefined), h75PremiseTargets(undefined).length].join(), ',,,0');
+  b(BATTERY75, 'H75: not a loud finding — it never escalates a sweep', isLoudFinding(fired75), false);
+  b(BATTERY75, 'H75 band: registered as `stall` (H19\'s), and the sweep really pushes it', `${familyBand('H75')}/${familyRegistryCoverage().emitted.includes('H75')}`, 'stall/true');
+  b(BATTERY75, 'H75 wiring: the sweep resolves targets through H19\'s ONE resolver, never a fetch of its own', readFileSync(fileURLToPath(import.meta.url), 'utf8').includes('for (const target of h75PremiseTargets(pr)) resolutions.push(await resolveBlockerTarget(target));'), true);
+  b(BATTERY75, 'floor: this battery is DECLARED on the frozen roster with a positive pin', Object.hasOwn(SELF_TEST_BATTERIES, BATTERY75) && SELF_TEST_BATTERIES[BATTERY75] > 0 && Object.isFrozen(SELF_TEST_BATTERIES), true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
@@ -29958,8 +30489,8 @@ async function selfTest() {
     kind({ token: 'prox_placeholder', authed: { status: 403, rateLimitRemaining: 59 }, anon: { status: 403, rateLimitRemaining: 59 } }),
     'host-unreachable',
   );
-  // #10156: the shared classifier is imported by ci-failure.mjs (#9966), a
-  // caller that runs no "sweep" and reads no "board" — so `host-unreachable`'s
+  // #10156: the shared classifier is also imported by check-handover.mjs, a
+  // caller that runs no "sweep" of its own — so `host-unreachable`'s
   // fix text must not name either, in EITHER branch that returns this kind
   // (network error, and the 403-in-both-directions case pinned just above).
   t(
@@ -30006,9 +30537,9 @@ async function selfTest() {
   t('…and it does NOT prescribe the token-less re-run', class3.fix.join(' ').includes('GITHUB_TOKEN= GH_TOKEN='), false);
   t('…and it names a real credential as the remedy', class3.fix[0].includes('a real GitHub token'), true);
   // #10443: bad-credential and bad-credential-anon-reachable are shared with
-  // ci-failure.mjs (#9966), same as repo-scope-refused/host-unreachable/
-  // repo-not-visible above — a caller that runs no "sweep" and reads no
-  // "board". Cover both branches (anon-reachable and not).
+  // check-handover.mjs, same as repo-scope-refused/host-unreachable/
+  // repo-not-visible above — a caller that runs no "sweep" of its own, so
+  // the prose names the CONTAINER. Cover both branches (anon-reachable and not).
   {
     const anonReachable = classifyTransportProbe({
       token: 'prox_abcdefghi',
@@ -30062,8 +30593,8 @@ async function selfTest() {
     classifyTransportProbe(class4).detail.join(' ').includes('contradict'),
     true,
   );
-  // #10156: repo-scope-refused is shared with ci-failure.mjs (#9966), a caller
-  // that runs no "sweep" and reads no "board" — its headline/detail/fix must
+  // #10156: repo-scope-refused is shared with check-handover.mjs, a caller
+  // that runs no "sweep" of its own — its headline/detail/fix must
   // describe what the CONTAINER cannot do, not what a caller-specific "sweep"
   // or "board read" cannot do.
   t(
@@ -30117,9 +30648,9 @@ async function selfTest() {
     classifyTransportProbe({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } }).fix[0].includes('PM_SWEEP_REPO'),
     true,
   );
-  // #10443: repo-not-visible is shared with ci-failure.mjs (#9966) exactly like
-  // repo-scope-refused above — a caller that runs no "sweep" and reads no
-  // "board", so its headline/detail/fix must describe what the CONTAINER
+  // #10443: repo-not-visible is shared with check-handover.mjs exactly like
+  // repo-scope-refused above — a caller that runs no "sweep" of its own, so
+  // its headline/detail/fix must describe what the CONTAINER
   // cannot do, never what a caller-specific "sweep" would have found.
   {
     const notVisible404 = classifyTransportProbe({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } });
@@ -31512,12 +32043,13 @@ async function selfTest() {
   b(BATTERY_SERVER, 'alias: `domain:engine` reads as `domain:server`', canonicalLane('domain:engine'), 'domain:server');
   b(BATTERY_SERVER, 'alias: `domain:services` reads as `domain:server`', canonicalLane('domain:services'), 'domain:server');
   b(BATTERY_SERVER, 'alias: `domain:cli` reads as `domain:server`', canonicalLane('domain:cli'), 'domain:server');
+  b(BATTERY_SERVER, 'alias: `domain:rest` reads as `domain:server`', canonicalLane('domain:rest'), 'domain:server');
   b(BATTERY_SERVER, 'alias control: `domain:server` is its own canonical form', canonicalLane('domain:server'), 'domain:server');
   b(BATTERY_SERVER, 'alias control: a lane the map does not name passes through untouched', canonicalLane('domain:spec'), 'domain:spec');
   b(BATTERY_SERVER, 'alias control: a non-lane label passes through untouched', canonicalLane('pm:queue'), 'pm:queue');
   b(BATTERY_SERVER, 'alias control: a non-string is handed back, never thrown on', canonicalLane(undefined), undefined);
   b(BATTERY_SERVER, 'alias map: frozen', Object.isFrozen(LANE_LABEL_ALIASES), true);
-  b(BATTERY_SERVER, 'alias map: it names exactly the three retired lanes', Object.keys(LANE_LABEL_ALIASES).sort().join(), 'domain:cli,domain:engine,domain:services');
+  b(BATTERY_SERVER, 'alias map: it names exactly the four retired lane spellings', Object.keys(LANE_LABEL_ALIASES).sort().join(), 'domain:cli,domain:engine,domain:rest,domain:services');
   b(BATTERY_SERVER, 'alias map: every value is the one surviving lane', Object.values(LANE_LABEL_ALIASES).every((v) => v === 'domain:server'), true);
   // The seat title: a post not yet retitled is the merged lane's seat, number intact.
   b(BATTERY_SERVER, 'seat title: a `domain:engine · seat 2` post reads as `domain:server`, seat 2', [seatLane(seat38('[PM seat] domain:engine · seat 2 — 🟢 os-b')).lane, seatLane(seat38('[PM seat] domain:engine · seat 2 — 🟢 os-b')).seat].join(), 'domain:server,2');
@@ -33022,7 +33554,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   const GOV48 = [{ glob: '.claude/**', files: ['.claude/agents/os-dev.md'] }];
   const VERDICT48 = '**ACCEPT** — lands #15894 as ruled. Governed (`.claude/**`), predicate exit 3.';
   const BRIEF48 = '## 维护者速读\n\n一句话:巡查行,报告态,不写标签。';
-  const LABEL48 = GOVERNED_PR_DECISION_LABEL;
+  const LABEL48 = GOVERNED_PR_AWAITING_MERGE_LABEL;
   const cm48 = (body, at = '2026-09-05T14:30:00Z') => ({ body, created_at: at });
   // ⚠️ The fixture BODY always carries the dev's six-line draft under the SAME
   // `## 维护者速读` heading the comment marker reads, so every case below that
@@ -33043,13 +33575,15 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H48: verdict + label, NO brief -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]), 'string');
   t('H48: …and the row names the brief half that is missing', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('no comment whose line begins `## 维护者速读`'), true);
   t('H48: …and the remedy is posting it as a COMMENT', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('post the final 维护者速读 brief as a COMMENT'), true);
-  t('H48: …and never asks for the label, which is already there', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`'), false);
+  t('H48: …and never asks for the label, which is already there', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('add `pm:awaiting-merge`'), false);
   t('H48: verdict + brief, NO label -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), 'string');
-  t('H48: …and the row names the label half that is missing', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('no `needs-user-decision` label'), true);
-  t('H48: …and the remedy is the label write', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('Remedy: add `needs-user-decision`.'), true);
+  t('H48: …and the row names the label half that is missing', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('no `pm:awaiting-merge` label'), true);
+  t('⛔ H48: the OLD shape — `needs-user-decision` on the PR — no longer satisfies the label half (the maintainer split the inboxes)', typeof h48GovernedVerdictWithoutBrief(pr48([DECISION_INBOX_LABEL]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), 'string');
+  t('H48: the PR-side constant is `pm:awaiting-merge`, PRs only, and NOT one of the six card states', [GOVERNED_PR_AWAITING_MERGE_LABEL, PM_EXCLUSIVE_STATE_LABELS.includes(GOVERNED_PR_AWAITING_MERGE_LABEL)].join('|'), 'pm:awaiting-merge|false');
+  t('H48: …and the remedy is the label write', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('Remedy: add `pm:awaiting-merge`.'), true);
   t('H48: …and never asks for a brief that is already posted', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('as a COMMENT'), false);
-  t('H48: verdict and NEITHER half -> ONE finding naming both', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no `needs-user-decision` label and no comment whose line begins `## 维护者速读`'), true);
-  t('H48: …and both remedies in one sentence, never two rows', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`, and post the final 维护者速读 brief as a COMMENT'), true);
+  t('H48: verdict and NEITHER half -> ONE finding naming both', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no `pm:awaiting-merge` label and no comment whose line begins `## 维护者速读`'), true);
+  t('H48: …and both remedies in one sentence, never two rows', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('add `pm:awaiting-merge`, and post the final 维护者速读 brief as a COMMENT'), true);
   t('H48: …and it really is ONE row', (h48row(pr48([]), GOV48, [cm48(VERDICT48)]).match(/Report-only patrol INPUT/gu) ?? []).length, 1);
 
   // The BODY draft is not the brief — the half this row exists to find must not
@@ -33605,7 +34139,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   t('H52 fires: a non-empty `open_questions` on a card with no `needs-user-decision`', typeof h52(OPEN52), 'string');
   t('H52 negative control: an EMPTY `open_questions` array is NOT reported', h52(EMPTY52), null);
   t('H52 negative control: a card ALREADY carrying `needs-user-decision` is NOT reported again', h52(OPEN52, card52(['pm:dispatched', 'needs-user-decision'])), null);
-  t('H52: the label constant is the one H48 already owns, not a second spelling', GOVERNED_PR_DECISION_LABEL, 'needs-user-decision');
+  t('H52: the label constant is the card inbox one, not a second spelling — and not H48\'s PR label', DECISION_INBOX_LABEL, 'needs-user-decision');
   t('H52: a thread with no report at all is silent', h52([cm52(1, 'Triage: routing only.', T52)]), null);
 
   // The marker — two spellings, and what is deliberately NOT one.
@@ -36217,7 +36751,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // measured 2026-08-31) — the pair that proves the refusal was about the route.
   const bypassedObs = { token: 'proxy-injected', authed: { status: 401, rateLimitRemaining: null }, anon: { status: 200, rateLimitRemaining: 0 } };
   t('#13544 bypassed route: still classified as a bad credential', classifyTransportProbe(bypassedObs).kind, 'bad-credential');
-  t('#13544 bypassed route: with no transport handed in, the old remedy is byte-identical (ci-failure.mjs)', classifyTransportProbe(bypassedObs).fix[0], 'export GITHUB_TOKEN=<a real GitHub token> and re-run (see the anonymous reading above).');
+  t('#13544 bypassed route: with no transport handed in, the old remedy is byte-identical', classifyTransportProbe(bypassedObs).fix[0], 'export GITHUB_TOKEN=<a real GitHub token> and re-run (see the anonymous reading above).');
   t('#13544 bypassed route: with the transport handed in, the remedy is the route', classifyTransportProbe({ ...bypassedObs, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }) }).fix[0].includes(PROXY_FLAG), true);
   // The same container, same token, routed through the proxy: all three stages
   // answer as GitHub, including the repo-scoped one. This is the reading the

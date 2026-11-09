@@ -57,8 +57,8 @@ const SYS = { isSystem: true } as const;
  * admin's READ over org-less rows — is unchanged by their number.
  */
 const SEEDED_RULE_NAMES = [
-  'share_new_inquiries_with_field_ops',
-  'share_key_account_qualified_contacts_with_managers',
+  'showcase_share_new_inquiries_with_field_ops',
+  'showcase_share_key_account_qualified_contacts_with_managers',
 ];
 
 interface RuleRow {
@@ -95,7 +95,7 @@ describe('#7676 — package-seeded (org-less) sharing rules stay visible to an O
       label: 'Org-bound probe',
       object: 'showcase_project',
       recipientType: 'position',
-      recipientId: 'exec',
+      recipientId: 'showcase_exec',
       criteria: { health: 'red' },
       accessLevel: 'read',
     });
@@ -177,7 +177,7 @@ describe('#7676 — package-seeded (org-less) sharing rules stay visible to an O
         object_name: 'showcase_project',
         criteria_json: JSON.stringify({ health: 'red' }),
         recipient_type: 'position',
-        recipient_id: 'exec',
+        recipient_id: 'showcase_exec',
         access_level: 'read',
         active: true,
       },

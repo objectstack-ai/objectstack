@@ -14,7 +14,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: api
   tags: rest, endpoint, auth, realtime, server
 ---
@@ -25,7 +25,8 @@ metadata:
 
 | Need | Use instead |
 |:-----|:------------|
-| Model objects, fields, permissions, or datasources | **objectstack-data** |
+| Model objects, fields, permissions, or datasources (`rules/datasources.md`) | **objectstack-data** |
+| Pick a driver package | **objectstack-platform** → Driver Selection Guide |
 | Filter, sort, paginate, or aggregate a request | **objectstack-query** |
 | Register a kernel service, or read one from a plugin | **objectstack-platform** |
 | CEL in a route guard or auth predicate | **objectstack-formula** |
@@ -44,20 +45,17 @@ GET    /api/v1/data/{object}          # List records (with filter, sort, paginat
 GET    /api/v1/data/{object}/:id      # Get single record
 POST   /api/v1/data/{object}          # Create record
 PATCH  /api/v1/data/{object}/:id      # Update record
-DELETE /api/v1/data/{object}/:id      # Delete record (hard delete)
+DELETE /api/v1/data/{object}/:id      # Delete record (business-object rows → recycle bin)
 POST   /api/v1/data/{object}/query    # Complex queries + aggregation (QueryAST in body)
 POST   /api/v1/data/{object}/batch    # Per-object batch operations
 POST   /api/v1/batch                  # Cross-object atomic batch
 ```
 
-Data CRUD lives under the `/data` prefix. There is no `/bulk` route and no
-`GET .../aggregate` route — batch writes go through the `batch` endpoints, and
-aggregation goes through `POST /api/v1/data/{object}/query` with
-`groupBy`/`aggregations` in the body.
+There is no `/bulk` route and no `GET .../aggregate` route — batch writes go
+through the `batch` endpoints.
 
 > **Key rule:** If your object defines `apiMethods`, only those operations (and
-> what derives from them) are exposed; `[]` means deny-all. The authorable
-> values are the six primitives — see **API Methods (Operations)**.
+> what derives from them) are exposed; `[]` means deny-all.
 
 ### Metadata API (`/meta`)
 
@@ -69,8 +67,13 @@ GET /api/v1/meta/:type            # List metadata items of a type (object, view,
 GET /api/v1/meta/:type/:name      # Read a single metadata item
 ```
 
-The read-side query params (`?preview=draft`, `?package=`, `?include=content`)
-are **client** contracts — nothing in a stack declares them.
+The list reads a closed query set — `package`, `preview` (`draft`), `object`,
+`include` (`content`, `grants`), `id`, `names`, `locale` — and refuses any other key with
+`400 VALIDATION_ERROR` instead of ignoring it. `?names=a,b,c` (one
+comma-separated value) narrows the list to the named items the caller may see:
+an unknown name is simply absent, an empty value is refused `400`, and the
+`package` list (keyed by id) refuses the key. These are **client** contracts —
+nothing in a stack declares them.
 
 ### Public (anonymous) Form Endpoints
 
@@ -129,16 +132,18 @@ policy layer over an existing pipeline, never a second execution dialect.
 | **`defineStack({ apis })`** | The endpoint is a *projection* of something the platform already executes: query/return records, or trigger a flow. No code, no deploy artifact, publish-gated. **Prefer this.** |
 | **A flow that runs your code** | The endpoint needs real handler CODE: point a `type: 'flow'` endpoint at a flow whose `script` node names a stack function (`defineStack({ functions })`), or whose `connector_action` node calls a declared connector (outbound). The URL stays declarative; the code runs where the automation surface already runs it. |
 
-An inbound webhook from a sender you control is a `type: 'api'` flow
-(objectstack-automation → **Inbound webhook (`api`) triggers**): it verifies
-ObjectStack's own `x-objectstack-signature`, enqueues, and answers `202`.
+An inbound webhook is a `type: 'api'` flow (objectstack-automation →
+**Inbound webhook (`api`) triggers**): it verifies ObjectStack's own
+`x-objectstack-signature`, or a vendor's own HMAC-SHA256 header its start node
+declares as `config.signature` (DocuSign Connect, Stripe-style), enqueues, and
+answers `202`.
 **An app never mounts on `http.server`** — that service is the platform
 plugins' own door-building primitive, and a code-mounted route gets no caller
 identity, auth gate, rate limit, namespace carve-out or OpenAPI entry. Three
 cases have no app surface today; say so rather than invent one: a third-party
-callback verified by its own signature over the raw body (the hook checks only
-`x-objectstack-signature`), a streaming response (a declared endpoint answers
-one JSON envelope), and a protocol the platform does not speak.
+callback signed in a form `config.signature` cannot declare (not HMAC-SHA256),
+a streaming response (a declared endpoint answers one JSON envelope), and a
+protocol the platform does not speak.
 
 <!-- os:check -->
 ```typescript
@@ -231,7 +236,6 @@ for `authRequired: false`.
 - Always use **plural nouns** for collection paths (`accounts`, not `account`).
 - Use **snake_case** for multi-word paths (`project_tasks`, not `projectTasks`).
 - Use **verbs** only for actions, not for CRUD (`/close`, `/approve`).
-- Always prefix with `/api/v1/` for versioning.
 
 ---
 
@@ -262,9 +266,9 @@ eight extra verbs are never declared in `apiMethods`:
 | `import` | `create` ∨ `update` (writeMode-precise) | `POST /data/{object}/import` |
 | `export` | `list` | `GET /data/{object}/export` |
 
-`history` (from `get` ∧ `trackHistory`) gates only. `restore` / `purge` never
-derive — the trash surface is retired. Declaring any derived verb in
-`apiMethods` is stripped at parse with a FROM → TO warning.
+`history` (from `get` ∧ `trackHistory`) gates only. `restore` / `purge` derive
+from `delete` and open the recycle-bin doors (pitfall 2). Declaring any
+derived verb in `apiMethods` is stripped at parse with a FROM → TO warning.
 
 `POST /data/{object}/import` takes `mapping` as `{ Column: field }` or as
 `FieldMappingEntry[]` (`api/export.zod.ts`); only the entry form carries
@@ -299,7 +303,7 @@ The **HttpDispatcher** is the central request router; it answers:
 
 ## Realtime Subscriptions
 
-Realtime contracts are pointer-style — read the spec source for exact shapes:
+Realtime contracts live in the spec source:
 
 - `node_modules/@objectstack/spec/src/api/realtime.zod.ts` — `TransportProtocol`
   (`websocket` | `sse` | `polling`), `SubscriptionSchema` (`id`, `events[]`,
@@ -313,18 +317,16 @@ Realtime contracts are pointer-style — read the spec source for exact shapes:
 
 ## Authentication & Authorization
 
-RBAC (`definePermissionSet`) and RLS are objectstack-data's surface, not this
-one; this section is the endpoint's own auth keys.
+RBAC and RLS are objectstack-data's surface; this section is the endpoint's
+own auth keys.
 
 ### Auth Configuration
 
 There is no nested `auth` block on an endpoint, and no `name` / `request` /
 `response` field: auth is the flat `public` + `permissions` pair on
 `RestApiEndpointSchema`, and declarative `ApiEndpointSchema` endpoints (and the
-dispatcher) use `authRequired: boolean` (default `true`) — setting it `false`
-obliges you to arm a `rateLimit` (ADR-0121 D6 — see **Declarative Endpoints →
-`authRequired` and the D6 pairing** above). Rate-limit policies themselves are
-shaped by `RateLimitConfigSchema`:
+dispatcher) use `authRequired: boolean` (default `true`; `false` owes an armed
+`rateLimit`, D6 above). Rate-limit policies are shaped by `RateLimitConfigSchema`:
 
 <!-- os:check -->
 ```typescript
@@ -345,15 +347,6 @@ Provider and login contracts live in
 `LoginRequestSchema` carries `type` (login method), plus optional `email`,
 `username`, `password`, `provider`, and `redirectTo`. Read that file for the
 session and token response shapes before wiring an auth flow.
-
----
-
-## Datasources
-
-`defineDatasource`, `schemaMode`, the `external` write gate and
-`credentialsRef` are objectstack-data → `rules/datasources.md`; driver packages
-and the Turso Cloud/EE caveat are objectstack-platform → **Driver Selection
-Guide**; the `driver` id vocabulary is `data/driver/config-registry.zod.ts`.
 
 ---
 
@@ -393,9 +386,7 @@ keys mean the run produced none — never invent an empty.
    return flat `{ error, code }` bodies instead (e.g. `CONCURRENT_UPDATE` →
    409, `VALIDATION_FAILED` → 400) — do not assume every error arrives in the
    `success: false` envelope.
-3. **Apply least-privilege auth.** Every endpoint should declare its required
-   permissions explicitly.
-4. **Design idempotent writes deliberately.** No upsert route is generated, so
+3. **Design idempotent writes deliberately.** No upsert route is generated, so
    an external integration queries by its unique external ID and branches to
    create or update — group those writes through
    `POST /api/v1/data/{object}/batch`.
@@ -411,10 +402,16 @@ keys mean the run produced none — never invent an empty.
    read. Sending neither skips the check; a mismatch answers **409
    `CONCURRENT_UPDATE`**; the quoted-empty entity-tag (`""`) is refused **400
    `VALIDATION_FAILED`**, not treated as omitted.
-2. **Assuming `DELETE` is recoverable.** ObjectStack `DELETE` is a hard
-   delete — there is no recycle bin (the dead `enable.trash` flag was removed
-   in 16.x). For recoverability, use per-field `trackHistory` (audit
-   trail) or a `lifecycle` archive policy instead of custom soft-delete logic.
+2. **Treating `DELETE` as final.** A by-id delete keeps a business object's
+   rows in the recycle bin (`sys_recycle_bin`, 30 days by default; not
+   `multi: true` deletes, platform rows or rows deleted before the bin existed)
+   and answers `recycleBinEntryId`. Under `/api/v1/data/{object}/recycle-bin`:
+   `POST /:entryId/restore` (`allowRestoreOwnDeleted` for your own deletes,
+   `manageRecycleBin` for others'); `GET` lists, `DELETE /:entryId` purges,
+   `DELETE` empties (`manageRecycleBin`). A refused restore answers `409`
+   `RESTORE_UNIQUE_VALUE_TAKEN`, `RESTORE_PARENT_PURGED`,
+   `RESTORE_PARENT_IN_RECYCLE_BIN` (restore that parent's entry first) or
+   `RESTORE_PACKAGE_UNINSTALLED`, and keeps the entry. No soft-delete.
 
 ---
 

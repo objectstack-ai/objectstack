@@ -428,6 +428,8 @@ import {
   describeFieldPathVerdict,
   indexObjectGraph,
   isUnjudgeable,
+  objectsAsServed,
+  objectsWithoutTiedFields,
   recordsOf,
   resolveFieldPath,
   suggestName,
@@ -959,7 +961,22 @@ export function validateListViewFieldRefs(
   const findings: ListViewFieldRefFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  const graph: ObjectGraph = indexObjectGraph(stack);
+  // [#30383] The objects as the registry serves them, every `objectExtensions`
+  // field folded in: the graph and the option map below both read this, so a
+  // column, filter key or `groupByField` naming a field a sibling package adds
+  // resolves as it does at runtime.
+  const servedStack = objectsAsServed(stack);
+  // [#30608] Skip 2 is asked of the DECLARED object: one that declares no
+  // readable field map (an introspected schema) stays `null`, unjudgeable,
+  // when an extension adds to it, as the write, readonly and sort rules keep
+  // it. The served graph alone reads such an object as having only the
+  // extension's fields, and so refused every column naming one of its own.
+  const declaredGraph = indexObjectGraph(stack);
+  const graph: ObjectGraph = new Map(
+    [...indexObjectGraph({ objects: servedStack.objects })].map(
+      ([name, served]) => [name, declaredGraph.get(name) === null ? null : served] as const,
+    ),
+  );
   const scope = options?.packageScope;
   // [#24668] The whole collection, stated — and only without a closure, which
   // is the narrower set and wins.
@@ -1058,11 +1075,13 @@ export function validateListViewFieldRefs(
 
   /**
    * [#28018] The inline option values each object's fields declare, read from
-   * the same `stack.objects` the graph indexes. A field with no non-empty
-   * inline `options` array is absent: its lanes are not judged.
+   * the same served objects the graph indexes. A field with no non-empty
+   * inline `options` array is absent: its lanes are not judged. [#30383] So is
+   * a field two packages tie on: which definition's options win is
+   * registration order.
    */
   const optionValues = new Map<string, Map<string, ReadonlySet<string>>>();
-  for (const obj of recordsOf(stack.objects)) {
+  for (const obj of objectsWithoutTiedFields(servedStack)) {
     const objName = strName(obj.name);
     if (!objName) continue;
     const byField = new Map<string, ReadonlySet<string>>();

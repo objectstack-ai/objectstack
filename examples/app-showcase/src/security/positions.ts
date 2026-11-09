@@ -25,7 +25,7 @@ import { definePosition } from '@objectstack/spec/identity';
 
 /** Works tasks on their own projects — the rank-and-file position. */
 export const ContributorPosition = definePosition({
-  name: 'contributor',
+  name: 'showcase_contributor',
   label: 'Contributor',
   description: 'Works tasks on their own projects.',
   permissionSets: ['showcase_contributor'],
@@ -33,7 +33,7 @@ export const ContributorPosition = definePosition({
 
 /** Runs a unit: depth-scoped visibility over the unit's private records. */
 export const ManagerPosition = definePosition({
-  name: 'manager',
+  name: 'showcase_manager',
   label: 'Project Manager',
   description: 'Manages projects and the contributors on them.',
   permissionSets: ['showcase_manager'],
@@ -41,7 +41,7 @@ export const ManagerPosition = definePosition({
 
 /** Org-wide read for reporting — depth-based (`readScope: org`), not VAMA. */
 export const ExecPosition = definePosition({
-  name: 'exec',
+  name: 'showcase_exec',
   label: 'Executive',
   description: 'Read-all visibility for reporting.',
   permissionSets: ['showcase_executive'],
@@ -49,7 +49,7 @@ export const ExecPosition = definePosition({
 
 /** Compliance: View-All bypass (VAMA) — reads everything, changes nothing. */
 export const AuditorPosition = definePosition({
-  name: 'auditor',
+  name: 'showcase_auditor',
   label: 'Auditor',
   description: 'Compliance read-only view across private records (viewAllRecords).',
   permissionSets: ['showcase_auditor'],
@@ -57,7 +57,7 @@ export const AuditorPosition = definePosition({
 
 /** Back-office: system permissions, Modify-All repairs, the Operations app. */
 export const OpsPosition = definePosition({
-  name: 'ops',
+  name: 'showcase_ops',
   label: 'Operations',
   description: 'Back-office operations — Setup access, announcement repairs, Operations app.',
   permissionSets: ['showcase_ops'],
@@ -69,7 +69,7 @@ export const OpsPosition = definePosition({
  * set (`adminScope`); this position is just how an admin hands it out.
  */
 export const FieldOpsDelegatePosition = definePosition({
-  name: 'field_ops_delegate',
+  name: 'showcase_field_ops_delegate',
   label: 'Field Ops Delegate Admin',
   description: 'Scoped administration of the Field Operations business-unit subtree.',
   permissionSets: ['showcase_field_ops_delegate'],
@@ -82,7 +82,7 @@ export const FieldOpsDelegatePosition = definePosition({
  * bound set masks the three budget figures outright.
  */
 export const ClientLiaisonPosition = definePosition({
-  name: 'client_liaison',
+  name: 'showcase_client_liaison',
   label: 'Client Liaison',
   description: 'Prepares and publishes client-facing project briefs; cannot see internal budget figures.',
   permissionSets: ['showcase_client_liaison'],
@@ -95,7 +95,7 @@ export const ClientLiaisonPosition = definePosition({
  * marks a user as belonging to that audience.
  */
 export const ClientPortalUserPosition = definePosition({
-  name: 'client_portal_user',
+  name: 'showcase_client_portal_user',
   label: 'Client Portal User',
   description: 'External client admitted to the Client Portal.',
   permissionSets: ['showcase_guest_portal'],
@@ -103,7 +103,7 @@ export const ClientPortalUserPosition = definePosition({
 
 /**
  * Approval-routing positions (会签 / quorum demos). The `approval` flow nodes
- * in src/automation/flows route to `{ type: 'position', value: 'finance' | 'legal' }`
+ * in src/automation/flows route to `{ type: 'position', value: 'showcase_finance' | 'showcase_legal' }`
  * (Invoice Dual Sign-off → finance AND legal; High-Value Committee Quorum →
  * manager + finance + legal, 2-of-3). Without these declared — and without a
  * holder assigned (see src/security/seed-approval-demo.ts) — those requests
@@ -114,13 +114,13 @@ export const ClientPortalUserPosition = definePosition({
  * so a holder gets no extra data access from holding one.
  */
 export const FinancePosition = definePosition({
-  name: 'finance',
+  name: 'showcase_finance',
   label: 'Finance',
   description: 'Finance sign-off authority on invoices and high-value expenses (approval routing only).',
 });
 
 export const LegalPosition = definePosition({
-  name: 'legal',
+  name: 'showcase_legal',
   label: 'Legal',
   description: 'Legal sign-off authority on invoices and high-value expenses (approval routing only).',
 });

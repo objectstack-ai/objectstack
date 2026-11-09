@@ -76,6 +76,7 @@ import {
   readUnlessRefused,
 } from './security-plugin.js';
 import { withoutOperationPrivateKeys } from '@objectstack/core';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import {
   resolveEngineDeleteDispatch,
   resolveEngineUpdateDispatch,
@@ -107,7 +108,10 @@ export function addressedByIdWriteId(
     const route = resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options);
     return route.kind === 'by-id' ? route.id : undefined;
   }
-  if (opCtx.operation === 'delete') {
+  // [#30237] `purge` is a delete (`rlsOperationForVerb`): the permanent
+  // delete addresses its row by `where.id` exactly as a delete does, while
+  // `purge(entryId)` / `empty(object)` carry no `where` and resolve no row.
+  if (rlsOperationForVerb(opCtx.operation) === 'delete') {
     const route = resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined);
     return route.kind === 'by-id' ? route.id : undefined;
   }
@@ -126,7 +130,7 @@ export function addressedPredicateWrite(
     if (data == null || typeof data !== 'object') return false;
     return resolveEngineUpdateDispatch(data as EngineUpdateDispatchData, opCtx.options).kind === 'multi';
   }
-  if (opCtx.operation === 'delete') {
+  if (rlsOperationForVerb(opCtx.operation) === 'delete') {
     return resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
   }
   return false;
@@ -136,7 +140,7 @@ export function addressedPredicateWrite(
 export async function readableRowsScopeForPredicateWrite(
   this: Pick<AddressedWritesHost, 'ql'>,
   opCtx: any,
-): Promise<Record<string, unknown> | null> {
+): Promise<Record<string, unknown>> {
   if (typeof this.ql?.find !== 'function') {
     // The read question cannot be asked, and a write that cannot be narrowed
     // must not run un-narrowed. Unreachable in a real deployment — `start()`
@@ -159,7 +163,11 @@ export async function readableRowsScopeForPredicateWrite(
       context: withoutOperationPrivateKeys((opCtx.context ?? {}) as Record<string, unknown>),
     }),
   );
-  if (answer.refused) return null;
+  // [#21829, ruling B] A caller the read door refuses writes none of the
+  // object's records: the read door's refusal is the predicate write's answer,
+  // before the write runs. The by-id leg refuses the same caller too (step
+  // 2.7).
+  if (answer.refused) throw answer.error;
   const rows: unknown[] = Array.isArray(answer.value) ? answer.value : [];
   if (rows.length > PREDICATE_WRITE_READABLE_ID_CAP) {
     throw predicateWriteReadableCapError(opCtx.object, opCtx.operation);

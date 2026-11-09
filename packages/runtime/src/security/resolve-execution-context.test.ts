@@ -2,11 +2,13 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { ObjectKernel, isAuthzStoreUnavailableError, isServiceNotRegisteredError } from '@objectstack/core';
+import { ObjectKernel, currentCredentialUseClient, isAuthzStoreUnavailableError, isServiceNotRegisteredError } from '@objectstack/core';
+import { resolveClientAddress } from '@objectstack/plugin-auth/client-address';
 
 import { resolveExecutionContext } from './resolve-execution-context.js';
 import { hashApiKey } from './api-key.js';
 import { bindCatalogFromTables } from './security-catalog.testkit.js';
+import { FORWARD_CREDENTIAL_HEADER, withForwardCredential, type ForwardCredentialBinding } from '@objectstack/rest';
 
 /**
  * Minimal ObjectQL stub. Only `sys_api_key` is populated; every other object
@@ -31,11 +33,15 @@ function bounded<T>(rows: T[], opts: any): T[] {
 }
 
 function makeQl(apiKeyRows: any[]) {
+  // The owners the key rows name exist: an API key authenticates only as an
+  // owner who exists.
+  const owners = [...new Set(apiKeyRows.map((r) => r.user_id).filter((id) => typeof id === 'string' && id))].map((id) => ({ id }));
   return {
     async find(object: string, opts: any) {
       const where = opts?.where ?? {};
-      if (object !== 'sys_api_key') return [];
-      return bounded(apiKeyRows.filter((row) => {
+      const table = object === 'sys_api_key' ? apiKeyRows : object === 'sys_user' ? owners : undefined;
+      if (!table) return [];
+      return bounded(table.filter((row) => {
         for (const [k, v] of Object.entries(where)) {
           if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           if (row[k] !== v) return false;
@@ -211,6 +217,8 @@ describe('resolveExecutionContext — localization (timezone + locale)', () => {
   }: { settings?: any[]; prefs?: any[]; settingsService?: any }) {
     const tables: Record<string, any[]> = {
       sys_api_key: apiKeyRows,
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      sys_user: [{ id: 'u1' }],
       sys_user_preference: prefs,
       sys_setting: settings,
     };
@@ -320,7 +328,7 @@ describe('resolveExecutionContext — the platform-scoped (Default Organization)
   const RAW = 'osk_admin';
   /** @param adminGrantOrg the organization that owns u1's admin_full_access grant. */
   function makeAuthQl(extraGrants = [], adminGrantOrg: string | null = 'org_default') {
-    const tables = {
+    const tables: Record<string, any[]> = {
       // [#8287] Re-spelled from `organization_id`: these fixtures use the key as a
       // VEHICLE to authenticate u1 into orgA, and `active_organization_id` is the
       // column the verifier reads for exactly that. The assertions below depend on
@@ -328,6 +336,8 @@ describe('resolveExecutionContext — the platform-scoped (Default Organization)
       // out), so this keeps them meaningful rather than merely green.
       sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', active_organization_id: 'orgA', expires_at: FUTURE }],
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'owner' }],
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      sys_user: [{ id: 'u1' }],
       sys_organization: [{ id: 'org_default', slug: 'default' }, { id: 'orgA', slug: 'org-a' }],
       sys_user_permission_set: [
         { id: 'ups_global', user_id: 'u1', permission_set_id: 'ps_admin', permission_set: 'admin_full_access', organization_id: adminGrantOrg },
@@ -409,6 +419,8 @@ describe('resolveExecutionContext — posture plumbing (#2947)', () => {
       // out), so this keeps them meaningful rather than merely green.
       sys_api_key: [{ id: 'k1', key: hashApiKey(RAW), revoked: false, user_id: 'u1', active_organization_id: 'orgA', expires_at: FUTURE }],
       sys_member: [{ user_id: 'u1', organization_id: 'orgA', role: 'member' }],
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      sys_user: [{ id: 'u1' }],
       sys_user_permission_set: userPermSets,
       sys_permission_set: permissionSets,
       sys_position: [], sys_position_permission_set: [], sys_user_position: [],
@@ -651,6 +663,8 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
         { user_id: 'u_exmember', organization_id: 'org_B' },
         { user_id: 'u_orgless', organization_id: 'org_A' },
       ],
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      sys_user: [{ id: 'u_exmember' }, { id: 'u_orgless' }],
       sys_user_permission_set: [], sys_permission_set: [],
       sys_position: [], sys_position_permission_set: [], sys_user_position: [],
     };
@@ -822,5 +836,312 @@ describe('[#13906 decision 1 A, runtime door] the tenancy posture seam tells "ne
     expect(err.code).toBe('SERVICE_UNAVAILABLE');
     expect(err.status).toBe(503);
     expect(err.object).toBe('tenancy');
+  });
+});
+
+describe('a banned user\'s OAuth credentials resolve to no principal while the ban holds', () => {
+  const NOW = Date.now();
+  const SOON = new Date(NOW + 3_600_000).toISOString();
+  const LAPSED = new Date(NOW - 60_000).toISOString();
+  const VERIFIED = { userId: 'u_ban', scopes: ['data:read', 'data:write'], clientId: 'agent-client-1' };
+
+  /**
+   * A table double for `sys_user` that records every read, and can make the
+   * ban read throw (a store fault) or answer as a table that was never
+   * provisioned. Every other object is empty.
+   */
+  function banQl(user: Record<string, unknown> | undefined, fault?: 'throws' | 'missing-table') {
+    const userReads: any[] = [];
+    const tables: Record<string, any[]> = { sys_user: user ? [user] : [] };
+    const ql = {
+      async find(object: string, opts: any) {
+        if (object === 'sys_user') {
+          userReads.push(opts);
+          // The fault strikes the ban read alone, so the outage asserted below is that read's.
+          const banRead = Array.isArray(opts?.fields) && opts.fields.includes('banned');
+          if (banRead && fault === 'throws') throw new Error('connection reset by peer');
+          if (banRead && fault === 'missing-table') throw Object.assign(new Error('no such table: sys_user'), { code: 'SQLITE_ERROR' });
+        }
+        return bounded((tables[object] ?? []).filter((row) =>
+          Object.entries(opts?.where ?? {}).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            if (v !== null && typeof v === 'object') throw new Error(`fake driver: unsupported operator on '${k}'`);
+            return row[k] === v;
+          }),
+        ), opts);
+      },
+    };
+    return { ql, userReads };
+  }
+  const oauthOpts = (ql: any, verified: any = VERIFIED) => ({
+    acceptOAuthAccessToken: true,
+    getService: async (name: string) => (name === 'auth' ? { verifyMcpAccessToken: async () => verified } : undefined),
+    getQl: async () => ql,
+    request: { headers: { authorization: 'Bearer a.b.c' } },
+  });
+  /** The envelope a bearer that does not verify gets at this door — what a banned subject must get. */
+  const notVerified = () => resolveExecutionContext(oauthOpts(banQl(undefined).ql, null));
+
+  it('a token whose subject is banned resolves exactly as a token that does not verify', async () => {
+    const { ql } = banQl({ id: 'u_ban', banned: true, ban_expires: null });
+    const ctx = await resolveExecutionContext(oauthOpts(ql));
+    const control = await notVerified();
+    expect(control.principalKind, 'control: an unverified bearer is the guest').toBe('guest');
+    expect(ctx).toEqual(control);
+    expect(ctx.userId).toBeUndefined();
+  });
+
+  it('a ban with an expiry still ahead binds; one whose expiry has passed does not', async () => {
+    const holding = await resolveExecutionContext(oauthOpts(banQl({ id: 'u_ban', banned: true, ban_expires: SOON }).ql));
+    expect(holding).toEqual(await notVerified());
+    const lapsed = await resolveExecutionContext(oauthOpts(banQl({ id: 'u_ban', banned: true, ban_expires: LAPSED }).ql));
+    expect(lapsed.principalKind).toBe('agent');
+    expect(lapsed.userId).toBe('u_ban');
+  });
+
+  it('control: a user who is not banned, or was unbanned, is the agent principal, as before', async () => {
+    for (const row of [{ id: 'u_ban' }, { id: 'u_ban', banned: false, ban_expires: null }]) {
+      const ctx = await resolveExecutionContext(oauthOpts(banQl(row).ql));
+      expect(ctx.principalKind, JSON.stringify(row)).toBe('agent');
+      expect(ctx.userId).toBe('u_ban');
+    }
+  });
+
+  it('control: a subject with no user row, or no provisioned user table, keeps today\'s answer', async () => {
+    const noRow = await resolveExecutionContext(oauthOpts(banQl(undefined).ql));
+    expect(noRow.principalKind).toBe('agent');
+    expect(noRow.userId).toBe('u_ban');
+    const noTable = await resolveExecutionContext(oauthOpts(banQl(undefined, 'missing-table').ql));
+    expect(noTable.principalKind).toBe('agent');
+  });
+
+  it('a ban read that throws is the store outage — 503 SERVICE_UNAVAILABLE naming sys_user, never a principal and never the guest', async () => {
+    const err: any = await resolveExecutionContext(oauthOpts(banQl(undefined, 'throws').ql)).then(
+      () => undefined,
+      (e) => e,
+    );
+    expect(err, 'the resolver resolved despite the store fault').toBeDefined();
+    expect(isAuthzStoreUnavailableError(err)).toBe(true);
+    expect(err.code).toBe('SERVICE_UNAVAILABLE');
+    expect(err.status).toBe(503);
+    expect(err.object).toBe('sys_user');
+  });
+
+  it('cost: one read of the ban columns, by primary key, as the system, per token resolved', async () => {
+    const { ql, userReads } = banQl({ id: 'u_ban' });
+    await resolveExecutionContext(oauthOpts(ql));
+    const banReads = userReads.filter((q) => Array.isArray(q?.fields) && q.fields.includes('banned'));
+    expect(banReads).toEqual([
+      { where: { id: 'u_ban' }, fields: ['id', 'banned', 'ban_expires'], limit: 1, context: { isSystem: true } },
+    ]);
+    // A bearer that does not verify reads no ban at all.
+    const unverified = banQl({ id: 'u_ban' });
+    await resolveExecutionContext(oauthOpts(unverified.ql, null));
+    expect(unverified.userReads.filter((q) => q?.fields?.includes?.('banned'))).toEqual([]);
+  });
+
+  it('a forward credential whose agent acts for a banned user resolves as one that does not redeem', async () => {
+    const forwardBinding: ForwardCredentialBinding = {
+      method: 'PATCH',
+      path: '/api/v1/data/crm_lead/r1',
+      run: { objectName: 'crm_lead', actionName: 'probe', recordId: 'r1' },
+      agent: { userId: 'u_ban', clientId: 'agent-client-1', scopes: ['actions:execute', 'data:write'] },
+    };
+    const forwardedAs = (ql: any) => (handle: string) => resolveExecutionContext({
+      getService: async () => undefined,
+      getQl: async () => ql,
+      request: { method: 'PATCH', path: '/api/v1/data/crm_lead/r1', headers: { [FORWARD_CREDENTIAL_HEADER]: handle } },
+    });
+    const control = await forwardedAs(banQl({ id: 'u_ban' }).ql)('not-a-minted-handle');
+    expect(control.principalKind, 'control: an unredeemable forward is the guest').toBe('guest');
+
+    const refused = await withForwardCredential(forwardBinding, forwardedAs(banQl({ id: 'u_ban', banned: true }).ql));
+    expect(refused).toEqual(control);
+
+    const served = await withForwardCredential(forwardBinding, forwardedAs(banQl({ id: 'u_ban' }).ql));
+    expect(served.principalKind).toBe('agent');
+    expect(served.userId).toBe('u_ban');
+  });
+});
+
+describe('[#31211] a verified MCP token is recorded as used only once this door admits the call', () => {
+  const VERIFIED = () => ({ userId: 'u_rec', scopes: ['data:read'], clientId: 'agent-client-1' });
+
+  /**
+   * A table double: `sys_user` holds `user`, every other object is empty, and
+   * `faultOn` names the one object whose read throws (a store fault).
+   */
+  function recQl(user: Record<string, unknown> | undefined, faultOn?: string) {
+    const tables: Record<string, any[]> = { sys_user: user ? [user] : [] };
+    return {
+      async find(object: string, opts: any) {
+        if (object === faultOn) throw new Error('connection reset by peer');
+        return bounded((tables[object] ?? []).filter((row) =>
+          Object.entries(opts?.where ?? {}).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            if (v !== null && typeof v === 'object') throw new Error(`fake driver: unsupported operator on '${k}'`);
+            return row[k] === v;
+          }),
+        ), opts);
+      },
+    };
+  }
+  /** An auth service whose verifier answers `verified` (the same object every time) and whose recorder is a spy. */
+  function recAuth(verified: any) {
+    const recorded: unknown[] = [];
+    const auth = {
+      verifyMcpAccessToken: async () => verified,
+      recordMcpAccessTokenUse: (principal: unknown) => {
+        recorded.push(principal);
+      },
+    };
+    return { auth, recorded };
+  }
+  const mcpOpts = (ql: any, auth: any) => ({
+    acceptOAuthAccessToken: true,
+    getService: async (name: string) => (name === 'auth' ? auth : undefined),
+    getQl: async () => ql,
+    request: { headers: { authorization: 'Bearer a.b.c' } },
+  });
+
+  it('admitted: recorded exactly once, with the very object the verifier answered', async () => {
+    const verified = VERIFIED();
+    const { auth, recorded } = recAuth(verified);
+    const ctx = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec' }), auth));
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.userId).toBe('u_rec');
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0], 'the verifier\'s own object, not a copy').toBe(verified);
+  });
+
+  it('a banned subject\'s verified token is refused and recorded as nothing', async () => {
+    const { auth, recorded } = recAuth(VERIFIED());
+    const ctx = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec', banned: true, ban_expires: null }), auth));
+    expect(ctx.principalKind).toBe('guest');
+    expect(ctx.userId).toBeUndefined();
+    expect(recorded).toEqual([]);
+  });
+
+  it('a call refused after the ban read (the grant read cannot be answered: 503) is recorded as nothing', async () => {
+    const { auth, recorded } = recAuth(VERIFIED());
+    const err: any = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec' }, 'sys_user_position'), auth)).then(
+      () => undefined,
+      (e) => e,
+    );
+    expect(err, 'the resolver resolved despite the store fault').toBeDefined();
+    expect(isAuthzStoreUnavailableError(err)).toBe(true);
+    expect(err.code).toBe('SERVICE_UNAVAILABLE');
+    expect(err.status).toBe(503);
+    expect(recorded).toEqual([]);
+  });
+
+  it('a token that does not verify is recorded as nothing', async () => {
+    const { auth, recorded } = recAuth(null);
+    const ctx = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec' }), auth));
+    expect(ctx.principalKind).toBe('guest');
+    expect(recorded).toEqual([]);
+  });
+
+  it('a forward credential is the continuation of a call already recorded: it records nothing', async () => {
+    const { auth, recorded } = recAuth(VERIFIED());
+    const binding: ForwardCredentialBinding = {
+      method: 'PATCH',
+      path: '/api/v1/data/crm_lead/r1',
+      run: { objectName: 'crm_lead', actionName: 'probe', recordId: 'r1' },
+      agent: { userId: 'u_rec', clientId: 'agent-client-1', scopes: ['actions:execute', 'data:write'] },
+    };
+    const served = await withForwardCredential(binding, (handle) => resolveExecutionContext({
+      getService: async (name: string) => (name === 'auth' ? auth : undefined),
+      getQl: async () => recQl({ id: 'u_rec' }),
+      request: { method: 'PATCH', path: '/api/v1/data/crm_lead/r1', headers: { [FORWARD_CREDENTIAL_HEADER]: handle } },
+    }));
+    expect(served.principalKind).toBe('agent');
+    expect(recorded).toEqual([]);
+  });
+
+  it('an auth service without the member still admits the call (the member is optional)', async () => {
+    const ctx = await resolveExecutionContext(mcpOpts(recQl({ id: 'u_rec' }), { verifyMcpAccessToken: async () => VERIFIED() }));
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.userId).toBe('u_rec');
+  });
+});
+
+/**
+ * [#31821] This door hands over what it holds about where the request came
+ * from, so the `credential_use` row names it: the transport's peer address and
+ * the headers, to the auth service, which applies the deployment's trust rule.
+ * The door reads no forwarded header as an address itself.
+ *
+ * The auth service here applies the REAL rule (`resolveClientAddress`, the
+ * function `AuthManager.resolveClientAddress` delegates to) with a declared
+ * `trustProxy`; the facts are read where plugin-audit reads them, inside the
+ * key's stamp write (`currentCredentialUseClient`).
+ */
+describe('[#31821] the dispatcher door hands the client facts to the credential\'s stamp', () => {
+  const PEER = '203.0.113.7';
+  const FORWARDED = '198.51.100.9';
+  const UA = 'ci-agent/3.1 (+31821)';
+  const RAW = 'osk_31821_dispatcher_key';
+
+  function keyQl() {
+    const facts: unknown[] = [];
+    const ql = makeQl([{ id: 'k_31821', key: hashApiKey(RAW), revoked: false, user_id: 'u_31821' }]) as any;
+    ql.update = async () => {
+      facts.push(currentCredentialUseClient() ?? null);
+      return {};
+    };
+    return { ql, facts };
+  }
+  const ruleAuth = (trustProxy: boolean) => ({
+    resolveClientAddress: (transport: { headers?: Record<string, string | string[] | undefined>; remoteAddress?: string }) =>
+      resolveClientAddress({ ...transport, trustProxy }),
+  });
+
+  it.each([
+    [false, PEER],
+    [true, FORWARDED],
+  ])('an API key, trustProxy %s: the stamp runs with address %s and the request\'s user agent', async (trustProxy, expected) => {
+    const { ql, facts } = keyQl();
+    const ctx = await resolveExecutionContext({
+      getService: async (name: string) => (name === 'auth' ? ruleAuth(trustProxy) : undefined),
+      getQl: async () => ql,
+      request: { headers: { 'x-api-key': RAW, 'user-agent': UA, 'x-forwarded-for': FORWARDED }, remoteAddress: PEER },
+    } as any);
+    expect(ctx.userId).toBe('u_31821');
+    expect(facts).toEqual([{ ipAddress: expected, userAgent: UA }]);
+  });
+
+  it('a transport with no peer address and no trusted header: the stamp records the address as undetermined', async () => {
+    const { ql, facts } = keyQl();
+    await resolveExecutionContext({
+      getService: async (name: string) => (name === 'auth' ? ruleAuth(false) : undefined),
+      getQl: async () => ql,
+      request: { headers: { 'x-api-key': RAW, 'x-forwarded-for': FORWARDED } },
+    } as any);
+    expect(facts).toEqual([{ ipAddress: null, userAgent: null, ipAddressAbsent: 'undetermined' }]);
+  });
+
+  it('a verified MCP token is recorded with the request\'s headers and peer address', async () => {
+    const verified = { userId: 'u_rec', scopes: ['data:read'], clientId: 'agent-client-1' };
+    const recorded: unknown[][] = [];
+    const auth = {
+      verifyMcpAccessToken: async () => verified,
+      recordMcpAccessTokenUse: (...args: unknown[]) => {
+        recorded.push(args);
+      },
+    };
+    const ql = { async find(object: string) { return object === 'sys_user' ? [{ id: 'u_rec' }] : []; } };
+    await resolveExecutionContext({
+      acceptOAuthAccessToken: true,
+      getService: async (name: string) => (name === 'auth' ? auth : undefined),
+      getQl: async () => ql,
+      request: { headers: { authorization: 'Bearer a.b.c', 'user-agent': UA, 'x-forwarded-for': FORWARDED }, remoteAddress: PEER },
+    } as any);
+    expect(recorded).toHaveLength(1);
+    const [principal, transport] = recorded[0] as [unknown, { headers: Record<string, string>; remoteAddress?: string }];
+    expect(principal).toBe(verified);
+    expect(transport.remoteAddress).toBe(PEER);
+    expect(transport.headers['user-agent']).toBe(UA);
+    expect(transport.headers['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe(FORWARDED);
   });
 });

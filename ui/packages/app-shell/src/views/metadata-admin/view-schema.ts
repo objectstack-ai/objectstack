@@ -32,6 +32,8 @@ import {
   viewForm as specViewForm,
 } from '@objectstack/spec/ui';
 import type { FormViewSpec } from './SchemaForm.js';
+import type { SupportedLocale } from './i18n.js';
+import { localizeMetadataForm } from './metadata-form-i18n.js';
 
 type JsonSchema = Record<string, any>;
 
@@ -85,7 +87,7 @@ let _viewForm: FormViewSpec | undefined;
  * are not double-rendered. Everything else — including the type-conditional
  * per-view-type sections — flows through verbatim from the spec.
  */
-export function getViewForm(): FormViewSpec | undefined {
+function bundledViewForm(): FormViewSpec | undefined {
   if (_viewForm) return _viewForm;
   if (!specViewForm || typeof specViewForm !== 'object') return undefined;
   const clone = JSON.parse(JSON.stringify(specViewForm)) as FormViewSpec;
@@ -101,4 +103,25 @@ export function getViewForm(): FormViewSpec | undefined {
   );
   _viewForm = clone;
   return _viewForm;
+}
+
+/** One localized copy per locale, for the reason `getDashboardForm`'s cache is keyed. */
+const _localizedViewForm = new Map<string, FormViewSpec | undefined>();
+
+/**
+ * The pruned authoring form with the active locale's `metadataForms.view`
+ * strings overlaid (`localizeMetadataForm`, objectui#7254), so the panel
+ * speaks the language of the Studio around it. A locale the overlay does not
+ * carry gets the spec's English, the same object as before.
+ */
+export function getViewForm(locale?: SupportedLocale | string): FormViewSpec | undefined {
+  const cacheKey = String(locale ?? '');
+  if (_localizedViewForm.has(cacheKey)) return _localizedViewForm.get(cacheKey);
+  const localized = localizeMetadataForm(
+    bundledViewForm() as unknown as Record<string, unknown> | undefined,
+    'view',
+    locale,
+  ) as unknown as FormViewSpec | undefined;
+  _localizedViewForm.set(cacheKey, localized);
+  return localized;
 }

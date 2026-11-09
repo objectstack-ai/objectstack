@@ -144,23 +144,30 @@ too (`trustProxy` option); `objectstack serve` does that for you.
 The buckets live in the kernel `cache` service, resolved when the first
 request is metered, so a cache plugin that registers late is still found.
 Under `objectstack serve` the `cache` service is always on and is served by
-`@objectstack/service-cache`, whose only working adapter is **in-memory** —
-per process. On one node that is exact. On N nodes each counts on its own,
-so the effective limit is the budget **multiplied by N**, and nothing about
-the deployment looks wrong.
+`@objectstack/service-cache`. On one node it is **in-memory** — per process,
+and exact. On N nodes a per-process cache would make each node count on its
+own, so the effective limit would be the budget **multiplied by N** with
+nothing about the deployment looking wrong.
 
-For one limit across nodes, register a `cache` service backed by a store
-every node shares (Redis, Memcached, …) that implements the
+So `@objectstack/service-cache` picks the store from the deployment's
+declaration. Declare multi-node (`OS_EXPECT_MULTI_NODE=true` or
+`OS_CLUSTER_REPLICAS` > 1) and run the `redis` cluster driver
+(`OS_CLUSTER_DRIVER=redis` + `OS_REDIS_URL`), and the cache is Redis — one
+store for every node, on a connection duplicated from the driver's. Boot logs
+`registered redis cache adapter — one cache for every node on this Redis`.
+Declared multi-node over the redis driver, a per-process cache is refused:
+`adapter: 'memory'` stops the boot. Declared multi-node over any other driver,
+the cache stays per-process and boot warns that limits multiply by the
+replica count; to share it there, register a `cache` service backed by a
+store every node reaches that implements the
 [`ICacheService` contract](../content/docs/kernel/contracts/cache-service.mdx)
 — see [Registering Services](../content/docs/kernel/services.mdx#registering-services).
-`CacheServicePlugin({ adapter: 'redis' })` is not that: its Redis adapter is a
-skeleton and the plugin refuses to start with it. Boot logs which store the
-limiter bound to: `inbound rate-limit buckets bound to the kernel cache
-service — enforced against ONE store across nodes iff the cache is shared`,
-or, with no `cache` service at all, a warning that it fell back to a
-per-process store. Counting is read-modify-write, so two nodes can both admit
-the last request at a window boundary — a slight over-admit, never a
-per-node limit.
+The limiter logs which store it bound to: `inbound rate-limit buckets bound
+to the kernel cache service — enforced against ONE store across nodes iff the
+cache is shared`, or, with no `cache` service at all, a warning that it fell
+back to a per-process store. Counting is read-modify-write, so two nodes can
+both admit the last request at a window boundary — a slight over-admit, never
+a per-node limit.
 
 ### Per-class budgets
 
@@ -239,9 +246,9 @@ production deployment, enable at least:
 | ----------- | ------------------------------------------------------------------------------------ |
 | Password    | `password_reject_breached: true`, `password_require_complexity: true`, `password_history_count: 3–5`, `password_expiry_days: 90` |
 | Anti-abuse  | `lockout_threshold: 5`, `lockout_duration_minutes: 15`, `rate_limit_max` / `rate_limit_window_seconds` |
-| MFA         | `mfa_required: true` (or per-org `require_mfa`), `mfa_grace_period_days: 7`            |
+| MFA         | `mfa_required: true` (or per-org `require_mfa`, which needs two-factor enrollment on), `mfa_grace_period_days: 7`; neither saves while `OS_AUTH_TWO_FACTOR=false` |
 | Sessions    | `session_idle_timeout_minutes: 30–60`, `session_absolute_max_hours: 8–12`, `max_concurrent_sessions_per_user` |
-| Network     | `allowed_ip_ranges` (IPv4 CIDR) for tenant- or office-scoped access                   |
+| Network     | `allowed_ip_ranges` (IPv4 or IPv6 CIDR, or exact addresses) for tenant- or office-scoped access; locked out, restart with `OS_AUTH_ALLOWED_IP_RANGES=` (empty), sign in, clear the stored list (`PUT /api/settings/auth` with `allowed_ip_ranges: null`), then remove the variable |
 
 Password expiry and enforced MFA share a *session-validation gate*: a
 non-compliant session can authenticate but is blocked from data access (auth +
@@ -260,7 +267,7 @@ ObjectStack uses [better-auth](https://www.better-auth.com/) via
 | Session TTL       | 7 days                                    | `session.expiresIn` (seconds)             |
 | Access token TTL  | inherited from session                    | configure in better-auth                  |
 | Refresh           | better-auth `/auth/get-session` rolls TTL | `session.updateAge` (seconds)             |
-| Revocation        | DELETE on `session` row                   | `revokeSessionsOnPasswordReset: true`     |
+| Revocation        | Sign-out deletes the `session` row. A revoke, and a completed password reset (which ends every session of the account), keep the row stamped `revoked_at` / `revoke_reason` (`password_reset` for the reset) and refuse it | — unconditional; no setting (the retired `emailAndPassword.revokeSessionsOnPasswordReset` key is refused at any value) |
 | Idle / absolute / concurrent caps | Off (opt-in)              | `session_idle_timeout_minutes` / `session_absolute_max_hours` / `max_concurrent_sessions_per_user` (Setup → Authentication) |
 | Email verify TTL  | 1 hour                                    | `emailVerification.expiresIn`             |
 
@@ -276,8 +283,8 @@ curl -X POST -H "Authorization: Bearer $TOK" $API/auth/sign-out
 curl -H "Authorization: Bearer $TOK" $API/data/account
 # → 401 Unauthorized
 
-# 3. Confirm password reset revokes all other sessions for that user
-#    (requires revokeSessionsOnPasswordReset: true)
+# 3. Confirm a completed password reset ends the user's other sessions
+#    (unconditional: a session signed in before the reset answers 401 after it)
 ```
 
 ## CORS
@@ -344,7 +351,6 @@ Run the production hardening checklist before each release:
 - [ ] `server.security.rateLimit` enabled with a sized budget; `server.trustProxy`
       matches the topology (`true` only behind a proxy that overwrites
       `X-Forwarded-For`); multi-node: the `cache` service is shared
-- [ ] `revokeSessionsOnPasswordReset: true`
 - [ ] CORS origin list is explicit, not `*`
 - [ ] `enforceProjectMembership: true` on scoped routes
 - [ ] `osv-scanner --lockfile=pnpm-lock.yaml` clean (npm retired the

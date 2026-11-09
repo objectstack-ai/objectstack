@@ -171,7 +171,7 @@ describe('StudioDesignSurface.railLabelInherits-11196', () => {
 
     it('CONTROL: an authored label renders verbatim', async () => {
       renderZhPillar();
-      expect(await screen.findByRole('button', { name: '客户仪表盘 仪表板' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: '客户仪表盘 仪表盘' })).toBeInTheDocument();
     });
   });
 });
@@ -298,7 +298,7 @@ describe('StudioDesignSurface.surfaceLabelInherits-11196', () => {
     it('a click on a label-less rail row opens a Surface named as the row is', async () => {
       renderZhPillar();
       await waitFor(() => expect(caption()).toHaveTextContent('客户仪表盘'), { timeout: 8000 });
-      fireEvent.click(screen.getByRole('button', { name: '销售仪表盘 仪表板' }));
+      fireEvent.click(screen.getByRole('button', { name: '销售仪表盘 仪表盘' }));
       await waitFor(() => expect(caption()).toHaveTextContent('销售仪表盘'), { timeout: 8000 });
       expect(crumb()).toHaveTextContent('销售仪表盘');
     });
@@ -379,7 +379,7 @@ describe('StudioDesignSurface.surfaceIdentity', () => {
     it('the rail kind chip is translated, not the raw English metadata type', async () => {
       renderZhPillar();
       await screen.findAllByText('客户仪表盘');
-      expect(screen.getAllByText('仪表板').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('仪表盘').length).toBeGreaterThan(0);
       expect(screen.queryByText('DASHBOARD')).not.toBeInTheDocument();
       expect(screen.queryByText('dashboard')).not.toBeInTheDocument();
     });
@@ -389,7 +389,7 @@ describe('StudioDesignSurface.surfaceIdentity', () => {
       fireEvent.click(await screen.findByTitle('dashboard · b2r4_customer_dashboard'));
       const crumb = await waitFor(() => screen.getByTestId('if-breadcrumb'), { timeout: 4000 });
       expect(crumb).toHaveTextContent('客户仪表盘');
-      expect(crumb).toHaveTextContent('仪表板');
+      expect(crumb).toHaveTextContent('仪表盘');
       // The pair is reachable, but not printed at the customer.
       // Prefixed, so the tooltip SAYS what the pair is — and so the rail item,
       // the breadcrumb and the caption stop sharing one addressable string.
@@ -1167,7 +1167,8 @@ describe('StudioDesignSurface.railServedLabels-12688', () => {
     list: vi.fn(async (type: string) => (type === 'app' ? [JSON.parse(JSON.stringify(state.served))] : [])),
     listDrafts: vi.fn(async () => []),
     layered: vi.fn(async (type: string, name: string) => {
-      if (type === 'app') return { effective: JSON.parse(JSON.stringify(CODE)) };
+      // As the server serves an admitted author: the pending draft as stored (objectstack#30859).
+      if (type === 'app') return { effective: JSON.parse(JSON.stringify(CODE)), draft: state.draft ? JSON.parse(JSON.stringify(state.draft)) : null };
       if (type === 'page') return { effective: { name, label: name, type: 'app', regions: [{ name: 'main', components: [] }] } };
       return { effective: { name } };
     }),

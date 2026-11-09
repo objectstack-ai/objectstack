@@ -25,9 +25,18 @@
  * `updated_at` as the `ifMatch` concurrency token, and re-reads the record.
  *
  * Which moves are legal is the SERVER's call: the object's `state_machine`
- * rule (ADR-0020), required fields and edit rights are judged on the write, and
- * nothing here evaluates them. A refusal is shown in place, under the rail —
- * the server's own sentences first, a fixed line only when it sent none.
+ * rule (ADR-0020), required fields and edit rights are judged on the write. A
+ * refusal is shown in place, under the rail — the server's own sentences
+ * first, a fixed line only when it sent none.
+ *
+ * What the path OFFERS follows the same machine the record form, the grid's
+ * inline editor and the board read (`stateMachineNextValues`): a stage the
+ * field's blocking `state_machine` rule cannot reach from the STORED value is
+ * drawn as a readout, not a button, so the press never promises a move the
+ * server is bound to refuse. The default record page turns this block's press
+ * on (objectstack#30075), which is why an always-refused button would reach
+ * every app with a machine on its stage field. A field without such a rule
+ * offers every stage, and the server still judges each write.
  */
 
 import React from 'react';
@@ -41,20 +50,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { resolveFieldAffordance } from '@object-ui/core';
+import { resolveFieldAffordance, stateMachineNextValues } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   declaredUserMessage,
   delegationScopeMessage,
   extractFieldErrors,
   extractWriteErrorMessage,
+  isExternalWriteRefusal,
   isPermissionError,
   useInlineEdit,
   useRecordContext,
   useSafeFieldLabel,
 } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
-import { isComputedFieldType } from '../fieldEnrichment';
+import { isComputedDetailField } from '../fieldEnrichment';
 import { NON_EDITABLE_SYSTEM_FIELDS } from '../systemFields';
 import { updateVia } from '../InlineEditSaveBar';
 import { isConcurrentUpdateError } from '../ConcurrentUpdateDialog';
@@ -76,9 +86,12 @@ type Translate = (key: string, opts?: Record<string, unknown>) => string;
  *      arrive): one line per entry. An entry about `statusField` itself, or an
  *      object-level `_record` entry, reads alone; any other field is prefixed
  *      with its label, since the reader cannot see that field on the path.
- *   4. A permission refusal: the delegated-admin scope reason when there is
+ *   4. A write the object's external datasource does not admit
+ *      (`EXTERNAL_WRITE_FORBIDDEN`, ADR-0015): the read-only line. No
+ *      permission lifts it, so it is asked before the permission check.
+ *   5. A permission refusal: the delegated-admin scope reason when there is
  *      one, else a fixed line — a raw 403 string is never shown.
- *   5. Anything else: the server's message, else a fixed line.
+ *   6. Anything else: the server's message, else a fixed line.
  */
 export function stageRefusalLines(
   err: unknown,
@@ -95,6 +108,7 @@ export function stageRefusalLines(
       e.field === statusField || e.field === RECORD_LEVEL_FIELD ? e.message : `${labelOf(e.field)}: ${e.message}`,
     );
   if (fieldLines.length > 0) return fieldLines;
+  if (isExternalWriteRefusal(err)) return [t('form.readOnlyExternalSource')];
   if (isPermissionError(err)) return [delegationScopeMessage(err) ?? t('detail.pathStageChangeDenied')];
   return [extractWriteErrorMessage(err) ?? t('detail.pathStageChangeFailed')];
 }
@@ -113,6 +127,12 @@ const canUpdate = (ds: unknown): boolean => {
 export interface StageChange {
   /** Whether this reader may press a stage of this record's path. */
   pressable: boolean;
+  /**
+   * Whether the field's blocking `state_machine` admits a move from the
+   * stored value to `value` — `true` for every value when no such rule
+   * governs the field. Only meaningful while `pressable`.
+   */
+  admits: (value: unknown) => boolean;
   /** A write is in flight. */
   busy: boolean;
   /** The last refusal's lines, until the next press. */
@@ -148,9 +168,13 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
     && !!inline?.canEdit
     && !inline.editing
     && fieldDef?.readonly !== true
-    && !isComputedFieldType(undefined, fieldDef?.type)
+    && !isComputedDetailField(undefined, fieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(statusField)
     && resolveFieldAffordance('recordEdit', perms, objectName, statusField);
+
+  const stored = statusField ? (ctx?.data as Record<string, unknown> | undefined)?.[statusField] : undefined;
+  const reachable = statusField ? stateMachineNextValues(ctx?.objectSchema, statusField, stored) : null;
+  const admits = (value: unknown): boolean => reachable === null || reachable.has(String(value));
 
   const request = React.useCallback((stage: { value: unknown; label: string }) => {
     setRefusal(null);
@@ -166,7 +190,7 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
   const confirm = async () => {
     const stage = target;
     setTarget(null);
-    if (!stage || !pressable) return;
+    if (!stage || !pressable || !admits(stage.value)) return;
     setBusy(true);
     const updatedAt = (ctx?.data as Record<string, unknown> | undefined)?.updated_at;
     const ifMatch = typeof updatedAt === 'string' ? updatedAt : undefined;
@@ -202,5 +226,5 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
     </AlertDialog>
   );
 
-  return { pressable, busy, refusal, request, dialog };
+  return { pressable, admits, busy, refusal, request, dialog };
 }

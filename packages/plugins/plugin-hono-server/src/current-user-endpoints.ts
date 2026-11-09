@@ -42,6 +42,7 @@ import {
     buildEffectiveFieldPermissions,
     buildEffectiveObjectPermissions,
     registryObjectPackageDisabled,
+    engineExternalWriteForbidden,
     IDataEngine,
     resolveLocalizationContext,
     resolveRequestExecutionContext,
@@ -336,6 +337,34 @@ type AnyQueueReader = Pick<IOwnershipQueueService, 'hasAnyQueue'>;
  *
  * It never throws.
  */
+/** The one protocol member `/me/apps` reads: its served list (`ObjectStackProtocolImplementation.getMetaItems`). */
+interface ServedAppLister {
+    getMetaItems(request: { type: string }): Promise<{ items?: unknown } | undefined>;
+}
+
+/**
+ * [#29613, ADR-0146 D8 item 2] The apps the protocol SERVES — the list
+ * `GET /meta/app` answers, a `.custom` pair's published override over the
+ * base's app — or `undefined` when no protocol service is registered (or it
+ * has no list read), and `/me/apps` reads the registry as it always has.
+ *
+ * A protocol list read that fails is warned once per request and answered
+ * from the registry, the degraded source this endpoint already falls back on;
+ * the caller still gets the apps it may enter.
+ */
+async function servedAppsOf(ctx: CurrentUserEndpointsContext): Promise<unknown[] | undefined> {
+    let protocol: ServedAppLister | undefined;
+    try { protocol = ctx.getService<ServedAppLister>('protocol'); } catch { return undefined; }
+    if (typeof protocol?.getMetaItems !== 'function') return undefined;
+    try {
+        const answer = await protocol.getMetaItems({ type: 'app' });
+        return Array.isArray(answer?.items) ? answer.items : undefined;
+    } catch (err: any) {
+        ctx.logger?.warn?.('[hono] /me/apps: the protocol app list failed; answering from the registry', { err: err?.message });
+        return undefined;
+    }
+}
+
 async function organizationHasAnyQueue(
     ctx: CurrentUserEndpointsContext,
     organizationId: string | null,
@@ -607,6 +636,9 @@ export function makeExecutionContextResolver(
                 accessToken: 'withhold',
                 oauth: undefined,
                 onAdmission: undefined,
+                // [#31898] `'session-only'` reads no API key, so no `credential_use` row is
+                // written here and no transport is handed.
+                transport: undefined,
             });
             if (!context) return undefined;
             // [#2408 / #3361] Open the per-request `Server-Timing` disclosure
@@ -1009,6 +1041,10 @@ export function registerCurrentUserEndpoints(
                 // [#28877] The data plane's own predicate: a disabled package's
                 // objects leave the map, as the data plane refuses them.
                 isObjectPackageDisabled: registryObjectPackageDisabled(ql?.registry),
+                // [#30370] The external write gate's own verdict: a read-only
+                // external object is served no write, as the data plane
+                // refuses every one.
+                isExternalWriteForbidden: engineExternalWriteForbidden(ql),
                 logger: ctx.logger,
             });
             // Spread into a literal ON PURPOSE, here and in the `catch`: the
@@ -1101,7 +1137,9 @@ export function registerCurrentUserEndpoints(
     // AppSchema.requiredPermissions with no enforced consumer. Source
     // from `registry.getAllApps()` (the same authority the meta routes
     // use, nav contributions merged), with the metadata service kept as
-    // an additive fallback for runtime-draft-published apps. Filters:
+    // an additive fallback for runtime-draft-published apps. [#29613] With
+    // the protocol service present, its served list stands in for the
+    // registry's ({@link servedAppsOf}). Filters:
     //   1. AppSchema.requiredPermissions ⊆ ctx.systemPermissions
     //   2. ctx.tabPermissions[app.name] !== 'hidden'
     // Anonymous users get an empty array. When SecurityPlugin is absent
@@ -1111,7 +1149,18 @@ export function registerCurrentUserEndpoints(
         if (!execCtx?.userId) return c.json({ apps: [] });
         try {
             const byName = new Map<string, any>();
-            try {
+            // [#29613, ADR-0146 D8 item 2] With the protocol service present,
+            // the apps are the protocol's SERVED list (`getMetaItems`, what
+            // `GET /meta/app` serves, nav contributions merged), so a `.custom`
+            // pair's published override of a base's app is listed over the
+            // base's app. The registry's list holds the base's app alone under
+            // the name since the override no longer takes its bare slot.
+            const served = await servedAppsOf(ctx);
+            if (served !== undefined) {
+                for (const app of served) {
+                    if ((app as { name?: unknown })?.name) byName.set(String((app as { name: unknown }).name), app);
+                }
+            } else try {
                 // The PUBLIC accessor. This read used to reach ObjectQL's
                 // private `_registry` while `/auth/me/permissions` read the
                 // `registry` getter over the same field, on the same object,

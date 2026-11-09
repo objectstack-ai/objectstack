@@ -38,6 +38,9 @@
 // shape this file's control first pinned, an object named exactly as its
 // remote table (`orders`), which the namespace now refuses; the control imports
 // with no `name` override instead, under the prefixed name the draft derives.
+// [#30469 item 2] The showcase package is read-only, so both imports land in
+// its customization package and carry that package's namespace,
+// `showcase_custom`.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import showcaseStack, { onEnable } from '@objectstack/example-showcase';
@@ -51,9 +54,9 @@ import { join } from 'node:path';
 /** The showcase's external datasource and its two remote tables (`external-fixture.ts`). */
 const DATASOURCE = 'showcase_external';
 /** Imported under a name that differs from its remote table — the defect's shape. */
-const RENAMED = 'showcase_dogfood_ext_cust_21788';
+const RENAMED = 'showcase_custom_dogfood_ext_cust_21788';
 /** Imported with no `name` override: the draft's name, the remote table's prefixed with the namespace. */
-const DERIVED = 'showcase_orders';
+const DERIVED = 'showcase_custom_orders';
 
 const importPath = (remote: string) => `/datasources/${DATASOURCE}/external/tables/${remote}/import`;
 

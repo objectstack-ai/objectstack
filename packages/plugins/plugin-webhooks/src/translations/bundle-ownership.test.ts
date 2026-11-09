@@ -27,7 +27,7 @@ describe('objects translation bundle ownership (ADR-0029 D8)', () => {
       strays,
       `bundle carries objects this package's extract config does not own: ${strays.join(', ')} — ` +
         'their curated translations would be silently deleted on the next `os i18n extract`. ' +
-        'Remove the dead block from the four locale bundles, or add the object to the extract config + this list.',
+        'Remove the dead block from every locale bundle, or add the object to the extract config + this list.',
     ).toEqual([]);
   });
 

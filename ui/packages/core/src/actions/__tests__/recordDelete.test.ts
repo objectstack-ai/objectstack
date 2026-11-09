@@ -53,7 +53,7 @@ function harness(opts: {
 }
 
 describe('recordDelete.confirmText', () => {
-  it('asks the plain delete question', () => {
+  it('with no object named, keeps the question that says the delete is permanent', () => {
     expect(recordDelete.confirmText({ t })).toBe('objectActions.deleteConfirm');
   });
 });
@@ -80,7 +80,9 @@ describe('recordDelete.confirmCopy (objectui#11695)', () => {
     );
     expect(copy).toEqual({
       title: 'objectActions.deleteConfirmTitle {"label":"Product","name":"QA Widget 0"}',
-      message: 'objectActions.deleteConfirm',
+      // A business object's delete goes to the recycle bin (ADR-0148): the
+      // question alone, pinned with its platform control below.
+      message: 'objectActions.deleteConfirmQuestion',
       confirmText: 'objectActions.deleteConfirmButton',
     });
   });
@@ -105,7 +107,7 @@ describe('recordDelete.confirmCopy (objectui#11695)', () => {
     const copy = recordDelete.confirmCopy({ objectName: 'crm_lead', t, label: 'Lead' }, { count: 3 });
     expect(copy).toEqual({
       title: 'objectActions.bulkDeleteConfirmTitle {"count":3,"label":"Lead"}',
-      message: 'console.objectView.bulkDeleteConfirm {"count":3}',
+      message: 'console.objectView.bulkDeleteQuestion {"count":3}',
       confirmText: 'objectActions.deleteConfirmButton',
     });
   });
@@ -242,5 +244,121 @@ describe('recordDelete.successText and the one-record toast (objectstack#27823)'
     );
     expect(toast.success).toHaveBeenCalledTimes(1);
     expect(toast.success).toHaveBeenCalledWith('objectActions.bulkDeleteSuccess {"count":2,"label":"Task"}');
+  });
+});
+
+/**
+ * objectstack#30239 (ADR-0148) — a by-id delete of a business record goes to
+ * the recycle bin. Its confirm asks the question alone; a platform object
+ * keeps the permanent copy. The one-record toast carries an Undo ONLY when
+ * the delete wrote an entry (`onRecycleBinEntry`) and the host passed
+ * `restore`; the Undo restores that entry — never a create — and a refused
+ * restore toasts its reason, not a generic failure.
+ */
+describe('recordDelete and the recycle bin (objectstack#30239)', () => {
+  function binHarness(opts: { entryId?: string; restoreError?: unknown; withRestore?: boolean } = {}) {
+    const dataSource = {
+      delete: vi.fn(async (_resource: string, _id: string, o?: { onRecycleBinEntry?: (id: string) => void }) => {
+        if (opts.entryId) o?.onRecycleBinEntry?.(opts.entryId);
+        return true;
+      }),
+      create: vi.fn(),
+    };
+    const restore = vi.fn(async (_entryId: string) => {
+      if (opts.restoreError) throw opts.restoreError;
+      return { entryId: opts.entryId };
+    });
+    const toast = { success: vi.fn(), error: vi.fn() };
+    const onRefresh = vi.fn();
+    const deps = {
+      objectName: 'crm_lead',
+      label: 'Lead',
+      t,
+      dataSource,
+      toast,
+      onRefresh,
+      ...(opts.withRestore === false ? {} : { restore }),
+      refusalLabels: { objectLabel: (name: string) => (name === 'crm_account' ? 'Account' : undefined) },
+    };
+    return { deps, dataSource, restore, toast, onRefresh };
+  }
+  const ROW = { params: { recordId: 'l1', record: { id: 'l1', name: 'Ada' } } };
+
+  it('a business object asks the question alone; a platform object keeps the permanent copy (one and batch)', () => {
+    const business = recordDelete.confirmCopy({ objectName: 'crm_lead', t, label: 'Lead' }, { record: { id: 'l1' } });
+    const platform = recordDelete.confirmCopy({ objectName: 'sys_user', t, label: 'User' }, { record: { id: 'u1' } });
+    expect(business.message).toBe('objectActions.deleteConfirmQuestion');
+    expect(platform.message).toBe('objectActions.deleteConfirm');
+    expect(recordDelete.confirmCopy({ objectName: 'crm_lead', t, label: 'Lead' }, { count: 2 }).message)
+      .toBe('console.objectView.bulkDeleteQuestion {"count":2}');
+    for (const name of ['sys_user', 'cloud_plan', 'ai_agent']) {
+      expect(recordDelete.confirmCopy({ objectName: name, t, label: 'X' }, { count: 2 }).message)
+        .toBe('console.objectView.bulkDeleteConfirm {"count":2}');
+    }
+  });
+
+  it('round trip: the toast carries Undo, which restores the entry (never a create), refreshes and names the record', async () => {
+    const { deps, dataSource, restore, toast, onRefresh } = binHarness({ entryId: 'rb1' });
+    const res = await recordDelete.run(deps, ROW);
+    expect(res).toEqual({ success: true, reload: true, silent: true });
+    expect(dataSource.delete).toHaveBeenCalledWith('crm_lead', 'l1', { onRecycleBinEntry: expect.any(Function) });
+
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    const [message, data] = toast.success.mock.calls[0];
+    expect(message).toBe('objectActions.deletedNamed {"label":"Lead","name":"Ada"}');
+    expect(data.action.label).toBe('actions.undo');
+    expect(restore).not.toHaveBeenCalled();
+
+    data.action.onClick();
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(restore).toHaveBeenCalledWith('rb1');
+    expect(dataSource.create).not.toHaveBeenCalled();
+    expect(onRefresh).toHaveBeenCalledTimes(2);
+    expect(toast.success.mock.calls[1]).toEqual(['objectActions.restoredNamed {"label":"Lead","name":"Ada"}']);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('a refused undo toasts the refusal sentence for its code, not the server message', async () => {
+    const refusal = Object.assign(new Error('raw server text'), {
+      code: 'RESTORE_PARENT_IN_RECYCLE_BIN',
+      details: { object: 'crm_lead', parentObject: 'crm_account', parentId: 'a1', parentEntryId: 'rb0' },
+    });
+    const { deps, toast, onRefresh } = binHarness({ entryId: 'rb1', restoreError: refusal });
+    await recordDelete.run(deps, ROW);
+    toast.success.mock.calls[0][1].action.onClick();
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(toast.error).toHaveBeenCalledWith('objectActions.restoreFailed {"label":"Lead"}', {
+      description: 'recycleBin.refusal.parentInRecycleBin {"object":"crm_lead","parent":"Account","field":""}',
+    });
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('control: an undo refused with a code nobody names keeps the server message', async () => {
+    const other = Object.assign(new Error('raw server text'), { code: 'SOMETHING_ELSE' });
+    const { deps, toast } = binHarness({ entryId: 'rb1', restoreError: other });
+    await recordDelete.run(deps, ROW);
+    toast.success.mock.calls[0][1].action.onClick();
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(toast.error).toHaveBeenCalledWith('objectActions.restoreFailed {"label":"Lead"}', { description: 'raw server text' });
+  });
+
+  it('control: a delete whose answer carries no entry keeps today\'s toast, byte for byte', async () => {
+    const { deps, toast } = binHarness({ entryId: undefined });
+    await recordDelete.run(deps, ROW);
+    expect(toast.success.mock.calls).toEqual([['objectActions.deletedNamed {"label":"Lead","name":"Ada"}']]);
+  });
+
+  it('control: a host with no restore deletes exactly as before and offers no Undo', async () => {
+    const { deps, dataSource, toast } = binHarness({ entryId: 'rb1', withRestore: false });
+    await recordDelete.run(deps, ROW);
+    expect(dataSource.delete.mock.calls).toEqual([['crm_lead', 'l1']]);
+    expect(toast.success.mock.calls).toEqual([['objectActions.deletedNamed {"label":"Lead","name":"Ada"}']]);
+  });
+
+  it('control: a batch keeps its summary toast with no Undo', async () => {
+    const { deps, toast } = binHarness({ entryId: 'rb1' });
+    await recordDelete.run(deps, { params: { records: [{ id: 'a' }, { id: 'b' }] } });
+    expect(toast.success.mock.calls).toEqual([['objectActions.bulkDeleteSuccess {"count":2,"label":"Lead"}']]);
   });
 });

@@ -53,7 +53,7 @@ architecture.
 Every deployment serves MCP at `/api/v1/mcp` by default (a core platform
 capability — set `OS_MCP_SERVER_ENABLED=false` to opt out), with two
 authentication tracks: The in-product entry point is the
-**Connect an Agent** page: per-client connect snippets, the portable
+**Connect an AI Assistant** page: per-client connect snippets, the portable
 SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
 
 - **OAuth 2.1 (interactive clients — recommended).** Each deployment is its
@@ -91,12 +91,46 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   layer, is the boundary for what actions can do.
 - **API key (headless).** Mint a key (`POST /api/v1/keys`, shown once) and
   send it as `x-api-key` — for CI, scripts, and agents without a browser.
+- **AI service account (unattended).** When an agent runs on its own, not
+  on your behalf, give it its own identity instead of your key. An
+  organization administrator (or a platform administrator) registers one
+  (Setup → Users → *Register AI Service Account*, or
+  `POST /api/v1/auth/service-account/register` with `name` and an optional
+  `ownerId`): a user of kind `agent`, a plain member of the active
+  organization, accountable to a named person who is a member there (the
+  caller by default). Its name carries its purpose. It never signs in: it has
+  no password and no session, and its email is a placeholder that is never
+  delivered. Its owner, or an administrator of its organization, mints its
+  key (*Create API Key* on the account, or
+  `POST /api/v1/auth/service-account/create-key` with `userId`), shown once,
+  bound to the account's organization and under the same expiry ceiling as
+  any key. The key acts as the account: only the grants given to the account
+  count, an account never holds administrator standing, and the agent
+  ceiling clears View All, Modify All and the other elevated permissions from
+  whatever sets it is given. Both doors take a signed-in session only, so a
+  key — the account's own included — can neither register an account nor mint
+  one's key. An account is never counted as one of the administrators that
+  keep an organization manageable, and never receives administrator mail.
+  Its lifecycle has doors of its own, each taking a signed-in session only
+  (`POST /api/v1/auth/service-account/<door>`):
+  - **`suspend`** (its owner or an administrator) stops every key on its
+    next call, without revoking any; **`resume`** (an administrator only, so
+    an owner cannot undo an administrator's stop) lets the same keys work again.
+    A ban a platform administrator placed only a platform administrator lifts.
+  - **`revoke-key`** and **`restore-key`** (its owner or an administrator)
+    stop or restart one key and leave its others alone. A platform
+    administrator's revoke can be restored only by a platform administrator.
+  - **`set-owner`** (an administrator) names another member as the
+    accountable owner. When the owner leaves the organization, the account is
+    suspended, and it is not resumed until an administrator names a new owner.
+  - **`retire`** (an administrator) ends its membership and revokes every key
+    for good; the account's record stays, so what it wrote still names it.
 
 Per client:
 
 | Client | How to connect |
 |---|---|
-| **Claude Code** | `claude mcp add --transport http objectstack https://<your-deployment>/api/v1/mcp` — a browser login opens on first use. Headless alternative: add `--header "x-api-key: osk_..."`. |
+| **Claude Code** | [`os mcp connect`](/docs/deployment/cli#os-mcp-connect) registers your ObjectOS Cloud environment; `os mcp connect --url <base>` registers a self-hosted or local server as `objectstack`. Without the CLI: `claude mcp add --transport http objectstack https://<your-deployment>/api/v1/mcp`. Either way a browser login opens on first use. Headless alternative: add `--header "x-api-key: osk_..."` to the `claude mcp add` line (`os mcp connect` stores no token). |
 | **Claude Desktop** | Settings → Connectors → *Add custom connector* → paste the MCP URL → sign in when prompted. Connects from Anthropic's servers — needs public HTTPS (see below). |
 | **claude.ai (web)** | Settings → Connectors → *Add custom connector* → paste the MCP URL. Connects from Anthropic's servers — needs public HTTPS (see below). |
 | **Other MCP clients** | Any client implementing MCP authorization discovers the flow automatically; header-based clients can send the API key instead. |

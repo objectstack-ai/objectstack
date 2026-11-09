@@ -77,6 +77,7 @@ export interface SharingRouteHost {
     readonly config: RestServer['config'];
     readonly routeManager: RestServer['routeManager'];
     readonly sharingServiceProvider: RestServer['sharingServiceProvider'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
 }
@@ -89,6 +90,7 @@ export interface SharingRouteHost {
 export interface SharingRuleRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly sharingRulesServiceProvider: RestServer['sharingRulesServiceProvider'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
 }
@@ -103,9 +105,15 @@ export function registerSharingEndpoints(this: SharingRouteHost, basePath: strin
     const dataPath = `${basePath}${crud.dataPrefix}`;
     const isScoped = basePath.includes('/environments/:environmentId');
 
-    const resolveService = async (environmentId?: string) => {
+    // [#30011] Asked for the REQUEST's environment — the scoped param, else
+    // the shared request→environment resolver — never the raw `undefined` an
+    // unscoped mount carries, which read the host kernel's occupant.
+    const resolveService = async (environmentId: string | undefined, req: any) => {
         if (!this.sharingServiceProvider) return undefined;
-        try { return await this.sharingServiceProvider(environmentId); }
+        try {
+            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
+            return await this.sharingServiceProvider(envId);
+        }
         catch { return undefined; }
     };
     /**
@@ -455,7 +463,7 @@ export function registerSharingEndpoints(this: SharingRouteHost, basePath: strin
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 const rows = await svc.listShares(req.params.object, req.params.id, context ?? {});
                 res.json({ data: rows });
@@ -484,7 +492,7 @@ export function registerSharingEndpoints(this: SharingRouteHost, basePath: strin
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 const body = req.body ?? {};
                 const input = {
@@ -523,7 +531,7 @@ export function registerSharingEndpoints(this: SharingRouteHost, basePath: strin
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 await svc.revoke(
                     req.params.shareId,
@@ -558,9 +566,15 @@ export function registerSharingRuleEndpoints(this: SharingRuleRouteHost, basePat
     const dataPath = basePath;
     const isScoped = basePath.includes('/environments/:environmentId');
 
-    const resolveService = async (environmentId?: string) => {
+    // [#30011] Asked for the REQUEST's environment — the scoped param, else
+    // the shared request→environment resolver — never the raw `undefined` an
+    // unscoped mount carries, which read the host kernel's occupant.
+    const resolveService = async (environmentId: string | undefined, req: any) => {
         if (!this.sharingRulesServiceProvider) return undefined;
-        try { return await this.sharingRulesServiceProvider(environmentId); }
+        try {
+            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
+            return await this.sharingRulesServiceProvider(envId);
+        }
         catch { return undefined; }
     };
     const respond501 = (res: any) => res.status(501).json({
@@ -655,7 +669,7 @@ export function registerSharingRuleEndpoints(this: SharingRuleRouteHost, basePat
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 // [#6877] `object` reached `listRules` as an array; a
                 // repeated `?activeOnly=true` stopped matching and listed the
@@ -680,7 +694,7 @@ export function registerSharingRuleEndpoints(this: SharingRuleRouteHost, basePat
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 const body = req.body ?? {};
                 // Field-by-field pluck (not a schema parse): the authoring
@@ -718,7 +732,7 @@ export function registerSharingRuleEndpoints(this: SharingRuleRouteHost, basePat
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 const row = await svc.getRule(req.params.idOrName, context ?? {});
                 if (!row) return res.status(404).json({ code: 'RULE_NOT_FOUND' });
@@ -737,7 +751,7 @@ export function registerSharingRuleEndpoints(this: SharingRuleRouteHost, basePat
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 await svc.deleteRule(req.params.idOrName, context ?? {});
                 res.status(204).end();
@@ -755,7 +769,7 @@ export function registerSharingRuleEndpoints(this: SharingRuleRouteHost, basePat
                 const environmentId = isScoped ? req.params?.environmentId : undefined;
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
-                const svc = await resolveService(environmentId);
+                const svc = await resolveService(environmentId, req);
                 if (!svc) return respond501(res);
                 const result = await svc.evaluateRule(req.params.idOrName, context ?? {});
                 res.json(result);

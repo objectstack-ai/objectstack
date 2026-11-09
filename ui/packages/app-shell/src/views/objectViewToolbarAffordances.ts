@@ -39,11 +39,11 @@ export function useObjectViewToolbarAffordances({
     newVerdict: ReturnType<typeof resolveAffordance>;
     importVerdict: ReturnType<typeof resolveAffordance>;
 }) {
-    // Environment list (sys_environment) is entitlement- + state-aware: born
-    // with one production env per org, its single `create_environment` action
-    // means different things — "Set up your production environment", "Add
-    // development environment", or a locked plan-tier mark linking to the
-    // upgrade page (objectui#12190) — depending on org state.
+    // Environment list (sys_environment) is entitlement- + state-aware: each
+    // org has exactly one environment, its production environment, so its
+    // single `create_environment` action reads "Set up your production
+    // environment" until that exists and is withheld after — depending on
+    // org state.
     // Resolved org-side here; the hook is a no-op for every other object.
     const isEnvironmentList = objectDef.name === 'sys_environment';
     const environmentEntitlements = useEnvironmentEntitlements({

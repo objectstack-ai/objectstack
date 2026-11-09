@@ -132,12 +132,19 @@ const BUNDLE = {
   'zh-CN': { showcase: { objects: { recheck_gate: { label: '质检关', pluralLabel: PLURAL['zh-CN'], _views: { timeline: { label: CATALOGUED['zh-CN'] } } } } } },
 };
 
-/** The `/meta/object` answer, BEFORE the merge: its own `listViews`. */
-function servedObject() {
+/** The object's label and plural as the server serves them per language. */
+const SERVED = { en: { label: 'QA Gate', pluralLabel: PLURAL.en }, 'zh-CN': { label: '质检关', pluralLabel: PLURAL['zh-CN'] } } as const;
+
+/**
+ * The `/meta/object` answer, BEFORE the merge: its own `listViews`.
+ * The served object document carries the session language's text, as the
+ * server translates it (objectstack#30311: a served label is drawn as served),
+ * so a zh-CN session is served the zh-CN label and plural.
+ */
+function servedObject(language: 'en' | 'zh-CN') {
   return {
     name: OBJECT_NAME,
-    label: 'QA Gate',
-    pluralLabel: 'QA Gates',
+    ...SERVED[language],
     fields: { name: { type: 'text', label: 'Name' } },
     listViews: {
       [EMBEDDED_KEY]: { type: 'grid', columns: ['name'] },
@@ -154,8 +161,8 @@ function servedObject() {
  * entries the console expands itself — `board` with no label and no catalogue
  * entry, `timeline` with no label and a catalogue entry.
  */
-function world(source: 'viewItem' | 'container') {
-  const doc = servedObject();
+function world(source: 'viewItem' | 'container', language: 'en' | 'zh-CN') {
+  const doc = servedObject(language);
   const viewItem = { name: DEFAULT_VIEW_ID, object: OBJECT_NAME, viewKind: 'list', config: { type: 'grid', columns: ['name'] } };
   const container = {
     name: OBJECT_NAME,
@@ -199,7 +206,7 @@ function makeDataSource() {
 }
 
 async function renderIn(language: 'en' | 'zh-CN', source: 'viewItem' | 'container') {
-  const { objects, metadata } = world(source);
+  const { objects, metadata } = world(source, language);
   render(
     <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false, resources: BUNDLE }}>
       <MetadataCtx.Provider value={metadata as any}>

@@ -277,7 +277,8 @@ describe('objectui#12331 — a record-scoped script action at list_toolbar, with
     await tickRows(1);
     await launchFromHeader();
 
-    expect(await screen.findByText('Action completed successfully', undefined, { timeout: 5000 })).toBeInTheDocument();
+    // The runner's default line names the labelled action (#30126).
+    expect(await screen.findByText('Add to Campaign completed', undefined, { timeout: 5000 })).toBeInTheDocument();
     expect(actionCalls()).toHaveLength(1);
   });
 });
@@ -296,7 +297,8 @@ describe('objectui#12331 — the refusal follows the `locations` declaration', (
     await tickRows(0);
     await launchFromHeader();
 
-    expect(await screen.findByText('Action completed successfully', undefined, { timeout: 5000 })).toBeInTheDocument();
+    // The runner's default line names the labelled action (#30126).
+    expect(await screen.findByText('Add to Campaign completed', undefined, { timeout: 5000 })).toBeInTheDocument();
     expect(actionCalls()).toHaveLength(1);
     expect(postedBody(0)).toEqual({ params: { campaign: 'cmp_webinar' } });
   });

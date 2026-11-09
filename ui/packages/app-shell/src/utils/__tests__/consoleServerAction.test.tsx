@@ -500,7 +500,7 @@ describe('the newTabUrl fast path refuses in the session language (objectui#1339
   const zhT = (key: string, englishDefault: string) => {
     const hit = key.split('.').reduce<unknown>(
       (node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined),
-      builtInLocales.zh,
+      builtInLocales['zh-Hans'],
     );
     return typeof hit === 'string' ? hit : englishDefault;
   };

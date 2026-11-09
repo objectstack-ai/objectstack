@@ -33,7 +33,12 @@
  *    so a holder of the position is granted nothing through such a name. The
  *    usual cause is a package that declared the set and is now uninstalled or
  *    disabled while a position still binds it; reinstalling the package clears
- *    the line at the next boot, with nothing else to do.
+ *    the line at the next boot, with nothing else to do. [ADR-0150 D3/D7] A
+ *    position's set resolves from the package that declared the position, so
+ *    a name that package cannot reach — held only by the environment, or only
+ *    by a package outside its declared dependency closure — or that two
+ *    holders it can reach both hold, is reported here too, with the
+ *    resolver's refusal naming every candidate.
  *
  * It reads no `sys_position` row: positions are read from the catalog. The catalog row objects are retired (C3
  * stage 8), so no composition provisions that table, and a Setup-authored
@@ -70,8 +75,15 @@
  * ADR anchors: ADR-0131 D3 (one catalog home), D4 (references by name).
  */
 
-import type { SecurityCatalogEntry, SecurityCatalogReader, SecurityCatalogType } from '@objectstack/core';
+import {
+  resolveCatalogReference,
+  storedPermissionSetScope,
+  type SecurityCatalogEntry,
+  type SecurityCatalogReader,
+  type SecurityCatalogType,
+} from '@objectstack/core';
 import { GRANT_OBJECT, GRANT_SET_NAME_FIELD } from './grant-permission-set-name.js';
+import { PERMISSION_SET_PACKAGE_COLUMN } from './stored-permission-set-package-backfill.js';
 
 /** The user ↔ position assignment object (ADR-0057 D4). */
 export const POSITION_ASSIGNMENT_OBJECT = 'sys_user_position';
@@ -135,6 +147,23 @@ export interface PositionNamingUnresolvedSets {
   packageId: string | null;
   /** The names in its `permissionSets` the catalog does not resolve, in declared order. */
   permissionSets: string[];
+  /**
+   * [ADR-0150 D3] Those of {@link PositionNamingUnresolvedSets.permissionSets}
+   * the package-scoped resolution refused, each with every candidate — absent
+   * when none was refused.
+   */
+  refusals?: PositionSetRefusal[];
+}
+
+/** [ADR-0150 D3] One permission-set name a position cannot resolve, and why: every candidate named, none picked. */
+export interface PositionSetRefusal {
+  permissionSet: string;
+  /** The resolver's reason (`outside-closure`, `ambiguous-in-closure`, `ambiguous-in-environment`). */
+  reason: string;
+  /** Every candidate holder, described. */
+  candidates: string[];
+  /** The resolver's sentence. */
+  message: string;
 }
 
 /** Why the report stopped before it judged every reference. */
@@ -235,15 +264,20 @@ async function listPositions(catalog: SecurityCatalogReader): Promise<SecurityCa
 }
 
 /** The catalog's answer per name, each name asked once. */
-function catalogResolver(catalog: SecurityCatalogReader): (type: SecurityCatalogType, name: string) => Promise<boolean> {
+function catalogResolver(
+  catalog: SecurityCatalogReader,
+): (type: SecurityCatalogType, name: string, packageColumn?: unknown) => Promise<boolean> {
   const memo = new Map<string, boolean>();
-  return async (type, name) => {
-    const key = `${type}\u0000${name}`;
+  return async (type, name, packageColumn) => {
+    // [ADR-0150 D8 R1] A grant naming its holder is asked for that package's
+    // set, as the authorization resolver asks it (`storedPermissionSetScope`).
+    const scope = type === 'permission' ? storedPermissionSetScope(packageColumn) : undefined;
+    const key = `${type}\u0000${name}\u0000${scope?.packageId ?? ''}`;
     const known = memo.get(key);
     if (known !== undefined) return known;
     let resolves: boolean;
     try {
-      const entry = await catalog.resolve(type, name);
+      const entry = await catalog.resolve(type, name, scope);
       resolves = entry !== undefined && entry.name === name;
     } catch (e) {
       throw new ReportStop('catalog-unreadable', 'the security catalog', e);
@@ -305,7 +339,7 @@ export async function collectCatalogReferences(
 
     if (readGrants) {
       const rows = await scanAll(engine, GRANT_OBJECT, [
-        'id', 'user_id', GRANT_SET_NAME_FIELD, 'organization_id',
+        'id', 'user_id', GRANT_SET_NAME_FIELD, PERMISSION_SET_PACKAGE_COLUMN, 'organization_id',
       ]);
       for (const row of rows) {
         const name = nameOf(row[GRANT_SET_NAME_FIELD]);
@@ -315,7 +349,7 @@ export async function collectCatalogReferences(
           });
           continue;
         }
-        if (await resolves('permission', name)) continue;
+        if (await resolves('permission', name, row[PERMISSION_SET_PACKAGE_COLUMN])) continue;
         bucket(organizationOf(row)).permissionSetGrants.push({
           id: String(row.id), userId: stringOrNull(row.user_id), name,
         });
@@ -326,13 +360,31 @@ export async function collectCatalogReferences(
       const declared = entry?.definition?.permissionSets;
       if (!Array.isArray(declared)) continue;
       const unresolved: string[] = [];
+      const refusals: PositionSetRefusal[] = [];
       for (const value of declared) {
         const name = nameOf(value);
-        if (name === undefined || unresolved.includes(name) || (await resolves('permission', name))) continue;
+        if (name === undefined || unresolved.includes(name)) continue;
+        // [ADR-0150 D7] Resolved from the position, as the authorization
+        // resolver grants it — never by the bare name alone.
+        let answer: Awaited<ReturnType<typeof resolveCatalogReference>>;
+        try {
+          answer = await resolveCatalogReference(deps.catalog, 'permission', name, { position: entry });
+        } catch (e) {
+          throw new ReportStop('catalog-unreadable', 'the security catalog', e);
+        }
+        if (answer.status === 'resolved' && answer.entry.name === name) continue;
         unresolved.push(name);
+        if (answer.status === 'refused') {
+          refusals.push({ permissionSet: name, reason: answer.reason, candidates: [...answer.candidates], message: answer.message });
+        }
       }
       if (unresolved.length === 0) continue;
-      report.positions.push({ position: entry.name, packageId: entry.packageId ?? null, permissionSets: unresolved });
+      report.positions.push({
+        position: entry.name,
+        packageId: entry.packageId ?? null,
+        permissionSets: unresolved,
+        ...(refusals.length > 0 ? { refusals } : {}),
+      });
     }
   } catch (e) {
     if (!(e instanceof ReportStop)) throw e;
@@ -450,12 +502,18 @@ function logReport(report: CatalogReferenceReport, logger?: CatalogReferenceRepo
         'does not resolve at this boot (ADR-0131 D4), so a holder of the position is granted nothing through that ' +
         'name. Nothing was changed. Fix: install or enable again the package that declared the permission set (the ' +
         'next boot then clears this line by itself), declare the set again, or remove the name from the ' +
-        "position's permissionSets.",
+        "position's permissionSets. A name listed under refusals is held, but not where the position's package " +
+        'can reach it, or by more than one holder it can reach (ADR-0150 D3): each refusal names every candidate. ' +
+        'Declare a dependency on the package that holds it, or bind the set through an administrator overlay of ' +
+        'the position, which resolves it as the environment does.',
       {
         count: report.positions.length,
         permissionSets: [...sets].sort(),
         positions: listed(report.positions.map((p) => ({
-          position: p.position, packageId: p.packageId, permissionSets: p.permissionSets,
+          position: p.position,
+          packageId: p.packageId,
+          permissionSets: p.permissionSets,
+          ...(p.refusals ? { refusals: p.refusals } : {}),
         }))),
       },
     );

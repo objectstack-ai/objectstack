@@ -93,6 +93,16 @@ export const STUDIO_ICON_TILE = 'inline-flex h-8 w-8 shrink-0 items-center justi
 export const STUDIO_API_CHIP =
   'block h-[22px] min-w-[5ch] max-w-max basis-[14ch] grow-[1000] shrink-[100000] truncate rounded-[5px] bg-muted px-2 font-mono text-[11px] leading-[22px] text-muted-foreground ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+/**
+ * objectstack#29693 — the label of a labelled action in the item header's
+ * actions slot (the Customize button, a flow's switch, the canvas mode
+ * buttons). On a row whose title would drop below its readable width, after
+ * the chips and the item tools have gone to the ⋯ menu, the header marks its
+ * actions `data-fold="labels"` and the label leaves the row: the action shows
+ * its icon, and the label stays its accessible name. The label's element
+ * carries `data-studio-fold-label` too, so the header can measure it.
+ */
+export const STUDIO_FOLD_LABEL = 'group-data-[fold=labels]/item-actions:sr-only';
 export const STUDIO_KIND_CHIP = 'inline-flex h-[22px] shrink-0 items-center rounded-[5px] bg-muted px-2 text-[11px] font-medium text-muted-foreground';
 export const STUDIO_META = 'min-w-0 truncate text-xs text-muted-foreground';
 /**

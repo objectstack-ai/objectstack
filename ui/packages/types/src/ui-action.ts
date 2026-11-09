@@ -100,6 +100,34 @@ export function actionRendersAt(
   return Array.isArray(declared) && declared.includes(location);
 }
 
+/**
+ * THE record header's placed actions: every action of an object whose
+ * `locations` include `record_header` or `record_more`, in declaration order,
+ * the first of each name (an unnamed entry passes through).
+ *
+ * ONE reader for the two headers that draw "the object's header actions"
+ * (objectstack#29951): the synthesized default record page
+ * (`RecordDetailView`'s header list) and an authored `page:header` that sets
+ * `placedActions: true` (objectstack#30018, ruling record 6624172200, letter A).
+ * Both read it off the object's actions as served at render time, so an action
+ * another package places on the object is in the set. Placement is
+ * {@link actionRendersAt}'s; this adds only the header's two locations and the
+ * first-of-a-name rule.
+ */
+export function placedHeaderActions<T extends { name?: unknown; locations?: readonly string[] }>(
+  actions: readonly T[] | null | undefined,
+): T[] {
+  const seen = new Set<string>();
+  return (actions ?? []).filter((action) => {
+    if (!actionRendersAt(action, 'record_header') && !actionRendersAt(action, 'record_more')) return false;
+    const name = typeof action?.name === 'string' ? action.name : '';
+    if (name === '') return true;
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+}
+
 // ============================================================================
 // Declared action arrays — ONE rule for every surface that authors a list of
 // actions by id (objectui#7182)
@@ -839,6 +867,15 @@ export interface UIActionSchema {
    */
   resultDialog?: SpecAction['resultDialog'];
 
+  /**
+   * Preflight read for the action's param dialog (objectstack#31840): one
+   * same-origin `GET` sent before submit, its answer shown above the params
+   * and seeded into the params it names. The four declared action renderers
+   * forward it, so a dialog opened from any of them sends the read
+   * (objectstack#31808). Derived from the contract, as `resultDialog` is.
+   */
+  preflight?: SpecAction['preflight'];
+
   // === Conditional ===
 
   /** Expression controlling visibility (e.g., "status === 'draft'") */
@@ -1207,55 +1244,6 @@ export interface ActionResult {
   undo?: UndoableOperation;
 }
 
-/**
- * Action executor function type
- */
-export type ActionExecutor = (
-  action: UIActionSchema,
-  context: ActionContext,
-  params?: Record<string, any>
-) => Promise<ActionResult>;
-
-// ============================================================================
-// Batch Operations (Q2 2026 - Spec v2.0.1 Enhancement)
-// ============================================================================
-
-/** Batch operation configuration */
-export interface BatchOperationConfig {
-  /** Operation name */
-  name: string;
-  /** Display label */
-  label: string;
-  /** Target action to execute on each record */
-  action: string;
-  /** Whether to run in parallel */
-  parallel?: boolean;
-  /** Maximum concurrent operations */
-  concurrency?: number;
-  /** Whether to continue on error */
-  continueOnError?: boolean;
-  /** Progress callback expression */
-  onProgress?: string;
-  /** Completion callback expression */
-  onComplete?: string;
-}
-
-/** Batch operation result */
-export interface BatchOperationSummary {
-  /** Total items processed */
-  total: number;
-  /** Successfully processed count */
-  succeeded: number;
-  /** Failed count */
-  failed: number;
-  /** Individual results */
-  results: Array<{
-    recordId: string;
-    success: boolean;
-    error?: string;
-  }>;
-}
-
 // ============================================================================
 // Transaction Support (Q2 2026 - Spec v2.0.1 Enhancement)
 // ============================================================================
@@ -1295,6 +1283,11 @@ export interface TransactionResult {
   rolledBack?: boolean;
 }
 
+// `ActionExecutor` and the "Batch Operations" pair (`BatchOperationConfig`,
+// `BatchOperationSummary`) are retired (objectstack#25921, batch 11): nothing in
+// this workspace or in hotcrm read them. `@object-ui/core`'s `ActionRunner` is
+// the executor; it registers `ActionRunnerHandler` functions, not this type.
+//
 // The undo/redo trio this file used to declare (`UndoRedoEntry`,
 // `UndoRedoConfig`, `UndoRedoState`) is retired (objectui#6349, batch 5): when
 // it was removed nothing in the repository read or wrote any of the three, and

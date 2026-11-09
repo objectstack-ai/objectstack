@@ -21,7 +21,11 @@ export const BusinessUnit = ObjectSchema.create({
 
   fields: {
     name: Field.text({ label: 'Name', required: true, searchable: true, maxLength: 120 }),
-    parent: Field.lookup('showcase_business_unit', { label: 'Parent Unit', allowCreate: true }),
+    // A lookup back to this object, so a unit's record page lists its child
+    // units. Without a title of its own that list would be headed by this
+    // object's own label ("Business Units") beside the unit itself; the title
+    // is translated at `objects.showcase_business_unit.fields.parent.relatedListTitle`.
+    parent: Field.lookup('showcase_business_unit', { label: 'Parent Unit', allowCreate: true, relatedListTitle: 'Sub-units' }),
     kind: Field.select({
       label: 'Type',
       options: [

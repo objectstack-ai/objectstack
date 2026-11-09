@@ -124,8 +124,8 @@ import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredK
  *    parentheses, numeric literals, `record.qty` or bare `qty`), and written
  *    back into the row so it persists and any running total reflects it.
  *  - `scale` — decimal places for a computed `number` result. ⛔ Not read on
- *    a `currency` column (objectui#10783): the resolved currency's ISO 4217
- *    minor unit decides both the stored and the shown width
+ *    a `currency` column (objectui#10783): the resolved currency's CLDR
+ *    fraction digits decide both the stored and the shown width
  *    (`currencyWidth`), and the spec refuses `scale` on a column declaring
  *    `type: 'currency'`. A column that takes `currency` from its child field
  *    at render time is reported by `hydrateColumns` in
@@ -324,7 +324,7 @@ function columnCurrency(tenantCurrency: string | undefined): string | undefined 
  * The fraction width of a `currency` column (objectui#10355) — the ONE
  * decision behind both its stored computed value and its display.
  *
- * 1. The resolved currency's ISO 4217 minor unit (0 for JPY, 2 for USD, 3 for
+ * 1. The resolved currency's CLDR fraction digits (0 for JPY, 2 for USD, 3 for
  *    KWD), from `currencyFractionDigits`, the helper every currency face
  *    already uses. It replaced the old default of a literal `2`, under which a
  *    yen amount was stored with cents it does not have and a dinar amount lost

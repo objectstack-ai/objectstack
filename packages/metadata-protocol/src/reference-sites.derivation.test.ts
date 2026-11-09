@@ -226,13 +226,17 @@ describe('[#9190] derived reference sites — derivation is a pure function of t
         // The module-load singleton must not be doing anything a caller cannot
         // reproduce; a derived registry that depends on WHEN it ran is a
         // curated one wearing a function.
+        //
+        // The two derivations are the module-load singleton and one call made
+        // now, at a different time and in a different state of the process.
+        // A third call would only repeat the second at the cost of another
+        // full schema walk, so the case derives once.
         const a = deriveReferenceSites();
-        const b = deriveReferenceSites();
+        expect(a).not.toBe(REFERENCE_SITES); // a second derivation, not the singleton handed back
         const flatten = (index: ReturnType<typeof deriveReferenceSites>) =>
             [...index.byTarget.entries()]
                 .map(([target, sites]) => `${target}=${sites.map((s) => `${s.fromType}.${s.property}`).join(',')}`)
                 .sort();
-        expect(flatten(a)).toEqual(flatten(b));
         expect(flatten(a)).toEqual(flatten(REFERENCE_SITES));
         expect([...a.compositeKeyByTarget]).toEqual([...REFERENCE_SITES.compositeKeyByTarget]);
     });

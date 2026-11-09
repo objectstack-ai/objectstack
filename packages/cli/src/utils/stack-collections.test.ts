@@ -17,6 +17,7 @@ import {
   artifactObjectNames,
   authoringRuleUnionStack,
   bundleDeclaresTranslations,
+  hasMetadataPlugin,
   resolveStackCollection,
   shouldAutoRegisterObjectQL,
   shouldAutoRegisterStorageDriver,
@@ -266,5 +267,30 @@ describe('#22371 — stackBootPlugins, `os serve`\'s `plugins` and its `--dev` m
   it('no plugins at all: an empty list', () => {
     expect(stackBootPlugins({}, false)).toEqual([]);
     expect(stackBootPlugins(undefined, true)).toEqual([]);
+  });
+});
+
+describe('#29936 — hasMetadataPlugin, the one gate both `os serve` metadata doors ask', () => {
+  // The shape the published `@objectstack/metadata` bundle emits (18.3.0
+  // dist/index.js: `var MetadataPlugin = class _MetadataPlugin {`): the class
+  // name is `_MetadataPlugin`, only `name` still says what the plugin is.
+  const BundledMetadataPlugin = class _MetadataPlugin {
+    name = 'com.objectstack.metadata';
+  };
+
+  it('finds the plugin by its name when the bundle renamed the class', () => {
+    const bundled = new BundledMetadataPlugin();
+    expect(bundled.constructor.name).toBe('_MetadataPlugin');
+    expect(hasMetadataPlugin([{ name: 'com.objectstack.runtime.default-datasource' }, bundled])).toBe(true);
+  });
+
+  it('finds the source-built class by its class name', () => {
+    class MetadataPlugin {}
+    expect(hasMetadataPlugin([new MetadataPlugin()])).toBe(true);
+  });
+
+  it('answers false for a stack with no metadata plugin', () => {
+    expect(hasMetadataPlugin([])).toBe(false);
+    expect(hasMetadataPlugin([{ name: 'com.objectstack.engine.objectql' }, null, undefined, 'x'])).toBe(false);
   });
 });

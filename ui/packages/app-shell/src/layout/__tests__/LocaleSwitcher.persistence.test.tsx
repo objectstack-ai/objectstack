@@ -32,7 +32,7 @@ vi.mock('lucide-react', async (importOriginal) => ({
   Globe: () => <span />,
 }));
 
-import { LocaleSwitcher } from '../LocaleSwitcher';
+import { LocaleSwitcher, localeLabel } from '../LocaleSwitcher';
 
 /** A page load: a fresh provider building a fresh i18next instance. */
 function load() {
@@ -53,10 +53,11 @@ describe('LocaleSwitcher persistence', () => {
     // English before the switch — the switcher's own sr-only label localizes.
     expect(screen.getByText('Language')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('中文'));
+    // The Simplified Chinese pack, named as the menu names `zh-Hans` (objectstack#30511).
+    fireEvent.click(screen.getByText(localeLabel('zh-Hans')));
 
     await waitFor(() => expect(screen.getByText('语言')).toBeInTheDocument());
-    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh');
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-Hans');
 
     first.unmount();
 

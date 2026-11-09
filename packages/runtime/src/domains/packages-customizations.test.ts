@@ -191,6 +191,17 @@ function baseManifest(): Record<string, unknown> {
                 columns: ['title', 'status', 'due_date'].map((field) => ({ field })),
             },
         }],
+        // [#28722] The base's app, with the group other packages contribute into.
+        apps: [{
+            name: 'showcase',
+            label: 'Showcase',
+            navigation: [{
+                id: 'showcase_work',
+                type: 'group',
+                label: 'Work',
+                children: [{ id: 'showcase_tasks', type: 'object', label: 'Tasks', objectName: 'showcase_task' }],
+            }],
+        }],
     };
 }
 
@@ -205,6 +216,11 @@ function otherManifest(): Record<string, unknown> {
             label: 'Note',
             sharingModel: 'private',
             fields: { body: { name: 'body', label: 'Body', type: 'text' } },
+        }],
+        apps: [{
+            name: 'other_app',
+            label: 'Other',
+            navigation: [{ id: 'other_notes', type: 'object', label: 'Notes', objectName: 'other_note' }],
         }],
     };
 }
@@ -507,8 +523,23 @@ const flowOn = (name: string, object: string) => ({
     edges: [{ id: 'e1', source: 'start', target: 'end' }],
 });
 
-/** A code package registered as the engine registers every manifest: an object extension and flows. */
-const registerContributor = (engine: ObjectQL, id: string, fields: readonly string[], flows: ReadonlyArray<ReturnType<typeof flowOn>>) =>
+/** One `navigationContributions` entry of a manifest (ADR-0029 D7). */
+type NavContribution = { app: string; group?: string; priority?: number; items: Array<Record<string, unknown>> };
+
+/** A url nav item: the smallest item that carries an id. */
+const navLink = (id: string) => ({ id, type: 'url', label: id, url: `/${id}` });
+
+/**
+ * A code package registered as the engine registers every manifest: an object
+ * extension, flows, and the navigation it contributes to other packages' apps.
+ */
+const registerContributor = (
+    engine: ObjectQL,
+    id: string,
+    fields: readonly string[],
+    flows: ReadonlyArray<ReturnType<typeof flowOn>>,
+    navigationContributions: readonly NavContribution[] = [],
+) =>
     engine.registerApp({
         id,
         name: id.split('.').join('-'),
@@ -518,13 +549,16 @@ const registerContributor = (engine: ObjectQL, id: string, fields: readonly stri
             fields: Object.fromEntries(fields.map((f) => [f, { name: f, label: f, type: 'text' }])),
         }],
         flows: [...flows],
+        navigationContributions: [...navigationContributions],
     });
 
 /**
- * The card's fixture (#28722): the base ships a flow on its object, the pair
- * extends that object and carries a flow on it, and a third code package
- * extends the same object with a field and ships a flow on it — plus a flow
- * on an object the base does not own.
+ * The card's fixture (#28722): the base ships a flow on its object and an app,
+ * the pair extends that object, carries a flow on it and contributes a nav
+ * item to the base's app, and a third code package extends the same object
+ * with a field, ships a flow on it and contributes a nav item into the base
+ * app's group — plus a flow on an object the base does not own. The base
+ * contributing to its own app is the base's item, not a contribution.
  */
 async function contributedFixture() {
     const booted = await boot();
@@ -533,12 +567,20 @@ async function contributedFixture() {
     await install(protocol, PAIR);
     extend(engine, PAIR, 'showcase_task', { fields: { region__c: { name: 'region__c', label: 'Region', type: 'text' } } });
     engine.registry.registerItem('flow', flowOn('showcase_task_region_notify', 'showcase_task'), 'name', PAIR);
-    registerContributor(engine, THIRD, ['acme_sync_id'], [flowOn('acme_task_sync', 'showcase_task'), flowOn('acme_note_sync', 'other_note')]);
+    engine.registry.registerAppNavContribution({ app: 'showcase', items: [navLink('showcase_region_board')] }, PAIR);
+    engine.registry.registerAppNavContribution({ app: 'showcase', group: 'showcase_work', items: [navLink('showcase_inbox')] }, BASE);
+    registerContributor(
+        engine,
+        THIRD,
+        ['acme_sync_id'],
+        [flowOn('acme_task_sync', 'showcase_task'), flowOn('acme_note_sync', 'other_note')],
+        [{ app: 'showcase', group: 'showcase_work', items: [navLink('acme_sync_log')] }],
+    );
     return booted;
 }
 
 describe('[#28722] GET /packages/:id/customizations — the fields and flows other packages contribute to a base', () => {
-    it('names the third package for its extension field and its flow, and names neither the base nor the pair', async () => {
+    it('names the third package for its extension field, its flow and its nav item, and names neither the base nor the pair', async () => {
         const { dispatcher } = await contributedFixture();
         const r = await customizations(dispatcher, BASE);
         expect(r.response?.status).toBe(200);
@@ -546,8 +588,9 @@ describe('[#28722] GET /packages/:id/customizations — the fields and flows oth
         expect(data.contributions).toEqual([
             { kind: 'field', object: 'showcase_task', name: 'acme_sync_id', packageId: THIRD },
             { kind: 'flow', object: 'showcase_task', name: 'acme_task_sync', packageId: THIRD },
+            { kind: 'nav', app: 'showcase', group: 'showcase_work', name: 'acme_sync_log', packageId: THIRD },
         ]);
-        expect(data.counts.contributions).toBe(2);
+        expect(data.counts.contributions).toBe(3);
         // The pair's member stays where N-15 serves it, and is not a contribution.
         expect(data.extensions).toEqual([{ object: 'showcase_task', kind: 'field', name: 'region__c' }]);
         const parsed = GetPackageCustomizationsResponseSchema.safeParse(data);
@@ -571,7 +614,7 @@ describe('[#28722] GET /packages/:id/customizations — the fields and flows oth
         engine.registry.registerItem('flow', { ...flowOn('showcase_task_local', 'showcase_task'), _packageId: 'sys_metadata' } as any);
         engine.registry.registerItem('flow', { ...flowOn('showcase_task_org', 'showcase_task'), _packageId: THIRD, _provenance: 'org' } as any);
         const { contributions } = (await customizations(dispatcher, BASE)).response?.body?.data;
-        expect(contributions.map((c: any) => `${c.kind}:${c.name}`)).toEqual(['field:acme_sync_id', 'flow:acme_task_sync']);
+        expect(contributions.map((c: any) => `${c.kind}:${c.name}`)).toEqual(['field:acme_sync_id', 'flow:acme_task_sync', 'nav:acme_sync_log']);
     });
 
     it('reads a field\'s stamp and a flow\'s stamp the same way: each stamp lists both kinds or neither', async () => {
@@ -606,5 +649,83 @@ describe('[#28722] GET /packages/:id/customizations — the fields and flows oth
         const data = (await customizations(dispatcher, OTHER)).response?.body?.data;
         expect(data.contributions).toEqual([{ kind: 'flow', object: 'other_note', name: 'acme_note_sync', packageId: THIRD }]);
         expect(data.counts.contributions).toBe(1);
+    });
+});
+
+/** Every nav item id of a folded navigation tree, depth first. */
+const navIds = (items: unknown): string[] => (Array.isArray(items) ? items : []).flatMap((item: any) => [
+    ...(typeof item?.id === 'string' ? [item.id] : []),
+    ...navIds(item?.children),
+]);
+
+describe('[#28722] GET /packages/:id/customizations — the navigation items other packages contribute to a base\'s app', () => {
+    /** The `nav` entries of the base's answer. */
+    const navOf = async (dispatcher: HttpDispatcher, id = BASE) =>
+        ((await customizations(dispatcher, id)).response?.body?.data.contributions as any[]).filter((c) => c.kind === 'nav');
+
+    it('lists one entry per item a contribution declares with an id, naming its group, the no-group entries first', async () => {
+        const { dispatcher, engine } = await contributedFixture();
+        registerContributor(engine, FOURTH, [], [], [
+            // A top-level contribution: a link, a separator with no id (no
+            // `name` to give, so not an entry), and a group whose child rides
+            // inside it and is not an entry of its own.
+            { app: 'showcase', items: [
+                navLink('partner_home'),
+                { type: 'separator' },
+                { id: 'partner_tools', type: 'group', label: 'Tools', children: [navLink('partner_tool_a')] },
+            ] },
+            // A group the app does not declare: still named, though the fold
+            // appends the item at the app's top level.
+            { app: 'showcase', group: 'showcase_missing', items: [navLink('partner_help')] },
+        ]);
+        expect(await navOf(dispatcher)).toEqual([
+            { kind: 'nav', app: 'showcase', name: 'partner_home', packageId: FOURTH },
+            { kind: 'nav', app: 'showcase', name: 'partner_tools', packageId: FOURTH },
+            { kind: 'nav', app: 'showcase', group: 'showcase_missing', name: 'partner_help', packageId: FOURTH },
+            { kind: 'nav', app: 'showcase', group: 'showcase_work', name: 'acme_sync_log', packageId: THIRD },
+        ]);
+        const { data } = (await customizations(dispatcher, BASE)).response?.body ?? {};
+        expect(data.contributions.slice(0, 2).map((c: any) => c.kind), 'the field and flow entries come first').toEqual(['field', 'flow']);
+        const parsed = GetPackageCustomizationsResponseSchema.safeParse(data);
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    });
+
+    it('a disabled package\'s contributions are not listed, as the fold drops them, and re-enabling restores them', async () => {
+        const { dispatcher, engine } = await contributedFixture();
+        registerContributor(engine, FOURTH, [], [], [{ app: 'showcase', items: [navLink('partner_home')] }]);
+        // AGREEMENT with the fold: the listed names are the served app's ids
+        // that neither the base nor its pair put there.
+        const ownIds = new Set(['showcase_work', 'showcase_tasks', 'showcase_inbox', 'showcase_region_board']);
+        const servedContributed = () => navIds(engine.registry.getApp('showcase')?.navigation).filter((id) => !ownIds.has(id)).sort();
+        const listed = async () => (await navOf(dispatcher)).map((c) => c.name).sort();
+
+        expect(await listed()).toEqual(['acme_sync_log', 'partner_home']);
+        expect(servedContributed()).toEqual(await listed());
+
+        expect(engine.registry.disablePackage(FOURTH), 'precondition: disabled').toBeTruthy();
+        expect(await listed()).toEqual(['acme_sync_log']);
+        expect(servedContributed()).toEqual(await listed());
+
+        expect(engine.registry.enablePackage(FOURTH), 'precondition: enabled').toBeTruthy();
+        expect(await listed()).toEqual(['acme_sync_log', 'partner_home']);
+    });
+
+    it('a contribution to an app the base does not own is not the base\'s: it is the owning base\'s, or nobody\'s', async () => {
+        const { dispatcher, engine } = await contributedFixture();
+        registerContributor(engine, FOURTH, [], [], [
+            { app: 'other_app', items: [navLink('partner_notes_report')] },
+            { app: 'ghost_app', items: [navLink('partner_ghost')] },
+        ]);
+        expect((await navOf(dispatcher)).map((c) => c.name)).toEqual(['acme_sync_log']);
+        expect(await navOf(dispatcher, OTHER)).toEqual([
+            { kind: 'nav', app: 'other_app', name: 'partner_notes_report', packageId: FOURTH },
+        ]);
+    });
+
+    it('a contribution with no code package behind it is the environment\'s, not a package\'s', async () => {
+        const { dispatcher, engine } = await contributedFixture();
+        engine.registry.registerAppNavContribution({ app: 'showcase', items: [navLink('unstamped_link')] });
+        engine.registry.registerAppNavContribution({ app: 'showcase', items: [navLink('sentinel_link')] }, 'sys_metadata');
+        expect((await navOf(dispatcher)).map((c) => c.name)).toEqual(['acme_sync_log']);
     });
 });

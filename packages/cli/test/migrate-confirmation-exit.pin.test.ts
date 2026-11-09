@@ -137,11 +137,21 @@ type Runnable = { flags?: Record<string, { type?: unknown }>; run(argv: string[]
 
 // Paid at module scope — collection is unclocked; every case below only reads.
 const COMMANDS = new Map<string, Runnable>();
-for (const name of readdirSync(MIGRATE_DIR).sort()) {
-  if (!name.endsWith('.ts') || /\.(test|spec)\.ts$/.test(name) || name.endsWith('.d.ts')) continue;
-  const mod = (await import(join(MIGRATE_DIR, name))) as { default?: unknown };
-  if (typeof mod.default === 'function') COMMANDS.set(basename(name, '.ts'), mod.default as unknown as Runnable);
+// A topic's subcommands live one directory down (`stored-references/bind.ts` is
+// `os migrate stored-references bind`, keyed `stored-references bind`; its
+// `index.ts` is the topic's own command), so the walk descends: a writing
+// subcommand under a topic is a member as much as a top-level one is.
+async function collect(dir: string, prefix: string[]): Promise<void> {
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory()) { await collect(join(dir, entry.name), [...prefix, entry.name]); continue; }
+    const name = entry.name;
+    if (!name.endsWith('.ts') || /\.(test|spec)\.ts$/.test(name) || name.endsWith('.d.ts')) continue;
+    const mod = (await import(join(dir, name))) as { default?: unknown };
+    const id = [...prefix, ...(name === 'index.ts' && prefix.length > 0 ? [] : [basename(name, '.ts')])].join(' ');
+    if (typeof mod.default === 'function') COMMANDS.set(id, mod.default as unknown as Runnable);
+  }
 }
+await collect(MIGRATE_DIR, []);
 
 /** A mode that writes behind a confirmation: a `yes` flag, or an `apply` mode. */
 function writesBehindConfirmation(cls: Runnable): boolean {
@@ -244,8 +254,10 @@ const ROSTER: Record<string, Member> = {
   'audit-key-material': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'audit-mail-bodies': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'audit-metadata-bodies': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
+  'blank-multi-values': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'blank-single-values': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'option-codes': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
+  'text-scalars': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-parent-pair': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-reactions': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'files-to-references': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
@@ -254,6 +266,12 @@ const ROSTER: Record<string, Member> = {
   'multi-value-columns': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'organization-ownership': { argv: ['--apply', '--plan-file', PLAN_FILE], confirm: '--backup-taken', writes: BOOT },
   'packageless-overlays': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
+  // [ADR-0150 D10] The reviewed bind: one row, named in full.
+  'stored-references bind': {
+    argv: ['--table', 'sys_sharing_rule', '--id', 'r1', '--package', 'com.example.crm'],
+    confirm: '--yes',
+    writes: BOOT,
+  },
   'recorded-by': {
     argv: ['--apply'],
     confirm: '--yes',
@@ -278,12 +296,18 @@ const ROSTER: Record<string, Member> = {
     },
     writes: () => [seams.resumeMigrationJournal],
   },
+  'recompute-home-amounts': {
+    argv: ['--apply', '--object', 'invoice'],
+    confirm: '--yes',
+    writes: BOOT,
+  },
   'record-currency-codes': {
     argv: ['--apply', '--object', 'opportunity', '--field', 'amount', '--code', 'USD'],
     confirm: '--yes',
     writes: BOOT,
   },
   'security-catalog-overlays': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
+  'stored-expressions': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'summary-nulls': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'value-shapes': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
 };

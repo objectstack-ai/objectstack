@@ -40,7 +40,7 @@ examples/app-todo/
 │   └── docs/                        # 📚 Package docs (ADR-0046)
 ├── test/
 │   ├── seed-check.ts                # 🧪 Seed/boot verification script (tsx)
-│   └── mcp-actions.e2e.ts           # 🤖 MCP business-action E2E (pnpm test:mcp)
+│   └── mcp-actions.test.ts          # 🤖 MCP business-action E2E (runs in pnpm test)
 ├── objectstack.config.ts            # Application manifest
 └── README.md
 ```
@@ -124,13 +124,17 @@ in-product chat lives in the cloud distribution — ADR-0063). This example
 ships a real end-to-end proof, **no API key required**:
 
 ```bash
-pnpm --filter @objectstack/example-todo test:mcp
+pnpm --filter @objectstack/example-todo exec vitest run test/mcp-actions.test.ts
 ```
 
-What it does (`test/mcp-actions.e2e.ts`):
+It is part of this example's `pnpm test`, so CI runs it. What it does
+(`test/mcp-actions.test.ts`):
 
 1. Boots a self-host composition of ONLY the open framework —
-   `@objectstack/runtime` + ObjectQL + a driver + this seeded app + `@objectstack/mcp`
+   `@objectstack/runtime` + ObjectQL + a driver + this seeded app + `@objectstack/mcp`,
+   plus plugin-auth's identity objects (`createIdentityObjectsPlugin()`, no
+   authentication mounted), which give the install its Default Organization
+   before the seed loads
 2. Drives the real `MCPServerRuntime` over JSON-RPC — the same code path an
    external MCP client (e.g. Claude) hits
 3. Lists the app's business actions as MCP tools, then executes one via

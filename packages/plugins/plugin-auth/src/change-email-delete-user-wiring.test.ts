@@ -36,6 +36,7 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import type { IEmailService, SendEmailResult, SendTemplateInput } from '@objectstack/spec/contracts';
 import { AuthManager } from './auth-manager';
 import { inviteForAudienceGate } from './audience-gate-test-support';
+import { CREDENTIALS_NAME_DIFFERENT_ACCOUNTS_CODE } from './one-account-per-request';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Harness
@@ -176,15 +177,15 @@ function makeManager(engine: MemoryEngine, emailService?: IEmailService): AuthMa
   } as never);
 }
 
-const signUp = (manager: AuthManager, email: string) => {
+const signUp = async (manager: AuthManager, email: string) => {
   // [#11739] default posture invite_only: fixture users beyond the first
   // enter through the invitation carve-out (see audience-gate-test-support).
-  inviteForAudienceGate(manager, email);
+  const invitationId = await inviteForAudienceGate(manager, email);
   return manager.handleRequest(
     new Request(`${AUTH}/sign-up/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password: PASSWORD, name: 'Change Email Subject' }),
+      body: JSON.stringify({ email, password: PASSWORD, name: 'Change Email Subject', invitationId }),
     }),
   );
 };
@@ -527,6 +528,103 @@ describe('#8019 — change-email notifies the previous address without gating on
     expect(changeEmail?.enabled, 'the capability itself stays on (#7735)').toBe(true);
     expect(changeEmail?.sendChangeEmailConfirmation).toBeUndefined();
     expect(changeEmail?.updateEmailWithoutVerification).toBeUndefined();
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * #8019, whatever way the caller is signed in. The notice is owed for every
+ * accepted request, so it must reach the account's current address on the
+ * session-cookie lane and on the bearer-token lane alike. Every accepted case
+ * also asserts the acceptance itself (a 200, and one confirmation to the
+ * requested address), so no case can pass on a request better-auth refused;
+ * and every refused case asserts that nothing at all was mailed.
+ */
+describe('#8019 — a change-email request notifies the current address whatever way the caller is signed in', () => {
+  const bearerFrom = (response: Response): string => response.headers.get('set-auth-token') ?? '';
+
+  const changeEmailAs = (manager: AuthManager, credentials: { cookie?: string; bearer?: string }, newEmail: string) =>
+    manager.handleRequest(
+      new Request(`${AUTH}/change-email`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: ORIGIN,
+          ...(credentials.cookie ? { cookie: credentials.cookie } : {}),
+          ...(credentials.bearer ? { authorization: `Bearer ${credentials.bearer}` } : {}),
+        },
+        body: JSON.stringify({ newEmail }),
+      }),
+    );
+
+  const confirmationsTo = (sent: SendTemplateInput[]): unknown[] =>
+    sent.filter((s) => s.template === 'auth.verify_email').map((s) => s.to);
+
+  const TRANSPORTS: ReadonlyArray<readonly [string, (signedUp: Response) => { cookie?: string; bearer?: string }]> = [
+    ['the session cookie', (signedUp) => ({ cookie: cookieFrom(signedUp) })],
+    ['a bearer token alone', (signedUp) => ({ bearer: bearerFrom(signedUp) })],
+  ];
+
+  for (const [transport, credentialsOf] of TRANSPORTS) {
+    it(`signed in by ${transport}: an accepted request mails the notice to the current address`, async () => {
+      const engine = createMemoryEngine();
+      const email = createRecordingEmailService();
+      const manager = makeManager(engine, email.service);
+      const credentials = credentialsOf(await signUp(manager, 'current@example.com'));
+      expect(Object.values(credentials).join(''), 'sign-up must hand out the credential').not.toBe('');
+      email.sent.length = 0;
+
+      const response = await changeEmailAs(manager, credentials, 'requested@example.com');
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({ status: true });
+      expect(confirmationsTo(email.sent), 'the request was accepted').toEqual([
+        expect.objectContaining({ address: 'requested@example.com' }),
+      ]);
+
+      expect(notices(email.sent), 'exactly one notice, to the address being left').toHaveLength(1);
+      const [notice] = notices(email.sent);
+      expect(notice.to).toMatchObject({ address: 'current@example.com' });
+      expect(notice.data).toMatchObject({
+        newEmail: 'requested@example.com',
+        user: { email: 'current@example.com', id: userRows(engine)[0]!.id },
+      });
+      // Nothing has moved yet: the notice names the address the account holds now.
+      expect(userRows(engine).map((r) => r.email)).toEqual(['current@example.com']);
+    });
+
+    it(`signed in by ${transport}: a refused request mails nothing`, async () => {
+      const engine = createMemoryEngine();
+      const email = createRecordingEmailService();
+      const manager = makeManager(engine, email.service);
+      const credentials = credentialsOf(await signUp(manager, 'current@example.com'));
+      email.sent.length = 0;
+
+      // better-auth refuses the account's own address before it mints anything.
+      const response = await changeEmailAs(manager, credentials, 'current@example.com');
+      expect(response.status).toBe(400);
+      expect(await errorBody(response)).toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(email.sent).toEqual([]);
+    });
+  }
+
+  it('signed in as two accounts at once: the request is refused, nothing is mailed and no address moves', async () => {
+    // An auth request is judged and executed as one account
+    // (`one-account-per-request.ts`): a cookie and a bearer naming two
+    // different accounts never reach the endpoint, so no confirmation and no
+    // notice is owed to anyone.
+    const engine = createMemoryEngine();
+    const email = createRecordingEmailService();
+    const manager = makeManager(engine, email.service);
+    const cookie = cookieFrom(await signUp(manager, 'cookie-holder@example.com'));
+    const bearer = bearerFrom(await signUp(manager, 'token-holder@example.com'));
+    email.sent.length = 0;
+
+    const response = await changeEmailAs(manager, { cookie, bearer }, 'requested@example.com');
+    expect(response.status).toBe(401);
+    expect(await errorBody(response)).toMatchObject({ code: CREDENTIALS_NAME_DIFFERENT_ACCOUNTS_CODE });
+
+    expect(email.sent).toEqual([]);
+    expect(userRows(engine).map((r) => r.email).sort()).toEqual(['cookie-holder@example.com', 'token-holder@example.com']);
   });
 });
 

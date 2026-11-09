@@ -197,10 +197,105 @@ export interface NotificationTemplateStoreOptions {
  */
 export const TEMPLATE_DECLARED_FALLBACK_LOCALE: unique symbol = Symbol('notification-template.declared-fallback-locale');
 
-/** {@link NotificationTemplateStoreOptions} plus the in-package fallback reader. */
+/**
+ * [#30509] The key the composition hands the store its
+ * {@link BuiltinNotificationTemplates} under — the code-declared tier a
+ * producer registers through `MessagingService.registerBuiltinTemplates`.
+ * Module-private like {@link TEMPLATE_DECLARED_FALLBACK_LOCALE}, so the
+ * published `NotificationTemplateStoreOptions` is unchanged.
+ */
+export const TEMPLATE_BUILTINS: unique symbol = Symbol('notification-template.builtins');
+
+/** {@link NotificationTemplateStoreOptions} plus the in-package fallback reader and built-in tier. */
 export type NotificationTemplateStoreWiring = NotificationTemplateStoreOptions & {
     [TEMPLATE_DECLARED_FALLBACK_LOCALE]?: () => string | undefined;
+    [TEMPLATE_BUILTINS]?: BuiltinNotificationTemplates;
 };
+
+/** The formats a template row may declare (`sys_notification_template.format`). */
+const TEMPLATE_FORMATS: ReadonlySet<string> = new Set(['markdown', 'html', 'text', 'mjml']);
+
+/**
+ * [#30509] A notification template a producer declares in code: the same
+ * columns a `sys_notification_template` row carries, keyed by
+ * `(topic, channel, locale)`, and never written to the database.
+ *
+ * It is the tier BELOW an organization's own row. ADR-0131 retired seeding
+ * template rows: a row exists only when an organization authored it (§1.4),
+ * so a producer that wants a channel to say more than the notification's
+ * title and body declares it here instead, and an organization that later
+ * authors a row at the same rung overrides it (the `phone-sms-texts.ts`
+ * walk in plugin-auth, made a messaging capability).
+ */
+export interface BuiltinNotificationTemplate {
+    readonly topic: string;
+    readonly channel: string;
+    readonly locale: string;
+    readonly subject?: string;
+    readonly body?: string;
+    readonly format?: 'markdown' | 'html' | 'text' | 'mjml';
+}
+
+/**
+ * [#30509] The code-declared template tier the store reads beneath the
+ * organization's rows. One per messaging service; producers fill it through
+ * `MessagingService.registerBuiltinTemplates`.
+ *
+ * A malformed declaration, or a second declaration of a `(topic, channel,
+ * locale)` already declared, is refused at registration with a `TypeError`:
+ * it is a producer bug, and a silent last-one-wins would let two producers
+ * disagree about what one notification says without anyone seeing it.
+ */
+export class BuiltinNotificationTemplates {
+    private readonly rows = new Map<string, NotificationTemplateRow>();
+
+    register(templates: readonly BuiltinNotificationTemplate[]): void {
+        if (!Array.isArray(templates)) {
+            throw new TypeError('messaging: registerBuiltinTemplates() takes an array of templates');
+        }
+        const staged = new Map<string, NotificationTemplateRow>();
+        for (const t of templates) {
+            const problem = builtinTemplateProblem(t);
+            if (problem) throw new TypeError(`messaging: registerBuiltinTemplates() ${problem}`);
+            const key = builtinKey(t.topic, t.channel, t.locale);
+            if (this.rows.has(key) || staged.has(key)) {
+                throw new TypeError(
+                    `messaging: registerBuiltinTemplates() the template for topic '${t.topic}', channel '${t.channel}', locale '${t.locale}' is already declared`,
+                );
+            }
+            staged.set(key, {
+                ...(t.subject !== undefined ? { subject: t.subject } : {}),
+                ...(t.body !== undefined ? { body: t.body } : {}),
+                ...(t.format !== undefined ? { format: t.format } : {}),
+            });
+        }
+        for (const [key, row] of staged) this.rows.set(key, row);
+    }
+
+    /** The template declared for exactly this `(topic, channel, locale)`, else `null`. */
+    get(topic: string, channel: string, locale: string): NotificationTemplateRow | null {
+        return this.rows.get(builtinKey(topic, channel, locale)) ?? null;
+    }
+}
+
+function builtinKey(topic: string, channel: string, locale: string): string {
+    return JSON.stringify([topic, channel, locale]);
+}
+
+function builtinTemplateProblem(t: BuiltinNotificationTemplate | null | undefined): string | undefined {
+    if (!t || typeof t !== 'object') return 'got a template that is not an object';
+    for (const key of ['topic', 'channel', 'locale'] as const) {
+        if (typeof t[key] !== 'string' || !t[key].trim()) return `got a template with no ${key}`;
+    }
+    for (const key of ['subject', 'body'] as const) {
+        if (t[key] !== undefined && typeof t[key] !== 'string') return `got a template whose ${key} is not a string`;
+    }
+    if (!t.subject && !t.body) return `got a template for topic '${t.topic}' with neither a subject nor a body`;
+    if (t.format !== undefined && !TEMPLATE_FORMATS.has(t.format)) {
+        return `got a template for topic '${t.topic}' with format '${String(t.format)}' (one of ${[...TEMPLATE_FORMATS].join(', ')})`;
+    }
+    return undefined;
+}
 
 /**
  * Loads `sys_notification_template` rows by `(topic, channel, locale)` in the
@@ -233,6 +328,18 @@ export type NotificationTemplateStoreWiring = NotificationTemplateStoreOptions &
  *    The composed fan-out never hands a channel such a delivery: the event row
  *    takes its organization from the producer or from the engine's system-write
  *    rule (ADR-0131 D9), and an emit with neither is refused.
+ *
+ * ## The code-declared tier (#30509)
+ *
+ * A store composed with {@link BuiltinNotificationTemplates} reads them at
+ * every rung of the same ladder, after the organization's row: the rung's
+ * row, else the rung's built-in, else the next rung. So an organization's row
+ * at a rung overrides the built-in there, and a built-in at a nearer rung
+ * beats a row at a farther one, exactly as two rows would. The built-in is no
+ * organization's (it is not stored), so a delivery with no organization, or a
+ * store with no engine, still reads it. A failed row read still answers
+ * `null`, as above: the delivery renders the producer's title and body, never
+ * a built-in in place of a row the read could not see.
  */
 export class NotificationTemplateStore {
     private readonly objectName: string;
@@ -246,23 +353,32 @@ export class NotificationTemplateStore {
         locale?: string,
         organizationId?: string,
     ): Promise<NotificationTemplateRow | null> {
-        const data = this.opts.getData();
-        if (!data) return null;
-        if (!organizationId) return null;
+        const builtins = (this.opts as NotificationTemplateStoreWiring)[TEMPLATE_BUILTINS];
+        // [#30509] No engine or no organization reads no row, as before; the
+        // code-declared tier is no organization's and needs no engine, so it
+        // still answers.
+        const data = organizationId ? this.opts.getData() : undefined;
+        if (!data && !builtins) return null;
         const candidates = localeCandidates(locale, locale ? declaredFallbackLocale(this.opts) : undefined);
         for (const loc of candidates) {
-            try {
-                // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the
-                // recipient organization's template row, read to render a
-                // delivery to that recipient.
-                const row = await data.findOne(this.objectName, {
-                    where: { organization_id: organizationId, topic, channel, locale: loc, is_active: true },
-                    fields: ['subject', 'body', 'format'],
-                }, { context: FAN_OUT_SYSTEM_CONTEXT });
-                if (row) return row as NotificationTemplateRow;
-            } catch {
-                return null; // best-effort — fall back to generic rendering
+            if (data) {
+                try {
+                    // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the
+                    // recipient organization's template row, read to render a
+                    // delivery to that recipient.
+                    const row = await data.findOne(this.objectName, {
+                        where: { organization_id: organizationId, topic, channel, locale: loc, is_active: true },
+                        fields: ['subject', 'body', 'format'],
+                    }, { context: FAN_OUT_SYSTEM_CONTEXT });
+                    if (row) return row as NotificationTemplateRow;
+                } catch {
+                    return null; // best-effort — fall back to generic rendering
+                }
             }
+            // [#30509] At each rung the organization's row first, the
+            // code-declared template second, then the next rung.
+            const builtin = builtins?.get(topic, channel, loc);
+            if (builtin) return builtin;
         }
         return null;
     }

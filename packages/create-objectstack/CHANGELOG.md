@@ -1,5 +1,50 @@
 # create-objectstack
 
+## 18.3.0
+
+### Patch Changes
+
+- 0f0b9f5: fix(create-objectstack): a project name npm would refuse is refused before anything is written, with the rule and a suggested name
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `create-objectstack "My App!"` (or `MyApp`, or no argument inside a directory called `My App`) used to write that name verbatim into `package.json` and `objectstack.manifest.json`. `validate` and `build` passed, and the first refusal came from npm at `npm publish`.
+  
+  The resolved project name (the argument, or the current directory's name when there is none) is now checked against npm's rules for a new package name, using `validate-npm-package-name` (the module npm itself uses), before the first file is written. A refused name exits 1 and prints npm's reasons, the rule, and a suggested name (`My App!` and `MyApp` both suggest `my-app`). The name is never rewritten for you: re-run with the suggested name or one of your own. Names npm accepts, such as `my-app` and `@scope/my-app`, scaffold as before.
+  
+  `create-objectstack` gains one runtime dependency, `validate-npm-package-name`.
+- a1ae469: fix(scaffold): a scaffolded namespace is at most 13 characters, so a fresh project from a long name validates with no `namespace-no-customization-pair` warning (#28992)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `npx create-objectstack` and `os init` derive `manifest.namespace` from the project name. They truncated it at 20 characters, the manifest grammar's limit, while a namespace longer than 13 has no paired customization namespace (ADR-0146 D3). So `qa-console-first-paint` scaffolded the namespace `qa_console_first_pai`, and the project's first `os validate` warned about it and about the object names it prefixes, none of which the author wrote.
+  
+  Both scaffolders now cap the namespace at `MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH` (13): `qa-console-first-paint` gets `qa_console_fi`, and every object name and file the scaffold derives from the namespace follows it. A truncated namespace never ends in `_`. `os init` reads the constant from `@objectstack/spec/kernel`; `create-objectstack`, which does not depend on the spec at runtime, keeps its own copy, pinned equal to the spec constant by a test. Project names whose namespace already fit are scaffolded exactly as before.
+- ad224b7: fix(create-objectstack)!: a scaffold into the current directory refuses, writing nothing, when a template file would overwrite one already there (#29134)
+  
+  Clause-②: no (narrowing) — `create-objectstack` with no name (or an empty one) in a current directory holding a file the template writes (`README.md`, `package.json`, …) refuses with exit 1 and leaves the directory untouched, where it overwrote those files and exited 0 before. Nothing is widened.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema, no export of a published entry and no stored shape changes: the scaffolder's command line refuses one more case before it writes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a script that runs `create-objectstack` with no name inside a directory that already holds files the template writes.
+  
+  - **Before.** A named directory that was not empty was refused (`Directory already exists and is not empty`, exit 1), but the current directory was not checked at all: the template was copied over whatever was there, so an existing project's `README.md` and `package.json` were replaced without a word and the run exited 0.
+  - **Now.** Before anything is written, the run compares the template's files with what the current directory holds. If any template file would replace an existing file (or a file stands where the template needs a directory), it refuses with exit 1, names each of those paths, and writes nothing.
+  - **Unchanged.** A current directory that holds only files the template does not write (a `.git/`, a notes file) still scaffolds, and those files are left as they were; the closing summary still says the directory already had contents. An empty current directory and a named directory behave as before.
+  
+  **The remedy.** Move the named files aside and re-run, or scaffold into a new directory: `create-objectstack my-app`.
+- 0a46a26: fix(create-objectstack): the scaffolded AGENTS.md lists only the `src/` directories the project's `objectstack.config.ts` loads
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The "Project Structure" block of the `AGENTS.md` a new project gets named `src/reports/`, `src/agents/`, `src/i18n/` and `src/handlers/`, which the scaffolded `objectstack.config.ts` never imports, so metadata a coding agent wrote there was never loaded and `npm run validate` still passed. It left out `src/skills/` and `src/picklists/`, which the config does load. The block now lists exactly the eight wired directories (objects, views, actions, flows, dashboards, apps, skills, picklists) and says that a new `src/` directory is never loaded or validated until its barrel is imported in `objectstack.config.ts`. What the config loads is unchanged.
+  
+  An existing project keeps the `AGENTS.md` it was created with; to adopt the fix, edit its Project Structure block to match the directories its own `objectstack.config.ts` imports.
+
 ## 18.2.0
 
 ### Patch Changes

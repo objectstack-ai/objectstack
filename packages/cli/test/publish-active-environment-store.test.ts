@@ -63,16 +63,23 @@ const MANAGED_ENV = [
 
 type Call = { url: string; method: string; body: any };
 
-/** Stub `fetch` so both publish POSTs succeed, and record what was sent. */
-function stubCloud(): Call[] {
+/**
+ * Stub `fetch` so both publish POSTs succeed, and record what was sent.
+ * `GET /cloud/environments` answers `environments` (default: none) — the list
+ * the install target falls back to when neither `--env` nor an active
+ * environment names one.
+ */
+function stubCloud(environments: Array<Record<string, unknown>> = []): Call[] {
   const calls: Call[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: any = {}) => {
       const body = init?.body ? JSON.parse(init.body) : undefined;
       calls.push({ url: String(url), method: init?.method ?? 'GET', body });
-      const data = String(url).endsWith('/versions')
-        ? { id: 'ver_1', version: '1.2.0', listing_status: 'draft' }
+      const data = String(url).endsWith('/cloud/environments')
+        ? { environments, total: environments.length }
+        : String(url).endsWith('/versions')
+        ? { id: 'ver_1', version: '1.2.0', listing_status: 'draft', installation: body?.install_env_id ? { environment_id: body.install_env_id, installation_id: 'inst_1' } : null }
         : { id: 'pkg_1', created: true, visibility: 'org' };
       return {
         ok: true,
@@ -240,11 +247,14 @@ describe('#18265: the active environment publish installs into', () => {
       activeEnvironmentId: 'env_on_other_plane',
       createdAt: 'now',
     });
-    const calls = stubCloud();
+    // This plane's own list names a different environment — the only one the
+    // install may land in.
+    const calls = stubCloud([{ id: 'env_on_this_plane', display_name: 'Acme', status: 'active' }]);
 
     await PackagePublish.run([artifactPath, '--install']);
 
-    expect(versionBody(calls).install_env_id).toBeUndefined();
+    expect(versionBody(calls).install_env_id).toBe('env_on_this_plane');
+    expect(versionBody(calls).install_env_id).not.toBe('env_on_other_plane');
     // …and the cross-plane id was not laundered into cloud.json either.
     expect((await readCloud()).activeEnvironmentId).toBeUndefined();
   });
@@ -280,13 +290,13 @@ describe('#18265: the active environment publish installs into', () => {
     expect((await readCloud()).activeEnvironmentId).toBe('env_switched_before_upgrade');
   });
 
-  it('does not install when neither store has an active environment', async () => {
+  it('falls back to the control plane\'s environment list when neither store has an active environment', async () => {
     await writeCloud({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' });
-    const calls = stubCloud();
+    const calls = stubCloud([{ id: 'env_only', display_name: 'Acme', status: 'active' }]);
 
     await PackagePublish.run([artifactPath, '--install']);
 
-    expect(versionBody(calls).install_env_id).toBeUndefined();
+    expect(versionBody(calls).install_env_id).toBe('env_only');
   });
 
   // ── The writing half: `os environments switch` ──────────────────────────
@@ -361,6 +371,106 @@ describe('#18265: the active environment publish installs into', () => {
       expect((await readCloud()).activeEnvironmentId).toBeUndefined();
       const runtime = JSON.parse(await readFile(credentialsJson(), 'utf8'));
       expect(runtime.activeEnvironmentId).toBe('env_self_hosted_new');
+    });
+  });
+
+  // ── The organization's only environment, and the refusals (#30871 items 1, 3) ──
+  //
+  // With `--install` and neither `--env` nor an active environment, the target
+  // is the ONE environment the control plane lists for the caller — on
+  // ObjectOS Cloud every organization has exactly one (cloud ADR-0024). None,
+  // several, or an unreadable list is a refusal that exits non-zero BEFORE ANY
+  // WRITE: the package row is not even registered, so a publish that was asked
+  // to install and could not never reads as success.
+  describe('the only environment, and refusing before any write', () => {
+    async function runPublish(argv: string[]): Promise<{ exit: number | undefined; output: string }> {
+      const lines: string[] = [];
+      const record = (...args: unknown[]) => { lines.push(args.map(String).join(' ')); };
+      vi.spyOn(console, 'log').mockImplementation(record);
+      vi.spyOn(console, 'error').mockImplementation(record);
+      let exit: number | undefined;
+      try {
+        await PackagePublish.run(argv);
+      } catch (err: any) {
+        exit = err?.oclif?.exit ?? err?.exitCode;
+        if (exit === undefined) throw err;
+      }
+      return { exit, output: lines.join('\n') };
+    }
+
+    const writes = (calls: Call[]) => calls.filter((c) => c.method !== 'GET');
+
+    it('installs into the only environment and says which, skipping archived and system rows', async () => {
+      await writeCloud({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' });
+      const calls = stubCloud([
+        { id: 'env_acme', display_name: 'Acme Production', status: 'active' },
+        { id: 'env_old', display_name: 'Old', status: 'archived' },
+        { id: 'env_platform', display_name: 'Platform', status: 'active', is_system: true },
+      ]);
+
+      const { exit, output } = await runPublish([artifactPath, '--install']);
+
+      expect(exit).toBeUndefined();
+      expect(versionBody(calls).install_env_id).toBe('env_acme');
+      expect(output).toContain("Acme Production (env_acme), your organization's only environment");
+      // The list was asked with the publish credential, of the publish's plane.
+      const list = calls.find((c) => c.url.endsWith('/cloud/environments'));
+      expect(list?.url).toBe(`${CLOUD_PLANE}/api/v1/cloud/environments`);
+    });
+
+    it('refuses several environments with exit 1, naming each and --env, before any write', async () => {
+      await writeCloud({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' });
+      const calls = stubCloud([
+        { id: 'env_a', display_name: 'Alpha', status: 'active' },
+        { id: 'env_b', display_name: 'Beta', status: 'active' },
+      ]);
+
+      const { exit, output } = await runPublish([artifactPath, '--install']);
+
+      expect(exit).toBe(1);
+      expect(writes(calls), 'a refused --install must not register the package or publish a version').toEqual([]);
+      expect(output).toContain('Alpha (env_a)');
+      expect(output).toContain('Beta (env_b)');
+      expect(output).toContain('--env <id>');
+    });
+
+    it('refuses an organization with no environment, with exit 1, before any write', async () => {
+      await writeCloud({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' });
+      const calls = stubCloud([{ id: 'env_gone', status: 'archived' }]);
+
+      const { exit, output } = await runPublish([artifactPath, '--install']);
+
+      expect(exit).toBe(1);
+      expect(writes(calls)).toEqual([]);
+      expect(output).toContain('has none');
+      expect(output).toContain('--env <id>');
+    });
+
+    it('refuses when the environment list cannot be read, with exit 1, before any write', async () => {
+      await writeCloud({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' });
+      const calls: Call[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: any = {}) => {
+        calls.push({ url: String(url), method: init?.method ?? 'GET', body: undefined });
+        return { ok: false, status: 503, statusText: 'Service Unavailable', json: async () => ({ success: false, error: { message: 'control plane down' } }) } as any;
+      }));
+
+      const { exit, output } = await runPublish([artifactPath, '--install']);
+
+      expect(exit).toBe(1);
+      expect(writes(calls)).toEqual([]);
+      expect(output).toContain('503');
+      expect(output).toContain('--env <id>');
+    });
+
+    it('asks for no environment list when --install is not passed', async () => {
+      await writeCloud({ url: CLOUD_PLANE, token: 'cloud_tok', createdAt: 'now' });
+      const calls = stubCloud([{ id: 'env_a' }, { id: 'env_b' }]);
+
+      const { exit } = await runPublish([artifactPath]);
+
+      expect(exit).toBeUndefined();
+      expect(calls.some((c) => c.url.endsWith('/cloud/environments'))).toBe(false);
+      expect(versionBody(calls).install_env_id).toBeUndefined();
     });
   });
 });

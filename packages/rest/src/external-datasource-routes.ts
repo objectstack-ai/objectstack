@@ -8,15 +8,24 @@ import {
   ANONYMOUS_DENY_STATUS,
   ANONYMOUS_DENY_CODE,
   ANONYMOUS_DENY_MESSAGE,
+  AuthzStoreUnavailableError,
+  classifyAdmissionTenancyPosture,
+  effectiveTenancyPosture,
+  isAuthzStoreUnavailableError,
   type AuthGate,
   type PluginContext,
+  type TenancyPostureSource,
 } from '@objectstack/core';
+// [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
+// the environment's metadata asks, the metadata save door among them.
+import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import type { ErrorCode } from '@objectstack/spec/api';
 import type {
   IExternalDatasourceService,
   IHttpServer,
   SchemaValidationReport,
 } from '@objectstack/spec/contracts';
+import type { TenancyPosture } from '@objectstack/spec/security';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // [#22719] …and so is the read of a sandboxed hook's refusal sentence.
 import { sendOk, sendError, sandboxBusinessMessage } from '@objectstack/types';
@@ -133,6 +142,14 @@ export interface ExternalDatasourceRoutesOptions {
      * only for a session the policy holds; the floor refuses on it.
      */
     authGate?: AuthGate;
+    /**
+     * [ADR-0131 D3 · D12 items 7–8] The caller's ADR-0095 posture rung
+     * (`ExecutionContext.posture`), the field the metadata save door hands the
+     * walled refusal. Read by the import route only: under a walled tenancy
+     * posture the platform operator rung is what admits a write to the
+     * environment's catalog.
+     */
+    posture?: unknown;
   } | undefined>;
 }
 
@@ -166,6 +183,19 @@ export interface ExternalDatasourceRoutesOptions {
  * [commit e634ecf6a] The reasoning is unchanged by the scoping fix and was never about
  * the sweep's WIDTH: it is the same introspection whether one datasource is
  * read or all of them, so `validate` answers to the read capability either way.
+ *
+ * ## …and the writes require it too: one rule for the whole family
+ *
+ * Seeing a datasource's remote structure needs this capability on every
+ * route, writes included. The two write routes answer with that structure —
+ * the import with the object definition it generated from the remote table,
+ * the refresh with the catalog snapshot (every table, every column) — so each
+ * requires this capability AND {@link FEDERATION_WRITE_CAPABILITY}, never the
+ * write capability alone. Maintainer ruling, 2026-11-03 (verbatim:
+ * 「两个写接口同时要求读权限 (Recommended)」): the permission gate, not a
+ * narrower response. The rule is written once, in
+ * {@link federationCapabilityRefusal}, and every door into this family's
+ * operations reads it there.
  */
 export const FEDERATION_READ_CAPABILITY = 'manage_platform_settings';
 
@@ -173,16 +203,77 @@ export const FEDERATION_READ_CAPABILITY = 'manage_platform_settings';
  * [#9901] The capability the federation family's WRITE routes require:
  * `POST /external/tables/:remote/import` and `POST /external/refresh-catalog`.
  *
- * Not the read capability, and deliberately so: these two have no twin on the
- * admin spelling to converge with, and what they do is CREATE METADATA — the
- * import mounts a live runtime-origin federated object, the refresh rewrites
- * the cached catalog snapshot. `manage_metadata` is this package's established
+ * It is the capability for the WRITE: these two have no twin on the admin
+ * spelling to converge with, and what they do is CREATE METADATA — the import
+ * mounts a live runtime-origin federated object, the refresh rewrites the
+ * cached catalog snapshot. `manage_metadata` is this package's established
  * gate for exactly that (`package-routes.ts`, whose write arm requires it for
  * `POST /packages/publish` and `DELETE /packages/:id`), so the split follows
  * the platform's existing division rather than inventing a second policy for
  * this family.
+ *
+ * It is required IN ADDITION to {@link FEDERATION_READ_CAPABILITY}, never
+ * instead of it: what the two writes answer is the remote structure, and
+ * seeing that needs the read capability on every route (that constant's note
+ * carries the 2026-11-03 ruling; {@link federationCapabilityRefusal} is the
+ * rule).
  */
 export const FEDERATION_WRITE_CAPABILITY = 'manage_metadata';
+
+/**
+ * The two kinds of call into the federation family: a `'read'` answers remote
+ * structure, a `'write'` answers it AND creates metadata from it.
+ */
+export type FederationCallKind = 'read' | 'write';
+
+/**
+ * The capabilities each kind requires, in the order a refusal names them.
+ * The read capability heads BOTH rows: seeing remote structure needs it on
+ * every route, writes included (2026-11-03 ruling, see
+ * {@link FEDERATION_READ_CAPABILITY}). A write adds the write capability; it
+ * never replaces the read one.
+ */
+const FEDERATION_REQUIRED_CAPABILITIES: Readonly<Record<FederationCallKind, readonly string[]>> = {
+  read: [FEDERATION_READ_CAPABILITY],
+  write: [FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY],
+};
+
+/** What each capability is FOR, as the refusal states it to the caller. */
+const FEDERATION_CAPABILITY_PURPOSE: Readonly<Record<string, string>> = {
+  [FEDERATION_READ_CAPABILITY]: 'Introspecting an external datasource',
+  [FEDERATION_WRITE_CAPABILITY]: 'Creating metadata from an external datasource',
+};
+
+/**
+ * The federation family's capability rule, in ONE place: `undefined` when
+ * `held` admits a call of this `kind`, otherwise the refusal sentence the door
+ * answers with `403 PERMISSION_DENIED`.
+ *
+ * Read by every door into the family's operations — the five REST routes
+ * here and the MCP federation tools (`list_remote_tables` / `import_object`,
+ * the runtime's bridge) — so no door can admit a caller another refuses. The
+ * read capability is required by every kind: seeing a datasource's remote
+ * structure needs it on every route, writes included; a write also needs the
+ * write capability.
+ *
+ * The sentence names every capability the caller lacks, one sentence each,
+ * the read one first. So a caller lacking only the read capability gets the
+ * read routes' refusal on a write route, word for word, and a caller lacking
+ * both learns both grants in one answer. It names capabilities and nothing
+ * else: a refused caller learns which grant to ask an administrator for,
+ * never whether the datasource exists.
+ */
+export function federationCapabilityRefusal(
+  kind: FederationCallKind,
+  held: readonly unknown[] | null | undefined,
+): string | undefined {
+  const holds: readonly unknown[] = Array.isArray(held) ? held : [];
+  const missing = FEDERATION_REQUIRED_CAPABILITIES[kind].filter((capability) => !holds.includes(capability));
+  if (missing.length === 0) return undefined;
+  return missing
+    .map((capability) => `${FEDERATION_CAPABILITY_PURPOSE[capability]} requires the \`${capability}\` capability.`)
+    .join(' ');
+}
 
 export function registerExternalDatasourceRoutes(
   server: IHttpServer,
@@ -191,6 +282,34 @@ export function registerExternalDatasourceRoutes(
   options: ExternalDatasourceRoutesOptions = {},
 ): readonly DirectMountedRoute[] {
   const ext = `${basePath}/datasources/:name/external`;
+
+  /**
+   * [ADR-0131 D3 · D12 items 7–8 · D11] The deployment's EFFECTIVE tenancy
+   * posture, for the walled refusal {@link refuseFederationRequest} asks of a
+   * route that saves a catalog item. Read per request, off this registrar's own
+   * kernel: the one its `external-datasource` lookup reads, so the posture
+   * judged and the service that writes come from the same kernel. Through the
+   * shared classification (`classifyAdmissionTenancyPosture`): no `tenancy`
+   * service is the supported composition and answers `undefined`, inert as
+   * `single` is, while one that is registered and cannot answer raises
+   * `AuthzStoreUnavailableError`, never a permit. A host with no async
+   * accessor (`KernelBase`-shaped) supports no service factories, so "not
+   * registered" is the only fault its synchronous lookup reports, and it is
+   * read as that same composition.
+   */
+  const tenancyPostureInForce = async (): Promise<TenancyPosture | undefined> => {
+    const kernel = (typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined) as
+      | { getServiceAsync?: <T>(name: string) => Promise<T> }
+      | undefined;
+    if (kernel && typeof kernel.getServiceAsync === 'function') {
+      return classifyAdmissionTenancyPosture(() => kernel.getServiceAsync!<TenancyPostureSource>('tenancy'));
+    }
+    try {
+      return effectiveTenancyPosture(ctx.getService<TenancyPostureSource>('tenancy'));
+    } catch {
+      return undefined;
+    }
+  };
 
   /**
    * [#9686 authentication, #9901 capability] The admission floor for this whole
@@ -251,6 +370,15 @@ export function registerExternalDatasourceRoutes(
    * on {@link FEDERATION_READ_CAPABILITY}, writes on
    * {@link FEDERATION_WRITE_CAPABILITY}.
    *
+   * [2026-11-03 ruling] The writes on BOTH: seeing a datasource's remote
+   * structure needs the read capability on every route, writes included, and
+   * both writes answer with it. The capability decision is
+   * {@link federationCapabilityRefusal} — the family's one rule, which the MCP
+   * federation tools read too — so this guard asks it rather than picking one
+   * capability per kind itself. A caller holding only the write capability
+   * gets, on a write route, the read routes' own refusal: the same status, the
+   * same code, the same sentence.
+   *
    * ## One resolution, two decisions — deliberately not two guards
    *
    * The identity and the held capabilities come out of the SAME
@@ -297,14 +425,37 @@ export function registerExternalDatasourceRoutes(
    * be a door no route walks through, so it is REMOVED rather than kept — a
    * spare lower gate is exactly what a future un-ruled route could silently
    * adopt.
+   *
+   * ## [ADR-0131 D3 · D12 items 7–8 · D11] …and the walled refusal on a call that saves a catalog item
+   *
+   * Under a walled tenancy posture (`isolated`, `group`) every organization
+   * shares the environment's metadata catalog, and every write to it is the
+   * platform operator's: an organization's administrator holding both
+   * federation capabilities is still below that rung. A route that SAVES an item
+   * into the catalog names the item's type in `catalogWrite`, and this guard
+   * then asks `walledCatalogWriteVerdict` (`@objectstack/metadata-core`) after
+   * the capability rule, with the caller's posture rung and `isSystem` off the
+   * same resolution: the verdict the metadata save door asks, never restated
+   * here. Inert under `single` and with no `tenancy` service. The import names
+   * `'object'`, the type it saves; the catalog refresh names `'external_catalog'`,
+   * the type of the snapshot it saves. Asked before the service lookup like
+   * everything above, so the refusal precedes the remote introspection and the
+   * write. Answered `403 PERMISSION_DENIED`, this family's spelling of a 403,
+   * with the verdict's sentence; a posture that could not be read answers the
+   * outage's `503`, never a permit.
+   *
+   * `isSystem` reaches the verdict as it reaches it at every walled door: it is
+   * the verdict's own admission, and it is never resolved from inbound HTTP, so
+   * no wire caller takes it.
    */
   const refuseFederationRequest = async (
     req: any,
     res: any,
-    kind: 'read' | 'write',
+    kind: FederationCallKind,
+    catalog: { catalogWrite?: string } = {},
   ): Promise<boolean> => {
     let authz:
-      | { userId?: string | null; isSystem?: boolean; systemPermissions?: string[]; authGate?: AuthGate }
+      | { userId?: string | null; isSystem?: boolean; systemPermissions?: string[]; authGate?: AuthGate; posture?: unknown }
       | undefined;
     try {
       authz = await options.resolveExecutionContext?.(req);
@@ -337,22 +488,35 @@ export function registerExternalDatasourceRoutes(
       sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE);
       return true;
     }
-    const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
-    const held = Array.isArray(authz?.systemPermissions) ? authz.systemPermissions : [];
-    if (!held.includes(required)) {
-      // The capability's name and nothing else. A refused caller needs to know
-      // which grant to ask an administrator for; it must not learn whether the
-      // named datasource exists or which services this deployment wired —
-      // which is also why this runs BEFORE the service lookup below.
-      sendError(
-        res,
-        403,
-        'PERMISSION_DENIED',
-        kind === 'write'
-          ? `Creating metadata from an external datasource requires the \`${FEDERATION_WRITE_CAPABILITY}\` capability.`
-          : `Introspecting an external datasource requires the \`${FEDERATION_READ_CAPABILITY}\` capability.`,
-      );
+    // The capabilities' names and nothing else. A refused caller needs to know
+    // which grant to ask an administrator for; it must not learn whether the
+    // named datasource exists or which services this deployment wired — which
+    // is also why this runs BEFORE the service lookup below. On a write route
+    // that is the read capability AND the write one: the family's one rule.
+    const refusal = federationCapabilityRefusal(kind, authz?.systemPermissions);
+    if (refusal !== undefined) {
+      sendError(res, 403, 'PERMISSION_DENIED', refusal);
       return true;
+    }
+    if (catalog.catalogWrite !== undefined) {
+      let posture: TenancyPosture | undefined;
+      try {
+        posture = await tenancyPostureInForce();
+      } catch (err) {
+        const outage = isAuthzStoreUnavailableError(err) ? err : new AuthzStoreUnavailableError('tenancy', err);
+        sendError(res, outage.status, outage.code, outage.message);
+        return true;
+      }
+      const walled = walledCatalogWriteVerdict({
+        type: catalog.catalogWrite,
+        tenancyPosture: posture,
+        isSystem: authz?.isSystem === true,
+        callerPosture: authz?.posture,
+      });
+      if (!walled.allowed) {
+        sendError(res, 403, 'PERMISSION_DENIED', walled.message);
+        return true;
+      }
     }
     return false;
   };
@@ -463,6 +627,19 @@ export function registerExternalDatasourceRoutes(
    * which told the caller to re-declare a datasource that does not exist. Both
    * fields are required, so an unrelated error carrying a stray `status`
    * cannot re-route itself.
+   *
+   * [#30609] A second relay of the same kind, the one `badRequest` makes
+   * first: an error carrying the `503` / `SERVICE_UNAVAILABLE` envelope has
+   * classified itself as a DEPENDENCY OUTAGE, and this family's `400` told the
+   * caller the request was malformed, the opposite of "retry". The import's
+   * landing reads the effective tenancy posture, and a registered `tenancy`
+   * service that cannot answer throws `AuthzStoreUnavailableError` there
+   * (`classifyAdmissionTenancyPosture`); nothing is saved, so only the status
+   * was wrong. Read off the envelope, as `badRequest` and the MCP
+   * `import_object` tool read it, rather than off the authorization brand, so
+   * every route here relays any service's declared outage the same way: the
+   * `EXTERNAL_DATASOURCE_ERROR` routes share the catch and the same truth. Both
+   * fields are required, for the reason above.
    */
   const answerThrown = (
     res: any,
@@ -476,6 +653,9 @@ export function registerExternalDatasourceRoutes(
       return sendError(res, nested.status, nested.code, nested.message, nested.extra);
     }
     const envelope = err as { code?: unknown; status?: unknown } | null | undefined;
+    if (envelope?.status === 503 && envelope?.code === 'SERVICE_UNAVAILABLE') {
+      return sendError(res, 503, 'SERVICE_UNAVAILABLE', (err as Error).message);
+    }
     if (envelope?.status === 404 && envelope?.code === 'RESOURCE_NOT_FOUND') {
       return sendError(res, 404, 'RESOURCE_NOT_FOUND', (err as Error).message);
     }
@@ -549,12 +729,21 @@ export function registerExternalDatasourceRoutes(
     // immediately queryable — the "Import as Object" action (ADR-0015 Addendum).
     // 503 when the service is absent; 400 when import is refused (e.g. read-only
     // metadata store) or the remote table is missing.
+    //
+    // A 'write' that answers with the generated definition — the remote table's
+    // structure — so it requires the read capability as well as the write one
+    // (2026-11-03 ruling; `federationCapabilityRefusal`).
+    //
+    // [ADR-0131 D3 · D12 items 7–8 · D11] …and it saves an `object` into the
+    // environment's metadata catalog, so under a walled tenancy posture it is
+    // the platform operator's, refused as the metadata save door refuses any
+    // other catalog write (`refuseFederationRequest`'s `catalogWrite`).
     {
       method: 'POST',
       path: `${ext}/tables/:remote/import`,
       metadata: { summary: 'Import a remote table as a federated object', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseFederationRequest(req, res, 'write')) return;
+        if (await refuseFederationRequest(req, res, 'write', { catalogWrite: 'object' })) return;
         const svc = externalService();
         if (!svc?.importObject) return unavailable(res);
         try {
@@ -571,12 +760,22 @@ export function registerExternalDatasourceRoutes(
     },
 
     // Refresh and return the cached catalog snapshot.
+    //
+    // A 'write' that answers with the snapshot — every remote table and column
+    // — so it requires the read capability as well as the write one
+    // (2026-11-03 ruling; `federationCapabilityRefusal`).
+    //
+    // [ADR-0131 D3 · D12 items 7–8 · D11] …and it saves the datasource's
+    // `external_catalog` snapshot into the environment's metadata catalog, so
+    // under a walled tenancy posture it is the platform operator's, refused as
+    // the metadata save door refuses any other catalog write
+    // (`refuseFederationRequest`'s `catalogWrite`).
     {
       method: 'POST',
       path: `${ext}/refresh-catalog`,
       metadata: { summary: 'Refresh the external datasource catalog snapshot', tags: ['datasources'] },
       handler: async (req: any, res: any) => {
-        if (await refuseFederationRequest(req, res, 'write')) return;
+        if (await refuseFederationRequest(req, res, 'write', { catalogWrite: 'external_catalog' })) return;
         const svc = externalService();
         if (!svc?.refreshCatalog) return unavailable(res);
         try {

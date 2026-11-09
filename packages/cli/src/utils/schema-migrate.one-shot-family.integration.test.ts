@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 30 — spawns the real producer once per single-cause fixture: one served boot writes the template database, then its 129 cases boot in process, each over its own copy (every bootSchemaStack caller's modes on a present file, on an absent file and in a development key home, plus the lifecycle and key-home controls), each a distinct (command, mode, state); slowest CI reading 17.7 s (run 41255489006) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
+// test-budget: 30 — spawns the real producer once per single-cause fixture: one served boot writes the template database, then its 134 cases boot in process, each over its own copy (every bootSchemaStack caller's modes on a present file, on an absent file and in a development key home, plus the lifecycle and key-home controls), each a distinct (command, mode, state); slowest CI reading 17.7 s (run 41255489006) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * [#21391] Every command that boots through `bootSchemaStack` keeps the two
@@ -57,6 +57,19 @@ import { isExitSignal } from './format.js';
 import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from './osplugin.js';
 import { bootSchemaStack } from './schema-migrate.js';
 import { buildDataMigrationPlugins } from './data-migration-plugins.js';
+// [#10126] Pay the first transform of the dist-resolved workspace deps the
+// family reaches through dynamic `import()`s at MODULE LOAD, not inside a
+// clocked case (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/service-automation';
+import '@objectstack/platform-objects/system';
+import '@objectstack/spec/automation';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/metadata';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/cloud-connection';
 import DbOrphans from '../commands/db/orphans.js';
 import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateActivityChangedFields from '../commands/migrate/activity-changed-fields.js';
@@ -65,8 +78,10 @@ import MigrateApply from '../commands/migrate/apply.js';
 import MigrateAuditKeyMaterial from '../commands/migrate/audit-key-material.js';
 import MigrateAuditMailBodies from '../commands/migrate/audit-mail-bodies.js';
 import MigrateAuditMetadataBodies from '../commands/migrate/audit-metadata-bodies.js';
+import MigrateBlankMultiValues from '../commands/migrate/blank-multi-values.js';
 import MigrateBlankSingleValues from '../commands/migrate/blank-single-values.js';
 import MigrateOptionCodes from '../commands/migrate/option-codes.js';
+import MigrateTextScalars from '../commands/migrate/text-scalars.js';
 import MigrateCommentReactions from '../commands/migrate/comment-reactions.js';
 import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
@@ -75,10 +90,14 @@ import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
 import MigratePackagelessOverlays from '../commands/migrate/packageless-overlays.js';
 import MigratePlan from '../commands/migrate/plan.js';
+import MigrateRecomputeHomeAmounts from '../commands/migrate/recompute-home-amounts.js';
 import MigrateRecordCurrencyCodes from '../commands/migrate/record-currency-codes.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
 import MigrateSecurityCatalogOverlays from '../commands/migrate/security-catalog-overlays.js';
+import MigrateStoredExpressions from '../commands/migrate/stored-expressions.js';
+import MigrateStoredReferences from '../commands/migrate/stored-references/index.js';
+import MigrateStoredReferencesBind from '../commands/migrate/stored-references/bind.js';
 import MigrateSummaryNulls from '../commands/migrate/summary-nulls.js';
 import MigrateUnmappedColumns from '../commands/migrate/unmapped-columns.js';
 import MigrateValueShapes from '../commands/migrate/value-shapes.js';
@@ -191,6 +210,11 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'migrate activity-changed-fields', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate activity-changed-fields --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
+  'commands/migrate/blank-multi-values.ts': {
+    run: invoke(MigrateBlankMultiValues),
+    noWrite: [{ label: 'migrate blank-multi-values', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate blank-multi-values --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
   'commands/migrate/blank-single-values.ts': {
     run: invoke(MigrateBlankSingleValues),
     noWrite: [{ label: 'migrate blank-single-values', argv: ['--database-url', '@DB@', '--json'] }],
@@ -200,6 +224,11 @@ const CALLERS: Record<string, Caller> = {
     run: invoke(MigrateOptionCodes),
     noWrite: [{ label: 'migrate option-codes', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate option-codes --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/text-scalars.ts': {
+    run: invoke(MigrateTextScalars),
+    noWrite: [{ label: 'migrate text-scalars', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate text-scalars --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
   'commands/migrate/comment-parent-pair.ts': {
     run: invoke(MigrateCommentParentPair),
@@ -295,6 +324,17 @@ const CALLERS: Record<string, Caller> = {
     noWrite: [{ label: 'migrate recorded-by', argv: ['--database-url', '@DB@', '--json'] }],
     write: [{ label: 'migrate recorded-by --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
   },
+  'commands/migrate/recompute-home-amounts.ts': {
+    run: invoke(MigrateRecomputeHomeAmounts),
+    // The fixture's app declares no home amount, so the recompute refuses
+    // `osf_lead` (INVALID_FIELD) after the boot and writes nothing. The boot
+    // is what these cases are about.
+    noWrite: [{ label: 'migrate recompute-home-amounts', argv: ['--object', 'osf_lead', '--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'migrate recompute-home-amounts --apply',
+      argv: ['--apply', '--yes', '--object', 'osf_lead', '--database-url', '@DB@', '--json'],
+    }],
+  },
   'commands/migrate/record-currency-codes.ts': {
     run: invoke(MigrateRecordCurrencyCodes),
     // The fixture's app declares no record-mode amount, so the backfill
@@ -325,6 +365,31 @@ const CALLERS: Record<string, Caller> = {
       label: 'migrate security-catalog-overlays --apply',
       argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'],
     }],
+  },
+  'commands/migrate/stored-expressions.ts': {
+    run: invoke(MigrateStoredExpressions),
+    // The fixture's app declares no stored computed field, so the walk finds
+    // nothing and `--apply` writes nothing — the boot is what these cases are about.
+    noWrite: [{ label: 'migrate stored-expressions', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{ label: 'migrate stored-expressions --apply', argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'] }],
+  },
+  'commands/migrate/stored-references/index.ts': {
+    run: invoke(MigrateStoredReferences),
+    noWrite: [{ label: 'migrate stored-references', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [],
+    note: 'the ADR-0150 D10 report: read-only; its writing mode is `stored-references bind`, its own module',
+  },
+  'commands/migrate/stored-references/bind.ts': {
+    run: invoke(MigrateStoredReferencesBind),
+    noWrite: [],
+    // The fixture stores no sharing rule, so the bind is refused for want of
+    // the row and writes nothing — the plain boot (audit plugin composed) is
+    // what these cases are about.
+    write: [{
+      label: 'migrate stored-references bind --yes',
+      argv: ['--table', 'sys_sharing_rule', '--id', 'r1', '--package', 'com.example.crm', '--yes', '--database-url', '@DB@', '--json'],
+    }],
+    note: 'the reviewed bind of one row: every mode writes; `os migrate stored-references` is its preview',
   },
   'commands/migrate/summary-nulls.ts': {
     run: invoke(MigrateSummaryNulls),

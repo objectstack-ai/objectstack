@@ -38,7 +38,9 @@ export type SqlDialect =
   | 'snowflake'
   | 'bigquery'
   | 'mongo'
-  | 'odata';
+  | 'odata'
+  | 'oracle'
+  | 'mssql';
 
 /**
  * Result of a compatibility check:
@@ -128,7 +130,112 @@ const DIALECT_ALIASES: Partial<Record<SqlDialect, Record<string, CanonicalSqlTyp
     'edm.binary': 'binary', 'edm.stream': 'binary', collection: 'array',
     'edm.datetime': 'datetime', 'edm.time': 'time',
   },
+  // Oracle Database, as `ALL_TAB_COLUMNS.DATA_TYPE` names its types (the SQL
+  // driver re-attaches `DATA_PRECISION` / `DATA_SCALE` to `NUMBER`, and
+  // `DATA_LENGTH` to `RAW`). These are the PARAMETER-FREE names; the two
+  // families whose parameters change the answer — `NUMBER(p,s)` and
+  // `RAW(n)` — are read before the parameter strip, by
+  // `oracleParameterisedType` below.
+  //
+  // `date` is a DATE-TIME in Oracle — the type always carries a time of day —
+  // so it maps to `datetime`, and a `date` field over it is lossy (the time is
+  // dropped), never exact. `timestamp with local time zone` keeps its whole
+  // name only when it arrives without a precision; `timestamp(6) with local
+  // time zone` loses the qualifier in the parameter strip and lands on
+  // `timestamp` → `datetime`, the same answer. `boolean` is native from
+  // Oracle 23ai; on earlier releases a flag is a `NUMBER(1)` or a `CHAR(1)`,
+  // and the matrix judges those as the integer and the text they are — a
+  // `boolean` field over `NUMBER(1)` is lossy, over `CHAR(1)` incompatible —
+  // rather than the driver coercing `'Y'` / `1` into `true` behind the
+  // author's back.
+  oracle: {
+    varchar2: 'text', nvarchar2: 'text', char: 'text', nchar: 'text', clob: 'text', nclob: 'text',
+    long: 'text', rowid: 'text', urowid: 'text',
+    number: 'decimal', float: 'float', binary_float: 'float', binary_double: 'float',
+    date: 'datetime', timestamp: 'datetime', 'timestamp with local time zone': 'datetime',
+    raw: 'binary', 'long raw': 'binary', blob: 'binary', bfile: 'binary',
+    boolean: 'boolean', json: 'json',
+  },
+  // Microsoft SQL Server, as `INFORMATION_SCHEMA.COLUMNS.DATA_TYPE` spells it
+  // (the parameter strip turns `nvarchar(max)` into `nvarchar`). Two entries
+  // OVERRIDE the base map rather than restate it: `timestamp` on SQL Server is
+  // the `rowversion` synonym, an 8-byte binary counter and never a date-time,
+  // and `bit` is the dialect's only boolean. `xml` is text, which is what the
+  // tedious client reads it as. Not mapped, so a draft flags them for review:
+  // `sql_variant` (a value of any type), `hierarchyid` and the
+  // `geography` / `geometry` spatial types (CLR types the client reads as bytes).
+  mssql: {
+    nvarchar: 'text', nchar: 'text', ntext: 'text', varchar: 'text', char: 'text', text: 'text',
+    xml: 'text', sysname: 'text',
+    bit: 'boolean',
+    tinyint: 'integer', smallint: 'integer', int: 'integer', bigint: 'bigint',
+    decimal: 'decimal', numeric: 'decimal', money: 'decimal', smallmoney: 'decimal',
+    float: 'float', real: 'float',
+    date: 'date', time: 'time',
+    datetime: 'datetime', datetime2: 'datetime', smalldatetime: 'datetime', datetimeoffset: 'datetime',
+    uniqueidentifier: 'uuid',
+    varbinary: 'binary', binary: 'binary', image: 'binary',
+    timestamp: 'binary', rowversion: 'binary',
+  },
 };
+
+/**
+ * Oracle's two type families whose PARAMETERS decide the canonical type — read
+ * from the raw string before `canonicalizeSqlType` strips them.
+ *
+ * ## `NUMBER(p,s)` — the scale decides integral, the precision decides width
+ *
+ * Oracle has one numeric type; every "integer" column is a `NUMBER` whose
+ * scale is zero. So the rule is:
+ *
+ *  - **scale > 0** → `decimal` (it holds fractions).
+ *  - **scale ≤ 0** (integral; a negative scale rounds to tens, hundreds, …, so
+ *    the column holds `p − s` digits) → `integer` when those digits are ≤ 9
+ *    (always within a 32-bit int), otherwise `bigint`. That includes
+ *    `NUMBER(*,0)`, which is what Oracle's `INTEGER` / `INT` / `SMALLINT`
+ *    become (38 digits). A `bigint` here is read into a JavaScript `number`,
+ *    exact to 2^53 — the same bound every dialect's `bigint` already has —
+ *    and it is what lets a legacy `NUMBER(10)` / `INTEGER` foreign key back a
+ *    lookup.
+ *  - **no precision and no scale** (bare `NUMBER`) → `decimal`: a floating
+ *    decimal that may hold fractions, so it never backs a lookup or an
+ *    autonumber exactly.
+ *
+ * The driver spells an unconstrained precision with a scale as `number(*,s)`,
+ * Oracle's own DDL spelling.
+ *
+ * ## `RAW(n)` — sixteen bytes is a UUID
+ *
+ * `RAW(16)` is the conventional Oracle column for a UUID / GUID (`SYS_GUID()`
+ * returns one), so it maps to `uuid`; every other width is `binary`. The
+ * reference pairings over it are exact; a `text` field over it is `'lossy'`
+ * on oracle: see {@link DIALECT_LOSSY_RULES}.
+ *
+ * `undefined` for any other spelling — the caller then strips parameters and
+ * reads the alias tables as for every dialect.
+ */
+function oracleParameterisedType(t: string): CanonicalSqlType | undefined {
+  const paren = t.indexOf('(');
+  if (paren === -1) return undefined;
+  const base = t.slice(0, paren).trim();
+  const close = t.indexOf(')', paren);
+  if (close === -1) return undefined;
+  const args = t.slice(paren + 1, close).split(',').map((a) => a.trim());
+  if (base === 'raw') {
+    return args.length === 1 && args[0] === '16' ? 'uuid' : 'binary';
+  }
+  if (base !== 'number') return undefined;
+  if (args.length > 2) return undefined;
+  const precisionText = args[0] ?? '';
+  const scaleText = args[1] ?? '0';
+  if (!/^-?\d+$/.test(scaleText)) return undefined;
+  const scale = Number(scaleText);
+  if (scale > 0) return 'decimal';
+  if (precisionText === '*') return 'bigint';
+  if (!/^\d+$/.test(precisionText)) return undefined;
+  const digits = Number(precisionText) - scale;
+  return digits <= 9 ? 'integer' : 'bigint';
+}
 
 /**
  * Dialect-agnostic base map of common ANSI/SQL type names to canonical types.
@@ -243,6 +350,13 @@ export function canonicalizeSqlType(rawType: string, dialect?: SqlDialect): Cano
   const isArray = t.endsWith('[]') || t.startsWith('_');
   if (isArray) return 'array';
 
+  // Oracle's NUMBER(p,s) / RAW(n) are decided by their parameters, so they
+  // are read before the strip below throws the parameters away.
+  if (dialect === 'oracle') {
+    const parameterised = oracleParameterisedType(t);
+    if (parameterised) return parameterised;
+  }
+
   // Drop precision/length: `numeric(10,2)` → `numeric`, `varchar(255)` →
   // `varchar`. Linear substring slice (no regex backtracking).
   const paren = t.indexOf('(');
@@ -307,6 +421,48 @@ export function suggestFieldTypeForSqlType(rawType: string, dialect?: SqlDialect
 }
 
 /**
+ * The ONE place a dialect moves a pairing to `'lossy'` that the
+ * dialect-agnostic {@link CANONICAL_TO_FIELD} answers otherwise. Two moves,
+ * one rule per (dialect, canonical type), and both only ever toward `'lossy'`
+ * — never exact, never suggested — so a draft carries a `// REVIEW:` marker
+ * and validation warns instead of passing silently or failing:
+ *
+ * - `demoteExact` — the EXACT pairings of the canonical type named here,
+ *   which this dialect can only half-serve, answer `'lossy'` here.
+ *   `oracle` / `uuid` → `text`: the SQL driver reads a `RAW(16)` column as a
+ *   lower-case hyphenated UUID string, and binds a comparison comparand, a
+ *   written value and a by-id key for it as `HEXTORAW(?)` over that string's
+ *   hex digits (#31390). A reference field over it — a `lookup` or
+ *   `master_detail` keyed by a `SYS_GUID()` column, a `user` — is filtered,
+ *   written and resolved by the very string it reads, so those pairings stay
+ *   exact. A `text` field is still half-served: its pattern operators
+ *   (`$contains`, `$startsWith`, `$like`, …) are not bound through
+ *   `HEXTORAW`, so they match the column as the text Oracle converts a
+ *   `RAW` to (its 32 hex digits, upper case, no hyphens), not as the string
+ *   it reads; a fragment of that string with a hyphen, or in the case it is
+ *   read in, answers no row instead of a refusal.
+ * - `addLossy` — field types the base row answers `false` for, which this
+ *   dialect's column can carry with loss.
+ *   `mssql` / `text`: SQL Server (before its 2025 `json` type) keeps JSON in
+ *   `nvarchar(max)`, and the SQL driver writes a `json` field and a
+ *   multi-value field (`tags`, `multiselect`) there as JSON text and parses it
+ *   back on read. Lossy, because the column does not enforce JSON, and because
+ *   JSON-array membership (`$contains`) and `$empty` on a multi-value field
+ *   are refused on this dialect rather than approximated. Without the rule,
+ *   validation reported every such field as a type mismatch on the very
+ *   column shape the driver relies on (#31327).
+ */
+interface DialectLossyRule {
+  readonly demoteExact?: readonly FieldType[];
+  readonly addLossy?: readonly FieldType[];
+}
+
+const DIALECT_LOSSY_RULES: Partial<Record<SqlDialect, Partial<Record<CanonicalSqlType, DialectLossyRule>>>> = {
+  oracle: { uuid: { demoteExact: ['text'] } },
+  mssql: { text: { addLossy: ['json', 'tags', 'multiselect'] } },
+};
+
+/**
  * Whether a remote SQL column type can back the given ObjectStack field type.
  *
  * @returns `true` (exact), `'lossy'` (usable with possible loss), or `false`.
@@ -318,8 +474,9 @@ export function isCompatible(
 ): Compatibility {
   const canonical = canonicalizeSqlType(rawType, dialect);
   const entry = CANONICAL_TO_FIELD[canonical];
-  if (entry.exact.includes(fieldType)) return true;
-  if (entry.lossy.includes(fieldType)) return 'lossy';
+  const rule = dialect ? DIALECT_LOSSY_RULES[dialect]?.[canonical] : undefined;
+  if (entry.exact.includes(fieldType)) return rule?.demoteExact?.includes(fieldType) ? 'lossy' : true;
+  if (entry.lossy.includes(fieldType) || rule?.addLossy?.includes(fieldType)) return 'lossy';
   // Unknown remote types are permissive-but-lossy against text/json only,
   // already encoded in CANONICAL_TO_FIELD.unknown.
   return false;

@@ -296,7 +296,7 @@ import { ExecutionContextSchema } from '@objectstack/spec/kernel';
 import {
   RELATIONSHIP_FIELD_TYPES,
   describeFieldPathVerdict,
-  indexObjectGraph,
+  indexServedObjectGraph,
   isUnjudgeable,
   listNames,
   recordsOf,
@@ -307,6 +307,7 @@ import {
 } from './object-graph.js';
 import {
   declaredMembershipKeysOf,
+  isRosterOwnId,
   objectsDeclaringKey,
   stackObjectNamesOf,
   type MembershipKeyOwners,
@@ -642,8 +643,9 @@ interface MembershipKeyContext {
   declared: ReadonlySet<string>;
   /**
    * Key → the object its values reference: the target of the declaring
-   * object's `valueField`. Present only when one object the stack carries
-   * declares the key and that column is a judgeable reference.
+   * object's `valueField`, or the declaring object itself when that is its
+   * own `id`. Present only when one object the stack carries declares the key
+   * and that column is a judgeable reference or that `id`.
    */
   targetOf: ReadonlyMap<string, string>;
   /**
@@ -1458,7 +1460,8 @@ interface MembershipTargetFault {
  * The `in` / not-`in` sites of a lowered predicate that test a declared key
  * against a column whose values can never be the key's (refusal 11).
  *
- * The key holds ids of its `valueField`'s target T. So the compared column must
+ * The key holds ids of its `valueField`'s target T — the declaring object
+ * itself when `valueField` is `id` (#31129 ruling A). So the compared column must
  * reference T, or be the `id` of T itself. A reference to another object, a
  * column that is no reference, and the `id` of another object hold values that
  * never equal a T id: `x in KEY` then matches no row, and `!(x in KEY)` every
@@ -1862,6 +1865,12 @@ function membershipKeyContextOf(
     if (!verdict || verdict.kind !== 'ok') continue;
     const meta: GraphField = verdict.meta ?? {};
     if (meta.type && RELATIONSHIP_FIELD_TYPES.has(meta.type) && meta.reference) targetOf.set(decl.key, meta.reference);
+    // [#31129 ruling A] `valueField: 'id'` — X's own primary key, never an
+    // author column of that name — holds ids of X itself: the caller's own
+    // roster rows. The key's target is the declaring object.
+    else if (isRosterOwnId(decl.valueField, verdict)) {
+      targetOf.set(decl.key, decl.object);
+    }
   }
   return { declared, targetOf, ...(owners ? { resolverKeys: owners.resolverKeys } : {}) };
 }
@@ -1904,14 +1913,20 @@ export function validateRlsPredicateEnforceability(
   const findings: RlsPredicateFinding[] = [];
   const cfg = (stack ?? {}) as AnyRec;
 
-  // [#16119] The object graph for the reference pass, built ONCE: `indexObjectGraph`
+  // [#16119] The object graph for the reference pass, built ONCE: `indexServedObjectGraph`
   // walks every object's whole field map, and a stack with N permission sets would
   // otherwise pay for that walk N times to answer the same question. It is the
   // SHARED index every field-existence rule in this package resolves through, so
   // the three skips (an object this stack does not define, an object with no
   // readable field map, registry-injected system columns) are the graph's and not
-  // re-derived here.
-  const graph: ObjectGraph = indexObjectGraph(cfg);
+  // re-derived here. [#30383] It indexes the objects as SERVED: the registry
+  // folds every `objectExtensions` field in before the RLS compiler sees the
+  // object, so a predicate naming a field a sibling package adds resolves.
+  // A field two packages write at the same deciding priority (`objectsAsServed`'s
+  // `tied`) is kept as the fold keeps it, the last writer: its list-holding and
+  // cross-class questions are answered on that definition, although which one
+  // the registry serves is its registration order.
+  const graph: ObjectGraph = indexServedObjectGraph(cfg);
   // [#25234] The declared membership keys every predicate below is judged
   // against: bound as lists, traced to their targets — see `## Membership keys`.
   const membership = membershipKeyContextOf(cfg, graph, options.membershipKeyOwners);

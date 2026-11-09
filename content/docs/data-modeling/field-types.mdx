@@ -234,9 +234,11 @@ what a record-currency amount refuses.
 { name: 'price', label: 'Price', type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'USD' } }
 ```
 
-A currency amount's decimal places are its currency's ISO 4217 minor unit
-(2 for USD, 0 for JPY, 3 for KWD), not a field setting, and they are declared
-nowhere. A `currency` field takes no `scale`, and `currencyConfig` has no
+A currency amount's decimal places are its currency's CLDR fraction digits
+(2 for USD, 0 for JPY, 3 for KWD; not ISO 4217's minor units, which differ for
+sixteen codes such as IQD, 0 in CLDR and 3 in ISO 4217: see
+[Currency fields](/docs/data-modeling/currency)), not a field setting, and they
+are declared nowhere. A `currency` field takes no `scale`, and `currencyConfig` has no
 decimal-places key: publish-time validation refuses `scale` on the field and
 `currencyConfig.precision` (removed in `@objectstack/spec` 17.5.0 — no renderer
 or runtime ever read it), each with a prescription to delete the key. The
@@ -245,7 +247,7 @@ amount declares `precision: 18` — and is never compared with the currency.
 
 **In the Console:** a numeric input with the currency's symbol. The read-only display, the
 grid cell, the input's `step` and the rounding applied when the input loses focus all use the
-currency's minor unit, so a JPY amount shows no decimals and a KWD amount shows three. With no
+currency's CLDR fraction digits, so a JPY amount shows no decimals and a KWD amount shows three. With no
 currency resolved at all, an amount shows two decimals. A `record`-mode amount resolves only
 its own record's code, never the tenant default. A field-level `currency` key is
 refused: the currency is `currencyConfig`. The input is a native number box; see
@@ -496,7 +498,7 @@ Reference to a record in another object (foreign key).
 |:---|:---|:---|:---|
 | `reference` | `string` | **required** | Target object name (snake_case). A stored-metadata table (`sys_metadata`, `sys_metadata_history`) is refused — see [below](#a-relationship-never-targets-a-stored-metadata-table) |
 | `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property. `FieldSchema` is a strict object, so an unknown key is **rejected with guidance**, not silently stripped (ADR-0078): the error echoes the offending key and prescribes the replacement. Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
-| `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'set_null'` | Behavior when referenced record is deleted. On a *required* lookup `set_null` is escalated to `restrict`, since a NOT NULL foreign key cannot be cleared — **whether the `set_null` was defaulted or written out explicitly**. On a `multiple: true` required lookup the escalation is judged per referencing row: only a row the member removal would leave EMPTY is refused. `cascade` and `restrict` are the values honored as written. Where `set_null` does run, a `multiple: true` lookup loses only the deleted **member** — the other members are kept, and a set emptied that way is stored as `[]`, never `null` |
+| `deleteBehavior` | `'restrict' \| 'cascade' \| 'set_null'` | `'set_null'` | Behavior when referenced record is deleted. On a *required* lookup `set_null` is escalated to `restrict`, since a NOT NULL foreign key cannot be cleared — **whether the `set_null` was defaulted or written out explicitly**. On a `multiple: true` required lookup the escalation is judged per referencing row: only a row the member removal would leave EMPTY is refused. `cascade` and `restrict` are the values honored as written. Where `set_null` does run, a `multiple: true` lookup loses only the deleted **member** — the other members are kept, and on an optional field a set emptied that way is stored as `null`, the same as one never set |
 
 ```typescript
 { name: 'company', label: 'Company', type: 'lookup', reference: 'account' }
@@ -593,7 +595,7 @@ the parent's form edits the children as rows of a table:
 - **Booleans.** A derived `boolean` or `toggle` child field becomes a `select` cell storing
   `'true'` / `'false'`, labelled in the session language.
 - **Currency.** A `currency` cell shows the resolved currency's symbol, and decimals of that
-  currency's minor unit; `prefix` replaces the symbol only.
+  currency's CLDR fraction digits; `prefix` replaces the symbol only.
 - **Order.** When the columns are derived and the child object has a field named `position`, `sort_order`, `sequence`,
   `line_no`, `line_number` or `sort`, the grid stamps each row's index into it whenever a row is
   added, removed, duplicated or dragged, so the order is saved with the rows.
@@ -1022,7 +1024,7 @@ These properties are available on **all** field types:
 | `type` | `FieldType` | **required** | One of the supported field types |
 | `required` | `boolean` | `false` | Whether the field is required |
 | `unique` | `boolean \| 'global' \| 'organization'` | `false` (`'organization'` on `autonumber`) | Unique constraint **and its scope** (ADR-0120). `'organization'` = one holder per organization; `true` = that same per-organization scope (positional synonym — prefer the explicit spelling in new code); `'global'` = one holder across the whole installation; `false` = no constraint. Omitted ⇒ `false`, except on an `autonumber` field, where omitted ⇒ `'organization'` — an auto-number is a business identifier, so the platform makes it unique per organization by default; write `unique: false` explicitly to opt out. `'tenant'`/`'org'` are rejected — the word is `'organization'`. Full rule in the `unique` doc block in [`FieldSchema`](/docs/references/data/field) |
-| `multiple` | `boolean` | `false` | Allow array of values (multi-record lookup, multi-select, multi-file). An emptied multi-value lookup reads back as `[]`, never `null` — the `multiple` doc block in [`FieldSchema`](/docs/references/data/field) |
+| `multiple` | `boolean` | `false` | Allow array of values (multi-record lookup, multi-select, multi-file). An emptied optional multi-value field is stored as `null`, the same as one never set (`[]` and `""` written to it store `null`); a row stored before that rule can still hold `[]`, and `is_empty` matches both — the `multiple` doc block in [`FieldSchema`](/docs/references/data/field) |
 | `searchable` | `boolean` | `false` | Search this field when the object declares no `searchableFields` — any type but `secret` / `password` / `vector`; a declared `searchableFields` is the whole set |
 | `sortable` | `boolean` | `true` | Allow sorting by this field |
 | `hidden` | `boolean` | `false` | Hide from default views |
@@ -1136,6 +1138,20 @@ list comes from the data source's `listMetadataItems(type)`. When the adapter
 has none, the list is empty, or the load fails, the field is a text box that
 takes the typed name; a failure is shown with its cause, and the box stays
 editable.
+
+### Notification preference inputs (`notification-topic`, `notification-channel`, `quiet-hours`)
+
+The platform's notification preference (`sys_notification_preference`) declares three
+widgets, so the record form offers choices instead of a bare box:
+
+| Widget | Field | Draws | Stores |
+|---|---|---|---|
+| `notification-topic` | `topic` (`text`; also on `sys_notification_template`) | a pick-or-type list from `GET /api/v1/messaging/preference-options` | the topic as written, `*` for all |
+| `notification-channel` | `channel` (`text`) | the same list, marking a known channel whose service is not configured | the channel id as written, `*` for all |
+| `quiet-hours` | `quiet_hours` (`json`) | a time-zone picker and two times | `{ tz?, start: 'HH:MM', end: 'HH:MM' }` |
+
+A typed topic or channel the list does not hold is still stored. Like every `widget` value,
+a name no host registers falls back to the type's default input.
 
 ### A widget's face on the record heading
 

@@ -60,23 +60,34 @@
  *
  * ## Signed out
  *
- * Nothing here applies: with no `sys_user` row there is nothing to read and
- * nothing to write. {@link useLanguageSelection} performs the local switch and
- * returns, so language selection for a visitor is exactly what it was.
+ * With no `sys_user` row there is nothing to read and nothing to write.
+ * {@link useLanguageSelection} performs the local switch, and it remembers the
+ * pick for this page-load only, so that the purge above does not take it from
+ * the person who signs in next (objectstack#30338, see
+ * {@link keepSignedOutPickThroughOwnerChange}). The sign-in page then saves it
+ * as that person's own language when they have none, before it navigates
+ * away (objectstack#30399, see {@link saveSignInLanguagePick}).
  *
  * @module
  */
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
-import { useAuth, getSessionOwnerChangeCount, subscribeSessionOwnerChange } from '@object-ui/auth';
+import {
+  useAuth,
+  createAuthenticatedFetch,
+  getSessionOwnerChangeCount,
+  subscribeSessionOwnerChange,
+} from '@object-ui/auth';
 import {
   LOCALE_STORAGE_KEY,
   readStoredLanguage,
   resolveBootstrapLanguage,
   useObjectTranslation,
 } from '@object-ui/i18n';
+import { resolveLocaleAmong } from '@objectstack/spec/system';
 import { useAdapter, useDataInvalidation, extractWriteErrorMessage } from '@object-ui/react';
+import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { useAfterFirstPaint } from './sharedUserFeeds.js';
 
 /**
@@ -86,6 +97,165 @@ import { useAfterFirstPaint } from './sharedUserFeeds.js';
  * user has switched to since by resetting it a second time.
  */
 let ownerChangesHandled = 0;
+
+/**
+ * The language picked while signed out in THIS page-load and not yet handed to
+ * whoever signs in next, or `null` (objectstack#30338).
+ */
+let signedOutPick: string | null = null;
+let signedOutPickKeeperInstalled = false;
+
+/**
+ * The same pick, held for {@link saveSignInLanguagePick} rather than for the
+ * owner-change keeper (objectstack#30399). Kept apart because the keeper spends
+ * its copy on the owner-change event, which fires before the sign-in page's
+ * post-login step reads this one, and fires not at all when the browser's last
+ * owner signs in again.
+ */
+let signInPickToSave: string | null = null;
+
+/**
+ * Keep a language picked on the sign-in page through the purge that follows a
+ * sign-in by someone other than the browser's last owner (objectstack#30338).
+ *
+ * ## The drop this closes
+ *
+ * The sign-in page's language menu writes the pick to the device slot
+ * ({@link LOCALE_STORAGE_KEY}) like every switch. When the person who then
+ * signs in is not the one the browser last held, `SessionUserScope.adopt`
+ * sweeps that slot with the rest of the previous owner's state
+ * (objectui#5664), and the sign-in page then leaves by a full navigation. The
+ * next page-load boots with no choice stored, so the person lands in the
+ * browser's language, not the one they just picked. The reset in
+ * {@link useLanguageResetOnOwnerChange} is not on that path: the shell is not
+ * mounted on the sign-in page.
+ *
+ * ## Why this keeps objectui#10193 ruling B
+ *
+ * The purge removes what the PREVIOUS owner left, and still does. A language
+ * picked after they signed out is not that, and the two can be told apart
+ * without a stored marker: the pick and the purge happen in the same
+ * page-load, so the pick is known here, in memory. The owner-change event
+ * fires after the sweep, and this puts the pick back into the same slot,
+ * where the next boot reads it as it reads any choice.
+ *
+ * ⚠️ The bound, stated: memory lasts one page-load. A pick followed by a reload
+ * of the sign-in page, or a sign-in that leaves the page first (an identity
+ * provider's redirect), is still swept.
+ *
+ * Installed once, on the first signed-out pick, at module scope: the sign-in
+ * page's menu unmounts in the same commit that sets the user, before
+ * `AuthProvider`'s effect calls `adopt`, so a listener owned by a component
+ * would be gone when the event fires.
+ */
+function keepSignedOutPickThroughOwnerChange(code: string): void {
+  signedOutPick = code;
+  signInPickToSave = code;
+  if (signedOutPickKeeperInstalled) return;
+  signedOutPickKeeperInstalled = true;
+  subscribeSessionOwnerChange(() => {
+    const pick = signedOutPick;
+    signedOutPick = null;
+    if (!pick) return;
+    try {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, pick);
+    } catch {
+      // Storage blocked — the live language still holds the pick for this
+      // page-load; nothing more can be kept.
+    }
+  });
+}
+
+/**
+ * The pick has reached a signed-in person, or a signed-in choice replaced it:
+ * either way it must not reach the NEXT owner change, which belongs to
+ * someone else.
+ */
+function forgetSignedOutPick(): void {
+  signedOutPick = null;
+  signInPickToSave = null;
+}
+
+/** Test seam: forget this page-load's signed-out pick. Not public. */
+export function __resetSignedOutPickForTests(): void {
+  signedOutPick = null;
+  signInPickToSave = null;
+}
+
+/**
+ * Whether a language was picked while signed out in this page-load and has not
+ * been saved for anyone yet (objectstack#30399) — the question the sign-in page
+ * asks before it navigates away, so a sign-in with no pick leaves at once.
+ */
+export function hasSignInLanguagePick(): boolean {
+  return signInPickToSave !== null;
+}
+
+/** The two calls {@link saveSignInLanguagePick} makes on the `sys_user` row. */
+export interface SignInLanguagePickWriter {
+  findOne: (resource: string, id: string) => Promise<unknown>;
+  update: (resource: string, id: string, data: Record<string, unknown>) => Promise<unknown>;
+}
+
+/**
+ * The data door the console's own adapter uses (`AdapterProvider`), built for
+ * one save: the sign-in page renders outside `ConnectedShell`, so no adapter is
+ * in context there.
+ */
+function createSignInPickWriter(): SignInLanguagePickWriter {
+  return new ObjectStackAdapter({
+    baseUrl: import.meta.env.VITE_SERVER_URL || '',
+    fetch: createAuthenticatedFetch(),
+  });
+}
+
+/**
+ * Save the language picked on the sign-in page as the signed-in person's own
+ * language, when they have none (objectstack#30399, the saved half of
+ * objectstack#30338).
+ *
+ * ## Why the sign-in page calls this, and awaits it
+ *
+ * The knowledge that the pick was made on the sign-in page is memory, and it
+ * dies at the full navigation the page leaves by. On the next page-load an
+ * unset `sys_user.locale` beside a set device slot says nothing: the profile
+ * card's "use deployment default" writes exactly that. So the save happens in
+ * the sign-in page-load, and the page awaits it before navigating — a write
+ * sent beside the navigation races the unload.
+ *
+ * ## What it writes
+ *
+ * Only the pick, only through the column's one write door
+ * (`update('sys_user', id, { locale })`, the same call
+ * {@link useLanguageSelection} makes), and only when the row's column is unset:
+ * a language the person already chose is theirs and is not replaced. No pick in
+ * this page-load ⇒ no request at all. The pick is spent by the first call, so
+ * it reaches one person.
+ *
+ * Never rejects. A read or write that fails leaves the pick on this device
+ * only (the slot still holds it, so the next page-load renders it), says so
+ * once at `error`, and lets the sign-in proceed.
+ */
+export async function saveSignInLanguagePick(
+  userId: string,
+  writer: SignInLanguagePickWriter = createSignInPickWriter(),
+): Promise<void> {
+  const pick = signInPickToSave;
+  signInPickToSave = null;
+  if (!pick || !userId) return;
+  try {
+    const row = await writer.findOne(USER_OBJECT, userId);
+    const raw = (row as { locale?: unknown } | null)?.locale;
+    if (typeof raw === 'string' && raw.length > 0) return;
+    await writer.update(USER_OBJECT, userId, { [LOCALE_FIELD]: pick });
+  } catch (err) {
+    console.error(
+      '[app-shell] The language picked on the sign-in page was not saved to `sys_user.locale`: ' +
+        'it applies on this device only. Pick it again from the language menu once signed in to save it.',
+      err,
+    );
+  }
+}
 
 /**
  * Serialises every language switch this module makes, so they land in the
@@ -203,10 +373,29 @@ const LOCALE_FIELD = 'locale';
  * locales ∩ what this renderer can resolve) — the same list the globe menu and
  * the profile card render, deliberately not a second opinion about what ships.
  *
- * Exact tag first, then the base language: a column holding `zh-CN` must reach
- * the `zh` pack, while a real `pt-BR` pack still beats `pt`. That order is the
- * one `@object-ui/i18n` already documents for a seed and for `pickLocalized`,
- * so this is the existing convention rather than a new rule.
+ * The match order IS the platform's one locale ladder, `resolveLocaleAmong`
+ * (`@objectstack/spec/system`), which the server's `resolveLocale` and every
+ * i18n route run too, so the console and the server agree on which language a
+ * stored tag means:
+ *
+ *   1. exact tag (`pt-BR` → `pt-BR`; a real `pt-BR` still beats `pt`);
+ *   2. the same tag in any case (`zh-cn` → `zh-CN`) — a row written before the
+ *      server door folded case is served as stored, never migrated;
+ *   3. the same platform locale table language, through the table's read
+ *      aliases (`zh-TW` → `zh-Hant`, `zh-HK` → `zh-TW`, `zh` → `zh-CN`,
+ *      `pt` → `pt-BR`): a row stored before the table keeps its meaning, and a
+ *      Traditional row is never handed the first Simplified variant offered;
+ *   4. the base language (`zh-CN` → `zh`, `en-GB` → `en`), case-insensitively;
+ *   5. the first offered variant of that base language (`es` → `es-MX`), in
+ *      the order the list offers them — after step 3, so a variant the table
+ *      reads as the language itself (`es-ES`) is taken first.
+ *
+ * The table's read aliases name the script-subtag spellings too
+ * (`zh-Hant-TW`, `zh-Hans-CN`), so step 3 reads them by script; a code the
+ * table does not name is not guessed at, here as on the server.
+ *
+ * A match answers the OFFERED spelling, never the stored one: the list is what
+ * the provider can switch to.
  *
  * `null` while the list is still in flight (`offerable === null`), and `null`
  * for a tag nothing can render: switching to a locale this renderer cannot
@@ -216,11 +405,8 @@ export function pickRenderableLocale(
   tag: string,
   offerable: readonly string[] | null,
 ): string | null {
-  if (!offerable) return null;
-  if (offerable.includes(tag)) return tag;
-  const base = tag.split('-')[0];
-  if (base && base !== tag && offerable.includes(base)) return base;
-  return null;
+  if (!offerable || offerable.length === 0) return null;
+  return resolveLocaleAmong(tag, offerable) ?? null;
 }
 
 /**
@@ -284,6 +470,9 @@ export function useSignedInUserLocale(): void {
         if (cancelled) return;
         const raw = (row as { locale?: unknown } | null)?.locale;
         const column = typeof raw === 'string' && raw.length > 0 ? raw : null;
+        // This person's session is established and read: a sign-in-page pick
+        // still held has reached them, and must not reach whoever is next.
+        forgetSignedOutPick();
         setRead((prev) => ({ seq: prev.seq + 1, column }));
       } catch (err) {
         // Cosmetic and never fail-closed, the same posture the rest of the
@@ -350,7 +539,9 @@ export function useSignedInUserLocale(): void {
  * is the divergence this card exists to end, one layer down.
  *
  * Signed out (or with no adapter): the local switch is the whole operation, no
- * request is attempted and nothing is reported.
+ * request is attempted and nothing is reported. Signed out, the pick is also
+ * remembered for this page-load, so that a sign-in by someone other than the
+ * browser's last owner keeps it ({@link keepSignedOutPickThroughOwnerChange}).
  */
 export function useLanguageSelection(): (code: string) => Promise<void> {
   const { user } = useAuth();
@@ -369,7 +560,12 @@ export function useLanguageSelection(): (code: string) => Promise<void> {
   return useCallback(
     async (code: string) => {
       await changeLanguageRef.current(code);
-      if (!adapter || !userId) return;
+      if (!userId) {
+        keepSignedOutPickThroughOwnerChange(code);
+        return;
+      }
+      forgetSignedOutPick();
+      if (!adapter) return;
       try {
         await adapter.update(USER_OBJECT, userId, { [LOCALE_FIELD]: code });
       } catch (err) {

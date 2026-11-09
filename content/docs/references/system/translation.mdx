@@ -67,6 +67,7 @@ Translation data for a single field
 | **placeholder** | `string` | optional | Translated placeholder text for form inputs |
 | **options** | `Record<string, string>` | optional | Option value to translated label map |
 | **inlineTitle** | `string` | optional | Translated inline master-detail grid title — overlays the field's own `inlineTitle` |
+| **relatedListTitle** | `string` | optional | Translated detail-page related list title — overlays the field's own `relatedListTitle` |
 
 
 ---
@@ -109,6 +110,7 @@ Translation data for a single field
 | **placeholder** | `string` | optional | Translated placeholder text for form inputs |
 | **options** | `Record<string, string>` | optional | Option value to translated label map |
 | **inlineTitle** | `string` | optional | Translated inline master-detail grid title — overlays the field's own `inlineTitle` |
+| **relatedListTitle** | `string` | optional | Translated detail-page related list title — overlays the field's own `relatedListTitle` |
 
 ### Nested Shape: `ObjectTranslationData._views[string]`
 
@@ -135,6 +137,7 @@ Translation data for a single field
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
+| **preflight** | `{ fields?: Record<string, string> }` | optional | Translations for the action preflight panel |
 
 ### Nested Shape: `ObjectTranslationData._sections[string]`
 
@@ -239,6 +242,7 @@ Translation data for a single object
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
+| **preflight** | `{ fields?: Record<string, string> }` | optional | Translations for the action preflight panel |
 
 ### Nested Shape: `PlatformTranslationData.dashboards[string]`
 
@@ -256,8 +260,8 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated dataset label |
 | **description** | `string` | optional | Translated dataset description |
-| **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
-| **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
+| **dimensions** | `Record<string, { label?: string; description?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
+| **measures** | `Record<string, { label?: string; description?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
 
 ### Nested Shape: `PlatformTranslationData.reports[string]`
 
@@ -339,7 +343,7 @@ Translation data for a single object
 | **title** | `string` | optional | Translated settings manifest title |
 | **description** | `string` | optional | Translated settings manifest description |
 | **groups** | `Record<string, { title?: string; description?: string }>` | optional | Group translations keyed by group key |
-| **keys** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Per-setting field translations keyed by setting key |
+| **keys** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Per-setting field translations keyed by setting key |
 | **actions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string }>` | optional | Action button translations keyed by action id |
 | **banners** | `Record<string, { title?: string; text?: string }>` | optional | Info banner translations keyed by the info_banner specifier id |
 
@@ -416,6 +420,7 @@ Translation data for a single object
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
+| **preflight** | `{ fields?: Record<string, string> }` | optional | Translations for the action preflight panel |
 
 ### Nested Shape: `ServedTranslationData.dashboards[string]`
 
@@ -433,8 +438,8 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated dataset label |
 | **description** | `string` | optional | Translated dataset description |
-| **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
-| **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
+| **dimensions** | `Record<string, { label?: string; description?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
+| **measures** | `Record<string, { label?: string; description?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
 
 ### Nested Shape: `ServedTranslationData.reports[string]`
 
@@ -507,7 +512,7 @@ Translation data for a single object
 | **title** | `string` | optional | Translated settings manifest title |
 | **description** | `string` | optional | Translated settings manifest description |
 | **groups** | `Record<string, { title?: string; description?: string }>` | optional | Group translations keyed by group key |
-| **keys** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Per-setting field translations keyed by setting key |
+| **keys** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string>; … }>` | optional | Per-setting field translations keyed by setting key |
 | **actions** | `Record<string, { label?: string; confirmText?: string; successMessage?: string }>` | optional | Action button translations keyed by action id |
 | **banners** | `Record<string, { title?: string; text?: string }>` | optional | Info banner translations keyed by the info_banner specifier id |
 
@@ -655,6 +660,7 @@ Translation data for a single object
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
+| **preflight** | `{ fields?: Record<string, string> }` | optional | Translations for the action preflight panel |
 
 ### Nested Shape: `TranslationData.dashboards[string]`
 
@@ -672,8 +678,8 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated dataset label |
 | **description** | `string` | optional | Translated dataset description |
-| **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
-| **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
+| **dimensions** | `Record<string, { label?: string; description?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
+| **measures** | `Record<string, { label?: string; description?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
 
 ### Nested Shape: `TranslationData.reports[string]`
 
@@ -817,7 +823,7 @@ One locale of translations — the `translation` metadata type
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never gates; a base's upgrade plan reads it only as advice. |
 
 ### Nested Shape: `TranslationItem.objects[string]`
 
@@ -864,6 +870,7 @@ Translation data for a single object
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
+| **preflight** | `{ fields?: Record<string, string> }` | optional | Translations for the action preflight panel |
 
 ### Nested Shape: `TranslationItem.dashboards[string]`
 
@@ -881,8 +888,8 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated dataset label |
 | **description** | `string` | optional | Translated dataset description |
-| **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
-| **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
+| **dimensions** | `Record<string, { label?: string; description?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
+| **measures** | `Record<string, { label?: string; description?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
 
 ### Nested Shape: `TranslationItem.reports[string]`
 
@@ -962,7 +969,7 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
-| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
+| **basedOn** | `string` | ✅ | Recorded, never a gate: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. One reader, as advice: a base's upgrade plan lists an override whose `basedOn` is not the installed base version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended). |
 
 
 ---

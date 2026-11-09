@@ -50,7 +50,7 @@ async function runInstall(): Promise<{ out: string; exit: number | undefined }> 
   vi.spyOn(console, 'error').mockImplementation(capture);
   let exit: number | undefined;
   try {
-    await PackageInstall.run(['com.acme.crm', '--runtime', 'http://runtime.test']);
+    await PackageInstall.run(['com.acme.crm', '--url', 'http://runtime.test']);
   } catch (err: any) {
     exit = err?.oclif?.exit ?? err?.code;
   }

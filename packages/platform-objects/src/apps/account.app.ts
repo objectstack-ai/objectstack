@@ -145,6 +145,22 @@ export const ACCOUNT_APP: App = {
       ],
     },
 
+    // --- AI Assistant ---------------------------------------------------
+    // An empty slot, expanded and high in the list, for the Connect an AI
+    // Assistant entry `@objectstack/mcp` contributes (`connect-ui.ts`).
+    // Connecting an AI client is something every person does for themselves,
+    // so it sits where a member looks, not inside the collapsed Developer
+    // group. The entry ships with the MCP capability; an opted-out deployment
+    // leaves the slot empty and the nav filter drops an empty group.
+    {
+      id: 'grp_account_ai_assistant',
+      type: 'group',
+      label: 'AI Assistant',
+      icon: 'bot',
+      expanded: true,
+      children: [],
+    },
+
     // --- Security -------------------------------------------------------
     {
       id: 'grp_account_security',

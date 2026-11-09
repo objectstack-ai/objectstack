@@ -264,6 +264,12 @@ export async function seedHookUserGrants(api: unknown): Promise<unknown> {
  *  - its `sudo()`, on it and on every api derived from it (`transaction`,
  *    `withRunAs`), marks the elevation it makes.
  *
+ * [ADR-0148 D3, ruling A recorded in 6691358077] And every repository it and
+ * the apis derived from it serve refuses a permanent delete
+ * (`refuseAppAuthoredPermanentDelete`, `recycle-bin/app-authored-delete.ts`):
+ * a hook's in-process `handler` is app-authored code, so its deletes enter the
+ * recycle bin, under the caller and under `runAs: 'system'` alike.
+ *
  * A symbol, and ⛔ not re-exported from the package entry, for the reason
  * {@link SEED_USER_GRANTS} gives.
  */

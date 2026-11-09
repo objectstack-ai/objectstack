@@ -19,8 +19,9 @@
 //
 // `@objectstack/example-showcase`'s `onEnable` unconditionally runs
 // `registerShowcaseApprovalDemo`, which assigns the dev-seeded admin the
-// `manager` / `finance` / `legal` / `exec` positions on EVERY boot
-// (`ADMIN_APPROVAL_POSITIONS` in `seed-approval-demo.ts`) — i.e. it STAFFS
+// `showcase_manager` / `showcase_finance` / `showcase_legal` / `showcase_exec`
+// positions on EVERY boot (`ADMIN_APPROVAL_POSITIONS` in
+// `seed-approval-demo.ts`) — i.e. it STAFFS
 // exactly the position `showcase_budget_approval`'s second rung needs
 // UNSTAFFED for the card's scene. A dogfood pin that re-booted showcase would
 // either race that seed step or have to disable it, coupling this pin's

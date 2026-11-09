@@ -35,6 +35,7 @@
  * "1 is singular, the rest plural" model gets wrong.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import i18next from 'i18next';
 import { builtInLocales } from '../locales';
 
@@ -111,7 +112,7 @@ const render = (template: string, count: number) =>
 describe('every plural slot is the one i18next selects, in every pack (objectui#11432)', () => {
   it('the matrix is real — families, packs and categories are all non-empty', () => {
     expect(FAMILIES.length).toBeGreaterThanOrEqual(5);
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     // Every category of every language has a sample, so no slot goes unjudged.
     for (const lang of LANGS) {
       expect([...sampleCounts(lang).keys()].sort(), lang).toEqual(

@@ -1319,6 +1319,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`cbp-master-relation-tiers-retired`.',
   },
   {
+    id: 'cbp-optional-master-admitted',
+    order: 119,
+    text:
+      'It then admits an optional master under `controlled_by_parent` (ADR-0055 §1 and §2 as amended, '
+      + 'maintainer ruling A): an object whose only `master_detail` is declared `required: false` derives its '
+      + 'master from it, and a detail row that names no master is read by its owner and by View All on the '
+      + 'detail, never through a master, while a row that names one is read through it as before. The builder '
+      + 'keeps an explicit `required: false` as written and still forces an omitted one to `true`, and the '
+      + 'stored-row listing stops naming the shape. A detail row that names no master is written by its '
+      + 'owner and by Modify All on the detail, and refused with 403 for everyone else; only an empty '
+      + 'required master reference is still refused with 422. Its D3 record is the semantic entry '
+      + '`cbp-optional-master-admitted`.',
+  },
+  {
     id: 'chart-config-aria-retired',
     order: 31,
     text:
@@ -1627,7 +1641,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     text:
       'It also removes `currencyConfig.precision` (ADR-0049 enforce-or-remove): '
       + 'declared and validated against ISO 4217, read by no renderer or runtime — a currency '
-      + 'amount\'s decimal places are its currency\'s ISO 4217 minor unit, derived from the '
+      + 'amount\'s decimal places are its currency\'s CLDR fraction digits, derived from the '
       + 'currency itself. The D2 conversion `currency-config-precision-removed` strips it from '
       + 'every field\'s `currencyConfig` as a pure lossless delete, which matters most at rest: '
       + 'the schema used to bake `precision: 2` into parse output, so stored object rows and '
@@ -1839,6 +1853,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'rewrites `heading` to `h2` and `subheading` to `h3` on every `element:text` page component — '
       + 'the heading element each one always rendered, so the outline is unchanged and the heading '
       + 'takes that level\'s style. The `body` default for an absent `variant` is unchanged.',
+  },
+  {
+    id: 'email-and-password-revoke-sessions-on-reset-retired',
+    order: 118,
+    text:
+      'It also retires `emailAndPassword.revokeSessionsOnPasswordReset` from the auth '
+      + 'configuration (ADR-0049 enforce-or-remove). A completed self-service password reset now '
+      + 'always ends every session the account holds, on every reset door, and the auth plugin '
+      + 'already refused an explicit `false`, so the key could hold one value only. There is no D2 '
+      + 'conversion: the key lives in the configuration a host hands the auth plugin, never in a '
+      + 'stack collection or a stored row. Its D3 record is the semantic entry '
+      + '`email-and-password-revoke-sessions-on-reset-retired`.',
   },
   {
     id: 'email-template-category-is-system-retired',
@@ -2327,6 +2353,44 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'deletes — none ever had an effect to lose).',
   },
   {
+    id: 'marketplace-category-retired',
+    order: 119,
+    text:
+      'It also retires the single marketplace `category` on the package, the publish requests, '
+      + '`objectstack.manifest.json`, the listing and the search request, with both of its defs '
+      + '(`MarketplaceCategorySchema`, `PackageCategorySchema`): one value had to say both who a package '
+      + 'is for and what it is, and the platform and the cloud catalog kept lists that disagreed. The '
+      + 'marketplace taxonomy is now defined once, in `marketplace/taxonomy.zod.ts` — `businessFunctions` '
+      + '(1-3, the primary one first), `industries` (up to 3, optional) and `solutionType` (`app`, '
+      + '`template` or `connector`), with `maturity` (`beta` | `stable`) as a separate flag — and '
+      + '`LEGACY_CATEGORY_MAPPING` says what every old value becomes. Each key is a retiredKey tombstone '
+      + 'with no D2 conversion, because none of these shapes is a stack collection member; the D3 record '
+      + 'is the semantic entry `marketplace-category-retired`.',
+  },
+  {
+    id: 'marketplace-template-manifest-inert-keys-retired',
+    order: 120,
+    text:
+      'It also retires five `objectstack.manifest.json` keys nothing read — `name`, `specVersion`, `skills`, '
+      + '`scaffold`, and `visibility`, which `os package publish` only warned it ignores: the slug lives in '
+      + '`package.json`, the protocol handshake in the stack\'s `engines.protocol`, the skills install is the whole '
+      + 'catalog, and visibility is the `--visibility` flag. Each key is a retiredKey tombstone with no D2 '
+      + 'conversion, because this file is not a stack collection member; the D3 record is the semantic entry '
+      + '`marketplace-template-manifest-inert-keys-retired`.',
+  },
+  {
+    id: 'marketplace-template-manifest-platform-decided-keys-retired',
+    order: 121,
+    text:
+      'It retires the file\'s last two keys that configured nothing, `publisher` and `isStarter`: both '
+      + 'are claims only the platform can make — `publisher` is the trust tier that gates listing '
+      + 'privileges, assigned from the publisher\'s credentials, and the starter flag is honoured only on '
+      + 'a first-party seed — so `os package publish` never sent either, and a trust claim does not belong '
+      + 'in an author-editable file. Both are retiredKey tombstones with no D2 conversion, because this file '
+      + 'is not a stack collection member; the D3 record is the semantic entry '
+      + '`marketplace-template-manifest-platform-decided-keys-retired`.',
+  },
+  {
     id: 'memory-persistence-placeholder-refused',
     order: 1,
     text:
@@ -2340,6 +2404,24 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'shape, one surface over. The memory driver\'s `initialData` stays deliberately '
       + 'unjudged: it carries arbitrary record values, where a literal `${…}` may be '
       + 'legitimate data.',
+  },
+  {
+    id: 'meta-type-rag-pipeline-retired',
+    order: 122,
+    text:
+      'It also retires the `rag_pipeline` metadata type the platform listed and nothing could '
+      + 'declare (ADR-0049 enforce-or-remove): `ragPipelines` sat in `PLURAL_TO_SINGULAR`, the '
+      + 'engine\'s registered-collection list, the metadata plugin\'s artifact map and the '
+      + 'runtime\'s app-payload probe, while `ObjectStackDefinitionSchema` never carried the key, '
+      + 'so `defineStack` refused it, and no producer of a `rag_pipeline` item was found in the '
+      + 'repositories measured (the cloud repository was not). Retiring the spelling row takes the '
+      + 'type out of the `/meta` URL-spelling contract, as the `themes` row did: a write to '
+      + '`/meta/rag_pipeline` gets the unrecognised-type refusal instead of the no-schema '
+      + 'store-anything branch, except in a deployment whose `sys_metadata` already holds the type\'s '
+      + 'namespace, where the write door keeps accepting writes until those rows are deleted; and '
+      + '`GET /meta/types` stops advertising it as creatable. There is '
+      + 'no D2 conversion, because no stack source can hold the key; its D3 record is the '
+      + 'semantic entry `meta-type-rag-pipeline-retired`.',
   },
   {
     id: 'metadata-customization-protocol-retired',
@@ -2659,21 +2741,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     text:
       'Finally, it retires the object-permission lifecycle bits `allowRestore` and '
       + '`allowPurge` (ADR-0049 enforce-or-remove; maintainer ruling 2026-08-26, '
-      + 'decision-inbox batch 5, which chose retiring the two bits over gating operations that do '
+      + 'decision-inbox batch 5, which chose retiring the two bits over gating operations that did '
       + 'not exist): the `restore` / '
-      + '`purge` ObjectQL operations the bits claimed to gate have never existed — no '
-      + 'destructive lifecycle verb is in the engine\'s dispatch vocabulary, which a test pins — '
+      + '`purge` ObjectQL operations the bits claimed to gate did not exist then — no '
+      + 'destructive lifecycle verb was in the engine\'s dispatch vocabulary — '
       + 'so granting the bits delivered nothing, and an author who declared '
       + '`allowPurge: false` believed a lock on GDPR hard-deletion existed when the '
       + 'operation itself did not. Both keys are retiredKey tombstones; the evaluator\'s '
-      + 'pre-mapping rows retired in the same batch (a dispatched `restore`/`purge` stays '
-      + 'denied fail-closed via the DESTRUCTIVE_OPERATIONS backstop, so there is no '
+      + 'pre-mapping rows retired in the same batch (a dispatched `restore`/`purge` stayed '
+      + 'denied fail-closed via the DESTRUCTIVE_OPERATIONS backstop, so there was no '
       + 'ungated window), and the mechanical conversion strips the keys from every object '
       + 'grant in `permissions[].objects` (pure lossless delete — they never had an '
       + 'effect to lose). `allowTransfer` is ENFORCED — the server guards who may rewrite a record\'s '
-      + 'owner — and stays. The keys return '
-      + 'with the M2 lifecycle initiative (feature + RBAC in one batch), which stays open as their '
-      + 'anchor.',
+      + 'owner — and stays. The keys do not return: the operations now exist with the recycle bin '
+      + '(ADR-0148), and their grants are the new keys `allowRestoreOwnDeleted` and '
+      + '`manageRecycleBin`.',
   },
   {
     id: 'permission-rls-tags-retired',

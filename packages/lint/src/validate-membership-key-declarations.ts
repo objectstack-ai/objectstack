@@ -28,11 +28,14 @@
  *   wrong ones. A registry-injected column (`owner_id`, `created_by`) is a
  *   column of the object and is judged by its injected definition.
  * - {@link MEMBERSHIP_KEY_VALUE_FIELD_INVALID} (refusal 6) — F is not a column
- *   of the merged object, or not a reference (`lookup`, `master_detail` or
- *   `user`). The set holds F's values, and a policy compares it with a column
- *   that references F's target or with that target's `id` (refusal 11), which
- *   only a reference has. `multiple: true` is allowed: its values are
- *   flattened. F naming U's column is refused by `MembershipKeySchema` itself.
+ *   of the merged object, or neither a reference (`lookup`, `master_detail` or
+ *   `user`) nor `id`, the object's own primary key. The set holds F's values,
+ *   and a policy compares it with a column that references F's target or with
+ *   that target's `id` (refusal 11): a reference names its target, and `id`
+ *   names X itself, so the key holds the caller's own rows of X (#31129 ruling
+ *   A, "the records I am"). Any other column has no target to compare with.
+ *   `multiple: true` is allowed: its values are flattened. F naming U's column
+ *   is refused by `MembershipKeySchema` itself.
  * - {@link MEMBERSHIP_KEY_DECLARED_TWICE} (refusal 3) — one key on two objects.
  *   `defineStack` and `composeStacks` refuse it inside one stack; this is the
  *   door they do not see, the runtime publish gate, where the other declaration
@@ -66,6 +69,7 @@
 import {
   indexObjectGraph,
   isUnjudgeable,
+  objectsAsServed,
   recordsOf,
   resolveFieldPath,
   suggestName,
@@ -104,7 +108,11 @@ function str(v: unknown): string {
 /** The platform's user object, the target of every `user` field. */
 const USER_OBJECT = 'sys_user';
 
-/** The field types a membership key's `valueField` may have. */
+/**
+ * The field types a membership key's `valueField` may have. The one other
+ * column it may name is `id`, X's own primary key ({@link isRosterOwnId}),
+ * which has no field type: the driver, not a definition, provisions it.
+ */
 const VALUE_FIELD_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail', 'user']);
 
 /** One `membershipKeys` entry, where the stack declares it. */
@@ -205,75 +213,6 @@ export function stackObjectNamesOf(stack: unknown): Set<string> {
   return names;
 }
 
-/** One `objectExtensions` entry, as the registry folds it. */
-interface VisibleExtension {
-  /** Package order: registration order across packages. */
-  carrier: number;
-  /** `priority ?? 200`, the registry's default. */
-  priority: number;
-  fields: AnyRec[];
-}
-
-/**
- * The stack's objects with every `objectExtensions` entry folded in, as the
- * registry merges them (this file's header). A field two packages write at the
- * priority that decides it is left out of the merged map and named in
- * `tied`, so its verdict is "not judged" rather than either writer's.
- */
-function mergedObjectsOf(stack: AnyRec): { objects: AnyRec[]; tied: Map<string, Set<string>> } {
-  const objects = recordsOf(stack.objects);
-  const tied = new Map<string, Set<string>>();
-  const names = new Set(objects.map((obj) => str(obj.name)).filter(Boolean));
-  const extensions = new Map<string, VisibleExtension[]>();
-  const collect = (entries: unknown, carrier: number) => {
-    if (!Array.isArray(entries)) return;
-    for (const entry of entries) {
-      if (!isRec(entry) || typeof entry.extend !== 'string' || !names.has(entry.extend)) continue;
-      const list = extensions.get(entry.extend) ?? [];
-      // One per package per target: the later entry wins.
-      const kept = list.filter((ext) => ext.carrier !== carrier);
-      kept.push({
-        carrier,
-        priority: typeof entry.priority === 'number' ? entry.priority : 200,
-        fields: recordsOf(entry.fields),
-      });
-      extensions.set(entry.extend, kept);
-    }
-  };
-  if (Array.isArray(stack.packages)) {
-    stack.packages.forEach((pkg: unknown, j: number) => {
-      if (isRec(pkg) && isRec(pkg.manifest)) collect(pkg.manifest.objectExtensions, j);
-    });
-  } else {
-    collect(stack.objectExtensions, 0);
-  }
-  if (extensions.size === 0) return { objects, tied };
-
-  const merged = objects.map((obj) => {
-    const name = str(obj.name);
-    const exts = extensions.get(name);
-    if (!exts) return obj;
-    const fields = new Map<string, AnyRec>();
-    for (const f of recordsOf(obj.fields)) if (str(f.name)) fields.set(str(f.name), f);
-    const lastWriter = new Map<string, VisibleExtension>();
-    const tiedKeys = new Set<string>();
-    for (const ext of [...exts].sort((a, b) => a.priority - b.priority || a.carrier - b.carrier)) {
-      for (const f of ext.fields) {
-        const key = str(f.name);
-        if (!key) continue;
-        const previous = lastWriter.get(key);
-        if (previous && previous.priority === ext.priority) tiedKeys.add(key);
-        else tiedKeys.delete(key);
-        lastWriter.set(key, ext);
-        fields.set(key, f);
-      }
-    }
-    if (tiedKeys.size > 0) tied.set(name, tiedKeys);
-    return { ...obj, fields: [...fields.values()] };
-  });
-  return { objects: merged, tied };
-}
-
 /** U's verdict: `null` when it is a single-valued user reference, else the reason. */
 function userFieldFault(meta: GraphField): string | null {
   const isUserRef =
@@ -287,11 +226,31 @@ function userFieldFault(meta: GraphField): string | null {
   return null;
 }
 
-/** F's verdict: `null` when it is a reference, else the reason. */
-function valueFieldFault(meta: GraphField): string | null {
+/** F's verdict: `null` when it is a reference or X's own `id`, else the reason. */
+function valueFieldFault(column: Extract<ColumnVerdict, { kind: 'ok' }>): string | null {
+  if (column.primaryKey) return null;
+  const { meta } = column;
   if (meta.type && VALUE_FIELD_TYPES.has(meta.type)) return null;
-  return `is a \`${meta.type ?? 'untyped'}\` field, not a reference (\`lookup\`, \`master_detail\` or \`user\`)`;
+  return `is a \`${meta.type ?? 'untyped'}\` field, not a reference (\`lookup\`, \`master_detail\` or \`user\`) or \`id\``;
 }
+
+/**
+ * [#31129 ruling A] Does a membership key's resolved `valueField` name X's
+ * own primary key, so the set is the caller's own rows of X? Only the `id` the
+ * driver provisions: the graph serves it as an injected column with an empty
+ * slice. An author-declared field that happens to be named `id` is judged by
+ * its own definition, like any other column. Shared by the declaration judge
+ * and the policy-target judge, so the two cannot disagree about it.
+ */
+export function isRosterOwnId(column: string, verdict: { injected?: true; meta?: GraphField }): boolean {
+  return column === 'id' && verdict.injected === true && !verdict.meta?.type;
+}
+
+/** One of U / F, resolved on the merged object — see {@link columnOf}. */
+type ColumnVerdict =
+  | { kind: 'ok'; meta: GraphField; primaryKey: boolean }
+  | { kind: 'missing'; candidates: ReadonlySet<string> }
+  | { kind: 'skip' };
 
 /**
  * The column one of U / F names, judged on the merged object: `ok` with its
@@ -304,14 +263,15 @@ function columnOf(
   object: string,
   column: string,
   tied: ReadonlySet<string> | undefined,
-): { kind: 'ok'; meta: GraphField } | { kind: 'missing'; candidates: ReadonlySet<string> } | { kind: 'skip' } {
+): ColumnVerdict {
   if (!column || tied?.has(column)) return { kind: 'skip' };
   const verdict = resolveFieldPath(graph, object, column);
   if (!verdict || isUnjudgeable(verdict)) return { kind: 'skip' };
   if (verdict.kind === 'field-unknown') return { kind: 'missing', candidates: verdict.candidates };
   if (verdict.kind !== 'ok') return { kind: 'skip' };
   // `id` maps to an empty slice: the driver's primary key, never a reference.
-  return { kind: 'ok', meta: verdict.meta ?? {} };
+  // As U it is no user reference; as F it is the roster row's own id.
+  return { kind: 'ok', meta: verdict.meta ?? {}, primaryKey: isRosterOwnId(column, verdict) };
 }
 
 /**
@@ -332,7 +292,7 @@ export function validateMembershipKeyDeclarations(
   const declared = declaredMembershipKeysOf(stack);
   if (declared.length === 0) return findings;
 
-  const { objects: merged, tied } = mergedObjectsOf(stack);
+  const { objects: merged, tied } = objectsAsServed(stack);
   const graph = indexObjectGraph({ objects: merged });
   const stackNames = stackObjectNamesOf(stack);
   const owners = options.membershipKeyOwners;
@@ -387,7 +347,7 @@ export function validateMembershipKeyDeclarations(
           suggestName(decl.valueField, value.candidates),
       });
     } else if (value.kind === 'ok' && decl.valueField !== decl.userField) {
-      const fault = valueFieldFault(value.meta);
+      const fault = valueFieldFault(value);
       if (fault) {
         findings.push({
           severity: 'error',
@@ -397,7 +357,7 @@ export function validateMembershipKeyDeclarations(
           message:
             `\`valueField\` '${decl.valueField}' ${fault}, so the set holds values no policy can compare ` +
             'with a record',
-          hint: 'Point `valueField` at a `lookup`, `master_detail` or `user` column, or reference the values\' object',
+          hint: 'Point `valueField` at a `lookup`, `master_detail` or `user` column, or at `id` for the caller\'s own rows',
         });
       }
     }

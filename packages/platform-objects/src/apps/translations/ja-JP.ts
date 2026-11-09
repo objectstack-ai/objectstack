@@ -16,6 +16,7 @@ export const jaJP: TranslationData = {
         grp_account_inbox: { label: '受信箱' },
         grp_account_security: { label: 'セキュリティ' },
         grp_account_developer: { label: '開発者' },
+        grp_account_ai_assistant: { label: 'AI アシスタント' },
         nav_account_profile: { label: 'プロフィール' },
         nav_account_notifications: { label: '通知' },
         nav_account_approvals: { label: '承認待ち' },
@@ -25,9 +26,9 @@ export const jaJP: TranslationData = {
         nav_account_api_keys: { label: 'API キー' },
         nav_account_oauth_apps: { label: 'OAuth アプリケーション' },
         // Contributed at runtime by `@objectstack/mcp` into
-        // `grp_account_developer`; the Setup twin's key does not answer for the
+        // `grp_account_ai_assistant`; the Setup twin's key does not answer for the
         // Account app (one `apps.<app>.navigation` namespace per app).
-        nav_connect_agent: { label: 'エージェントを接続' },
+        nav_connect_agent: { label: 'AI アシスタントを接続' },
       },
     },
     setup: {
@@ -49,6 +50,7 @@ export const jaJP: TranslationData = {
         group_advanced: { label: '詳細' },
 
         nav_system_overview: { label: 'システム概要' },
+        nav_connect_agent: { label: 'AI アシスタントを接続' },
 
         nav_users: { label: 'ユーザー' },
         nav_organization: { label: '現在の組織' },
@@ -63,13 +65,16 @@ export const jaJP: TranslationData = {
         nav_record_shares: { label: 'レコード共有' },
         nav_queues: { label: 'キュー' },
         nav_queue_members: { label: 'キューメンバー' },
+        nav_assignment_rules: { label: '割り当てルール' },
         // Conditionally contributed by `@objectstack/plugin-auth` (only when an
         // external IdP is wired), so `check:app-nav-i18n` cannot see it — see
         // the rationale in `en.ts` (#6659). Wording matches this locale's
         // `sys_sso_provider.pluralLabel`.
         nav_sso_providers: { label: 'SSO プロバイダー' },
+        // Conditionally contributed by plugin-auth (only while SCIM is wired),
+        // the same case as the entry above; see `en.ts` (#31123).
+        nav_scim_credentials: { label: 'SCIM 資格情報' },
         nav_api_keys: { label: 'API キー' },
-        nav_connect_agent: { label: 'エージェントを接続' },
 
         nav_approvals_inbox: { label: '承認センター' },
         nav_approval_requests: { label: 'リクエスト' },
@@ -84,11 +89,12 @@ export const jaJP: TranslationData = {
         nav_settings_sms: { label: 'SMS 配信' },
         nav_settings_branding: { label: 'ブランディング' },
         nav_settings_auth: { label: '認証' },
+        nav_settings_access_policy: { label: 'アクセスポリシー' },
         nav_settings_storage: { label: 'ファイルストレージ' },
         nav_settings_ai: { label: 'AI と Embedder' },
         nav_settings_knowledge: { label: 'ナレッジ' },
         nav_settings_lifecycle: { label: 'データライフサイクル' },
-        nav_settings_feature_flags: { label: '機能フラグ' },
+        nav_recycle_bin: { label: 'ごみ箱' },
         nav_notification_preferences: { label: '通知設定' },
         nav_notification_templates: { label: '通知テンプレート' },
 
@@ -186,9 +192,9 @@ export const jaJP: TranslationData = {
         'このランタイムを ObjectStack コントロールプレーンに接続すると、組織のプライベートパッケージを閲覧してここにインストールできます。',
     },
     connect_agent: {
-      label: 'エージェントを接続',
+      label: 'AI アシスタントを接続',
       subtitle:
-        'MCP 対応の AI クライアントにこのシステムへの統制されたアクセスを許可します。すべての呼び出しは、呼び出し元自身の権限と行レベルセキュリティのもとで実行されます。',
+        'Claude や Doubao などの AI アシスタントからこのシステムを使えます。アシスタントは常にあなたとして動作し、あなたの権限で許された範囲だけを参照・変更します。',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

@@ -333,7 +333,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
       },
     },
     dashboards: {
-      pipeline_dashboard: {
+      crm_pipeline_dashboard: {
         label: '销售漏斗',
         description: '销售漏斗一览，并与之前的周期对比。',
         widgets: {
@@ -366,18 +366,36 @@ export const CrmTranslationBundle = defineTranslationBundle({
     },
     // The names a dashboard draws under its tiles and on its chart axes.
     datasets: {
-      opportunity_metrics: {
+      crm_opportunity_metrics: {
         label: '商机指标',
         description: '销售漏斗的商机数与金额。',
         dimensions: {
-          stage: { label: '阶段' },
-          account: { label: '客户' },
-          close_date: { label: '成交日期' },
+          stage: {
+            label: '阶段',
+            description: '商机在销售流程中所处的阶段：初步接洽、需求确认、方案报价、赢单或输单。前三个是在途商机，后两个是已结束的商机。',
+          },
+          account: {
+            label: '客户',
+            description: '商机所销售的客户公司。每个商机恰好属于一个客户；结果显示客户名称。',
+          },
+          close_date: {
+            label: '成交日期',
+            description: '商机实际结束的日期；在途商机则为预计成交日期，按自然月归组。不是商机的创建日期。',
+          },
         },
         measures: {
-          opp_count: { label: '商机数' },
-          total_amount: { label: '总金额' },
-          avg_amount: { label: '平均成交额' },
+          opp_count: {
+            label: '商机数',
+            description: '商机的个数，涵盖所有阶段：在途、赢单与输单都计入。只数赢单时，限定在赢单阶段。',
+          },
+          total_amount: {
+            label: '总金额',
+            description: '所有商机金额之和，涵盖所有阶段：在途、赢单与输单都计入，因此它既不是在途漏斗金额，也不是已确认收入。在途漏斗是限定在三个在途阶段的这一合计；赢单收入是限定在赢单阶段的这一合计。',
+          },
+          avg_amount: {
+            label: '平均成交额',
+            description: '单个商机的平均金额，涵盖所有阶段：在途、赢单与输单都计入。未填写金额的商机不参与平均。',
+          },
         },
       },
     },
@@ -411,9 +429,9 @@ export const CrmTranslationBundle = defineTranslationBundle({
     // The security catalog: what an admin assigns a person to, and what
     // Setup lists under it.
     positions: {
-      sales_rep: { label: '销售代表', description: '一线销售代表。' },
-      sales_manager: { label: '销售经理', description: '管理一支销售代表团队。' },
-      finance_approver: { label: '财务审批人', description: '有权审批 30% 以上折扣的财务团队成员。' },
+      crm_sales_rep: { label: '销售代表', description: '一线销售代表。' },
+      crm_sales_manager: { label: '销售经理', description: '管理一支销售代表团队。' },
+      crm_finance_approver: { label: '财务审批人', description: '有权审批 30% 以上折扣的财务团队成员。' },
     },
     permissions: {
       crm_sales_user: { label: 'CRM 销售用户' },

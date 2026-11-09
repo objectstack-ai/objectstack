@@ -38,7 +38,11 @@ export const InboxMessage = ObjectSchema.create({
             name: 'mine',
             label: 'Notifications',
             data: { provider: 'object', object: 'sys_inbox_message' },
-            columns: ['title', 'topic', 'severity', 'created_at'],
+            // [#30126 row 8] No `topic`: it is the producer's machine id
+            // (`notify`, `collab.mention`), not a word a recipient reads, and
+            // there is no catalog that labels it. The column stays on the
+            // object (searchable, filterable); only this view stops showing it.
+            columns: ['title', 'severity', 'created_at'],
             filter: [{ field: 'user_id', operator: 'equals', value: '{current_user_id}' }],
             sort: [{ field: 'created_at', order: 'desc' }],
             pagination: { pageSize: 50 },

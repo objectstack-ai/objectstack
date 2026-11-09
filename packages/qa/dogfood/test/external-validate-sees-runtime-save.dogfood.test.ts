@@ -50,8 +50,9 @@ const SAVED = 'dogfood_ext_cust_21842';
 /** A column the saved object declares and the remote `customers` table does not have. */
 const MISSING = 'loyalty_tier';
 /** Imported at runtime from the remote `orders` table. */
-// [#21889] Prefixed: an import over `showcase_external` is held to the showcase package's namespace.
-const IMPORTED = 'showcase_dogfood_ext_ord_21842';
+// [#21889] Prefixed: an import over `showcase_external` is held to the namespace of the package it
+// lands in, the showcase's customization package (`showcase_custom`, #30469 item 2).
+const IMPORTED = 'showcase_custom_dogfood_ext_ord_21842';
 
 const validatePath = `/datasources/${DATASOURCE}/external/validate`;
 

@@ -3383,6 +3383,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       <div
         ref={scrollBoxRef}
         data-testid="data-table-scroll-box"
+        // The element that scrolls, for a host that reads whether the table
+        // overflows it (objectstack#29945: a record page's body table).
+        data-table-scroll-box=""
         className={cn(
         "relative bg-background",
         // When embedded in a shared scroll container (grouped grid), let the
@@ -3527,7 +3530,9 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         {col.headerIcon && (
                           <span className="text-muted-foreground shrink-0">{col.headerIcon}</span>
                         )}
-                        <span className="text-xs font-medium text-muted-foreground whitespace-nowrap truncate">{col.header}</span>
+                        {/* The full label on hover wherever the cell is too narrow
+                            for it and the ellipsis cuts it (objectstack#29945). */}
+                        <span className="text-xs font-medium text-muted-foreground whitespace-nowrap truncate" title={col.header || undefined}>{col.header}</span>
                         {isColumnSortable(col) && getSortIcon(col.accessorKey)}
                         {editColumnEnabled && (
                           <button

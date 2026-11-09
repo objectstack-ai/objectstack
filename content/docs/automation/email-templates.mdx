@@ -96,7 +96,7 @@ in that shape.
 **The formatter is one the whitelist names.** `{{ amount | curency:EUR }}` is
 refused by `os validate`, `os build`, `os lint` and the metadata publish door
 (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish door),
-naming the hole and listing the known formatters (`TEMPLATE_FORMATTERS`,
+naming the hole and listing the known formatters (`MAIL_TEMPLATE_FORMATTERS`,
 exported from `@objectstack/formula`). A template stored before this rule fails its render with
 `TEMPLATE_INVALID` and sends nothing, rather than print the raw value (`1234.5`)
 where a formatted one was meant; republish it with the name corrected.
@@ -149,6 +149,41 @@ send; code that calls `sendTemplate` or `renderTemplate` itself passes it as
 sent: the amount is never formatted in US dollars or any other guess. Set the
 organization's default currency, or name the currency in the hole: a literal
 code (`currency:EUR`) or a marked path to it (`currency:@currency_code`).
+
+**`option` prints a select value as its option's label.** A flow notice is
+filled once per run and then sent to each recipient in their own locale, so a
+select field's value reaches the template as it is stored (`needs_analysis`).
+`option` names the object and field the value belongs to, written bare as
+`object.field`, and the hole prints that option's label in the recipient's
+language:
+
+```ts
+subject: 'Deal stalled at {{ stage | option:opportunity.stage }}',
+```
+
+The renderer builds the label table for each `object.field` the template names,
+in the locale it renders that recipient's copy in. A multi-select value prints
+the label of each of its values, joined with `, `, and a value that is not one
+of the field's options prints as stored. A render that reaches an `option` hole
+with no label table for its field is refused and nothing is sent: the stored
+value is never printed where the label was promised. `os validate`, `os build`,
+`os lint` and the metadata publish door refuse an `option` hole whose object
+resolves to nothing (the app's own objects, those another package of the same
+artifact provides, and the platform's objects all resolve), whose field that
+object does not have, or whose field declares no options (`email-template-hole-grammar`, a `422 INVALID_METADATA` at the publish
+door), and an argument that is not a bare `object.field`: a quoted one
+(`option:'opportunity.stage'`), a field with no object (`option:stage`) or a
+marked path (`option:@stage_ref`). An object none of those carries whose name
+has a platform prefix (`sys_`, `cloud_`, `ai_`) gets a warning at `os validate`,
+`os build` and `os lint`, its field not judged, because a package outside the
+app may register it; the publish door judges against every object the
+deployment serves and refuses it there if none of them is that object. A
+template saved into a package is judged against that package's closure (its
+own objects, the objects of the packages its manifest declares in
+`dependencies`, and platform objects): an object outside it is refused, and the
+fix is to declare the dependency. `option` belongs to mail templates: in-app
+template text (flow notifications, action and bulk-action copy) refuses it as a
+formatter it does not know.
 
 **Where a hole may sit in `bodyHtml`.** The renderer's escaping is right for
 element text and for a quoted attribute value that holds plain text, so those
@@ -257,8 +292,10 @@ one `EmailServicePlugin` wires), walks:
 1. **this locale, folded** against the locale tags the template's bundle carries
    by `resolveBundleLocale` (`@objectstack/spec/system`, the BCP-47 fold
    plugin-email imports rather than copying): exact, then case-insensitive
-   (`zh-cn` → `zh-CN`), then base language (`en-GB` → `en`), then variant
-   expansion (`zh` and `zh-TW` → `zh-CN`), the first match in ascending tag
+   (`zh-cn` → `zh-CN`), then the same platform locale table language (`zh-TW`
+   → a `zh-Hant` row, `zh` → a `zh-CN` row, in any tag order), then base
+   language (`en-GB` → `en`), then variant expansion (`zh-TW` → `zh-CN` when
+   the bundle has no Traditional row), the first match in ascending tag
    order;
 2. **the stack's declared fallback locale**, as
    `II18nService.getFallbackLocale()` answers it (`i18n.fallbackLocale`, else

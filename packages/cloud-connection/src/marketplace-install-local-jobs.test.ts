@@ -47,6 +47,7 @@ import { tmpdir } from 'node:os';
 // the plugin reaches the same module through a dynamic `import()`.
 import '@objectstack/runtime';
 import { SCHEDULED_WORK_ENV } from '@objectstack/types';
+import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
 import { LocalManifestSource } from './local-manifest-source.js';
@@ -66,7 +67,13 @@ const HANDLER_JOB = { name: 'jobs_app_tick_handler', schedule: INTERVAL, handler
 /** The compiled-artifact shape `os build` writes and `os package install` sends. */
 function artifact(jobs: unknown[] | undefined, id: string = APP_ID) {
     return {
-        manifest: { id, namespace: 'jobs_app', version: '0.1.0', type: 'app', name: 'Jobs App' },
+        // A range this runtime admits, as a scaffolded app declares one: the
+        // answer then carries no `protocolCheckSkipped` notice, and the key
+        // set the jobs-free case pins is the jobs gate's alone.
+        manifest: {
+            id, namespace: 'jobs_app', version: '0.1.0', type: 'app', name: 'Jobs App',
+            engines: { protocol: `^${PROTOCOL_MAJOR}` },
+        },
         objects: [{ name: TICK, label: 'Tick', fields: { name: { type: 'text', label: 'Name' } } }],
         ...(jobs ? { jobs } : {}),
     };

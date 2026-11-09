@@ -54,7 +54,8 @@ export interface ITriggerApiService {
    *    id gets this `503`, signed or not. It stays a `503` on purpose: it is
    *    the deployment's fault, a sender retries it, and it lasts only while
    *    the secret cannot be read.
-   *  - It verifies the `x-objectstack-signature` header in its timestamped
+   *  - Unless the hook declares its sender's own scheme (next item), it
+   *    verifies the `x-objectstack-signature` header in its timestamped
    *    form, the only one it accepts: `t=<unix seconds>,v1=<hex>`, where the
    *    hex is the HMAC-SHA256 of `<t>.<raw body>` under that secret, and a `t`
    *    more than 300 seconds from the server's clock is refused. A missing or
@@ -62,9 +63,60 @@ export interface ITriggerApiService {
    *    (`sha256=` and the hex HMAC-SHA256 of the raw body alone, which signs
    *    no time; refused even when it is the secret's HMAC of the body) get the
    *    unverified-post refusal below.
+   *  - **A sender's own scheme, declared, REPLACES that check** for its hook:
+   *    the start node's `config.signature`
+   *    (`automation/api-trigger-signature.zod.ts`, for a vendor that signs its
+   *    callbacks its own way). `apiTriggerVerifierOf` is the one reader of
+   *    which verifier a hook has, and every hook has exactly one. Such a hook
+   *    verifies the declared scheme under the key its `config.secretRef`
+   *    names, read at this moment like any hook secret (the `503` above when
+   *    it cannot be read), and nothing else: ⛔ it never reads
+   *    `x-objectstack-signature`, so a valid one admits nothing, and ⛔ it
+   *    never admits a post that lacks the declared header. The declared shape
+   *    itself refuses a `header` that names `x-objectstack-signature` or
+   *    another reserved header (`API_TRIGGER_SIGNATURE_RESERVED_HEADERS`: the
+   *    request's credentials, routing or framing, or the idempotency key), in
+   *    any case, so a declared scheme never reads one. A hook whose
+   *    declaration the reader answers `unusable` admits no post at all: every
+   *    post to it gets the one `401 INVALID_SIGNATURE` below, whether the
+   *    trigger declines to arm the declaration or refuses each post. The
+   *    implementer:
+   *     - reads the declared `header`, its name matched without regard to
+   *       case. A field the sender repeats is ONE value: the field values
+   *       joined with `, ` in the order received (what `Headers.get`
+   *       answers), and that joined value is the one verified, ⛔ never the
+   *       first or the last field alone. For `signs: 'body'` the whole
+   *       trimmed value, after `prefix` when one is declared (a value without
+   *       it fails), is the one digest, so a repeated body-only header fails.
+   *       For `signs: 'timestamp.body'` the value is `NAME=value` elements
+   *       separated by `,`, each trimmed and split at its first `=`: exactly
+   *       one element named `timestampElement`, whose value is whole unix
+   *       seconds written as `x-objectstack-signature` writes its `t` (decimal,
+   *       no sign, no leading zero, at most fifteen digits), and one or more
+   *       named `digestElement` (a sender rolling its key sends one per key).
+   *       An element with any other name is ignored. A missing, repeated or
+   *       malformed timestamp, or no digest, fails.
+   *     - computes the HMAC-SHA256, under the key, of the raw body exactly as
+   *       received for `body`, or of `<t>.<raw body>` for `timestamp.body`,
+   *       `<t>` being the timestamp element's value exactly as received.
+   *     - decodes each received digest by `encoding` (`hex`, or `base64` in
+   *       the RFC 4648 standard alphabet) and compares the 32 bytes with that
+   *       HMAC **in constant time**. A digest that does not decode to 32
+   *       bytes fails. The post verifies when one digest matches.
+   *     - for `timestamp.body`, then refuses a `t` more than 300 seconds from
+   *       the server's clock: the same window the `x-objectstack-signature`
+   *       check applies (`HTTP_SIGNATURE_TOLERANCE_SECONDS` in
+   *       `@objectstack/core`), never a window of its own.
+   *    A `body` scheme signs no time, so **no replay window applies to it**:
+   *    a captured post verifies again for as long as the key is unchanged.
+   *    The sender offers nothing to bound a replay with, and this contract
+   *    adds no bound of its own. A trigger that predates this form verifies
+   *    `x-objectstack-signature` alone, so it refuses every post a declared
+   *    sender makes; it never admits one unverified.
    *  - **One refusal for every post that does not verify** (#22806): an
    *    unknown flow, a wrong hook id, an absent signature and a bad one all
-   *    answer `401 INVALID_SIGNATURE`, with one body. So the answer does not
+   *    answer `401 INVALID_SIGNATURE`, with one body. A post that fails a
+   *    declared scheme, at any of its steps above, gets that same answer. So the answer does not
    *    tell an armed flow name from an unarmed one, whichever hook id a flow
    *    is armed with. The cause (which of those) goes to the server log,
    *    ⛔ never to the sender. FROM → TO: an unknown flow and a wrong hook id
@@ -94,13 +146,15 @@ export interface ITriggerApiService {
    * fail verification for every real sender. ⛔ Nor does the caller check,
    * pre-filter or short-circuit the signature: there is one verifier, and it
    * is behind this member. Anything the signing scheme carries beyond the
-   * body (the accepted form's timestamp, for one) arrives in the same
-   * forwarded request, so this signature gains no field for it.
+   * body (the accepted form's timestamp, for one, and a declared scheme's
+   * own header) arrives in the same forwarded request, headers as received,
+   * so this signature gains no field for it.
    *
    * **The signature is the only credential.** This member takes no
    * `ExecutionContext` and reads no session, cookie or `Authorization` header:
    * a third-party sender has no session, and the HMAC under the hook's own
-   * secret carries the whole authorization. A signed-in caller is judged
+   * secret (or, for a declared scheme, the key `config.secretRef` names)
+   * carries the whole authorization. A signed-in caller is judged
    * exactly as an anonymous one, as on the self-hosted mount, which has no
    * auth gate.
    *

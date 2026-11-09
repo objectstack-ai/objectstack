@@ -41,6 +41,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
+import { isUserBanInForce } from '@objectstack/core';
 import {
   FORWARD_CREDENTIAL_HEADER,
   redeemForwardCredential,
@@ -140,13 +141,6 @@ function soleTokenOf(where: unknown): string | undefined {
   return typeof w.value === 'string' ? w.value : undefined;
 }
 
-/** A user better-auth would refuse a session to: banned, and the ban not lapsed. */
-function isBanned(user: any): boolean {
-  if (!user?.banned) return false;
-  const until = user.banExpires ? new Date(user.banExpires).getTime() : undefined;
-  return until === undefined || Number.isNaN(until) || until > Date.now();
-}
-
 /**
  * The better-auth plugin that answers the view's session lookup from memory.
  * It wraps the database adapter better-auth builds its session store on
@@ -172,7 +166,8 @@ export function agentForwardIdentityViewPlugin() {
           return inner.findOne(args);
         }
         const user = await inner.findOne({ model: 'user', where: [{ field: 'id', value: view.agent.userId }] });
-        if (!user || isBanned(user)) return null;
+        // A user better-auth would refuse a session to: the one ban predicate.
+        if (!user || isUserBanInForce(user)) return null;
         const session = {
           id: view.sessionId,
           token: view.token,

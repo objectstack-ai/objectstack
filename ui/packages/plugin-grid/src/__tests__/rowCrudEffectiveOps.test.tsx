@@ -129,6 +129,9 @@ function renderGrid(c: Case) {
       ...(c.managedBy ? { managedBy: c.managedBy } : {}),
       ...(c.userActions ? { userActions: c.userActions } : {}),
       fields: { id: { type: 'text' }, name: { type: 'text', label: 'Name' } },
+      // `notify` is declared: a bare bulk-action name draws only when the
+      // object declares the action it names (objectstack#30169).
+      actions: [{ name: 'notify', label: 'Notify' }],
     }),
   };
   const schema: any = {

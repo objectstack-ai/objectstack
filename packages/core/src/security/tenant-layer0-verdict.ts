@@ -70,6 +70,19 @@ export interface TenantLayer0Input {
    */
   tenancyDisabled: boolean;
   /**
+   * [ADR-0015 §10] The object is EXTERNAL (ADR-0015 `external`: the platform
+   * provisions none of its storage) and states no organization scope the wall
+   * can enforce — neither its own `organization_id` field, nor
+   * `tenancy.enabled: false`, nor `systemFields.tenant: false`; or it names a
+   * `tenancy.tenantField` other than `organization_id`, which the wall does not
+   * read. Under a walled posture such an object is DENIED: whose rows it serves
+   * is a fact only its author can state, and an unstated scope fails toward
+   * isolation, never toward exposure (the shape the owner anchor takes when no
+   * owner is provable). The boot refuses such an object by name; this rung
+   * meets the one registered after the boot. Omitted, nothing changes.
+   */
+  externalOrganizationScopeUndeclared?: boolean;
+  /**
    * Whether the object's POSTURE permits a platform admin to cross the tenant
    * wall — `private`, platform-global (`tenancy.enabled:false`), or
    * better-auth-managed (exactly the ADR-0066 ① gate). Business (public) tenant
@@ -123,18 +136,28 @@ const LAYER0_DENY: TenantLayer0Verdict = Object.freeze({ kind: 'deny' as const }
  *   (ADR-0105 D2).
  * - `deny` → a walled posture on a tenant object, but the context carries no
  *   organization scope to enforce with (no active org under `isolated`, empty
- *   access set under `group`) → fail closed (zero rows / write denied).
+ *   access set under `group`); or a walled posture on an external object that
+ *   states no organization scope (ADR-0015 §10) → fail closed (zero rows /
+ *   write denied).
  */
 export function computeTenantLayer0Verdict(input: TenantLayer0Input): TenantLayer0Verdict {
   // `single` posture (incl. a degraded deployment, which resolves to `single`)
   // → parity with today's policy stripping.
   if (!postureEnforcesWall(input.tenancyPosture)) return LAYER0_NONE;
 
-  // Not a tenant object: platform-global (tenancy disabled) or simply carries no
-  // `organization_id` column (e.g. better-auth identity tables like `sys_user`).
-  // Layer 0 contributes nothing — the object's own business RLS (Layer 1, e.g.
+  // Not a tenant object: platform-global (tenancy disabled). Layer 0
+  // contributes nothing — the object's own business RLS (Layer 1, e.g.
   // `_self` carve-outs) is its only scoping.
   if (input.tenancyDisabled) return LAYER0_NONE;
+
+  // [ADR-0015 §10] An external object that states no organization scope is
+  // denied under a wall — ahead of the column question (its `organization_id`
+  // is the registry's, not the remote's) and ahead of the platform-admin
+  // crossing (an unstated scope is a configuration defect, not a posture).
+  if (input.externalOrganizationScopeUndeclared) return LAYER0_DENY;
+
+  // Simply carries no `organization_id` column (e.g. better-auth identity
+  // tables like `sys_user`): not a tenant object, Layer 0 contributes nothing.
   if (input.objectHasOrgIdField === false) return LAYER0_NONE;
 
   // Exemption is a Layer 0 rule (W2 fix): only a TRUE PLATFORM_ADMIN caller on an

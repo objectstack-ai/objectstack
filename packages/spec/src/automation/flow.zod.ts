@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
@@ -27,6 +28,8 @@ import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { predicateSlotRefusal, resolveFlowNodeExpressions, type FlowNodeSiblingBlocks } from './flow-node-expression-paths';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { apiTriggerSecretRefRefusals } from './api-trigger-secret-ref.zod';
+import { apiTriggerSignatureRefusals } from './api-trigger-signature.zod';
+import { flowStartConfigRefusals } from './flow-start-config-refusals';
 import { saveNoticePlacementRefusals } from './save-notice-placement';
 // [#23543 F3] The loose `config` keys of the two sibling-block node types — one
 // table, shared with the two D2 lifts that still run at rehydration.
@@ -232,23 +235,17 @@ export const FLOW_PAUSE_CAPABLE_NODE_TYPES: readonly string[] = [
  *
  * ## `objectName` — a start input that is a record id (#29425 ruling A)
  *
- * [planned] An input may declare that its value is the id of a record of a
- * named object. The contract the declaration states: every door that starts
- * the flow by name judges the input as a record, whether or not the definition
- * reads it as one in plain sight — the door loads it from the named object in
- * the caller's own scope before the run exists, refusing an unreadable id
- * `404 RECORD_NOT_FOUND` and a value that is not an id
- * `400 VALIDATION_FAILED` naming the input. An input without the declaration
- * keeps the visible-read rule (`flowDeclaredRecordReads` in
- * `packages/runtime/src/flow-start-admission.ts`).
- *
- * ⛔ No door applies it yet. This is the spec half; the start doors read the
- * declaration in the ruling's server half (Blocked-by #29442). Until then the
- * key is parsed, refused on a non-input (below) and linted
- * (`flow-input-unknown-object`), and its liveness row is `planned` with an
- * author warning (`packages/spec/liveness/flow.json` › `variables.objectName`),
- * so an author who writes it is told. Flip the row, drop the warning and the
- * describe's planned sentence in the commit that lands the reader.
+ * An input may declare that its value is the id of a record of a named
+ * object. Every door that starts the flow by name judges the input as a
+ * record, whether or not the definition reads it as one in plain sight: the
+ * door loads it from the named object in the caller's own scope before the
+ * run exists, refusing an unreadable id `404 RECORD_NOT_FOUND` and a value
+ * that is not an id `400` naming the input. The declaration adds that load
+ * beside any read the definition makes in plain sight, never in place of one.
+ * An input without the declaration keeps the visible-read rule. The reader is
+ * `flowDeclaredRecordReads` in `packages/runtime/src/flow-start-admission.ts`;
+ * the key is also refused on a non-input (below) and linted
+ * (`flow-input-unknown-object`).
  *
  * The spelling is `objectName`, the word the CRUD nodes already use for the
  * object they read, and ⛔ not a `type: 'record'` beside it: `type` already
@@ -298,14 +295,14 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
     .meta({ title: 'Default Value' }),
   objectName: z.string().regex(/^[a-z_][a-z0-9_]*$/).optional()
     .describe(
-      '[planned] Declares this input a record reference: its value is the id of one record of the named object ' +
+      'Declares this input a record reference: its value is the id of one record of the named object ' +
       '(the object\'s snake_case name, e.g. `crm_account`). Only on an input (`isInput: true`). The contract: ' +
       'every door that starts the flow by name (the trigger route, an action of type flow over REST and MCP ' +
       'run_action, a declared endpoint of type flow) loads a declared input from this object in the caller\'s ' +
       'own scope before the run exists; an id the caller cannot read there is refused 404 RECORD_NOT_FOUND, and ' +
-      'a value that is not an id is refused 400 VALIDATION_FAILED naming the input. No door applies it yet: ' +
-      'today the key is parsed and checked, and a start with an id the caller cannot read still runs. An input ' +
-      'without this declaration is judged as a record only where the flow\'s own definition reads it as a ' +
+      'a value that is not an id is refused 400 naming the input. The load is added beside any read the ' +
+      'flow\'s own definition makes of the input, never in place of one. An input without this declaration ' +
+      'is judged as a record only where the flow\'s own definition reads it as a ' +
       'record id. `type` stays the data type: the variable holds the id the caller sent.',
     )
     .meta({ title: 'Record Object' }),
@@ -1057,7 +1054,11 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *   type: "record_change",
  *   status: "active",
  *   nodes: [
- *     { id: "start", type: "start", label: "Start", position: {x: 0, y: 0} },
+ *     { id: "start", type: "start", label: "Start", position: {x: 0, y: 0},
+ *       // Launch only on the transition into "submitted": without a start condition the
+ *       // auto-approve write is itself an update and would launch the flow again.
+ *       config: { objectName: "order", triggerType: "record-after-update",
+ *         condition: "record.status == 'submitted' && previous.status != 'submitted'" } },
  *     { id: "check_amount", type: "decision", label: "Check Amount", position: {x: 0, y: 100} },
  *     { id: "auto_approve", type: "update_record", label: "Auto Approve", position: {x: -100, y: 200},
  *       config: { objectName: "order", filter: { id: { dialect: "cel", source: "record.id" } }, fields: { status: "approved" } } },
@@ -1072,8 +1073,12 @@ export const FlowEdgeSchema = lazySchema(() => strictObject(
  *     // Conditions are bare CEL (ADR-0032). Reference fields directly —
  *     // `record.amount`, `previous.status`, `<var>.field` — and DO NOT wrap them
  *     // in `{…}` template braces: `{amount}` parses as a CEL map literal and fails.
- *     { id: "e2", source: "check_amount", target: "auto_approve", condition: "record.amount < 500" },
- *     { id: "e3", source: "check_amount", target: "submit_for_approval", condition: "record.amount >= 500" }
+ *     // On a record-triggered flow an optional field reads `null` when unset, and
+ *     // `<` on null aborts the condition: test `!= null` first — `has()` does not.
+ *     // e3 is the default edge: it takes every order e2 does not, so an order
+ *     // with no amount goes to review instead of being auto-approved.
+ *     { id: "e2", source: "check_amount", target: "auto_approve", condition: "record.amount != null && record.amount < 500" },
+ *     { id: "e3", source: "check_amount", target: "submit_for_approval", isDefault: true }
  *   ]
  * }
  */
@@ -1124,7 +1129,7 @@ export const FlowSchema = lazySchema(() => strictObject(
   },
   {
   /** Identity */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Machine name'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Machine name'),
   label: z.string().describe('Flow label'),
   description: z.string().optional(),
 
@@ -1698,6 +1703,23 @@ export const FlowSchema = lazySchema(() => strictObject(
   // flow's own `nodes` is the whole walk; the three refusals and why each
   // exists are `api-trigger-secret-ref.zod.ts`'s header.
   for (const refusal of apiTriggerSecretRefRefusals(flow)) {
+    ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+  }
+
+  // A third-party sender's signature scheme (`config.signature`), declared
+  // beside `config.secretRef`, which names its key. Declared, it replaces the
+  // `x-objectstack-signature` check for that hook; the five refusals and why
+  // each exists are `api-trigger-signature.zod.ts`'s header.
+  for (const refusal of apiTriggerSignatureRefusals(flow)) {
+    ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+  }
+
+  // [#31224 B1] Two start-node `config` shapes that parse and then do nothing:
+  // a `filter` beside `timeRelative` (the sweep reads `timeRelative.filter`),
+  // and a `schedule` the schedule readers cannot use. Why each, and why the
+  // untyped aliases the reader accepts stay accepted, is
+  // `flow-start-config-refusals.ts`'s header.
+  for (const refusal of flowStartConfigRefusals(flow)) {
     ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
   }
 

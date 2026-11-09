@@ -31,6 +31,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React from 'react';
 import { render, cleanup, waitFor } from '@testing-library/react';
@@ -211,7 +214,8 @@ async function saveFrom(url: string, event: WriteWarningEvent, saved: Record<str
   // The overlay's claim is opened by an effect of the mounted, open dialog.
   await waitFor(() => expect(handlers.has('crud_success')).toBe(true));
   const schema = modalSchemas[modalSchemas.length - 1];
-  expect(schema.objectName).toBe('showcase_task');
+  // The overlay edits the object the write names.
+  expect(schema.objectName).toBe(event.resource);
   const channel = emitWriteWarning(event, t, dataSourceStub as never, identityLabel, toast);
   await schema.onSuccess(saved);
   await channel;

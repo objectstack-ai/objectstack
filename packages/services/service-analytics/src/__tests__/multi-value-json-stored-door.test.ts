@@ -371,6 +371,13 @@ describe('GUARD the judged population is the spec predicates\', over every Field
           () => null,
           (e: Refusal) => ({ code: e.code, status: e.status, member: e.member }),
         );
+        if (type === 'formula') {
+          // [#29304] Not this door's: the native strategy declines a grouped
+          // virtual field to the engine path, which this native-only harness
+          // does not configure — no refusal of this door's (no `member`).
+          expect(verdict, field).toEqual({ code: undefined, status: undefined, member: undefined });
+          continue;
+        }
         const judged = STRUCTURED_JSON_TYPES.has(type) || isMultiValueField({ type, multiple });
         expect(verdict, field).toEqual(judged ? { code: 'INVALID_FIELD', status: 400, member: field } : null);
       }

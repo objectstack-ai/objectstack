@@ -108,7 +108,8 @@ describe('the Interfaces pillar holds a report list item the spec refuses only f
   it('names the list and the item in the designer locale', () => {
     const body = summary({ order: [{}] });
     const held = reportHeldEdit(body, 'zh-CN');
-    expect(held?.clause).toBe(listClause('Order By', 1, held?.input ?? '', 'zh-CN'));
+    // The report form's row label reaches it through the zh-CN overlay (objectstack#30039).
+    expect(held?.clause).toBe(listClause('排序依据', 1, held?.input ?? '', 'zh-CN'));
     expect(held?.target).toBeNull();
   });
 });

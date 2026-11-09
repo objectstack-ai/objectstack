@@ -51,7 +51,7 @@ for (const [k, v] of Object.entries(context.record))
 | Surface | Evaluator (file:line) | In-scope references | Token shape |
 | :-- | :-- | :-- | :-- |
 | Flow / edge / decision | `packages/services/service-automation/src/engine.ts#variables` | `record`,`previous`, **flattened record fields**, flow `variables`, node outputs, `$runId`/`$flowName` | bare **and** `record.x` |
-| Formula field (`Field.expression`) | `packages/objectql/src/engine.ts#expression` | `{ now, timezone, user, org, record }` | `record.x` only |
+| Formula field (`Field.expression`) | `packages/objectql/src/engine-top-level.ts#expression` | `{ now, timezone, user, org, record }` | `record.x` only |
 | Validation (`script`/`cross_field`/`when`) | `packages/objectql/src/validation/rule-validator.ts#cross_field` | `{ record: {...previous,...patch}, previous }` | `record.x` only |
 | Field `visibleWhen`/`requiredWhen`/`readonlyWhen` | `packages/objectql/src/validation/rule-validator.ts#readonlyWhen` | merged `record`, `previous`, (`parent` for master-detail — server-bound for `readonlyWhen` since #4889; the client grid binds it for all three) | `record.x` only |
 | Hook lifecycle `condition` | `packages/objectql/src/hook-wrappers.ts#condition` | `{ record }` | `record.x` only |

@@ -24,6 +24,10 @@ import { resolveFlowTriggerKind } from './flow-trigger-kind';
  * The reference is NOT a credential: it is served with the definition like any
  * other key, and only the literal `config.secret` is withheld on read.
  *
+ * It is also the key a third-party sender's declared scheme is verified under
+ * (`config.signature`, `api-trigger-signature.zod.ts`): one key per hook,
+ * whichever verifier the hook has.
+ *
  * Three refusals, each anchored on the start node's `config`:
  *
  *  - a reference that is not a name — {@link ApiTriggerSecretRefSchema};

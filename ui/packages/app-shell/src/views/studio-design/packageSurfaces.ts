@@ -49,6 +49,14 @@ export interface PackageSurface {
   type: string;
   name: string;
   label: string;
+  /**
+   * objectstack#30046 — a `view` row's bound object and family (`viewKind`,
+   * `list` | `form`), as the published item declares them (ADR-0017's
+   * `{ name, object, viewKind }`). Absent on every other type, and on a
+   * draft-only view: its `_drafts` header carries no body.
+   */
+  object?: string;
+  viewKind?: string;
 }
 
 /**
@@ -127,6 +135,7 @@ function mergeSurfaces(
       type,
       name: String(o.name ?? ''),
       label: String(o.label ?? o.name ?? ''),
+      ...(type === 'view' ? viewBindingOf(o) : {}),
     }))
     .filter((o) => o.name);
 
@@ -141,4 +150,50 @@ function mergeSurfaces(
   }
 
   return items;
+}
+
+/**
+ * objectstack#30046 — a view item's bound object and family, where the item
+ * declares them as strings: the members {@link PackageSurface} carries for a
+ * `view` row. Used for a published row and for a draft-overlaid one alike.
+ */
+export function viewBindingOf(item: Record<string, unknown>): Pick<PackageSurface, 'object' | 'viewKind'> {
+  return {
+    ...(typeof item.object === 'string' && item.object ? { object: item.object } : {}),
+    ...(typeof item.viewKind === 'string' && item.viewKind ? { viewKind: item.viewKind } : {}),
+  };
+}
+
+/** The draft-overlaid read {@link withDraftViewBindings} asks: the metadata client's preview door. */
+export interface DraftViewBindingClient {
+  withPreviewDrafts(on: boolean): { list(type: string, options?: { packageId?: string }): Promise<unknown> };
+}
+
+/**
+ * objectstack#30046 — the `view` rows of {@link loadPackageSurfaces} with the
+ * bound object and family of each draft-only row filled in. A `_drafts`
+ * header carries no body, so a view only drafted here (one made with New view)
+ * is read from the draft-overlaid list (`withPreviewDrafts`), which serves
+ * each pending draft's body. Asked only when some row lacks them; a failed or
+ * refused read returns the rows as they were, so nothing listed is lost.
+ */
+export async function withDraftViewBindings(
+  client: DraftViewBindingClient,
+  packageId: string,
+  items: PackageSurface[],
+): Promise<PackageSurface[]> {
+  if (items.every((item) => item.viewKind)) return items;
+  let rows: unknown;
+  try {
+    rows = await client.withPreviewDrafts(true).list('view', { packageId });
+  } catch {
+    return items;
+  }
+  const byName = new Map<string, Pick<PackageSurface, 'object' | 'viewKind'>>();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row && typeof row === 'object' && typeof (row as { name?: unknown }).name === 'string') {
+      byName.set((row as { name: string }).name, viewBindingOf(row as Record<string, unknown>));
+    }
+  }
+  return items.map((item) => (item.viewKind ? item : { ...item, ...byName.get(item.name) }));
 }

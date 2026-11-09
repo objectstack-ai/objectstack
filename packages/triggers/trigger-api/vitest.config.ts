@@ -36,6 +36,14 @@ export default defineConfig({
         find: /^@objectstack\/core$/,
         replacement: path.resolve(__dirname, '../../core/src/index.ts'),
       },
+      // `start()` reads each hook's one verifier with @objectstack/spec's
+      // `apiTriggerVerifierOf`, the reader the engine and the lint share, and
+      // the declared-signature pins judge what it answers. The same reason:
+      // without this entry those pins read spec's `dist/`, not its source.
+      {
+        find: /^@objectstack\/spec\/automation$/,
+        replacement: path.resolve(__dirname, '../../spec/src/automation/index.ts'),
+      },
     ],
   },
 });

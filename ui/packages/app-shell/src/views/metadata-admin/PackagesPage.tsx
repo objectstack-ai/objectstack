@@ -77,6 +77,9 @@ import {
 import { useMetadataLocale, t, tFormat } from './i18n.js';
 import { useMetadataClient } from './useMetadata.js';
 import { PackageFormDialog } from './PackageFormDialog.js';
+import { readPackageRemovalContents, type PackageRemovalState } from './packageRemovalContents.js';
+import { PackageRemovalSummary } from './PackageRemovalSummary.js';
+import { useAdapter } from '@object-ui/react';
 import { PageHeader } from '../../layout/PageHeader.js';
 import { errorCodeIs } from '@object-ui/types';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
@@ -90,6 +93,8 @@ import { getRuntimeConfig } from '../../runtime-config.js';
 import { readMarketplaceInstalls, type LocalInstallEntry } from '../../console/marketplace/marketplaceApi.js';
 import { MarketplaceNotLoaded, MarketplaceRowActions } from '../../console/marketplace/MarketplaceRowActions.js';
 import { useDependencyMissingText } from '../../console/marketplace/dependencyMissing.js';
+import { useProtocolCheckSkippedText } from '../../console/marketplace/protocolCheckSkipped.js';
+import { ProtocolCheckSkippedNote } from '../../console/marketplace/ProtocolCheckSkippedNote.js';
 import type { InstalledPackageAtEitherStage } from '@objectstack/spec/api-assembled';
 import type { PackagePublishResult } from '@objectstack/spec/system';
 import type { ReassignOrphanedMetadataResponse } from '@objectstack/spec/api';
@@ -158,8 +163,15 @@ export interface PackageManifestRow {
  *
  * The list reads both at load (`UncheckedPackageRow` below is the wire before
  * that read) and refuses a row by name when either is missing.
+ *
+ * `disableable` is the disable door's own verdict, served beside `writable`
+ * (objectstack#28318): the detail sheet offers Disable from it alone, never
+ * from `writable`, `manifest.type` or `scope` — a module of an installed app
+ * is `disableable` and not `writable`. Read like `writable` in the sheet:
+ * anything but `true` offers no Disable, the answer the door would give.
  */
 export interface InstalledPackageRow extends Pick<InstalledPackageAtEitherStage, 'source' | 'writable'> {
+  disableable?: InstalledPackageAtEitherStage['disableable'];
   manifest: PackageManifestRow;
   status?: string;
   enabled?: boolean;
@@ -178,6 +190,14 @@ type UncheckedPackageRow = Omit<InstalledPackageRow, 'source' | 'writable'> & {
 };
 
 const API = '/api/v1/packages';
+
+/**
+ * The code `PATCH /packages/:id/disable` answers, with `409`, while a
+ * validation rule of an enabled package reads a field the package adds through
+ * `objectExtensions` (registered in the spec's error-code ledger). Its message
+ * names every such rule and the remedy; the refusal carries no `details`.
+ */
+const DISABLE_RESTRICTED_BY_VALIDATION_RULE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   // objectstack#29119 — every write this page sends (publish, revert, discard,
@@ -509,11 +529,14 @@ export function PackageDetailSheet({
   const client = useMetadataClient();
   const [busy, setBusy] = React.useState<string | null>(null);
   // `details`: the lines a refusal carries under its sentence, in the server's
-  // own words (objectui#13160).
+  // own words (objectui#13160). `heading`: a console sentence, in the reader's
+  // language, drawn above a refusal that is then shown whole rather than cut
+  // to its first sentence (objectstack#31003).
   const [msg, setMsg] = React.useState<{
     kind: 'ok' | 'err';
     text: string;
     details?: readonly string[];
+    heading?: string;
   } | null>(null);
   // ADR-0033 — pending DRAFT items bound to this package. AI-authored metadata
   // lands as drafts that the active-only browsers hide, so without this the
@@ -534,6 +557,15 @@ export function PackageDetailSheet({
   const [disableOpen, setDisableOpen] = React.useState(false);
   const [deleteMode, setDeleteMode] = React.useState<DeleteMode>('');
   const [deleteTyped, setDeleteTyped] = React.useState('');
+  // objectstack#31025 — what the delete removes, read when its dialog opens.
+  const [removal, setRemoval] = React.useState<PackageRemovalState | null>(null);
+  // The count reads key on the package id alone (AGENTS.md #10): the adapter
+  // is read through a ref, kept current from an effect.
+  const adapter = useAdapter();
+  const adapterRef = React.useRef(adapter);
+  React.useEffect(() => {
+    adapterRef.current = adapter;
+  });
   const [discardOpen, setDiscardOpen] = React.useState(false);
   const [dupOpen, setDupOpen] = React.useState(false);
   const [dupName, setDupName] = React.useState('');
@@ -557,7 +589,7 @@ export function PackageDetailSheet({
     }
     let cancelled = false;
     apiJson<{ drafts?: Array<{ type: string; name: string }> }>(
-      `/api/v1/meta/_drafts?packageId=${encodeURIComponent(pid)}`,
+      `/api/v1/meta/_drafts?package=${encodeURIComponent(pid)}`,
     )
       .then((r) => {
         if (!cancelled) setDrafts(r?.drafts ?? []);
@@ -570,6 +602,43 @@ export function PackageDetailSheet({
     };
   }, [open, pkg?.manifest.id]);
 
+  // objectstack#31025 — the Delete dialog states what goes: the export door's
+  // items (each object with the rows the data list counts), read each time
+  // the dialog opens (`openDelete` marks it loading).
+  const removalPackageId = deleteOpen ? pkg?.manifest.id : undefined;
+  React.useEffect(() => {
+    if (!removalPackageId) return;
+    let cancelled = false;
+    apiJson<unknown>(`${API}/${encodeURIComponent(removalPackageId)}/export`)
+      .then((manifest) => {
+        if (cancelled) return;
+        const contents = readPackageRemovalContents(manifest);
+        setRemoval({ status: 'ready', contents, counts: {} });
+        const source = adapterRef.current;
+        for (const { name } of contents.objects) {
+          const counted: Promise<number | null> =
+            source && typeof source.find === 'function'
+              ? source
+                  .find(name, { $top: 0 })
+                  .then((r) => (typeof r?.total === 'number' ? r.total : null))
+                  .catch(() => null)
+              : Promise.resolve(null);
+          void counted.then((count) => {
+            if (cancelled) return;
+            setRemoval((prev) =>
+              prev?.status === 'ready' ? { ...prev, counts: { ...prev.counts, [name]: count } } : prev,
+            );
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRemoval({ status: 'failed' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [removalPackageId]);
+
   if (!pkg) return null;
   const id = pkg.manifest.id;
   const enabled = pkg.enabled !== false && pkg.status !== 'disabled';
@@ -578,11 +647,17 @@ export function PackageDetailSheet({
   // Scope badge above draws Writable: the same served verdict, the row's
   // top-level `writable` (objectstack#14375), read the same way (anything but
   // `true` is never writable). On a read-only package the server refuses
-  // Edit, Publish, Revert, Disable and Delete (`WRITABLE_PACKAGE_REQUIRED`)
-  // and Duplicate (`DUPLICATE_SOURCE_NOT_A_BASE`: its source must be a
-  // writable base); Adopt orphans would bind loose items into a package the
-  // org cannot author. So none of them is offered there. The reads stay.
+  // Edit, Publish, Revert and Delete (`WRITABLE_PACKAGE_REQUIRED`) and
+  // Duplicate (`DUPLICATE_SOURCE_NOT_A_BASE`: its source must be a writable
+  // base); Adopt orphans would bind loose items into a package the org cannot
+  // author. So none of them is offered there. The reads stay. Disable has its
+  // own served verdict, `disableable`, below.
   const writable = pkg.writable === true;
+  // objectstack#28118 — Disable is offered from the disable door's own served
+  // verdict (`disableable`, objectstack#28318), never re-derived here: it is
+  // `true` for a writable base and for a module of an installed app, which
+  // stays read-only for every other write action above and below.
+  const disableable = pkg.disableable === true;
   // The name the delete dialog asks the author to type: the one the sheet's
   // title shows.
   const displayName = pkg.manifest.name || id;
@@ -614,6 +689,14 @@ export function PackageDetailSheet({
         kind: 'err',
         text: e?.message ?? t('engine.packages.detail.actionFailed', locale),
         ...(e instanceof PackagePublishRefusal ? { details: e.reasons } : {}),
+        // objectstack#31003 — the disable door refuses while an enabled
+        // validation rule reads a field the package adds. The server's sentence
+        // names every such rule (package · object · rule) and then the remedy,
+        // so it is drawn whole under a heading in the reader's language: cut to
+        // its first sentence, the remedy sat behind "More".
+        ...(errorCodeIs(e, DISABLE_RESTRICTED_BY_VALIDATION_RULE)
+          ? { heading: t('engine.packages.detail.disableRestricted', locale) }
+          : {}),
       });
     } finally {
       setBusy(null);
@@ -698,7 +781,7 @@ export function PackageDetailSheet({
         emitMetadataRefresh();
         try {
           const fresh = await apiJson<{ drafts?: Array<{ type: string; name: string }> }>(
-            `/api/v1/meta/_drafts?packageId=${encodeURIComponent(id)}`,
+            `/api/v1/meta/_drafts?package=${encodeURIComponent(id)}`,
           );
           setDrafts(fresh?.drafts ?? []);
         } catch {
@@ -752,7 +835,7 @@ export function PackageDetailSheet({
         ).then(async (r) => {
           try {
             const fresh = await apiJson<{ drafts?: Array<{ type: string; name: string }> }>(
-              `/api/v1/meta/_drafts?packageId=${encodeURIComponent(id)}`,
+              `/api/v1/meta/_drafts?package=${encodeURIComponent(id)}`,
             );
             setDrafts(fresh?.drafts ?? []);
           } catch {
@@ -779,6 +862,7 @@ export function PackageDetailSheet({
     startAction(() => {
       setDeleteMode('');
       setDeleteTyped('');
+      setRemoval({ status: 'loading' });
       setDeleteOpen(true);
     });
 
@@ -1025,8 +1109,8 @@ export function PackageDetailSheet({
           ) : pkg.writable === false ? (
             <p className="text-sm text-muted-foreground" data-testid="pkg-detail-readonly-reason">
               {pkg.manifest.scope === 'project'
-                ? t('engine.packages.detail.codeReadOnly', locale)
-                : t('engine.packages.detail.readOnly', locale)}
+                ? t(disableable ? 'engine.packages.detail.codeReadOnlyDisableable' : 'engine.packages.detail.codeReadOnly', locale)
+                : t(disableable ? 'engine.packages.detail.readOnlyDisableable' : 'engine.packages.detail.readOnly', locale)}
             </p>
           ) : null}
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -1055,10 +1139,11 @@ export function PackageDetailSheet({
                 {t('engine.packages.detail.revert', locale)}
               </Button>
             )}
-            {/* Disable is refused on a read-only package; Enable is not (the
-                server's enable door has no writability gate), so a disabled
-                read-only package can still be switched back on. */}
-            {(writable || !enabled) && (
+            {/* Disable is offered where the disable door accepts it, the
+                served `disableable`; Enable is not refused anywhere (the
+                server's enable door has no writability gate), so any disabled
+                package can still be switched back on. */}
+            {(disableable || !enabled) && (
               <Button
                 size="sm"
                 variant="outline"
@@ -1158,8 +1243,22 @@ export function PackageDetailSheet({
             }`}
           >
             {/* A refusal leads with its first sentence; the rest of the
-                server's text is behind "More" (objectui#13332). */}
-            {msg.kind === 'err' ? <RefusalMessage text={msg.text} /> : msg.text}
+                server's text is behind "More" (objectui#13332). One with a
+                heading is drawn whole under it (objectstack#31003). */}
+            {msg.kind === 'err' && msg.heading ? (
+              <>
+                <p className="font-medium" data-testid="pkg-detail-refusal-heading">
+                  {msg.heading}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words select-text" data-testid="pkg-detail-refusal-text">
+                  {msg.text}
+                </p>
+              </>
+            ) : msg.kind === 'err' ? (
+              <RefusalMessage text={msg.text} />
+            ) : (
+              msg.text
+            )}
             {msg.details && msg.details.length > 0 && (
               // Not capped: the sheet scrolls (`overflow-y-auto`), as it does
               // for the pending-drafts list above. `break-words` keeps a long
@@ -1241,6 +1340,12 @@ export function PackageDetailSheet({
                 </Label>
               </div>
             </RadioGroup>
+            <PackageRemovalSummary
+              state={removal}
+              draftCount={drafts?.length ?? 0}
+              dropsTables={deleteMode === 'all'}
+              locale={locale}
+            />
             <div className="grid gap-1.5">
               <Label htmlFor={`${fieldId}-delete-name`} className="text-sm font-medium">
                 {tFormat('engine.packages.detail.deleteTypeName', locale, { name: displayName })}
@@ -1285,6 +1390,13 @@ export function PackageDetailSheet({
               <AlertDialogDescription>
                 {t('engine.packages.detail.disableDescription', locale)}
               </AlertDialogDescription>
+              {/* objectstack#31003 — the served `disableable` says what the
+                  package allows, not whether a rule elsewhere still reads its
+                  fields; the door answers that only when asked, so the dialog
+                  says the disable can still be refused. */}
+              <p className="text-sm text-muted-foreground" data-testid="pkg-detail-disable-may-refuse">
+                {t('engine.packages.detail.disableMayBeRefused', locale)}
+              </p>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel data-testid="pkg-detail-disable-cancel">
@@ -1362,6 +1474,7 @@ export function PackagesPage() {
   // ADR-0141 D2 — the import door's `DEPENDENCY_MISSING` refusal, one line per
   // unmet dependency, from the locale packs (the `engine.*` table is en/zh only).
   const dependencyMissingText = useDependencyMissingText();
+  const protocolCheckSkippedText = useProtocolCheckSkippedText();
   const { pathname } = useLocation();
   // App base = path up to (and excluding) `/component/...`, so links to
   // `/apps/:app/metadata/...` work regardless of nesting.
@@ -1380,7 +1493,9 @@ export function PackagesPage() {
   const [detailOpen, setDetailOpen] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [importing, setImporting] = React.useState(false);
-  const [importMsg, setImportMsg] = React.useState<{ kind: 'ok' | 'err'; text: string } | null>(
+  // `protocolNote`: the import answer's `protocolCheckSkipped`, drawn
+  // (objectstack#30326) — imported, its platform protocol range unchecked.
+  const [importMsg, setImportMsg] = React.useState<{ kind: 'ok' | 'err'; text: string; protocolNote?: string } | null>(
     null,
   );
   // objectui#12675 — every row with its Source; objectui#12790 — that Source is
@@ -1546,9 +1661,11 @@ export function PackagesPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ manifest }),
       });
+      const protocolNote = protocolCheckSkippedText(res);
       setImportMsg({
         kind: 'ok',
         text: tFormat('engine.packages.import.success', locale, { id: res?.manifestId ?? manifest.id }),
+        ...(protocolNote ? { protocolNote } : {}),
       });
       await load();
     } catch (err: any) {
@@ -1649,6 +1766,7 @@ export function PackagesPage() {
           }`}
         >
           {importMsg.text}
+          {importMsg.protocolNote ? <ProtocolCheckSkippedNote text={importMsg.protocolNote} /> : null}
         </div>
       )}
 

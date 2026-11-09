@@ -10,7 +10,8 @@ import {
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+import { isMissingTableError } from '@objectstack/types';
 
 /**
  * LocalCryptoProvider — the default, KMS-free `ICryptoProvider`. It is an
@@ -28,11 +29,14 @@ import { dirname, join } from 'node:path';
  *      (legacy `OBJECTSTACK_DEV_CRYPTO_KEY`)  `OBJECTSTACK_DEV_CRYPTO_KEY`
  *                                       still honoured).
  *   4. Persisted file                 — `~/.objectstack/dev-crypto-key`
- *                                       (mode 0600). In development it is
- *                                       auto-created; in production it is
- *                                       only *read* unless `OS_CRYPTO_AUTOKEY`
- *                                       opts the single-node self-host case
- *                                       into minting + persisting it too.
+ *                                       (mode 0600), or the file the CLI
+ *                                       names on `OS_INTERNAL_CRYPTO_KEY_FILE`
+ *                                       (see {@link resolvePersistedKeyFile}).
+ *                                       In development it is auto-created; in
+ *                                       production it is only *read* unless
+ *                                       `OS_CRYPTO_AUTOKEY` opts the
+ *                                       single-node self-host case into
+ *                                       minting + persisting it too.
  *   5. Ephemeral random key           — development/test only.
  *
  * ## Fail-loud guarantee (the reason this class exists)
@@ -165,6 +169,25 @@ const DEV_KEY_LEGACY_ENV = 'OBJECTSTACK_DEV_CRYPTO_KEY';
  * leaves it unset and keeps the fail-loud guarantee. See `commands/start.ts`.
  */
 const AUTOKEY_ENV = 'OS_CRYPTO_AUTOKEY';
+/**
+ * The CLI's INTERNAL parent-to-child channel naming the key file a `serve`
+ * child reads (and, where its posture allows, mints) its data key at — set by
+ * `os dev` and `os start` from {@link resolvePersistedKeyFile}, so both
+ * commands land on one file for one project (#29934). Same naming and
+ * ownership rule as the CLI's other `OS_INTERNAL_*` channels: the parent sets
+ * it or deletes it, and it is deliberately not an operator setting. It moves
+ * only WHICH file the file tier reads; an env key still answers first.
+ */
+export const KEY_FILE_CHANNEL_ENV = 'OS_INTERNAL_CRYPTO_KEY_FILE';
+/**
+ * The second internal channel, set beside {@link KEY_FILE_CHANNEL_ENV} only
+ * when {@link resolvePersistedKeyFile} answers `both-differ`: the legacy file,
+ * whose key the boot has not ruled out. The CLI parent cannot rule between the
+ * two files, because only the child opens the database; the child does, in
+ * {@link settleKeyFileChannel}, and then deletes this variable. Owned by the
+ * parent like every `OS_INTERNAL_*` channel, and not an operator setting.
+ */
+export const KEY_FILE_CANDIDATE_CHANNEL_ENV = 'OS_INTERNAL_CRYPTO_KEY_FILE_CANDIDATE';
 
 /** The data key's only legal length: AES-256 needs exactly 32 bytes. */
 const DATA_KEY_BYTES = 32;
@@ -461,17 +484,37 @@ const detectMode = (env: EnvMap): CryptoMode => {
 };
 
 /**
+ * A home directory spelled the way the CLI resolves `OS_HOME` for `os start`
+ * (`resolveStartHome` in `@objectstack/cli`): a leading `~` is the user's home
+ * directory, and the path is absolute. A shell expands `~` only when it is
+ * unquoted at the start of a word, so `OS_HOME="~/x"` reaches the process with
+ * the `~` intact; read literally, it named a directory called `~` under the
+ * working directory, and a key file there differed from the one `os start`
+ * used for the same value.
+ */
+const expandHome = (raw: string): string => {
+  const v = raw.trim();
+  if (v.startsWith('~')) return resolvePath(homedir(), v.slice(1).replace(/^[/\\]/, ''));
+  return resolvePath(v);
+};
+
+/**
  * Per-user persistent key location. Honours `OS_HOME`
- * (legacy `OBJECTSTACK_HOME`) for projects that pin a non-default config dir.
+ * (legacy `OBJECTSTACK_HOME`) for projects that pin a non-default config dir,
+ * with a leading `~` expanded as {@link expandHome} says.
  */
 const keyFilePath = (env: EnvMap): string => {
+  const pinned = env.OS_HOME?.trim() || env.OBJECTSTACK_HOME?.trim();
   const home =
-    env.OS_HOME ||
-    env.OBJECTSTACK_HOME ||
+    (pinned ? expandHome(pinned) : undefined) ||
     (env.HOME ? join(env.HOME, '.objectstack') : undefined) ||
     join(homedir(), '.objectstack');
   return join(home, 'dev-crypto-key');
 };
+
+/** The file the file tier reads: the CLI's channel when set, else {@link keyFilePath}. */
+const effectiveKeyFilePath = (env: EnvMap): string =>
+  env[KEY_FILE_CHANNEL_ENV]?.trim() || keyFilePath(env);
 
 /**
  * Parse an env key value (hex or base64) into a 32-byte Buffer. Returns
@@ -529,6 +572,435 @@ const loadOrCreateKey = (path: string): { key: Buffer; generated: boolean } | un
   }
 };
 
+/**
+ * Where the persisted data key of a command's `serve` child lives — the ONE
+ * answer `os dev` and `os start` both take (#29934).
+ *
+ * The canonical file is {@link keyFilePath} over `env`: the location `os dev`
+ * has always used (`$OS_HOME`, else `$HOME/.objectstack`). `os start` used to
+ * read its own home instead (`<project>/.objectstack` in project mode), so the
+ * same project database was sealed under two keys. That earlier file is the
+ * `legacyKeyFile`: it is never orphaned, and it is never chosen silently.
+ *
+ *  - canonical present (or neither present) → `canonical`.
+ *  - only the legacy file holds a key → `legacy-only`: its path is the answer,
+ *    so secrets sealed under it keep opening.
+ *  - both hold keys and they differ → `both-differ`: the canonical file is the
+ *    answer and the caller says so, naming both paths.
+ *
+ * `undefined` when an env key answers first (`OS_SECRET_KEY`, or a usable
+ * `OS_DEV_CRYPTO_KEY` / legacy alias): the file tier is never reached, so
+ * there is no file to name. A file that holds no usable key counts as absent,
+ * exactly as the file tier itself reads it.
+ */
+export interface PersistedKeyFile {
+  /** The key file the child reads (and, where its posture allows, mints). */
+  path: string;
+  /** Which rule chose {@link path}. */
+  kind: 'canonical' | 'legacy-only' | 'both-differ';
+  /** The canonical file ({@link keyFilePath} over the env). */
+  canonical: string;
+  /** The legacy file, when one holds a key and is not the canonical file. */
+  legacy?: string;
+}
+
+export function resolvePersistedKeyFile(
+  opts: { env?: EnvMap; legacyKeyFile?: string } = {},
+): PersistedKeyFile | undefined {
+  const env = opts.env ?? processEnv();
+  if (env[SECRET_KEY_ENV] !== undefined) return undefined;
+  if (parseKey(env[DEV_KEY_ENV] ?? env[DEV_KEY_LEGACY_ENV])) return undefined;
+
+  const canonical = keyFilePath(env);
+  const legacy = opts.legacyKeyFile;
+  const legacyKey =
+    legacy && resolvePath(legacy) !== resolvePath(canonical) ? loadExistingKey(legacy) : undefined;
+  if (!legacy || !legacyKey) return { path: canonical, kind: 'canonical', canonical };
+
+  const canonicalKey = loadExistingKey(canonical);
+  if (!canonicalKey) return { path: legacy, kind: 'legacy-only', canonical, legacy };
+  if (!canonicalKey.equals(legacyKey)) return { path: canonical, kind: 'both-differ', canonical, legacy };
+  return { path: canonical, kind: 'canonical', canonical };
+}
+
+/**
+ * One stored `sys_secret` ciphertext, as {@link chooseKeyFileByTrialOpen}
+ * reads it: the row's own `(namespace, key)` and its sealed value. Nothing
+ * else of the row, and never the plaintext, leaves the trial.
+ */
+export interface StoredSecretSample {
+  namespace: string;
+  key: string;
+  ciphertext: string;
+}
+
+/**
+ * Reads the stored ciphertexts to judge a key by, NEWEST FIRST: the page
+ * {@link chooseKeyFileByTrialOpen} scores both keys over. Empty when the
+ * database holds none. A failed read rejects: it is not an empty table.
+ */
+export type StoredSecretReader = () => Promise<readonly StoredSecretSample[]>;
+
+/** How many of the newest rows the trial reads; it judges those of them whose marker this provider knows. */
+const TRIAL_SAMPLE_PAGE = 10;
+
+/**
+ * The {@link StoredSecretReader} over a data engine: the newest
+ * {@link TRIAL_SAMPLE_PAGE} `sys_secret` rows (by `created_at`), read as the
+ * system, outside any tenant, less every row whose ciphertext records a
+ * derivation this provider does not know (no key could open it, so it says
+ * nothing about the keys).
+ *
+ * A table that does not exist yet (a database that has never booted) holds no
+ * row. ⛔ Any other failed read rejects: it says nothing about the keys.
+ */
+export function storedSecretReaderOverEngine(engine: {
+  find(object: string, query?: Record<string, unknown>): Promise<unknown>;
+}): StoredSecretReader {
+  return async () => {
+    let answer: unknown;
+    try {
+      answer = await engine.find('sys_secret', {
+        orderBy: [{ field: 'created_at', order: 'desc' }],
+        limit: TRIAL_SAMPLE_PAGE,
+        bypassTenantAudit: true,
+        context: { isSystem: true },
+      });
+    } catch (error) {
+      if (isMissingTableError(error, 'sys_secret')) return [];
+      throw error;
+    }
+    const rows = (Array.isArray(answer) ? answer : (answer as { data?: unknown[] } | null)?.data) ?? [];
+    const page: StoredSecretSample[] = [];
+    for (const row of rows as Array<Record<string, unknown>>) {
+      if (ciphertextDerivationStatus(row?.ciphertext) === 'unknown') continue;
+      page.push({
+        namespace: String(row.namespace ?? ''),
+        key: String(row.key ?? ''),
+        ciphertext: row.ciphertext as string,
+      });
+    }
+    return page;
+  };
+}
+
+/**
+ * Does `key` open `sample`? The trial asks only that: it opens the ciphertext
+ * under the derivation the ciphertext records, once per member of the closed
+ * scope set (a version-2 seal binds its producer's scope, and `sys_secret`
+ * records no producer), and throws the plaintext away.
+ *
+ * AES-GCM authenticates the key with the context, so a wrong key fails under
+ * every scope and the right key opens under exactly the scope that sealed the
+ * row. This decides WHICH KEY, never what a row means: no caller receives a
+ * value from it, so it guesses no producer for a read (ADR-0128 D3).
+ */
+async function keyOpensSample(key: Buffer, sample: StoredSecretSample): Promise<boolean> {
+  const provider = new LocalCryptoProvider({ key });
+  const handle: CryptoHandle = {
+    id: 'trial',
+    kmsKeyId: 'local:v1',
+    alg: 'aes-256-gcm',
+    version: 1,
+    ciphertext: sample.ciphertext,
+  };
+  for (const scope of CRYPTO_CONTEXT_SCOPES) {
+    try {
+      await provider.decrypt(handle, { scope, namespace: sample.namespace, key: sample.key });
+      return true;
+    } catch {
+      // Not this key under this scope; the next scope, or the verdict below.
+    }
+  }
+  return false;
+}
+
+/**
+ * Which rows of the page `key` opens, newest first: their count, and the
+ * position of the newest one it opens (`-1` for none, or no key).
+ */
+async function scoreKeyOverPage(
+  key: Buffer | undefined,
+  page: readonly StoredSecretSample[],
+): Promise<{ opens: number; newest: number }> {
+  let opens = 0;
+  let newest = -1;
+  if (!key) return { opens, newest };
+  for (const [index, sample] of page.entries()) {
+    if (!(await keyOpensSample(key, sample))) continue;
+    opens += 1;
+    if (newest < 0) newest = index;
+  }
+  return { opens, newest };
+}
+
+/**
+ * Which key file a boot reads, and why — {@link chooseKeyFileByTrialOpen}'s
+ * answer.
+ *
+ *  - `single` — {@link resolvePersistedKeyFile} named one file; there was no
+ *    second key to rule out.
+ *  - `no-stored-secret` — two keys, but the database holds no ciphertext to
+ *    judge them by: the canonical file, as before.
+ *  - `opens` — the chosen file's key opens at least one row of the judged page
+ *    and the other's opens none.
+ *  - `mixed` — each key opens at least one row of the page: the database holds
+ *    secrets under both. The chosen file opens more of them (on a tie, the
+ *    newest of them); the rows under the other read as unset, and the boot
+ *    says so as an error naming both paths.
+ *  - `opens-nothing` — neither key opens any row of the page (development: the
+ *    canonical file, with a boot error; production refuses instead, see
+ *    {@link DataKeyOpensNothingError}).
+ *  - `not-judged` — the stored ciphertext could not be read: the canonical
+ *    file, with a boot error naming the read.
+ */
+export interface KeyFileChoice {
+  path: string;
+  reason: 'single' | 'no-stored-secret' | 'opens' | 'mixed' | 'opens-nothing' | 'not-judged';
+  /** The file not chosen, when there were two. */
+  other?: string;
+  /**
+   * What the trial measured, when it opened rows: the page it judged, and how
+   * many rows of it each file's key opens. Absent when nothing was judged.
+   */
+  tally?: { judged: number; chosen: number; other: number };
+  /** What the boot prints, and at which level; absent for `single`. */
+  notice?: { level: 'warn' | 'error'; message: string };
+}
+
+/** `the newest stored secret` / `the N newest stored secrets`: the page the trial judged, as the notices name it. */
+const newestStored = (judged: number): string =>
+  judged === 1 ? 'the newest stored secret' : `the ${judged} newest stored secrets`;
+
+/** `opens the newest stored secret` / `opens 3 of the 10 newest stored secrets`: what a key was measured to open. */
+const opensOf = (opens: number, judged: number): string =>
+  opens === judged ? `opens ${newestStored(judged)}` : `opens ${opens} of ${newestStored(judged)}`;
+
+const OPENS_NOTHING_CONSEQUENCE =
+  `Every stored secret (encrypted settings, secret fields, datasource credentials) reads back as unset under either key.`;
+
+const opensNothingRemedy = (canonical: string): string =>
+  `Fix: find the key these secrets were sealed under and put it at ${canonical} (keep a copy of both ` +
+  `files first), or set ${SECRET_KEY_ENV} to it.`;
+
+/**
+ * A production boot whose two candidate key files both fail to open every
+ * stored secret the trial judged (the newest rows). The fail-loud contract
+ * this provider keeps (see "Fail-loud guarantee" above): production refuses to
+ * run under a key it cannot vouch for, because every secret would read as
+ * unset while the server looks healthy.
+ */
+export class DataKeyOpensNothingError extends Error {
+  constructor(
+    readonly canonical: string,
+    readonly legacy: string,
+    /** How many stored secrets the trial judged (the newest rows). */
+    readonly judged = 1,
+  ) {
+    super(
+      `[LocalCryptoProvider] Refusing to start in production: neither data key opens any of ` +
+        `${newestStored(judged)}.\n` +
+        `  Tried:\n    ${canonical}\n    ${legacy}\n` +
+        `  ${OPENS_NOTHING_CONSEQUENCE}\n` +
+        `  ${opensNothingRemedy(canonical)}`,
+    );
+    this.name = 'DataKeyOpensNothingError';
+  }
+}
+
+/**
+ * Rule between the two key files of a `both-differ` answer by the database
+ * itself: trial-open the newest stored `sys_secret` ciphertexts (the page
+ * `readStoredSecret` returns) under each file's key, count the rows each key
+ * opens, and take the file whose key opens more of them.
+ *
+ *  - One key opens rows, the other none: that key's file (`opens`). A row that
+ *    opens under neither (a corrupt or foreign row) does not change that, so a
+ *    corrupt newest row no longer decides the boot when an older row settles it.
+ *  - Both keys open rows (`mixed`): the file whose key opens more, on a tie the
+ *    one that opens the newest of them (the key sealed with last). The rows
+ *    under the other key read as unset under either choice, so the notice is an
+ *    `error` naming both paths, both counts and the fix, in every posture: the
+ *    boot is measured, not guessed, and refusing it would leave the operator no
+ *    running server to re-save the minority's secrets through.
+ *  - Neither key opens any row: production throws
+ *    {@link DataKeyOpensNothingError}; development and test keep the canonical
+ *    file and return an `error` notice, the posture split of the provider's own
+ *    fail-loud contract.
+ *
+ * Every other answer of {@link resolvePersistedKeyFile} names one file and is
+ * returned as it is (`single`). With no stored ciphertext there is nothing to
+ * judge, and the canonical file stands (`no-stored-secret`). ⛔ Never a silent
+ * choice: every answer between two files carries its notice, and each notice
+ * says what was measured (how many of the newest rows), never more.
+ */
+export async function chooseKeyFileByTrialOpen(opts: {
+  answer: PersistedKeyFile;
+  readStoredSecret: StoredSecretReader;
+  /** The posture the refusal is graded by. Defaults to `NODE_ENV`'s, as the provider reads it. */
+  mode?: CryptoMode;
+  env?: EnvMap;
+}): Promise<KeyFileChoice> {
+  const { answer } = opts;
+  if (answer.kind !== 'both-differ' || !answer.legacy) return { path: answer.path, reason: 'single' };
+  const canonical = answer.canonical;
+  const legacy = answer.legacy;
+  const mode = opts.mode ?? detectMode(opts.env ?? processEnv());
+
+  let page: readonly StoredSecretSample[];
+  try {
+    page = await opts.readStoredSecret();
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    return {
+      path: canonical,
+      reason: 'not-judged',
+      other: legacy,
+      notice: {
+        level: 'error',
+        message:
+          `[LocalCryptoProvider] Data key: two different key files exist, ${canonical} and ${legacy}, and ` +
+          `the stored secrets could not be read to tell which one opens them (${why}). Using ${canonical}; ` +
+          `secrets sealed under ${legacy} will not decrypt. If they were saved under \`os start\`, keep a ` +
+          `copy of both files and move ${legacy} over ${canonical}.`,
+      },
+    };
+  }
+
+  if (page.length === 0) {
+    return {
+      path: canonical,
+      reason: 'no-stored-secret',
+      other: legacy,
+      notice: {
+        level: 'warn',
+        message:
+          `[LocalCryptoProvider] Data key: using ${canonical}. ${legacy} holds a different key; this ` +
+          `database has no stored secret yet to tell them apart, so the shared file stands.`,
+      },
+    };
+  }
+
+  const judged = page.length;
+  const c = await scoreKeyOverPage(loadExistingKey(canonical), page);
+  const l = await scoreKeyOverPage(loadExistingKey(legacy), page);
+  const neither = judged - c.opens - l.opens;
+  const neitherNote = neither > 0 ? ` ${neither} of them open under neither key.` : '';
+
+  if (c.opens === 0 && l.opens === 0) {
+    if (mode === 'production') throw new DataKeyOpensNothingError(canonical, legacy, judged);
+    return {
+      path: canonical,
+      reason: 'opens-nothing',
+      other: legacy,
+      tally: { judged, chosen: 0, other: 0 },
+      notice: {
+        level: 'error',
+        message:
+          `[LocalCryptoProvider] Neither data key opens any of ${newestStored(judged)}. Tried ${canonical} ` +
+          `(used) and ${legacy}. ${OPENS_NOTHING_CONSEQUENCE} ${opensNothingRemedy(canonical)}`,
+      },
+    };
+  }
+
+  // The canonical file keeps a tie only when it also opens the newest of the
+  // rows either key opens; `newest` is a position, lower is newer.
+  const legacyWins =
+    l.opens > c.opens || (l.opens === c.opens && l.newest >= 0 && (c.newest < 0 || l.newest < c.newest));
+  const [path, other, chosen, rejected] = legacyWins
+    ? [legacy, canonical, l, c]
+    : [canonical, legacy, c, l];
+  const tally = { judged, chosen: chosen.opens, other: rejected.opens };
+  const converge =
+    path === legacy
+      ? ` \`os dev\` and \`os start\` share ${canonical}: keep a copy of it, then move ${legacy} over it to converge.`
+      : '';
+
+  if (rejected.opens === 0) {
+    return {
+      path,
+      reason: 'opens',
+      other,
+      tally,
+      notice: {
+        level: 'warn',
+        message:
+          `[LocalCryptoProvider] Data key: using ${path}, which ${opensOf(chosen.opens, judged)}` +
+          `${path === legacy ? ' (an earlier `os start` kept it)' : ''}. ${other} holds a different key that ` +
+          `opens none of them, and is not used.${neitherNote}${converge}`,
+      },
+    };
+  }
+
+  return {
+    path,
+    reason: 'mixed',
+    other,
+    tally,
+    notice: {
+      level: 'error',
+      message:
+        `[LocalCryptoProvider] Data key: this database holds secrets sealed under two different keys. Of ` +
+        `${newestStored(judged)}, ${chosen.opens} open under ${path} (used) and ${rejected.opens} under ` +
+        `${other} (not used).${neitherNote} Every secret sealed under ${other} reads back as unset while the ` +
+        `server looks healthy. Fix: keep a copy of both files, then save each secret that reads as unset again, ` +
+        `which seals it under ${path}.${converge}`,
+    },
+  };
+}
+
+/** The settlement in flight per env map: concurrent callers share one trial. */
+const settlements = new WeakMap<EnvMap, Promise<KeyFileChoice | undefined>>();
+
+/**
+ * Settle the CLI's key-file channel in the process that opened the database —
+ * the `serve` child, or a one-shot command after its boot. When the parent set
+ * {@link KEY_FILE_CANDIDATE_CHANNEL_ENV} beside {@link KEY_FILE_CHANNEL_ENV}
+ * (a `both-differ` answer), rule between the two files with
+ * {@link chooseKeyFileByTrialOpen}, point the channel at the chosen file,
+ * delete the candidate and print the notice once. Every provider built after
+ * this reads the chosen file; a provider built before it says so
+ * (`resolveDataKey`).
+ *
+ * `undefined` when there is nothing to settle: no candidate, or an earlier call
+ * already settled it. Concurrent callers share one trial. A production refusal
+ * ({@link DataKeyOpensNothingError}) rejects every caller of that trial, and
+ * both channels are left as they were.
+ */
+export function settleKeyFileChannel(opts: {
+  readStoredSecret: StoredSecretReader;
+  env?: EnvMap;
+  mode?: CryptoMode;
+}): Promise<KeyFileChoice | undefined> {
+  const env = opts.env ?? processEnv();
+  const pending = settlements.get(env);
+  if (pending) return pending;
+  const candidate = env[KEY_FILE_CANDIDATE_CHANNEL_ENV]?.trim();
+  const current = env[KEY_FILE_CHANNEL_ENV]?.trim();
+  if (!candidate || !current) return Promise.resolve(undefined);
+  const settlement = (async () => {
+    const choice = await chooseKeyFileByTrialOpen({
+      answer: { path: current, kind: 'both-differ', canonical: current, legacy: candidate },
+      readStoredSecret: opts.readStoredSecret,
+      mode: opts.mode,
+      env,
+    });
+    env[KEY_FILE_CHANNEL_ENV] = choice.path;
+    delete env[KEY_FILE_CANDIDATE_CHANNEL_ENV];
+    if (choice.notice?.level === 'warn') warn(choice.notice.message);
+    else if (choice.notice) bootError(choice.notice.message);
+    return choice;
+  })();
+  settlements.set(env, settlement);
+  // Once settled the candidate is gone, so a later call has nothing to settle;
+  // after a refusal it is still there, and a later call judges again.
+  const clear = () => {
+    if (settlements.get(env) === settlement) settlements.delete(env);
+  };
+  settlement.then(clear, clear);
+  return settlement;
+}
+
 const INVALID_KEY_MSG = (name: string): string =>
   `[LocalCryptoProvider] ${name} is set but is not a 32-byte key (expected 64 hex chars or base64 of 32 bytes). ` +
   `Generate one with \`openssl rand -hex 32\`.`;
@@ -551,6 +1023,15 @@ interface ResolvedKey {
 const warn = (msg: string): void => {
   try {
     (globalThis as { console?: { warn?: (m: string) => void } }).console?.warn?.(msg);
+  } catch {
+    /* exotic runtime without console — ignore */
+  }
+};
+
+/** A boot error the operator must see: `console.error`, never a debug line. */
+const bootError = (msg: string): void => {
+  try {
+    (globalThis as { console?: { error?: (m: string) => void } }).console?.error?.(msg);
   } catch {
     /* exotic runtime without console — ignore */
   }
@@ -597,7 +1078,17 @@ function resolveDataKey(opts: LocalCryptoProviderOptions): ResolvedKey {
     return { key: randomBytes(32), source: 'ephemeral' };
   }
 
-  const path = keyFilePath(env);
+  const path = effectiveKeyFilePath(env);
+  const unsettled = env[KEY_FILE_CANDIDATE_CHANNEL_ENV]?.trim();
+  if (unsettled) {
+    // A provider built before the boot ruled between the two key files
+    // (`settleKeyFileChannel`) reads the first one unexamined. Never silently.
+    warn(
+      `[LocalCryptoProvider] This provider was built before the boot chose its data key: it reads ${path}, ` +
+        `and ${unsettled} (a different key) was never tried against the stored secrets. Secrets sealed under ` +
+        `the other key will not decrypt through this provider.`,
+    );
+  }
 
   if (mode === 'production') {
     // Honour a pre-existing, operator-provisioned key file first.
@@ -806,6 +1297,47 @@ export class LocalCryptoProvider implements ICryptoProvider {
     const tag = cipher.getAuthTag();
     return Buffer.concat([iv, tag, enc]).toString('base64');
   }
+}
+
+/**
+ * A {@link LocalCryptoProvider} built at its FIRST USE rather than now.
+ *
+ * A host has to hand a provider to consumers it composes before the database
+ * is open (a binder, a plugin's options), while the CLI's key-file channel is
+ * settled only once it is open ({@link settleKeyFileChannel}, in the settings
+ * service's `start()`). Built eagerly, such a provider would read the key file
+ * before the boot chose it. Built here, it reads the env as it stands at first
+ * use: every consumer of a kernel decrypts at `kernel:ready` or later, after
+ * every `start()`.
+ *
+ * `options` is read at that moment too, so an env snapshot it takes is the
+ * settled one. {@link DeferredLocalCryptoProvider.resolve} builds it at once,
+ * which is how a host keeps the constructor's production refusal at boot. A
+ * constructor that throws throws from every call, the same error each time.
+ */
+export interface DeferredLocalCryptoProvider extends ICryptoProvider {
+  /** The built provider's key source; reading it builds the provider. */
+  readonly keySource: KeySource;
+  /** Build the provider now (once), or throw what its constructor throws. */
+  resolve(): LocalCryptoProvider;
+}
+
+export function deferredLocalCryptoProvider(
+  options: () => LocalCryptoProviderOptions = () => ({}),
+): DeferredLocalCryptoProvider {
+  let built: LocalCryptoProvider | undefined;
+  const resolve = (): LocalCryptoProvider => (built ??= new LocalCryptoProvider(options()));
+  return {
+    get keySource() {
+      return resolve().keySource;
+    },
+    resolve,
+    encrypt: async (plain, ctx) => resolve().encrypt(plain, ctx),
+    decrypt: async (handle, ctx) => resolve().decrypt(handle, ctx),
+    rotateKey: async (handle, ctx) => resolve().rotateKey(handle, ctx),
+    digest: (plain) => resolve().digest(plain),
+    keyedDigest: async (plain) => resolve().keyedDigest(plain),
+  };
 }
 
 /**

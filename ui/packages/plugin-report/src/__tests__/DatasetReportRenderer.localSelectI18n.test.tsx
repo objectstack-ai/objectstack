@@ -110,6 +110,7 @@ const tabularResult = {
   object: 'crm_opportunity',
   dimensionFields: { sales_channel: 'sales_channel' },
   drillRawRows: [{ sales_channel: 'domestic' }, { sales_channel: 'export' }],
+  drillScopes: { deals: {} },
 };
 
 const cellsOf = (row: Element) => Array.from(row.querySelectorAll('td')).map((td) => td.textContent);
@@ -204,6 +205,7 @@ describe('DatasetReportRenderer matrix — both axes and the totals (objectui#43
     ],
     object: 'crm_opportunity',
     dimensionFields: { sales_channel: 'sales_channel', competitor_name: 'competitor_name' },
+    drillScopes: { deals: {} },
     drillRawRows: [
       { sales_channel: 'domestic', competitor_name: 'orion' },
       { sales_channel: 'export', competitor_name: 'cabot' },

@@ -47,6 +47,61 @@ export {
     type SplitBrainGuardEnv,
 } from './split-brain-guard.js';
 
+// [cloud#3814 R2/R3] Declared multi-replica over the Redis cluster driver: the
+// one switch every multi-replica behaviour keys on, and the code a door answers
+// when it refuses a package change under it.
+export {
+    MULTI_REPLICA_CLUSTER_DRIVER,
+    MULTI_REPLICA_PACKAGE_CHANGE_REFUSED,
+    declaresMultiReplicaOnRedis,
+    composedClusterDriver,
+} from './multi-replica.js';
+
+export {
+    offerClusterDriverConnection,
+    readClusterDriverConnection,
+    type ClusterDriverConnection,
+} from './driver-connection.js';
+
+// [#31601] An ACTIVE probe of the shared store (a bounded PING), for /ready.
+// `readClusterDriverHealth()` below is the PASSIVE reading of the same
+// driver's connection state; the two answer different questions.
+export {
+    probeClusterDriverHealth,
+    DEFAULT_CLUSTER_PROBE_TIMEOUT_MS,
+    type ClusterDriverHealth,
+    type ClusterDriverUnreachableReason,
+    type ProbeClusterDriverHealthOptions,
+} from './driver-health.js';
+
+// A remote driver's connection health and the local `cluster.resync` event it
+// emits when its connection returns after an outage: caches holding
+// cross-node state subscribe with `onClusterResync()` and re-read on it.
+export {
+    CLUSTER_RESYNC_EVENT,
+    ClusterDriverLiveness,
+    offerClusterDriverLiveness,
+    onClusterResync,
+    readClusterDriverHealth,
+    watchClusterDriverConnection,
+    describeConnectionError,
+    redactCredentials,
+    type ClusterResyncEvent,
+    type ClusterResyncHandler,
+    type ClusterDriverLivenessHealth,
+    type ClusterDriverLivenessLogger,
+    type ClusterDriverLivenessOptions,
+} from './cluster-resync.js';
+
+// [cloud#3814] Cluster membership: under a declared multi-replica deployment on
+// Redis each replica beats a TTL key; `readClusterMembers()` lists the live ones,
+// and answers a degraded reading (never a throw) while the store is unreachable.
+export {
+    readClusterMembers,
+    type ClusterMember,
+    type ClusterMembership,
+} from './cluster-membership.js';
+
 export { MetadataClusterBridgePlugin } from './metadata-cluster-bridge-plugin.js';
 
 // [#11968] The `authz.invalidated` bridge + the non-optional boot-time posture

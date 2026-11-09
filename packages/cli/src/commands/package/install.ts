@@ -32,19 +32,112 @@
  * "Source" and "mode" are two words for two questions on purpose: where the
  * package comes from, and how it is installed.
  *
+ * A base's paired customization package — `<base>.custom`, what
+ * `os package export` writes for the overrides an administrator authored
+ * (ADR-0146 D2 / D3) — is neither: the runtime writes its items into ITS OWN
+ * writable pair of that base, as Studio would, so the overrides are served,
+ * listed by the base's customization read, and stay editable there. Printed
+ * as such; a runtime that answers it as a managed install (one that predates
+ * the pair install, and registered it as read-only code) is printed as the
+ * failure it is, with the way back.
+ *
+ * `--dry-run` (epic cloud#3652 Q3, #30884) installs nothing: the runtime
+ * answers the package upgrade plan — the version it has installed against
+ * this one: objects, fields, type changes, declared (`renamedFrom`) and
+ * suspected renames, seed datasets — with the rows each touched column holds
+ * and the rows a customer edited that the seed replay would overwrite, and
+ * the command prints it. A runtime that predates the dry run ignores the key
+ * and installs; the command reads the answer, and says so when that happened.
+ *
  * This complements `os package publish` (which uploads to the CLOUD): the
  * pairing is publish-to-cloud / install-into-runtime. The target runtime
- * authenticates the call with its own better-auth session — pass
- * --email/--password (or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) for an
- * account on the TARGET runtime, not your cloud login.
+ * authenticates the call itself — pass a token it issued (-t/--token, or
+ * OS_RUNTIME_TOKEN), or --email/--password (or OS_RUNTIME_EMAIL /
+ * OS_RUNTIME_PASSWORD) for an account on the TARGET runtime, not your cloud
+ * login.
+ *
+ * [#30126 row 13, ruling A] The server and the credential are spelled as
+ * `os package export` and the other server-talking commands spell them:
+ * `-u/--url` and `-t/--token`. `-r/--runtime` is retired with no alias — the
+ * startup rule keeps no window for an old spelling — so `os package install
+ * -r URL` is refused by the parser as an unknown flag and the fix is `-u URL`.
+ *
+ * With neither `-u` nor `$OS_RUNTIME_URL`, the server is the self-hosted
+ * runtime `os environments use-runtime` remembered, and its API key is the
+ * credential when no `-t` / `--email` is given — sent only to that runtime's
+ * own url (`utils/runtime-target.ts`). Nothing remembered: `http://localhost:3000`.
+ *
+ * `os deploy` runs this command in-process for a self-hosted target — the dry
+ * run, then the install — so every refusal and answer below is printed once,
+ * here, for both; it reads {@link PackageInstall.outcome} and names itself in
+ * the retry lines through {@link PackageInstall.retryCommand}.
  */
 
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { Args, Command, Flags } from '@oclif/core';
-import { INSTALL_MODES, type InstallMode } from '@objectstack/spec/kernel';
+import { INSTALL_MODES, customizationBasePackageId, type InstallMode } from '@objectstack/spec/kernel';
 import { printHeader, printKV, printSuccess, printWarning, printError, printStep, isExitSignal } from '../../utils/format.js';
+import { DEFAULT_RUNTIME_INSTALL_URL, runtimeInstallTarget } from '../../utils/runtime-target.js';
+import {
+  readSchemaUpgradeRefusal,
+  renderSchemaUpgradeRefusal,
+  renderUpgradePlan,
+  type SchemaUpgradeRefusal,
+} from '../../utils/upgrade-plan.js';
+
+/** The plan printer moved to `utils/upgrade-plan.ts`, shared with `os deploy`; still exported here. */
+export { renderUpgradePlan };
+
+/**
+ * What an install answered, for an in-process caller (`os deploy`). Unset
+ * until the runtime answered: a 2xx is one of the answered kinds, a refusal
+ * the runtime sent (a status and an error envelope) is `refused`, with the
+ * envelope verbatim and — for the Q3 stop — its findings and token read.
+ */
+export type PackageInstallOutcome =
+  | {
+    kind: 'dry-run'; manifestId: string; version: string; installedVersion: string | null;
+    /** The answer's plan reading, verbatim (`data.plan`, `data.environment`). */
+    plan: unknown; environment: unknown;
+    /** The runtime could not read its record of the installed version: the plan is against none. */
+    installedRecordUnreadable: boolean;
+  }
+  | {
+    kind: 'refused'; status: number; code: string | null; message: string; details: unknown;
+    /** Set when the refusal is the Q3 stop: what an explicit confirmation must echo. */
+    schemaUpgrade?: SchemaUpgradeRefusal;
+  }
+  | { kind: 'installed'; manifestId: string; version: string; hotLoaded: boolean; runtime: string }
+  | { kind: 'other'; manifestId: string };
+
+/**
+ * [#28640 ruling ③A] The connector maps the package export withheld whole,
+ * as the install-local answer names them (`withheldMaps`, either install
+ * mode): one warning, one line per map — `connector 'NAME' PATH`, the
+ * answer's own position spelling — and the remedy. The connector is installed
+ * and runs, but sends none of those headers or environment variables until
+ * each map is supplied again, so an operator who installs an export from the
+ * command line is told here; the runtime's `warn` line lands in a log the
+ * operator may never read.
+ *
+ * Printed from the answer only: an answer without the list (nothing was
+ * withheld, or a runtime that predates the key) prints nothing, and nothing
+ * is guessed from the artifact the command sent.
+ */
+function printWithheldMaps(withheldMaps: unknown): void {
+  const maps: Array<{ type?: unknown; name?: unknown; path?: unknown }> =
+    Array.isArray(withheldMaps) ? withheldMaps : [];
+  if (maps.length === 0) return;
+  console.log('');
+  printWarning(
+    `${maps.length} connector map(s) arrived empty — the package export withheld each one whole, so the connector `
+    + 'sends none of those headers or environment variables:',
+  );
+  for (const map of maps) console.log(`    ${String(map.type)} '${String(map.name)}' ${String(map.path)}`);
+  console.log('  Re-enter each map where the connector is authored.');
+}
 
 export default class PackageInstall extends Command {
   static override description =
@@ -52,10 +145,13 @@ export default class PackageInstall extends Command {
 
   static override examples = [
     '$ os package install com.acme.crm',
-    '$ os package install com.acme.crm --version 1.2.0 --runtime http://localhost:3000',
+    '$ os package install com.acme.crm --version 1.2.0 --url http://localhost:3000',
     '$ os package install ./dist/objectstack.json                     # air-gapped, no catalog',
     '$ os package install ./dist/objectstack.json --install-mode unmanaged   # copy into the environment as its own metadata',
     '$ OS_RUNTIME_EMAIL=admin@local.test OS_RUNTIME_PASSWORD=… os package install com.acme.crm',
+    '$ os package install ./dist/objectstack.json --url https://app.example.com --token osk_…',
+    '$ os package install ./dist/objectstack.json --dry-run            # print the upgrade plan, install nothing',
+    '$ os package install ./dist/objectstack.json --confirm-upgrade <finding-set>   # confirm the schema findings the runtime printed',
   ];
 
   static override args = {
@@ -66,11 +162,21 @@ export default class PackageInstall extends Command {
   };
 
   static override flags = {
-    runtime: Flags.string({
-      char: 'r',
-      description: 'Target runtime base URL (the instance to install INTO)',
+    // No oclif `default`: an absent flag must be told apart from a typed one,
+    // so the remembered runtime can fill it (`utils/runtime-target.ts`).
+    url: Flags.string({
+      char: 'u',
+      description:
+        'Server URL of the runtime to install INTO (default: the runtime `os environments use-runtime` remembered, '
+        + `else ${DEFAULT_RUNTIME_INSTALL_URL})`,
       env: 'OS_RUNTIME_URL',
-      default: 'http://localhost:3000',
+    }),
+    token: Flags.string({
+      char: 't',
+      description:
+        'Authentication token issued by the target runtime (an API key); instead of --email/--password. Defaults to '
+        + 'the key `os environments use-runtime` remembered, when the URL is that runtime',
+      env: 'OS_RUNTIME_TOKEN',
     }),
     version: Flags.string({
       char: 'v',
@@ -127,15 +233,66 @@ export default class PackageInstall extends Command {
         "Confirm the access findings of this upgrade with the finding-set token the runtime's refusal printed "
         + '(ACCESS_UPGRADE_CONFIRMATION_REQUIRED). It confirms exactly those findings; a changed set is refused again.',
     }),
+    // [epic cloud#3652 Q3, #30884] The confirmation of an upgrade's schema
+    // findings — an undeclared suspected rename, a type change that is not
+    // `safe`. A TOKEN, as `--confirm-access-upgrade` is: the finding set's
+    // digest the runtime's refusal printed, so it confirms exactly the
+    // findings shown, and a set that changed since is refused again.
+    'confirm-upgrade': Flags.string({
+      description:
+        "Confirm the schema findings of this upgrade with the finding-set token the runtime's refusal printed "
+        + '(SCHEMA_UPGRADE_CONFIRMATION_REQUIRED): a removed field with an unlinked added one (a suspected rename), '
+        + 'a type change that is not safe. It confirms exactly those findings; a changed set is refused again.',
+    }),
+    // [epic cloud#3652 Q3, #30884] The install-local body's `dryRun`.
+    'dry-run': Flags.boolean({
+      description:
+        'Install nothing: print the upgrade plan of the installed version against this one (objects, fields, type '
+        + 'changes, declared and suspected renames, seed datasets), with the rows each touched column holds and the '
+        + 'rows a customer edited that the seed replay would overwrite',
+      default: false,
+    }),
   };
+
+  /** What the runtime answered — read by `os deploy`, which runs this command in-process. */
+  outcome: PackageInstallOutcome | undefined;
+
+  /** The command a retry line names (`os deploy` sets its own); defaults to this command with its argument. */
+  retryCommand: string | undefined;
+
+  /** Set by an in-process caller that prints its own header. */
+  embedded = false;
 
   async run(): Promise<void> {
     const { args, flags } = await this.parse(PackageInstall);
+    const retry = this.retryCommand ?? `os package install ${args.package}`;
 
-    printHeader('Install Package');
-    const runtime = flags.runtime.replace(/\/+$/, '');
+    if (!this.embedded) printHeader('Install Package');
+
+    // One credential per call: a token and a password sign-in name two
+    // identities, and picking one silently would install as whichever the
+    // command happened to prefer.
+    if (flags.token && (flags.email || flags.password)) {
+      printError(
+        'Pass either --token or --email/--password, not both '
+        + '(OS_RUNTIME_TOKEN counts as --token; OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD count as --email/--password).',
+      );
+      this.exit(1);
+      return;
+    }
 
     try {
+      const target = await runtimeInstallTarget({
+        url: flags.url,
+        token: flags.token,
+        useStoredToken: !flags.email && !flags.password,
+      });
+      const runtime = target.url;
+      const token = target.token;
+      if (target.rememberedUrl || target.rememberedToken) {
+        printStep(`Runtime ${runtime} — remembered by \`os environments use-runtime\``);
+      }
+
       // ---- Resolve the source: inline artifact file vs catalog id ---------
       const looksLikeFile = args.package.endsWith('.json')
         || args.package.startsWith('./')
@@ -182,7 +339,9 @@ export default class PackageInstall extends Command {
 
       // ---- Authenticate against the TARGET runtime ------------------------
       let cookie: string | undefined;
-      if (flags.email && flags.password) {
+      if (token) {
+        printStep(`Authenticating to ${runtime} with a token`);
+      } else if (flags.email && flags.password) {
         printStep(`Signing in to ${runtime} as ${flags.email}...`);
         // `Origin` is required: better-auth's CSRF check 403s origin-less
         // non-browser POSTs to the sign-in route.
@@ -209,18 +368,34 @@ export default class PackageInstall extends Command {
       printStep(`Installing ${label} into ${runtime}...`);
       if (flags['confirm-global-uniques']) body.confirmGlobalUniques = true;
       if (flags['confirm-access-upgrade'] !== undefined) body.confirmAccessUpgrade = flags['confirm-access-upgrade'];
+      if (flags['confirm-upgrade'] !== undefined) body.confirmSchemaUpgrade = flags['confirm-upgrade'];
       const installMode = flags['install-mode'] as InstallMode | undefined;
       if (installMode !== undefined) body.installMode = installMode;
+      if (flags['dry-run']) body.dryRun = true;
       const res = await this.request(`${runtime}/api/v1/marketplace/install-local`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(cookie ? { Cookie: cookie } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(body),
       }, flags.timeout);
 
       if (!res.ok) {
+        // The refusal, for an in-process caller, before any of it is printed.
+        // A status of 0 is no answer at all (a timeout, a refused connection).
+        if (res.status !== 0) {
+          const error = res.body?.error;
+          this.outcome = {
+            kind: 'refused',
+            status: res.status,
+            code: typeof error?.code === 'string' ? error.code : null,
+            message: String(res.error ?? ''),
+            details: error?.details ?? null,
+            schemaUpgrade: readSchemaUpgradeRefusal(res.body),
+          };
+        }
         // [ADR-0120 D5e] The `isolated`-posture stop. Rendered as its own case
         // rather than a bare "Install failed (409)": the whole point of the gate
         // is that the installer READS the list and decides per index, so the
@@ -233,7 +408,7 @@ export default class PackageInstall extends Command {
           }
           console.log('');
           console.log('  Confirm them as genuinely platform-wide:');
-          console.log(`    os package install ${args.package} --confirm-global-uniques`);
+          console.log(`    ${retry} --confirm-global-uniques`);
           console.log("  …or edit the app's metadata to `unique: 'organization'` and rebuild.");
           this.exit(1);
           return;
@@ -248,19 +423,39 @@ export default class PackageInstall extends Command {
           for (const finding of findings) console.log(`  • ${finding.describe ?? JSON.stringify(finding)}`);
           console.log('');
           console.log('  Review each finding. To upgrade anyway, confirm exactly these findings:');
-          console.log(`    os package install ${args.package} --confirm-access-upgrade ${details.findingSet}`);
+          console.log(`    ${retry} --confirm-access-upgrade ${details.findingSet}`);
+          this.exit(1);
+          return;
+        }
+        // [epic cloud#3652 Q3, #30884] The schema upgrade stop: every finding,
+        // then both ways forward — declare the rename in the package, or
+        // confirm exactly these findings.
+        if (res.body?.error?.code === 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED') {
+          const details = res.body.error.details ?? {};
+          const refusal = readSchemaUpgradeRefusal(res.body)
+            ?? { findings: Array.isArray(details.findings) ? details.findings : [], findingSet: String(details.findingSet) };
+          const { headline, lines } = renderSchemaUpgradeRefusal(refusal, retry);
+          printError(headline);
+          for (const line of lines) console.log(line);
           this.exit(1);
           return;
         }
         if (res.status === 401) {
           printError(
-            'The runtime rejected the call as unauthenticated. Pass --email/--password ' +
-            '(or set OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) for an account on the target runtime.',
+            'The runtime rejected the call as unauthenticated. Pass --token (or OS_RUNTIME_TOKEN) with a ' +
+            'token the target runtime issued, or --email/--password (or OS_RUNTIME_EMAIL/OS_RUNTIME_PASSWORD) ' +
+            'for an account on the target runtime, or record one with `os environments use-runtime <url> --token <key>`.',
           );
         } else if (res.status === 404) {
+          // The door is absent, not refusing: a runtime booted from a composed
+          // artifact takes no package installs (ObjectOS Enterprise declines
+          // install-local in that mode), and any other host may simply not
+          // mount it. Both are named, with what to do — nothing was installed.
           printError(
-            `install-local endpoint not found on ${runtime}. The target runtime must mount ` +
-            'MarketplaceInstallLocalPlugin (see @objectstack/cloud-connection).',
+            `${runtime} does not serve install-local (POST /api/v1/marketplace/install-local answered 404), so `
+            + 'nothing was installed. A runtime booted from a composed artifact takes no package installs: rebuild '
+            + 'its artifact with this package in it and restart it. Any other runtime must mount '
+            + 'MarketplaceInstallLocalPlugin (@objectstack/cloud-connection) to take installs.',
           );
         } else {
           // [#21489] The runtime's refusal is printed with its CODE beside the
@@ -278,6 +473,80 @@ export default class PackageInstall extends Command {
       }
 
       const data = res.body?.data ?? res.body ?? {};
+
+      // [#30884] The dry run's answer: the plan, and nothing installed.
+      if (data.dryRun === true) {
+        this.outcome = {
+          kind: 'dry-run',
+          manifestId: String(data.manifestId ?? label),
+          version: String(data.version ?? flags.version),
+          installedVersion: typeof data.installedVersion === 'string' ? data.installedVersion : null,
+          plan: data.plan ?? null,
+          environment: data.environment ?? null,
+          installedRecordUnreadable: data.installedRecordUnreadable === true,
+        };
+        console.log('');
+        printSuccess('Dry run — nothing was installed or written');
+        printKV('  Package',   String(data.manifestId ?? label));
+        printKV('  Version',   `${String(data.version ?? flags.version)}${typeof data.installedVersion === 'string' ? ` (installed: ${data.installedVersion})` : ' (not installed)'}`);
+        printKV('  Runtime',   runtime);
+        console.log('');
+        for (const line of renderUpgradePlan(data)) console.log(line);
+        console.log('');
+        return;
+      }
+      // Asked for a dry run, answered without it: the runtime predates the
+      // key, read no `dryRun`, and INSTALLED. Said out loud, never printed as
+      // a plan — the opposite of what was asked happened.
+      if (flags['dry-run']) {
+        printError(
+          `The runtime at ${runtime} does not support a dry run: it ignored \`--dry-run\` and INSTALLED ${label}. `
+          + 'Upgrade the runtime to preview an upgrade before it is installed'
+          + `${this.retryCommand ? `, then run \`${this.retryCommand}\` again` : ''}.`,
+        );
+        this.exit(1);
+        return;
+      }
+
+      // [ADR-0146 D3, #30106] A base's paired customization package answers
+      // its own shape too: the writable pair its items were written into,
+      // never a kernel registration or a cached manifest — so, as for an
+      // unmanaged install, none of the managed lines below is true of it.
+      this.outcome = { kind: 'other', manifestId: String(data.manifestId ?? label) };
+      const pair = data.customizationPair;
+      if (pair && typeof pair === 'object' && typeof pair.packageId === 'string') {
+        console.log('');
+        printSuccess(
+          `Customization package installed into the writable pair of '${String(pair.basePackageId)}' — `
+          + 'its overrides are served now, and the pair stays editable on this runtime',
+        );
+        printKV('  Package',   String(data.manifestId ?? label));
+        printKV('  Version',   String(data.version ?? flags.version));
+        printKV('  Runtime',   runtime);
+        printKV('  Pair',      `${pair.packageId}${pair.created === true ? ' (created by this install)' : ''}`);
+        if (typeof data.writtenCount === 'number') printKV('  Items written', String(data.writtenCount));
+        if (data.seeded?.mode === 'skipped' && typeof data.seeded.reason === 'string') {
+          printKV('  Sample data', `not loaded — ${data.seeded.reason}`);
+        }
+        printWithheldMaps(data.withheldMaps);
+        console.log('');
+        return;
+      }
+      // Sent a pair, answered as a managed install: the runtime predates the
+      // pair install and registered the pair as CODE — read-only, serving none
+      // of its overrides. Said out loud, never printed as a success: that
+      // answer is what #30106 measured.
+      if (customizationBasePackageId(String(data.manifestId ?? label)) !== null) {
+        const pairId = String(data.manifestId ?? label);
+        printError(
+          `The runtime at ${runtime} installed ${pairId} as code, not into its writable pair: it serves none of the `
+          + 'package\'s overrides and leaves the pair read-only. Uninstall it '
+          + `(\`DELETE ${runtime}/api/v1/marketplace/install-local/${pairId}\`), upgrade and restart the runtime, `
+          + 'then install it again.',
+        );
+        this.exit(1);
+        return;
+      }
 
       // [ADR-0131 D6] An unmanaged install answers its own shape: what was
       // copied and where, never a kernel registration — so none of the
@@ -313,6 +582,7 @@ export default class PackageInstall extends Command {
         if (data.seeded?.mode === 'skipped' && typeof data.seeded.reason === 'string') {
           printKV('  Sample data', `not loaded — ${data.seeded.reason}`);
         }
+        printWithheldMaps(data.withheldMaps);
         console.log('');
         return;
       }
@@ -343,6 +613,13 @@ export default class PackageInstall extends Command {
       // missing, blank or not a string prints no reason line at all.
       const notHotLoaded = data.hotLoaded === false;
       const hotLoadError = typeof data.hotLoadError === 'string' ? data.hotLoadError.trim() : '';
+      this.outcome = {
+        kind: 'installed',
+        manifestId: String(data.manifestId ?? data.packageId ?? label),
+        version: String(data.version ?? flags.version),
+        hotLoaded: !notHotLoaded,
+        runtime,
+      };
       console.log('');
       if (notHotLoaded) {
         printWarning(
@@ -356,6 +633,7 @@ export default class PackageInstall extends Command {
       printKV('  Runtime',   runtime);
       if (data.installedAt) printKV('  Installed', String(data.installedAt));
       if (notHotLoaded && hotLoadError) printKV('  Hot-load error', hotLoadError);
+      printWithheldMaps(data.withheldMaps);
       console.log('');
       // #6721: the cache directory is quoted from the RESPONSE, never from a
       // literal or a locally-resolved constant. The directory lives on the

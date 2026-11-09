@@ -54,7 +54,7 @@ import {
 import { errorCodeIs } from '@object-ui/types';
 import { readFields } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat, type SupportedLocale } from '../metadata-admin/i18n.js';
-import { deriveMasterObject, requireCbpMasterDetails } from './owd-sharing.js';
+import { cbpMasterDetailDefaultsRequired, deriveMasterObject, requireCbpMasterDetails } from './owd-sharing.js';
 import { toast } from 'sonner';
 
 
@@ -69,13 +69,14 @@ interface OwdRow {
   internal: string;
   /**
    * The master (parent) object the row derives under `controlled_by_parent`:
-   * the reference of its one required `master_detail` (objectui#12326). For a
-   * row loaded as `controlled_by_parent` it is read from the body as stored,
-   * which is what the runtime derives. For any other row it is the master the
-   * row would derive once switched and saved here, since that save sets
-   * `required: true` on its `master_detail` fields. Undefined = no master: zero
-   * `master_detail` fields, or two or more, an authoring error the save door
-   * refuses.
+   * the reference of its one master `master_detail`, required or optional
+   * (objectui#12326, objectstack#30905 ruling A). For a row loaded as
+   * `controlled_by_parent` it is read from the body as stored, which is what
+   * the runtime derives. For any other row it is the master the row would
+   * derive once switched and saved here, since that save sets `required: true`
+   * on each `master_detail` that writes no `required`. Undefined = no master:
+   * zero `master_detail` fields, or two or more with no one master, an
+   * authoring error the save door refuses.
    */
   master?: string;
   /** True when this object already has an unpublished draft. */
@@ -138,7 +139,7 @@ function owdLabel(value: string, locale: SupportedLocale): string {
  */
 function cbpPrerequisite(fields: unknown): string[] {
   return readFields(fields)
-    .entries.filter((e) => e.def.type === 'master_detail' && e.def.required !== true)
+    .entries.filter((e) => cbpMasterDetailDefaultsRequired(e.def))
     .map((e) => `${e.name} → ${typeof e.def.reference === 'string' ? e.def.reference : '?'}`);
 }
 
@@ -399,8 +400,10 @@ export function PackageOwdOverviewPanel({
         if (s.edit.internal) next.sharingModel = s.edit.internal;
         else delete next.sharingModel;
         // objectui#12326 — switching to `controlled_by_parent` sets
-        // `required: true` on every `master_detail` field, as the per-object
-        // Settings tab does: the save door refuses an omitted one there.
+        // `required: true` on each `master_detail` field that writes no
+        // `required`, as the per-object Settings tab does: the save door would
+        // read the omission as an optional master. An explicit
+        // `required: false` is an optional master and is kept.
         let relations: string[] = [];
         if (s.edit.internal === 'controlled_by_parent' && next.fields !== undefined) {
           relations = cbpPrerequisite(next.fields);

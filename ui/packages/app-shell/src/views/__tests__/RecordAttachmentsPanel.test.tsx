@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RecordAttachmentsPanel } from '../RecordAttachmentsPanel';
@@ -710,5 +710,217 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
       ),
     );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Inside the ObjectStack mobile shell, when it announces `openFile`
+ * (objectstack-ai/mobile `docs/HYBRID-SHELL.md`, "Files"): the row tap
+ * fetches the signed URL with the Console's session as before, then fetches
+ * the BYTES and hands them to the shell's `openFile`. Over the bridge's
+ * 8 MiB, a failed byte fetch or a `bad_args` refusal keeps the browser path.
+ * ⛔ The signed URL is a credential, so it never crosses the bridge.
+ */
+describe('RecordAttachmentsPanel — mobile shell openFile', () => {
+  const GLOBAL = 'ObjectStackNative';
+  const SIGNED = '/api/v1/storage/_local/raw/tok123';
+
+  function installShell(opts: { capabilities?: string[]; refuse?: boolean } = {}) {
+    const capabilities = opts.capabilities ?? ['openFile', 'share'];
+    const openFile = vi.fn(async (_file: { base64: string; name: string; mime: string }) => {
+      if (opts.refuse) throw Object.assign(new Error('Files cross the bridge up to 8 MB'), { code: 'bad_args' });
+      return null;
+    });
+    const host = {
+      version: 1,
+      platform: 'ios',
+      appVersion: '2.2.0',
+      capabilities,
+      safeArea: { top: 0, bottom: 0, left: 0, right: 0 },
+      has: (c: string) => capabilities.includes(c),
+      openFile,
+      openExternal: vi.fn(async () => null),
+      share: vi.fn(async () => null),
+      ready: vi.fn(),
+      routeChanged: vi.fn(),
+    };
+    (window as unknown as Record<string, unknown>)[GLOBAL] = host;
+    return host;
+  }
+
+  /** `/files/:id/url` answers the signed URL; the signed URL answers `bytes`. */
+  function mockStorage(bytes: BlobPart = 'hello', type = 'application/pdf', bytesStatus = 200) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('/api/v1/storage/files/f1/url')) {
+        return new Response(JSON.stringify({ success: true, data: { url: SIGNED } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith(SIGNED)) return new Response(new Blob([bytes], { type }), { status: bytesStatus });
+      throw new Error(`unexpected fetch ${url}`);
+    });
+  }
+
+  async function tapDownload(rows: unknown[] = [ROW]) {
+    setup(makeDataSource({ find: vi.fn(async () => rows) }));
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+  }
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>)[GLOBAL];
+  });
+
+  it('hands the fetched bytes to openFile, never the URL, and opens no tab', async () => {
+    const host = installShell();
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const fetchSpy = mockStorage();
+    await tapDownload();
+
+    await waitFor(() => expect(host.openFile).toHaveBeenCalledTimes(1));
+    // "hello" in standard padded base64; the bridge file has exactly these keys.
+    expect(host.openFile.mock.calls[0][0]).toEqual({ base64: 'aGVsbG8=', name: 'report.pdf', mime: 'application/pdf' });
+    expect(fetchSpy.mock.calls.map((c) => String(c[0]))).toEqual([
+      expect.stringContaining('/api/v1/storage/files/f1/url'),
+      expect.stringContaining(SIGNED),
+    ]);
+    expect(JSON.stringify(host.openFile.mock.calls)).not.toContain('tok123');
+    expect(host.openExternal).not.toHaveBeenCalled();
+    expect(host.share).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('a row over 8 MiB keeps the browser path without fetching the bytes', async () => {
+    const host = installShell();
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const fetchSpy = mockStorage();
+    await tapDownload([{ ...ROW, size: 8 * 1024 * 1024 + 1 }]);
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalledWith(expect.stringContaining(SIGNED), '_blank', 'noopener,noreferrer'));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(host.openFile).not.toHaveBeenCalled();
+  });
+
+  it('fetched bytes over 8 MiB keep the browser path', async () => {
+    const host = installShell();
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    mockStorage(new Uint8Array(8 * 1024 * 1024 + 1));
+    await tapDownload([{ ...ROW, size: null }]);
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalledWith(expect.stringContaining(SIGNED), '_blank', 'noopener,noreferrer'));
+    expect(host.openFile).not.toHaveBeenCalled();
+  });
+
+  it('a bad_args refusal keeps the browser path', async () => {
+    const host = installShell({ refuse: true });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    mockStorage();
+    await tapDownload();
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalledWith(expect.stringContaining(SIGNED), '_blank', 'noopener,noreferrer'));
+    expect(host.openFile).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('a failed byte fetch keeps the browser path', async () => {
+    const host = installShell();
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    mockStorage('nope', 'text/plain', 403);
+    await tapDownload();
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalledWith(expect.stringContaining(SIGNED), '_blank', 'noopener,noreferrer'));
+    expect(host.openFile).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: an older shell without openFile fetches no bytes and opens the tab as today', async () => {
+    const host = installShell({ capabilities: ['share'] });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const fetchSpy = mockStorage();
+    await tapDownload();
+
+    await waitFor(() => expect(openSpy).toHaveBeenCalledWith(expect.stringContaining(SIGNED), '_blank', 'noopener,noreferrer'));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(host.openFile).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The upload attaches through the server's attach verb: the presigned upload's
+ * own completion carries `attachTo` (`POST /api/v1/storage/upload/complete`),
+ * and the server commits the file and writes its `sys_attachment` row as the
+ * signed-in user. The panel never creates `sys_attachment` through the generic
+ * data door, which refuses a member who may attach but cannot read `sys_file`.
+ * Driven through the REAL ObjectStack upload adapter over a stubbed `fetch`.
+ */
+describe('RecordAttachmentsPanel — upload attaches through the upload’s own completion', () => {
+  const ok = (data: unknown) =>
+    new Response(JSON.stringify({ success: true, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  function stubStorage(complete: () => Response) {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const method = init?.method ?? 'GET';
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body;
+      calls.push({ url, method, body });
+      if (url.endsWith('/api/v1/storage/upload/presigned')) {
+        return ok({ uploadUrl: '/api/v1/storage/_local/raw/tok', method: 'PUT', fileId: 'f-new', headers: {} });
+      }
+      if (url.endsWith('/api/v1/storage/_local/raw/tok')) return ok({ key: 'attachments/f-new.pdf' });
+      if (url.endsWith('/api/v1/storage/upload/complete')) return complete();
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    return { spy, calls };
+  }
+
+  async function uploadOne() {
+    const dataSource = makeDataSource();
+    const { container } = render(
+      <RecordAttachmentsPanel objectName="att_case" recordId="r1" dataSource={dataSource} currentUserId="me" />,
+    );
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.setup().upload(input, new File(['%PDF'], 'quote.pdf', { type: 'application/pdf' }));
+    return dataSource;
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('completes the upload with attachTo naming this record, and creates no sys_attachment through the data door', async () => {
+    const { calls } = stubStorage(() => ok({ fileId: 'f-new', name: 'quote.pdf', attachmentId: 'a-new' }));
+    const dataSource = await uploadOne();
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalledTimes(2)); // the list re-read after the attach
+    const complete = calls.find((c) => c.url.endsWith('/upload/complete'));
+    expect(complete).toMatchObject({
+      method: 'POST',
+      body: { fileId: 'f-new', attachTo: { parentObject: 'att_case', parentId: 'r1' } },
+    });
+    expect(calls.find((c) => c.url.endsWith('/upload/presigned'))?.body).toMatchObject({ scope: 'attachments' });
+    expect(dataSource.create).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('maps the attach verb’s ATTACHMENT_PARENT_ACCESS refusal to the friendly copy', async () => {
+    stubStorage(
+      () =>
+        new Response(
+          JSON.stringify({ success: false, error: { code: 'ATTACHMENT_PARENT_ACCESS', message: 'Cannot attach to att_case/r1' } }),
+          { status: 403, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const dataSource = await uploadOne();
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent("You don't have access to attach files to this record."),
+    );
+    expect(dataSource.create).not.toHaveBeenCalled();
+  });
+
+  it('a completion that attached nothing is an error, never a silent success', async () => {
+    stubStorage(() => ok({ fileId: 'f-new', name: 'quote.pdf' }));
+    await uploadOne();
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('did not attach it to this record'));
   });
 });

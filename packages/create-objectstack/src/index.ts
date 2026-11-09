@@ -25,7 +25,7 @@
  * After the files land in `targetDir`, four files are rewritten with the
  * user-supplied project name:
  *   - package.json              .name
- *   - objectstack.manifest.json .name + .displayName
+ *   - objectstack.manifest.json .displayName (+ .namespace)
  *   - objectstack.config.ts     manifest.id and manifest.name string literals
  *   - README.md                 first H1
  *
@@ -78,6 +78,7 @@ import {
   readTemplateNamespace,
   rewriteObjectNamePrefix,
   findStaleNamespacePrefixes,
+  stripRetiredManifestKeys,
 } from './rewrite-identity.js';
 import { lookupTemplate, templateNames } from './template-registry.js';
 import { readResolvedCliVersion, pinRuntimeImage } from './runtime-image.js';
@@ -155,6 +156,7 @@ function rewriteProjectIdentity(
   targetDir: string,
   projectName: string,
   namespace: string,
+  pm: string,
 ) {
   const title = toTitleCase(projectName);
 
@@ -186,7 +188,11 @@ function rewriteProjectIdentity(
     }
   }
 
-  // objectstack.manifest.json — set .name, .displayName, .namespace, and DROP
+  // objectstack.manifest.json — set .displayName and .namespace, DROP every
+  // key @objectstack/spec 18 retired from the file (`category` #30980; `name`,
+  // `specVersion`, `skills`, `scaffold`, `visibility` #31035): a parse of the
+  // file refuses each, and publish refuses `category` and `visibility` — the
+  // list is RETIRED_TEMPLATE_MANIFEST_KEYS in rewrite-identity.ts), and DROP
   // .description (#9263). The template ships a generic line describing
   // ITSELF ("Minimal ObjectStack environment — a clean slate for building."),
   // not the project being scaffolded, and there is nothing but the project
@@ -201,7 +207,7 @@ function rewriteProjectIdentity(
   if (fs.existsSync(manifestPath)) {
     try {
       const m = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      m.name = projectName;
+      stripRetiredManifestKeys(m);
       m.displayName = title;
       if ('namespace' in m) m.namespace = namespace;
       delete m.description;
@@ -268,16 +274,20 @@ function rewriteProjectIdentity(
     fs.writeFileSync(readmePath, md);
   }
 
-  writeAgentGuides(targetDir, title, projectName);
+  writeAgentGuides(targetDir, title, projectName, pm);
 }
 
 // Emit the cross-agent guidance file (AGENTS.md) and the GitHub Copilot variant
 // (.github/copilot-instructions.md) from the shared template. This is what tells
-// the coding agent to run `npm run validate` after editing metadata — the gate
+// the coding agent to run `<pm> run validate` after editing metadata — the gate
 // that catches bare-field predicates and dangling bindings that otherwise fail
 // silently at runtime. Skip either file if the template already shipped its own,
 // so a curated template can override the default.
-function writeAgentGuides(targetDir: string, title: string, projectName: string) {
+//
+// `{{PM}}` is the package manager this run detected — the same one the install
+// line and "Next steps" name — so a project created with pnpm is not told to
+// type `npm run` in the file its coding agent reads first.
+function writeAgentGuides(targetDir: string, title: string, projectName: string, pm: string) {
   const templatePath = path.join(BUNDLED_TEMPLATES_DIR, 'AGENTS.md');
   let template: string;
   try {
@@ -289,7 +299,8 @@ function writeAgentGuides(targetDir: string, title: string, projectName: string)
 
   const rendered = template
     .replace(/\{\{PROJECT_TITLE\}\}/g, title)
-    .replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+    .replace(/\{\{PROJECT_NAME\}\}/g, projectName)
+    .replace(/\{\{PM\}\}/g, pm);
 
   // Atomic exclusive-create (the `wx` flag) instead of existsSync()+writeFileSync():
   // it fails with EEXIST if the file already exists, so a curated template that
@@ -593,7 +604,7 @@ const program = new Command()
 
       const createdFiles = loadBundled(template.source.dir, targetDir);
 
-      rewriteProjectIdentity(targetDir, projectName, namespace);
+      rewriteProjectIdentity(targetDir, projectName, namespace, pm);
 
       // Progress, not an inventory. The authoritative list is printed at the
       // end, once `<pm> install` and the skills installer have also written —

@@ -33,7 +33,6 @@
 - 注册按克隆(`pnpm install` 的 prepare),服务端一个驱动都不跑 ⇒ 两侧答的不是同一个问题。
 - 驱动接手的路径上 exit 0 只说内容判断被推迟,⛔ 不是无冲突:它对内容什么都没说。
 - ⇒ 冲突证明探无驱动裸克隆,配方与读法见 `scripts/pm/os-regen-merge.sh`:exit 1 无树 id = 缺对象
-- ⛔ 永不用 `-c merge.os-regen.driver=` 覆盖:驱动不是被关掉而是跑失败,路由路径全报冲突。
 - 入队决策点才整对象 `get` 一次;挂了 flip 定点到点读,⛔ 不又查又等。
 - 状态核验用最小字段(search/list 加 `fields`)或等事件。
 - 聚合读数(`blocked`/`dirty`)只作阴性筛查再定位;放行按名定向读单条 job,⛔ 不拉全表。
@@ -73,7 +72,7 @@
 - 从根在当前 `origin/main` 的那条起走父-tip 链即真实排队序;`ls-remote` 的字典序无意义。
 - 名形里的 `<PARENT>` 是推测基:实测晚十余分钟才落 `main` ⇒ ⛔ 不读作该基已落地。
 - 该读法零配额,答 timeline 答不了的排第几;⛔ 只读现在、不重建历史。
-- 队列踢出先认签名再决定重投:核对失败签名与已知 flaky 一致 ⇒ 原样重投。
+- 队列踢出先认签名:与已知 flaky(如 `Checkout repository` 超时)一致 ⇒ 原样重投,理由记 PR。
 - 止血修复合入后同一签名再现就不再是那条 flaky,是新问题须重新诊断,⛔ 禁反射式重投。
 - 第三种签名:本 PR 名下没有任何 `merge_group` run,且批次同伴的 run 全部 `success`。
 - 队列重建的连带取消不是红 ⇒ 带签名收据重投一次,收据留在 PR 上,⛔ 无收据不重投。
@@ -129,8 +128,7 @@
 - `performed_via_github_app`、`GET /user` 与 core 限流头对两类同答 ⇒ 三者都不是判别式。
 - 封号隐藏其全部评论、无 timeline 事件;assignee、PR、正文存活;分诊没了挂 `pm:retriage`。
 - ⇒ 耐久算按令牌类重算,⛔ 不假定署名恒 `claude[bot]`;用户类下请 PR 作者复审回 422。
-- GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
-- 那几件 = `rest-channel.md`〈不可迁移〉那三件;draft 翻转与 auto-merge 挂载有中继 op、不在内。
+- GraphQL 池 5000/时只留给 `rest-channel.md`〈不可迁移〉三件;draft 翻转与挂载走中继 op。
 - 逐操作通道归属、写侧配方与队列路由三读法见 `rest-channel.md`,⛔ 不在本表复述。
 - MCP list/search 家族整个走 GraphQL 稀缺池,`issue_write` 连查找半边都吃。
 - 配额红时认领类动作排队,评论走 REST 桶先行把结论发出去。
@@ -140,13 +138,11 @@
 - 红窗调度:守候只给上面那几件 GraphQL-only 的,⛔ 其余一切不为配额空等。
 - 走队列的仓落地仍必经 auto-merge,红窗里照样走中继 op 挂载;直合仓合并本身有 REST 端点。
 - 被挡住的翻转是在等窗口,不是关于该 PR 的信号 ⇒ ⛔ 不据它重挂、不据它改判状态。
-- 报文里的 user ID 只是报文:据它推 MCP 池跨席共享与本节首条冲突,⛔ 未裁不写成事实。
 - `issue transfer` 因配额或权限拿不到 ⇒ 当轮改走多仓协调条款的在目的仓重建配方。
 - 该配方 = 出处头加裸 `#N` 改全名加关源单为 moved:纯 REST、配额免疫,⛔ 不为它空等重置。
 - 两个瘦身参数都不省池。`fields` 省载荷:MCP list/search 服务器端无条件抓 Project field_values。
 - ⇒ 池枯竭时最小字段请求同样全体失败,报错串是 failed to fetch issue field values。
-- ⛔ `minimal_output: true` 不裁 `list_issues` 的 `body`,⛔ 永不当省额度手段写进任何 skill。
-- 没有参数能关掉 `body`:要么整表 107 点,要么换窄接口(点数未测)。
+- `minimal_output` 不裁 `list_issues` 的 `body`,也无参数关得掉;⛔ 永不当省额度手段写进 skill。
 - 站得住的证据是直接观察 `body` 在,不是前后体积对比 —— 两次调用之间 population 已变。
 - git 先行:本地检出、`git log`、`ls-remote` 不花配额,断粮期分支存在性检查照常可用。
 - PR 文件读取同走 git:REST PR files 端点可瞬态 404。
@@ -286,9 +282,13 @@
 - auto 档判定随命令形状变,不随能力变 ⇒ 被拒的复合命令拆成裸动作重试再报 blocked。
 - 读数:带链接与管道的 `git push` 被拒,裸 `git push origin <分支>` 放行,拒绝文案不点名元素。
 - 判定跨天翻面 ⇒ ⛔ 一次拒绝不是能力边界;`permissions.allow` 条目才是仓库侧确定性通道。
-- `rerun_failed_jobs` 复用原 run 的提交与合并 ref,不拿新 main 重算。
-- ⇒ 基上缺已合修复时重跑无效,只能 `git merge origin/main` 推提交;判别看修复合并时间。
-- 经 `rerun-failed.mjs` 重跑 PR `ci.yml` 失败 job 仅一次,先在 PR 或卡写明 flake 理由;二败即真红。
+- 红检查先读日志:自称一个都没测(基础设施失败)的红归席位清,⛔ 永不请维护者点重跑。
+- ① `rerun-failed.mjs` 重跑失败 job 一次(名单即 `RERUN_FAILED_WORKFLOWS`),先在 PR 或卡写明理由。
+- 中继重跑(`rerun-failed.mjs` → `run_rerun_failed`)复用原 run 的提交与合并 ref,不拿新 main 重算。
+- ② 被拒(如 `lint.yml`)、基缺修复或冲突 ⇒ `pr_update_branch`(齐平即空操作)或 dev 合 main。
+- `pr-automation.yml`(`Check Changeset` 取消无后继):席位改正文记下 flake 理由,其 `edited` 即重跑。
+- ⇒ 该正文改走 `seat-post-protocol.md` 的 PR 正文行。
+- ③ 测到东西的二败才是真红;⛔ 永不空提交、永不关了重开;落地记录点名所取步骤。
 - 同一 head 上轻量兄弟 workflow `success` 加重量级载体 `cancelled` 是普通取代的预期签名。
 - 同名 `failure` 也会被带另一诊断的后一次 `failure` 取代 ⇒ 任何判定前先按名取最新一次。
 - cancel-in-progress 窗口只罩得住慢载体 ⇒ 先比对 run `head_sha` 与 PR 当前 head,不开调查。
@@ -310,7 +310,6 @@
 - doctype 开标记与 object 标签形状同触发;网页全文完好,⛔ 不修复只在 API 读短的卡。
 - 同坑第三条读路径:MCP `issue_read` 与 PR 读路径把行内反引号里的尖括号片段整个吃掉。
 - GitHub 存储字节完好、raw REST 一字不差 ⇒ ⛔ 不单凭 MCP 读判截断,先取 raw 或渲染页核对。
-- 否则 repair-first 被正确地应用到完好的卡上,重写毁掉的是正确内容。
 - 唤醒中继渲染会把 `{` `}` `<` 转义 ⇒ 判已发布产物按 `GET` 取存储体,⛔ 永不按中继正文。
 - 判据 = 数空的行内代码跨度:一个空跨度恰是短尖括号片段被吃掉的签名。
 - 判据是尖括号不是反引号:有的正文本来就把标识符不带尖括号写。
@@ -341,6 +340,7 @@
 - 该追加按面不按路由:`PATCH /issues/{n}` 打在 PR 上同样 +58 追加裸页脚,而 draft 位不动。
 - 页脚两拼写:裸版与 session-URL 版都要剥,漏剥的卡在正文中段,而 58 字节差照常。
 - ⇒ 代价是归属:裸形无 session id,按此剥净的 PR 正文不载明哪个会话写的;另置见 AGENTS.md。
+- 中继 `issue_patch` 不在此列:`dispatch.mjs` 读回 PR 正文存 = 送(`identical`),无追加。
 - 第四形:建 PR 两通道同判 —— 送出体尾部不是 `---` 加页脚块时,追加一条同形页脚。
 - 该追加是横线加一条 session-URL 形页脚,送出体是存储体的严格前缀;字节数非常量(90/91)。
 - 尾部已是该块则一字不追加,两通道各实测两向 ⇒ 建侧通道不是变量,判据是送出体尾部。
@@ -385,9 +385,9 @@
 - 强制档不因临缺授权降档:临缺非退役,退役唯维护者裁;不达档起隔离达档子代理或等档。
 - 本车道强制多是过宽的回忆:`dispatch-gates.mjs --tier PATH` 逐路径现推,路径线是下限非放行。
 - 该脚本只答自己那棵树:姊妹仓路径回 absent from this tree,姊妹仓的档位与条款②只能手推。
-- required checks 的名单是每仓事实,objectstack 十个:
-  `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Build Core` · `Lint UI` ·
-  `Governed Surface Queue Guard` · `Type Check UI` · `Test UI` · `Build & E2E UI` · `Live E2E UI`。
+- required checks 的名单是每仓事实,objectstack 十一个:
+  `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Build Core` · `Lint UI` · `Test UI` ·
+  `Governed Surface Queue Guard` · `Type Check UI` · `Build & E2E UI` · `Live E2E UI` · `Dogfood Regression Gate`。
 - ⭐ 本表的 `mustName` 声明 `statesTheSet` ⇒ 必须逐字等于注册表,加注册行不跟改本表即红。
 - ⇒ 门绿即名单逐字齐全的读数;⛔ 但数量词未钉:实测 七→六 照绿,只能手跟改。
 - ⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在包级 typecheck 绿时红。

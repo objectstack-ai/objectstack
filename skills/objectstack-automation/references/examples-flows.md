@@ -1,4 +1,4 @@
-# Automation — long flow examples (moved verbatim from SKILL.md)
+# Automation — long flow examples
 
 ### Flow Example — Auto-Escalate Overdue Cases
 
@@ -16,7 +16,7 @@
 import { defineFlow } from '@objectstack/spec';
 
 export const EscalateOverdueCasesFlow = defineFlow({
-  name: 'escalate_overdue_cases',
+  name: 'crm_escalate_overdue_cases',
   label: 'Escalate Overdue Cases',
   type: 'schedule',
   status: 'active',
@@ -25,10 +25,13 @@ export const EscalateOverdueCasesFlow = defineFlow({
     {
       id: 'start',
       type: 'start',
-      label: 'Daily at 09:00',
+      label: 'Daily at 09:00 Shanghai time',
       // The cadence lives HERE — FlowSchema has NO top-level `schedule` key (a
       // named parse error). A bare cron string also works; a cron`…` tag does not.
-      config: { schedule: { type: 'cron', expression: '0 9 * * *' } },
+      // A bare expression runs in UTC. A wall-clock hour the request names is
+      // written AS SAID with its IANA `timezone` — never converted to UTC by hand:
+      // the arithmetic may be right, but nothing then records which zone was meant.
+      config: { schedule: { type: 'cron', expression: '0 9 * * *', timezone: 'Asia/Shanghai' } },
     },
     {
       id: 'escalate_overdue',
@@ -80,12 +83,14 @@ is on the context, so the start `condition` and a `record.*` CEL value envelope 
 exactly as for a record-change flow — and because the window is evaluated every
 day, a threshold is never missed.
 
+<!-- os:check -->
 ```typescript
-{
-  name: 'renewal_alert',
+import { defineFlow } from '@objectstack/spec';
+defineFlow({
+  name: 'crm_renewal_alert',
   label: 'Renewal Alert',
   type: 'schedule',
-  runAs: 'system',              // a sweep has no trigger user — elevate explicitly
+  runAs: 'system',
   nodes: [
     {
       id: 'start', type: 'start', label: 'Daily Sweep',
@@ -98,14 +103,14 @@ day, a threshold is never missed.
           filter: { status: 'active' },  // optional, ANDed with the date window
           // maxRecords: 1000            // optional per-sweep cap (default 1000)
         },
-        // Optional sweep cadence; omit for daily 08:00 UTC. Plain shape only:
-        // schedule: { type: 'cron', expression: '0 8 * * *' }
+        // Optional sweep cadence; omit for daily 08:00 UTC. Plain shape only, a
+        // named hour with its zone: schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'Asia/Shanghai' }
       },
     },
     // …downstream nodes (notify, update_record, …)
   ],
   edges: [ /* start → downstream */ ],
-}
+});
 ```
 
 **Date EQUALITY never matches**, so a hand-rolled sweep filters windows, not
@@ -128,7 +133,6 @@ fires once, idempotent, no guard field. Each bound is a CEL value envelope
 query placeholder such as `{today}` is refused there (`expression-invalid`).
 For "days remaining" in a message, use `daysBetween(today(), record.end_date)`.
 
-`timeRelative` ships in `@objectstack/trigger-schedule` — needs
-`requires: ['automation', 'triggers']` **plus `'job'`** (the sweep cadence
-runs on the job service). Full descriptor schema:
+`timeRelative` ships in `@objectstack/trigger-schedule` (its `requires` tokens:
+SKILL.md § Prerequisite). Full descriptor schema:
 `node_modules/@objectstack/spec/src/automation/time-relative-trigger.zod.ts`.

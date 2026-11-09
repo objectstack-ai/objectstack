@@ -82,10 +82,18 @@ import {
 import type { TenancyPosture } from '@objectstack/spec/security';
 import { describeAnchorForbiddenBits, postureEnforcesWall } from '@objectstack/spec/security';
 import { EVERYONE_POSITION } from '@objectstack/spec';
-import { findDefaultOrganization, securityCatalogReaderOf } from '@objectstack/core';
+import {
+  findDefaultOrganization,
+  resolveCatalogReference,
+  securityCatalogReaderOf,
+  storedPermissionSetScope,
+  type SecurityCatalogEntry,
+  type SecurityCatalogReader,
+} from '@objectstack/core';
 import { METADATA_AUTHORING_CAPABILITY } from '@objectstack/metadata-core';
 import { PermissionDeniedError } from './errors.js';
 import { readDeclaredCapabilityContext } from './declared-capability-context.js';
+import { bindCommandFor } from './stored-permission-set-package-backfill.js';
 
 /** The execution context every read and write of the record carries. */
 function scopedSystemCtx(organizationId?: string): { isSystem: true; tenantId?: string } {
@@ -627,7 +635,7 @@ export async function readAcceptedEveryoneSets(
 ): Promise<{ accepted: string[]; withheld: WithheldAcceptance[] }> {
   const out = { accepted: [] as string[], withheld: [] as WithheldAcceptance[] };
   const declared = hostDeclaredAcceptance(deployment);
-  let candidates: Array<{ set: string; packageId?: string }>;
+  let candidates: Array<{ set: string; packageId?: string; row?: Record<string, unknown> }>;
   if (declared) {
     candidates = declared.map((set) => ({ set }));
   } else {
@@ -640,17 +648,22 @@ export async function readAcceptedEveryoneSets(
     });
     candidates = (Array.isArray(rows) ? rows : [])
       .filter((r) => ownedBy(r, organizationId) && isDeploymentDecision(r))
-      .map((r) => ({ set: String(r.permission_set_name), packageId: String(r.package_id) }));
+      .map((r) => ({ set: String(r.permission_set_name), packageId: String(r.package_id), row: r }));
   }
   if (candidates.length === 0) return out;
   const source: WithheldAcceptance['source'] = declared ? 'host-configuration' : 'record';
   const reader = securityCatalogReaderOf(ql);
   const capabilities = await readDeclaredCapabilityContext(ql, metadata);
-  for (const { set, packageId: accepting } of candidates) {
-    const entry = await reader?.resolve('permission', set);
+  for (const { set, packageId: accepting, row } of candidates) {
+    // [ADR-0150 D8 R3] A row reads the set its `permission_set_package` names,
+    // else the one the suggesting package resolves by D3; a host-declared name
+    // is the environment's, read with no package.
+    const answer = await resolveSuggestedSet(reader, set, row);
+    const entry = answer.entry;
     const owner = entry ? declaredOwnerOf(entry) : undefined;
     const withhold = (reason: string, forbidden = false) =>
       out.withheld.push({ set, packageId: accepting ?? owner ?? '', reason, forbidden, source });
+    if (answer.refusal) { withhold(answer.refusal); continue; }
     if (!entry) { withhold('the security catalog serves no set of that name (package uninstalled or disabled)'); continue; }
     // A row is the accepting package's; a declared name, like every suggestion,
     // must be some package's (ADR-0086 D3 — an unowned default is not offered).
@@ -959,13 +972,38 @@ async function recordRow(ql: any, organizationId: string, id: string): Promise<a
 }
 
 /**
+ * [ADR-0150 D8 R3] The set a suggestion names, read the way every reader of
+ * the column reads it ({@link storedPermissionSetScope}): the package its
+ * `permission_set_package` names, else the suggesting package (`package_id`)
+ * as the D3 caller, else — a host-declared name, no row — a caller with no
+ * package. A name the rule refuses answers no entry and the refusal's own
+ * sentence, which names every candidate, plus the operator's bind.
+ */
+async function resolveSuggestedSet(
+  reader: SecurityCatalogReader | undefined,
+  name: string,
+  row?: Record<string, unknown>,
+): Promise<{ entry?: SecurityCatalogEntry; refusal?: string }> {
+  if (!reader) return {};
+  const scope = row ? storedPermissionSetScope(row.permission_set_package, row.package_id) : undefined;
+  const answer = await resolveCatalogReference(reader, 'permission', name, scope);
+  if (answer.status === 'resolved') return { entry: answer.entry };
+  if (answer.status === 'refused') {
+    const bind = row ? ` Review it and bind one: \`${bindCommandFor(SUGGESTION_OBJECT, row.id)}\`.` : '';
+    return { refusal: `${answer.message}${bind}` };
+  }
+  return {};
+}
+
+/**
  * The catalog entry of the set `row` suggests, or the 409 naming why nothing
  * is suggested any more: the catalog does not serve the set, another package
  * declares it now (ADR-0086 D4), or it no longer declares `isDefault: true`.
  * Asked before a row is accepted, and before a dismissed row is re-opened.
  */
 async function requireStillSuggested(ql: any, row: any, verb: 'accept' | 're-open'): Promise<any> {
-  const entry = await securityCatalogReaderOf(ql)?.resolve('permission', row.permission_set_name);
+  const { entry, refusal } = await resolveSuggestedSet(securityCatalogReaderOf(ql), row.permission_set_name, row);
+  if (refusal) throw new SuggestionStateError(`${refusal} — refusing to ${verb} it.`);
   if (!entry) {
     throw new SuggestionStateError(
       `Permission set '${row.permission_set_name}' is not served by the security catalog — is package ` +

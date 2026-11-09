@@ -24,12 +24,22 @@
  *  - Restore deletes the pair's draft and row of that one member, and the
  *    base's version reads back;
  *  - a walled caller sees Customize disabled, and nothing is asked or sent.
+ *
+ * objectstack#30064 — a read-only base's dataset, in the same editor with the
+ * type's registered designer (a probe here): the whole dataset written into
+ * the pair, declared; what uses it listed from the references read before
+ * anything is published, a failed read said as failed; a designer's blocking
+ * issue holding the edit unsent; and a kept publish refusal shown at the item.
+ *
+ * objectstack#30859 — on a zh-CN console the dataset's pending draft is edited
+ * as stored (the layered read's `draft` at the pair), never as the translated
+ * `?state=draft` read, and a served draft with no stored copy opens nothing.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const BASE = 'com.example.hotcrm';
@@ -46,9 +56,19 @@ const srv = vi.hoisted(() => ({
   resets: [] as Array<{ type: string; name: string; opts: Record<string, unknown> }>,
   reads: [] as Array<{ op: string; type: string; name: string; opts: Record<string, unknown> }>,
   version: 0,
+  /** objectstack#30859 — the console's locale: `zh` serves `?state=draft` translated, as the server does. */
+  servedLocale: 'en' as 'en' | 'zh',
+  /** `false` models a server that does not serve the stored `draft` layer to this caller. */
+  servesDraftLayer: true,
 }));
 
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+/** objectstack#30859 — the zh-CN catalog's labels for the dataset, as `translateDataset` applies them. */
+const ZH_LABELS: Record<string, string> = { 'Opportunity Metrics': '商机指标', Opportunities: '商机数', 'Total Amount': '总金额' };
+const translated = (doc: Record<string, unknown>): Record<string, unknown> =>
+  JSON.parse(JSON.stringify(doc), (key, value) =>
+    key === 'label' && typeof value === 'string' ? (ZH_LABELS[value] ?? value) : value,
+  ) as Record<string, unknown>;
 /** The canonical member when none is named, as the server reads a bare name. */
 const slot = (type: string, name: string, member?: string) =>
   `${type}/${name}/${type === 'email_template' ? (member ?? 'en-US') : ''}`;
@@ -63,7 +83,8 @@ const mockClient = vi.hoisted(() => ({
   getDraft: vi.fn(async (type: string, name: string, opts: { packageId?: string; member?: string } = {}) => {
     srv.reads.push({ op: 'getDraft', type, name, opts: clone(opts) });
     const draft = srv.drafts.get(opts.packageId ?? '')?.get(slot(type, name, opts.member));
-    return draft ? { type, name, item: clone(draft), version: `v${srv.version}` } : null;
+    if (!draft) return null;
+    return { type, name, item: srv.servedLocale === 'zh' ? translated(draft) : clone(draft), version: `v${srv.version}` };
   }),
   layered: vi.fn(async (type: string, name: string, opts: { packageId?: string; member?: string } = {}) => {
     srv.reads.push({ op: 'layered', type, name, opts: clone(opts) });
@@ -71,12 +92,16 @@ const mockClient = vi.hoisted(() => ({
     const code = srv.rows.get(opts.packageId ?? '')?.get(key) ?? null;
     // N-10: the pair's declaring row is served over the base's item, member by member.
     const overlay = opts.packageId === BASE ? (srv.rows.get(PAIR)?.get(key) ?? null) : null;
-    if (!code && !overlay) throw Object.assign(new Error('Not found'), { status: 404 });
+    // objectstack#30859 — the pending draft at that package, as stored (never
+    // translated), served to an admitted author; an item with only a draft has layers too.
+    const draft = srv.drafts.get(opts.packageId ?? '')?.get(key) ?? null;
+    if (!code && !overlay && !draft) throw Object.assign(new Error('Not found'), { status: 404 });
     return {
       code: code ? clone(code) : null,
       overlay: overlay ? clone(overlay) : null,
       overlayScope: overlay ? 'env' : null,
       effective: clone(overlay ?? code),
+      ...(srv.servesDraftLayer ? { draft: draft ? clone(draft) : null } : {}),
     };
   }),
   save: vi.fn(async (type: string, name: string, item: unknown, opts: Record<string, unknown> = {}) => {
@@ -90,6 +115,7 @@ const mockClient = vi.hoisted(() => ({
     srv.version += 1;
     return { success: true, version: `v${srv.version}`, state: 'draft' };
   }),
+  references: vi.fn(async (_type: string, _name: string): Promise<unknown[]> => []),
   reset: vi.fn(async (type: string, name: string, opts: Record<string, unknown> = {}) => {
     srv.resets.push({ type, name, opts: clone(opts) });
     const map = opts.state === 'draft' ? srv.drafts : srv.rows;
@@ -115,6 +141,45 @@ import type { StudioBaseCustomization } from './StudioDesignSurface';
 import { ensureCustomizationPackage } from './packages-io';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerDefaultMetadataSchemas } from '../metadata-admin/default-schemas';
+import {
+  registerMetadataDefaultInspector,
+  type MetadataDefaultInspectorProps,
+} from '../metadata-admin/default-inspector-registry';
+import type { StudioRefusal } from './metadataError';
+import { t } from '../metadata-admin/i18n';
+
+/**
+ * The dataset's designer slot: the draft it is handed, its read-only gate, one
+ * edit (the second measure's aggregate) and one blocking report.
+ */
+function DesignerProbe({ draft, onPatch, onBlockingIssuesChange, readOnly }: MetadataDefaultInspectorProps) {
+  const measures = Array.isArray(draft.measures) ? (draft.measures as Array<Record<string, unknown>>) : [];
+  return (
+    <div data-testid="designer-probe" data-readonly={String(readOnly)}>
+      <p data-testid="designer-probe-aggregate">{String(measures[1]?.aggregate ?? '')}</p>
+      <p data-testid="designer-probe-labels">{[draft.label, ...measures.map((m) => m.label)].map(String).join(' | ')}</p>
+      <button
+        type="button"
+        data-testid="designer-probe-avg"
+        disabled={readOnly}
+        onClick={() => onPatch({ measures: measures.map((m, i) => (i === 1 ? { ...m, aggregate: 'avg' } : m)) })}
+      >
+        avg
+      </button>
+      <button
+        type="button"
+        data-testid="designer-probe-blank-dimension"
+        disabled={readOnly}
+        onClick={() => {
+          onPatch({ dimensions: [{ name: 'stage' }] });
+          onBlockingIssuesChange?.(1);
+        }}
+      >
+        blank
+      </button>
+    </div>
+  );
+}
 
 /** The preview slot, printing the live draft it is handed. */
 function PreviewProbe({ draft }: { draft: Record<string, unknown> }) {
@@ -134,6 +199,37 @@ const WELCOME_EN = {
   _packageId: BASE,
 };
 const WELCOME_ZH = { ...WELCOME_EN, locale: 'zh-CN', subject: '欢迎使用 HotCRM', bodyHtml: '<p>你好 {{user.name}}</p>' };
+const METRICS = {
+  name: 'opportunity_metrics',
+  label: 'Opportunity Metrics',
+  object: 'crm_opportunity',
+  dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string' }],
+  measures: [
+    { name: 'opp_count', label: 'Opportunities', aggregate: 'count' },
+    { name: 'total_amount', label: 'Total Amount', aggregate: 'sum', field: 'amount' },
+  ],
+  _packageId: BASE,
+};
+/** What the references read answers for the dataset (`client.references`, mapped from the served `references[]`). */
+const USED_BY = [
+  {
+    fromType: 'dashboard',
+    fromName: 'pipeline_dashboard',
+    fromLabel: 'Pipeline Dashboard',
+    path: 'widgets[].dataset',
+    kind: 'dashboard dataset',
+    value: 'opportunity_metrics',
+  },
+  {
+    fromType: 'dashboard',
+    fromName: 'pipeline_dashboard',
+    fromLabel: 'Pipeline Dashboard',
+    path: 'widgets[].compare.dataset',
+    kind: 'dashboard dataset',
+    value: 'opportunity_metrics',
+  },
+  { fromType: 'report', fromName: 'won_by_stage', path: 'dataset', kind: 'report dataset', value: 'opportunity_metrics' },
+];
 const BUNDLE_ZH = {
   name: 'hotcrm_zh',
   label: 'HotCRM zh-CN',
@@ -146,6 +242,7 @@ beforeAll(() => {
   registerDefaultMetadataSchemas();
   registerMetadataPreview('email_template', PreviewProbe as never);
   registerMetadataPreview('translation', PreviewProbe as never);
+  registerMetadataDefaultInspector('dataset', DesignerProbe);
 });
 
 beforeEach(() => {
@@ -155,12 +252,15 @@ beforeEach(() => {
   at(srv.rows, BASE).set(slot('email_template', 'welcome', 'zh-CN'), clone(WELCOME_ZH));
   at(srv.rows, BASE).set(slot('translation', 'hotcrm_zh'), clone(BUNDLE_ZH));
   at(srv.rows, WRITABLE).set(slot('email_template', 'welcome', 'zh-CN'), { ...clone(WELCOME_ZH), _packageId: WRITABLE });
+  at(srv.rows, BASE).set(slot('dataset', 'opportunity_metrics'), clone(METRICS));
   srv.pairExists = false;
   srv.ensure.length = 0;
   srv.saves.length = 0;
   srv.resets.length = 0;
   srv.reads.length = 0;
   srv.version = 0;
+  srv.servedLocale = 'en';
+  srv.servesDraftLayer = true;
   for (const fn of Object.values(mockClient)) fn.mockClear();
   vi.stubGlobal(
     'fetch',
@@ -196,6 +296,7 @@ function Host({
   packageId = BASE,
   walled = false,
   listedPair = null,
+  publishRefusal = null,
 }: {
   type: string;
   name: string;
@@ -203,6 +304,7 @@ function Host({
   packageId?: string;
   walled?: boolean;
   listedPair?: string | null;
+  publishRefusal?: StudioRefusal | null;
 }) {
   const readOnly = packageId === BASE;
   const [pairId, setPairId] = React.useState<string | null>(listedPair);
@@ -228,6 +330,7 @@ function Host({
       readOnly={readOnly}
       customization={customization}
       basePath={`/studio/${packageId}/metadata`}
+      publishRefusal={publishRefusal}
     />
   );
 }
@@ -253,9 +356,12 @@ async function customize(): Promise<void> {
   await waitFor(() => expect(screen.queryByTestId('studio-customize')).toBeNull());
 }
 
+/** objectstack#29692 — Restore is asked from the override mark's popover. */
 async function restore(): Promise<void> {
-  fireEvent.pointerDown(await screen.findByTestId('studio-bundle-editor-more'), { button: 0, ctrlKey: false });
-  fireEvent.click(await screen.findByTestId('studio-restore-original'));
+  fireEvent.click(await screen.findByTestId('studio-override-chip', undefined, { timeout: 8000 }));
+  const popover = await screen.findByTestId('studio-override-popover');
+  await waitFor(() => expect(within(popover).getByTestId('studio-override-restore')).toBeEnabled(), { timeout: 8000 });
+  fireEvent.click(within(popover).getByTestId('studio-override-restore'));
   const dialog = await screen.findByTestId('studio-restore-original-dialog');
   fireEvent.click(within(dialog).getByTestId('studio-restore-original-confirm'));
 }
@@ -371,6 +477,12 @@ describe('Customize a read-only base’s email template, one locale (objectstack
     mount({ type: 'email_template', name: 'welcome', member: 'zh-CN', listedPair: PAIR });
     expect(await field('Subject')).toHaveValue('欢迎回来');
     expect(await screen.findByTestId('studio-override-chip')).toBeInTheDocument();
+    // objectstack#29692 — one door: the editor's ⋯ menu offers no Restore.
+    fireEvent.pointerDown(screen.getByTestId('studio-bundle-editor-more'), { button: 0, ctrlKey: false });
+    await screen.findByTestId('studio-bundle-editor-history');
+    expect(screen.queryByTestId('studio-restore-original')).toBeNull();
+    fireEvent.keyDown(screen.getByTestId('studio-bundle-editor-history'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('studio-bundle-editor-history')).toBeNull());
 
     await restore();
     await waitFor(() => expect(srv.resets).toHaveLength(2));
@@ -426,5 +538,161 @@ describe('Customize a read-only base’s translation bundle (objectstack#28569)'
     expect(srv.reads.every((r) => !('member' in r.opts))).toBe(true);
     expect(await screen.findByTestId('studio-override-chip')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId('studio-bundle-editor-whole-bundle')).toBeNull());
+  });
+});
+
+describe('Customize a read-only base’s dataset (objectstack#30064)', () => {
+  beforeEach(() => {
+    mockClient.references.mockImplementation(async () => clone(USED_BY));
+  });
+
+  it('opens the designer read-only, says the whole dataset is copied, and lists what uses it before anything is published', async () => {
+    mount({ type: 'dataset', name: 'opportunity_metrics' });
+    const probe = await screen.findByTestId('designer-probe', undefined, { timeout: 8000 });
+    expect(probe).toHaveAttribute('data-readonly', 'true');
+    expect(screen.getByTestId('designer-probe-aggregate')).toHaveTextContent('sum');
+    expect(screen.getByTestId('studio-bundle-editor-whole-dataset')).toHaveTextContent(
+      'Customizing a dataset copies HotCRM’s whole dataset into your customization',
+    );
+    const usedBy = await screen.findByTestId('studio-bundle-editor-used-by');
+    await waitFor(() => expect(usedBy).toHaveAttribute('data-state', 'loaded'));
+    expect(mockClient.references).toHaveBeenCalledWith('dataset', 'opportunity_metrics');
+    // One entry per referring item: the dashboard binding it twice is one dashboard.
+    const items = within(usedBy).getAllByTestId('studio-bundle-editor-used-by-item');
+    expect(items.map((el) => [el.getAttribute('data-type'), el.getAttribute('data-name')])).toEqual([
+      ['dashboard', 'pipeline_dashboard'],
+      ['report', 'won_by_stage'],
+    ]);
+    expect(items[0]).toHaveTextContent('Pipeline Dashboard');
+    expect(items[1]).toHaveTextContent('won_by_stage');
+    expect(usedBy).toHaveTextContent('reaches the 2 items built on this dataset');
+    expect(srv.saves).toEqual([]);
+  });
+
+  it('Customize and an edit in the designer write the whole dataset into the pair’s draft, declared; the base is untouched', async () => {
+    mount({ type: 'dataset', name: 'opportunity_metrics' });
+    await screen.findByTestId('designer-probe', undefined, { timeout: 8000 });
+    await customize();
+    await waitFor(() => expect(screen.getByTestId('designer-probe')).toHaveAttribute('data-readonly', 'false'));
+    fireEvent.click(screen.getByTestId('designer-probe-avg'));
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 5000 });
+    expect(srv.ensure).toEqual([201]);
+    const [save] = srv.saves;
+    expect(save).toMatchObject({ type: 'dataset', name: 'opportunity_metrics' });
+    expect(save.opts).toMatchObject({ mode: 'draft', packageId: PAIR, ifNoneMatch: '*' });
+    const { _packageId: _dropped, ...whole } = clone(METRICS);
+    expect(save.body).toEqual({
+      ...whole,
+      measures: [whole.measures[0], { ...whole.measures[1], aggregate: 'avg' }],
+      overrides: { package: BASE, basedOn: '4.0.0' },
+    });
+    expect(await screen.findByTestId('studio-override-chip')).toHaveTextContent('Overrides HotCRM');
+    await waitFor(() => expect(screen.queryByTestId('studio-bundle-editor-whole-dataset')).toBeNull());
+    // What uses it stays in view until the change is published.
+    expect(screen.getByTestId('studio-bundle-editor-used-by')).toBeInTheDocument();
+    expect(srv.rows.get(BASE)?.get(slot('dataset', 'opportunity_metrics'))).toEqual(METRICS);
+  });
+
+  it('holds an edit the designer reports as blocking: nothing is sent', async () => {
+    mount({ type: 'dataset', name: 'opportunity_metrics' });
+    await screen.findByTestId('designer-probe', undefined, { timeout: 8000 });
+    await customize();
+    await waitFor(() => expect(screen.getByTestId('designer-probe')).toHaveAttribute('data-readonly', 'false'));
+    fireEvent.click(screen.getByTestId('designer-probe-blank-dimension'));
+    await sleep(2500);
+    expect(srv.ensure).toEqual([]);
+    expect(srv.saves).toEqual([]);
+  });
+
+  it('a references read that failed says so and asks again; it never reads as nothing using the dataset', async () => {
+    mockClient.references.mockRejectedValueOnce(Object.assign(new Error('Service Unavailable'), { status: 503 }));
+    mount({ type: 'dataset', name: 'opportunity_metrics' });
+    const usedBy = await screen.findByTestId('studio-bundle-editor-used-by', undefined, { timeout: 8000 });
+    await waitFor(() => expect(usedBy).toHaveAttribute('data-state', 'error'));
+    expect(within(usedBy).getByRole('alert')).toHaveTextContent('could not be read');
+    expect(usedBy).not.toHaveTextContent('Nothing uses this dataset');
+    fireEvent.click(within(usedBy).getByTestId('studio-bundle-editor-used-by-retry'));
+    await waitFor(() => expect(usedBy).toHaveAttribute('data-state', 'loaded'));
+    expect(within(usedBy).getAllByTestId('studio-bundle-editor-used-by-item')).toHaveLength(2);
+  });
+
+  it('a read that answers no reference says nothing uses the dataset', async () => {
+    mockClient.references.mockImplementation(async () => []);
+    mount({ type: 'dataset', name: 'opportunity_metrics' });
+    const usedBy = await screen.findByTestId('studio-bundle-editor-used-by', undefined, { timeout: 8000 });
+    await waitFor(() => expect(usedBy).toHaveAttribute('data-state', 'loaded'));
+    expect(usedBy).toHaveTextContent('Nothing uses this dataset yet');
+  });
+
+  it('shows the refusal the header’s Publish kept for the dataset at the item, with the server’s text under Details', async () => {
+    mount({
+      type: 'dataset',
+      name: 'opportunity_metrics',
+      listedPair: PAIR,
+      publishRefusal: {
+        message: 'Not published. Check Aggregate of the measure “Total Amount”: Details say what to change.',
+        target: null,
+        input: 'Aggregate',
+        detail: 'datasets.opportunity_metrics.measures[1].aggregate — aggregate "sum" over field "expected_revenue" is refused',
+      },
+    });
+    const strip = await screen.findByTestId('studio-bundle-editor-publish-refusal', undefined, { timeout: 8000 });
+    expect(within(strip).getByRole('alert')).toHaveTextContent('Check Aggregate of the measure “Total Amount”');
+    expect(within(strip).getByTestId('studio-refusal-detail')).toHaveTextContent('expected_revenue');
+  });
+});
+
+describe('a read-only base’s dataset draft is edited as stored on a zh-CN console (objectstack#30859)', () => {
+  /** The pair's pending draft as its author saved it: source labels, declared. */
+  const pendingDraft = () => {
+    const { _packageId: _dropped, ...whole } = clone(METRICS);
+    return { ...whole, overrides: { package: BASE, basedOn: '4.0.0' } };
+  };
+
+  beforeEach(() => {
+    srv.servedLocale = 'zh';
+    at(srv.drafts, PAIR).set(slot('dataset', 'opportunity_metrics'), pendingDraft());
+  });
+
+  it('the designer is handed the stored draft, not the translated read, and an edit saves source labels', async () => {
+    mount({ type: 'dataset', name: 'opportunity_metrics', listedPair: PAIR });
+    // Red on base: the buffer was the served draft, `商机指标 | 商机数 | 总金额`.
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('designer-probe-labels')).toHaveTextContent(
+          'Opportunity Metrics | Opportunities | Total Amount',
+        ),
+      { timeout: 8000 },
+    );
+    // The stored draft is read at the draft read's address: the pair.
+    expect(srv.reads).toContainEqual({ op: 'layered', type: 'dataset', name: 'opportunity_metrics', opts: { packageId: PAIR } });
+
+    if (screen.queryByTestId('studio-customize')) await customize();
+    await waitFor(() => expect(screen.getByTestId('designer-probe')).toHaveAttribute('data-readonly', 'false'));
+    fireEvent.click(screen.getByTestId('designer-probe-avg'));
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 5000 });
+    const [save] = srv.saves;
+    expect(save.opts).toMatchObject({ mode: 'draft', packageId: PAIR });
+    const sent = save.body as { label: unknown; measures: Array<{ label: unknown; aggregate: unknown }> };
+    expect(sent.label).toBe('Opportunity Metrics');
+    expect(sent.measures.map((m) => [m.label, m.aggregate])).toEqual([
+      ['Opportunities', 'count'],
+      ['Total Amount', 'avg'],
+    ]);
+    expect(JSON.stringify(save.body)).not.toMatch(/[㐀-鿿]/u);
+  });
+
+  it('a served draft whose stored copy the layers do not serve opens no buffer, and nothing is sent', async () => {
+    srv.servesDraftLayer = false;
+    mount({ type: 'dataset', name: 'opportunity_metrics', listedPair: PAIR });
+    expect(
+      await screen.findByText(t('engine.studio.refusal.draftUnreadable', 'en-US'), undefined, { timeout: 8000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('designer-probe')).toBeNull();
+    await act(async () => {
+      await sleep(2500);
+    });
+    expect(srv.saves).toEqual([]);
+    expect(srv.drafts.get(PAIR)?.get(slot('dataset', 'opportunity_metrics'))).toEqual(pendingDraft());
   });
 });

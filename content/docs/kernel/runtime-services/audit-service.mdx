@@ -29,7 +29,7 @@ The slot's entire surface is one method:
 ```ts
 services.audit.recordAuthEvent(event: {
   action: 'login' | 'logout' | 'login_failed' | 'account_locked';
-  userId: string;
+  userId?: string;
   sessionId?: string;
   organizationId?: string;
   ipAddress?: string;
@@ -46,11 +46,17 @@ services.audit.recordAuthEvent(event: {
   hands over an **event** (what happened) rather than a row (what to store).
   - `login` / `logout` are **session events**: a sign-in that minted a session, and a
     sign-out.
-  - `login_failed` / `account_locked` are **account events**: a refused password sign-in
-    that named an existing account, and the refused sign-in that stamped the account
+  - `login_failed` / `account_locked` are **account events**: a refused sign-in — a
+    password sign-in that named an existing account, or any `/sign-in/*` request the IP
+    allow-list refused (ADR-0069 D5) — and the refused sign-in that stamped the account
     lockout (`lockoutThreshold`, ADR-0069 D2). They exist without any session.
-- **`userId`** is required and must be a real `sys_user` id — it lands on the strict
-  `user_id` lookup. On an account event it is the account the sign-in named.
+- **`userId`** must be a real `sys_user` id when given — it lands on the strict `user_id`
+  lookup. On an account event it is the account the sign-in named. Every event names one
+  except a `login_failed` refused before any account could be resolved: the deployment's
+  IP allow-list refuses ahead of better-auth, and the identifier the request carried may
+  name no account. That row is written with `user_id` and `record_id` null — a row about
+  no record, read under the ledger's own grant — and still carries the client address and
+  the rule. Any other event without a `userId` writes nothing.
 - **`sessionId`** lands on `record_id`, with `object_name` set to `sys_session`, so the
   ledger row is navigable to the session it describes. An account event names its account
   instead — `object_name` `sys_user` and `record_id` the account's id — and does not read
@@ -67,9 +73,23 @@ services.audit.recordAuthEvent(event: {
   because a refused attempt authenticated nobody.
 - **`context`** is free-form and is serialized into `metadata`, e.g. the endpoint that
   produced the event (`/sign-in/email`, `/sign-out`). On an account event it is the
-  endpoint, the refusal's machine code (`reason`, e.g. `INVALID_EMAIL_OR_PASSWORD` or
-  `ACCOUNT_LOCKED`) and, for `account_locked`, the lock's `locked_until` and `threshold`.
-  It never carries the attempted credential.
+  endpoint, the refusal's machine code (`reason`, e.g. `INVALID_EMAIL_OR_PASSWORD`,
+  `ACCOUNT_LOCKED` or `IP_NOT_ALLOWED`) and, for `account_locked`, the lock's `locked_until`
+  and `threshold`. It never carries the attempted credential.
+  - A sign-in an authentication **policy** holds or refuses also names the policy, in
+    `rule`. A sign-in held by enforced MFA (ADR-0069 D3) is not refused — the session is
+    minted — so its own `login` row carries `reason: 'MFA_REQUIRED'` and
+    `rule: 'mfa_required'`. A sign-in the IP allow-list refuses (ADR-0069 D5), by the
+    deployment's list or by the organization's own list when the session is created, is a
+    `login_failed` with `reason: 'IP_NOT_ALLOWED'`, `rule: 'ip_allow_list'` and
+    `attempts`, below; the organization's refusal also names the organization. A refused
+    switch of the active organization is not a sign-in and writes no row.
+  - IP allow-list rows are **bounded** so a scanner cannot flood the ledger: per client
+    address, in a 10-minute window from its first refusal, only the 1st, 10th and 100th
+    refusal write a row, carrying that count as `attempts`; across all addresses, at most
+    1000 rows per 10-minute window, with one operator `warn` line in a window once the cap
+    drops a row. The bound is held in each server process, so N replicas write up to N
+    times as many rows.
 
 ## Notes
 
@@ -80,8 +100,9 @@ services.audit.recordAuthEvent(event: {
   reference from the moment the plugin initializes.
 - `@objectstack/plugin-auth` is the only in-repo consumer. It resolves the slot lazily
   through a locally-declared structural surface and calls it from the session lifecycle
-  and from the password sign-in outcome, so neither package depends on the other. A
-  sign-in identifier that resolves to no account produces no call.
+  and from the sign-in outcomes, so neither package depends on the other. A password
+  sign-in whose identifier resolves to no account produces no call; an IP allow-list
+  refusal produces one with no `userId`.
 
 ## Typical Errors
 
@@ -98,8 +119,9 @@ caller's side:
   `error` line, once. The sign-in was answered exactly as it would have been without the
   ledger, so the shipped `auth_events` list view and the system-overview widgets keep
   showing an empty, healthy-looking screen.
-- The call **silently no-ops** when no data engine resolves, or when `userId` is absent.
-  A caller that passes an event without a subject records nothing and is told nothing.
+- The call **silently no-ops** when no data engine resolves, or when `userId` is absent on
+  any event but `login_failed`. A caller that passes such an event records nothing and is
+  told nothing.
 - The most common cause of a failing insert is a datasource split rather than a broken
   write: `sys_audit_log` carries an ADR-0057 `audit` lifecycle class, which routes it to a
   dedicated `telemetry` datasource whenever one is registered — `os dev` provisions one by

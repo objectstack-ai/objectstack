@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect, vi } from 'vitest';
 import { runBuildProbes, type ProbeEngine } from '@objectstack/metadata-protocol';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';

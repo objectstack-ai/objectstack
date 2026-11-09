@@ -215,3 +215,67 @@ describe('AppHeader avatar menu — a hidden app opens itself (objectstack-ai/ob
     expect(screen.queryByRole('button', { name: 'Lead App' })).toBeNull();
   });
 });
+
+/**
+ * objectstack-ai/objectstack#30895 — Connect an AI Assistant is in the avatar
+ * menu, the person's own things, for every signed-in person. The entry opens
+ * the page inside the Account app and is drawn only while the served Account
+ * app carries that page: `@objectstack/mcp` contributes the page's nav entry
+ * exactly when it registers the page, so with MCP off there is no dead item.
+ */
+const ACCOUNT_WITH_ASSISTANT = {
+  name: 'account',
+  label: 'Account',
+  icon: 'user-circle',
+  hidden: true,
+  _packageId: 'com.objectstack.account',
+  navigation: [
+    { id: 'nav_account_profile', type: 'component', label: 'Profile', componentRef: 'account:profile_card' },
+    {
+      id: 'grp_account_ai_assistant',
+      type: 'group',
+      label: 'AI Assistant',
+      expanded: true,
+      children: [
+        { id: 'nav_connect_agent', type: 'page', pageName: 'connect_agent', label: 'Connect an AI Assistant' },
+      ],
+    },
+  ],
+};
+const ACCOUNT_WITHOUT_ASSISTANT = {
+  ...ACCOUNT_WITH_ASSISTANT,
+  navigation: [ACCOUNT_WITH_ASSISTANT.navigation[0]],
+};
+
+describe('AppHeader avatar menu — Connect an AI Assistant (objectstack-ai/objectstack#30895)', () => {
+  it('opens the page inside the Account app, at the app\'s one address', () => {
+    served.apps = [FIRST, ACCOUNT_WITH_ASSISTANT];
+    render(<AppHeader variant="home" />);
+
+    screen.getByTestId('header-connect-ai-assistant').click();
+
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/apps/com.objectstack.account/page/connect_agent');
+  });
+
+  it('is labelled Connect an AI Assistant', () => {
+    served.apps = [FIRST, ACCOUNT_WITH_ASSISTANT];
+    render(<AppHeader variant="home" />);
+
+    expect(screen.getByRole('button', { name: 'Connect an AI Assistant' })).toBeInTheDocument();
+  });
+
+  it('draws nothing when the served Account app does not carry the page (MCP off)', () => {
+    served.apps = [FIRST, ACCOUNT_WITHOUT_ASSISTANT];
+    render(<AppHeader variant="home" />);
+
+    expect(screen.queryByTestId('header-connect-ai-assistant')).toBeNull();
+  });
+
+  it('draws nothing when no Account app is served', () => {
+    served.apps = [FIRST];
+    render(<AppHeader variant="home" />);
+
+    expect(screen.queryByTestId('header-connect-ai-assistant')).toBeNull();
+  });
+});

@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { buildEffectiveObjectPermissions, registryObjectPackageDisabled } from '@objectstack/core';
@@ -417,7 +419,7 @@ const READERS: Array<{
       ((await protocol.listDrafts())?.drafts ?? []).some((d: any) => d?.packageId === PKG),
   },
   {
-    reader: 'listDrafts({ packageId }) — GET /meta/_drafts?packageId=',
+    reader: 'listDrafts({ packageId }) — GET /meta/_drafts?package=',
     enforces: true,
     why: '[#24210] naming the package does not bring its drafts back',
     serves: async ({ protocol }) =>

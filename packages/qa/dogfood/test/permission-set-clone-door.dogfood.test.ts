@@ -104,7 +104,9 @@ describe('the permission-set clone door, on a booted showcase', () => {
         const res = await clone(token, DELEGATE_SET, { name: DELEGATE_COPY, label: 'My Field Ops Delegate' });
         const text = await res.clone().text();
         expect(res.status, text).toBe(200);
-        const data = JSON.parse(text).data as { permissionSet: Record<string, unknown>; package: string | null; notice: string };
+        const data = JSON.parse(text).data as {
+            permissionSet: Record<string, unknown>; package: string | null; notice: string; noticeCode?: string;
+        };
         expect(data.permissionSet.name).toBe(DELEGATE_COPY);
         expect(data.permissionSet).not.toHaveProperty('adminScope');
         expect(data.permissionSet).not.toHaveProperty('packageId');
@@ -113,6 +115,8 @@ describe('the permission-set clone door, on a booted showcase', () => {
         // ensure door created for it.
         expect(data.package).toBe(SHOWCASE_PAIR);
         expect(data.notice).toContain(`'${SHOWCASE_PAIR}'`);
+        // [#29727] The notice is named by its variant's code: a pair created for this copy.
+        expect(data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_CREATED_PACKAGE');
         const pair = await stack.apiAs(token, 'GET', `/packages/${SHOWCASE_PAIR}`);
         expect(pair.status, await pair.clone().text()).toBe(200);
 
@@ -139,7 +143,10 @@ describe('the permission-set clone door, on a booted showcase', () => {
         const res = await clone(token, DEFAULT_SET, { name: DEFAULT_COPY, label: 'My Member Default' });
         expect(res.status, await res.clone().text()).toBe(200);
         // The second copy REUSES the pair the first created: one pair, the same id.
-        expect(((await res.json()) as any).data.package).toBe(SHOWCASE_PAIR);
+        const reused = ((await res.json()) as any).data;
+        expect(reused.package).toBe(SHOWCASE_PAIR);
+        // [#29727] Reused, not created: the in-package code.
+        expect(reused.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
         const listed = ((await (await stack.apiAs(token, 'GET', '/packages')).json()) as any).data;
         const pairs = (Array.isArray(listed) ? listed : listed?.packages ?? [])
             .filter((p: any) => (p?.manifest?.id ?? p?.id) === SHOWCASE_PAIR);
@@ -221,7 +228,11 @@ describe('the permission-set clone door, on a booted showcase', () => {
         }
     });
 
-    it('a platform set (the lock-and-clone rule\'s commonest source) copies into its shipping package\'s pair', async () => {
+    // [#29594, ruling record 6691217245] A kernel package has no paired
+    // customization package, so a platform set's copy is saved where an
+    // environment-authored set's copy is: environment-wide, the notice naming
+    // the kernel package and `package`.
+    it('a platform set (the lock-and-clone rule\'s commonest source) copies environment-wide: the kernel has no pair', async () => {
         const reader = securityCatalogReaderOf(ql)!;
         const source = await reader.resolve('permission', 'member_default');
         expect(source?.packageId, 'member_default is not packaged on this boot').toBeTruthy();
@@ -229,9 +240,12 @@ describe('the permission-set clone door, on a booted showcase', () => {
         const res = await clone(token, 'member_default', { name: 'my_member_baseline', label: 'My Member Baseline' });
         const text = await res.clone().text();
         expect(res.status, text).toBe(200);
-        const landed = ((await res.json()) as any).data.package;
-        expect(landed).toBe(`${source!.packageId}.custom`);
-        expect((await reader.resolve('permission', 'my_member_baseline'))?.packageId).toBe(landed);
+        const data = ((await res.json()) as any).data;
+        expect(data.package).toBeNull();
+        expect(data.noticeCode).toBe('PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE');
+        expect(data.notice).toContain(`kernel package '${source!.packageId}'`);
+        expect((await reader.resolve('permission', 'my_member_baseline'))?.packageId).toBeUndefined();
+        expect((await stack.apiAs(token, 'GET', `/packages/${source!.packageId}.custom`)).status).toBe(404);
     });
 
     it('CONTROL — an environment-authored source still copies environment-wide, with no package', async () => {

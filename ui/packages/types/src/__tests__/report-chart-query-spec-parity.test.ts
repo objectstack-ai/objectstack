@@ -19,7 +19,7 @@
  *    spec owns, or a divergence outliving the reason it was granted. Four-way
  *    parity, in the shape `select-option-spec-parity.test.ts` established.
  *  - **Renamed** (`ChartDataSeries`, `ChartDataSeriesSchema`, `SqlQueryAST`,
- *    `DriverQueryConfig`, `SqlDriverInterface`, `DatasourceRegistration`): the
+ *    `DriverQueryConfig`): the
  *    concepts genuinely differ from the spec exports whose names they were
  *    wearing. The risk is picking a new name the spec ALREADY owns — the
  *    `PageComponentSchema` mistake from objectui#3074 — so each new name is
@@ -42,11 +42,8 @@ import {
   ChartTypeSchema as SpecChartTypeSchema,
   DashboardWidgetSchema as SpecDashboardWidgetSchema,
 } from '@objectstack/spec/ui';
-import type {
-  JoinedReportBlock as SpecJoinedReportBlock,
-  JoinedReportBlockParsed as SpecJoinedReportBlockParsed,
-} from '@objectstack/spec/ui';
-import type { JoinedReportBlock as PublishedJoinedReportBlock, JoinedSpecReport } from '../spec-report.js';
+import type { JoinedReportBlock as SpecJoinedReportBlock } from '@objectstack/spec/ui';
+import type { JoinedReportBlock as PublishedJoinedReportBlock } from '../spec-report.js';
 import { AppContextSelectorSchema } from '../zod/app.zod.js';
 import { DashboardWidgetSchema, DashboardWidgetTypeSchema, GlobalFilterSchema } from '../zod/complex.zod.js';
 import { DASHBOARD_COMPONENT_WIDGET_TYPES, DASHBOARD_WIDGET_TYPE_EXTENSIONS } from '../complex.js';
@@ -750,8 +747,6 @@ describe('renamed local dialects do not collide with a spec export (objectui#307
     ['ChartDataSeriesSchema', 'zod twin of ChartDataSeries'],
     ['SqlQueryAST', 'compiled SQL syntax tree, not the spec ObjectQL request'],
     ['DriverQueryConfig', 'high-level query config the SQL AST builder consumes'],
-    ['SqlDriverInterface', "objectui's SQL-oriented client driver abstraction"],
-    ['DatasourceRegistration', 'in-memory datasource registration record'],
     // objectui#3162 batch 8. `JoinNode` was ledgered as "erased to `any` upstream,
     // re-export once objectstack#4171 lands". #4171 landed — and the symbol it was
     // waiting on no longer exists: spec 17.0.0 retired `query.joins` and the whole
@@ -792,10 +787,10 @@ describe('renamed local dialects do not collide with a spec export (objectui#307
  * `groupingsAcross`, `filter`, `chart` — plus an index signature; the spec's
  * schema refuses all five of those keys, `chart` by name since objectstack#20161.
  *
- * objectui#10940 REPLACED the published `JoinedReportBlock` with the spec's type,
- * and `JoinedSpecReport.blocks` with the spec's own `Report.blocks`: a
- * published-type change, narrowing and widening, stated member by member in its
- * changeset. The divergence probes that stood here — local interface against
+ * objectui#10940 REPLACED the published `JoinedReportBlock` with the spec's type:
+ * a published-type change, narrowing and widening, stated member by member in
+ * its changeset. (The joined-report wrapper type it also re-derived left the
+ * package with objectstack#25921, read by nothing; its pins went with it.) The divergence probes that stood here — local interface against
  * spec, each written to stop compiling the day its difference moved — are
  * answered by that replacement and are deleted with the interface.
  *
@@ -809,8 +804,7 @@ describe('renamed local dialects do not collide with a spec export (objectui#307
  *   probe on an erased spec is deleted, so every probe below is asked on every
  *   compile and an erasure, on either spec, stops compiling. `any` is refused
  *   as before.
- * - THE DERIVATION PINS: the published block IS the spec's block, and the
- *   published joined report's `blocks` ARE the spec's report blocks. Re-forking
+ * - THE DERIVATION PIN: the published block IS the spec's block. Re-forking
  *   the block by hand under the spec's name is also refused by
  *   `check:spec-symbols`, whose ALLOW row for this symbol retired with the
  *   burn-down.
@@ -862,27 +856,6 @@ const _publishedBlockIsTheSpecBlock = true satisfies (
   SameType<PublishedJoinedReportBlock, SpecJoinedReportBlock> extends true
     ? SameType<DeclaredBlockKeys<PublishedJoinedReportBlock>, DeclaredBlockKeys<SpecJoinedReportBlock>>
     : false
-);
-// …and a published joined report's `blocks` are the spec's own report blocks,
-// on the PARSED tier of `SpecReport`: required, each element the spec's parsed
-// block, assignable to the authoring-tier block but not the other way round
-// (`type` and `order[].direction` are defaulted on the parsed side).
-type PublishedJoinedBlocks = BlockMember<JoinedSpecReport, 'blocks'>;
-const _joinedReportBlocksAreTheSpecReportBlocks = true satisfies (
-  [PublishedJoinedBlocks] extends [never]
-    ? false
-    : undefined extends PublishedJoinedBlocks
-      ? false
-      : SameType<PublishedJoinedBlocks, SpecJoinedReportBlockParsed[]>
-);
-const _joinedReportBlocksAreParsedTier = true satisfies (
-  [PublishedJoinedBlocks] extends [never]
-    ? false
-    : [SpecJoinedReportBlockParsed] extends [PublishedJoinedReportBlock]
-      ? [PublishedJoinedReportBlock] extends [SpecJoinedReportBlockParsed]
-        ? false
-        : true
-      : false
 );
 
 // 1. NARROWED: the legacy inline-query keys are gone from the published block,
@@ -960,8 +933,6 @@ void _specJoinedReportBlockTyping;
 void _specJoinedReportBlockIsNotEvenAny;
 void _publishedBlockTyping;
 void _publishedBlockIsTheSpecBlock;
-void _joinedReportBlocksAreTheSpecReportBlocks;
-void _joinedReportBlocksAreParsedTier;
 void _legacyBlockKeysAreGone;
 void _publishedBlockHasNoIndexSignature;
 void _datasetBoundBlockKeysArrived;

@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { SeedLoaderService } from './seed-loader.js';
+import { SeedLoaderService, seedLoadPartialWrites } from './seed-loader.js';
+import { seedAppliedLanded } from './seed-applied-landed.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
@@ -298,5 +299,60 @@ describe('seed deferred back-fill failure is reported, not swallowed (framework#
     expect(store.audit_department.find((r) => r.name === 'Engineering')!.head_id).toBe(aliceId);
     expect(result.success).toBe(true);
     expect(result.summary.totalErrored).toBe(0);
+  });
+});
+
+/**
+ * [#30429] A load that throws in PASS 2 — after every dataset finished — is
+ * still a thrown load, and its partial-writes reading lists every dataset as
+ * finished: no `failedObject`, and the receipt's `landed` (the same
+ * `seedAppliedLanded` projection the publish catch uses) names every row the
+ * load wrote.
+ *
+ * Pass 2 guards its own driver traffic (a failed back-fill write is counted,
+ * a failed lookup probe is a miss), so the throw is staged at the one call in
+ * it that is not guarded: the `logger.error` its back-fill failure reports
+ * through — a log transport that fails while pass 2 reports. What is pinned is
+ * the loader's state at that point, not the transport.
+ */
+describe('a load that throws in pass 2 reports every dataset as finished (#30429)', () => {
+  it('finished lists both datasets with their store ids; no failed object; landed names every row', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const metadata = createMetadata();
+    const realUpdate = (engine.update as any).getMockImplementation();
+    (engine.update as any).mockImplementation(async (obj: string, data: any, opts: any) => {
+      if (obj === 'audit_department') throw new Error('fetch failed');
+      return realUpdate(obj, data, opts);
+    });
+    const logger = createLogger();
+    logger.error.mockImplementation(() => { throw new Error('the log transport is down'); });
+
+    const err = await new SeedLoaderService(engine, metadata, logger)
+      .load({ seeds: SEEDS, config: CONFIG })
+      .then(() => undefined, (e: unknown) => e);
+
+    expect((err as Error)?.message).toBe('the log transport is down');
+    // Positive control: the throw came from pass 2's back-fill report, after
+    // both datasets wrote their row.
+    expect((engine.update as any).mock.calls.some(([obj]: [string]) => obj === 'audit_department')).toBe(true);
+    const deptIds = (store.audit_department ?? []).map((r) => String(r.id));
+    const workerIds = (store.audit_worker ?? []).map((r) => String(r.id));
+    expect(deptIds).toHaveLength(1);
+    expect(workerIds).toHaveLength(1);
+    const partial = seedLoadPartialWrites(err)!;
+    expect(partial).toEqual({
+      inserted: 2,
+      updated: 0,
+      finished: [
+        { object: 'audit_department', landedIds: deptIds, insertedIds: deptIds },
+        { object: 'audit_worker', landedIds: workerIds, insertedIds: workerIds },
+      ],
+    });
+    expect('failedObject' in partial).toBe(false);
+    const list = (ids: string[]) => ({ ids, total: ids.length, truncated: false });
+    expect(seedAppliedLanded(partial.finished)).toEqual([
+      { object: 'audit_department', inserted: list(deptIds), matched: list([]) },
+      { object: 'audit_worker', inserted: list(workerIds), matched: list([]) },
+    ]);
   });
 });

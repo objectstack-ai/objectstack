@@ -488,3 +488,45 @@ describe('LiteKernel with Configurable Logger', () => {
         });
     });
 });
+
+/**
+ * The LiteKernel half of `hasBootPhaseSettled('kernel:ready')`: the same
+ * answer at the same points of the boot as `ObjectKernel`
+ * (kernel.boot-phase-hooks.test.ts), so a consumer reads one meaning on both.
+ */
+describe('LiteKernel hasBootPhaseSettled', () => {
+    it('answers false until every kernel:ready handler has settled, true from kernel:bootstrapped on, false after shutdown', async () => {
+        const kernel = new LiteKernel();
+        const read: Record<string, boolean[]> = {};
+        const take = (at: string, k: { hasBootPhaseSettled(p: 'kernel:ready'): boolean }) => {
+            (read[at] ??= []).push(k.hasBootPhaseSettled('kernel:ready'));
+        };
+        kernel.use({
+            name: 'phase-reader-plugin',
+            init: async (ctx) => {
+                take('init', ctx.getKernel());
+                ctx.hook('kernel:ready', async () => { take('kernel:ready', ctx.getKernel()); });
+                ctx.hook('kernel:bootstrapped', async () => { take('kernel:bootstrapped', ctx.getKernel()); });
+                ctx.hook('kernel:listening', async () => { take('kernel:listening', ctx.getKernel()); });
+            },
+            start: async (ctx) => { take('start', ctx.getKernel()); },
+        });
+        expect(kernel.hasBootPhaseSettled('kernel:ready')).toBe(false);
+
+        await kernel.bootstrap();
+
+        expect(read).toEqual({
+            init: [false],
+            start: [false],
+            'kernel:ready': [false],
+            'kernel:bootstrapped': [true],
+            'kernel:listening': [true],
+        });
+        expect(kernel.hasBootPhaseSettled('kernel:ready')).toBe(true);
+        expect(kernel.hasBootPhaseSettled('kernel:bootstrapped' as 'kernel:ready')).toBe(false);
+
+        await kernel.shutdown();
+
+        expect(kernel.hasBootPhaseSettled('kernel:ready')).toBe(false);
+    });
+});

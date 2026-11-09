@@ -36,6 +36,7 @@
  * `plural-categories-11432.test.ts`'s; both read this family by construction.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -47,12 +48,13 @@ const CLAIM: Record<LocaleCode, RegExp> = {
   de: /alle live oder keiner|geht live, oder nichts ändert sich/u,
   es: /o se publican todos, o ninguno|se publica, o no cambia nada/u,
   fr: /tous sont mis en ligne, ou aucun|il est mis en ligne, ou rien ne change/u,
-  pt: /ou todos entram no ar, ou nenhum|ele entra no ar, ou nada muda/u,
+  'pt-BR': /ou todos entram no ar, ou nenhum|ele entra no ar, ou nada muda/u,
   ru: /либо публикуются все, либо ни один|он публикуется, либо ничего не меняется/u,
   ar: /إما أن تُنشر/u,
   ja: /どちらかです/u,
   ko: /하나도 게시되지 않습니다|아무것도 바뀌지 않습니다/u,
-  zh: /原子|一次性/u,
+  'zh-Hans': /原子|一次性/u,
+  'zh-Hant': /原子|一次性/u,
 };
 
 /** The word for "package" in each pack's package sentence — controlled below. */
@@ -61,12 +63,13 @@ const PACKAGE_WORD: Record<LocaleCode, RegExp> = {
   de: /Paket/u,
   es: /paquete/u,
   fr: /paquet/u,
-  pt: /pacote/u,
+  'pt-BR': /pacote/u,
   ru: /пакет/u,
   ar: /الحزمة/u,
   ja: /パッケージ/u,
   ko: /패키지/u,
-  zh: /包/u,
+  'zh-Hans': /包/u,
+  'zh-Hant': /包/u,
 };
 
 const changesOf = (lang: LocaleCode): Record<string, unknown> =>
@@ -82,7 +85,7 @@ function family(lang: LocaleCode, base: string): Array<[string, string]> {
 describe('the package-less confirm note claims no atomicity in any pack (objectui#11591)', () => {
   it('names a claim spelling for every pack — no pack left unjudged', () => {
     expect(Object.keys(CLAIM).sort()).toEqual([...LANGS].sort());
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s: the package sentence carries the claim (control)', (lang) => {

@@ -50,6 +50,19 @@
  *    answer contradicts the request in plain view and still reports success.
  *    Since #6994/#7095 both doors refuse it by name instead.
  *
+ * 3. AUTHOR-DECLARED (`sort-field-unsortable`, #30023): a stored field whose
+ *    author declared `sortable: false`. Since #29896 the Data API list door
+ *    (`assertSortFieldsExist`) refuses an ORDER BY over it with
+ *    `400 INVALID_SORT` (`a field on '<object>' that declares
+ *    \`sortable: false\``), so a declaration naming it is the same
+ *    first-fetch refusal as check 2, and is graded the same: `error`.
+ *
+ * Checks 2 and 3 are ONE question — the served sortability projection's
+ * `sortable: false` — answered by `resolveObjectSortability`
+ * (`@objectstack/spec/api`), the resolver the list door refuses by, never by a
+ * second reading of `type` or `sortable` here. A virtual field that also
+ * declares `sortable: false` keeps the projection's `virtual-type` reason.
+ *
  * The verdict is `error`, not the advisory level the field-existence rules for
  * pages and forms use, for the reason `validate-searchable-fields` gives at
  * `error`: those describe a consumer that SKIPS an unknown name and renders the
@@ -57,8 +70,8 @@
  *
  * ── The predicate, and the type list this rule must NOT use ──────────────
  *
- * Virtuality is judged by {@link isVirtualSearchField} / `SEARCH_VIRTUAL_TYPES`
- * (`@objectstack/spec/data`), pinned to `formula` alone — the same spec fact
+ * Virtuality is judged, through the projection, by `isVirtualSearchField` /
+ * `SEARCH_VIRTUAL_TYPES` (`@objectstack/spec/data`), pinned to `formula` alone — the same spec fact
  * the search ingress gate, the engine's search resolution and the FILTER axis'
  * dotted-head classifier (#8296) already read. That constant documents itself
  * as a STORAGE fact rather than a search taste judgment, which is what makes it
@@ -123,10 +136,18 @@
  *     `ReportSchema.order[].by`. Judging those needs the dataset's measure
  *     index, which is `validateChartBindings`' family, not this one.
  *
- * One more list-shaped surface carries a `sort` and is deliberately left to
- * its owner, exactly as the search axis leaves the react page surface to
- * `validate-react-page-props`: page/component `sort`
- * (`ui/page.zod.ts`, `ui/component.zod.ts` — `walkPageComponents`' territory).
+ * PAGE sorts (`ui/page.zod.ts`, `ui/component.zod.ts`) are walked since
+ * #30023: a component's `dataSource.sort`, a related list's
+ * `parentDataSource.sort`, the `properties.sort` of each block in
+ * `PAGE_BLOCK_SORT_OBJECT_PROP`, a list page's `interfaceConfig.sort` and an
+ * app page's `record.sort`. Each reaches the same list door a list view's sort
+ * does. Since #30093 every one of them is asked existence and provenance here
+ * too, under the page family's ids (`page-field-unknown` at `error`,
+ * `page-field-unprovisioned` at `warning`), and `validate-page-field-bindings`
+ * no longer reads a page sort: one reader per slot, at the door's grade, in the
+ * member that reaches the page publish door. A `kind: 'react'` page's JSX
+ * props are still `validate-react-page-props`' territory and are not walked
+ * here.
  * The flattened standalone list overlay used to be listed here too — the
  * #4463 P2 gap this module's first landing recorded — and is walked since
  * #9313 (the self rung above). Its sibling shape, a standalone ViewItem
@@ -229,9 +250,15 @@
  * axis its own authoring answer is how those doors drifted apart before.
  */
 
-import { isVirtualSearchField } from '@objectstack/spec/data';
+import {
+  FIELD_UNSORTABLE_AUTHOR_DECLARED,
+  resolveObjectSortability,
+  type FieldSortability,
+} from '@objectstack/spec/api';
 
-import { suggestName } from './object-graph.js';
+import { objectsAsServed, objectsWithoutTiedFields, recordsOf, suggestName } from './object-graph.js';
+import { walkPageComponents } from './page-walk.js';
+import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -365,6 +392,14 @@ export function checkSortDeclaration(
   // posture, for the same reason, as `checkSearchableFieldList`'s own
   // trailing parameter. Every in-repo caller passes it.
   unprovisionedAnchors?: ReadonlyMap<string, ReadonlySet<string>>,
+  // [#30023] `objectName -> its sortability projection`
+  // ({@link indexObjectSortability}). OPTIONAL, with the same posture as the
+  // anchor index above: absent, the projection is derived from the
+  // `fieldsByObject` slice, which carries each field's `type` and nothing
+  // else, so only the virtual-type verdict is answered — the pre-#30023
+  // behaviour for out-of-repo callers. Every in-repo caller passes it, and
+  // then the author-declared verdict (`sortable: false`) is answered too.
+  sortability?: ReadonlyMap<string, SortabilityFields>,
 ): SortableFieldFinding[] {
   const findings: SortableFieldFinding[] = [];
   if (declared === undefined || declared === null) return findings;
@@ -375,6 +410,8 @@ export function checkSortDeclaration(
 
   const known = target.names;
   const anchors = unprovisionedAnchors?.get(objectName);
+  const projection =
+    sortability?.get(objectName) ?? resolveObjectSortability({ fields: target.fields }).fields;
 
   for (const key of readSortKeys(declared)) {
     const name = key.field;
@@ -439,30 +476,327 @@ export function checkSortDeclaration(
       continue;
     }
 
-    // Virtuality — the verdict the runtime added last and the one an author
-    // cannot see, because the name IS a real field. Judged by the spec's own
-    // storage predicate so linter, ingress gate and engine cannot disagree
-    // about which types have a column.
-    const meta = target.fields[name];
-    if (isVirtualSearchField(meta)) {
-      const vtype = meta?.type;
-      findings.push({
-        severity: 'error',
-        rule: SORT_FIELD_UNSORTABLE,
-        where,
-        path: `${path}${key.at}`,
-        message:
-          `${subject} orders by "${name}" on object "${objectName}", ` +
-          `${virtualFieldClause(vtype)}, so there is no column to ORDER BY`,
-        // [#22161] One remedy line; that both runtime doors refuse it with
-        // 400 INVALID_SORT is the id's `os explain` entry.
-        hint:
-          `Denormalise the value onto "${objectName}" (a stored field, written when the source ` +
-          `changes) and sort by that, or drop "${name}" from this sort`,
-      });
-    }
+    // Unsortability — the verdicts an author cannot see, because the name IS
+    // a real field. Judged by the served sortability projection
+    // (`resolveObjectSortability`), the one the list door
+    // (`assertSortFieldsExist`) refuses by, so linter and door cannot
+    // disagree: `virtual-type` (no column to ORDER BY) and, since #30023,
+    // `author-declared` (`sortable: false`).
+    const unsortable = unsortableFinding(
+      projection[name], name, objectName, target.fields[name]?.type, where, `${path}${key.at}`, subject,
+    );
+    if (unsortable) findings.push(unsortable);
   }
 
+  return findings;
+}
+
+/** One object's sortability projection: field name → its served verdict. */
+export type SortabilityFields = Readonly<Record<string, FieldSortability>>;
+
+/**
+ * [#30023] object name → its sortability projection, derived by
+ * `resolveObjectSortability` (`@objectstack/spec/api`) from the object as
+ * authored — the resolver the `GET /meta/object/:name` envelope serves and the
+ * Data API list door (`assertSortFieldsExist`) refuses by. Reused rather than
+ * re-derived from field `type` and `sortable`: a second reading of the same
+ * two facts is how a linter and a door come to disagree.
+ */
+export function indexObjectSortability(stack: AnyRec): Map<string, SortabilityFields> {
+  const out = new Map<string, SortabilityFields>();
+  if (!isRec(stack)) return out;
+  for (const obj of recordsOf(stack.objects)) {
+    const name = strName(obj.name);
+    if (name) out.set(name, resolveObjectSortability(obj).fields);
+  }
+  return out;
+}
+
+/**
+ * [#30471] The two field indexes over the objects as SERVED (`objectsAsServed`,
+ * the package's one fold), as the list door reads them:
+ *
+ *   - existence ({@link indexObjectSearchTargets}' shape): a field an
+ *     `objectExtensions` entry adds is a known name, a field two packages tie
+ *     on included, since existence never asks which definition wins;
+ *   - sortability ({@link indexObjectSortability}): a question about the
+ *     field's definition, so a tied field is left out
+ *     (`objectsWithoutTiedFields`) and goes unjudged.
+ *
+ * An object that declares no field map keeps its declared answer on both
+ * (skip 2, `null` and its own projection): an extension adding to an
+ * introspected schema does not make that schema knowable, extended or not.
+ */
+function indexServedSortFields(stack: AnyRec): {
+  fieldsByObject: Map<string, ObjectSearchTarget | null>;
+  sortability: Map<string, SortabilityFields>;
+} {
+  const served = objectsAsServed(stack);
+  const fieldsByObject = indexObjectSearchTargets({ objects: served.objects });
+  const sortability = indexObjectSortability({ objects: objectsWithoutTiedFields(served) });
+  const declaredSortability = indexObjectSortability(stack);
+  for (const [name, target] of indexObjectSearchTargets(stack)) {
+    if (target !== null) continue;
+    fieldsByObject.set(name, null);
+    const own = declaredSortability.get(name);
+    if (own) sortability.set(name, own);
+  }
+  return { fieldsByObject, sortability };
+}
+
+/**
+ * The finding for one sort key whose projection entry says `sortable: false`,
+ * or `undefined` when it does not (no entry — unknown, dotted, a registry
+ * anchor — or `sortable: true`). Both reasons are `error`: the list door
+ * answers each with `400 INVALID_SORT`, on the declaration's first fetch and
+ * every fetch after it, so the #9257 grading applies to the second reason
+ * unchanged.
+ */
+function unsortableFinding(
+  verdict: FieldSortability | undefined,
+  name: string,
+  objectName: string,
+  vtype: string | undefined,
+  where: string,
+  path: string,
+  subject: string,
+): SortableFieldFinding | undefined {
+  if (verdict?.sortable !== false) return undefined;
+  if (verdict.reason === FIELD_UNSORTABLE_AUTHOR_DECLARED) {
+    return {
+      severity: 'error',
+      rule: SORT_FIELD_UNSORTABLE,
+      where,
+      path,
+      // The door's own clause (`a field on '<object>' that declares
+      // \`sortable: false\``), so an author refused here and one refused at
+      // request time read the same field and the same reason.
+      message:
+        `${subject} orders by "${name}", a field on object "${objectName}" that declares ` +
+        '`sortable: false`, so every load answers 400 INVALID_SORT',
+      hint: `Sort by another field, or remove \`sortable: false\` from "${name}" to make it sortable`,
+    };
+  }
+  return {
+    severity: 'error',
+    rule: SORT_FIELD_UNSORTABLE,
+    where,
+    path,
+    message:
+      `${subject} orders by "${name}" on object "${objectName}", ` +
+      `${virtualFieldClause(vtype)}, so there is no column to ORDER BY`,
+    // [#22161] One remedy line; that both runtime doors refuse it with
+    // 400 INVALID_SORT is the id's `os explain` entry.
+    hint:
+      `Denormalise the value onto "${objectName}" (a stored field, written when the source ` +
+      `changes) and sort by that, or drop "${name}" from this sort`,
+  };
+}
+
+/**
+ * [#30023] Page blocks that declare their own `properties.sort`, and the
+ * position inside `properties` that names the object it orders (dotted for a
+ * nested one) — the `ComponentPropsMap` rows with a live `sort` key (pinned
+ * against the spec in the test). Each block resolves its query as
+ * `dataSource.<key> ?? properties.<key>`, so the node-level binding's `object`
+ * wins over this position. A page `list-view` node's bag is a list view, so its
+ * binding is the list view's own `data.object`.
+ */
+export const PAGE_BLOCK_SORT_OBJECT_PROP: Readonly<Record<string, string>> = {
+  'list-view': 'data.object',
+  'record:related_list': 'objectName',
+  'record:line_items': 'childObject',
+  'object-grid': 'objectName',
+  'object-calendar': 'objectName',
+  'object-gantt': 'objectName',
+  'object-map': 'objectName',
+  'object-timeline': 'objectName',
+};
+
+/**
+ * [#30023] Judge one STORED PAGE sort. A page sort reaches the same list door a
+ * list view's does, so each key is asked the door's questions in the door's
+ * order, at the door's severity:
+ *
+ *   1. EXISTENCE (`page-field-unknown`, `error`, #30093) — a name the object
+ *      does not have. The list door (`assertSortFieldsExist`) answers it
+ *      `400 INVALID_SORT` on the first fetch and every fetch after it, so the
+ *      grade is the list view's `sort-field-unknown` grade, under the page
+ *      family's id: an author reading a page finding reads the page rule.
+ *      Before #30093 two slots (a related list's `sort`, `interfaceConfig.sort`)
+ *      were read here by `validate-page-field-bindings` at `warning`, and the
+ *      element `dataSource.sort`, `parentDataSource.sort`, `record.sort` and
+ *      the other blocks' own `sort` were read by nothing, so the page published
+ *      green and broke on its first read. This member is the one that reaches
+ *      the page publish door (`runtimeTypes` carries `page`), so asking it here
+ *      refuses the page at save instead.
+ *   2. PROVENANCE (`page-field-unprovisioned`, `warning`) — a registry-injected
+ *      anchor on an ADR-0015 `external` object. Its ORDER BY reaches the driver
+ *      and is dropped; no door refuses it, so it stays advisory (#10474's
+ *      reasoning, the list-view twin's grade).
+ *   3. SORTABILITY (`sort-field-unsortable`, `error`) — the projection's
+ *      `sortable: false`, a `formula` or an author-declared one.
+ *
+ * Two skips, the `page-field-unknown` family's own: a DOTTED name, which the
+ * door refuses as its own verdict and this family does not judge, and an
+ * object this stack does not define or that declares no field map.
+ */
+function checkPageSortDeclaration(
+  declared: unknown,
+  objectName: string | undefined,
+  fieldsByObject: ReadonlyMap<string, ObjectSearchTarget | null>,
+  sortability: ReadonlyMap<string, SortabilityFields>,
+  unprovisionedAnchors: ReadonlyMap<string, ReadonlySet<string>>,
+  where: string,
+  path: string,
+  subject: string,
+): SortableFieldFinding[] {
+  if (declared === undefined || declared === null || !objectName) return [];
+  const projection = sortability.get(objectName);
+  if (!projection) return []; // ① object from another package
+  const target = fieldsByObject.get(objectName); // null ⇒ ② no authored field map
+  const anchors = unprovisionedAnchors.get(objectName);
+  const findings: SortableFieldFinding[] = [];
+  for (const key of readSortKeys(declared)) {
+    const name = key.field;
+    const at = `${path}${key.at}`;
+    if (name.includes('.')) continue;
+    if (SYSTEM_FIELDS.has(name)) {
+      if (anchors?.has(name)) {
+        findings.push({
+          severity: 'warning',
+          rule: PAGE_FIELD_UNPROVISIONED,
+          where,
+          path: at,
+          message:
+            `${subject}: ${unprovisionedAnchorVerdict(objectName, name)}, so its ORDER BY is ` +
+            'dropped and every fetch returns rows in an arbitrary order',
+          hint: unprovisionedAnchorFix(objectName, name),
+        });
+      }
+      // An author-DECLARED field of a system name is the author's own column,
+      // so it falls through to the projection; a bare anchor has no entry there.
+      if (!target?.names.has(name)) continue;
+    }
+    if (target && !target.names.has(name)) {
+      findings.push({
+        severity: 'error',
+        rule: PAGE_FIELD_UNKNOWN,
+        where,
+        path: at,
+        message:
+          `field "${name}" is not a field on object "${objectName}" — the ${subject} orders by it, ` +
+          'so every load answers 400 INVALID_SORT.',
+        // The `page-field-unknown` family's one remedy line: the nearest
+        // declared field, never the field list.
+        hint: `Fix the field name, or add "${name}" to ${objectName}.${suggestName(name, target.names)}`,
+      });
+      continue;
+    }
+    const unsortable = unsortableFinding(
+      projection[name],
+      name,
+      objectName,
+      target?.fields[name]?.type,
+      where,
+      at,
+      subject,
+    );
+    if (unsortable) findings.push(unsortable);
+  }
+  return findings;
+}
+
+/**
+ * [#30023] Every stored sort a PAGE carries that reaches the Data API list
+ * door, judged by {@link checkPageSortDeclaration} (existence, provenance and
+ * sortability since #30093), each bound to the object its renderer reads:
+ *
+ *   - every component's node-level `dataSource.sort` (`ElementDataSourceSchema`),
+ *     bound to `dataSource.object`;
+ *   - a `record:related_list`'s `properties.parentDataSource.sort` (the same
+ *     schema, bound to its own `object`);
+ *   - the `properties.sort` of each block in {@link PAGE_BLOCK_SORT_OBJECT_PROP};
+ *   - a list page's own `interfaceConfig.sort`, bound to
+ *     `interfaceConfig.source`, else the page's `object`;
+ *   - an app page's `record.sort`, bound to `record.object`.
+ */
+function validatePageSorts(
+  stack: AnyRec,
+  fieldsByObject: ReadonlyMap<string, ObjectSearchTarget | null>,
+  sortability: ReadonlyMap<string, SortabilityFields>,
+  unprovisionedAnchors: ReadonlyMap<string, ReadonlySet<string>>,
+): SortableFieldFinding[] {
+  const findings: SortableFieldFinding[] = [];
+  const check = (declared: unknown, objectName: string | undefined, where: string, path: string, subject: string) => {
+    findings.push(
+      ...checkPageSortDeclaration(
+        declared, objectName, fieldsByObject, sortability, unprovisionedAnchors, where, path, subject,
+      ),
+    );
+  };
+
+  const pages = recordsOf(stack.pages);
+  for (let pi = 0; pi < pages.length; pi++) {
+    const page = pages[pi];
+    const pageName = strName(page.name) ?? `#${pi}`;
+
+    for (const { component, path } of walkPageComponents(page, `pages[${pi}]`)) {
+      const type = strName(component.type) ?? 'component';
+      const where = `page "${pageName}" · ${type}`;
+      const props = isRec(component.properties) ? component.properties : undefined;
+      const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
+
+      if (dataSource) {
+        check(dataSource.sort, strName(dataSource.object), where, `${path}.dataSource.sort`, `${type} dataSource sort`);
+      }
+      if (!props) continue;
+      const objectProp = PAGE_BLOCK_SORT_OBJECT_PROP[type];
+      if (objectProp) {
+        check(
+          props.sort,
+          strName(dataSource?.object) ?? strName(valueAt(props, objectProp)),
+          where,
+          `${path}.properties.sort`,
+          `${type} sort`,
+        );
+      }
+      // The PARENT binding is declared on `record:related_list` alone.
+      const parent =
+        type === 'record:related_list' && isRec(props.parentDataSource) ? props.parentDataSource : undefined;
+      if (parent) {
+        check(
+          parent.sort,
+          strName(parent.object),
+          where,
+          `${path}.properties.parentDataSource.sort`,
+          `${type} parentDataSource sort`,
+        );
+      }
+    }
+
+    const cfg = isRec(page.interfaceConfig) ? page.interfaceConfig : undefined;
+    if (cfg) {
+      check(
+        cfg.sort,
+        strName(cfg.source) ?? strName(page.object),
+        `page "${pageName}" · interfaceConfig`,
+        `pages[${pi}].interfaceConfig.sort`,
+        'list-page sort',
+      );
+    }
+
+    const record = isRec(page.record) ? page.record : undefined;
+    if (record) {
+      check(
+        record.sort,
+        strName(record.object),
+        `page "${pageName}" · record`,
+        `pages[${pi}].record.sort`,
+        'page record sort',
+      );
+    }
+  }
   return findings;
 }
 
@@ -485,9 +819,13 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
     : isRec(stack.objects)
       ? Object.entries(stack.objects).map(([name, def]) => ({ name, ...(def as AnyRec) }))
       : [];
-  const fieldsByObject = indexObjectSearchTargets(stack);
+  // [#30471] The existence index and the sortability projection read the
+  // objects as served ({@link indexServedSortFields}); the walk above stays on
+  // the declared objects, so every finding keeps its declared path.
+  const { fieldsByObject, sortability } = indexServedSortFields(stack);
   // [#10474] The provenance index alongside the existence one — same keying,
-  // asked on the path where the existence check stays silent.
+  // asked on the path where the existence check stays silent. Object-level
+  // (`external`, the injected anchors), so it stays on the declared objects.
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
 
   const check = (
@@ -506,6 +844,7 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
         path,
         subject,
         unprovisionedAnchors,
+        sortability,
       ),
     );
   };
@@ -632,7 +971,20 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
     }
   }
 
+  // ── [#30023] Stored page sorts: existence (#30093), provenance, sortability ──
+  findings.push(...validatePageSorts(stack, fieldsByObject, sortability, unprovisionedAnchors));
+
   return findings;
+}
+
+/** The value at a dotted position inside a record, or `undefined`. */
+function valueAt(rec: AnyRec, dotted: string): unknown {
+  let cur: unknown = rec;
+  for (const seg of dotted.split('.')) {
+    if (!isRec(cur)) return undefined;
+    cur = cur[seg];
+  }
+  return cur;
 }
 
 /** A list view's own object binding: `data: { provider: 'object', object }`. */

@@ -31,6 +31,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createAuthenticatedFetch } from '@object-ui/auth';
+import type { FilterBuilderRowGroup } from '@object-ui/components';
+import { builderRulesOfSpecFilter } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
 import type { DataSource } from '@object-ui/types';
 import { foldFilterGroupToSpecRules, type FilterFoldRefusal } from './viewFilterFold.js';
@@ -117,12 +119,58 @@ export function personalViewEntry(view: PersonalView): Record<string, any> {
   };
 }
 
+/**
+ * A personal view's own conditions as Filter panel rows (objectstack#30073):
+ * the view is the reader's own, so its conditions are shown and edited where
+ * the reader filters, and a 保存 writes the panel back as the view's filter.
+ *
+ * `undefined` keeps the conditions where every other view keeps them, applied
+ * under the list and not drawn as rows:
+ * - the view declares no condition;
+ * - the stored list is one the panel cannot hold (`builderRulesOfSpecFilter`
+ *   reads `null`: an any-of group beside other conditions), or an element is
+ *   not a flat rule naming a field;
+ * - a condition names a field `acceptField` refuses (one the object no longer
+ *   declares, or the reader cannot read). The list state the panel writes is
+ *   read back through that same gate, which would drop the row, and the view
+ *   would then select more records than it declares.
+ *
+ * The rows carry the stored operator and value as authored; the fold that
+ * saves them (`foldFilterGroupToSpecRules`) writes them back unchanged.
+ */
+export function personalViewPanelFilters(
+  config: Record<string, unknown> | undefined,
+  acceptField: (field: string) => boolean,
+): FilterBuilderRowGroup | undefined {
+  const stored = config?.filter;
+  if (!Array.isArray(stored) || stored.length === 0) return undefined;
+  const shown = builderRulesOfSpecFilter(stored);
+  if (!shown || shown.rules.length === 0) return undefined;
+  const conditions: FilterBuilderRowGroup['conditions'] = [];
+  for (const [i, rule] of shown.rules.entries()) {
+    if (!isRecord(rule) || typeof rule.field !== 'string' || !rule.field || !acceptField(rule.field)) return undefined;
+    conditions.push({
+      id: `view-${i}`,
+      field: rule.field,
+      operator: typeof rule.operator === 'string' ? rule.operator : 'equals',
+      value: (rule.value ?? '') as FilterBuilderRowGroup['conditions'][number]['value'],
+    } as FilterBuilderRowGroup['conditions'][number]);
+  }
+  return { id: 'root', logic: shown.logic, conditions };
+}
+
 /** What the list on screen holds beyond its view's own body. */
 export interface PersonalViewListState {
   /** The toolbar state the address carries (`uf_*`); an absent part is the view's own. */
   url: Pick<ListUrlState, 'filters' | 'sort' | 'grouping'>;
   /** The reader's stored state for the view (`ui.list.<object>`), if any. */
   preference?: ListViewPreference;
+  /**
+   * The open view's own conditions when the Filter panel holds them as rows
+   * ({@link personalViewPanelFilters}): the panel is then the WHOLE filter,
+   * the view's conditions included, and is not laid over them a second time.
+   */
+  panelFilters?: FilterBuilderRowGroup;
 }
 
 /** The column a `columns` entry names: a bare name, or an entry's `field`. */
@@ -140,6 +188,8 @@ function columnName(column: unknown): string | undefined {
  *   spec rules by the one fold every explicit save uses
  *   (`foldFilterGroupToSpecRules`). A group it cannot fold losslessly (a
  *   nested group) refuses the save instead of storing another record set.
+ *   When the panel holds the view's own conditions (`state.panelFilters`),
+ *   the panel alone is the filter: the reader may have edited or removed one.
  * - **sort** and **grouping**: the ones the address carries; absent there,
  *   the view's own.
  * - **columns**: the view's, in the reader's dragged order, without the
@@ -156,9 +206,17 @@ export function buildPersonalViewConfig(
   view: Record<string, any>,
   state: PersonalViewListState,
 ): { ok: true; config: Record<string, unknown> } | { ok: false; reason: FilterFoldRefusal } {
-  const folded = foldFilterGroupToSpecRules(state.url.filters);
-  if (!folded.ok) return { ok: false, reason: folded.reason };
-  const filter = [...(Array.isArray(view.filter) ? view.filter : []), ...folded.rules];
+  const own: unknown[] = Array.isArray(view.filter) ? view.filter : [];
+  let filter: unknown[];
+  if (state.panelFilters && state.url.filters === undefined) {
+    // The panel holds the view's own conditions and the reader has not
+    // touched it: the stored list is kept as it is.
+    filter = own;
+  } else {
+    const folded = foldFilterGroupToSpecRules(state.url.filters);
+    if (!folded.ok) return { ok: false, reason: folded.reason };
+    filter = state.panelFilters ? folded.rules : [...own, ...folded.rules];
+  }
 
   const pref = state.preference;
   const hidden = new Set<string>(pref?.hiddenFields ?? (Array.isArray(view.hiddenFields) ? view.hiddenFields : []));
@@ -308,6 +366,19 @@ export function usePersonalViews({
     [dataSource, objectName, userId, settle],
   );
 
+  /**
+   * Save the list on screen back into one of the reader's views (保存,
+   * objectstack#30073): the row's `config` replaced by a body built the way
+   * Save as my view builds one, so the stored shape is the same.
+   */
+  const update = useCallback(
+    async (id: string, config: Record<string, unknown>): Promise<void> => {
+      await dataSource.update(PERSONAL_VIEW_OBJECT, id, { config });
+      settle((views) => views.map((v) => (v.id === id ? { ...v, config } : v)));
+    },
+    [dataSource, settle],
+  );
+
   /** Rename one of the reader's views. */
   const rename = useCallback(
     async (id: string, label: string): Promise<void> => {
@@ -330,5 +401,5 @@ export function usePersonalViews({
     [authFetch, settle],
   );
 
-  return { status, views, save, rename, remove };
+  return { status, views, save, update, rename, remove };
 }

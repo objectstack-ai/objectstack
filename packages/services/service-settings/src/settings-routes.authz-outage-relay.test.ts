@@ -21,7 +21,8 @@
  * swallow — this registrar has **four**: `GET /api/settings`,
  * `GET /api/settings/:namespace`, `PUT /api/settings/:namespace` and
  * `POST /api/settings/:namespace/:actionId`. All four are driven below, so the
- * fourth cannot be the one nobody remembered.
+ * fourth cannot be the one nobody remembered. [#30120] The deployment notice's
+ * read and hide came later, through the same family door, and are driven too.
  *
  * ## RELAY, not re-raise
  *
@@ -55,6 +56,7 @@ import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spe
 import { registerSettingsRoutes } from './settings-routes.js';
 import { SettingsForbiddenError, UnknownNamespaceError } from './settings-service.types.js';
 import type { SettingsContext } from './settings-service.types.js';
+import type { DeploymentNoticeDoor, DeploymentNoticeState } from './deployment-notice.js';
 
 const BASE = '/api/settings';
 const NS = 'mail';
@@ -81,6 +83,17 @@ function permissiveService() {
   } as any;
 }
 
+/** The deployment notice's door, which would SUCCEED for both of its routes. */
+const NOTICE: DeploymentNoticeState = {
+  production: true,
+  findings: [{ id: 'auth_secret_generated', severity: 'high', variable: 'OS_AUTH_SECRET' }],
+  fingerprint: 'auth_secret_generated',
+};
+const permissiveNoticeDoor: DeploymentNoticeDoor = {
+  read: async () => NOTICE,
+  hide: async () => ({ outcome: 'recorded', state: NOTICE }),
+};
+
 type Ctx = (req: IHttpRequest) => SettingsContext | Promise<SettingsContext>;
 
 function mount(contextFromRequest: Ctx, service: any = permissiveService()) {
@@ -95,11 +108,11 @@ function mount(contextFromRequest: Ctx, service: any = permissiveService()) {
     listen: async () => {},
     close: async () => {},
   };
-  registerSettingsRoutes(http as any, service, { basePath: BASE, contextFromRequest });
+  registerSettingsRoutes(http as any, service, { basePath: BASE, contextFromRequest, deploymentNotice: permissiveNoticeDoor });
   return routes;
 }
 
-/** The four doors this registrar mounts — the predicate-found census, not the card's count. */
+/** The six doors this registrar mounts — the predicate-found census, not the card's count. */
 const DOORS = [
   { name: 'GET /api/settings', key: `GET:${BASE}`, params: {}, body: undefined },
   { name: 'GET /api/settings/:namespace', key: `GET:${BASE}/:namespace`, params: { namespace: NS }, body: undefined },
@@ -109,6 +122,13 @@ const DOORS = [
     key: `POST:${BASE}/:namespace/:actionId`,
     params: { namespace: NS, actionId: 'test' },
     body: {},
+  },
+  { name: 'GET /api/settings/deployment/notice', key: `GET:${BASE}/deployment/notice`, params: {}, body: undefined },
+  {
+    name: 'POST /api/settings/deployment/notice/hide',
+    key: `POST:${BASE}/deployment/notice/hide`,
+    params: {},
+    body: { fingerprint: NOTICE.fingerprint },
   },
 ] as const;
 
@@ -143,8 +163,8 @@ const RESOLVED: Ctx = () => ({ enforced: false, userId: 'usr_control' });
 // §0 — The census control: the door table above IS the mounted surface.
 // ---------------------------------------------------------------------------
 
-describe('[#15999] §0 — all four route catches exist and are the ones driven', () => {
-  it('the registrar mounts exactly the four doors this file drives', () => {
+describe('[#15999] §0 — all six route catches exist and are the ones driven', () => {
+  it('the registrar mounts exactly the six doors this file drives', () => {
     const routes = mount(() => ({ enforced: false }));
     expect([...routes.keys()].sort()).toEqual(DOORS.map((d) => d.key).sort());
   });

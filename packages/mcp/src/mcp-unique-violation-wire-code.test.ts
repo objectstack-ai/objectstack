@@ -112,7 +112,7 @@ const UPDATE: Site = {
   args: { objectName: 'udoc', recordId: 'r2', data: { email: 'taken@example.com' } },
   member: 'update',
 };
-const DELETE: Site = { tool: 'delete_record', args: { objectName: 'udoc', recordId: 'r2' }, member: 'remove' };
+const DELETE: Site = { tool: 'delete_record', args: { objectName: 'udoc', recordId: 'r2', confirm: true }, member: 'remove' };
 const RUN_ACTION: Site = { tool: 'run_action', args: { actionName: 'add_duplicate', objectName: 'udoc' }, member: 'runAction' };
 const RESUME_RUN: Site = { tool: 'resume_run', args: { runId: 'run_1', values: { email: 'taken@example.com' } }, member: 'resumeRun' };
 

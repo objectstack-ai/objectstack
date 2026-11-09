@@ -19,6 +19,16 @@ export default defineConfig({
         find: /^@objectstack\/spec\/kernel$/,
         replacement: path.resolve(HERE, '../spec/src/kernel/index.ts'),
       },
+      // `scaffold-retired-manifest-keys.test.ts` pins the scaffolder's restated
+      // retired-key list to the spec's registry rows and schema (#31035).
+      {
+        find: /^@objectstack\/spec\/marketplace$/,
+        replacement: path.resolve(HERE, '../spec/src/marketplace/index.ts'),
+      },
+      {
+        find: /^@objectstack\/spec\/migrations$/,
+        replacement: path.resolve(HERE, '../spec/src/migrations/index.ts'),
+      },
     ],
   },
   test: {

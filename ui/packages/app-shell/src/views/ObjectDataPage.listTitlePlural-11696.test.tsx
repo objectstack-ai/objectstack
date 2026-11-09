@@ -81,10 +81,21 @@ const FIELDS = {
   name: { type: 'text', label: 'Name' },
 };
 
-const OBJECTS = [
-  { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: FIELDS },
-  { name: 'showcase_note', label: 'Note', fields: FIELDS },
-];
+/**
+ * The served objects, per language: the server translates what it serves under
+ * the request's language from the same catalog the console loads, so a zh-CN
+ * session holds the zh-CN answer (objectstack#30311).
+ */
+const OBJECTS: Record<Lang, Array<Record<string, unknown>>> = {
+  en: [
+    { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: FIELDS },
+    { name: 'showcase_note', label: 'Note', fields: FIELDS },
+  ],
+  'zh-CN': [
+    { name: 'showcase_project', label: '项目', pluralLabel: '项目清单', fields: FIELDS },
+    { name: 'showcase_note', label: 'Note', fields: FIELDS },
+  ],
+};
 
 /** The catalog as the console loads it: `zh-CN` translates both scalars. */
 const BUNDLE: Record<Lang, Record<string, unknown>> = {
@@ -111,7 +122,7 @@ afterEach(() => {
 });
 
 /** The `/data` page's title text for `objectName`, in `lang` (the badge excluded). */
-async function dataPageTitle(lang: Lang, objectName: string): Promise<string> {
+async function dataPageTitle(lang: Lang, objectName: string, objects = OBJECTS[lang]): Promise<string> {
   const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
   // The instance really booted in the language under test.
   expect(i18n.language).toBe(lang);
@@ -130,7 +141,7 @@ async function dataPageTitle(lang: Lang, objectName: string): Promise<string> {
           <Routes>
             <Route
               path="/apps/:appName/:objectName/data"
-              element={<ObjectDataPage dataSource={dataSource} objects={OBJECTS} />}
+              element={<ObjectDataPage dataSource={dataSource} objects={objects as never} />}
             />
           </Routes>
         </MemoryRouter>
@@ -154,5 +165,24 @@ describe('ObjectDataPage — the /data page is titled with the plural (objectui#
 
   it('control: an object that declares no plural is titled with its label', async () => {
     expect(await dataPageTitle('en', 'showcase_note')).toBe('Note');
+  });
+});
+
+/**
+ * objectstack#30311 — a served object's /data page is titled as served.
+ * Directions, written before the run: the renamed cell RED before the change
+ * (`项目清单`), GREEN after; the control GREEN on both sides.
+ */
+describe('ObjectDataPage — a served object’s /data page is titled as served (objectstack#30311)', () => {
+  const renamed = (extra: Record<string, unknown>) => [{ name: 'showcase_project', fields: FIELDS, ...extra }];
+
+  it('zh-CN: a renamed object titles the page with the served plural, not the packaged string', async () => {
+    const title = await dataPageTitle('zh-CN', 'showcase_project', renamed({ label: 'Venture (renamed-30311)', pluralLabel: 'Ventures (renamed-30311)' }));
+    expect(title).toContain('Ventures (renamed-30311)');
+    expect(title).not.toContain('项目清单');
+  });
+
+  it('zh-CN: control — an object served with no label is titled by the bundle', async () => {
+    expect(await dataPageTitle('zh-CN', 'showcase_project', renamed({}))).toContain('项目清单');
   });
 });

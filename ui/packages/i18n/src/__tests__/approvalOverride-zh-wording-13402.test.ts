@@ -31,7 +31,7 @@ const OVERRIDE_KEYS = [
 const VIOLATION_WORD = /越权/u;
 
 type Pack = Record<string, unknown>;
-const zh = (builtInLocales.zh as unknown as { approvalsInbox: Pack }).approvalsInbox;
+const zh = (builtInLocales['zh-Hans'] as unknown as { approvalsInbox: Pack }).approvalsInbox;
 const en = (builtInLocales.en as unknown as { approvalsInbox: Pack }).approvalsInbox;
 
 const placeholders = (value: string) => [...value.matchAll(/\{\{\s*(\w+)\s*\}\}/gu)].map((m) => m[1]).sort();

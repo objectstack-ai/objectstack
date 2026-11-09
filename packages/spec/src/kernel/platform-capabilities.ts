@@ -63,6 +63,11 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   // mailboxes (ADR-0029 D2).
   'mailbox',
   'sms',
+  // Mobile push (ADR-0012 §4, §6): the kernel's `push` service, the transport
+  // half of the messaging `push` channel, built from the stack's `push` key.
+  // Requested, never always-on: it delivers only with the operator's own
+  // vendor credentials, and a boot with none refuses it.
+  'push',
   'sharing',
   'pinyin-search',
   // `reports` was RETIRED (#20102) — see RETIRED_PLATFORM_CAPABILITY_GUIDANCE.
@@ -212,6 +217,7 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     email: { package: '@objectstack/plugin-email', edition: 'open' },
     mailbox: { package: '@objectstack/service-mailbox', edition: 'open' },
     sms: { package: '@objectstack/service-sms', edition: 'open' },
+    push: { package: '@objectstack/service-push', edition: 'open' },
     sharing: { package: '@objectstack/plugin-sharing', edition: 'open' },
     'pinyin-search': { package: '@objectstack/plugin-pinyin-search', edition: 'open' },
     approvals: { package: '@objectstack/plugin-approvals', edition: 'open' },
@@ -339,7 +345,10 @@ export const PLATFORM_PLUGIN_WIRED_RUNTIMES: Readonly<Record<string, PlatformPlu
  * only when `audit` does; `sms` has no provider package in that image at all.
  *
  * This is the FLOOR, not the ceiling: a host may mount more (cloud adds
- * `observability`), and `objectstack serve --preset minimal` opts out entirely.
+ * `observability`), and `objectstack serve --preset minimal` opts out of the
+ * slate, though not of all of it: `resolveServedCapabilities` (`@objectstack/core`)
+ * still mounts `job` and `queue` first when `email`, `approvals` or `auth` is
+ * present, and mounts `email` whenever `auth` is.
  */
 export const PLATFORM_ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze([
   // Order is a CONTRACT, not a count. `queue`/`job`/`cache`/`settings` are the
@@ -376,14 +385,14 @@ export const PLATFORM_ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze(
   // this slate (its only hard requirement is the ObjectQL engine, which is not
   // a capability token), so it joins the TAIL like any other reader.
   //
-  // ⚠️ SCOPE, measured on `serve`'s capability resolver at c17ff70f3f: a slate
-  // entry is force-appended to every app's `requires`, and the CLI then mounts
-  // it only if `Serve.CAPABILITY_PROVIDERS` keys the token. That registry keys
-  // `marketplace`, not this token, so under `objectstack serve` this entry is
-  // inert until the runtime half of the same ruling lands (#17676 items 2/3/5,
-  // the engine lane). The declaration is deliberately first: it is the single
-  // list both runtimes read, and the thing the runtime half is written
-  // against.
+  // Mounting: a slate entry joins every boot's served tokens
+  // (`resolveServedCapabilities`, `@objectstack/core`) unless the preset is
+  // `minimal`, and the CLI mounts it through `CAPABILITY_PROVIDERS`
+  // (`@objectstack/core`, `capability-providers.ts`). That registry keys this
+  // token at `@objectstack/service-package`'s `PackageServicePlugin`, the
+  // provider `PLATFORM_CAPABILITY_PROVIDERS` declares and the same one
+  // `marketplace` resolves to, so a stock `objectstack serve` boot mounts it;
+  // an app that also declares `marketplace` gets one instance, not two.
   'package-registry',
 ]);
 

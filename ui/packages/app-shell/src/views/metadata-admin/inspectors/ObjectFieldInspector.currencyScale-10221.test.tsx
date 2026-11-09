@@ -6,7 +6,7 @@
  *
  * `scale` is retired from the currency type (ruling B on
  * objectstack-ai/objectstack#19629), and a currency's decimal places are the
- * currency's ISO 4217 minor unit, not a setting (ruling 乙 on
+ * currency's CLDR fraction digits, not a setting (ruling 乙 on
  * objectstack-ai/objectstack#19910). The numeric section used to render the
  * same four controls for `number`, `currency` and `percent`, so the designer
  * offered a decimal-places knob on money that no display face honours.

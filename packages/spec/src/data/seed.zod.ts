@@ -21,11 +21,11 @@ import {
   isSeedFileReference,
 } from './seed-file.zod';
 export const SeedMode = z.enum([
-  'insert',    // Try to insert, fail on duplicate
+  'insert',    // Insert every record, no match: each replay inserts them again (a row the database refuses is that row's error)
   'update',    // Only update found records, ignore new
-  'upsert',    // Create new or Update existing (Standard)
-  'replace',   // Delete ALL records in object then insert (Dangerous - use for cache tables)
-  'ignore'     // Try to insert, silently skip duplicates
+  'upsert',    // Create new or update existing: every replay writes the declared columns back
+  'replace',   // Insert every record, no match, deleting nothing: for a cache table the caller cleared
+  'ignore'     // Create-only (the default): insert missing rows, leave existing rows alone
 ]);
 
 /**
@@ -165,9 +165,58 @@ export const SeedSchema = lazySchema(() => strictObject({
     .describe('Field (or composite list of fields) matched for the uniqueness check'),
 
   /**
-   * Import Strategy
+   * Import Strategy — what a load does with a record whose `externalId`
+   * matches a row that already exists.
+   *
+   * The default, `ignore`, makes a seed create-only: a load inserts the
+   * records whose row is missing and leaves every existing row exactly as it
+   * is. A seed is replayed — on every single-tenant boot, on every package
+   * install or upgrade, on every publish of a `seed` item — and once a seeded
+   * row reaches a customer the row is the customer's: a replay must not write
+   * the shipped value back over their edit, silently, on the next restart
+   * (ruling 6631016988 on objectstack#30081, which measured exactly that on a
+   * production boot and on both upgrade paths while the default was `upsert`).
+   *
+   * A row a person deleted is not brought back by every replay. The loads
+   * AppPlugin (`@objectstack/runtime`) runs for an organization — the
+   * single-tenant boot seed, the per-organization replay (the `seed-replayer`
+   * service) and the dev hot reload, where the composition registers
+   * `sys_seed_landed_key` (`@objectstack/platform-objects`) — record, per
+   * organization, the key of every keyed row an `ignore` or `upsert` dataset
+   * landed, and do not insert again a recorded row that is now gone. A key
+   * never recorded still lands, so a row an upgrade adds to the seed is
+   * inserted. A seed publish and a package
+   * install or upgrade (`os package install`, the marketplace install) keep no
+   * record, so the row comes back on those. The deliberate re-seed,
+   * `seed-replayer(organizationId, { reseed: true })`, inserts every missing
+   * row whatever the record says.
+   *
+   * An author who wants a replay to refresh the rows — reference data the
+   * package keeps current — declares `mode: 'upsert'`, and can still exempt
+   * the columns the customer or a job owns after the first load with
+   * `columns: { FIELD: { applyOn: 'create' } }` ({@link SeedColumnSchema}).
+   *
+   * A package built before this default moved carries a written
+   * `mode: 'upsert'` in its compiled artifact (`os build` stores the parsed
+   * seed), and the loader cannot tell that value from an authored one, so such
+   * a package keeps replaying with upsert until it is rebuilt — and, where it
+   * was installed with `os package install`, until the rebuilt artifact is
+   * re-installed, because the install ledger keeps the body as installed and
+   * its sample-data reseed replays that body.
    */
-  mode: SeedMode.default('upsert').describe('Conflict resolution strategy'),
+  mode: SeedMode.default('ignore')
+    .describe(
+      'What a load does with a record whose `externalId` matches an existing row. `ignore` (default) ' +
+      'is create-only: a missing row is inserted and an existing row is left as it is, so a replay ' +
+      '(every boot, a package install or upgrade, a publish) never writes a seeded value back over a ' +
+      'later edit. `upsert` also writes every declared column back onto the matched row on each replay; ' +
+      'declare it for reference data the package keeps current. `update` writes matched rows only, ' +
+      '`insert` inserts every record with no match, so each replay inserts them again, and `replace` does the ' +
+      'same and deletes nothing: it is for a table the caller cleared. On the loads AppPlugin runs for an ' +
+      'organization (the boot seed, the seed-replayer replay, the dev hot reload), an `ignore` or `upsert` row ' +
+      'that landed once and was later deleted is not inserted again; a publish or package install keeps no such ' +
+      'record, and seed-replayer called with { reseed: true } inserts every missing row.',
+    ),
 
   /**
    * Column Policies
@@ -230,20 +279,38 @@ export const SeedSchema = lazySchema(() => strictObject({
    * The platform translates nothing. This is the axis that SELECTS between
    * record sets the app authored itself.
    *
-   * **Publishing and installing are locale-neutral acts — this axis is scoped
-   * to the boot path, by decision.** The loader evaluates it against
-   * `SeedLoaderConfig.locale`, which only the boot path supplies (AppPlugin
-   * reads the app's declared `i18n.defaultLocale`). Package apply, draft
-   * publish and marketplace install each build their own load request and pass
-   * no locale, so a `locale`-scoped dataset reaching one of them is loaded for
-   * **every** locale and the loader warns naming each dataset it let through.
-   * That bound is the contract, not an unfinished path: a package is assembled
-   * once for every market, and selecting a market is what happens when it is
-   * opened. Ruled on #17011 (2026-09-10), which also kept the warning rather
-   * than turning those paths into a refusal.
+   * **Which loads filter on it.** The loader evaluates this axis against
+   * `SeedLoaderConfig.locale`; a load request that carries none loads a
+   * `locale`-scoped dataset for **every** locale, and the loader warns naming
+   * each dataset it let through.
+   *
+   * - **Boot.** The boot seed and the dev hot-reload seeder filter on the
+   *   app's declared `i18n.defaultLocale` (AppPlugin).
+   * - **Install, reseed, heal and per-organization replay.** The marketplace
+   *   install, the sample-data reseed, the restart heal and the
+   *   per-organization replay filter on the locale resolved for that load by
+   *   `resolveSeedLocaleForLoad` (`@objectstack/runtime`), first answer wins:
+   *   the `localization.locale` setting for the organization the rows land in
+   *   (a load that names no organization, such as a single-tenant install or
+   *   reseed or the restart heal, still reads it: the environment override
+   *   answers first, then the `global` setting, then, where no wall stands and
+   *   the deployment holds exactly one organization, that organization's own
+   *   setting), counted only when somebody set it (a
+   *   value whose `source` is `'default'` is the platform's placeholder, not a
+   *   choice); then the `sys_user.locale`
+   *   of the user who installs, reseeds or founds the organization, when one
+   *   started the load; then the app's declared `i18n.defaultLocale`, when the
+   *   caller names one. No answer is a load with no locale, as above. A
+   *   setting or user read that fails seeds nothing rather than another
+   *   language.
+   * - **Package apply and draft publish** pass no locale: they stay
+   *   locale-neutral, because a package is assembled once for every market.
+   *   That is the bound ruled on #17011 (2026-09-10), narrowed to these two
+   *   paths when the maintainer ruled that the install paths pick by locale
+   *   (2026-11-05).
    */
   locale: z.array(LocaleSchema).min(1).optional()
-    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The publish and install paths do not filter by locale — they load every dataset and warn'),
+    .describe('Applicable locales (BCP-47 tags); omitted applies to every locale. The boot seed filters on the app\'s i18n.defaultLocale; the marketplace install, sample-data reseed, restart heal and per-organization replay filter on the locale resolved for the load (the localization.locale setting when set, then the locale of the installing, reseeding or founding user, then the app\'s i18n.defaultLocale where the load names one); package apply and draft publish do not filter by locale — they load every dataset and warn'),
 
   /**
    * The Payload

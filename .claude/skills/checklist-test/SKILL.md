@@ -218,6 +218,9 @@ QA-source: #运行记录号 · area.item · 条款
 或直接填实值。**唯一例外是 npm 冒烟**(§6):定位字段写冒烟选择器、条款写格号,如
 `QA-source: #运行记录号 · smoke:npm-18.2.0 · C3` —— 下一轮冒烟凭这一行重判它。
 
+**关闭** —— 收口完成即由 QA 席当轮关记录 `completed`,一行指向收口评论;遗留项留在各
+自卡上,回测经 `retest-owed.mjs` 欠着,⛔ 不为等修复开着。
+
 **Supersede 协议** —— 重跑覆盖了旧记录的地面时,旧记录关闭(`not_planned` + 一行
 `Superseded-by:` 指向新记录),但**先把新一轮没有重新判定的判定结转过去**:结转行
 (`Carried-forward:`,引旧记录号)落在**新记录**上,supersede 行落在**旧记录**上。⛔
@@ -231,7 +234,7 @@ QA-source: #运行记录号 · area.item · 条款
    单 —— 与跨仓联动同一纪律:第一产者是接受座位。安全加固没有卡:落地它的 PM 会话自
    己重跑该项,⛔ 不在任何卡上点名它。
 3. **维护者点名目标**。
-4. **常驻回归**(维护者所定,§6)⇒ 每周回归与发版后 npm 冒烟。
+4. **常驻回归**(维护者所定,§6)⇒ 例行回归与发版后 npm 冒烟。
 
 ⛔ 其它一切都不是重测触发:凭手感「再跑一遍」只增加收口债,不增加覆盖。
 
@@ -241,16 +244,16 @@ QA-source: #运行记录号 · area.item · 条款
 
 ## 6. 常驻回归 —— 两次发版之间也重跑
 
-维护者所定的两条例行(裁定评论 6501246005);定时任务由派发的 PM 会话建,⛔ 不是仓库代码,也
-不是合并门禁。
+维护者所定的两条例行(裁定评论 6501246005)归 QA 席 `qa#1`;何时开轮只见 pm-dispatch `lanes/qa.md`,
+⛔ 本节不另写节奏;例行不是仓库代码,也不是合并门禁。
 
-- **每周回归**,对 `main` HEAD,四张 `qa-run` 记录,一个选择器一张:
+- **例行回归**,对 `main` HEAD,四张 `qa-run` 记录,一个选择器一张:
   - 欠测清单:标题选择器写 `owed:weekly`(⛔ 不带冒号的词会被读成区),清单里每个 id
     按 §0 裸 id 逐项解析;
-  - `touched:<上周 touched 记录的 subject sha>`;首周取最近一张发版全量重跑记录的 subject;
+  - `touched:<上轮 touched 记录的 subject sha>`;首轮取最近一张发版全量重跑记录的 subject;
   - `priority:P0` 与 `surface:api`。
-  §5 的 Supersede 让每条例行至多开着一张:选择器周周相同的三张直接适用;`touched:` 的 sha
-  每周都变,本周那张照样 supersede 上周那张,判定结转照 §5。
+  §5 的 Supersede 让每条例行至多开着一张:选择器轮轮相同的三张直接适用;`touched:` 的 sha
+  每轮都变,本轮那张照样 supersede 上轮那张,判定结转照 §5。
 - **发版后 npm 冒烟**:每次发布后跑 `smoke:npm-<版本>`,形状照上一张同类记录;上一轮冒烟抽出
   的修复卡在这里重判(它们的溯源行见 §5 的冒烟例外)。
 - **欠测清单**由 `node scripts/qa/retest-owed.mjs` 只读算出(⛔ 不写 GitHub):
@@ -263,7 +266,7 @@ QA-source: #运行记录号 · area.item · 条款
   blocked 判定是一次成功运行;伪造的 pass 不是。
 - **每个产品问题同一轮经 §4 立 issue。** `fail` 条款与条款外探测同样,⛔ 不只留在运行记
   录或聊天;安全发现按下一条。
-- **安全发现不立卡,复现不上 GitHub**:定义、私卡与修复派发全照 pm-dispatch
+- **runner 不为安全发现立卡,复现不上 GitHub**:定义、私卡与修复派发全照 pm-dispatch
   `references/security-findings.md`,⛔ 这里不复述。runner 只把复现经会话间消息私报给
   **派发它的 PM 会话**(无此通道则留本会话,终报报 blocked)。运行记录只留一行
   `area.item · 条款 · security finding — detail withheld, reported to PM`,算已完成判定、标题计 `FAIL`。

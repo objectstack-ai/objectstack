@@ -51,8 +51,10 @@
  *
  * Fields an `objectExtensions[]` entry merges into the object (from this stack
  * or from a sibling package of the same artifact) ARE addressable at runtime,
- * because the registry merges every extension layer onto its target, so they
- * are folded into the object's field map before it is judged. Fields injected
+ * because the registry merges every extension layer onto its target, so the
+ * object is judged as served: through the package's one fold
+ * (`objectsAsServed`, #30383), which keeps one entry per package per target
+ * as the registry does. Fields injected
  * imperatively by plugin code are not metadata and no static rule can see
  * them; the import door, which reads the registered object, still judges them.
  */
@@ -64,7 +66,7 @@ import {
   type ImportMappingTargetHead,
 } from '@objectstack/spec/data';
 
-import { packagesOf, recordsOf, suggestName } from './object-graph.js';
+import { objectsAsServed, packagesOf, recordsOf, suggestName } from './object-graph.js';
 
 /**
  * A `fieldMapping[].target` the mapping cannot write on its object: it names no
@@ -95,30 +97,6 @@ function strName(v: unknown): string | undefined {
 }
 
 /**
- * Target object name → the field records every `objectExtensions[]` entry
- * aimed at it contributes, read from the stack in hand and from each
- * `packages[].manifest` body (the per-package leg of `os build` sees a
- * sibling's extension only there).
- */
-function extensionFieldsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
-  const byTarget = new Map<string, AnyRec[]>();
-  const add = (extensions: unknown) => {
-    for (const extension of recordsOf(extensions)) {
-      const target = strName(extension.extend);
-      if (!target) continue;
-      const fields = recordsOf(extension.fields);
-      if (fields.length === 0) continue;
-      byTarget.set(target, [...(byTarget.get(target) ?? []), ...fields]);
-    }
-  };
-  add(stack.objectExtensions);
-  for (const entry of packagesOf(stack)) {
-    if (isRec(entry.manifest)) add(entry.manifest.objectExtensions);
-  }
-  return byTarget;
-}
-
-/**
  * Report every import-mapping target its mapping cannot write on its object:
  * one that names no field and no declared part of a compound field, and a
  * part of a field the same mapping also writes whole. Returns findings
@@ -130,23 +108,21 @@ export function validateMappingTargetFields(stack: AnyRec): MappingTargetFieldFi
   const mappings = recordsOf(stack.mappings);
   if (mappings.length === 0) return findings;
 
+  // A present non-array `packages` is still refused (ruling A on #15293): the
+  // shared fold reads such a value as absent, so the refusal is asked here.
+  packagesOf(stack);
   const objects = new Map<string, AnyRec>();
-  for (const obj of recordsOf(stack.objects)) {
+  for (const obj of objectsAsServed(stack).objects) {
     const n = strName(obj.name);
     if (n) objects.set(n, obj);
   }
-  const extensionFields = extensionFieldsByTarget(stack);
 
   for (let mi = 0; mi < mappings.length; mi++) {
     const mapping = mappings[mi];
     const objectName = strName(mapping.targetObject);
     if (!objectName) continue; // a missing targetObject is the schema's subject
-    const declared = objects.get(objectName);
-    if (!declared) continue; // skip 1
-    const extra = extensionFields.get(objectName);
-    const objectDef: AnyRec = extra
-      ? { ...declared, fields: [...recordsOf(declared.fields), ...extra] }
-      : declared;
+    const objectDef = objects.get(objectName);
+    if (!objectDef) continue; // skip 1
 
     const misses = unknownImportMappingTargets(mapping.fieldMapping, objectDef);
     if (misses.length === 0) continue; // clean, or skip 2

@@ -370,6 +370,286 @@ describe('dashboard dataset bindings at the publish door (#7529)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// #29900 — a report's `runtimeFilter` keys, at the same publish door
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The card's reproduction through the same harness: a report whose
+// `runtimeFilter` names a field its dataset's object lacks is refused at the
+// PUBLISH of its draft, at the key's path, by `report-filter-field-unknown` —
+// the report half of `widget-filter-field-unknown`, whose dashboard control on
+// the same dataset is pinned unchanged beside it. The registry universe gains
+// one dataset over `orders` whose dimension is named APART from the field it
+// reads, so "a dimension key is accepted" is a different fact from "a field key
+// is accepted".
+
+/** The harness, with `orders_states` (dimension `state` over field `status`) added. */
+function makeReportProtocol() {
+    const { engine, rows } = makeStubEngine();
+    const realListItems = engine.registry.listItems;
+    engine.registry.listItems = (type: string) =>
+        type === 'dataset'
+            ? [
+                ...realListItems('dataset'),
+                {
+                    name: 'orders_states',
+                    object: 'orders',
+                    dimensions: [{ name: 'state', field: 'status' }],
+                    measures: [{ name: 'amount_sum', aggregate: 'sum', field: 'amount' }],
+                },
+            ]
+            : realListItems(type);
+    const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test');
+    return { protocol, rows };
+}
+
+/** The card's report body, step 2 of its reproduction. */
+const filteredReport = (runtimeFilter: Record<string, unknown>) => ({
+    name: 'orders_report',
+    label: 'Bad',
+    type: 'summary',
+    dataset: 'orders_states',
+    values: ['amount_sum'],
+    rows: ['state'],
+    runtimeFilter,
+});
+
+/** Draft PUT, then POST publish: the two calls the card's reproduction makes. */
+async function draftThenPublish(type: 'report' | 'dashboard', name: string, item: unknown) {
+    const { protocol, rows } = makeReportProtocol();
+    const draft = await protocol.saveMetaItem({ type, name, item, mode: 'draft' });
+    const published = await protocol.publishMetaItem({ type, name }).catch((e: any) => e);
+    return { draft, published, rows };
+}
+
+describe('#29900 — a report `runtimeFilter` key resolves at the publish door', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('the card\'s repro: the draft saves, the publish is REFUSED 422 naming the key\'s path', async () => {
+        const { draft, published, rows } = await draftThenPublish('report', 'orders_report', filteredReport({ no_such_field: 'x' }));
+
+        expect(draft.success, 'a draft makes no claim to work (#4463 D1)').toBe(true);
+        expect(published).toBeInstanceOf(Error);
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        const issue = published.issues.find((i: any) => i.rule === 'report-filter-field-unknown');
+        expect(issue, `issues: ${JSON.stringify(published.issues)}`).toBeDefined();
+        expect(issue.path).toBe('reports[0].runtimeFilter.no_such_field');
+        expect(published.rulesRun).toContain('validateReferenceIntegrity');
+        expect(Array.from(rows.values()).filter((r) => r.type === 'report').map((r) => r.state)).not.toContain('active');
+    });
+
+    it('an ACTIVE save of the same body is refused the same way', async () => {
+        const { protocol, rows } = makeReportProtocol();
+        const err = await protocol
+            .saveMetaItem({ type: 'report', name: 'orders_report', item: filteredReport({ no_such_field: 'x' }) })
+            .catch((e: any) => e);
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.issues.map((i: any) => [i.rule, i.path])).toContainEqual([
+            'report-filter-field-unknown',
+            'reports[0].runtimeFilter.no_such_field',
+        ]);
+        expect(Array.from(rows.values()).filter((r) => r.type === 'report')).toEqual([]);
+    });
+
+    it.each([
+        ['a field of the object', { status: 'open' }],
+        ['a dimension of the dataset', { state: 'open' }],
+        ['a system column under `$` operators', { $and: [{ created_at: { $gte: '{today}' } }, { amount: { $gt: 1 } }] }],
+    ])('CONTROL — %s publishes', async (_label, filter) => {
+        const { draft, published } = await draftThenPublish('report', 'orders_report', filteredReport(filter));
+        expect(draft.success).toBe(true);
+        expect(published.success, JSON.stringify(published?.issues ?? published)).toBe(true);
+    });
+
+    it('CONTROL — the dashboard twin on the same dataset is unchanged: refused 422 at its path', async () => {
+        const board = {
+            name: 'orders_board',
+            label: 'Bad',
+            widgets: [{ id: 'w1', type: 'metric', title: 'T', dataset: 'orders_states', values: ['amount_sum'], filter: { no_such_field: 'x' } }],
+        };
+        const { draft, published } = await draftThenPublish('dashboard', 'orders_board', board);
+        expect(draft.success).toBe(true);
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        expect(published.issues.map((i: any) => [i.rule, i.path])).toContainEqual([
+            'widget-filter-field-unknown',
+            'dashboards[0].widgets[0].filter.no_such_field',
+        ]);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #30005 — another package's dataset, under the written package's closure
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The filer's reproduction at the door: a runtime package (`app.runtime`, which
+// declares no dependency on the showcase) saves a dashboard on
+// `showcase_task_metrics`, a dataset the showcase package ships over its own
+// `showcase_task`. The write names its package, so the gate narrows `objects`
+// to that package's closure; `datasets` stays whole. Before the fix the dataset
+// resolved, its object did not, and the misspelled key saved `200`.
+
+const RUNTIME_PKG = 'app.runtime';
+
+/** The harness, with a showcase-stamped object and dataset and an installed runtime package. */
+function makeClosureProtocol() {
+    const { engine, rows } = makeStubEngine();
+    const realListItems = engine.registry.listItems;
+    engine.registry.listItems = (type: string) => {
+        if (type === 'object') {
+            return [
+                ...realListItems('object'),
+                {
+                    name: 'showcase_task',
+                    _packageId: 'com.example.showcase',
+                    fields: [
+                        { name: 'name', type: 'text' },
+                        { name: 'status', type: 'text' },
+                    ],
+                },
+            ];
+        }
+        if (type === 'dataset') {
+            return [
+                ...realListItems('dataset'),
+                {
+                    name: 'showcase_task_metrics',
+                    object: 'showcase_task',
+                    _packageId: 'com.example.showcase',
+                    dimensions: [{ name: 'status', field: 'status' }],
+                    measures: [{ name: 'task_count', aggregate: 'count' }],
+                },
+            ];
+        }
+        return realListItems(type);
+    };
+    // The written package is installed and declares no dependencies, so its
+    // closure is itself plus platform and unpackaged rows.
+    (engine.registry as any).getPackage = (id: string) =>
+        id === RUNTIME_PKG ? { manifest: { id: RUNTIME_PKG } } : undefined;
+    const protocol: any = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test');
+    return { protocol, rows };
+}
+
+const crossPackageBoard = (filter: Record<string, unknown>) => ({
+    name: 'runtime_ops_board',
+    label: 'Runtime Ops',
+    widgets: [
+        { id: 'tasks', type: 'metric', title: 'Tasks', dataset: 'showcase_task_metrics', values: ['task_count'], filter },
+    ],
+});
+
+describe('#30005 — a filter key on another package\'s dataset, under the written package\'s closure', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('the filer\'s repro: the save is REFUSED 422 INVALID_METADATA at the widget path, and nothing is stored', async () => {
+        const { protocol, rows } = makeClosureProtocol();
+        const err = await protocol
+            .saveMetaItem({ type: 'dashboard', name: 'runtime_ops_board', item: crossPackageBoard({ no_such_field: 'x' }), packageId: RUNTIME_PKG })
+            .then(() => null, (e: any) => e);
+        expect({ status: err?.status, code: err?.code }).toEqual({ status: 422, code: 'INVALID_METADATA' });
+        expect(err.issues.map((i: any) => [i.rule, i.path])).toContainEqual([
+            'widget-filter-field-unknown',
+            'dashboards[0].widgets[0].filter.no_such_field',
+        ]);
+        expect(dashboardRows(rows).filter((r) => r.state === 'active')).toEqual([]);
+    });
+
+    it('CONTROL — a key the dataset\'s object has saves under the same closure', async () => {
+        const { protocol, rows } = makeClosureProtocol();
+        const saved = await protocol.saveMetaItem({
+            type: 'dashboard', name: 'runtime_ops_board', item: crossPackageBoard({ status: 'done' }), packageId: RUNTIME_PKG,
+        });
+        expect(saved.success, JSON.stringify(saved?.issues ?? saved)).toBe(true);
+        expect(dashboardRows(rows).map((r) => r.state)).toContain('active');
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #30006 — a bare filter key naming a dataset dimension or measure, same door
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The dataset door binds a bare key naming a DIMENSION through that
+// dimension's field (`state` → `status = ?`), so a widget filter keyed on it
+// now publishes, as the report twin's already did. A key naming a MEASURE is
+// refused by both rules with its own message: the door would compile
+// `amount_sum > 100` to the row-level `amount > 100`, never a filter on the
+// total. Same harness and `orders_states` dataset as the #29900 block.
+
+const stateBoard = (filter: Record<string, unknown>) => ({
+    name: 'orders_board',
+    label: 'Orders',
+    widgets: [{ id: 'w1', type: 'metric', title: 'T', dataset: 'orders_states', values: ['amount_sum'], filter }],
+});
+
+describe('#30006 — dataset dimension and measure filter keys at the publish door', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('a widget filter keyed on a dimension name publishes', async () => {
+        const { draft, published } = await draftThenPublish('dashboard', 'orders_board', stateBoard({ state: 'open' }));
+        expect(draft.success).toBe(true);
+        expect(published.success, JSON.stringify(published?.issues ?? published)).toBe(true);
+    });
+
+    it('a report runtimeFilter keyed on a measure name is REFUSED 422 with the measure message', async () => {
+        const { published, rows } = await draftThenPublish(
+            'report', 'orders_report', filteredReport({ amount_sum: { $gt: 100 } }),
+        );
+        expect(published).toBeInstanceOf(Error);
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        const issue = published.issues.find((i: any) => i.rule === 'report-filter-field-unknown');
+        expect(issue, `issues: ${JSON.stringify(published.issues)}`).toBeDefined();
+        expect(issue.path).toBe('reports[0].runtimeFilter.amount_sum');
+        expect(issue.message).toContain('names a measure of dataset "orders_states"');
+        expect(Array.from(rows.values()).filter((r) => r.type === 'report').map((r) => r.state)).not.toContain('active');
+    });
+
+    it('the widget twin refuses the same measure key the same way', async () => {
+        const { published } = await draftThenPublish('dashboard', 'orders_board', stateBoard({ amount_sum: { $gt: 100 } }));
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        const issue = published.issues.find((i: any) => i.rule === 'widget-filter-field-unknown');
+        expect(issue?.path).toBe('dashboards[0].widgets[0].filter.amount_sum');
+        expect(issue.message).toContain('names a measure of dataset "orders_states"');
+    });
+
+    it('CONTROL — an unknown key on the dimension board is still refused as unknown', async () => {
+        const { published } = await draftThenPublish('dashboard', 'orders_board', stateBoard({ state: 'open', no_such_field: 'x' }));
+        expect(published.status).toBe(422);
+        expect(published.code).toBe('INVALID_METADATA');
+        expect(published.issues.map((i: any) => [i.rule, i.path])).toEqual([
+            ['widget-filter-field-unknown', 'dashboards[0].widgets[0].filter.no_such_field'],
+        ]);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // #16225 — the stub answers the table it was asked about, and only that one
 // ─────────────────────────────────────────────────────────────────────────────
 //

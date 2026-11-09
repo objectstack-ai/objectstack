@@ -36,6 +36,7 @@
  * actions — see the note beside the keys in every pack.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -64,11 +65,12 @@ const chipsOf = (lang: LocaleCode) =>
  */
 const BANNED: Record<LocaleCode, readonly string[]> = {
   en: ['alert', 'remind', 'notif', 'automat', 'workflow', 'trigger', 'schedule'],
-  zh: ['提醒', '预警', '警报', '自动', '流转', '通知', '触发', '定时'],
+  'zh-Hans': ['提醒', '预警', '警报', '自动', '流转', '通知', '触发', '定时'],
+  'zh-Hant': ['提醒', '預警', '警報', '自動', '流轉', '通知', '觸發', '定時'],
   de: ['automat', 'erinner', 'warnung', 'alarm', 'benachrichtig', 'workflow', 'auslös', 'ablauf'],
   fr: ['automat', 'alerte', 'rappel', 'notifi', 'workflow', 'flux', 'déclench'],
   es: ['automat', 'alerta', 'recordar', 'recordatorio', 'notifi', 'flujo', 'disparador'],
-  pt: ['automa', 'alerta', 'lembr', 'notifi', 'fluxo', 'gatilho'],
+  'pt-BR': ['automa', 'alerta', 'lembr', 'notifi', 'fluxo', 'gatilho'],
   ru: ['автомат', 'оповещ', 'уведомл', 'напомин', 'триггер', 'процесс', 'поток'],
   ja: ['自動', '通知', 'アラート', 'リマイン', 'ワークフロー', 'フロー', 'トリガー'],
   ko: ['자동', '알림', '알람', '워크플로', '흐름', '트리거'],
@@ -77,7 +79,7 @@ const BANNED: Record<LocaleCode, readonly string[]> = {
 
 /** Every banned term this text hits, lower-cased for the case-insensitive scripts. */
 function bannedHits(lang: LocaleCode, text: string): string[] {
-  const haystack = text.toLocaleLowerCase(lang === 'zh' ? 'zh' : undefined);
+  const haystack = text.toLocaleLowerCase(lang === 'zh-Hans' || lang === 'zh-Hant' ? lang : undefined);
   return BANNED[lang].filter((term) => haystack.includes(term.toLocaleLowerCase()));
 }
 
@@ -90,11 +92,12 @@ function bannedHits(lang: LocaleCode, text: string): string[] {
  */
 const RETIRED: Record<LocaleCode, readonly string[]> = {
   en: ['Design a support desk — tickets with priority, a status workflow, and customer links.'],
-  zh: ['设计一个工单系统：工单、优先级、状态流转。', '做一个库存管理应用：商品、库存量、供应商，以及低库存预警。'],
+  'zh-Hans': ['设计一个工单系统：工单、优先级、状态流转。', '做一个库存管理应用：商品、库存量、供应商，以及低库存预警。'],
+  'zh-Hant': ['設計一個工單系統：工單、優先順序、狀態流轉。', '做一個庫存管理應用：商品、庫存量、供應商，以及低庫存預警。'],
   de: ['Entwirf einen Support-Desk — Tickets mit Priorität, einen Status-Workflow und Kundenverknüpfungen.'],
   fr: ["Conçois un service d'assistance — tickets avec priorité, un flux de statuts et des liens vers les clients."],
   es: ['Diseña una mesa de ayuda — tickets con prioridad, un flujo de estados y vínculos con los clientes.'],
-  pt: ['Projete uma central de suporte — chamados com prioridade, um fluxo de status e vínculos com clientes.'],
+  'pt-BR': ['Projete uma central de suporte — chamados com prioridade, um fluxo de status e vínculos com clientes.'],
   ru: ['Спроектируй службу поддержки — заявки с приоритетом, процесс статусов и связи с клиентами.'],
   ja: ['サポートデスクを設計して — 優先度つきチケット、ステータスのワークフロー、顧客との紐付け。'],
   ko: ['고객 지원 데스크를 설계해 줘 — 우선순위가 있는 티켓, 상태 워크플로, 고객 연결.'],
@@ -103,7 +106,7 @@ const RETIRED: Record<LocaleCode, readonly string[]> = {
 
 describe('maker start chips — every shipped pack carries all five (cloud#1984)', () => {
   it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s defines a non-empty string for every chip', (lang) => {
@@ -135,7 +138,7 @@ describe('maker start chips — none promises autonomous behaviour (cloud#1984)'
   });
 
   it('the two chips the card named read as UI, not as automation', () => {
-    const zh = chipsOf('zh')!;
+    const zh = chipsOf('zh-Hans')!;
     // 「状态流转」 → a board grouped by status; 「低库存预警」 → a filtered view.
     expect(zh.buildFlow).toContain('看板');
     expect(zh.buildFlow).not.toContain('流转');

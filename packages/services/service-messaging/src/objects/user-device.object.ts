@@ -7,10 +7,12 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * (user, app install), the stored form of spec's `UserDeviceSchema`
  * (`system/push-device.zod.ts`).
  *
- * Belongs to `service-messaging` because no push channel plugin exists yet and
- * this service owns the `notification` slot whose `INotificationService`
- * device members write it (`../device-registry.ts`). When the push channel
- * lands it reads this table; it does not own it.
+ * Owned by `service-messaging`: this service fills the `notification` slot
+ * whose `INotificationService` device members write it
+ * (`../device-registry.ts`), and the `push` channel (`../push-channel.ts`,
+ * also this package) reads it through `listDevices` and retires dead tokens
+ * through `invalidateDeviceToken`. `@objectstack/service-push` holds only the
+ * APNs and FCM transports; it never reads or writes this table.
  *
  * The three rules spec states for the shape, and where each is kept:
  *
@@ -115,7 +117,19 @@ export const UserDevice = ObjectSchema.create({
             required: false,
             // BCP 47 tags are short; 35 is the RFC 5646 practical maximum.
             maxLength: 35,
-            description: 'Device locale that pushes to this device are rendered in.',
+            description: 'Device locale, as the registration named it. Stored for the device; no push renders by it: a push '
+                + 'arrives in the recipient\'s language (their user locale, then the deployment default).',
+        }),
+
+        origin: Field.text({
+            label: 'Server Origin',
+            required: false,
+            // No maxLength: spec's origin pattern (`system/push-server-origin.ts`)
+            // bounds the shape, not the length, so an unbounded column stores
+            // every origin the registration accepts.
+            description: 'The origin the Console was loaded from when it registered the device (for example '
+                + 'https://crm.example.com). Every push to the device carries it, so a mobile shell with several saved '
+                + 'servers opens the push on this one. Empty for a device registered without one.',
         }),
 
         name: Field.text({

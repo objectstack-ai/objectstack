@@ -141,8 +141,8 @@ const Chatbot = React.forwardRef<HTMLDivElement, ChatbotProps>(
 )
 Chatbot.displayName = "Chatbot"
 
-// Individual message component
-export interface ChatMessageProps {
+// Individual message component (its props are local: nothing outside the package named them)
+interface ChatMessageProps {
   message: ChatbotEnhancedMessage
   showTimestamp?: boolean
   userAvatarUrl?: string
@@ -284,13 +284,11 @@ export {
 // Export floating chatbot components
 export { FloatingChatbot } from './FloatingChatbot';
 export type { FloatingChatbotProps } from './FloatingChatbot';
-export { FloatingChatbotProvider, useFloatingChatbot } from './FloatingChatbotProvider';
-export type {
-  FloatingChatbotProviderProps,
-  FloatingChatbotState,
-  FloatingChatbotActions,
-  FloatingChatbotContextValue,
-} from './FloatingChatbotProvider';
+// `useFloatingChatbot` and its three state/action/context types left the entry
+// with zero importers outside the package; the trigger and panel read it from
+// the module.
+export { FloatingChatbotProvider } from './FloatingChatbotProvider';
+export type { FloatingChatbotProviderProps } from './FloatingChatbotProvider';
 export { FloatingChatbotTrigger } from './FloatingChatbotTrigger';
 export type { FloatingChatbotTriggerProps } from './FloatingChatbotTrigger';
 export { FloatingChatbotPanel } from './FloatingChatbotPanel';
@@ -350,6 +348,8 @@ export {
   detectProposedPlan,
   detectBuilderHandoff,
   detectRecordHandoff,
+  detectRecordWrite,
+  detectSampleDataCleanup,
   detectProposedChanges,
   detectReplayOutcome,
   detectAuthoringVerdict,
@@ -364,6 +364,9 @@ export type {
   DraftReview,
   ProposedPlan,
   BuilderHandoff,
+  RecordWrite,
+  RecordWriteField,
+  SampleDataCleanup,
   ProposedChanges,
   ReplayOutcome,
 } from './mapMessages';
@@ -380,7 +383,6 @@ export {
   toRuntimeMessages,
   toRuntimeRole,
   toRuntimeTimestamp,
-  toRuntimeToolInvocation,
   toRuntimeToolState,
 } from './chatMessageAdapter';
 
@@ -394,14 +396,10 @@ export {
  */
 export type { SeamChatMessage, SeamToolInvocation } from './chatMessageAdapter';
 
-// Display helpers used internally by ChatbotEnhanced. Exported so app
-// authors composing their own chat surface get the same pretty tool-call
-// rendering and friendly error summaries for free.
-export {
-  humanizeToolName,
-  unwrapToolResult,
-  summarizeChatError,
-} from './tool-display';
+// Display helper used internally by ChatbotEnhanced, exported for app authors
+// composing their own chat surface. `unwrapToolResult` and `summarizeChatError`
+// left the entry with zero importers outside the package.
+export { humanizeToolName } from './tool-display';
 
 // HITL (Human-In-The-Loop) pending-actions inbox. Talks to
 // `@objectstack/service-ai` at `/api/v1/ai/pending-actions/*`. Shared
@@ -428,3 +426,7 @@ export type {
   UseHitlInChatReturn,
   ContinueContext,
 } from './useHitlInChat';
+// objectstack#30223 — the marker on the continuation turn `useHitlInChat`
+// sends after 确认 / 取消; readers skip such a turn instead of showing it as
+// the person's own words.
+export { isHitlContinuation } from './hitlContinuation';

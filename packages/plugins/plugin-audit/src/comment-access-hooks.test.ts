@@ -203,6 +203,14 @@ describe('comment access — beforeInsert (parent readability + provenance)', ()
     expect(data.author_id).toBe('rep1');
   });
 
+  it('refuses a create whose session names no user: the author is the signed-in user, never the request\'s', async () => {
+    const { beforeInsert } = install({});
+    const data = { thread_id: 'crm_opportunity:opp1', body: 'hi', author_id: 'someone-else' };
+    await expect(
+      beforeInsert({ ...insertCtx(data, { visible: ['crm_opportunity/opp1'] }), session: { positions: ['org_member'] } }),
+    ).rejects.toMatchObject({ code: 'RECORD_NOT_ACCESSIBLE', status: 403 });
+  });
+
   it('bypasses for system context and context-less calls', async () => {
     const { beforeInsert } = install({});
     await expect(

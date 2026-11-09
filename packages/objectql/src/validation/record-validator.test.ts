@@ -642,9 +642,10 @@ describe('validateRecord — ADR-0113 required write contract on update', () => 
 
 /**
  * #9476 — the enforcement half of the #9447 maintainer ruling (2026-08-18):
- * `required` on a multi-value field means NON-EMPTY array. The empty set is
- * representable — it reads back as `[]`, never `null` — so `required` judges
- * emptiness: an explicit `[]` is an empty value exactly as `null` / `''` are.
+ * `required` on a multi-value field means NON-EMPTY array; that half stands
+ * under ruling A on #29343 (record 6591577985), which stores an emptied
+ * OPTIONAL multi-value field as `null`. So `required` judges emptiness: an
+ * explicit `[]` is an empty value exactly as `null` / `''` are.
  *
  * Scope is the spec's own multi-value predicate (`isMultiValueField`,
  * ADR-0104 D1): inherently-multi option types, plus multi-capable types

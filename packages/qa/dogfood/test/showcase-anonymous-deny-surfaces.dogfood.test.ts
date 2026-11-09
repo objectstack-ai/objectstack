@@ -51,6 +51,8 @@
 // authz-row: anonymous-deny-packages
 // authz-row: anonymous-deny-analytics
 // authz-row: anonymous-deny-api-description
+// authz-row: anonymous-deny-user-work
+// authz-row: anonymous-deny-recycle-bin
 // authz-row: anonymous-deny-i18n
 //
 // ── Why the translation faces are here (#22432) ────────────────────────────
@@ -180,6 +182,45 @@ const API_DESCRIPTION_ENDPOINTS: readonly ApiDescriptionEndpoint[] = [
 const RETIRED_VIEWER_PATH = '/docs';
 const NEVER_SERVED_PATH = '/this-route-does-not-exist';
 
+// ── #30205 — a user's assigned work, counted and handed over (@objectstack/rest)
+//
+// Both handlers open with the floor, ahead of the query-parameter check and
+// any engine read. The ids are ones no user holds, so the member controls
+// read nothing and write nothing: the count answers an empty summary, and the
+// hand-over refuses the unknown target before any write.
+interface UserWorkFace {
+  readonly face: string;
+  readonly method: 'GET' | 'POST';
+  readonly path: string;
+  readonly body?: unknown;
+}
+const USER_WORK_FACES: readonly UserWorkFace[] = [
+  { face: 'the assigned-work count', method: 'GET', path: '/security/users/usr_nobody_30205/assigned-work' },
+  {
+    face: 'the assigned-work hand-over', method: 'POST', path: '/security/users/usr_nobody_30205/assigned-work/transfer',
+    body: { toUserId: 'usr_nobody_either_30205' },
+  },
+];
+
+// ── #30237 — the recycle bin's doors (@objectstack/rest, ADR-0148)
+//
+// All four handlers open with the floor after resolving the caller, ahead of
+// the query-parameter checks, the object's exposure gate and any engine call.
+// The entry id is one no entry holds, so the admin controls restore and purge
+// nothing: each reaches the engine and is answered its own not-found.
+interface RecycleBinFace {
+  readonly face: string;
+  readonly method: 'GET' | 'POST' | 'DELETE';
+  readonly path: string;
+}
+const RECYCLE_BIN_PATH = '/data/showcase_task/recycle-bin';
+const RECYCLE_BIN_FACES: readonly RecycleBinFace[] = [
+  { face: 'the recycle-bin listing', method: 'GET', path: RECYCLE_BIN_PATH },
+  { face: 'the recycle-bin restore', method: 'POST', path: `${RECYCLE_BIN_PATH}/rb_nobody_30237/restore` },
+  { face: 'the recycle-bin purge', method: 'DELETE', path: `${RECYCLE_BIN_PATH}/rb_nobody_30237` },
+  { face: 'the recycle-bin empty', method: 'DELETE', path: RECYCLE_BIN_PATH },
+];
+
 // ── #22432 — the translation faces (dispatcher-mounted; runtime domains/i18n.ts)
 //
 // One handler body serves every face, so the floor is its first statement. The
@@ -267,7 +308,8 @@ interface MetaWriteDoor {
  * no longer exist. A retired door cannot sit in this table: the registered-door
  * anti-vacuity leg below asserts `.not.toBe(404)`, which is exactly what a
  * retired route answers. Its own case lives beside these — the compound
- * spelling must now 404 for EVERYONE, anonymous or not.
+ * spelling must now be unrouted for EVERYONE, anonymous or not (405 with
+ * `Allow: GET, HEAD` since the qualified read, ADR-0150 D5, shares its shape).
  */
 const META_WRITE_DOORS: readonly MetaWriteDoor[] = [
   { seam: 'POST /meta/_migrate-stored', method: 'POST', path: '/meta/_migrate-stored', body: {} },
@@ -487,18 +529,29 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(body.error?.code).toBe('RESOURCE_NOT_FOUND');
   });
 
-  it('[#12176 D3] the retired compound save routes NOWHERE — 404 for everyone, not a 401', async () => {
+  it('[#12176 D3] the retired compound save routes NOWHERE — no PUT on that shape, for everyone, not a 401', async () => {
     // The compound arity used to be the sixth row of the table above. Retired,
-    // it must answer the same 404 to an anonymous caller and to a member: a
-    // 401 here would mean the route is BACK (an auth floor only speaks for a
-    // door that exists), and #6603's history says a re-mounted compound door
-    // arrives ungated. The composed-app leg of that statement lives here; the
-    // registrar-level absence pins live in
+    // it must answer the same unrouted answer to an anonymous caller and to a
+    // member: a 401 here would mean the route is BACK (an auth floor only
+    // speaks for a door that exists), and #6603's history says a re-mounted
+    // compound door arrives ungated. The composed-app leg of that statement
+    // lives here; the registrar-level absence pins live in
     // `rest/src/meta-compound-save-and-reset-capability-gate.test.ts`.
-    const anonRes = await anon('PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW });
-    expect(anonRes.status, 'retired compound save must be unrouted, not auth-refused').toBe(404);
-    const memberRes = await stack.apiAs(memberToken, 'PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW });
-    expect(memberRes.status, 'a session must not change the answer on a route that is gone').toBe(404);
+    //
+    // [ADR-0150 D5, #31691] The shape `/meta/:type/:x/:y` now has ONE route,
+    // the qualified by-name READ `GET /meta/:type/:ns/:name`. So the adapter's
+    // unmatched sink answers a PUT there `405 METHOD_NOT_ALLOWED` with the
+    // verbs the shape does serve — `GET, HEAD` and never `PUT` — where it
+    // answered 404 while the shape had no route at all. Either way no PUT is
+    // routed, and no auth floor speaks.
+    const unrouted = async (res: Response, who: string) => {
+      const body = (await res.json()) as { error?: { code?: string; details?: { allowed?: string[] } } };
+      expect([res.status, body.error?.code], `${who}: the retired compound save must be unrouted, not auth-refused`)
+        .toEqual([405, 'METHOD_NOT_ALLOWED']);
+      expect(body.error?.details?.allowed, `${who}: the shape serves the qualified read only`).toEqual(['GET', 'HEAD']);
+    };
+    await unrouted(await anon('PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW }), 'anonymous');
+    await unrouted(await stack.apiAs(memberToken, 'PUT', RETIRED_COMPOUND_PATH, { name: META_PROBE_VIEW }), 'member');
   });
 
   // ── /data (surface-level; served by @objectstack/rest, its sole owner) ──
@@ -560,8 +613,18 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
   // ⛔ The case above is left as it was. Narrowing IT to 404 would make this
   // file's anonymity proof fail for reasons belonging to another proof, which
   // is what its own comment warns against.
-  it('[#7867] a member hitting the action with a NONEXISTENT record id gets 404 RECORD_NOT_FOUND', async () => {
-    const r = await stack.apiAs(memberToken, 'POST', ACTION, { params: {} });
+  //
+  // [#30848] `showcase_mark_done` is a declarative update (`operation:
+  // 'update'`), and a declarative update is judged as the write it performs:
+  // a caller who may not update the object is refused before the record is
+  // looked up, as the data door's PATCH refuses it. The member holds no edit
+  // grant on `showcase_task`, so its answer for the ghost id is that refusal,
+  // 403 PERMISSION_DENIED, and no longer the lookup's 404. #7867's proof, that
+  // a ghost id answers the lookup's 404 rather than a 400 from further down
+  // the pipeline, is carried by a caller who passes that refusal: the dev
+  // administrator, who holds the edit grant.
+  it('[#7867] a caller holding the edit grant hitting the action with a NONEXISTENT record id gets 404 RECORD_NOT_FOUND', async () => {
+    const r = await stack.apiAs(adminToken, 'POST', ACTION, { params: {} });
 
     expect(r.status, 'a ghost record id must answer 404, not a 400 from further down the pipeline').toBe(404);
     const body = (await r.json()) as Record<string, unknown>;
@@ -575,32 +638,52 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(String(err.message ?? '')).not.toMatch(/HookConditionError/);
   });
 
-  it('[#7867] …the SAME answer the REST data surface gives for that same id', async () => {
+  it('[#30848] a member with no edit grant hitting the action with a NONEXISTENT record id gets 403 PERMISSION_DENIED', async () => {
+    const r = await stack.apiAs(memberToken, 'POST', ACTION, { params: {} });
+
+    expect(r.status, 'a caller who may not update the object is refused the write before the lookup').toBe(403);
+    const body = (await r.json()) as Record<string, unknown>;
+    const err = (isRecord(body.error) ? body.error : {}) as Record<string, unknown>;
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.httpStatus).toBe(403);
+    // Still never the 400 shapes #7867 removed.
+    expect(String(err.message ?? '')).not.toMatch(/not bound for this operation/);
+    expect(String(err.message ?? '')).not.toMatch(/HookConditionError/);
+  });
+
+  it('[#7867, #30848] …the SAME answer the REST data surface gives that caller for that same id', async () => {
     // The comparison that made #7867 measurable in the first place: one id, one
     // object, one process, one second — and two surfaces that disagreed
     // (`/actions` → 400, `/data` → 404). Both are asserted here, so they cannot
     // drift apart again without this gate saying so.
     //
-    // The data surface that answers this the way the action does is the record
-    // READ: the action loads its record through the read door, and the member
-    // reads `showcase_task`. A PATCH is not that surface for this caller: an
-    // update by id is judged before the record is looked up, as a delete is, and
-    // the member holds no edit grant on `showcase_task` — so it is refused the
-    // write whatever the id (`update-by-id-refusal-order.dogfood.test.ts`).
+    // The data surface that answers this the way the action does is the
+    // record's UPDATE, the write the action performs: an update by id is
+    // judged before the record is looked up, as a delete is
+    // (`update-by-id-refusal-order.dogfood.test.ts`). For the member, who holds
+    // no edit grant on `showcase_task`, both refuse the write whatever the id;
+    // for the administrator, who holds it, both answer the lookup's not-found.
     const ghostId = ACTION.slice(ACTION.lastIndexOf('/') + 1);
-    const rest = await stack.apiAs(memberToken, 'GET', `/data/showcase_task/${ghostId}`);
 
-    expect(rest.status).toBe(404);
-    const body = (await rest.json()) as Record<string, unknown>;
     // `@objectstack/rest` answers the flat envelope; the dispatcher-mounted
     // `/actions` answers its own wrapper. Different shells, one code — each read
     // in its own shape, with no `??` chain across the two (#5632's rule, which
     // this file already enforces for the 401 bodies).
-    expect(body.code).toBe('RECORD_NOT_FOUND');
+    const memberPatch = await stack.apiAs(memberToken, 'PATCH', `/data/showcase_task/${ghostId}`, { done: true });
+    expect(memberPatch.status).toBe(403);
+    expect(((await memberPatch.json()) as Record<string, unknown>).code).toBe('PERMISSION_DENIED');
+    const memberAction = await stack.apiAs(memberToken, 'POST', ACTION, { params: {} });
+    expect(memberAction.status).toBe(403);
+    const memberActionBody = (await memberAction.json()) as Record<string, unknown>;
+    expect(((isRecord(memberActionBody.error) ? memberActionBody.error : {}) as Record<string, unknown>).code).toBe('PERMISSION_DENIED');
 
-    const patch = await stack.apiAs(memberToken, 'PATCH', `/data/showcase_task/${ghostId}`, { done: true });
-    expect(patch.status).toBe(403);
-    expect(((await patch.json()) as Record<string, unknown>).code).toBe('PERMISSION_DENIED');
+    const adminPatch = await stack.apiAs(adminToken, 'PATCH', `/data/showcase_task/${ghostId}`, { done: true });
+    expect(adminPatch.status).toBe(404);
+    expect(((await adminPatch.json()) as Record<string, unknown>).code).toBe('RECORD_NOT_FOUND');
+    const adminAction = await stack.apiAs(adminToken, 'POST', ACTION, { params: {} });
+    expect(adminAction.status).toBe(404);
+    const adminActionBody = (await adminAction.json()) as Record<string, unknown>;
+    expect(((isRecord(adminActionBody.error) ? adminActionBody.error : {}) as Record<string, unknown>).code).toBe('RECORD_NOT_FOUND');
   });
 
   // ── /automation (dispatcher-mounted; runtime domains/automation.ts) ─────
@@ -807,6 +890,81 @@ describe('showcase: anonymous posture is uniform across surfaces (#2567)', () =>
     expect(adminRes.status, 'the admin is answered the same not-found').toBe(404);
     expect(adminRes.headers.get('content-type') ?? '', 'no page is served to the admin').not.toContain('text/html');
     expect(await adminRes.text(), 'the retired path answers the admin the ordinary not-found body').toBe(controlBody);
+  });
+
+  // ── a user's assigned work (@objectstack/rest) — #30205 ─────────────────
+  //
+  // The refusal is each handler's first act, so the anonymous body is the REST
+  // seam's shared one, whole, and nothing is counted or moved. The member
+  // controls are the teeth: with a session the count is served 200 and the
+  // hand-over reaches its own target check (404), so both doors are mounted
+  // on this boot and the 401 is the floor's answer.
+  it.each(USER_WORK_FACES)('an anonymous caller on $face is denied (401) and served nothing', async (face) => {
+    const r = await anon(face.method, face.path, face.body);
+    expect(r.status, `${face.face}: an anonymous caller must be refused by the floor`).toBe(ANONYMOUS_DENY_STATUS);
+    const body = await r.json();
+    expect(body, `${face.face}: the refusal is the REST seam's shared body, whole`).toEqual(ANONYMOUS_DENY_BODY);
+    expect(body, `${face.face}: nothing of the work rides on the refusal`).not.toHaveProperty('data');
+  });
+
+  it('a signed-in member is served the assigned-work count (200) — the control', async () => {
+    const r = await stack.apiAs(memberToken, 'GET', USER_WORK_FACES[0].path);
+    expect(r.status, 'an authenticated member must clear the floor and be served the count').toBe(200);
+    const body = await r.json();
+    expect(body.data, 'the served body is the count of a user who holds nothing').toMatchObject({
+      userId: 'usr_nobody_30205', total: 0, objects: [],
+    });
+  });
+
+  it('a signed-in member reaches the hand-over\'s own target check (404), and nothing moves — the control', async () => {
+    const face = USER_WORK_FACES[1];
+    const r = await stack.apiAs(memberToken, face.method, face.path, face.body);
+    expect(r.status, 'an authenticated member must clear the floor and meet the target check').toBe(404);
+    const body = await r.json();
+    expect(body.error?.details?.fields?.[0], 'the refusal names the unknown target').toMatchObject({
+      field: 'toUserId', code: 'reference_not_found',
+    });
+  });
+
+  // ── the recycle bin's doors (@objectstack/rest) — #30237 ────────────────
+  //
+  // The refusal is each handler's first act after resolving the caller, so the
+  // anonymous body is the REST seam's shared one, whole, and nothing is listed,
+  // restored or removed. The admin controls are the teeth: with a session the
+  // listing is served 200 and the restore and purge reach the engine's own
+  // not-found (404), so the doors are mounted on this boot and the 401 is the
+  // floor's answer. The empty door shares the listing's path and handler
+  // registration; its anonymous refusal is driven, and its admin control
+  // removes nothing a test here put in the bin.
+  it.each(RECYCLE_BIN_FACES)('an anonymous caller on $face is denied (401) and served nothing', async (face) => {
+    const r = await anon(face.method, face.path);
+    expect(r.status, `${face.face}: an anonymous caller must be refused by the floor`).toBe(ANONYMOUS_DENY_STATUS);
+    const body = await r.json();
+    expect(body, `${face.face}: the refusal is the REST seam's shared body, whole`).toEqual(ANONYMOUS_DENY_BODY);
+    expect(body, `${face.face}: nothing of the bin rides on the refusal`).not.toHaveProperty('data');
+  });
+
+  it('the admin is served the recycle-bin listing (200) — the control', async () => {
+    const r = await stack.apiAs(adminToken, 'GET', RECYCLE_BIN_FACES[0].path);
+    expect(r.status, 'an authenticated manager of the bin must clear the floor and be served the page').toBe(200);
+    const body = await r.json();
+    expect(body.data?.object, 'the served page is the addressed object\'s').toBe('showcase_task');
+    expect(Array.isArray(body.data?.entries), 'the page carries its entries').toBe(true);
+  });
+
+  it.each([RECYCLE_BIN_FACES[1], RECYCLE_BIN_FACES[2]])('the admin reaches $face\'s own not-found (404), and nothing changes — the control', async (face) => {
+    const r = await stack.apiAs(adminToken, face.method, face.path);
+    expect(r.status, `${face.face}: an authenticated admin must clear the floor and meet the engine's not-found`).toBe(404);
+    const body = await r.json();
+    expect(body.error?.code, `${face.face}: the refusal names no entry`).toBe('RECORD_NOT_FOUND');
+  });
+
+  it('the admin empties the bin of an object with nothing in it (200) — the control', async () => {
+    const r = await stack.apiAs(adminToken, 'DELETE', RECYCLE_BIN_FACES[3].path);
+    expect(r.status, 'an authenticated manager of the bin must clear the floor and be answered').toBe(200);
+    const body = await r.json();
+    expect(body.data, 'the answer names the object and how many entries went').toMatchObject({ object: 'showcase_task' });
+    expect(typeof body.data?.removed).toBe('number');
   });
 
   // ── the translation faces (dispatcher-mounted; runtime domains/i18n.ts) — #22432

@@ -176,8 +176,13 @@ const REFUSED_AT_TYPE = 0;
  * objectui#13449: minus `ui:html`, the namespaced twin of the raw-HTML `html`
  * node type, retired from the registry with its renderer; the armed bare `html`
  * left with its arm, which became a refusal, so it moved nothing here.
+ * #31856: plus `app-shell:row-table`, the sixth console product block's
+ * namespaced twin, registered the way objectui#13301 registers the five and
+ * refused at `type` for the same reason: the bare `row-table` is the one
+ * authorable key, and its arm landed with it. A named stopgap raise of that
+ * one key; any other rise is still a regression.
  */
-const NAMESPACED_REFUSED_AT_TYPE = 306;
+const NAMESPACED_REFUSED_AT_TYPE = 307;
 
 /** The bare registry keys — the population the card measured. */
 const BARE_KEYS = KNOWN_SCHEMA_TYPES.filter((key) => !key.includes(':'));
@@ -676,6 +681,26 @@ describe('registered NAMESPACED component types refused at `type` — a ratchet 
     expect(NAMESPACED_KEYS).toContain('cloud:workspace-timezone-notice');
     expect(BARE_KEYS).not.toContain('workspace-timezone-notice');
     expect(refusedAtType('cloud:workspace-timezone-notice')).toBe(false);
+  });
+
+  it('counts `mcp:authorized-assistants` armed — it registered WITH its arm', () => {
+    // One registry key (`skipFallback: true`, so no bare `authorized-assistants`
+    // and no `app-shell:` spelling), armed in `@object-ui/types/zod` in the same
+    // change, so the pin above did not move.
+    expect(NAMESPACED_KEYS).toContain('mcp:authorized-assistants');
+    expect(NAMESPACED_KEYS).not.toContain('app-shell:mcp:authorized-assistants');
+    expect(BARE_KEYS).not.toContain('authorized-assistants');
+    expect(refusedAtType('mcp:authorized-assistants')).toBe(false);
+  });
+
+  it('counts `security:effective-access` armed — it registered WITH its arm', () => {
+    // One registry key (`skipFallback: true`, so no bare `effective-access`
+    // and no `app-shell:` spelling), armed in `@object-ui/types/zod` in the same
+    // change, so the pin above did not move.
+    expect(NAMESPACED_KEYS).toContain('security:effective-access');
+    expect(NAMESPACED_KEYS).not.toContain('app-shell:security:effective-access');
+    expect(BARE_KEYS).not.toContain('effective-access');
+    expect(refusedAtType('security:effective-access')).toBe(false);
   });
 
   it('counts `record:approval_decision` armed — it registered WITH its arm (objectui#12342)', () => {

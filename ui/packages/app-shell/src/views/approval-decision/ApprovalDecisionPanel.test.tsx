@@ -58,6 +58,7 @@ import { resetApproverDirectoryCache } from '../../hooks/useApproverDirectory';
 // The package's registration leaf, imported for its side effect as the
 // package entry imports it (objectui#12342).
 import '../record-approval-decision-renderer';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 afterEach(() => {
   cleanup();
@@ -173,9 +174,9 @@ describe('off an approval request page, a localized notice instead of nothing (o
     expect(wrapper.getAttribute('data-obj-type')).toBe('record:approval_decision');
   });
 
-  it('the notice copy is a key in all ten language packs', () => {
+  it('the notice copy is a key in every language pack', () => {
     const languages = Object.keys(builtInLocales);
-    expect(languages).toHaveLength(10);
+    expect(languages).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     for (const language of languages) {
       const value = packNotice(language);
       expect(typeof value, `${language} defines ${NOTICE_KEY}`).toBe('string');
@@ -185,13 +186,13 @@ describe('off an approval request page, a localized notice instead of nothing (o
 
   it('renders the active language: the zh pack value under a zh provider', () => {
     render(
-      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
+      <I18nProvider config={{ defaultLanguage: 'zh-Hans', detectBrowserLanguage: false }} persistLanguage={false}>
         <RecordContextProvider objectName="invoice" recordId="inv_1" data={{ id: 'inv_1' }}>
           <ApprovalDecisionRenderer />
         </RecordContextProvider>
       </I18nProvider>,
     );
-    expect(noticeText()).toBe(packNotice('zh'));
+    expect(noticeText()).toBe(packNotice('zh-Hans'));
   });
 
   it('CONTROL: the en provider renders the en value, and the two packs differ', () => {
@@ -203,7 +204,7 @@ describe('off an approval request page, a localized notice instead of nothing (o
       </I18nProvider>,
     );
     expect(noticeText()).toBe(packNotice('en'));
-    expect(packNotice('zh')).not.toBe(packNotice('en'));
+    expect(packNotice('zh-Hans')).not.toBe(packNotice('en'));
   });
 });
 

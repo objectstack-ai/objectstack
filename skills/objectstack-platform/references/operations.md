@@ -1,16 +1,13 @@
 # Part 3 — Operations: CLI, Testing, Deployment
 
-Every project gets the same `os` command surface — `npm install` does not need
-to be re-run when commands are added.
-
 ## Daily-loop commands
 
 | Command | What it does |
 |:--------|:-------------|
 | `os init` | Scaffold a new project (alternative to `npx create-objectstack`) |
-| `os dev` | Start the dev server with hot metadata reload. `--seed-admin` (default **on** for plain `os dev`) seeds a loginable dev admin **in-process via the runtime** (env vars `OS_SEED_ADMIN*`) on an **empty** DB only — idempotent, never overwrites an existing account (default `admin@objectos.ai` / `admin123`; override with `--admin-email` / `--admin-password`; disable with `--no-seed-admin`). `--fresh` = ephemeral clean OS_HOME/DB, implies `--seed-admin`. The seeded admin is promoted to **platform admin**, so Setup/Studio work on first login. |
+| `os dev` | Start the dev server with hot metadata reload. `--seed-admin` (default **on** for plain `os dev`) seeds a loginable dev admin **in-process via the runtime** (env vars `OS_SEED_ADMIN*`) with **no login** yet (default `admin@objectos.ai` / `admin123`; override with `--admin-email` / `--admin-password`; disable with `--no-seed-admin`). `--fresh` = ephemeral clean OS_HOME/DB, implies `--seed-admin`. |
 | `os dev --ui` | Also mount the bundled Console portal at `/_console/` (there is no separate `os studio` command) |
-| `os validate` | Validate `objectstack.config.ts` — Zod protocol schema, CEL/predicate validation (`record.<field>` existence), and widget-binding integrity. Same gates as `os build`, no artifact emitted. See [Verify your work](#verify-your-work). |
+| `os validate` | Validate `objectstack.config.ts` — see [Verify your work](#verify-your-work) |
 | `os lint` | Style/convention lint on metadata files |
 | `os info` | Print a metadata summary of the config (objects, apps, and other collections; `--json`) |
 | `os doctor` | Diagnose common setup issues |
@@ -23,15 +20,15 @@ to be re-run when commands are added.
 | `os compile` | Compile to portable JSON artifact (for runtime hydration) |
 | `os serve` | Serve a compiled stack in production mode |
 | `os start` | Quick-start a server: auto-compiles `objectstack.config.ts` when no artifact is present, and falls back to an empty kernel with the Console + marketplace when there is no config at all. It does **not** validate env or apply migrations — run `os validate` / `os migrate apply` yourself |
-| `os generate <kind>` | Scaffold an object / view / flow / agent from a template |
+| `os generate <kind>` | Scaffold `object` `view` `action` `flow` `dashboard` `app` `skill` `picklist` `permission` `dataset` |
 
 ## Verify your work
 
-ObjectStack metadata mistakes fail **silently at runtime**, not at edit time:
-a bare field ref in a predicate (`done` instead of `record.done`) evaluates to
-`null` and silently hides an action/validation on every record; a
-dangling dashboard widget binding renders an empty chart (ADR-0021). Both are
-caught at author time by one command:
+Metadata mistakes surface at runtime, not at edit time: a bare field ref in a
+predicate (`done` for `record.done`) faults, so an `error` validation rule
+refuses each write naming the rule and an action's `visible` hides it; a
+dangling dashboard widget binding renders an empty chart. Both are caught at
+author time by one command:
 
 ```bash
 os validate     # Zod schema + CEL predicates + widget bindings — no artifact
@@ -39,23 +36,18 @@ os validate     # Zod schema + CEL predicates + widget bindings — no artifact
 os build        # the same three gates, plus emits dist/objectstack.json
 ```
 
-`os validate` and `os build` run the **same** structural + semantic gates:
-
 1. **Zod protocol schema** — the stack conforms to `@objectstack/spec`.
 2. **CEL / predicate validation (ADR-0032)** — every `visible` / `disabled` /
    `requiredWhen` / validation rule / flow condition / sharing rule is parsed
    for CEL syntax *and* checked that each `record.<field>` reference exists on
-   the target object. A bare `field` (missing `record.`) fails here.
+   the target object.
 3. **Widget-binding integrity (ADR-0021)** — every dashboard widget's
    `dataset` / `dimensions` / `values` resolves to a declared dataset/field.
 
-Both exit non-zero with a located, corrective message. Use `os validate` as the
-fast inner-loop check after editing metadata and `os build` when you need
-`dist/`. In a scaffolded project these are `npm run validate` / `npm run build`.
+Both exit non-zero with a located, corrective message.
 
 **Rule of thumb: never report a metadata change as done until `os validate`
-passes.** (`os lint` is a *separate* style/convention pass — naming, labels,
-namespace prefixes — and does not replace `os validate`.)
+passes.**
 
 ## Ports & networking
 
@@ -69,13 +61,12 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 
 | Mode | If the resolved port is busy |
 |:-----|:-----------------------------|
-| **Dev** (`os dev`, or `NODE_ENV=development`) | Auto-hops to the next free port (up to +100) so several example apps run side-by-side. The startup banner shows the *actual* bound port. |
-| **Production** (`os start`) | **Fails loudly and exits 1.** It never silently drifts — a shifted port breaks reverse-proxy upstreams, better-auth callback URLs, and CORS trusted-origins as opaque 403/502s. |
+| **Dev** (`os dev`, or `NODE_ENV=development`) | Auto-hops to the next free port (up to +100). The startup banner shows the *actual* bound port. |
+| **Production** (`os start`) | **Fails loudly and exits 1.** |
 
 **Production guidance:**
 
-- **Pin the port explicitly** — `PORT=8080 os start` (or `--port 8080`). Don't
-  rely on the `3000` default; it collides easily on shared hosts.
+- **Pin the port explicitly** — `PORT=8080 os start` (or `--port 8080`).
 - **Keep these in sync when you change the port** (mismatch ⇒ better-auth
   `Invalid origin` 403 / CORS failures):
   - reverse-proxy upstream (`nginx`/`caddy`)
@@ -98,19 +89,37 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 
 | Command | What it does |
 |:--------|:-------------|
-| `os login` / `logout` / `whoami` | Auth against the ObjectStack cloud control plane |
 | `os environments list` / `create` / `switch` | Manage cloud environments (prod/staging/dev) |
-| `os register` | Register the local stack as a deployable target |
+| `os environments use-runtime <url> --token <key>` | Deploy to a self-hosted runtime instead: the key (one it issued) is tried first (`--no-verify` skips), then kept in `~/.objectstack/cloud.json` (0600) across cloud login/logout. `--forget` or `os environments switch` targets the cloud again |
 | `os cloud login` / `logout` / `whoami` | Cloud auth subcommands (these three only — there are no `os cloud logs/metrics/status`) |
+| `os deploy` (or `npm run deploy`, or `d` in `os dev`) | See an edit on your org's ObjectOS Cloud environment: build, publish `<manifest.version>-dev.<timestamp>`, install, wait until served. Environment: `--env <id>`, else the one `os environments switch` recorded (kept across `os cloud login`), else your organization's only one. `--no-wait`; `--wait-timeout <seconds>` (600). A `use-runtime` target: below |
 | `os package publish [dist/objectstack.json] [--env … --install --visibility org]` | Upload the compiled artifact as a versioned package to the cloud catalog (ADR-0008 P3). Listing file, README, review and every screen the customer's administrator meets: [Marketplace handbook](https://objectstack.ai/docs/deployment/marketplace-handbook) |
-| `os package install <manifest-id │ ./dist/objectstack.json> [--version │ --runtime http://localhost:3000]` | Install a package into a **running** runtime via its install-local endpoint. Catalog mode (by manifest id) or air-gapped local-artifact mode. Auths with the **target runtime's** session (`--email/--password` or `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD`), not the cloud login |
+| `os package install <manifest-id │ ./dist/objectstack.json> [--version │ -u/--url]` | Install a package into a **running** runtime. Catalog mode (by manifest id) or air-gapped local-artifact mode. Auths as a **target runtime** user (`-t/--token` or `--email/--password`; env `OS_RUNTIME_TOKEN` or `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD`), not the cloud login. No `-u`: the `use-runtime` runtime and, with no `-t`/`--email`, its key; else `http://localhost:3000` |
+| `os mcp connect` | Register the cloud environment's MCP server (picked as `os deploy` picks it) with Claude Code (`claude mcp add`); `--url <base>` for a self-hosted or local server (named `objectstack`); `--name`; `--print` runs nothing (other clients). Stores no token: the client runs the server's own OAuth |
 
-> **Cloud connection & marketplace (`@objectstack/cloud-connection`, ADR-0008/0009).**
-> The open runtime-side cloud client. Its plugins —
-> `CloudConnectionPlugin`/`createCloudConnectionPlugin`, `MarketplaceProxyPlugin`,
-> `MarketplaceInstallLocalPlugin`, `RuntimeConfigPlugin` — expose the install-local
-> endpoint that `os package install` targets, ship the **Installed Apps** page and
-> marketplace Setup nav as plugin metadata.
+**`os deploy` exit 1, cloud:** a refusal before any write publishes nothing: log in (`os cloud login`), pick an environment (`--env`; none: create one in the ObjectOS Cloud console), or fix the local build or `manifest.version`. `could not build …: <reason>`: the environment's build failed, it keeps serving the previous one; fix and deploy again. `Timed out after …`: the install is recorded and a failing build reads as pending for minutes; deploy again with a longer `--wait-timeout`, or see the build in the ObjectOS Cloud console.
+
+**A `use-runtime` target** (no `--env`) asks for no cloud login: build, dry-run plan, install, live on `hotLoaded`. Exit 1: a failed build; a dry run refused, unserved (no install-local) or ignored (an older runtime installed: upgrade it); an install refusal (rerun with the `--confirm-access-upgrade` / `--confirm-upgrade <token>` it printed, or `--confirm-global-uniques` if its installation-wide `unique` constraints are meant platform-wide, else set them `unique: 'organization'`); installed but not loaded (live after a restart).
+
+> **Cloud connection & marketplace (`@objectstack/cloud-connection`, ADR-0008/0009):**
+> the open runtime-side cloud client; its `MarketplaceInstallLocalPlugin` serves the
+> install-local endpoint `os package install` targets.
+
+## Mobile push
+
+`requires: ['push']` reads the top-level `push` key (`PushServiceConfigSchema`).
+Served today: `transport: 'direct'` only, one block per vendor, at least one:
+
+```ts
+push: { transport: 'direct',
+  apns: { teamId, keyId, topic: 'com.acme.app', environment: 'production', credentialRef: 'APNS_P8_KEY' },
+  fcm: { projectId, credentialRef: 'FCM_SA_JSON' } },
+```
+
+`credentialRef` names each secret (the `.p8` key, the service-account JSON; an
+env-var name in the open tier), never holds it: `privateKey`, `serviceAccount` or
+a PEM/JSON value is refused. The relay transport (also what `{}` or no key reads
+as) is refused at boot until its sender ships.
 
 ## Shipping a plugin
 
@@ -128,38 +137,12 @@ Authoring stops at `kernel.use(plugin)`; these three make it distributable.
 Use `LiteKernel` for unit / integration tests — it skips the cloud bits and
 plugin discovery, so tests run in milliseconds. Assemble the same plugins the
 CLI would auto-register (`use()` is synchronous and chainable):
+`new ObjectQLPlugin()`, `new DriverPlugin(new InMemoryDriver())` and
+`new AppPlugin(stack)` (`AppPlugin`: `@objectstack/runtime`; `stack`: the
+config's default export). The vitest shape: [Testing Plugins](./plugin-development.md#testing-plugins);
+the other imports: [Using Plugins](./plugin-development.md#using-plugins).
 
-```typescript
-import { describe, it, expect } from 'vitest';
-import { LiteKernel } from '@objectstack/core';
-import { ObjectQLPlugin } from '@objectstack/objectql';
-import { DriverPlugin, AppPlugin } from '@objectstack/runtime';
-import { InMemoryDriver } from '@objectstack/driver-memory';
-import stack from '../objectstack.config';
-
-describe('stack boot', () => {
-  it('registers the task object', async () => {
-    const kernel = new LiteKernel({ logger: { level: 'silent' } });
-    kernel
-      .use(new ObjectQLPlugin())
-      .use(new DriverPlugin(new InMemoryDriver()))
-      .use(new AppPlugin(stack));
-    await kernel.bootstrap();
-
-    const ql = kernel.getService<any>('objectql');
-    // query / mutate through the engine — see objectstack-query for the API
-    expect(ql).toBeDefined();
-
-    await kernel.shutdown();
-  });
-});
-```
-
-- **Seed in tests:** declare fixtures in the stack's `data:` collection —
-  they load at boot. See **objectstack-data** for env-scoped fixtures
-  (`env: ['test']`).
-- **Reset between tests:** create a fresh `LiteKernel` per test — with the
-  in-memory driver a full bootstrap is cheap, and there is no `reset()`.
+- **Reset between tests:** create a fresh `LiteKernel` per test, and there is no `reset()`.
 - **HTTP-level tests:** mount `createHonoApp({ kernel })` from
   `@objectstack/hono` and drive it with `app.request(...)` / `fetch`.
 
@@ -171,17 +154,16 @@ describe('stack boot', () => {
 | Edge (Cloudflare Workers, Vercel Edge) | `driver-turso` (**cloud / EE only**) | `@objectstack/hono` | Cold-start friendly; LiteKernel only |
 | Serverless (Lambda, Vercel functions) | `driver-sql` (`pg` with pooler) / `driver-mongodb` | `@objectstack/hono` | Mind cold-start: prefer LiteKernel |
 | Browser / WebContainer | `driver-sqlite-wasm` | none (in-process) | Playground, demos |
-| Docker / Kubernetes | any | any | Use `os start` as the entrypoint; pin `PORT` and `EXPOSE` it (see [Ports & networking](#ports--networking)) |
+| Docker / Kubernetes | any | any | Use `os start` as the entrypoint; pin `PORT` and `EXPOSE` it (see [Ports & networking](#ports--networking)). The official image (`ghcr.io/objectstack-ai/objectstack`): its required variables (pitfalls below) set at runtime, never baked in; an explicit `OS_DATABASE_URL=file:/path/on/a/mounted/volume/app.db` passes, so SQLite on a volume still works |
 
 ## Health & observability
 
 - **Health endpoints:** the HTTP dispatcher exposes `GET /health` and
   `GET /ready` under the API prefix.
 - **Logs:** plugins log via `ctx.logger`. Logger config is a **kernel
-  construction** option, not a `defineStack` key:
-  `new ObjectKernel({ logger: { level: 'info', format: 'json' } })`.
+  construction** option (`new ObjectKernel({ logger })`), not a `defineStack` key.
 - **Metrics:** use the kernel's built-ins — `kernel.getPluginMetrics()`
-  (per-plugin startup durations) and `await kernel.checkAllPluginsHealth()`.
+  and `await kernel.checkAllPluginsHealth()`.
   There is no `metrics` service and no `@objectstack/plugin-prometheus`.
 
 ## Common ops pitfalls
@@ -189,11 +171,9 @@ describe('stack boot', () => {
 | Symptom | Likely cause |
 |:--------|:-------------|
 | `os dev` hangs at "Loading metadata…" | Circular import in `objectstack.config.ts` — run `os validate` |
-| `os start` exits with "Port N is already in use" | Intended: production never auto-shifts ports. Free the port or set `PORT=<n>` — see [Ports & networking](#ports--networking) |
-| better-auth `Invalid origin` 403 after a port/host change | Port or hostname out of sync with `OS_AUTH_URL` / `OS_TRUSTED_ORIGINS` — see [Ports & networking](#ports--networking) |
 | Migrations apply locally but not in cloud | `env` scoping on the dataset excludes the target environment |
 | Adapter 404s on auto-generated routes | `enable.apiEnabled: false` on the object, or missing `os build` |
 | LiteKernel test passes, ObjectKernel boot fails | Test missed a plugin the CLI auto-registers — compare your test's `use()` list against the `os dev` boot log |
 | Hot reload misses new objects | Barrel `src/objects/index.ts` not re-exporting — check the file |
 | Login works but **Setup / Studio missing** | The logged-in user isn't a platform admin. Setup/Studio are gated by `setup.access` / `studio.access` on `admin_full_access`, auto-granted only to the first registered **human** (`bootstrapPlatformAdmin`). The `usr_system` seed identity is skipped, so it can't steal the grant. Either sign up first (`--seed-admin`/`--fresh` does this) or check `sys_user_permission_set` for a cross-tenant (`organization_id = NULL`) `admin_full_access` link on your user. Don't edit nav code first. |
-| A permission set is declared but grants nobody anything | Declaring a set is not assigning it — see "Assigning a permission set to a user" in **objectstack-data**. |
+| The official image exits at start naming `OS_DATABASE_URL` / `OS_AUTH_SECRET` / `OS_SECRET_KEY` | The image presets `OS_DEPLOYMENT_DURABILITY_CHECK_ENABLED=true`: with any of the three unset, `os start` exits 1 before it writes a database file or a secret. Set the named ones on the run command. Upgrading a container that ran on the image's defaults? **Keep its generated values**, read from the old container's `/home/node/.objectstack` (`docker exec <container> cat <file>`, or its volume): `OS_AUTH_SECRET` is the contents of `auth-secret`, `OS_SECRET_KEY` the contents of `dev-crypto-key`, and the data is `data/objectstack.db` (`OS_DATABASE_URL=file:…` on the kept volume, or migrate it). Fresh values leave every saved credential unreadable and sign everyone out. |

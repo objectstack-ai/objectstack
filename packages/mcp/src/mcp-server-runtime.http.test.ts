@@ -97,6 +97,7 @@ describe('MCPServerRuntime.handleHttpRequest (Streamable HTTP)', () => {
       [
         'create_record',
         'delete_record',
+        'delete_records',
         'describe_object',
         'get_record',
         'list_objects',
@@ -190,7 +191,7 @@ describe('MCPServerRuntime.handleHttpRequest (Streamable HTTP)', () => {
         jsonrpc: '2.0',
         id: 6,
         method: 'tools/call',
-        params: { name: 'delete_record', arguments: { objectName: 'task', recordId: '1' } },
+        params: { name: 'delete_record', arguments: { objectName: 'task', recordId: '1', confirm: true } },
       },
       bridge,
     );
@@ -226,7 +227,11 @@ describe('MCPServerRuntime.handleHttpRequest (Streamable HTTP)', () => {
     );
     expect(status).toBe(200);
     expect(json.result.isError).toBe(true);
-    expect(json.result.content[0].text).toContain('RLS: not permitted');
+    // [#31218] A code-less throw answers what the `/data` door answers it: a
+    // fault, its message withheld (and logged on the server).
+    expect(JSON.parse(json.result.content[0].text)).toEqual({
+      error: { code: 'INTERNAL_ERROR', message: 'Internal server error', status: 500 },
+    });
   });
 });
 
@@ -367,8 +372,13 @@ describe('aggregate_records (GROUP BY aggregation tool)', () => {
 
   it('surfaces bridge errors (e.g. FLS denial) as tool errors', async () => {
     const bridge = makeAggBridge();
+    // The security plugin's aggregate denial is a coded `PermissionDeniedError`.
     bridge.aggregate = async () => {
-      throw new Error('[Security] Field read denied: not permitted to aggregate [salary]');
+      throw Object.assign(new Error('[Security] Field read denied: not permitted to aggregate [salary]'), {
+        name: 'PermissionDeniedError',
+        code: 'PERMISSION_DENIED',
+        status: 403,
+      });
     };
     const { json } = await call(
       runtime,

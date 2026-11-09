@@ -22,7 +22,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { UploadProvider, type UploadAdapter } from '@object-ui/providers';
+import { UploadProvider } from './UploadProvider';
+import type { UploadAdapter } from '@object-ui/types';
 import { ImageField } from './ImageField';
 // Imported at module scope (not awaited in a hook) so the widget's
 // `React.lazy(() => import('./ImageCropperDialog'))` resolves from the ESM

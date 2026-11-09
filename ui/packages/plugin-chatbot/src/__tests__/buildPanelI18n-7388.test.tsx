@@ -127,7 +127,7 @@ describe('the build panel under a zh console (objectui#7388)', () => {
 
   it('localizes every per-type row heading — the five that render on every build', () => {
     renderIn('zh', panel('structure'));
-    for (const zh of ['对象', '视图', '仪表板', '示例数据']) {
+    for (const zh of ['对象', '视图', '仪表盘', '示例数据']) {
       expect(screen.getByText(zh)).toBeInTheDocument();
     }
     for (const en of ['Objects', 'Views', 'Dashboards', 'Sample data']) {

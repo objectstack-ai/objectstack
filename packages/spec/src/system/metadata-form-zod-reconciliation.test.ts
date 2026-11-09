@@ -198,6 +198,18 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'sourceView',
     why: '@deprecated legacy named-view inheritance, honored at runtime as a fallback but deliberately not offered to new authors — a page defines columns/sort/filterBy directly (ADR-0047 revised)',
   },
+  // #30267 — `view.form.ts` now spells out `userFilters`' children. This walk
+  // resolves the block through the view union to the page-shaped
+  // `UserFiltersSchema`; the list arm the view form lays out takes
+  // `ObjectUserFiltersSchema`, which omits these three page-only keys and
+  // refuses them on an object view.
+  ...(['tabs', 'showAllRecords', 'allowAddTab'] as const).map((key): OmitEntry => ({
+    kind: 'omit',
+    type: 'view',
+    path: 'userFilters',
+    key,
+    why: "page-only — a list view's `userFilters` is `ObjectUserFiltersSchema`, which omits this key and refuses it on an object view (named presets on an object view are `listViews` entries); the view form lays out that list arm, so a control here would offer a value the save rejects",
+  })),
   {
     kind: 'omit',
     type: 'object',
@@ -387,6 +399,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'conditionalFormatting',
     why: "planned, not yet rendered — a field's cell formatting rules (`[{ condition, style }]`, the list view's own rule element) are validated at parse and their CEL is judged at the authoring doors (it parses, it reads only `value` and `record`), but no renderer styles a cell from them until objectui's cell renderers read them, after the spec publishes. A form control offered today would let an author set a style nothing paints",
   },
+  // cloud#3652 ruling D3 — a field's rename declaration lands spec-first the
+  // same way: `planned` in the liveness ledger, read by no upgrade until the
+  // rename execution card. Offering the key in the field form first would be
+  // the UI half of declared-not-enforced.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'renamedFrom',
+    why: "planned, not yet read — the earlier keys of a field are validated at parse (each a field key, once, never the field's own key, a key another field still declares, or an old key another field also claims), but no package upgrade carries a column on them until the rename execution lands. It is a package author's declaration about the field's history, written in the package source beside the rename itself; a form control offered today would let an author declare a rename no upgrade performs",
+  },
   // [ADR-0144 D5] A record-mode amount's home-currency projection lands
   // spec-first the same way: declared and judged at parse, written by nothing
   // until the engine's write-time projection lands in the same release (D9).
@@ -406,6 +429,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'pressed',
     why: "planned, not yet rendered — the reader's pressed-state predicate is validated at parse (CEL only, no boolean literal) and judged at the authoring doors in the `record` scope, but no action surface draws the pressed face until the console's header buttons read it. A form control offered today would let an author write a predicate nothing shows",
+  },
+  // #31840 — an action's preflight read lands spec-first the same way:
+  // `planned` in the liveness ledger, sent by no param dialog until the console
+  // card (#31808) draws the panel and applies the seeds.
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'preflight',
+    why: "planned, not yet read — the same-origin `GET`, its closed hole set and its answer-to-param seeds are validated at parse (each hole and seed judged against the action's declared params), but no param dialog sends the read, shows the answer or fills a param until the console's param dialog reads it. A form control offered today would let an author declare a read nothing sends",
   },
 
   // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`

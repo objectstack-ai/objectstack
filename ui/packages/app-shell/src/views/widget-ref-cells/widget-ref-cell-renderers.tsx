@@ -47,4 +47,6 @@ export function RecipientCell(props: CellRendererProps) {
 }
 
 registerFieldRenderer('object-ref', ObjectRefCell);
+// The sharing-rule object picker stores an object name too: the same face.
+registerFieldRenderer('shareable-object-ref', ObjectRefCell);
 registerFieldRenderer('recipient-picker', RecipientCell);

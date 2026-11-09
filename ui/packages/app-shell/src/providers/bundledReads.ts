@@ -45,6 +45,19 @@ export interface BundledReads {
    * it holds); a miss otherwise, and the `/meta/view` list composes them.
    */
   viewsFor(objectNames: readonly string[]): BundledRead<unknown[]>;
+  /**
+   * objectstack#29552 — the names of the bundle's objects that point at
+   * `objectName` (a `lookup` / `master_detail` field whose `reference` names
+   * it), when the active bundle is `appName`'s and that app's navigation
+   * reaches `objectName`. The server adds to an app's bundle every object that
+   * points at an object its navigation reaches (`inboundRelationObjects`,
+   * judged over the same object list the registry is read from), so for such
+   * an object these are every object that points at it: what a record page
+   * synthesized for it derives its related lists from. A miss when the bundle
+   * cannot say (no bundle, draft preview, an app with no bundle, or an object
+   * outside the app's navigation); pending while `appName`'s bundle is not in.
+   */
+  objectsReferencing(appName: string, objectName: string): BundledRead<readonly string[]>;
 }
 
 export const BundledReadsCtx = createContext<BundledReads | null>(null);

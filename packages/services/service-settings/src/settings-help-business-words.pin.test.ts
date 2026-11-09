@@ -18,7 +18,9 @@
  * source's config path. They now say what the setting does, and a saved key
  * is described as used instead of the one in the server configuration.
  *
- * The sweep reads every string an administrator is shown for those five
+ * The Feature Flags namespace has since been removed: its toggles had no reader.
+ *
+ * The sweep reads every string an administrator is shown for those four
  * namespaces — the manifest literals (the English fallback) and each shipped
  * locale's copy — and refuses the four shapes that only a developer can read.
  * It pins SHAPES, never wording: a rewrite that stays in business words keeps
@@ -28,7 +30,6 @@
 import { describe, it, expect } from 'vitest';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { authSettingsManifest } from './manifests/auth.manifest.js';
-import { featureFlagsSettingsManifest } from './manifests/feature-flags.manifest.js';
 import { mailSettingsManifest } from './manifests/mail.manifest.js';
 import { aiSettingsManifest } from './manifests/ai.manifest.js';
 import { knowledgeSettingsManifest } from './manifests/knowledge.manifest.js';
@@ -36,7 +37,6 @@ import { en, zhCN, jaJP, esES } from './translations/index.js';
 
 const MANIFESTS: SettingsManifest[] = [
   authSettingsManifest,
-  featureFlagsSettingsManifest,
   mailSettingsManifest,
   // #28069
   aiSettingsManifest,

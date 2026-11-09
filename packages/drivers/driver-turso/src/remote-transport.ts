@@ -87,6 +87,12 @@ import {
   type DeclaredIndexInput,
   type ExpectedIndex,
 } from '@objectstack/driver-sql';
+// [cloud#3485] A large `$and` / `$or` group is joined as balanced halves, so the
+// expression tree SQLite parses stays shallow: the rule the local face's knex
+// path applies (#29888), shared, never copied. This face compiles every hosted
+// environment's reads, and a flat chain of one parent-record gate branch per
+// registered object passed the hosted libSQL server's depth limit of 100.
+import { joinBalancedGroup } from '@objectstack/driver-sql';
 import { nanoid } from 'nanoid';
 
 /**
@@ -3251,7 +3257,10 @@ export class RemoteTransport {
           subArgs.push(...sa);
         }
         if (subClauses.length > 0) {
-          clauses.push(`(${subClauses.join(' AND ')})`);
+          // [cloud#3485] Balanced halves above FLAT_GROUP_MAX_MEMBERS members,
+          // byte-identical flat at or below it; members keep their order, so
+          // `subArgs` still line up with the placeholders.
+          clauses.push(`(${joinBalancedGroup(subClauses, ' AND ')})`);
           args.push(...subArgs);
         }
         // Every conjunct TRUE (`$and: []`, `$and: [{}]`) → the conjunction is
@@ -3286,7 +3295,14 @@ export class RemoteTransport {
           // whole-table write.
           clauses.push(SQL_FALSE);
         } else {
-          clauses.push(`(${subClauses.join(' OR ')})`);
+          // [cloud#3485] Balanced halves above FLAT_GROUP_MAX_MEMBERS members,
+          // byte-identical flat at or below it. The parent-record read gates
+          // (sys_comment, sys_attachment) OR one `ReadableIds` branch per
+          // registered parent object: joined flat, that chain was one level
+          // per parent, and a hosted environment with an app installed passed
+          // the server's limit of 100 on every read of those objects. Members
+          // keep their order, so `subArgs` still line up with the placeholders.
+          clauses.push(`(${joinBalancedGroup(subClauses, ' OR ')})`);
           args.push(...subArgs);
         }
       } else if (key === '$not') {

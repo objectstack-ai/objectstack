@@ -24,7 +24,7 @@
  * that call a module helper `engine.ts` still needs elsewhere
  * (`settleMasterDetailLanding`, `resolvePreviewParents`,
  * `resolvePredicateRelated`, `resolveOneHopRelated`); and
- * `masterDetailHeaderExists`, `materializeParentHeader` and
+ * `callerReadableReferenceExists`, `materializeParentHeader` and
  * `masterDeclaredFields`, whose bodies are no longer than the host literal
  * moving them would cost.
  *
@@ -36,19 +36,25 @@
  * literal of exactly the {@link ReferentialIntegrityHost} members that method
  * reads, plus a `.call`. The one field a body reads (`logger`) goes as a
  * GETTER, so the read happens when the body makes it, as it did. The methods
- * they call (`find`, `masterDetailHeaderExists`, `referenceExists`) go as
+ * they call (`find`, `callerReadableReferenceExists`, `referenceExists`) go as
  * late-bound closures over the instance, so a double or spy set on the engine
  * is still the one a call reaches.
  *
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import { referenceTargetOf, type EngineQueryOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { keepsFlowWriteReferenceCheck } from '@objectstack/core';
+import { isUserBanInForce, isVouchedReference, keepsFlowWriteReferenceCheck, USER_BAN_FIELDS } from '@objectstack/core';
 import { ValidationError, buildFieldError } from './validation/record-validator.js';
+import { servedAsStored } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -62,8 +68,10 @@ import type { ObjectQL } from './engine.js';
 export interface ReferentialIntegrityHost {
   readonly logger: ObjectQL['logger'];
   find: ObjectQL['find'];
-  masterDetailHeaderExists: ObjectQL['masterDetailHeaderExists'];
+  callerReadableReferenceExists: ObjectQL['callerReadableReferenceExists'];
+  callerReadableReferenceRow: ObjectQL['callerReadableReferenceRow'];
   referenceExists: ObjectQL['referenceExists'];
+  referenceRow: ObjectQL['referenceRow'];
 }
 
 /**
@@ -79,9 +87,159 @@ function isEmptyReferenceValue(v: unknown): boolean {
   return false;
 }
 
-/** The body of `ObjectQL#assertReferencesResolve`; the method's docblock there is its contract. */
+/**
+ * [#29029] The reference types whose target a non-system write may name only
+ * when the caller's own read door returns it: `master_detail` (#22519), and
+ * `lookup` and `user` with it. A target the caller cannot read answers
+ * `reference_not_found`, exactly as a target that exists nowhere. `tree`, the
+ * one other reference type, keeps the elevated existence probe: the rulings
+ * that tightened this set (records 6573561091 and 6663849489) name `lookup`
+ * and `user` only.
+ */
+const CALLER_READ_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'user']);
+
+/**
+ * [#29029] Whether this write's reference check ({@link assertReferencesResolve})
+ * runs BEFORE the record's validation rules. A write that is not a system
+ * write: yes — a reference its caller cannot read answers
+ * `reference_not_found`, whatever a rule would answer. A system write keeps
+ * the order it had, the rules first and then the check, so its answer is the
+ * one it gave before (ruling of record 6663849489). The one predicate every
+ * write door and the validate preview read, so the order cannot differ
+ * between them.
+ */
+export function referencesCheckedBeforeRules(context: unknown): boolean {
+  return !(context as { isSystem?: unknown } | null | undefined)?.isSystem;
+}
+
+/**
+ * [#4441] Referential integrity on the WRITE path: a `lookup` (or any
+ * reference-typed field) may not be given an id that exists in no row of the
+ * object it declares.
+ *
+ * The field metadata is unambiguous — `{"type":"lookup","required":true,
+ * "reference":"sys_permission_set"}` — and the DELETE side already reasons
+ * about the edge (`deleteBehavior: 'set_null'`). Only the insert side never
+ * checked, so `POST /data/sys_position_permission_set
+ * {"permission_set_id":"ps_does_not_exist_at_all"}` created the row.
+ *
+ * On the RBAC link tables that is a security-surface record that resolves to
+ * nothing: an administrator auditing permissions sees a binding whose target
+ * cannot be inspected, and the audience-anchor gate had to resolve that very
+ * set to evaluate the grant — so a dangling row was an unevaluable gate input,
+ * not merely an untidy one. (That gate and `sys_position_permission_set` are
+ * retired since C3 stage 8; the check stands for the link tables that remain.)
+ *
+ * ## Scope, deliberately narrow
+ *
+ * - **Caller-supplied keys only.** Server stamps (`owner_id`,
+ *   `organization_id`, `created_by`/`updated_by`) are lookups too; they are
+ *   written by hooks and middleware, not by the request, and re-validating
+ *   them here would turn a platform stamp into a caller-facing rejection.
+ * - **Non-system writes only**, like every other write-path guard in this
+ *   engine (`stripReadonlyFields` — which since #14147 runs on the create
+ *   path as well as the update one — and `stripRuntimeOwnedFields`). Seed
+ *   replay,
+ *   package install and boot-time provisioning legitimately write rows in an
+ *   order that resolves only once the batch completes; failing them closed
+ *   would turn an ordering detail into a boot failure. This leaves a real
+ *   residual — an `isSystem` caller can still write a dangling reference —
+ *   which is recorded on the issue rather than silently accepted.
+ *   [#28881] ⛔ Except a flow run's elevated write (`runAs: 'system'`):
+ *   its context carries the flow-write mark (`keepsFlowWriteReferenceCheck`,
+ *   `@objectstack/core`, set by `resolveRunDataContext` in
+ *   service-automation) and is checked like a user write. Its elevation is
+ *   for authorization (other people's rows, past RLS and FLS), never for a
+ *   link to a row that does not exist, and it keeps every authorization
+ *   exemption `isSystem` gives it. A write it sets off (a hook's `ctx.api`,
+ *   its `sudo()`, a cascade leg) spreads that context and is checked as
+ *   the flow's own.
+ * - **Empty values are not references.** `null` / `undefined` / `''` mean
+ *   "no link", which is what `deleteBehavior: 'set_null'` produces.
+ * - **Already-expanded objects are skipped.** A read round-trip can hand back
+ *   `{id, name, …}` in the slot; that is not an id write.
+ * - **A value the row already stores is not the write's (#29062).** The
+ *   check judges only the references a write ADDS. An update's `storedRows`
+ *   (the by-id prior row; a predicate update's matched rows) forgive a
+ *   refused value, or a multi-valued member, that every one of those rows
+ *   already holds: an edit form carries the whole record back, and a stored
+ *   id that has since stopped resolving (the delete walk leaves a `user`
+ *   value in place, `DELETE_SEMANTICS_REFERENCE_TYPES`) is not the editor's
+ *   to answer for. A value new to any of the rows is refused as before, and
+ *   an insert has no stored rows, so every value it supplies is judged.
+ *   [#29029] The stored rows are compared as the caller may read them
+ *   ({@link storedReferencesCallerReads}): a column the caller cannot read
+ *   holds no stored value for it, so it forgives nothing, and the answer is
+ *   the same whatever the column holds. A system write compares them as
+ *   stored, as before.
+ *
+ * ## Why the existence probe bypasses RLS — and why it keeps the tenant wall
+ *
+ * Existence is a fact about the database, not about the caller's ROW-LEVEL
+ * visibility — the same distinction the #4435 existence probe turns on. So
+ * the existence probe ({@link referenceExists}) is elevated: `isSystem`
+ * bypasses RBAC, RLS and FLS. Whether a NON-system caller may name the row is
+ * the separate question the next section answers, and it is asked first, of
+ * the caller's own read door, for every reference type but `tree`.
+ *
+ * That argument is about visibility, never about TENANCY, and the elevation
+ * is therefore `sudo()`-shaped — `{ ...context, isSystem: true }`, see
+ * {@link referenceExists} — not a bare `{ isSystem: true }` (#19808). The
+ * bare spelling carried no `tenantId`, so the probe spanned every
+ * organization: an org-bound caller could store a reference to another
+ * organization's row, and could tell "exists in another organization" (the
+ * write committed) from "exists nowhere" (refused) — a cross-tenant existence
+ * oracle. With the caller's context spread first, `buildDriverOptions`
+ * forwards its `tenantId` to the driver, a row stamped with another
+ * organization is not found, and both cases answer the same
+ * `reference_not_found`. The tenancy exemptions stay where they are decided:
+ * `buildDriverOptions` withholds `tenantId` for a `tenancy.enabled: false`
+ * (platform-global) object and for a federated one, so a reference to either
+ * still resolves from an org-bound caller. A row with no organization is no
+ * tenant's (ADR-0131 D1): the driver's scope is the organization equality,
+ * with no `IS NULL` arm, so an org-bound caller's probe does not find one.
+ *
+ * ## A non-system caller may name only a row its own read door returns (#22519, #29029)
+ *
+ * A `master_detail`, `lookup` or `user` value a non-system caller supplies
+ * must name a row the caller's own read door returns; a write naming a row
+ * the caller cannot read answers exactly what a write naming a row that
+ * exists nowhere answers: `reference_not_found`. So for those three types the
+ * caller's read door is asked first ({@link callerReadableReferenceExists}),
+ * then the elevated, tenant-kept existence probe for a row it returned. A
+ * multi-valued field is judged per member: one unreadable member refuses the
+ * write. Nothing upstream of this check settles it: ADR-0055 §3 gates a
+ * detail write on its header (master edit) only for a `controlled_by_parent`
+ * detail, and nothing gates a lookup on its target, so an elevated probe
+ * alone would let a caller bind its row to a row it has no access to, and
+ * tell "exists" apart from "exists nowhere". #22519 (ruling A) set the rule
+ * for `master_detail`; ruling records 6573561091 and 6663849489 extended it
+ * to `lookup` and `user` as the default, with no field-level opt-out. A
+ * system caller keeps the exemption above (its read door returns every row),
+ * and a value the row already stores is not judged again (#29062). `tree`
+ * keeps the elevated probe alone.
+ *
+ * One value is not the caller's choice: a reference a service verb vouches for
+ * on its own write (`vouchForReference`, `@objectstack/core`), naming a record
+ * the same call authorized and created — the file-attachments writer's
+ * `sys_attachment.file_id`, inserted as the caller after its own attach check.
+ * For exactly that object, field and id the caller's read door is not asked;
+ * the elevated, tenant-kept existence probe still is. Every other value, field
+ * and object on the write is judged as above, and the mark comes from no
+ * request: it is a symbol-keyed context property no body, query or stored row
+ * can spell.
+ *
+ * Fails OPEN when the target cannot be checked (unregistered object, no
+ * driver, a probe that throws): an integrity check that cannot run must not
+ * invent a rejection, and the alternative — refusing every write to an object
+ * whose target lives on an unreachable datasource — converts a connectivity
+ * problem into data loss. A caller's read door that fails is the exception:
+ * it did not return the row, so the row is missing for that caller, for a
+ * `master_detail`, `lookup` or `user` value alike
+ * (see {@link masterDetailHeadersCallerReads}).
+ */
 export async function assertReferencesResolve(
-  this: Pick<ReferentialIntegrityHost, 'masterDetailHeaderExists' | 'referenceExists'>,
+  this: Pick<ReferentialIntegrityHost, 'logger' | 'find' | 'callerReadableReferenceExists' | 'callerReadableReferenceRow' | 'referenceExists' | 'referenceRow'>,
   schema: any,
   data: Record<string, unknown> | null | undefined,
   supplied: Record<string, unknown> | null | undefined,
@@ -96,7 +254,7 @@ export async function assertReferencesResolve(
   const fields = schema?.fields;
   if (!fields || !data) return;
 
-  const refused: Array<{ name: string; def: any; value: unknown; target: string }> = [];
+  const refused: Array<{ name: string; def: any; value: unknown; target: string; code?: 'reference_user_banned' }> = [];
   for (const name of Object.keys(fields)) {
     // [#4441, narrowing kept by #4743] A `readonly` field is never the
     // caller's to answer for — BY CONSTRUCTION, not by exemption.
@@ -152,9 +310,36 @@ export async function assertReferencesResolve(
     for (const v of values) {
       if (v === null || v === undefined || v === '') continue;
       if (typeof v === 'object') continue;
-      // [#22519] A master-detail header must also be one the caller can read.
-      const resolved = def?.type === 'master_detail'
-        ? await this.masterDetailHeaderExists(target, v, context)
+      // [#22519, #29029] A master-detail header, a lookup target and a user
+      // must also be one the caller can read — except the one value a service
+      // verb vouches for on its own write: a record the same call authorized
+      // and created (`vouchForReference`, @objectstack/core). Its existence is
+      // still probed; nothing else on the write is admitted by it.
+      const callerReads = CALLER_READ_REFERENCE_TYPES.has(def?.type)
+        && !isVouchedReference(context, schema?.name, name, v);
+      if (def?.type !== 'master_detail' && target === BAN_CHECKED_USER_OBJECT) {
+        // [#30205] One probe answers both: the row's existence and its ban.
+        // [#29029] The caller's read door comes first: a user it does not
+        // return answers as one that exists nowhere, and its ban is not read.
+        let row: Awaited<ReturnType<typeof this.referenceRow>>;
+        try {
+          row = callerReads
+            ? await this.callerReadableReferenceRow(target, v, context, USER_BAN_FIELDS)
+            : await this.referenceRow(target, v, context, USER_BAN_FIELDS);
+        } catch (err) {
+          // Fails open like the existence probe: a check that cannot run refuses nothing.
+          this.logger?.warn?.('the reference check could not read the referenced user — neither its existence nor its ban was checked', {
+            object: target, field: name, error: err instanceof Error ? err.message : String(err),
+          });
+          row = null;
+        }
+        if (row === false) refused.push({ name, def, value: v, target });
+        // adr0112-ok: D6 — a field-addressed FieldErrorCode; this entry becomes `{ field, code }` below
+        else if (row !== null && isUserBanInForce(row)) refused.push({ name, def, value: v, target, code: 'reference_user_banned' });
+        continue;
+      }
+      const resolved = callerReads
+        ? await this.callerReadableReferenceExists(target, v, context)
         : await this.referenceExists(target, v, context);
       if (resolved === false) refused.push({ name, def, value: v, target });
     }
@@ -163,13 +348,20 @@ export async function assertReferencesResolve(
   // [#29062] A refused value every row this write lands on already stores
   // is not a reference the write ADDS, so it is not this caller's to answer
   // for. The stored rows are read only now, once a probe has refused.
-  const stored = storedRows ? (await storedRows() ?? []).filter(isRow) : [];
+  // [#29029] …and only as this caller may read them
+  // ({@link storedReferencesCallerReads}): the update's reference forgiveness
+  // compares only stored values the caller may read, so a column it cannot
+  // read forgives nothing, and its value is refused like any other.
+  const storedAsStored = storedRows ? (await storedRows() ?? []).filter(isRow) : [];
+  const stored = storedAsStored.length === 0
+    ? storedAsStored
+    : await storedReferencesCallerReads.call(this, schema?.name, storedAsStored, [...new Set(refused.map((r) => r.name))], context);
   const failures = refused
     .filter((r) => stored.length === 0 || !stored.every((row) => storedReferenceIds(row[r.name]).has(String(r.value))))
     .map((r) => buildFieldError(
       {
         field: r.name,
-        code: 'reference_not_found',
+        code: r.code ?? 'reference_not_found',
         def: r.def,
         value: String(r.value),
         constraint: { target: r.target },
@@ -178,6 +370,28 @@ export async function assertReferencesResolve(
     ));
   if (failures.length > 0) throw new ValidationError(failures);
 }
+
+/**
+ * [#30205] The user object whose rows a reference check also asks about a ban.
+ *
+ * Banning a user leaves the row in place, so the existence probe resolves a
+ * banned user like any other, and a write could hand new work to someone who
+ * cannot sign in to do it (`POST /data/OBJECT` with `assignee` set to the
+ * banned user answered 201). The check refuses that with
+ * `reference_user_banned`, on the same terms as `reference_not_found`: only a
+ * caller-supplied value, only a value the write ADDS (a row that already holds
+ * the banned user stays editable, and is handed over by the transfer
+ * instead), never a system write the reference check exempts.
+ *
+ * The ban columns ride the existence probe's own read (`referenceRow`), so the
+ * check costs no read of its own and is read the way the probe reads:
+ * elevated inside the caller's tenant, because a ban is a fact about the
+ * user, not about what the caller may read. A probe that cannot run refuses
+ * nothing, as before, and logs a warning. The caller's read door is asked
+ * before the probe, as for every `lookup` and `user` value (#29029): a user
+ * the caller cannot read answers `reference_not_found`, and its ban is not read.
+ */
+const BAN_CHECKED_USER_OBJECT = 'sys_user';
 
 /**
  * [#29062] The rows a write lands on, as stored before it, read on demand by
@@ -191,6 +405,71 @@ function isRow(row: unknown): row is Record<string, unknown> {
   return row !== null && typeof row === 'object';
 }
 
+/**
+ * [#29029] The stored rows an update's reference forgiveness compares against,
+ * as THIS caller may read them: for each of `rows`, only the `fields` the
+ * caller's own read door serves for that row exactly as stored
+ * ({@link servedAsStored}). One `find` for the batch, under the caller's own
+ * context, so every enforcement layer in the middleware chain (RBAC, RLS,
+ * sharing, field-level security) answers it, as it answers
+ * {@link masterDetailHeadersCallerReads}.
+ *
+ * A column the caller cannot read — hidden, masked or rewritten for it — is
+ * absent from the row returned here, so it holds no stored id and forgives
+ * nothing: the value the write names is judged like any other, and the
+ * answer does not depend on what the column holds. A row the read door does
+ * not return, or a read that fails, keeps no column either; ⛔ never the row
+ * as stored. A caller who can read the column keeps the forgiveness: an
+ * unchanged stored reference is still accepted.
+ *
+ * A SYSTEM caller (a flow run's elevated write, the one system write the
+ * reference check judges) is answered with `rows` unchanged, as before.
+ */
+export async function storedReferencesCallerReads(
+  this: Pick<ReferentialIntegrityHost, 'find' | 'logger'>,
+  object: unknown,
+  rows: ReadonlyArray<Record<string, unknown>>,
+  fields: ReadonlyArray<string>,
+  context: ExecutionContext | undefined,
+): Promise<ReadonlyArray<Record<string, unknown>>> {
+  if (context?.isSystem) return rows;
+  const ids = new Map<string, unknown>();
+  for (const row of rows) {
+    const id = row.id;
+    if (typeof id === 'string' || typeof id === 'number') ids.set(String(id), id);
+  }
+  const served = new Map<string, Record<string, unknown>>();
+  if (typeof object === 'string' && object && ids.size > 0) {
+    const values = [...ids.values()];
+    try {
+      const found = await this.find(object, {
+        where: { id: values.length === 1 ? values[0] : { $in: values } },
+        fields: ['id', ...fields],
+        context,
+      } as EngineQueryOptions) as Array<Record<string, unknown>>;
+      for (const row of Array.isArray(found) ? found : []) {
+        if (isRow(row) && row.id != null && ids.has(String(row.id))) served.set(String(row.id), row);
+      }
+    } catch (err) {
+      this.logger?.warn?.('the caller\'s read of the stored record failed — its stored references forgive nothing', {
+        object, error: err,
+      });
+    }
+  }
+  return rows.map((row) => {
+    const view = row.id != null ? served.get(String(row.id)) : undefined;
+    const kept: Record<string, unknown> = {};
+    if (!view) return kept;
+    for (const field of fields) {
+      if (Object.prototype.hasOwnProperty.call(view, field) && Object.prototype.hasOwnProperty.call(row, field)
+        && servedAsStored(view[field], row[field])) {
+        kept[field] = row[field];
+      }
+    }
+    return kept;
+  });
+}
+
 /** The ids a stored reference value holds: each member of a multi-valued one, or the one scalar. */
 function storedReferenceIds(value: unknown): ReadonlySet<string> {
   const members = Array.isArray(value) ? value : [value];
@@ -199,7 +478,26 @@ function storedReferenceIds(value: unknown): ReadonlySet<string> {
   return ids;
 }
 
-/** The body of `ObjectQL#masterDetailHeadersCallerReads`; the method's docblock there is its contract. */
+/**
+ * [#22519] Read 1 of the write's master-detail header read: which of `ids`
+ * the caller's READ DOOR returns — one `find` for the whole batch, under the
+ * caller's own context, so every enforcement layer in the middleware chain
+ * (RBAC, RLS, sharing, row scope) answers it, as it answers the preview's
+ * first read ({@link resolvePreviewParents}). Projected to `id`: what the
+ * header HOLDS is read 2's question, never this one's.
+ *
+ * A header it does not return binds as a header that exists nowhere binds:
+ * the reference check answers `reference_not_found` for it
+ * ({@link callerReadableReferenceExists}), and the write's header resolution
+ * leaves `parent` unbound for it ({@link resolveMasterDetailParent},
+ * {@link resolveMasterDetailParents}). A read that fails — a refusal of the
+ * read itself included — returned no header, so every header binds as
+ * missing, as the preview binds them and as the write's own failed header
+ * read does; ⛔ never as readable.
+ *
+ * A SYSTEM caller (seed replay, boot) has no read door to ask: every id goes
+ * straight to read 2, and its write resolves exactly as before.
+ */
 export async function masterDetailHeadersCallerReads(
   this: Pick<ReferentialIntegrityHost, 'find' | 'logger'>,
   master: string,
@@ -224,7 +522,7 @@ export async function masterDetailHeadersCallerReads(
     }
     return served;
   } catch (err) {
-    this.logger?.warn?.('the caller\'s read of the master-detail header failed — the header binds as a missing header', {
+    this.logger?.warn?.('the caller\'s read of the referenced record failed — it answers as a record that does not exist', {
       object: master, error: err,
     });
     return new Set();

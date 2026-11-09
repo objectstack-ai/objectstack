@@ -43,7 +43,7 @@ A `slotted` record page has no `tabs` slot — see [Record Page](./record-page.m
 
 | `type`               | Use |
 |:---------------------|:----|
-| `page:header`        | `title` / `subtitle` templates + `actions: string[]` — ids of the bound object's actions, never a sibling action node |
+| `page:header`        | `title` / `subtitle` templates + `actions` (ids of the bound object's actions, never action nodes) or `placedActions: true` (all placed, read live) |
 | `page:card`          | Bordered/un-bordered card with `children: Component[]` (plus an optional `footer: Component[]` slot) |
 | `flex`               | Generic styleable box (`properties.children`) — the workhorse for custom layout; style via `responsiveStyles` (see Styling below) |
 | `element:text`       | Text node — `properties.content`; style via `responsiveStyles` |
@@ -68,7 +68,7 @@ An invoice, a delivery order, a letter or a report is an ordinary page with a
 the document. Only a `kind: 'full'` page of `type: 'record'`, `'home'` or
 `'app'` with its blocks in `regions` may declare it: the parse refuses `print`
 on a `list` page (its switch is `interfaceConfig.allowPrinting`), a `utility`
-page, a `slotted` / `html` / `react` page and a `full` page with no regions.
+page and a `slotted` / `html` / `react` page.
 
 `print` keys, each mapped to print CSS: `paperSize` (`'A4'` default, `'A5'`,
 `'Letter'`, `'Legal'`) and `orientation` (`'portrait'` default, `'landscape'`);
@@ -101,7 +101,7 @@ a list prints as shown via the view's `allowPrinting`.
 import { definePage } from '@objectstack/spec/ui';
 
 export const InvoicePrintPage = definePage({
-  name: 'invoice_print', label: 'Invoice', type: 'record', object: 'invoice',
+  name: 'crm_invoice_print', label: 'Invoice', type: 'record', object: 'invoice',
   print: { paperSize: 'A4', margins: { top: 15, right: 12, bottom: 15, left: 12 },
            repeatHeader: true, repeatFooter: true, pageNumbers: true },
   regions: [
@@ -143,13 +143,16 @@ Tags are the **registered components** (bare names: `<flex>`, `<grid>`, `<card>`
 set** (`<h1>`–`<h6>`, `<p>`, `<a>`, `<ul>/<ol>/<li>`, `<img>`, `<blockquote>`, `<strong>`,
 …). Props come from each component's registry `inputs` (e.g. `<text content=…>`,
 `<badge label=…>`). **No JavaScript** — `onClick`, `{expr}` logic and `.map()` are NOT
-available; use `kind:'react'` for those. `os build` parses the source and fails loudly
+available. `os build` parses the source and fails loudly
 on unknown tags / missing required props / forbidden constructs (event handlers,
 `dangerouslySetInnerHTML`).
 
+<!-- os:check -->
 ```typescript
+import { definePage } from '@objectstack/spec/ui';
+
 export const ReleaseNotesPage = definePage({
-  name: 'release_notes', label: 'Release Notes', type: 'home', kind: 'html',
+  name: 'crm_release_notes', label: 'Release Notes', type: 'home', kind: 'html',
   source: `
 <flex direction="col" gap={6} style={{"maxWidth":"768px","margin":"0 auto","padding":"40px"}}>
   <h1 style={{"fontSize":"32px","fontWeight":700,"color":"hsl(var(--foreground))"}}>Release Notes</h1>
@@ -254,9 +257,11 @@ Rules:
   `element:button` — and style each block's root. (`page:card` etc. are fine for
   structure but style what you control.)
 
+<!-- os:check -->
 ```typescript
-// A styled pricing card — every block carries responsiveStyles + tokens.
-{
+import type { PageComponent } from '@objectstack/spec/ui';
+
+const card: PageComponent = {
   id: 'plan_solo', type: 'flex',
   responsiveStyles: {
     large: {
@@ -277,7 +282,7 @@ Rules:
         properties: { label: 'Upgrade', variant: 'primary', size: 'large' } },
     ],
   },
-}
+};
 ```
 
 **In the source tiers (`kind:'html'` / `kind:'react'`) the same rule holds — no
@@ -319,8 +324,7 @@ grounding the AI assistant reads about a package.
 2. **Namespace-prefixed filename.** The filename stem becomes the doc
    `name` (`^[a-z][a-z0-9_]*$`) and must start with the package namespace
    (`crm_…`). `os build` refuses a bare `user_guide`
-   (`docs/namespace-prefix`) — hygiene, not uniqueness: two packages
-   coexist on one bare name (ADR-0048 §3.4).
+   (`docs/namespace-prefix`).
 3. **Title** resolves: frontmatter `title:` → first `#` heading → `name`.
    Optional frontmatter `description:` is a one-line summary the docs portal
    shows under the title — add it on index/overview docs.
@@ -345,8 +349,7 @@ behind the screen is not.
 The viewer is **platform-level**: one global `/docs/<name>` route
 resolves any doc regardless of which app you came from. The URL is
 **single-coordinate** — no package or app prefix — so a doc has exactly
-one URL. Do **not** design per-app or per-package doc URLs; that gives one
-doc many addresses and breaks cross-references.
+one URL. Do **not** design per-app or per-package doc URLs.
 
 To surface a doc inside an app, add a `doc` navigation item (a `url` item is
 for an external or custom URL): `doc: '<name>'` opens that page,
@@ -354,17 +357,19 @@ for an external or custom URL): `doc: '<name>'` opens that page,
 in that book). It inherits the docs audience gate, and `os build` refuses a
 target the package lacks (`docs/nav-target`):
 
+<!-- os:check -->
 ```typescript
-navigation: [
+import type { NavigationItem } from '@objectstack/spec/ui';
+
+const navigation: NavigationItem[] = [
   { id: 'nav_help', type: 'doc', doc: 'crm_user_guide',
     label: 'User Guide', icon: 'book-open' },
-]
+];
 ```
 
 > **Live instances.** For a *live, interactive
 > instance* — a dashboard, a report, a record table — **don't embed it**:
-> link to it by URL and let the platform render it (one source, never a
-> stale copy).
+> link to it by URL and let the platform render it.
 
 ### Inline metadata views — the `metadata` fence (ADR-0051)
 

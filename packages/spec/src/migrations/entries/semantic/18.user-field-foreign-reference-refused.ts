@@ -23,10 +23,10 @@ export const entry: SemanticMigration = {
     + '`current_user` default, a sharing rule over the users a field holds) treated its values as users. '
     + 'No conversion can carry the rewrite. A `lookup` joins the referential delete walk and gets '
     + '`deleteBehavior: \'set_null\'` by default, so it would start clearing the column when the target '
-    + 'record is deleted, which a `user` field never did, and `deleteBehavior` has no value that means '
-    + '"leave it". A converted field would also stop counting as one that holds users for sharing, and '
-    + 'a `current_user` default on it would be refused. So a delete-behaviour judgement is owed by the '
-    + 'author.',
+    + 'record is deleted, which a `user` field that declares no `deleteBehavior` does not do, and '
+    + '`deleteBehavior` has no value that means "leave it". A converted field would also stop counting '
+    + 'as one that holds users for sharing, and a `current_user` default on it would be refused. So a '
+    + 'delete-behaviour judgement is owed by the author.',
   acceptanceCriteria:
     'Every `user` field in the stack either declares no `reference` or declares `reference: \'sys_user\'`, '
     + 'and `os validate` passes. A field that still names another object is refused at parse with an '

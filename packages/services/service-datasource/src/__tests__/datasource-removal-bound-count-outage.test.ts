@@ -277,6 +277,8 @@ describe('#6504 — the plugin wiring composes the count and the verdict correct
     const read = await config.countBoundObjectsDiagnosed!('warehouse');
 
     expect(read.count, 'the count comes from listObjects(), filtered by datasource').toBe(2);
+    // [#30444] The names ride on the same filtered listing, sorted.
+    expect(read.objects).toEqual(['wh_line', 'wh_order']);
     expect(read.degraded).toBe(true);
     expect(read.errors).toEqual([LOADER_FAILURE]);
     expect(diagnosedCalls, 'the verdict is asked for `object`, the type being counted').toEqual([
@@ -295,6 +297,6 @@ describe('#6504 — the plugin wiring composes the count and the verdict correct
 
     const read = await config.countBoundObjectsDiagnosed!('warehouse');
 
-    expect(read).toEqual({ count: 1, degraded: false, errors: [] });
+    expect(read).toEqual({ count: 1, degraded: false, errors: [], objects: ['wh_order'] });
   });
 });

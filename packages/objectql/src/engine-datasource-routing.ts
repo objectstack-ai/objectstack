@@ -45,6 +45,11 @@
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it, so the published surface does not
  * move.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { IDataDriver } from '@objectstack/core';
@@ -68,7 +73,21 @@ export interface DatasourceRoutingHost {
   matchPattern: ObjectQL['matchPattern'];
 }
 
-/** The body of `ObjectQL#getDriver`; the method's docblock there is its contract. */
+/**
+ * Helper to get the target driver
+ *
+ * Resolution priority (first match wins):
+ * 1. Object's explicit `datasource` field (if not 'default')
+ * 2. DatasourceMapping rules (namespace/package/pattern matching)
+ * 3. Lifecycle-class separation (ADR-0057 §3.6): telemetry/event/audit
+ *    objects route to the dedicated 'telemetry' datasource when registered
+ * 4. Package's `defaultDatasource` from manifest
+ * 5. Global default driver
+ *
+ * The order itself lives in {@link resolveDatasourceBinding} — this method
+ * turns the name it decides on into a driver, and diagnoses the cases where
+ * that driver is missing.
+ */
 export function getDriver(
   this: Pick<DatasourceRoutingHost, 'resolveDatasourceBinding' | 'drivers' | 'logger' | 'unavailableDatasources'>,
   objectName: string,
@@ -131,7 +150,12 @@ export function getDriver(
   throw new Error(`[ObjectQL] No driver available for object '${objectName}'`);
 }
 
-/** The body of `ObjectQL#resolveDatasourceFromMapping`; the method's docblock there is its contract. */
+/**
+ * Resolve datasource from mapping rules
+ *
+ * Rules are evaluated in order (or by priority if specified).
+ * First matching rule wins.
+ */
 export function resolveDatasourceFromMapping(
   this: Pick<DatasourceRoutingHost, 'datasourceMapping' | 'matchPattern'>,
   objectName: string,
@@ -173,7 +197,10 @@ export function resolveDatasourceFromMapping(
   return null;
 }
 
-/** The body of `ObjectQL#matchPattern`; the method's docblock there is its contract. */
+/**
+ * Simple glob pattern matching
+ * Supports * (any chars) and ? (single char)
+ */
 export function matchPattern(objectName: string, pattern: string): boolean {
   const regexPattern = pattern
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')  // Escape regex special chars

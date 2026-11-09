@@ -42,6 +42,7 @@ import { AddWidgetPicker } from '../previews/AddWidgetPicker.js';
 import { WIDGET_TYPE_META, UnknownWidgetIcon } from '../previews/widget-types.js';
 import type { MetadataDefaultInspectorProps } from '../default-inspector-registry.js';
 import { SchemaForm } from '../SchemaForm.js';
+import { fallbackFormPatch } from './fallbackFormPatch.js';
 import type { FormViewSpec } from '../SchemaForm.js';
 import { getDashboardForm, getDashboardSchema } from '../dashboard-schema.js';
 import { mergeServerFields } from '../mergeServerFields.js';
@@ -312,7 +313,7 @@ export function DashboardDefaultInspector({
             value={draft}
             hiddenFields={['name', 'label', 'description', 'widgets']}
             readOnly={readOnly}
-            onChange={(next) => onPatch(next)}
+            onChange={(next) => onPatch(fallbackFormPatch(draft, next))}
           />
         ) : (
           <p className="text-[11px] text-muted-foreground">

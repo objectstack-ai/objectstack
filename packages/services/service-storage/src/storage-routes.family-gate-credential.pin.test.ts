@@ -85,6 +85,8 @@ function services(sessionReads: { n: number }) {
       { user_id: KEY_OWNER, organization_id: ORG, role: 'member' },
       { user_id: MFA_OWNER, organization_id: ORG, role: 'member' },
     ],
+    // The keys' owners exist: an API key authenticates only as an owner who exists.
+    sys_user: [{ id: KEY_OWNER }, { id: MFA_OWNER }],
     sys_file: [
       {
         id: UNCLAIMED_FILE, key: 'files/unclaimed.txt', name: 'unclaimed.txt', mime_type: 'text/plain', size: 3,

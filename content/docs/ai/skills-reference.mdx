@@ -45,7 +45,7 @@ npm create objectstack@latest my-app
 
 {/* BEGIN GENERATED: skills (packages/spec/scripts/build-skill-docs.ts) — DO NOT EDIT */}
 
-ObjectStack ships **10 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
+ObjectStack ships **11 skills** — one per authoring domain, plus process skills for how a project is delivered. Each is self-contained: an AI assistant loads only the ones a task needs.
 
 ## Quick Reference
 
@@ -61,6 +61,7 @@ ObjectStack ships **10 skills** — one per authoring domain, plus process skill
 | 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout. |
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
 | 10 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
+| 11 | [ObjectUI](#objectui) | `ui` | `skills/objectui/` | Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality. |
 
 ---
 
@@ -201,6 +202,20 @@ Use when a project is on an older protocol major and must move to the current on
 Do not use to author new metadata (the domain skills cover that), or to reconcile physical database drift (that is objectstack-platform's `os migrate plan` / `os migrate apply`).
 
 **Tags:** `upgrade`, `migration`, `protocol`, `major`, `retired-keys`, `tombstone`, `conversions`, `validate`, `report`
+
+---
+
+### ObjectUI
+
+**Domain** `ui` · **Path** `skills/objectui/`
+
+Universal Server-Driven UI (SDUI) engine for building JSON-driven React interfaces with Shadcn design quality.
+
+Use for schema-driven page building, plugin development, expression bindings, data integration, testing, auth/permissions, i18n, mobile responsiveness and project setup with the `@object-ui/*` packages. Triggers on ObjectUI, SchemaRenderer, JSON UI schemas, SDUI, metadata-driven UIs, `@object-ui/*`.
+
+Do NOT use for server-side ObjectStack concerns (data modelling, API endpoints, automation, formulas, agents) — those belong to the `objectstack-*` skills.
+
+**Tags:** `sdui`, `schema-renderer`, `json-ui`, `react`, `shadcn`, `tailwind`, `plugin`, `expression`
 
 ---
 

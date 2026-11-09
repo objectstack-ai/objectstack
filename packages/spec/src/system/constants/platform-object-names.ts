@@ -35,6 +35,8 @@
  * package. Each group is the exact set that package registers.
  */
 export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly string[]>> = {
+  /** `@objectstack/cloud-connection` — the cloud binding credential every replica reads, registered only when several replicas are declared over the Redis cluster driver. */
+  'cloud-connection': ['sys_cloud_binding_credential'],
   /** `@objectstack/metadata-core` — metadata storage & commit history. */
   'metadata-core': [
     'sys_metadata',
@@ -54,12 +56,14 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_email_template',
     'sys_exchange_rate',
     'sys_identity_email',
+    'sys_idp_group_mapping',
     'sys_import_job',
     'sys_invitation',
     'sys_job',
     'sys_job_queue',
     'sys_job_run',
     'sys_jwks',
+    'sys_lifecycle_state',
     'sys_member',
     'sys_metadata_activation',
     'sys_migration',
@@ -76,6 +80,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_personal_view',
     'sys_platform_setting',
     'sys_platform_setting_audit',
+    'sys_recycle_bin',
     'sys_scim_connection_binding',
     'sys_scim_connection_credential',
     'sys_scim_group',
@@ -85,6 +90,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_scim_subject',
     'sys_scim_user',
     'sys_secret',
+    'sys_seed_landed_key',
     'sys_session',
     'sys_setting',
     'sys_setting_audit',
@@ -116,6 +122,7 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
   /** `@objectstack/plugin-sharing` — record shares & share links; ownership queues and the assignment cursor (ADR-0142). */
   'plugin-sharing': [
     'sys_assignment_cursor',
+    'sys_assignment_rule',
     'sys_queue',
     'sys_queue_member',
     'sys_record_share',

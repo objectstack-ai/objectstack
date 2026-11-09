@@ -504,6 +504,15 @@ describe.concurrent('[#21839] the legacy upgrade', () => {
     expect(await storedHash(engine, link.id), 'no write on a refused redemption').toBe(legacyHash);
   });
 
+  // [#30920] An explicit budget, sized to the measured work. Each of the two
+  // redemptions re-hashes the legacy password under a fresh salt before the
+  // write is refused, so the case pays two native scrypt derivations the memo
+  // cannot answer, beside the cases running concurrently with it. The second
+  // redemption is the one "reported once" is judged on, so neither is cut.
+  // Its slowest `Test Core` reading was 2605 ms (`main` push and merge group
+  // runs, 2026-11-03..06, n=4); local idle, 458-689 ms. 3x the slowest reading,
+  // rounded up to the next second (the rule and why 3x are in
+  // share-link-password-webcontainer.test.ts): 3 x 2605 = 7815, so 8000.
   it('a refused upgrade write does not block the read, leaves the legacy form verifying, and is reported once without the password', async () => {
     const { engine, service, logger } = await boot({ refuseHashWrites: true });
     const link = await service.createLink({ object: 'pin_doc', recordId: 'doc_1' }, CREATOR);
@@ -519,7 +528,7 @@ describe.concurrent('[#21839] the legacy upgrade', () => {
     expect(reports[0]![1]).toMatchObject({ link: link.id, reason: 'STORAGE_REFUSED' });
     expect(loggedText(logger)).not.toContain(PASSWORD);
     expect(loggedText(logger)).not.toContain(legacyHash.split('$')[2]);
-  });
+  }, 8_000);
 
   it('is not attempted when the deployment injects its own hasher pair', async () => {
     const { engine, service } = await boot({

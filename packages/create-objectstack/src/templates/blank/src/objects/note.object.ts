@@ -1,5 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+// SAMPLE OBJECT: delete or replace it once your own objects exist.
+//
+// `note` is here so a blank project has one object to boot, query and test
+// on day one. It is not part of the app you are building: until you remove
+// it, it ships in every build, is served over REST and is listed to MCP
+// clients like any object of yours. To remove it, delete this file and its
+// export line in `src/objects/index.ts`, then point `note.test.ts` at one of
+// your own objects (it imports `Note` and will not compile without it).
+// The README's "The sample `note` object" section says the same.
+
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 export const Note = ObjectSchema.create({

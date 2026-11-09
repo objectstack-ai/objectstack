@@ -16,7 +16,7 @@ import { ChatbotEnhanced } from '../ChatbotEnhanced';
 const STAGED_TYPES = ['object', 'view', 'dashboard', 'app', 'seed', 'dataset', 'permission'] as const;
 type Heading = (typeof STAGED_TYPES)[number] | 'other';
 const HEADINGS: Record<'zh' | 'en', Record<Heading, string>> = {
-  zh: { object: '对象', view: '视图', dashboard: '仪表板', app: '应用', seed: '示例数据', dataset: '数据集', permission: '权限', other: '其他' },
+  zh: { object: '对象', view: '视图', dashboard: '仪表盘', app: '应用', seed: '示例数据', dataset: '数据集', permission: '权限', other: '其他' },
   en: { object: 'Objects', view: 'Views', dashboard: 'Dashboards', app: 'App', seed: 'Sample data', dataset: 'Datasets', permission: 'Permissions', other: 'Other' },
 };
 

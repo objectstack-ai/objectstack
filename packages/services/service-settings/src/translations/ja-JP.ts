@@ -46,7 +46,10 @@ export const jaJP: PlatformTranslationData = {
         smtp_password: { label: 'パスワード' },
         api_key: { label: 'API キー' },
         from_email: { label: '差出人アドレス', help: '例: no-reply@example.com' },
-        from_name: { label: '差出人名' },
+        from_name: {
+          label: '差出人名',
+          help: '空欄の場合は製品名(ブランディング)を使用し、未設定ならこのデプロイの名前を使用します。',
+        },
         queue_delivery: {
           label: '永続キュー配信',
           help: '各メッセージをインライン送信ではなくジョブキューに渡します。配信に失敗してもワーカーが'
@@ -135,7 +138,10 @@ export const jaJP: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: 'メール/パスワードログインを有効化' },
+        email_password_enabled: {
+          label: 'メール/パスワードログインを有効化',
+          confirmOffText: 'パスワードでサインインしているユーザーは、別のサインイン方法が必要になります。',
+        },
         signup_enabled: {
           label: 'メールでの新規登録を許可',
           help: 'メールとパスワードによる新規登録フォームを開きます。誰を受け入れるかは下の「セルフ登録の対象」が決めます。「招待のみ」では保留中の招待を持つアドレスのみ、「メールドメイン」では許可リストのドメインと招待済みのアドレス、「オープン」では誰でも受け入れます。オフにすると、どの対象でもフォームが閉じ、招待済みのアドレスも登録できません。',
@@ -206,6 +212,7 @@ export const jaJP: PlatformTranslationData = {
         },
         mfa_required: {
           label: '多要素認証を必須にする',
+          options: { off: 'オフ', administrators: '管理者', everyone: '全員' },
           help: '認証アプリを登録していないユーザーは、猶予期間の終了後にデータへのアクセスをブロックされます。これを有効にすると、ユーザーが登録できるよう二要素機能もオンになります。',
         },
         mfa_grace_period_days: {
@@ -346,25 +353,23 @@ export const jaJP: PlatformTranslationData = {
       },
     },
 
-    feature_flags: {
-      title: '機能フラグ',
-      description: 'この組織で実験的・ベータ機能を切替えます。',
+    access_policy: {
+      title: 'アクセスポリシー',
+      description: 'この組織のサインイン制限です。デプロイの認証設定は常に適用され、ここではそれに制限を追加することしかできません。',
       groups: {
-        productivity: { title: '生産性' },
-        collaboration: { title: 'コラボレーション' },
+        network: { title: 'ネットワーク', description: 'この組織のメンバーがサインインできる場所。' },
+        sessions: { title: 'セッション', description: 'メンバーのセッションの有効期間。各上限はデプロイの上限より短くすることしかできません。' },
+        multi_factor: { title: '多要素認証', description: 'この組織で認証アプリ (TOTP) によるアカウント保護が必須となる人。' },
       },
       keys: {
-        ai_enabled: {
-          label: 'AI アシスタント',
-          help: 'アプリ内 AI アシスタントパネルを有効化します。',
+        allowed_ip_ranges: { label: '許可する IP 範囲' },
+        session_idle_timeout_minutes: { label: 'アイドルタイムアウト (分)' },
+        session_absolute_max_hours: { label: 'セッションの最大有効期間 (時間)' },
+        max_concurrent_sessions_per_user: { label: 'ユーザーあたりの最大同時セッション数' },
+        mfa_required: {
+          label: '多要素認証を必須にする',
+          options: { off: 'オフ', administrators: '管理者', everyone: '全員' },
         },
-        kanban_swimlanes: { label: 'カンバンのスイムレーン' },
-        realtime_cursors: { label: 'リアルタイムカーソル' },
-        inline_comments: { label: 'インラインコメント' },
-      },
-      banners: {
-        beta_notice: { title: 'ご注意ください',
-          text: 'ベータ機能は予告なく変更される場合があります。サーバー設定で指定した機能はデプロイ全体でオンまたはオフに固定され、ここでは変更できません。' },
       },
     },
 
@@ -586,17 +591,23 @@ export const jaJP: PlatformTranslationData = {
         },
         retention_overrides: {
           label: '保持期間の上書き',
-          help: 'オブジェクトごとの保持ウィンドウの上書き：{ "<object>": { "maxAge": "1y", "expireAfter": "30d" } }。期間は h/d/w/y で指定します。'
+          help: 'オブジェクトごとの保持ウィンドウの上書き。期間は h/d/w/y で指定します。'
             + '組織ごとに設定するため、規制対象の組織は数年、開発用の組織は数日だけ保持できます。'
             + 'プラットフォーム機能が必要とする最小期間（例：ジョブキューの重複検出ウィンドウ）より短い上書きは無視されてエラーとして記録され、既定のウィンドウが引き続き適用されます。',
+          keyColumn: { label: 'オブジェクト' },
+          columns: { maxAge: { label: '行の保持期間' }, expireAfter: { label: '行の失効までの期間' } },
         },
         quotas: {
           label: '行数クォータ',
-          help: 'オブジェクトごとの最大行数：{ "<object>": 1000000 }。超過するとガバナンスアラートが発生します。クォータが宣言済みのポリシーを超えて削除することはありません。',
+          help: 'オブジェクトごとの最大行数。超過するとガバナンスアラートが発生します。クォータが宣言済みのポリシーを超えて削除することはありません。',
+          keyColumn: { label: 'オブジェクト' },
+          columns: { max_rows: { label: '最大行数' } },
         },
         quota_defaults: {
           label: 'クラス別の既定クォータ',
-          help: 'ライフサイクルクラスごとのフォールバッククォータ：{ "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }。',
+          help: 'ライフサイクルクラスごとのフォールバッククォータ（telemetry、transient、event、audit）。',
+          keyColumn: { label: 'ライフサイクルクラス' },
+          columns: { max_rows: { label: '最大行数' } },
         },
         growth_alert_rows: {
           label: '増加アラートのしきい値（クリーンアップ 1 回あたりの行数）',

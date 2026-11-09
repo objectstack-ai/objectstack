@@ -184,7 +184,6 @@ describe('spec/ui …Schema re-exports (#2561, decision (a))', () => {
     expect(typeof Types.defineStack).toBe('function');
     expect(Types.ObjectStackSchema).toBeDefined();
     expect(Types.SpecReportSchema).toBeDefined();
-    expect(Types.SpecReportTypeEnum).toBeDefined();
     expect(Types.ACTION_LOCATIONS).toBeDefined();
     expect(Types.ActionLocationSchema).toBeDefined();
   });

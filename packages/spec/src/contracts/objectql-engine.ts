@@ -414,10 +414,10 @@ export interface IObjectQLEngine extends IDataEngine, QueryEvaluationGate {
     /**
      * The objects a delete of a record of `objectName` can cascade into, by
      * name: every object holding a relation into it whose resolved delete
-     * behaviour is `cascade` (a `master_detail` by default, a `lookup` or
-     * `tree` that declares `deleteBehavior: 'cascade'`), and transitively the
-     * objects that cascade into those, each once, in the order the delete's
-     * own walk first reaches them. `objectName` itself is named only when a
+     * behaviour is `cascade` (a `master_detail` by default, a `lookup`, `tree`
+     * or `user` field that declares `deleteBehavior: 'cascade'`), and
+     * transitively the objects that cascade into those, each once, in the
+     * order the delete's own walk first reaches them. `objectName` itself is named only when a
      * cascading relation leads back to it. A `restrict` or `set_null`
      * relation removes nothing and is not named. `undefined` when the engine
      * does not hold `objectName`.

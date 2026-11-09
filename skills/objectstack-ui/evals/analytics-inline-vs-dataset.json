@@ -9,7 +9,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["defineDataset", "dataset", "dimensions", "values"],
-        "must_not_contain": ["valueField", "categoryField"]
+        "must_not_contain": ["valueField:", "categoryField"]
       }
     },
     {

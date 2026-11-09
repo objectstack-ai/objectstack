@@ -11,6 +11,17 @@ export type { RuntimeConfig } from './runtime.js';
 export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase, sqliteFilenameFromUrl } from './standalone-stack.js';
 export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDatabase } from './standalone-stack.js';
 
+// [#30962] The host seam for package lifecycle state (module enable/disable):
+// a host whose `OS_HOME` does not outlive its container supplies the store,
+// and every kernel without one keeps the file under `OS_HOME`.
+export {
+  PACKAGE_STATE_STORE_SERVICE,
+  PACKAGE_STATE_STORE_PLUGIN_NAME,
+  PackageStateStorePlugin,
+  createPackageStateStorePlugin,
+} from './package-state-host-store.js';
+export type { PackageStateStore } from './package-state-host-store.js';
+
 // The dev schema self-heal decision (#21733) — public because `@objectstack/cli`
 // is a reader, not a second home: its config-load fallback and its `telemetry`
 // sibling read the SAME answer the standalone stack's `default` datasource does.
@@ -202,6 +213,10 @@ export type { SeedSourceOutcome } from './seed-summary.js';
 // replays the UNION of every seed source, not just the first one.
 export { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 export { declareSeedSource, readSeedSettlement } from './seed-settlement.js';
+// Per-organization seed locale (#30281) — the producer of `Seed.locale` that the
+// marketplace install, reseed, rehydrate heal and per-org replay share.
+export { appDefaultSeedLocale, describeSeedLocale, resolveSeedLocaleForLoad, seedsDeclareLocale } from './seed-locale.js';
+export type { ResolvedSeedLocale, SeedLocaleQuestion, SeedLocaleSource } from './seed-locale.js';
 export type { SeedSourceHandle } from './seed-settlement.js';
 // External Datasource Federation — boot-validation gate (ADR-0015, Gate 2)
 export { ExternalValidationPlugin, createExternalValidationPlugin } from './external-validation-plugin.js';
@@ -234,6 +249,17 @@ export type { KernelResolver } from './http-dispatcher.js';
 export { DomainHandlerRegistry } from './domain-handler-registry.js';
 export type { DomainRoute, DomainHandler, DomainRequest, DomainHandlerDeps } from './domain-handler-registry.js';
 export { MiddlewareManager } from './middleware.js';
+// The package disable door's dependent-rule verdict and its sentence, for a
+// host door that takes a package out of service another way: the validation
+// rules a disable would leave reading a withheld `objectExtensions` field, and
+// the `409 PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE` message naming them.
+// The same two functions `PATCH /packages/:id/disable` asks: one scan, one
+// sentence. ⛔ Never re-spell either in a host.
+export {
+    readDisableDependentRules as readPackageDisableDependents,
+    disableDependentRulesMessage as formatPackageDisableDependents,
+} from './domains/packages.js';
+export type { DisableDependentRule } from './domains/packages.js';
 
 // ── Security primitives ───────────────────────────────────────────────
 // Adapter-agnostic helpers for response hardening (CSP/HSTS/XCTO/…) and

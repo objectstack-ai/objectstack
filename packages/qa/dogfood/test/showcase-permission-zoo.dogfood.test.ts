@@ -143,16 +143,16 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
 
   // ── ADR-0090 D12: the delegated-admin gate, positive and negative ────────
   it('a delegate assigns an allowlisted position inside their subtree', async () => {
-    // [ADR-0131 D3/D4] `contributor` binds `showcase_contributor` on its own
+    // [ADR-0131 D3/D4] `showcase_contributor` binds the set of the same name on its own
     // definition (`permissionSets`), which the allowlist judges; no binding row.
     const assign = await stack.apiAs(delegateTok, 'POST', '/data/sys_user_position', {
       user_id: targetId,
-      position: 'contributor',
+      position: 'showcase_contributor',
       business_unit_id: 'bu_west_coast',
     });
     expect(assign.status, 'in-subtree, allowlisted assignment passes').toBeLessThan(300);
     const row = await ql.findOne('sys_user_position', {
-      where: { user_id: targetId, position: 'contributor' },
+      where: { user_id: targetId, position: 'showcase_contributor' },
       context: SYS,
     });
     expect(row, 'assignment persisted').toBeTruthy();
@@ -177,7 +177,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
   it('the same delegate is refused OUTSIDE their subtree (no lateral reach), on the scope-violation code', async () => {
     const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_user_position', {
       user_id: targetId,
-      position: 'contributor',
+      position: 'showcase_contributor',
       business_unit_id: 'bu_hq_finance',
     });
     const a = await refusalEnvelope(r);
@@ -202,7 +202,7 @@ describe('showcase: ADR-0090 permission-model zoo', () => {
     // An unanchored assignment: no `business_unit_id` to judge against any scope.
     const r = await stack.apiAs(delegateTok, 'POST', '/data/sys_user_position', {
       user_id: targetId,
-      position: 'contributor',
+      position: 'showcase_contributor',
     });
     const a = await refusalEnvelope(r);
     expect([a.status, a.code], a.message).toEqual([403, 'PERMISSION_DENIED']);

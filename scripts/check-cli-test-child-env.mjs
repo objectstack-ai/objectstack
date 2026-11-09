@@ -2635,13 +2635,20 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the eighteen files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the twenty-one files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#26130] Joined the population deliberately: its subject is a plain
         // `os dev` boot that compiles before it serves, measured on the BUILT
         // packages the way `dev-standalone-self-heal` measures its `os dev`
         // boots. Its spawn hands the child `NODE_ENV: undefined`.
         'packages/cli/test/dev-connector-env-parity.integration.test.ts',
+        // [#31761] Joined the population deliberately: its CONTROL leg is a
+        // plain `os start` on a host config in PRODUCTION posture (no dev
+        // artifact door, so the config module is the only copy), which
+        // `bin/run-dev.js` cannot reach — it sets `NODE_ENV=development` before
+        // argv is parsed, and `os start` then composes the door. Every spawn
+        // hands its child `NODE_ENV: undefined`.
+        'packages/cli/test/dev-host-config-artifact-source.integration.test.ts',
         // [#26615] Joined the population deliberately, beside
         // `dev-standalone-self-heal`: its subject is a plain `os dev` whose
         // refused boot runs the organization-ownership ceremony through the
@@ -2655,6 +2662,12 @@ export function selfTest() {
         // `NODE_ENV=development` before argv is parsed. Every spawn hands its
         // child `NODE_ENV: undefined`.
         'packages/cli/test/dev-standalone-self-heal.integration.test.ts',
+        // [#29934] Joined the population deliberately: its subject is the data
+        // key a plain `os dev` and then a plain `os start` resolve over one
+        // project, and `os start` forces production posture on its `serve`
+        // child — measured on the BUILT packages as the card's reproduction
+        // ran them. Its spawn hands the child `NODE_ENV: undefined`.
+        'packages/cli/test/dev-start-shared-data-key.integration.test.ts',
         // [#12271] Joined the population deliberately, and it is the one member
         // whose subject is the ENTRY rather than `serve`: it spawns `bin/run.js`
         // with an ambient `development` / `test` child to assert that the
@@ -2708,6 +2721,13 @@ export function selfTest() {
         // so the tsx shim every `runServe()` caller uses cannot reach it at all.
         'packages/cli/test/serve-ready-degraded-boot.e2e.test.ts',
         'packages/cli/test/serve-stdio-stdout-purity.e2e.test.ts',
+        // [#30120] Joined the population deliberately: its subject is the
+        // official image's refusal and the production boot block of a plain
+        // `os start` (start forces a production `serve` child unless `NODE_ENV`
+        // is set), measured on the BUILT packages, and `bin/run-dev.js` sets
+        // `NODE_ENV=development` before argv is parsed, where neither exists.
+        // Every spawn hands its child `NODE_ENV: undefined`.
+        'packages/cli/test/start-deployment-durability.integration.test.ts',
         // [#24002] Joined the population deliberately: its subject is the
         // documented stdio invocation, `os start` in PRODUCTION posture (start
         // forces a production `serve` child unless `NODE_ENV` is set), and

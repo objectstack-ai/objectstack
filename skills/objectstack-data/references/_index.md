@@ -30,7 +30,9 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/driver/config-registry.zod.ts` — The driver-id → `datasource.config` shape registry.
 - `node_modules/@objectstack/spec/src/data/driver/memory.zod.ts` — Memory Driver Configuration Schema
 - `node_modules/@objectstack/spec/src/data/driver/mongo.zod.ts` — MongoDB Standard Driver Protocol
+- `node_modules/@objectstack/spec/src/data/driver/mssql.zod.ts` — Microsoft SQL Server driver configuration — the `config` slot of a
 - `node_modules/@objectstack/spec/src/data/driver/mysql.zod.ts` — MySQL / MariaDB driver configuration — the `config` slot of a `datasource`
+- `node_modules/@objectstack/spec/src/data/driver/oracle.zod.ts` — Oracle Database driver configuration — the `config` slot of a `datasource`
 - `node_modules/@objectstack/spec/src/data/driver/postgres.zod.ts` — PostgreSQL driver configuration — the `config` slot of a `datasource` whose
 - `node_modules/@objectstack/spec/src/data/driver/sqlite.zod.ts` — SQLite driver configuration — the `config` slot of a `datasource` whose
 - `node_modules/@objectstack/spec/src/data/driver/turso.zod.ts` — Turso / libSQL Driver Protocol.
@@ -40,7 +42,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/data/query.zod.ts` — QueryAST — Abstract Syntax Tree for data queries.
 - `node_modules/@objectstack/spec/src/data/seed-file.zod.ts` — Seed files — a file a package ships, written into a file field by a seed
 - `node_modules/@objectstack/spec/src/identity/eval-user.zod.ts` — EvalUser — the one user-context contract (ADR-0068 D1).
-- `node_modules/@objectstack/spec/src/kernel/execution-context.zod.ts` — Exports: AuthGateCodeSchema, AuthGateScopeSchema, ExecutionContextSchema
+- `node_modules/@objectstack/spec/src/kernel/execution-context.zod.ts` — Exports: AuthGateCodeSchema, AuthGateScopeSchema, PermissionSetAddressSchema, ExecutionContextSchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/kernel/override-declaration.zod.ts` — The override declaration (ADR-0146 D2)
 - `node_modules/@objectstack/spec/src/security/explain.zod.ts` — [ADR-0090 D6] Access-explanation contract — `explain(principal, object,

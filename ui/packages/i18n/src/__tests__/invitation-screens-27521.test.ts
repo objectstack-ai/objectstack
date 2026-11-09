@@ -13,6 +13,7 @@
  * each key, translated, with the English placeholders kept.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales/index';
 
 const KEYS = [
@@ -31,7 +32,7 @@ const LANGS = Object.keys(builtInLocales) as Array<keyof typeof builtInLocales>;
 
 describe('objectstack#27521 — the Invitations screens keys', () => {
   it('reads all ten packs (guards the loops from emptying)', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each(LANGS)('%s carries every key as a non-empty string', (lang) => {

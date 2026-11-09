@@ -258,7 +258,8 @@ describe('[#22639] the by-name read: a list view or a dashboard the caller does 
             const refused = (await item('non-holder', type, name)).res;
             expect(envelope(refused)).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
             // The app's whole refusal, written by the same emitter: the same
-            // envelope keys, only the message names the item.
+            // envelope keys. [#30126 row 12] And the same localized sentence,
+            // which names no item (`meta-permission-refusal-locale.test.ts`).
             const app = (await item('non-holder', 'app', 'payroll')).res;
             expect(Object.keys(refused.body).sort()).toEqual(Object.keys(app.body).sort());
             expect(Object.keys(refused.body.error).sort()).toEqual(Object.keys(app.body.error).sort());

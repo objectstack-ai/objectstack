@@ -23,8 +23,9 @@
  * ## What it judges, and what it never reads
  *
  *  - **The row's own binding** — its `package_id` column — must be X's pair,
- *    `isCustomizationPairOf(package_id, X)` from `@objectstack/spec`, the one
- *    spelling of the `.custom` suffix (N-08). ⛔ Never a body stamp: a stored
+ *    `isPairOf(package_id, X)` from `@objectstack/metadata-core` — the pair of
+ *    the App that carries X, the `.custom` suffix spelled once in
+ *    `@objectstack/spec` (N-08). ⛔ Never a body stamp: a stored
  *    body can carry a `_packageId` copied from a read of the base, and that
  *    copy names the base while the row belongs to another package (the shape
  *    #28238 measured). A declaration from any package that is not X's pair —
@@ -32,7 +33,8 @@
  *    write gate refuses it at publish (N-09), and this predicate is the read's
  *    second line of defence behind that gate.
  *  - **The declaration** — the body's `overrides.package` must name X.
- *    `overrides.basedOn` is recorded and never judged (ADR-0146 D2).
+ *    `overrides.basedOn` is not read here: it never gates, and its one
+ *    reader is a base's upgrade plan, as advice (ADR-0146 D2, as amended).
  *  - **The type** — the row's type, folded to its canonical singular, must be
  *    one a declared override applies to (`isOverridableMetadataType`, the
  *    closed `OVERRIDE_TYPE_CLASSIFICATION`). An `object` is extended, never
@@ -46,12 +48,14 @@
  * before they ask this predicate (`declinesStoredRow`). Arming a flow override
  * is N-11's.
  *
- * Pure, synchronous and total: no I/O, no registry read, and `false` for any
- * input it cannot read as a declaring row. Whether the pair package is
+ * Pure, synchronous and total: no I/O, and `false` for any input it cannot
+ * read as a declaring row. Which App carries X is read through the caller's
+ * `installed` lookup (the registry it serves); whether the pair package is
  * INSTALLED is not its question.
  */
 
-import { isCustomizationPairOf, isOverridableMetadataType } from '@objectstack/spec/kernel';
+import { isOverridableMetadataType } from '@objectstack/spec/kernel';
+import { isPairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
 
@@ -82,10 +86,14 @@ export interface ServedOverrideRow {
  * | `package_id: null`, body `_packageId: 'hotcrm.custom'`, `overrides.package: 'hotcrm'` | `hotcrm` | `false` — a body stamp binds nothing |
  * | `object`, `package_id: 'hotcrm.custom'`, `overrides.package: 'hotcrm'` | `hotcrm` | `false` — extended, never replaced |
  */
-export function isServedOverrideRowOf(row: ServedOverrideRow | null | undefined, basePackageId: unknown): boolean {
+export function isServedOverrideRowOf(
+    row: ServedOverrideRow | null | undefined,
+    basePackageId: unknown,
+    installed: InstalledManifestLookup,
+): boolean {
     if (row === null || row === undefined || typeof row !== 'object') return false;
     if (typeof basePackageId !== 'string' || basePackageId === '') return false;
-    if (!isCustomizationPairOf(row.package_id, basePackageId)) return false;
+    if (!isPairOf(row.package_id, basePackageId, installed)) return false;
     if (typeof row.type !== 'string' || !isOverridableMetadataType(PLURAL_TO_SINGULAR[row.type] ?? row.type)) {
         return false;
     }
@@ -102,4 +110,39 @@ export function isServedOverrideRowOf(row: ServedOverrideRow | null | undefined,
     const declaration = (body as { overrides?: unknown }).overrides;
     if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false;
     return (declaration as { package?: unknown }).package === basePackageId;
+}
+
+/**
+ * [#30062] The base package a SERVED document is the declared override of, or
+ * `undefined` — the read-side reading of the answer {@link isServedOverrideRowOf}
+ * gave, never a second judgement of the row.
+ *
+ * Every read that serves a base's name from the pair's declaring row stamps
+ * the document with the overridden base's envelope (`_packageId` =
+ * `overrideOf`, `protocol-meta-item-reads.ts` and the list's slot), and the
+ * body keeps the declaration it was saved with (`overrides.package`). The two
+ * agree exactly on a document the reads served as the base's item from its
+ * pair: a row bound anywhere else keeps its own column's binding
+ * (`withRowBinding`), so a pair row that declares nothing reads the pair, a
+ * package-less row reads no package, and a declaration naming some other
+ * package never matches the envelope it is served under.
+ *
+ * | served document | type | answer |
+ * |:--|:--|:--|
+ * | `_packageId: 'hotcrm'`, `overrides.package: 'hotcrm'` | `page` | `'hotcrm'` |
+ * | the same document | `object` | `undefined` — extended, never replaced (D10) |
+ * | `_packageId: 'hotcrm.custom'`, `overrides.package: 'hotcrm'` | `page` | `undefined` — not served as the base's item |
+ * | `_packageId: 'hotcrm'`, no `overrides` | `page` | `undefined` — the base's own item |
+ * | no `_packageId`, `overrides.package: 'hotcrm'` | `view` | `undefined` — a package-less row |
+ *
+ * Pure, synchronous and total, as {@link isServedOverrideRowOf} is.
+ */
+export function servedOverrideBaseOf(type: unknown, document: unknown): string | undefined {
+    if (typeof type !== 'string' || !isOverridableMetadataType(PLURAL_TO_SINGULAR[type] ?? type)) return undefined;
+    if (document === null || typeof document !== 'object' || Array.isArray(document)) return undefined;
+    const declaration = (document as { overrides?: unknown }).overrides;
+    if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return undefined;
+    const base = (declaration as { package?: unknown }).package;
+    if (typeof base !== 'string' || base === '') return undefined;
+    return (document as { _packageId?: unknown })._packageId === base ? base : undefined;
 }

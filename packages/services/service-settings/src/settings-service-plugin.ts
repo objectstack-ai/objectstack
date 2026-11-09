@@ -25,16 +25,22 @@ import {
   type TenancyServiceResolver,
 } from '@objectstack/core';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
-import type { IHttpServer, IDataEngine, IHttpRequest, IAuthService } from '@objectstack/spec/contracts';
+import type { IHttpServer, IDataEngine, IHttpRequest, IAuthService, IEmailService } from '@objectstack/spec/contracts';
 import type { SettingsContext } from './settings-service.types.js';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import type { ICryptoProvider } from '@objectstack/spec/contracts';
 import type { SettingsAuditWriter, SettingsEngine, SettingsSecretStore } from './settings-service.types.js';
 import type { CryptoAdapter } from './crypto-adapter.js';
-import { LocalCryptoProvider } from './local-crypto-provider.js';
+import {
+  LocalCryptoProvider,
+  settleKeyFileChannel,
+  storedSecretReaderOverEngine,
+} from './local-crypto-provider.js';
 import { buildConfigChangeAuditSink } from './config-change-audit.js';
+import { buildDeploymentNoticeDoor } from './deployment-notice.js';
 import { registerLocalizationCurrencyLock, type CurrencyUsageEngine } from './localization-currency-lock.js';
+import { registerLocalizationLocaleOptions, type LocaleListService } from './localization-locale-options.js';
 import { USER_OBJECT, assertUserReferenceResolves, registeredLabel } from './actor-reference.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { registerSettingsReadDoor } from './settings-read-door.js';
@@ -116,7 +122,7 @@ const UNWALLED_ONLY_SETUP_NAV_BUNDLE_ID = `${SETTINGS_PLUGIN_ID}.setup-nav`;
 export interface SettingsServicePluginOptions {
   /**
    * Pre-register these manifests at boot. When omitted, the bundled
-   * builtin manifests (mail / branding / feature_flags) are loaded so
+   * builtin manifests (`builtinSettingsManifests`) are loaded so
    * a host gets a working Settings hub out of the box. Pass an empty
    * array to opt out entirely. A `branding` manifest, bundled or passed
    * here, is offered only where no organization wall stands (see
@@ -227,6 +233,22 @@ export class SettingsServicePlugin implements Plugin {
       // `console.error` fallback instead.
       logger: ctx.logger,
     });
+    // Setup's default language offers the languages the deployment supports:
+    // the i18n service's locale list, the one the language menu reads, asked
+    // at each use (the i18n service registers after this `init`). Registered
+    // before the manifests, so `localization`'s registration-time audit of
+    // `OS_LOCALIZATION_LOCALE` leaves that key to be judged when it is read.
+    // That list fills during the boot (authored translations arrive at
+    // `kernel:ready`), so its verdict on an override is held until
+    // `kernel:bootstrapped` seals it (`start` below).
+    this.service.holdOptionSourceVerdicts();
+    registerLocalizationLocaleOptions(this.service, () => {
+      try {
+        return ctx.getService<LocaleListService>('i18n');
+      } catch {
+        return undefined;
+      }
+    });
     for (const m of this.opts.manifests ?? []) {
       if (UNWALLED_ONLY_NAMESPACES.has(m.namespace)) {
         this.heldUntilPostureKnown.push(m);
@@ -258,6 +280,33 @@ export class SettingsServicePlugin implements Plugin {
 
   async start(ctx: PluginContext): Promise<void> {
     if (!this.service) return;
+
+    // The data key's file, where two candidates exist: ruled here, in Phase 2,
+    // because the database is open (this plugin starts after objectql) and no
+    // consumer has decrypted yet (they all read at `kernel:ready` or later, so
+    // every provider they build reads the chosen file). A no-op unless the CLI
+    // parent named a second candidate (`settleKeyFileChannel`). A production
+    // boot where neither key opens any of the newest stored secrets throws
+    // here, which stops the boot: the provider's fail-loud contract, at the one
+    // place that can judge it.
+    let settleEngine: IDataEngine | null = null;
+    try {
+      settleEngine = ctx.getService<IDataEngine>('objectql');
+    } catch {
+      // No engine: no stored secret can be read, so the canonical file stands.
+    }
+    await settleKeyFileChannel({
+      readStoredSecret: settleEngine
+        ? storedSecretReaderOverEngine(settleEngine as unknown as Parameters<typeof storedSecretReaderOverEngine>[0])
+        : async () => [],
+    });
+
+    // Every `kernel:ready` handler has run: the lists the option sources read
+    // are whole, so an `OS_*` override they still do not admit is reported now
+    // and its readers are told to read again (`sealOptionSources`).
+    ctx.hook('kernel:bootstrapped', async () => {
+      this.service?.sealOptionSources();
+    });
 
     ctx.hook('kernel:ready', async () => {
       // First, before the engine binds (its change event names every
@@ -456,6 +505,9 @@ export class SettingsServicePlugin implements Plugin {
             accessToken: 'withhold',
             oauth: undefined,
             onAdmission: undefined,
+            // [#31898] The transport's own peer address, for the `credential_use` row
+            // an admitted API key writes; the auth service applies the trust rule.
+            transport: { remoteAddress: req.remoteAddress || undefined },
           });
           if (!context) return { enforced: true }; // fail closed
           const authGate = context.authGate;
@@ -483,9 +535,50 @@ export class SettingsServicePlugin implements Plugin {
         }
       };
 
+      // [#30120, ruling A3] What a production deployment keeps on its own
+      // disk because nobody set it, served to administrators behind this door
+      // (see `deployment-notice.ts`). Every source is read at the request.
+      const settings = this.service!;
+      const deploymentNotice = buildDeploymentNoticeDoor({
+        sources: {
+          env: () => process.env,
+          emailDeliveryLive: () => {
+            let email: IEmailService | undefined;
+            try {
+              email = ctx.getService<IEmailService>('email');
+            } catch {
+              return undefined;
+            }
+            // The deliverability member is optional: absent or throwing is
+            // not live, as the auth plugin's own reader rules.
+            if (!email || typeof email.isConfigured !== 'function') return email ? false : undefined;
+            try {
+              return email.isConfigured() === true;
+            } catch {
+              return false;
+            }
+          },
+          storageAdapter: async () => {
+            try {
+              if (!ctx.getService('storage')) return undefined;
+            } catch {
+              return undefined;
+            }
+            try {
+              const resolved = await settings.get<string>('storage', 'adapter');
+              return typeof resolved.value === 'string' ? resolved.value : undefined;
+            } catch {
+              return undefined;
+            }
+          },
+        },
+        engine: () => engine,
+      });
+
       registerSettingsRoutes(http, this.service!, {
         basePath: this.opts.basePath,
         contextFromRequest: verifiedContextFromRequest,
+        deploymentNotice,
       });
       ctx.logger?.info?.(
         'SettingsServicePlugin: REST routes registered at ' + (this.opts.basePath ?? '/api/settings'),

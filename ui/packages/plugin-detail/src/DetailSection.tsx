@@ -35,6 +35,7 @@ import {
   useRecordPagePreferences,
 } from '@object-ui/react';
 import { resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
+import { withHomeAmountSource } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import {
   BooleanCellRenderer,
@@ -59,7 +60,7 @@ import { DetailsColumnCapContext, framelessSectionColumns, useDefaultRecordPage 
 import { hasCellValue } from './emptiness';
 import {
   enrichDetailField,
-  isComputedFieldType,
+  isComputedDetailField,
   isInlineExcludedDetailFieldType,
   isMaskedDetailFieldType,
 } from './fieldEnrichment';
@@ -470,7 +471,13 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // like select options, currency code, lookup target, etc. are
     // available in either mode.
     const objectDefField = objectSchema?.fields?.[field.name];
-    const enrichedField = enrichDetailField(field as Record<string, any>, objectDefField);
+    // A home field (ADR-0144 D5) also carries the amount, rate and document
+    // date that produced it, so its read face says which rate it was converted at.
+    const enrichedField = withHomeAmountSource(
+      enrichDetailField(field as Record<string, any>, objectDefField),
+      objectSchema?.fields,
+      field.name,
+    );
     if (objectName && Array.isArray(enrichedField.options) && enrichedField.options.length > 0) {
       enrichedField.options = translateOptions(objectName, field.name, enrichedField.options as any);
     }
@@ -485,8 +492,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // the UNION of the two, so an authored display `type` (which still drives
     // renderer/editor selection through `enrichedField.type`) can narrow
     // editability but never widen it (objectui#3355). Shared with
-    // HeaderHighlight via `isComputedFieldType` so the two can't drift.
-    const isComputedField = isComputedFieldType(field.type, objectDefField?.type);
+    // HeaderHighlight via `isComputedDetailField` so the two can't drift.
+    // A stored field carrying an `expression` is computed too (objectstack#31759).
+    const isComputedField = isComputedDetailField(field.type, objectDefField);
     // Honor the OBJECT metadata's read-only flag too — the enrichment above
     // intentionally doesn't copy `readonly` into enrichedField, so read it
     // straight off objectDefField (covers formula / non-updateable fields the
@@ -653,6 +661,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
             <CellRenderer
               value={value}
               field={enrichedField as unknown as FieldMetadata}
+              // The record, as a grid cell gets its row (see the highlights
+              // strip): a sibling-scoped face reads its sibling from it.
+              dependentValues={data}
               deadlineSettled={isDeadlineSettled(enrichedField, data, { scope: predicateScope, fields: objectSchema?.fields })}
               // A record page writes every date one way. The highlights strip
               // above writes the year on a current-year date (objectui#13331),
@@ -728,7 +739,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // (objectui#2578). Allowing the item to shrink lets the value wrap.
     return (
       <div key={field.name} className={cn("space-y-1.5 group min-w-0", spanClass)}>
-        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        {/* The label as authored, in the header highlights' style: no case
+            transform, which only Latin text takes, so a translated label and
+            an untranslated one beside it read in one style. */}
+        <div className="text-xs font-medium text-muted-foreground">
           {fieldLabel(objectName || '', field.name, field.label || field.name)}
         </div>
         {isEditing && fieldEditable ? (

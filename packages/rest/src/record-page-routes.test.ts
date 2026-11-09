@@ -26,13 +26,16 @@
  * - [#28737] the timeline part is a count of each source the body names, by
  *   that source's own read as the caller, summed as the spec's timeline table
  *   spells it.
+ * - [#30343] one action written to both the activity and the ledger is one
+ *   entry of that count: every update steps aside, and a create (a delete) as
+ *   often as both sources hold one.
  *
  * The end-to-end half, under row-level and field-level security as a member who
  * is not an admin, is `record-page.dogfood.test.ts`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES, RecordPageResponseSchema } from '@objectstack/spec/api';
+import { RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES, RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES, RecordPageResponseSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
 import { RECORD_PAGE_PARAMS } from './record-page-routes.js';
 import { unknownQueryParamMessage } from './query-allowlist.js';
@@ -319,6 +322,74 @@ describe('[#27627] POST /data/:object/:id/page', () => {
         expect(findData).not.toHaveBeenCalled();
     });
 
+    describe('[#29946] a user field relates its child to sys_user, as the row query follows it', () => {
+        const SYS_USER = { name: 'sys_user', label: 'User', fields: { id: { name: 'id', type: 'text' } } };
+        const TASK = {
+            name: 'task',
+            label: 'Task',
+            fields: {
+                id: { name: 'id', type: 'text' },
+                // A bare `Field.user` as a raw registration spells it: no carrier.
+                owner: { name: 'owner', type: 'user' },
+                // ...and as the spec's parse materializes it.
+                assignee: { name: 'assignee', type: 'user', reference: 'sys_user' },
+                reviewers: { name: 'reviewers', type: 'user', multiple: true },
+                parent: { name: 'parent', type: 'tree', reference: 'task' },
+                account: { name: 'account', type: 'lookup', reference: 'account' },
+            },
+        };
+        const items = { ...ITEMS, sys_user: SYS_USER, task: TASK };
+
+        it('a related list on sys_user keyed by a user field answers 200 with its rows (duly#185)', async () => {
+            const { call, findData } = boot({ items });
+            const answer = await call(
+                { related: [{ object: 'task', field: 'owner', top: 5 }, { object: 'task', field: 'assignee', top: 5 }, { object: 'task', field: 'reviewers', top: 5 }] },
+                {},
+                { object: 'sys_user', id: 'u9' },
+            );
+            expect(answer.status).toBe(200);
+            const data = RecordPageResponseSchema.parse(answer.body.data);
+            expect(data.related).toEqual([
+                expect.objectContaining({ object: 'task', field: 'owner', total: 7, records: [{ id: 'task-1' }] }),
+                expect.objectContaining({ object: 'task', field: 'assignee', total: 7 }),
+                expect.objectContaining({ object: 'task', field: 'reviewers', total: 7 }),
+            ]);
+            expect(findData.mock.calls.map(([req]: any) => req.query.where)).toEqual([
+                { owner: 'u9' },
+                { assignee: 'u9' },
+                { reviewers: { $contains: 'u9' } },
+            ]);
+        });
+
+        it('a user field on a page that is not sys_user is still a located 400, naming the kinds it accepts', async () => {
+            const { call, getData, findData } = boot({ items });
+            const answer = await call({ related: [{ object: 'task', field: 'owner', top: 1 }] });
+            expect(answer.status).toBe(400);
+            expect(answer.body.error.details.fields).toEqual([{
+                field: 'related.0.field',
+                code: 'invalid_relationship',
+                message: "'owner' on 'task' is not a lookup, master-detail, user or tree field that references 'account'.",
+            }]);
+            expect(getData).not.toHaveBeenCalled();
+            expect(findData).not.toHaveBeenCalled();
+        });
+
+        it('a lookup keeps relating only to its own reference, and a tree to its own object', async () => {
+            const { call } = boot({ items });
+            expect((await call({ related: [{ object: 'task', field: 'account', top: 1 }] })).status).toBe(200);
+            expect((await call({ related: [{ object: 'task', field: 'account', top: 1 }] }, {}, { object: 'sys_user', id: 'u9' })).status).toBe(400);
+            expect((await call({ related: [{ object: 'task', field: 'parent', top: 1 }] }, {}, { object: 'task', id: 't1' })).status).toBe(200);
+            expect((await call({ related: [{ object: 'task', field: 'parent', top: 1 }] })).status).toBe(400);
+        });
+
+        it('an unreadable reference carrier is not a relationship: the located 400, not a thrown 500', async () => {
+            const odd = { ...TASK, fields: { ...TASK.fields, bad: { name: 'bad', type: 'lookup', reference: { object: 'account' } } } };
+            const answer = await boot({ items: { ...items, task: odd } }).call({ related: [{ object: 'task', field: 'bad', top: 1 }] });
+            expect(answer.status).toBe(400);
+            expect(answer.body.error.details.fields).toEqual([expect.objectContaining({ code: 'invalid_relationship' })]);
+        });
+    });
+
     it('a declared filter the list read refuses is a located 400 before anything is read', async () => {
         const { call, getData, findData } = boot();
         const answer = await call({ related: [{ object: 'note', field: 'account', top: 1, filter: { title: { $in: 'x' } } }] });
@@ -533,8 +604,10 @@ describe('[#28737] the timeline part is the 动态 stream\'s size, counted by th
     const countOf = (req: any) => {
         const where = req.query?.where ?? {};
         if (req.object === 'sys_comment') return { records: [], total: 3 };
-        if (req.object === 'sys_audit_log') return { records: [], total: 40 };
-        if (req.object === 'sys_activity') return { records: [], total: where.type === 'updated' ? 30 : 250 };
+        if (req.object === 'sys_audit_log') return { records: [], total: where.action === 'create' ? 1 : where.action === 'delete' ? 0 : 40 };
+        if (req.object === 'sys_activity') {
+            return { records: [], total: where.type === 'updated' ? 30 : where.type === 'created' ? 1 : where.type === 'deleted' ? 2 : 250 };
+        }
         return { records: [], total: 0 };
     };
     const ofRecord = { object_name: 'account', record_id: 'a1' };
@@ -544,8 +617,9 @@ describe('[#28737] the timeline part is the 动态 stream\'s size, counted by th
         const answer = await call({ timeline: { discussion: true, activity: true, fieldChanges: true } });
         expect(answer.status).toBe(200);
         const data = RecordPageResponseSchema.parse(answer.body.data);
-        // 3 comments + 40 field changes + 250 drawn activity rows − their 30 updates.
-        expect(data.timeline).toEqual({ total: 263 });
+        // 3 comments + 40 field changes + 250 drawn activity rows − their 30
+        // updates − min(1 created, 1 create) − min(2 deleted, 0 delete) [#30343].
+        expect(data.timeline).toEqual({ total: 262 });
         const reads = findData.mock.calls.map(([req]) => req);
         expect(reads).toEqual(expect.arrayContaining([
             { object: 'sys_comment', query: { object: 'sys_comment', where: { thread_id: 'account:a1' }, limit: 0, count: true }, context: CTX },
@@ -569,8 +643,20 @@ describe('[#28737] the timeline part is the 动态 stream\'s size, counted by th
                 query: { object: 'sys_activity', where: { ...ofRecord, type: 'updated' }, limit: 0, count: true },
                 context: CTX,
             },
+            ...(['create', 'delete'] as const).flatMap((action) => [
+                {
+                    object: 'sys_activity',
+                    query: { object: 'sys_activity', where: { ...ofRecord, type: RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES[action] }, limit: 0, count: true },
+                    context: CTX,
+                },
+                {
+                    object: 'sys_audit_log',
+                    query: { object: 'sys_audit_log', where: { ...ofRecord, action }, limit: 0, count: true },
+                    context: CTX,
+                },
+            ]),
         ]));
-        expect(reads).toHaveLength(4);
+        expect(reads).toHaveLength(8);
     });
 
     it('counts only the sources named, and no update steps aside without a field change', async () => {
@@ -661,5 +747,81 @@ describe('[#28737] the timeline part is the 动态 stream\'s size, counted by th
         }
         expect(getData).not.toHaveBeenCalled();
         expect(findData).not.toHaveBeenCalled();
+    });
+});
+
+describe('[#30343] one action is one entry in the timeline count, as the 动态 stream draws it', () => {
+    const items: Record<string, any> = { ...ITEMS, sys_audit_log: systemObject('sys_audit_log') };
+    const ofRecord = { object_name: 'account', record_id: 'a1' };
+    // Rows, not canned totals: each count read is answered by filtering these
+    // with its own `where`, so the sum is the one the rows give.
+    // It implements the field equality, `$in` and `$nin` the route sends, and
+    // refuses anything else (a combinator, another operator) rather than
+    // misreading it.
+    const matches = (row: Record<string, unknown>, where: Record<string, any>) =>
+        Object.entries(where).every(([key, want]) => {
+            if (key.startsWith('$')) throw new Error(`the timeline double does not implement the combinator ${key}`);
+            if (want && typeof want === 'object') {
+                const ops = Object.keys(want);
+                if (ops.length !== 1 || (ops[0] !== '$in' && ops[0] !== '$nin')) {
+                    throw new Error(`the timeline double does not implement ${ops.join(', ')}`);
+                }
+                return ops[0] === '$in' ? want.$in.includes(row[key]) : !want.$nin.includes(row[key]);
+            }
+            return row[key] === want;
+        });
+    const rowsBoot = (rows: Record<string, Array<Record<string, unknown>>>, refuse: string[] = []) =>
+        boot({
+            items,
+            findData: async (req) => {
+                if (refuse.includes(req.object)) throw permissionDenied();
+                const where = req.query?.where ?? {};
+                return { records: [], total: (rows[req.object] ?? []).filter((row) => matches(row, where)).length };
+            },
+        });
+    // One create and one edit, each written to both the activity and the ledger.
+    const createThenEdit = {
+        sys_activity: [
+            { ...ofRecord, type: 'created' },
+            { ...ofRecord, type: 'updated' },
+        ],
+        sys_audit_log: [
+            { ...ofRecord, action: 'create' },
+            { ...ofRecord, action: 'update' },
+        ],
+    };
+    const BOTH = { timeline: { discussion: true, activity: true, fieldChanges: true } };
+
+    it('an audit reader counts one create and one edit as 2, the rows the stream draws', async () => {
+        const { call } = rowsBoot(createThenEdit);
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 2 });
+    });
+
+    it('a member without audit read counts the same 2 activity rows, unchanged', async () => {
+        const { call } = rowsBoot(createThenEdit, ['sys_audit_log']);
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 2 });
+    });
+
+    it('a record created before its history was kept counts its create row: one create and one edit are still 2', async () => {
+        const { call } = rowsBoot({ ...createThenEdit, sys_audit_log: [{ ...ofRecord, action: 'update' }] });
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 2 });
+    });
+
+    it('a delete written to both sources is one entry too: create, edit and delete count 3', async () => {
+        const { call } = rowsBoot({
+            sys_activity: [...createThenEdit.sys_activity, { ...ofRecord, type: 'deleted' }],
+            sys_audit_log: [...createThenEdit.sys_audit_log, { ...ofRecord, action: 'delete' }],
+        });
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 3 });
+    });
+
+    it('a comment still adds one', async () => {
+        const { call } = rowsBoot({ ...createThenEdit, sys_comment: [{ thread_id: 'account:a1' }] });
+        const data = RecordPageResponseSchema.parse((await call(BOTH)).body.data);
+        expect(data.timeline).toEqual({ total: 3 });
     });
 });

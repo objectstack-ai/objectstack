@@ -44,10 +44,15 @@ import type { SysActivityBuiltinType } from '../data/feed.zod';
  * 动态 stream — the comments, the activity and the field changes it merges —
  * counted by those reads as the caller (`RecordPageTimelineRequestSchema`), so
  * a page draws the stream's count without holding every row of it. The total
- * counts the sources' rows as that schema's table defines them, so it is an
+ * counts the sources' rows as that schema's table defines them, one action
+ * that wrote both an activity row and a ledger row counted once, so it is an
  * upper bound of the entries the 动态 panel draws, not their number. The panel
  * draws fewer where its `showCompleted` / `types` configuration filters entries
  * out, and where a ledger row has no displayable diff and so draws no entry.
+ * [#30343] One case falls the other way: a create (delete) whose activity row
+ * and ledger row the panel does not pair, as their actors differ or they were
+ * stamped more than its pairing window apart, draws one entry more than the
+ * total counts.
  * Object permissions, row-level security, sharing and
  * field-level security therefore apply exactly as they apply to those reads.
  * A part whose read refuses carries that refusal in place of an answer — a
@@ -92,9 +97,28 @@ export const RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES = [
  * [#28737] The `sys_activity.type` of an update, which steps aside in the
  * 动态 stream once the stream merges the record's field changes: the audit
  * entry says the same update with its before and after values, so an update
- * is one entry.
+ * is one entry. Every update steps aside, the ones no audit entry pairs with
+ * included; a create or a delete steps aside only where its audit entry pairs
+ * with it (`RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES`).
  */
 export const RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE = 'updated' satisfies SysActivityBuiltinType;
+
+/**
+ * [#30343] Each ledger write action (`sys_audit_log.action`) and the
+ * `sys_activity.type` the same action writes. The 动态 stream draws one action
+ * that wrote both as ONE entry: the activity row, carrying the audit entry's
+ * before and after values. The `timeline` count follows it: with any field
+ * change counted, every `updated` row steps aside
+ * (`RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE`), and so do as many `created`
+ * (`deleted`) rows as both the activity and the ledger hold for the record:
+ * the fewer of its `created` (`deleted`) rows and its `create` (`delete`)
+ * entries.
+ */
+export const RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES = {
+  create: 'created',
+  update: RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE,
+  delete: 'deleted',
+} as const satisfies Readonly<Record<'create' | 'update' | 'delete', SysActivityBuiltinType>>;
 
 /** The record-grained operations a record page's header asks about. */
 export const RecordPageExplainOperationSchema = z.enum(['update', 'delete', 'transfer']);
@@ -167,16 +191,21 @@ export type RecordPageActivityRequestParsed = z.infer<typeof RecordPageActivityR
  * | -------------- | ------------------------------------------------------------------------------------------- |
  * | `discussion`   | `sys_comment` where `thread_id` = `{object}:{id}`: every comment and reply of the thread    |
  * | `activity`     | `sys_activity` where `object_name` = `{object}`, `record_id` = `{id}` and `type` is not one |
- * |                | of `RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES`; with any field change counted, not             |
- * |                | `RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE` either                                               |
+ * |                | of `RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES`; with any field change counted, less every      |
+ * |                | `RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE` row, and less, for `created` and for `deleted`       |
+ * |                | (`RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES`), the fewer of that type's rows and the ledger's   |
+ * |                | writes of the paired action (`create`, `delete`)                                            |
  * | `fieldChanges` | `sys_audit_log` where `object_name` = `{object}`, `record_id` = `{id}` and `action` is a    |
  * |                | write (`create`, `update`, `delete`)                                                         |
  *
  * The total is their sum: it counts the sources' rows as this table defines
- * them, so it is an upper bound of the entries the 动态 panel draws, not their
+ * them, one action that wrote both an activity row and a ledger row counted
+ * once, so it is an upper bound of the entries the 动态 panel draws, not their
  * number. The panel draws fewer where its `showCompleted` / `types`
  * configuration filters entries out, and where a ledger row has no
- * displayable diff and so draws no entry. A source this deployment does not serve (its read
+ * displayable diff and so draws no entry. [#30343] It draws one more for a
+ * create (delete) whose two rows it does not pair: their actors differ, or
+ * they were stamped more than its pairing window apart. A source this deployment does not serve (its read
  * answers `OBJECT_NOT_FOUND`) holds no entry, as the page reads such a stream
  * as an empty one. The field changes are the history the stream merges only
  * where the caller may read it: a refused `sys_audit_log` read counts none, as
@@ -189,7 +218,7 @@ export const RecordPageTimelineRequestSchema = lazySchema(() => z.object({
     'Count the record\'s activity rows the stream draws an entry for (not `RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES`).',
   ),
   fieldChanges: z.boolean().describe(
-    'Count the record\'s field changes (its `sys_audit_log` writes); with any, its `updated` activity rows step aside.',
+    'Count the record\'s field changes (its `sys_audit_log` writes); with any, its `updated` activity rows step aside, and as many `created` (`deleted`) rows as it has `create` (`delete`) writes.',
   ),
 }).strict());
 export type RecordPageTimelineRequest = z.input<typeof RecordPageTimelineRequestSchema>;
@@ -316,15 +345,17 @@ export type RecordPageStreamRowsParsed = z.infer<typeof RecordPageStreamRowsSche
 /**
  * [#28737] The `timeline` part: the size of the record's 动态 stream, counted
  * by the reads `RecordPageTimelineRequestSchema` names, as the caller. The
- * total counts the sources' rows as that schema's table defines them, so it is
- * an upper bound of the entries the 动态 panel draws, not their number. The
+ * total counts the sources' rows as that schema's table defines them, one
+ * action that wrote both an activity row and a ledger row counted once, so it
+ * is an upper bound of the entries the 动态 panel draws, not their number. The
  * panel draws fewer where its `showCompleted` / `types` configuration filters
  * entries out, and where a ledger row has no displayable diff and so draws no
- * entry.
+ * entry; it draws one more for a create (delete) whose two rows it does not
+ * pair (their actors differ, or their stamps are past its pairing window).
  */
 export const RecordPageTimelineCountSchema = lazySchema(() => z.object({
   total: z.number().int().min(0).describe(
-    'The rows of the sources the request named, counted as this caller may read them: an upper bound of the entries the timeline panel draws, not their number. The panel draws fewer where its `showCompleted` / `types` configuration filters entries out, and where a ledger row has no displayable diff.',
+    'The rows of the sources the request named, counted as this caller may read them, one action that wrote both an activity row and a ledger row counted once: an upper bound of the entries the timeline panel draws, not their number. The panel draws fewer where its `showCompleted` / `types` configuration filters entries out, and where a ledger row has no displayable diff; it draws one more for a create or delete whose two rows it does not pair.',
   ),
 }).strict());
 export type RecordPageTimelineCount = z.input<typeof RecordPageTimelineCountSchema>;

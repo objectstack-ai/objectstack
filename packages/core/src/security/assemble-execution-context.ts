@@ -142,11 +142,13 @@ export type ExecutionContextEntryFields = {
 export const ENTRY_EXECUTION_CONTEXT_FIELDS = [
   'positions',
   'permissions',
+  'permissionSetAddresses',
   'systemPermissions',
   'isSystem',
   'principalKind',
   'onBehalfOf',
   'performedBy',
+  'impersonatedBy',
   'audience',
   'userId',
   'tenantId',
@@ -234,8 +236,10 @@ export interface ExecutionContextAssemblyInput {
   /**
    * OAuth access-token provenance, or `undefined` on a face that does not
    * accept one. Only the `/mcp` dispatch door passes a value; REST passes
-   * `undefined` — which is why `principalKind: 'agent'`, `onBehalfOf` and
-   * `oauthScopes` are not representable there.
+   * `undefined` — which is why an OAuth-delegated agent (`onBehalfOf`,
+   * `oauthScopes`) is not representable there. An AI service account's key
+   * makes `principalKind: 'agent'` on every face (ADR-0151 D3), with no
+   * `onBehalfOf`: that agent is its own subject, read from `authz`.
    */
   oauth: OAuthTokenProvenance | undefined;
   /**
@@ -316,7 +320,17 @@ function entryFields(
   // consented scope OR the user's own reach (confused-deputy prevention).
   // `userId` stays the human so owner-stamping and `current_user.*` RLS resolve
   // to them.
-  const agent = !anonymous && oauth?.clientId ? oauth : undefined;
+  //
+  // [ADR-0151 D3] An AI service account is an agent principal of a different
+  // provenance: its own subject. Its API key admits it, its row says so
+  // (`authz.principalKind`), and it acts for nobody — no `onBehalfOf`, so no
+  // intersection with anyone's grants: its own explicit grants are its whole
+  // authority, under the agent ceiling. It carries no system permission. It
+  // takes precedence over the OAuth arm: an account never consents to a client,
+  // so no token names it, and an `onBehalfOf` naming it as a person would be
+  // false.
+  const account = !anonymous && authz.principalKind === 'agent';
+  const agent = !anonymous && !account && oauth?.clientId ? oauth : undefined;
 
   return {
     // [ADR-0090 D9/D10] Principal taxonomy at the HTTP entry: a session-backed
@@ -326,6 +340,8 @@ function entryFields(
     // security plugin's empty-context skip path keeps its meaning.
     positions: agent ? [] : anonymous ? ['guest'] : authz.positions,
     permissions: agent ? agent.scopePermissions : authz.permissions,
+    // [ADR-0150 D3] Decided, and not yet filled: the server half (#31971) sets it from the security catalog's resolved (package, name); undefined is dropped by emit(), so the envelope is unchanged.
+    permissionSetAddresses: undefined,
     // [ADR-0090 D10] System capabilities on the agent principal gate business
     // ACTION invocation (`actionPermissionError` reads `ctx.systemPermissions`)
     // — a door SEPARATE from the object CRUD/FLS/RLS intersection, which is
@@ -333,13 +349,15 @@ function entryFields(
     // OBJECT access stays denied to the agent regardless of this line). The
     // `actions:execute` scope IS the user's consent to let this agent invoke
     // actions on their behalf; without it the agent holds none.
-    systemPermissions: agent
-      ? agent.delegatesActions
-        ? (authz.systemPermissions ?? [])
-        : []
-      : authz.systemPermissions,
+    systemPermissions: account
+      ? []
+      : agent
+        ? agent.delegatesActions
+          ? (authz.systemPermissions ?? [])
+          : []
+        : authz.systemPermissions,
     isSystem: false,
-    principalKind: agent ? 'agent' : anonymous ? 'guest' : 'human',
+    principalKind: agent || account ? 'agent' : anonymous ? 'guest' : 'human',
     onBehalfOf: agent ? { userId: authz.userId!, principalKind: 'human' } : undefined,
     // [ADR-0090 D10 rule 4 — dual attribution] The same `azp` that made this
     // an agent principal, carried as the PERFORMER so the write is attributable
@@ -354,6 +372,13 @@ function entryFields(
     // what narrows the optional away — the guard that made `agent` truthy is
     // this same property.
     performedBy: agent?.clientId ? { clientId: agent.clientId } : undefined,
+    // The administrator who started the impersonation session that admitted
+    // `userId` (the resolver's session arm reads `session.impersonatedBy`).
+    // Attribution, not authorization, in the shape `performedBy` uses: the
+    // subject stays the impersonated user above, whose grants the envelope
+    // carries, and no security middleware reads this. An anonymous entry has
+    // no session to have been minted for anyone.
+    impersonatedBy: anonymous ? undefined : authz.impersonatedBy,
     // [ADR-0090 D10/D11 · ruling of record 6355206139, letter B] The resolver's
     // population stamp: `'external'` for a holder of `org_external`, absent
     // (read as 'internal') otherwise. It rides an AGENT envelope too: the

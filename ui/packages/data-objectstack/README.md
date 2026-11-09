@@ -910,7 +910,7 @@ import { ObjectStackAdapter, type MetaItemAccess } from '@object-ui/data-objects
 const adapter = new ObjectStackAdapter({ baseUrl: '' });
 
 const access: MetaItemAccess = await adapter.probeMetaItemAccess('dashboard', 'legal_board');
-// { verdict: 'denied', message: "You do not have permission to open the 'legal_board' dashboard." }
+// { verdict: 'denied', message: "You do not have permission to perform this action. Contact your administrator if you need access." }
 ```
 
 `verdict` is `granted`, `denied`, `not_found`, `unreachable` (no answer was
@@ -1096,6 +1096,19 @@ When an answer fills that `$top`, a key whose row is missing from it reads
 its own row. Only rows whose value is a JSON object are returned. A failed
 read loads as `{}`, and a failed write is reported to `onError` and
 swallowed. A key outside the family is refused and nothing is written.
+
+## File Uploads
+
+`createObjectStackUploadAdapter` is the browser-side client for the server's
+storage service (`/api/v1/storage` unless `basePath` says otherwise). It
+requests a presigned upload, PUTs the bytes, and completes the upload, which
+registers the `sys_file` row; it answers the stable `/files/FILE_ID` download
+URL, with the `sys_file` id in `meta.fileId`. Hand it to `UploadProvider` from
+`@object-ui/fields`, whose README shows the wiring. Its `scope` option is the
+storage scope every upload from that adapter is filed under, typed by the
+spec's upload-scope vocabulary (`API.UploadScope` from `@object-ui/types`;
+`attachments` is the scope of files joined to records). Leave it out and the
+request carries no scope, so the server applies its default.
 
 ## API Reference
 

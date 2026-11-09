@@ -96,7 +96,7 @@ describe('AcceptInvitationPage — names the inviter (#25886)', () => {
     renderIn('zh');
 
     await screen.findByTestId('accept-invitation-inviter');
-    expect(screen.getByText(builtInLocales.zh.organization.accept.invitedBy)).toBeInTheDocument();
+    expect(screen.getByText(builtInLocales['zh-Hans'].organization.accept.invitedBy)).toBeInTheDocument();
   });
 
   it('draws no inviter row when the answer carries no inviter address', async () => {

@@ -87,9 +87,16 @@ export function withServerOnlyErrors<T extends { path: string; message: string }
  */
 export function verdictPreviewEntries(
   diagnostics: ServerDiagnostics | undefined,
-): Array<{ path?: string; message: string; severity: 'error' | 'warning' }> {
+): Array<{ path?: string; message: string; severity: 'error' | 'warning'; code?: string }> {
   return [
-    ...(diagnostics?.errors ?? []).map((e) => ({ path: e.path || undefined, message: e.message, severity: 'error' as const })),
+    // objectstack#30038 — an error keeps its rule id, so the Problems list can
+    // word a refusal it knows in the Console's language (`flow-closure-refusal.ts`).
+    ...(diagnostics?.errors ?? []).map((e) => ({
+      path: e.path || undefined,
+      message: e.message,
+      severity: 'error' as const,
+      ...(e.code ? { code: e.code } : {}),
+    })),
     ...(diagnostics?.warnings ?? []).map((w) => ({ path: w.path || undefined, message: w.message, severity: 'warning' as const })),
   ];
 }
@@ -188,7 +195,7 @@ export function verdictEntriesStillShown(
   diagnostics: ServerDiagnostics | undefined,
   judged: unknown,
   shown: unknown,
-): Array<{ path?: string; message: string; severity: 'error' | 'warning' }> {
+): Array<{ path?: string; message: string; severity: 'error' | 'warning'; code?: string }> {
   return verdictPreviewEntries(diagnostics).filter(
     (entry) =>
       !entry.path ||

@@ -157,7 +157,7 @@ function strName(v: unknown): string | undefined {
  * names (#6662): `boundObject` in `validate-form-layout.ts`, `viewObjectName`
  * in `validate-translatable-sections.ts` and in
  * `validate-translation-references.ts`. The majority spelling wins here, and it
- * is also the CLI i18n extractor's (`packages/cli/src/utils/i18n-extract.ts`)
+ * is also the CLI i18n extractor's (`packages/lint/src/i18n-walk.ts`)
  * and the spec resolver's (`packages/spec/src/system/i18n-resolver.ts`), so
  * every walker in the repo now agrees on which object a record belongs to by
  * reading the same four lines. Disagreeing here would mean warning about the

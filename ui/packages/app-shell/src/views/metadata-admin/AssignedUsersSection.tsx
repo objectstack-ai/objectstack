@@ -86,6 +86,7 @@ import { usePermissions } from '@object-ui/permissions';
 import { extractWriteErrorMessage, useAdapter, useMetadata } from '@object-ui/react';
 import { Plus, X, Users, Loader2, AlertCircle } from 'lucide-react';
 import { useMetadataLocale } from './i18n.js';
+import { isZhLocale } from './schema-field-label.js';
 import { membershipOrganization, readOrganizationMemberIds, type MemberFilter } from './organization-members.js';
 
 /** The object a permission set's direct grants are rows of: ADD creates one, REMOVE deletes one. */
@@ -129,7 +130,7 @@ interface AssignedRow {
  * them: a space in English, none after a CJK full stop.
  */
 function useCopy() {
-  const zh = useMetadataLocale() === 'zh-CN';
+  const zh = isZhLocale(useMetadataLocale());
   return React.useMemo(
     () =>
       zh
@@ -158,7 +159,7 @@ function useCopy() {
             countOf: (n: number) => n + ' 人',
             direct: '直授',
             viaPosition: (p: string) => '经岗位 ' + p,
-            everyoneNote: '已绑定到 everyone 锚点 — 所有登录成员都持有此权限集。',
+            everyoneNote: '所有登录成员都持有此权限集。',
             positionHeldHint: '经岗位持有 — 在岗位的指派中移除。',
           }
         : {
@@ -186,7 +187,7 @@ function useCopy() {
             countOf: (n: number) => String(n),
             direct: 'direct',
             viaPosition: (p: string) => 'via position ' + p,
-            everyoneNote: 'Bound to the everyone anchor — every signed-in member holds this set.',
+            everyoneNote: 'Every signed-in member holds this set.',
             positionHeldHint: 'Held via a position — remove it on the position’s assignments.',
           },
     [zh],

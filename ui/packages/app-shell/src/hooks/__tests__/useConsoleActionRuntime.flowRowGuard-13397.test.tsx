@@ -42,7 +42,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => {
   const zhT = (key: string, options?: { defaultValue?: string }) => {
     const hit = key.split('.').reduce<unknown>(
       (node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined),
-      builtInLocales.zh,
+      builtInLocales['zh-Hans'],
     );
     return typeof hit === 'string' ? hit : String(options?.defaultValue ?? key);
   };

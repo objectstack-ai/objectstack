@@ -49,6 +49,11 @@
  *     `user_id`, which a read that computes it pays for with a `sys_user` read
  *     and a round trip. Case 1 cannot see this — its principal holds no grant
  *     row, so no formula is ever computed for it.
+ *  7. **The membership's own title reads one hop and the prelude pays nothing
+ *     for it** — `sys_member` ships a record title that reads the person
+ *     through `user_id`, and its row backs every case above. The resolver's
+ *     membership reads project the columns it decides on, so the title is
+ *     never computed there: the same 8 reads in 4 round trips.
  *
  * The counts are exact on purpose: a change that issues a read the prelude did
  * not issue turns 1 or 2 red. A change that REMOVES one turns them red too —
@@ -291,6 +296,22 @@ describe('[#24061] one authenticated request\'s prelude, counted on a real engin
       expect(run.legs).toBe(4);
     }, 60_000);
   });
+
+  it('[#30454] the shipped sys_member title reads one hop through user_id, and the prelude still pays 8 reads in 4 round trips', async () => {
+    const { engine, probe, prelude, userId } = await signedInRig();
+    const source = String((authIdentityObjects as any[]).find((o) => o?.name === 'sys_member')?.fields?.display_title?.expression?.source);
+    expect(source).toContain('record.user_id.name');
+    // The membership is real and a read that does not project computes its
+    // title, so the hop is live on this engine.
+    const [membership] = (await engine.find('sys_member', { where: { user_id: userId }, ...SYS })) as any[];
+    expect(membership?.display_title).toBe('Prelude (owner)');
+
+    const run = await probe.measure(prelude);
+
+    expect((run.result as any).positions).toContain('org_owner');
+    expect(tally(run.objects)).toEqual(PRELUDE_READS);
+    expect(run.legs).toBe(4);
+  }, 60_000);
 
   it('the HTTP /get-session still carries set-auth-jwt, and reads the keyring once', async () => {
     const { engine, manager, probe, cookie, userId } = await signedInRig();

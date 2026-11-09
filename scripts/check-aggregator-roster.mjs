@@ -111,7 +111,7 @@ export const REQUIRED_AGGREGATORS = [
   { workflow: 'lint.yml', job: 'typecheck', context: 'TypeScript Type Check' },
   // #22991: the single 193-step job became an aggregate over eight lanes.
   { workflow: 'lint.yml', job: 'lint', context: 'Lint & Repo Gates' },
-  // #26460: the `Test UI` aggregate over the 16 `test-ui` shards.
+  // #26460: the `Test UI` aggregate over the `test-ui` shards (16 slots, planned since #31914).
   { workflow: 'ci.yml', job: 'test-ui-gate', context: 'Test UI' },
 ];
 
@@ -502,15 +502,15 @@ async function selfTest() {
   const dropped = [
     { label: 'typecheck loses a lane from needs:', file: 'lint.yml', member: 'typecheck-consumers', from: '      - typecheck-consumers\n', to: '' },
     { label: 'lint loses a lane from needs:', file: 'lint.yml', member: 'lint-pm-dispatch-gates', from: '      - lint-pm-dispatch-gates\n', to: '' },
-    { label: 'test-gate loses its matrix from needs:', file: 'ci.yml', member: 'test', from: '    needs: [test, filter, test-plan]\n', to: '    needs: [filter, test-plan]\n' },
+    { label: 'test-gate loses its matrix from needs:', file: 'ci.yml', member: 'test', from: '    needs: [test, filter, test-plan, queue-verdict]\n', to: '    needs: [filter, test-plan, queue-verdict]\n' },
     {
       label: 'dogfood-gate loses the CLI pass from needs:',
       file: 'ci.yml',
       member: 'dogfood-verify',
-      from: '    needs: [dogfood, dogfood-verify, filter]\n',
-      to: '    needs: [dogfood, filter]\n',
+      from: '    needs: [dogfood, dogfood-verify, filter, queue-verdict]\n',
+      to: '    needs: [dogfood, filter, queue-verdict]\n',
     },
-    { label: 'test-ui-gate loses its matrix from needs:', file: 'ci.yml', member: 'test-ui', from: '    needs: [test-ui, filter]\n', to: '    needs: [filter]\n' },
+    { label: 'test-ui-gate loses its matrix from needs:', file: 'ci.yml', member: 'test-ui', from: '    needs: [test-ui, filter, test-ui-plan, queue-verdict]\n', to: '    needs: [filter, test-ui-plan, queue-verdict]\n' },
   ];
   for (const scenario of dropped) {
     const verdict = fixture(scenario.label, scenario.file, (s) => s.replace(scenario.from, scenario.to));
@@ -532,15 +532,15 @@ async function selfTest() {
   const phantom = [
     { label: 'typecheck needs a job that was deleted', file: 'lint.yml', from: '      - typecheck-consumers\n', to: '      - typecheck-consumers\n      - typecheck-ghost\n', ghost: 'typecheck-ghost' },
     { label: 'lint needs a job that was deleted', file: 'lint.yml', from: '      - lint-pm-dispatch-gates\n', to: '      - lint-pm-dispatch-gates\n      - lint-ghost\n', ghost: 'lint-ghost' },
-    { label: 'test-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test, filter, test-plan]\n', to: '    needs: [test, filter, test-plan, test-ghost]\n', ghost: 'test-ghost' },
+    { label: 'test-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test, filter, test-plan, queue-verdict]\n', to: '    needs: [test, filter, test-plan, queue-verdict, test-ghost]\n', ghost: 'test-ghost' },
     {
       label: 'dogfood-gate needs a job that was deleted',
       file: 'ci.yml',
-      from: '    needs: [dogfood, dogfood-verify, filter]\n',
-      to: '    needs: [dogfood, dogfood-verify, filter, dogfood-ghost]\n',
+      from: '    needs: [dogfood, dogfood-verify, filter, queue-verdict]\n',
+      to: '    needs: [dogfood, dogfood-verify, filter, queue-verdict, dogfood-ghost]\n',
       ghost: 'dogfood-ghost',
     },
-    { label: 'test-ui-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test-ui, filter]\n', to: '    needs: [test-ui, filter, test-ui-ghost]\n', ghost: 'test-ui-ghost' },
+    { label: 'test-ui-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test-ui, filter, test-ui-plan, queue-verdict]\n', to: '    needs: [test-ui, filter, test-ui-plan, queue-verdict, test-ui-ghost]\n', ghost: 'test-ui-ghost' },
   ];
   for (const scenario of phantom) {
     const verdict = fixture(scenario.label, scenario.file, (s) => s.replace(scenario.from, scenario.to));

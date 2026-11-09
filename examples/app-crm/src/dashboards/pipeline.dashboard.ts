@@ -8,7 +8,7 @@ import type { Dashboard } from '@objectstack/spec/ui';
  * Demonstrates period-over-period comparison via `compareTo`, whose shape is
  * `{ kind, dimension? }` — the same contract the analytics executor reads
  * (`DatasetSelection.compareTo`). Every widget below omits `dimension`:
- * `opportunity_metrics` dates exactly one dimension (`close_date`), so the
+ * `crm_opportunity_metrics` dates exactly one dimension (`close_date`), so the
  * executor resolves it. Name it explicitly (`{ kind: 'previousYear', dimension:
  * 'close_date' }`) only on a dataset that dates more than one — the executor
  * refuses to guess, and says which candidates it found.
@@ -29,7 +29,7 @@ import type { Dashboard } from '@objectstack/spec/ui';
  *   (pie / donut / funnel ignore overlays even if set).
  */
 export const PipelineDashboard: Dashboard = {
-  name: 'pipeline_dashboard',
+  name: 'crm_pipeline_dashboard',
   label: 'Pipeline Dashboard',
   description: 'The sales pipeline at a glance, compared with earlier periods.',
   columns: 12,
@@ -47,7 +47,7 @@ export const PipelineDashboard: Dashboard = {
       title: 'Total Pipeline',
       description: 'Total value of all open opportunities.',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
-      dataset: 'opportunity_metrics',
+      dataset: 'crm_opportunity_metrics',
       values: ['total_amount'],
       layout: { x: 0, y: 0, w: 4, h: 2 },
     },
@@ -64,7 +64,7 @@ export const PipelineDashboard: Dashboard = {
         },
       },
       compareTo: { kind: 'previousPeriod' },
-      dataset: 'opportunity_metrics',
+      dataset: 'crm_opportunity_metrics',
       values: ['total_amount'],
       layout: { x: 4, y: 0, w: 4, h: 2 },
     },
@@ -81,7 +81,7 @@ export const PipelineDashboard: Dashboard = {
         },
       },
       compareTo: { kind: 'previousYear' },
-      dataset: 'opportunity_metrics',
+      dataset: 'crm_opportunity_metrics',
       values: ['avg_amount'],
       layout: { x: 8, y: 0, w: 4, h: 2 },
     },
@@ -96,7 +96,7 @@ export const PipelineDashboard: Dashboard = {
         close_date: { $gte: '{1_years_ago}', $lte: '{today}' },
       },
       compareTo: { kind: 'previousYear' },
-      dataset: 'opportunity_metrics',
+      dataset: 'crm_opportunity_metrics',
       dimensions: ['close_date'],
       values: ['opp_count'],
       // Axis fields name the dataset's dimension/measure (NOT base columns) —
@@ -115,7 +115,7 @@ export const PipelineDashboard: Dashboard = {
         },
       },
       compareTo: { kind: 'previousPeriod' },
-      dataset: 'opportunity_metrics',
+      dataset: 'crm_opportunity_metrics',
       dimensions: ['stage'],
       values: ['opp_count'],
       layout: { x: 8, y: 2, w: 4, h: 4 },
@@ -128,7 +128,7 @@ export const PipelineDashboard: Dashboard = {
       title: 'Open Pipeline by Stage',
       description: 'Value of open opportunities, split by stage.',
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
-      dataset: 'opportunity_metrics',
+      dataset: 'crm_opportunity_metrics',
       dimensions: ['stage'],
       values: ['total_amount'],
       layout: { x: 0, y: 6, w: 6, h: 4 },

@@ -380,3 +380,52 @@ describe('objectstack#26917 — Create app over a taken identifier', () => {
     ]);
   });
 });
+
+describe('objectstack#30038 — Automations: New automation never saves a typed prefix as the trigger object', () => {
+  async function openRecordPreset() {
+    publish('flow', PKG, FLOW_ALPHA);
+    publish('object', PKG, OBJ_ACCOUNT);
+    publish('object', PKG, OBJ_TICKET);
+    render(
+      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+        <AutomationsPillar packageId={PKG} />
+      </MemoryRouter>,
+    );
+    await screen.findByTestId('auto-rail-row-alpha_intake', undefined, { timeout: 8000 });
+    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByTestId('create-flow-preset-record_updated'));
+    const picker = within(dialog).getByRole('combobox');
+    fireEvent.focus(picker);
+    await waitFor(() => expect(dialog.querySelector('[data-object-name="acme_ticket"]')).not.toBeNull());
+    return { dialog, picker };
+  }
+
+  /** The saved flow's Start node config. */
+  const savedStart = () => {
+    const body = save.mock.calls[0]![2] as { nodes: Array<{ type: string; config?: Record<string, unknown> }> };
+    return body.nodes.find((n) => n.type === 'start')?.config;
+  };
+
+  it('Enter on a prefix with one match shown saves that object', async () => {
+    const { dialog, picker } = await openRecordPreset();
+    fireEvent.change(picker, { target: { value: 'tick' } });
+    fireEvent.keyDown(picker, { key: 'Enter' });
+    submitCreate(dialog, 'Close stale');
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(savedStart()).toMatchObject({ triggerType: 'record-after-update', objectName: 'acme_ticket' });
+  });
+
+  it('Enter on a prefix with several matches: no object chosen, nothing saved, the dialog stays open', async () => {
+    const { dialog, picker } = await openRecordPreset();
+    fireEvent.change(picker, { target: { value: 'acme' } });
+    fireEvent.keyDown(picker, { key: 'Enter' });
+    expect(dialog.querySelector('[data-object-refused]')).not.toBeNull();
+    submitCreate(dialog, 'Close stale');
+
+    expect(await within(dialog).findByText(en('engine.studio.auto.preset.needsObject'))).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBe(dialog);
+  });
+});

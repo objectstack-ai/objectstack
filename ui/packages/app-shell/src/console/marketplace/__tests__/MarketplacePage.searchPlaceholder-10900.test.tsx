@@ -11,9 +11,12 @@
  * the zh pack already uses for identifiers. `en` and the eight other packs
  * dropped the same jargon in objectui#10969: `en` now names the "app ID".
  *
- * The placeholder is only honest if the search matches what it names, so this
- * suite measures that too, through the page's own filter: the display name and
- * the identifier each find the package, and text that is neither does not.
+ * The placeholder is only honest if the search matches what it names. The
+ * catalog list door does the matching (objectstack#31267): its `q` matches the
+ * display name and the manifest id, `catalogRowMatches` in
+ * `@objectstack/cloud-connection`'s marketplace proxy. So this suite measures
+ * the console's half: the box's text reaches the list read as `q`, trimmed,
+ * from the first page, and the cards drawn are the door's answer.
  *
  * Harness: `MarketplacePage.guardOrder.test.tsx`'s — the real runtime-config
  * boot, an admin viewer, the API module stubbed — with the REAL
@@ -22,7 +25,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
@@ -43,8 +46,13 @@ const PKG = {
   latest_version: null,
 };
 
+/** The door's answer to a read: the package, unless the text names neither its name nor its id. */
+const listMarketplacePackages = vi.fn(async (params: { q?: string } = {}) => ({
+  items: params.q === 'no-such-package' ? [] : [PKG],
+}));
+
 vi.mock('../marketplaceApi', () => ({
-  listMarketplacePackages: async () => ({ items: [PKG] }),
+  listMarketplacePackages: (params: { q?: string }) => listMarketplacePackages(params),
   listLocalInstalls: async () => [],
   listOrgPackages: async () => ({ items: [] }),
   listInstalledPackages: async () => ({ items: [] }),
@@ -63,6 +71,7 @@ const ZH = { defaultLanguage: 'zh', detectBrowserLanguage: false } as const;
 const EN = { defaultLanguage: 'en', detectBrowserLanguage: false } as const;
 
 beforeEach(async () => {
+  listMarketplacePackages.mockClear();
   resetRuntimeConfigForTesting();
   vi.stubGlobal(
     'fetch',
@@ -109,20 +118,23 @@ describe('MarketplacePage search placeholder (objectui#10900)', () => {
     expect(search.getAttribute('placeholder')).not.toMatch(/manifest/i);
   });
 
-  it('the search matches the name and the identifier the placeholder names', async () => {
+  it('the search sends the text the placeholder asks for to the list door, which matches it', async () => {
     renderIn(ZH);
     await screen.findByTestId(`marketplace-card-${PKG.manifest_id}`);
     const search = screen.getByLabelText('搜索市场应用');
+    const lastRead = () => listMarketplacePackages.mock.calls.at(-1)![0];
 
-    // The name only — the identifier does not contain it.
+    // The name, then the identifier: each reaches the read as `q`, trimmed.
     fireEvent.change(search, { target: { value: 'service desk' } });
+    await waitFor(() => expect(lastRead()).toMatchObject({ q: 'service desk', offset: 0 }));
     expect(screen.getByTestId(`marketplace-card-${PKG.manifest_id}`)).toBeInTheDocument();
 
-    // The identifier only — the name and description do not contain it.
-    fireEvent.change(search, { target: { value: 'com.acme' } });
+    fireEvent.change(search, { target: { value: ' com.acme ' } });
+    await waitFor(() => expect(lastRead()).toMatchObject({ q: 'com.acme', offset: 0 }));
     expect(screen.getByTestId(`marketplace-card-${PKG.manifest_id}`)).toBeInTheDocument();
 
+    // Text that names neither: the door answers nothing, and nothing is drawn.
     fireEvent.change(search, { target: { value: 'no-such-package' } });
-    expect(screen.queryByTestId(`marketplace-card-${PKG.manifest_id}`)).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId(`marketplace-card-${PKG.manifest_id}`)).toBeNull());
   });
 });

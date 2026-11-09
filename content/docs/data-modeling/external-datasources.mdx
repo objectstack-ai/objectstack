@@ -157,6 +157,12 @@ Datasources** (stamped `origin: code`, read-only in the UI) and via
 `GET /api/v1/datasources` and `GET /api/v1/meta/datasource`, where an admin can
 run the "Sync objects" wizard.
 
+A datasource created in Setup (`POST /api/v1/datasources`) is a `datasource`
+item of the environment's metadata. Under the `group` and `isolated` tenancy
+postures only the platform operator creates, changes or removes one, or migrates
+its credential; any other caller is refused `403`, naming the posture, whatever
+it holds, as at the `/meta` doors ([tenancy modes](/docs/deployment/tenancy-modes)).
+
 ### When auto-connect fails
 
 An object that binds explicitly via `datasource: '…'` has **no fallback** — it
@@ -183,7 +189,10 @@ one failed start reports *all* the misconfigured ones.
 in an explicitly degraded state announced by a `DEGRADED BOOT` banner. The
 datasource stays unconnected for the process lifetime: nothing re-runs the
 connect, so queries against its objects keep failing until the server is
-restarted. Do not set it in production.
+restarted. The one exception is a plugin-driver datasource whose connector
+instance could not lend, which recovers on its own once the instance does
+([Borrowing a connector instance's credential](#borrowing-a-connector-instances-credential)).
+Do not set it in production.
 </Callout>
 
 <Callout type="info">
@@ -412,6 +421,19 @@ its header or query parameter. The rules:
   automation service (`@objectstack/service-automation` is what lends the credential),
   leaves the datasource unconnected with the reason, the same connect failure as an
   unresolvable `credentialsRef`.
+- **Recovery without a restart.** The connect judges the instance once, but the plugin
+  driver stays registered and borrows again on each request. So when that failure did not
+  stop the boot (no gate in [When auto-connect fails](#when-auto-connect-fails) refuses it,
+  or `OS_ALLOW_DRIVER_CONNECT_FAILURE` is set), the datasource shows `error` in
+  Setup → Datasources and its requests answer `503` only until the instance is repaired.
+  The first borrow the lender grants for **that** instance after the repair, which the next
+  request makes, clears the failure, and the datasource reads `ok` again with no restart.
+  A grant for a different instance leaves it standing. A datasource reconnected or edited
+  in between records a result of its own instead. This needs a lender that reports its
+  grants, as `@objectstack/service-automation` does; with a lender that does not, or none,
+  the failure stands until a restart. The `DEGRADED BOOT` banner says which applies: it
+  names the instance whose next granted borrow clears the failure, or says the server has
+  to be restarted.
 - **A credential not set yet does not fail the connect.** Each request is answered
   `503 ERR_DATASOURCE_UNAVAILABLE`, with the reference named in the server log, until
   an administrator sets it; the next request after that reads with it, with no restart.
@@ -457,6 +479,210 @@ Dashboards and reports over a federated object aggregate against the **correct**
 remote table/columns: the analytics layer routes such queries through the driver's
 physical-table resolution (honoring `remoteName` / `remoteSchema`) rather than the
 object name, so they never hit the wrong table.
+
+## 7. Oracle Database
+
+Oracle is a **federation-only** dialect. ObjectStack reads an existing Oracle schema
+live and writes to it when both write gates are on, but it never owns one. A
+`managed` Oracle datasource, including one that leaves `schemaMode` at its default,
+is refused when the stack is defined. Every DDL operation is refused by the driver
+too.
+
+{/* os:check */}
+```typescript
+import { defineDatasource } from '@objectstack/spec/data';
+
+export const Erp = defineDatasource({
+  name: 'erp',
+  label: 'ERP (Oracle)',
+  driver: 'oracle',                 // alias: 'oracledb'
+  schemaMode: 'external',           // required: 'external' or 'validate-only'
+  config: { host: 'erp-db.internal', port: 1521, serviceName: 'ERPPDB1', username: 'erp_ro' },
+  external: {
+    allowWrites: false,
+    credentialsRef: 'sys_secret:4b1e…', // the password is the bound secret, never inline
+  },
+});
+```
+
+**Requirements**
+
+- **Oracle Database 12c Release 1 or later.** Pages are read with
+  `OFFSET … ROWS FETCH NEXT … ROWS ONLY`, which 12c introduced. Verified live on
+  Oracle Database 23ai Free.
+- **The `oracledb` package.** It is an optional install of `@objectstack/driver-sql`
+  (`npm install oracledb`). It runs in **Thin mode**, which is pure JavaScript and
+  needs no Oracle Client libraries. Without the package, the datasource's connect
+  fails with an error that names that install.
+
+**The `config` block**
+
+| Key | Meaning |
+| --- | --- |
+| `connectString` | An Easy Connect string (`host:port/service_name`), a `tcps://…` string, or a TNS descriptor. Wins over the keys below when set. |
+| `host` / `port` / `serviceName` | Composed into `host:port/serviceName` when there is no `connectString`. `port` defaults to 1521. |
+| `username` | The database user. Its schema is the one the Tables tab lists. |
+
+`password` and `url` are refused by name. The password is the bound secret, and an
+Oracle connect string is not a URL.
+
+**TLS** is chosen by the connect string: `connectString: 'tcps://erp-db.internal:2484/ERPPDB1'`.
+The server is verified against the host's trusted certificate authorities. If the
+database's certificate comes from a private certificate authority, put that CA in a
+PEM wallet (a directory holding `ewallet.pem`) on the host and name the directory in
+the connect string, which reaches the driver unchanged:
+`'tcps://erp-db.internal:2484/ERPPDB1?wallet_location=/etc/oracle/wallet'`, or
+`(SECURITY=(MY_WALLET_DIRECTORY=/etc/oracle/wallet))` inside a descriptor. This route
+follows node-oracledb's Thin-mode connect-string handling and has not been tested
+against a live TLS listener here. A datasource `ssl` block and `ca`, `cert`, `key` or
+`rejectUnauthorized` config keys are refused rather than silently dropped, because
+the driver reads TLS only from the connect string.
+
+**Binding tables.** Oracle stores an unquoted identifier in UPPER case, so an
+imported table's columns are `CUST_NO`, `FULL_NAME`, and so on. The Tables tab and
+`import_object` map each one to a lower-case field through `external.columnMap`. The
+driver quotes the catalog spelling back in every statement. The Tables tab lists the
+tables of the connecting user's current schema. Reach another owner's table with an
+object whose `remoteName` is `OWNER.TABLE`.
+
+**How values read and compare**
+
+| Remote column | Field | Notes |
+| --- | --- | --- |
+| `BOOLEAN` (23ai) | `boolean` | Exact. |
+| `NUMBER(1)` flag | `boolean` | Judged lossy by the type matrix: it is an integer column. It reads as `true` / `false`, and a write sends `1` / `0`. |
+| `CHAR(1)` flag (`'Y'` / `'N'`) | `text` | Judged incompatible with a `boolean` field, so bind it as text. A boolean binding would read every non-NULL letter as `true`. |
+| `DATE` | `datetime` | An Oracle `DATE` carries a time of day. A `date` field over it is judged lossy: the time is dropped. |
+| `TIMESTAMP WITH TIME ZONE` | `datetime` | Compared and returned as UTC instants. |
+| `CLOB` | `textarea` | |
+| `RAW(16)` | `text` | Read as a lower-case UUID string, and filtered and written by that string (see below). A `lookup`, `master_detail` or `user` field over it is exact. A `text` field is judged lossy, so a draft marks it for review: `$contains` and the other pattern operators do not match it as the string it reads. |
+
+The driver pins every session to UTC. Thin mode decodes `DATE` and `TIMESTAMP`
+values with the server process's local clock, and the driver repairs that on read.
+The repair is exact except during the hour a daylight-saving spring-forward skips in
+the process's own time zone. Run the server with `TZ=UTC` and there is no such hour.
+
+**What Oracle answers differently**
+
+- **`''` is NULL in Oracle.** A filter that compares against an empty string
+  (`= ''`, `$ne: ''`, `$in: ['']`, a range bound of `''`) is refused with
+  `INVALID_FILTER`, because Oracle would answer it as a comparison with NULL rather
+  than as written. Use `$null` / `$empty` instead. `$empty` on a text column matches
+  exactly the NULL rows there.
+- **Upsert is refused** with `NOT_IMPLEMENTED` (HTTP 501). The driver emits no
+  `MERGE`. Use create and update.
+- **JSON-array membership** (`$contains` on a multi-value field) is refused. There is
+  no Oracle construct modelled for it.
+- **A `RAW(16)` column is filtered and written by its UUID string.** The driver
+  reads which of an object's columns are `RAW(16)` from the catalog, and binds a
+  comparison value (`=`, `$ne`, `$in`, the range operators), a written value and a
+  record's key for those columns as `HEXTORAW(?)`. That covers a `SYS_GUID()` key and
+  a `lookup` keyed by one. A UUID is accepted with hyphens (the form a read returns)
+  or as its 32 hex digits, in either case. Any other value is refused before the
+  statement is sent: in a filter with `INVALID_FILTER`, in a write with
+  `VALIDATION_ERROR`. So is a create that gives no id on an object keyed by such a
+  column, because the id the driver would mint is not a UUID. A `VARCHAR2` column
+  that holds UUIDs is still compared as text.
+- **Pattern operators on a `RAW(16)` column** (`$contains`, `$startsWith`, `$like`
+  and the rest) are sent as text patterns. Oracle compares them with the column's
+  hex text: 32 upper-case digits, no hyphens. A fragment of the UUID as it reads
+  back matches only when it has no hyphen and the operator ignores case.
+- A `NUMBER` beyond 2^53 is read as a JavaScript number and loses precision.
+- **Paged reads are stable when the object's `columnMap` maps a column to `id`.**
+  That column breaks ties after the caller's own sort. Without a mapped key, a paged
+  read has no unique order, and the server logs a warning once per object.
+
+## 8. SQL Server (federation only)
+
+Microsoft SQL Server is a **federation-only** driver: point an `external` (or
+`validate-only`) datasource at it and its tables become objects, read live — and,
+with the double opt-in above, written live. The usual reason is an older
+line-of-business system (an ERP, a MES, a HIS) whose database is federated in place
+rather than migrated. It is served by `@objectstack/driver-sql` over knex's `mssql`
+client, so install its optional peer `tedious` next to it.
+
+{/* os:check */}
+```typescript
+import { defineDatasource } from '@objectstack/spec/data';
+
+export const LegacyErp = defineDatasource({
+  name: 'legacy_erp',
+  label: 'Legacy ERP (SQL Server)',
+  driver: 'mssql',                     // aliases: 'sqlserver', 'tedious'
+  schemaMode: 'external',              // required — see below
+  config: {
+    host: 'erp-db.internal',
+    port: 1433,                        // ignored when instanceName is set
+    database: 'ERP',
+    username: 'objectstack_ro',
+    // instanceName: 'SQLEXPRESS',     // a named instance, via SQL Server Browser
+    ssl: true,                         // tedious `encrypt`; required by Azure SQL
+  },
+  external: {
+    credentialsRef: 'sys_secret:7c1e…', // the password — never written inline
+    validation: { onMismatch: 'fail', checkOnBoot: true },
+  },
+  active: true,
+});
+```
+
+What is different from the other SQL drivers:
+
+- **Federation only.** The platform never builds its own schema on SQL Server, so a
+  `managed` datasource on this driver is refused when the stack is parsed, with a
+  message naming the scope, and no boot host offers it as the platform database. If
+  you need ObjectStack's own tables on SQL Server, that is a separate feature request.
+- **Discrete fields, no URL.** `tedious` reads no connection-string grammar, so the
+  config takes `host` / `port` / `database` / `username` / `instanceName` and
+  refuses a `url` / `connectionString`. The password is refused inline: bind it
+  through the connection form or `external.credentialsRef`.
+- **TLS.** `config.ssl` is tedious's `encrypt`. For an on-premises server with a
+  self-signed certificate, set the datasource-level
+  `ssl: { enabled: true, rejectUnauthorized: false }` (tedious's `encrypt` plus
+  `trustServerCertificate`); a CA goes in the same block. Write `enabled: true`:
+  the block's `enabled` defaults to `false`, and a block without it turns
+  encryption off.
+- **Schemas.** A SQL Server database is usually several schemas. The Studio Tables
+  tab, `list_remote_tables` and `import_object` list every user table as
+  `schema.table` (`dbo.Orders`, `Sales.Customers`) with its primary key and foreign
+  keys, and an imported object gets `external.remoteSchema` / `remoteName` from it.
+  A bound object without `remoteSchema` resolves in the login's default schema.
+- **Types.** `nvarchar` / `nchar` / `ntext` / `xml` read as text (`nvarchar(max)`
+  included), `bit` as boolean, `datetime2` / `datetimeoffset` / `smalldatetime` as
+  datetime, `uniqueidentifier` as uuid, `money` / `decimal` as decimal. SQL Server's
+  `timestamp` is `rowversion` — a binary row counter, not a date. A `json`,
+  `tags` or `multiselect` field over an `nvarchar(max)` column is accepted as a
+  lossy match (the driver keeps it as JSON text); JSON-array membership
+  (`$contains`) and `$empty` on a multi-value field are refused on SQL Server.
+- **GUIDs.** A `uniqueidentifier` reads back in the lower-case form
+  (`3f2504e0-4f89-…`), so a GUID written as a string reads back as that string, and
+  an equality or `$in` filter matches it in either case. The text operators
+  (`$contains`, `$startsWith`, `$endsWith`, `$notContains`, `$like` and their
+  case-insensitive siblings) match a `uniqueidentifier` column as that same
+  lower-case text, `LOWER(CONVERT(nvarchar(36), col))`, so a fragment copied from a
+  read finds its row. The case-exact operators follow that read form, so
+  `$startsWith: '3f2504e0'` matches and `$startsWith: '3F2504E0'` does not;
+  `$icontains` and `$ilike` match either case. The driver learns which columns
+  are GUIDs from the remote catalog
+  (`INFORMATION_SCHEMA.COLUMNS`) the first time a read uses a text operator on the
+  object, never from the shape of the value you filter by.
+- **Text matching** follows the platform's contract, not the database's collation:
+  `$contains` / `$startsWith` / `$endsWith` / `$like` are case-exact even on SQL
+  Server's case-insensitive default collations, and `$icontains` folds A–Z only.
+  This uses `TRANSLATE`, so the floor is **SQL Server 2017**.
+- **Paging.** `OFFSET … FETCH` needs an `ORDER BY` on SQL Server. An unsorted page
+  is ordered by the column the object's `columnMap` maps to `id` when there is one,
+  else by the table's own single-column primary key, read from the catalog; a table
+  with neither (a heap, a composite key) pages without a stable order, and the
+  driver logs that once per object.
+- **Writes** use `INSERT … OUTPUT inserted.*` (routed through a temp table, so a
+  table with triggers accepts it too), and a created record comes back with the
+  values SQL Server filled in. The remote table needs a column the object reads as
+  `id`, and the platform supplies its value: an `IDENTITY` key cannot be inserted
+  into, so keep a table keyed that way read-only.
+- **Not on SQL Server:** `$contains` / `$empty` on a multi-value (JSON-array) field is
+  refused rather than approximated, and date buckets in reports are computed by the
+  engine rather than pushed down.
 
 ## Multi-tenant hosts
 

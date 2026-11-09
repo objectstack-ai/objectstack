@@ -74,8 +74,8 @@ describe('PushDeliveryDataSchema', () => {
   });
 });
 
-describe('PushDeliveryDataSchema is declared, not yet served', () => {
-  it('carries the PLANNED marker until a push channel produces it', () => {
-    expect(PushDeliveryDataSchema.description).toMatch(/^\[PLANNED — /);
+describe('PushDeliveryDataSchema is served', () => {
+  it('carries no PLANNED marker: the push channel produces it (#29041)', () => {
+    expect(PushDeliveryDataSchema.description).not.toMatch(/PLANNED/);
   });
 });

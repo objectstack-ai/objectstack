@@ -40,6 +40,7 @@ import {
 import { buildPackageScopeOptions } from './package-scope.js';
 import { diagnosticsHeaderTone, type DiagnosticsHeaderTone } from './diagnostics-tone.js';
 import { ENVIRONMENT_AREA_TYPES, SETUP_DATASOURCES_PATH, useMetadataAreaHost } from './metadataAreaHost.js';
+import { WritabilityBadge, typeStateWord } from './PageShell.js';
 import { ENVIRONMENT_SCOPE_QUERY } from './catalog-scope.js';
 import { usePackageCustomizations } from '../studio-design/CustomizationMark.js';
 import { customizationCountsByType, customizationTotal } from '../studio-design/customizationMarks.js';
@@ -101,7 +102,7 @@ export function MetadataDirectoryPage() {
 
   const [query, setQuery] = React.useState('');
   const [domainFilter, setDomainFilter] = React.useState<string>('all');
-  const [writableOnly, setWritableOnly] = React.useState(false);
+  const [hideReadOnly, setHideReadOnly] = React.useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   // objectstack ADR-0146 D1 (#28561) — under Studio's "All metadata" area the
   // package is the area's, not one this page picks and repairs; the
@@ -205,12 +206,14 @@ export function MetadataDirectoryPage() {
     return c;
   }, [scopedEntries]);
 
-  const writableCount = scopedEntries.filter(
-    (e) => e.allowEnvironmentOverlay || e.allowRuntimeCreate,
-  ).length;
+  // objectstack#29705 — a tile's word answers "what can I do here" in the
+  // package's context: a read-only package's overlay type can be customized,
+  // never "writable". The filter hides the types that word marks read-only.
+  const packageReadOnly = !!host?.readOnly;
+  const actionableCount = scopedEntries.filter((e) => typeStateWord(e, packageReadOnly) !== 'readOnly').length;
 
   const filtered = scopedEntries.filter((e) => {
-    if (writableOnly && !(e.allowEnvironmentOverlay || e.allowRuntimeCreate)) return false;
+    if (hideReadOnly && typeStateWord(e, packageReadOnly) === 'readOnly') return false;
     if (domainFilter !== 'all' && (e.domain ?? 'other') !== domainFilter) return false;
     if (query) {
       const q = query.toLowerCase();
@@ -250,15 +253,9 @@ export function MetadataDirectoryPage() {
       {/* Header */}
       <div className="px-6 pt-5 pb-4 border-b bg-background">
         <h1 className="text-xl font-semibold">{t('engine.directory.title', locale)}</h1>
-        <p
-          className="text-sm text-muted-foreground mt-1 max-w-3xl"
-          dangerouslySetInnerHTML={{
-            __html: tFormat('engine.directory.description', locale, {
-              count: `<strong class="text-foreground">${scopedEntries.length}</strong>`,
-              writable: writableCount,
-            }),
-          }}
-        />
+        <p className="text-sm text-muted-foreground mt-1 max-w-3xl" data-testid="directory-description">
+          {t('engine.directory.description', locale)}
+        </p>
         {customizations.status === 'read' && customizationTotal(customizations.read) > 0 && (
           <p className="text-sm text-muted-foreground mt-1" data-testid="directory-customizations-total">
             {tFormat('engine.directory.customizations.total', locale, {
@@ -285,11 +282,12 @@ export function MetadataDirectoryPage() {
             />
           </div>
           <Button
-            variant={writableOnly ? 'default' : 'outline'}
+            variant={hideReadOnly ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setWritableOnly((w) => !w)}
+            aria-pressed={hideReadOnly}
+            onClick={() => setHideReadOnly((w) => !w)}
           >
-            {t('engine.directory.writableOnly', locale)} ({writableCount})
+            {t('engine.directory.hideReadOnly', locale)} ({actionableCount})
           </Button>
           {diagSummary.total > 0 && (
             <Button
@@ -373,6 +371,7 @@ export function MetadataDirectoryPage() {
                       lockedCount={lockedByType[e.type] ?? 0}
                       itemCount={totalCount}
                       customizedCount={customizedByType?.[e.type]}
+                      packageReadOnly={packageReadOnly}
                       packageFilter={activePackage ?? undefined}
                       environmentScope={!!host && host.packageId === null}
                       // ADR-0146 D1 — under the area, the datasource tile
@@ -435,9 +434,12 @@ function TypeTile({
   environmentScope = false,
   href: hrefOverride,
   customizedCount,
+  packageReadOnly = false,
 }: {
   entry: RichMetadataTypeEntry;
   locale?: string;
+  /** The area's package is read-only: the tile's word is the one its headers draw (objectstack#29705). */
+  packageReadOnly?: boolean;
   invalidCount?: number;
   warnCount?: number;
   itemCount?: number;
@@ -534,34 +536,7 @@ function TypeTile({
               {lockedCount}
             </Badge>
           )}
-          {entry.allowEnvironmentOverlay ? (
-            <Badge
-              className={
-                'text-[10px] ' +
-                (entry.overrideSource === 'env'
-                  ? 'bg-amber-100 text-amber-800 hover:bg-amber-100'
-                  : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-100')
-              }
-              title={
-                entry.overrideSource === 'env'
-                  ? 'Writable via the OS_METADATA_WRITABLE env var: it opens the items no package ships, never an item a package ships'
-                  : 'Writable per ADR-0005 overlay opt-in'
-              }
-            >
-              {t('engine.badge.writable', locale)}
-            </Badge>
-          ) : entry.allowRuntimeCreate ? (
-            <Badge
-              className="text-[10px] bg-sky-100 text-sky-800 hover:bg-sky-100"
-              title="Code-shipped items are locked; new items can be created at runtime"
-            >
-              {t('engine.badge.createOnly', locale)}
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="text-[10px] text-muted-foreground">
-              {t('engine.badge.readOnly', locale)}
-            </Badge>
-          )}
+          <WritabilityBadge entry={entry} readOnly={packageReadOnly} locale={locale ?? 'en'} />
         </div>
       </div>
       {entry.description && (

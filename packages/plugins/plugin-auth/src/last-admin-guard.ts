@@ -32,8 +32,8 @@
  *     administrator" is not a fact stored on `sys_user` at all. It lives in the
  *     two tables `resolveAdminUserIds` enumerates, so it is taken away by
  *     writing THEM: downgrading (or deleting) the `sys_member` row that carries
- *     the `owner`/`admin` grade — better-auth's `updateMemberRole`, a SCIM
- *     group-mapping change — or deleting the `admin_full_access`
+ *     the `owner`/`admin` grade — better-auth's `updateMemberRole`, an
+ *     import, a script — or deleting the `admin_full_access`
  *     `sys_user_permission_set` grant, or editing it until it no longer counts
  *     (re-pointed at another set, scoped to an organization, moved outside its
  *     ADR-0091 validity window). The end state is identical to (2): everyone is
@@ -118,7 +118,8 @@
  *
  * The standing halves judge EVERY membership downgrade, not only a caller
  * downgrading themselves. Narrowing to self-downgrade would miss the case that
- * actually happens: an IdP group mapping that rewrites other people's roles.
+ * actually happens: an administrator, an import or a script rewriting other
+ * people's roles.
  *
  * ## What counts as an administrator
  *
@@ -336,6 +337,7 @@ import {
 } from '@objectstack/core';
 
 import { isOrgAdminGrade } from './invitation-role-cap.js';
+import { isAgentAccountRow } from './service-account-identity.js';
 import { GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-set-name.js';
 
 /** `sys_user_permission_set` has no `SystemObjectName` member; it is spelled once, here. */
@@ -557,11 +559,13 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
  * shape actually comes from, so the operator goes and fixes the source instead
  * of this guard.
  *
- * The two identity tables are written by IdP integrations, so their refusals
- * point at the SCIM group mapping. The activation ledger is not — nothing in
- * SCIM or better-auth writes it; a disable action, an upgrade step or a script
- * does. Sending THAT operator to look at an IdP group would send them into a
- * system they may not even run.
+ * The two identity tables are written by administrators, better-auth's own
+ * membership doors, imports and scripts — never by an identity provider's group
+ * mapping, which grants only ordinary permission sets inside the organization
+ * boundary (`sys_idp_group_mapping`, refused at save otherwise), so it can
+ * neither confer nor take away administrator standing. Their refusals send the
+ * operator to grant standing elsewhere first. The activation ledger is written
+ * by a disable action, an upgrade step or a script, and says so.
  */
 function standingOrigin(table: string, noun: string, op?: GuardedOp): string {
   if (op === 'organization-insert') {
@@ -597,8 +601,9 @@ function standingOrigin(table: string, noun: string, op?: GuardedOp): string {
     );
   }
   return (
-    `If the ${noun} came from an identity provider, the SCIM group mapping is too broad — fix ` +
-    'the IdP group, not this guard.'
+    `If the ${noun} came from an import, a script or an administrator, grant another account ` +
+    'administrator standing first, then make the change. An identity provider group mapping never ' +
+    'moves administrator standing: it grants ordinary permission sets only.'
   );
 }
 
@@ -779,9 +784,15 @@ export const MEMBER_STANDING_KEYS = ['role', 'user_id', 'userId'] as const;
  * [ADR-0131 D4] The enumeration reads WHICH set by the grant's name,
  * `permission_set`, and only by it (the legacy `permission_set_id` is retired,
  * C7b, and a write naming it is refused as an undeclared field).
+ *
+ * [ADR-0150 D8 R1] `permission_set_package` names which holder's set that
+ * name is, and the resolver confers the set (and `admin_full_access`'s
+ * standing) only when that package holds it — so a payload re-pointing it
+ * pays for the enumeration like one re-pointing the name.
  */
 export const GRANT_STANDING_KEYS = [
   'permission_set',
+  'permission_set_package',
   'user_id',
   'userId',
   'organization_id',
@@ -957,6 +968,15 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
       + 'from the configured-and-verified email pair — never from this flag. Emptying it costs the '
       + 'holder their AI seat, which is an ADR-0086 capability question with an in-product remedy, '
       + 'not a break-glass one.',
+    principal_kind:
+      '[ADR-0151 D1/D3] An AI service account (`agent`) confers no administrator standing, so the '
+      + 'only write that could cost standing is one moving a person\'s row to `agent`. None is '
+      + 'expressible: the kind is set at insert and any change is refused for every caller, '
+      + '`isSystem` included (`service-account-identity.ts`), before this guard is asked.',
+    principalKind:
+      'The camel-cased spelling of `principal_kind` the resolver also reads (a driver may hand the '
+      + 'row back camel-cased). Its reason is the same: the kind is immutable for every caller, so '
+      + 'no write moves a person\'s row to `agent`.',
   },
 };
 
@@ -1280,6 +1300,14 @@ function createStandingReader(engine: Pick<LastAdminGuardEngine, 'find'>, maxSca
    * `standing: 'platform-admins'` skips half 2 (organization owners and
    * admins), which is no platform-admin standing; the guard always reads all
    * three halves.
+   *
+   * [ADR-0151 D2/D3] An AI service account is never one of them, whatever
+   * its grade or its grants say: it holds no administrator standing (the
+   * resolver withholds every administrator set from it) and it can never
+   * sign in, so it is no escape hatch. The ids the three halves found are
+   * read once more, by id, and every account among them is dropped. The kind
+   * never changes (`service-account-identity.ts`), so no pending write can
+   * move a row onto or off it, and the stored rows are what is read.
    */
   const resolveAdminUserIds = async (
     op: StandingReadOp,
@@ -1455,6 +1483,16 @@ function createStandingReader(engine: Pick<LastAdminGuardEngine, 'find'>, maxSca
     // The legacy service account is not loginable — it can never be the escape
     // hatch, so it must not be counted as one.
     ids.delete(SystemUserId.SYSTEM);
+
+    // [ADR-0151 D2/D3] Nor is an AI service account (see above). Whole rows,
+    // by id: the kind is read off the row the way the resolver reads it.
+    if (ids.size > 0) {
+      const found = await scan(op, SystemObjectName.USER, { where: { id: { $in: [...ids] } } });
+      for (const row of found) {
+        const uid = toId(row.id);
+        if (uid && isAgentAccountRow(row)) ids.delete(uid);
+      }
+    }
     return ids;
   };
 
@@ -1943,9 +1981,9 @@ export function registerLastAdminGuard(
     if (ctx.object !== SystemObjectName.MEMBER) return;
     const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
     // The whole downgrade family lands here: better-auth's `updateMemberRole`,
-    // a SCIM group-mapping change, an import, a script. It is NOT narrowed to
-    // "the caller downgrading themselves" — an IdP writes these on everyone's
-    // behalf, which is exactly the case ADR-0135 D5.2 exists for.
+    // an import, a script. It is NOT narrowed to "the caller downgrading
+    // themselves" — those write on everyone's behalf, which is exactly the
+    // case ADR-0135 D5.2 exists for.
     //
     // A payload touching neither `role` nor `user_id` provably cannot move the
     // enumeration (see MEMBER_STANDING_KEYS), so it costs no reads at all.

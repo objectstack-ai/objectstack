@@ -60,11 +60,16 @@ os compile
 | `os generate <type> <name>` | Generate metadata files (alias: `os g`) |
 | `os create <type> [name]` | Scaffold a standalone **kernel code** plugin project (the `Plugin` contract, built by `tsc`) from a built-in template |
 
-Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`, `picklist`
+Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`, `picklist`, `permission`, `dataset`
 
 `picklist` writes a shared option list (`src/picklists/<name>.picklist.ts`, with
 `definePicklist`). A select field names it with `Field.select({ picklist: '<name>' })`
 in place of its own `options`, and the server serves that field with the list's options.
+
+`permission` writes a permission set (`src/security/<name>.permission.ts`, with
+`definePermissionSet`) granting the object `--object` names, or the stack's only object.
+`dataset` writes an analytics dataset (`src/datasets/<name>.dataset.ts`, with
+`defineDataset`) over that object, which dashboard and report widgets bind to by name.
 
 `agent` is **retired** (ADR-0063 §2): agents are platform-internal, so a scaffolded
 `src/agents/*.ts` validated, published and was then filtered out of the runtime
@@ -134,9 +139,9 @@ Two stored sessions exist, and each command authenticates with one of them:
 | `os environments list` / `show` / `create` / `bind` / `switch` | `-u, --url` (env `OS_CLOUD_URL`); else the URL of the stored session it uses; else `http://localhost:3000` | `-t, --token` (env `OS_TOKEN`) | No `--url`: `~/.objectstack/credentials.json` (the `os login` session), else `~/.objectstack/cloud.json` (the `os cloud login` session). With `--url`: the file that names that server, `credentials.json` first; when neither does, `credentials.json` as before. `cloud.json`'s token is never sent to another URL |
 
 `os package install` is not a cloud command: it installs into a running runtime
-(`-r, --runtime`, env `OS_RUNTIME_URL`, default `http://localhost:3000`) and signs
-in there with `--email` / `--password` (env `OS_RUNTIME_EMAIL` /
-`OS_RUNTIME_PASSWORD`).
+(`-u, --url`, env `OS_RUNTIME_URL`, default `http://localhost:3000`) and
+authenticates there with `-t, --token` (env `OS_RUNTIME_TOKEN`) or `--email` /
+`--password` (env `OS_RUNTIME_EMAIL` / `OS_RUNTIME_PASSWORD`).
 
 ### Plugin Management
 
@@ -428,7 +433,7 @@ service plugins for every preset **except** `--preset minimal`:
 | `queue`     | `QueueServicePlugin`         | Background retries (mail, audit batching) need a queue.      |
 | `job`       | `JobServicePlugin`           | Scheduled jobs (cleanup, reports, cron).                     |
 | `cache`     | `CacheServicePlugin`         | In-memory adapter; performance baseline.                     |
-| `settings`  | `SettingsServicePlugin`      | Mail / storage / branding / feature-flag UI + persistence.   |
+| `settings`  | `SettingsServicePlugin`      | Mail / storage / branding settings UI + persistence.         |
 | `email`     | `EmailServicePlugin`         | Auth callbacks (verify, reset, magic-link) hard-depend.      |
 | `storage`   | `StorageServicePlugin`       | Avatars, attachments, exports. Local fallback in dev.        |
 
@@ -437,8 +442,8 @@ Apps no longer need to list these in `requires: [...]`.
 **Opt-out:** run `objectstack serve --preset minimal` to skip the slate
 and only load core + your explicit `requires`.
 
-**Built-in Settings manifests:** `mail`, `storage`, `branding`,
-`feature_flags` are pre-registered. Both `mail` and `storage` expose a
+**Built-in Settings manifests:** `mail`, `storage` and `branding`
+are among those pre-registered. Both `mail` and `storage` expose a
 "Test connection" action that exercises the live transport / adapter
 end-to-end. Switching the storage adapter does **not** migrate
 previously uploaded files — the plugin logs a warning on every swap.

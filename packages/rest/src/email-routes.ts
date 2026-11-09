@@ -189,6 +189,7 @@ function refuse(res: any, message: string): void {
 export interface EmailRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly emailServiceProvider: RestServer['emailServiceProvider'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
 }
@@ -247,7 +248,14 @@ export function registerEmailEndpoints(this: EmailRouteHost, basePath: string): 
                 // answered the wiring question, and "not configured" and
                 // "configured and unusable" both mean this deployment cannot
                 // send mail — one 501, no fact lost by folding them.
-                const emailService = await seamOrUndefined(() => this.emailServiceProvider!(environmentId));
+                //
+                // [#30011] Asked for the REQUEST's environment — the scoped
+                // param, else the shared request→environment resolver — so a
+                // hosted environment's send goes through its own kernel's
+                // email service, never the host's. Resolved inside the seam,
+                // so a resolver fault takes the same 501 as any other.
+                const emailService = await seamOrUndefined(async () =>
+                    this.emailServiceProvider!(await this.resolveRequestEnvironmentId(environmentId, req)));
                 if (!emailService || typeof emailService.send !== 'function') {
                     res.status(501).json({
                         code: 'NOT_IMPLEMENTED',
@@ -256,8 +264,13 @@ export function registerEmailEndpoints(this: EmailRouteHost, basePath: string): 
                     return;
                 }
 
-                const body = req.body ?? {};
-                if (!body || typeof body !== 'object') {
+                // An absent body is the empty message, for the service to
+                // judge. A body that is present must be a JSON object: an
+                // array is `typeof 'object'` and a JSON `null` is present, and
+                // neither is a message, so both take this route's own 400
+                // before the service is reached.
+                const body = req.body === undefined ? {} : req.body;
+                if (!isPlainObject(body)) {
                     res.status(400).json({ code: 'INVALID_REQUEST', error: 'JSON body required' });
                     return;
                 }

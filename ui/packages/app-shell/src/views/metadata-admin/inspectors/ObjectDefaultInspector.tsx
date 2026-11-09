@@ -14,7 +14,8 @@
  * Create-mode niceties:
  *   • `name` is editable only while creating (it's the immutable PK once
  *     saved) and auto-derives a snake_case slug from the label until the
- *     author edits it directly — mirroring the protocol create form.
+ *     author edits it directly — mirroring the protocol create form; a
+ *     Chinese label derives through its pinyin (`romanizeHan`).
  *
  * All edits flow through `onPatch` as shallow draft patches.
  */
@@ -25,6 +26,7 @@ import { InspectorShell, InspectorTextField } from './_shared.js';
 import { Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import { toFieldNameLoose } from '../previews/object-fields-io.js';
 import { slugify } from '../createDerive.js';
+import { romanizeHan, useWhenRomanizerLands } from '../romanizeHan.js';
 import { t } from '../i18n.js';
 import { IconPickerWidget } from '../widgets.js';
 
@@ -47,14 +49,23 @@ export function ObjectDefaultInspector({
   // reset whenever the host remounted this panel (a Properties → Source →
   // Properties round trip does), and the next label keystroke then replaced
   // the name the author had typed.
-  const nameFollowsLabel = createMode && (str('name') === '' || str('name') === slugify(str('label')));
+  const deriveName = (label: string) => slugify(romanizeHan(label));
+  const nameFollowsLabel = createMode && (str('name') === '' || str('name') === deriveName(str('label')));
   const iconFieldId = React.useId();
 
   const setLabel = (v: string) => {
     const patch: Record<string, unknown> = { label: v || undefined };
-    if (nameFollowsLabel) patch.name = slugify(v);
+    if (nameFollowsLabel) patch.name = deriveName(v);
     onPatch(patch);
   };
+
+  // A Chinese label typed before the pinyin dictionary landed left the name
+  // empty; when it lands, an empty name takes the derived one.
+  useWhenRomanizerLands(() => {
+    if (!createMode || readOnly || str('name') !== '' || !str('label')) return;
+    const derived = deriveName(str('label'));
+    if (derived) onPatch({ name: derived });
+  }, str('label'));
   const setName = (v: string) => {
     onPatch({ name: toFieldNameLoose(v) });
   };

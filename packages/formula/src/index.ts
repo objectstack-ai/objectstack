@@ -66,19 +66,33 @@ export { cronEngine } from './cron-engine';
 export {
   templateEngine,
   TEMPLATE_FORMATTERS,
+  MAIL_TEMPLATE_FORMATTERS,
   formatValue,
   judgeHoleFormatter,
   CURRENCY_ARGUMENT_RULE,
+  // `option:object.field`, a mail template's own formatter: the rule sentence
+  // and the parse of its argument.
+  OPTION_ARGUMENT_RULE,
+  optionFieldReference,
+  // An `option` hole with no label table for its `object.field` is refused
+  // with this sentence by every renderer, never printed as stored.
+  optionTableRefusal,
   currencyCodePath,
   currencyCodeValueRefusal,
   // A `currency` hole with no argument formats in the tenant default currency the
   // caller supplies; with none, every renderer refuses it with this sentence.
   currencyDefaultRefusal,
 } from './template-engine';
-export type { TemplateHoleDialect, TemplateHoleGrammarRefusal, TemplateHoleGrammarRule } from './template-engine';
+export type {
+  OptionFieldReference,
+  OptionLabelTable,
+  TemplateHoleDialect,
+  TemplateHoleGrammarRefusal,
+  TemplateHoleGrammarRule,
+} from './template-engine';
 // The mail template hole grammar — one copy, read by `@objectstack/plugin-email`'s
 // renderer, the placement judge below and `@objectstack/lint`'s grammar rule.
-export { mailHolePattern, parseMailHole, judgeMailHoleGrammar } from './mail-hole-grammar';
+export { mailHolePattern, parseMailHole, judgeMailHoleGrammar, optionObjectUnregisteredPlatform } from './mail-hole-grammar';
 export type { ParsedMailHole, MailHoleGrammarFinding, MailHoleGrammarOptions } from './mail-hole-grammar';
 // #25189 — where a hole may sit in a mail template's HTML face (ruling
 // 6335348115 on #25082, F1 A2 / F3 C2). Here because both readers already
@@ -165,12 +179,18 @@ export type { UnknownFunctionCall } from './unknown-function';
 // ADR-0032 — shared validator + introspection (one validator for build,
 // registration, and the agent-callable validate_expression tool).
 export { validateExpression, introspectScope, expectedDialect, inferExpressionType, nearestName, CEL_STDLIB_FUNCTIONS } from './validate';
-export type { FieldRole, ExprInput, ExprSchemaHint, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
+export type { FieldRole, ExprInput, ExprSchemaHint, ExprFaultOutcome, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
 // #22727 — the declaration authoring stamps onto a formula field: its
 // `returnType`, and for a provably-money result its currency, copied from the
 // source field's own `currencyConfig`. The producer behind `returnType: 'currency'`.
 export { inferFormulaReturn } from './formula-return';
 export type { FormulaReturnDeclaration, FormulaSourceField } from './formula-return';
+// ADR-0144 D5 — the home-amount conversion arithmetic: the engine's write-time
+// home projection (`@objectstack/objectql`) and the form's live "≈ home amount"
+// preview read this one copy, so the number a form shows before save is the
+// number the engine stores.
+export { toScaledDecimal, divideToPlaces, formatScaledDecimal, documentDateOf } from './home-amount-arithmetic';
+export type { ScaledDecimal } from './home-amount-arithmetic';
 // The closed set of refusal codes `validateExpression` and
 // `collectCelRootIdentifiers` carry beside their English message, with the
 // typed params each message interpolates — so a localized author surface keys

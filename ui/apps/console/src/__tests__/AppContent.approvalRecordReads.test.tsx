@@ -36,9 +36,6 @@ vi.mock('@object-ui/permissions', async (importOriginal) => ({
 vi.mock('../LocalizationFetchProvider', () => ({
   LocalizationFetchProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
-vi.mock('../pages/settings/WorkspaceTimezonePrompt', () => ({
-  WorkspaceTimezonePrompt: () => null,
-}));
 
 import { AppContent } from '../AppContent';
 

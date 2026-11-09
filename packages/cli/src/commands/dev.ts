@@ -35,11 +35,19 @@ import {
 import { artifactObjectNames } from '../utils/stack-collections.js';
 import { readEnvWithDeprecation, isMcpServerEnabled } from '@objectstack/types';
 import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';
+import { claudeMcpAddLine, MCP_ENDPOINT_PATH } from './mcp/connect.js';
 // The ONE port contract, shared with `start` and with the `serve` child this
 // command spawns (#12673). ⛔ Nothing about ports is declared in this file —
 // no range, no reader, no wording; a second copy of the bound is exactly what
 // #12620 and #12662 protected against.
 import { describePortSource, parseRequestedPort, formatInvalidPortNotice, portFlagEnv } from '../utils/port-contract.js';
+import { applyCryptoKeyFileChannel } from '../utils/internal-crypto-key-file-channel.js';
+import {
+  ceremonyDatabaseUrl,
+  writeCeremonyConnectionChannel,
+  writeCeremonyDatabaseChannel,
+} from '../utils/internal-ceremony-database-channel.js';
+import { startDevDeployKey, type DeployKeyHandle } from '../utils/dev-deploy-key.js';
 // The ONE dev-TLS contract, shared with the `serve` child this command spawns
 // (#16804). ⛔ Nothing about certificates is declared in this file, and ⛔ no
 // certificate is ever generated — the developer brings their own.
@@ -192,6 +200,9 @@ export function prepareDevDatabaseDirectory(
  * used to be the current folder's basename, so one endpoint was registered as
  * the folder's name from the banner and as `objectstack` from the skill and
  * the console: two entries for one server in the agent's config.
+ *
+ * The line itself is `os mcp connect`'s ({@link claudeMcpAddLine}), so
+ * `os mcp connect --url <this origin>` prints and runs exactly this row.
  */
 export function printMcpConnectHint(
   opts: { boundPort: number | string; boundProtocol?: ListenerProtocol },
@@ -200,9 +211,9 @@ export function printMcpConnectHint(
   if (baseOrigin === null) return;
   console.log();
   console.log(chalk.cyan('  🤖 MCP server — connect a coding agent:'));
-  console.log(`     Endpoint  ${baseOrigin}/api/v1/mcp`);
-  console.log(`     Skill     ${baseOrigin}/api/v1/mcp/skill`);
-  console.log(chalk.dim(`     Connect   claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} ${baseOrigin}/api/v1/mcp`));
+  console.log(`     Endpoint  ${baseOrigin}${MCP_ENDPOINT_PATH}`);
+  console.log(`     Skill     ${baseOrigin}${MCP_ENDPOINT_PATH}/skill`);
+  console.log(chalk.dim(`     Connect   ${claudeMcpAddLine(OBJECTSTACK_MCP_SERVER_NAME, `${baseOrigin}${MCP_ENDPOINT_PATH}`)}`));
   console.log(chalk.dim('     Disable   OS_MCP_SERVER_ENABLED=false'));
 }
 
@@ -248,6 +259,28 @@ export function forwardSeedSettledToParent(msg: unknown): boolean {
     if (typeof process.send === 'function') process.send(msg);
   } catch { /* the parent's channel closed — best-effort, exactly like the child's */ }
   return true;
+}
+
+/**
+ * The internal channel `@objectstack/cloud-connection` reads as
+ * `FRESH_HOME_CHANNEL_ENV` (#30217): the ephemeral `OS_HOME` a `--fresh` run
+ * created. Spelled here rather than imported because oclif loads every command
+ * module on every invocation; `dev-fresh-home-channel.test.ts` holds the two
+ * spellings equal.
+ */
+export const FRESH_HOME_CHANNEL_ENV = 'OS_INTERNAL_FRESH_HOME';
+
+/**
+ * Set or clear {@link FRESH_HOME_CHANNEL_ENV} on the serve child's env
+ * (#30217). Under `--fresh` it names the run's ephemeral `OS_HOME`, so the
+ * install ledger there adopts nothing from the project's working-directory
+ * ledger — a fresh run starts without an earlier run's installs. Otherwise it is
+ * removed: the parent owns the variable, so an inherited copy never speaks for
+ * a home this run did not create. Not an operator setting.
+ */
+export function applyFreshHomeChannel(childEnv: NodeJS.ProcessEnv, freshHome: string | undefined): void {
+  if (freshHome) childEnv[FRESH_HOME_CHANNEL_ENV] = freshHome;
+  else delete childEnv[FRESH_HOME_CHANNEL_ENV];
 }
 
 /**
@@ -675,6 +708,9 @@ export default class Dev extends Command {
       //     (OS_HOME → <home>/data/objectstack.db, published as OS_DATABASE_URL),
       //   - the storage-service uploads root, published on the settings
       //     service's own env name OS_STORAGE_LOCAL_ROOT (#4968),
+      //   - the install-local ledger, which follows OS_HOME (#30217); the
+      //     child is told this home is ephemeral (applyFreshHomeChannel), so
+      //     it adopts nothing from the project's working-directory ledger,
       //   - any other state a plugin keys off OS_HOME.
       // In one sentence: framework-owned, OS_HOME-keyed state plus the env
       // channels this block publishes below. Auto-deleted on exit.
@@ -809,6 +845,27 @@ export default class Dev extends Command {
         ...(flags['database-auth-token'] ? { OS_DATABASE_AUTH_TOKEN: flags['database-auth-token'] } : {}),
         ...(flags['auth-secret'] ? { OS_AUTH_SECRET: flags['auth-secret'] } : {}),
       };
+      applyFreshHomeChannel(localEnv, freshHome);
+      // [#31547] The database `-d` (or `--fresh`) chose is one the ceremony the
+      // ownership refusal names does not find on its own, and the driver and
+      // token the two flags above put here are not in the developer's shell:
+      // the child names them in both `--dev` commands, read from the
+      // resolution above (the one this boot serves), never re-resolved. Same
+      // channel as `os start` (#31488). `os dev` has no `--home`.
+      writeCeremonyDatabaseChannel(localEnv, ceremonyDatabaseUrl(resolvedDb, { homeFlag: undefined }));
+      writeCeremonyConnectionChannel(localEnv, {
+        databaseDriver: flags['database-driver'],
+        databaseAuthToken: flags['database-auth-token'],
+      });
+      // The data key's file: the ONE answer `os start` takes too (#29934), so a
+      // secret saved here reads back under `os start` over the same project —
+      // and the file an earlier `os start` kept in the project is still read.
+      const keyFileNotice = await applyCryptoKeyFileChannel(localEnv, {
+        env: freshHome ? { ...process.env, OS_HOME: freshHome } : process.env,
+        cwd: process.cwd(),
+        hasProjectConfig: configExists,
+      });
+      if (keyFileNotice) console.log(chalk.yellow(`  ⚠ ${keyFileNotice}`));
       printKV('Environment ID', environmentId, '🎯');
       if (artifactUrl) {
         // Redacted: the reference may be a pre-signed URL whose query string IS
@@ -839,6 +896,7 @@ export default class Dev extends Command {
       // per session (`utils/dev-organization-ownership-upgrade.ts`,
       // `upgradeRefusedDevelopmentDatabase` above for what it prints).
       let ownershipUpgrade: 'none' | 'pending' | 'attempted' = 'none';
+      let deployKey: DeployKeyHandle | undefined;
       let upgradedBoot = false;
       const spawnServeChild = (info: { restartIndex: number }) => {
         const child = spawn(
@@ -914,6 +972,13 @@ export default class Dev extends Command {
                 boundProtocol,
               });
             }
+            // ── The deploy key ───────────────────────────────────────────
+            // Last line of the first boot: "press d to deploy" (or to log in,
+            // then deploy). Attached once — a restart re-enters this handler
+            // only through the early return above, and the key outlives every
+            // child. ⛔ Never a save hook: the organization's one cloud
+            // environment is production (cloud ADR-0024).
+            if (!deployKey) deployKey = startDevDeployKey(binPath, (line) => console.log(chalk.cyan(`  ${line}`)));
           }
         });
         return child;

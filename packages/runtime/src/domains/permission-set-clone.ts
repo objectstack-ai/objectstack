@@ -74,6 +74,13 @@
  *    grants on; the one check both "new similar" doors ask
  *    (`newSimilarTargetRefusal`, `./new-similar-target.ts`), else refused with
  *    nothing written;
+ *  - **omitted, the source shipped by a kernel package** (scope `system` /
+ *    `cloud`: the platform's own sets, `member_default` among them) — the
+ *    save is environment-wide, as for a source authored in the environment:
+ *    a kernel package has no paired customization package in this version
+ *    (ruling record 6691217245), and the copy is a new set, not a change to
+ *    the kernel's. The notice says why, and that `package` keeps the copy in
+ *    a package the caller names;
  *  - **omitted, the source shipped by a read-only package X** — X's paired
  *    customization package `<X>.custom`, answered by N-13's ensure door
  *    (`ensureCustomizationPackage`, `@objectstack/metadata-protocol`), the
@@ -86,7 +93,8 @@
  *    not a package for every set.
  *
  * The response names the package (`package`, `null` for environment-wide) and
- * the notice says where the copy went ({@link permissionSetCloneNotice}).
+ * the notice says where the copy went ({@link permissionSetCloneNotice}), named
+ * by a stable code beside it ({@link permissionSetCloneNoticeCode}).
  *
  * ## Authority
  *
@@ -109,10 +117,11 @@ import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
 import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { securityCatalogReaderOf, type SecurityCatalogEntry } from '@objectstack/core';
-import { isWritablePackage, type ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { isWritablePackage, kernelPackageScope, type ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { newSimilarTargetRefusal, newSimilarTargetRefusalAnswer } from './new-similar-target.js';
 import { validationFailure } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
+import { multiReplicaPairCreationRefusal, multiReplicaPackageChangeError } from '../multi-replica-package-refusal.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 
 /** The door's first path segment under `/security`. */
@@ -157,6 +166,38 @@ export const PERMISSION_SET_CLONE_NOTICE =
 export interface PermissionSetCloneLanding {
     readonly packageId: string | null;
     readonly created: boolean;
+    /**
+     * The kernel package that shipped the source, when the copy went
+     * environment-wide because that package has no pair; absent otherwise.
+     */
+    readonly kernelSource?: string;
+}
+
+/**
+ * [#29727] The stable code for each notice variant, served beside the notice
+ * as `data.noticeCode`. One code per landing, so a console can show the
+ * sentence in its own language without a parameter key: the one value the
+ * sentence carries, the package, is already on the answer as `data.package`.
+ * A console maps a code it knows to its own sentence and falls back to
+ * `notice` verbatim for a code it does not know; `notice` stays the English
+ * fallback. Keyed by {@link PermissionSetCloneLandingKind}, the same key
+ * {@link permissionSetCloneNotice} composes its sentence from, so code and
+ * sentence cannot drift.
+ */
+export const PERMISSION_SET_CLONE_NOTICE_CODES = Object.freeze({
+    environmentWide: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE',
+    environmentWideKernelSource: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE',
+    inPackage: 'PERMISSION_SET_CLONE_IN_PACKAGE',
+    inCreatedPackage: 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE',
+} as const);
+
+/** Which of the four notices a landing is told with. */
+export type PermissionSetCloneLandingKind = keyof typeof PERMISSION_SET_CLONE_NOTICE_CODES;
+
+/** The one place a landing is sorted into its notice variant. */
+export function permissionSetCloneLandingKind(landing: PermissionSetCloneLanding): PermissionSetCloneLandingKind {
+    if (landing.packageId === null) return landing.kernelSource !== undefined ? 'environmentWideKernelSource' : 'environmentWide';
+    return landing.created ? 'inCreatedPackage' : 'inPackage';
 }
 
 /**
@@ -164,14 +205,26 @@ export interface PermissionSetCloneLanding {
  * ahead of {@link PERMISSION_SET_CLONE_NOTICE}.
  */
 export function permissionSetCloneNotice(landing: PermissionSetCloneLanding): string {
-    if (landing.packageId === null) {
+    const kind = permissionSetCloneLandingKind(landing);
+    if (kind === 'environmentWide') {
         return 'The copy was saved environment-wide, in no package, as the set it was copied from is. '
             + PERMISSION_SET_CLONE_NOTICE;
     }
+    if (kind === 'environmentWideKernelSource') {
+        return `The copy was saved environment-wide, in no package: the set it was copied from is shipped by kernel `
+            + `package '${landing.kernelSource}', which has no paired customization package in this version. Name a `
+            + 'writable package with `package` to keep the copy in it instead. '
+            + PERMISSION_SET_CLONE_NOTICE;
+    }
     return `The copy was saved in package '${landing.packageId}'`
-        + (landing.created ? ', created for it to hold your changes to the package the set came from' : '')
+        + (kind === 'inCreatedPackage' ? ', created for it to hold your changes to the package the set came from' : '')
         + ', beside the original rather than in place of it, and travels with that package. '
         + PERMISSION_SET_CLONE_NOTICE;
+}
+
+/** The code naming {@link permissionSetCloneNotice}'s sentence for the same landing. */
+export function permissionSetCloneNoticeCode(landing: PermissionSetCloneLanding): string {
+    return PERMISSION_SET_CLONE_NOTICE_CODES[permissionSetCloneLandingKind(landing)];
 }
 
 /** ADR-0112 status for a target name the catalog already holds. */
@@ -207,6 +260,17 @@ export function clonePermissionSetDefinition(
     copy.name = target.name;
     copy.label = target.label;
     return copy;
+}
+
+/**
+ * [#30255] The grant keys of the SOURCE's `objects` map — what the save is told
+ * the copy inherits ({@link handlePermissionSetCloneWrite} step 7). Read from the
+ * source, not from the copy, so only a key the source already holds is ever
+ * passed, whatever {@link clonePermissionSetDefinition} does to the copy.
+ */
+export function inheritedGrantObjectsOf(source: Readonly<Record<string, unknown>>): string[] {
+    const objects = source.objects;
+    return objects && typeof objects === 'object' && !Array.isArray(objects) ? Object.keys(objects) : [];
 }
 
 /**
@@ -249,10 +313,21 @@ export async function resolveDefaultCloneLanding(
     ql: unknown,
     protocol: Partial<Pick<ObjectStackProtocolImplementation, 'ensureCustomizationPackage'>>,
     source: SecurityCatalogEntry,
+    /**
+     * [cloud#3814 D1] Asked with the base right before the pair is ensured;
+     * it throws to refuse the ensure (the multi-replica refusal), writing
+     * nothing.
+     */
+    beforeEnsure?: (basePackageId: string) => Promise<void>,
 ): Promise<PermissionSetCloneLanding> {
     const sourcePackageId = source.packageId;
     if (sourcePackageId === undefined) return { packageId: null, created: false };
     if (isWritablePackage(ql, sourcePackageId)) return { packageId: sourcePackageId, created: false };
+    // [ruling record 6691217245] A kernel package has no pair: the copy of
+    // its set is a new set, saved where an environment-authored set's is.
+    if (kernelPackageScope(ql, sourcePackageId) !== undefined) {
+        return { packageId: null, created: false, kernelSource: sourcePackageId };
+    }
     if (typeof protocol.ensureCustomizationPackage !== 'function') {
         throw Object.assign(
             new Error(
@@ -262,6 +337,7 @@ export async function resolveDefaultCloneLanding(
             { statusCode: 501 },
         );
     }
+    await beforeEnsure?.(sourcePackageId);
     const pair = await protocol.ensureCustomizationPackage({ basePackageId: sourcePackageId });
     return { packageId: pair.packageId, created: pair.created };
 }
@@ -359,7 +435,9 @@ function readCloneBody(body: unknown): { name: string; label: string; package?: 
  *     `packageId` (none for environment-wide): the same save the `/meta` door
  *     makes, so the same schema, publish gates and hooks judge it. A save that
  *     loses the race for the name (a row written under it after step 5's read)
- *     is step 5's 409, in step 5's words.
+ *     is step 5's 409, in step 5's words. [#30255] The source's grant keys go
+ *     with it as `inheritedGrantObjects`: the copy's grants are the source's,
+ *     so the save's unknown-grant refusal does not judge them as this write's.
  */
 export async function handlePermissionSetCloneWrite(
     deps: DomainHandlerDeps,
@@ -480,7 +558,12 @@ export async function handlePermissionSetCloneWrite(
             if (refused) return newSimilarTargetRefusalAnswer(deps, refused);
             landing = { packageId: target.package, created: false };
         } else {
-            landing = await resolveDefaultCloneLanding(ql, protocol, source);
+            landing = await resolveDefaultCloneLanding(ql, protocol, source, async (base) => {
+                // [cloud#3814 D1] Declared replicas on the Redis driver: creating
+                // the pair here would register a package on this replica alone.
+                const oneReplica = await multiReplicaPairCreationRefusal(deps, context, ql, base, `Cloning permission set '${source.name}'`);
+                if (oneReplica) throw multiReplicaPackageChangeError(oneReplica);
+            });
         }
 
         // ── 7. the save ─────────────────────────────────────────────────────
@@ -504,6 +587,13 @@ export async function handlePermissionSetCloneWrite(
                 item: clone,
                 parentVersion: null,
                 ...(landing.packageId !== null ? { packageId: landing.packageId } : {}),
+                // [#30255] The copy's grants are the source's — the keys are
+                // read from the source itself — so the save's unknown-grant
+                // refusal does not judge them as this write's: a
+                // platform set may grant on an object of a platform plugin this
+                // deployment does not install (`member_default` on
+                // `sys_comment` / `sys_activity`, `@objectstack/plugin-audit`).
+                inheritedGrantObjects: inheritedGrantObjectsOf(source.definition),
             });
         } catch (err: unknown) {
             // [#23577] The create-only pin refused: a row was written under the
@@ -529,6 +619,8 @@ export async function handlePermissionSetCloneWrite(
                 permissionSet: clone,
                 package: landing.packageId,
                 notice: permissionSetCloneNotice(landing),
+                // [#29727] The notice's code, for a console that translates it.
+                noticeCode: permissionSetCloneNoticeCode(landing),
             }),
         };
     } catch (err: unknown) {

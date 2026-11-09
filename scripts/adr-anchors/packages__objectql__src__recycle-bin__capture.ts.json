@@ -1,0 +1,5 @@
+{
+  "file": "packages/objectql/src/recycle-bin/capture.ts",
+  "adrs": ["ADR-0148"],
+  "invariant": "A by-id delete of a business object writes ONE recycle-bin entry per delete operation: the cascade set is read raw before the walk deletes or clears anything (the master first, secret columns left out), the cleared set_null references are recorded, and the entry is written in the delete's own unit of work before the root row goes, with its purge deadline stamped from the retention in days. Predicate deletes, cascade children and sys_* objects write none."
+}

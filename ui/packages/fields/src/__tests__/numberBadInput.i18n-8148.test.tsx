@@ -66,6 +66,7 @@ import { GeolocationField } from '../widgets/GeolocationField';
 import { AddressField } from '../widgets/AddressField';
 import { badInputMessage } from '../widgets/numberBadInput';
 import { BAD_INPUT_AGREED } from './numberInputBrowserReadings.js';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 /**
  * Every widget of this class takes the same three runtime props, but their
@@ -198,7 +199,7 @@ describe('the locale channel is live in this run (control for objectui#8148)', (
     // Without this, a blank or English diagnostic below would be a dead
     // provider rather than a missing key, and every negative assertion in this
     // file would pass for the wrong reason.
-    renderIn('zh', React.createElement(asWidget(AddressField), { value: {}, onChange: vi.fn(), field: addressField }));
+    renderIn('zh-Hans', React.createElement(asWidget(AddressField), { value: {}, onChange: vi.fn(), field: addressField }));
     expect(screen.getByLabelText('街道地址')).toBeInTheDocument();
     expect(screen.getByLabelText('城市')).toBeInTheDocument();
   });
@@ -236,7 +237,7 @@ describe('all five examples still reach the rendered sentence (objectui#8148)', 
     expect(EXAMPLES).toEqual(['1234', '1234.56', '12.5', '30.2741', '120.1551']);
   });
 
-  it.each(['en', 'zh', 'ja', 'ar'])('every box still quotes its own example in %s', language => {
+  it.each(['en', 'zh-Hans', 'ja', 'ar'])('every box still quotes its own example in %s', language => {
     // Before AND after: the numeral is the widget's, not the locale's, so a
     // translated render must still carry it verbatim.
     BOXES.forEach((b, index) => {
@@ -249,7 +250,7 @@ describe('all five examples still reach the rendered sentence (objectui#8148)', 
     // The failure a single hard-coded example would produce: four boxes quoting
     // a fifth box's numeral. `1234` is a substring of nothing else here, and
     // `12.5`/`120.1551` are checked by exact-position containment below.
-    for (const language of ['en', 'zh'] as const) {
+    for (const language of ['en', 'zh-Hans'] as const) {
       BOXES.forEach((b, index) => {
         const message = refusalFrom(language, index) ?? '';
         for (const other of EXAMPLES) {
@@ -267,7 +268,7 @@ describe('all five examples still reach the rendered sentence (objectui#8148)', 
 
 describe("the bad-input refusal speaks the reader's language (objectui#8148)", () => {
   it.each([
-    ['zh', '未保存：此输入框中的文本不是数字。请输入普通小数（例如 1234）。'],
+    ['zh-Hans', '未保存：此输入框中的文本不是数字。请输入普通小数（例如 1234）。'],
     ['ja', '保存されていません: このボックスのテキストは数値ではありません。通常の小数で入力してください（例: 1234）。'],
     ['ar', 'لم يتم الحفظ: النص في هذا المربع ليس رقمًا. أدخل رقمًا عشريًا عاديًا (مثال: 1234).'],
   ])('says NumberField\'s refusal in %s', (language, expected) => {
@@ -275,8 +276,8 @@ describe("the bad-input refusal speaks the reader's language (objectui#8148)", (
   });
 
   it.each([
-    ['zh', 0],
-    ['zh', 4],
+    ['zh-Hans', 0],
+    ['zh-Hans', 4],
     ['ja', 2],
     ['ar', 3],
     ['ru', 1],
@@ -295,8 +296,8 @@ describe("the bad-input refusal speaks the reader's language (objectui#8148)", (
   it('the two GEOLOCATION boxes both speak it, which is the card\'s sharpest case', () => {
     // `GeolocationField` sits beside `LocationField`, already keyed. Before this
     // card the two coordinate widgets refused in two different languages.
-    expect(refusalFrom('zh', 3)).toContain('未保存：');
-    expect(refusalFrom('zh', 4)).toContain('未保存：');
+    expect(refusalFrom('zh-Hans', 3)).toContain('未保存：');
+    expect(refusalFrom('zh-Hans', 4)).toContain('未保存：');
   });
 });
 
@@ -305,7 +306,8 @@ describe("the bad-input refusal speaks the reader's language (objectui#8148)", (
 /* -------------------------------------------------------------------------- */
 
 describe('the example is a HOLE, not five per-widget keys (objectui#8148)', () => {
-  const LANGS = ['en', 'zh', 'ja', 'ko', 'de', 'es', 'fr', 'pt', 'ru', 'ar'] as const;
+  // Every pack: the platform locale table's tags (objectstack#30511).
+  const LANGS = PLATFORM_LOCALE_TAGS;
 
   /**
    * One pack's `fields.number` block, READ THROUGH ITS REAL TYPE.
@@ -374,7 +376,7 @@ describe('the sentence is composed at exactly one place (objectui#8148)', () => 
     const onChange = vi.fn();
     const NumberWidget = asWidget(NumberField);
     const { container } = renderIn(
-      'zh',
+      'zh-Hans',
       <NumberWidget value={null} onChange={onChange} field={{ name: 'qty', type: 'number' }} />,
     );
     const box = container.querySelector('input[type=number]') as HTMLInputElement;

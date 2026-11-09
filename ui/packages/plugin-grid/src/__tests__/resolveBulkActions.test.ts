@@ -29,12 +29,12 @@ describe('resolveBulkActions', () => {
     // Naming the action in the view's `bulkActions` is the ONLY declaration —
     // spec 17 retired `action.bulkEnabled` (framework#4054) and its tombstone
     // prescribes exactly this.
-    const { defs, unresolved } = resolveBulkActions({
+    const { defs, undeclared } = resolveBulkActions({
       bulkActions: ['push_down'],
       objectActions: [PUSH_DOWN],
     });
 
-    expect(unresolved).toEqual([]);
+    expect(undeclared).toEqual([]);
     expect(defs).toHaveLength(1);
     expect(defs[0]).toMatchObject({
       name: 'push_down',
@@ -47,30 +47,35 @@ describe('resolveBulkActions', () => {
 
   it('surfaces nothing for an object action the view never names', () => {
     const rowOnly = { name: 'convert_lead', label: 'Convert', locations: ['list_item'] };
-    const { defs, unresolved } = resolveBulkActions({ objectActions: [rowOnly, PUSH_DOWN] });
+    const { defs, undeclared } = resolveBulkActions({ objectActions: [rowOnly, PUSH_DOWN] });
 
     expect(defs).toEqual([]);
-    expect(unresolved).toEqual([]);
+    expect(undeclared).toEqual([]);
   });
 
   it('ignores a stale bulkEnabled flag on an object action', () => {
     // The key is a retiredKey() tombstone: `defineStack` hard-rejects a config
     // that sets it, so it must never be a path into the bar on its own.
     const stale = { name: 'push_down', label: '下推', bulkEnabled: true };
-    const { defs, unresolved } = resolveBulkActions({ objectActions: [stale] });
+    const { defs, undeclared } = resolveBulkActions({ objectActions: [stale] });
 
     expect(defs).toEqual([]);
-    expect(unresolved).toEqual([]);
+    expect(undeclared).toEqual([]);
   });
 
-  it('keeps a name that matches no declared action for by-name dispatch', () => {
-    const { defs, unresolved } = resolveBulkActions({
+  it('gives a name the object does not declare no def, and reports it as undeclared (objectstack#30169)', () => {
+    // Trigger objectstack#30169: a disabled package's action is withheld from
+    // the served object, so its bare name matched nothing and the bar drew a
+    // humanized ghost button that toasted "not executable". The spec says a
+    // bare name "names an action the object declares"; a name that does not
+    // resolves to no def. `undeclared` feeds the development warning only.
+    const { defs, undeclared } = resolveBulkActions({
       bulkActions: ['push_down', 'crm_only_handler'],
       objectActions: [PUSH_DOWN],
     });
 
     expect(defs.map(d => d.name)).toEqual(['push_down']);
-    expect(unresolved).toEqual(['crm_only_handler']);
+    expect(undeclared).toEqual(['crm_only_handler']);
   });
 
   it('lets an inline-authored def win over the object action of the same name', () => {
@@ -85,13 +90,13 @@ describe('resolveBulkActions', () => {
   });
 
   it('drops a repeated name', () => {
-    const { defs, unresolved } = resolveBulkActions({
+    const { defs, undeclared } = resolveBulkActions({
       bulkActions: ['dispatch_job', 'dispatch_job', 'ghost', 'ghost'],
       objectActions: [{ name: 'dispatch_job' }],
     });
 
     expect(defs).toHaveLength(1);
-    expect(unresolved).toEqual(['ghost']);
+    expect(undeclared).toEqual(['ghost']);
   });
 
   it('returns the authored array by reference when nothing folds in', () => {
@@ -255,12 +260,12 @@ describe('resolveBulkActions', () => {
         operation: 'custom',
         execution: 'aggregate',
       };
-      const { defs, unresolved } = resolveBulkActions({
+      const { defs, undeclared } = resolveBulkActions({
         bulkActionDefs: [authored],
         objectActions: [PUSH_DOWN],
       });
 
-      expect(unresolved).toEqual([]);
+      expect(undeclared).toEqual([]);
       expect(defs).toHaveLength(1);
       expect(defs[0]).toMatchObject({
         name: 'push_down',

@@ -109,7 +109,9 @@ const beforeSay = async (ctx: any) => {
 };
 const afterSay = async (ctx: any) => {
   const say = ctx.result?.say_after;
-  if (say !== undefined) listenerOf(ctx)?.(say);
+  // [#29538] `!= null`: the write result answers an unwritten declared column
+  // `null`, as the next read does.
+  if (say != null) listenerOf(ctx)?.(say);
   if (nestedSay !== undefined && ctx.event === 'afterInsert') {
     const nested = nestedSay;
     nestedSay = undefined;
@@ -136,7 +138,9 @@ async function boot(surface: 'envelope' | 'declarative' | 'member') {
     for (const e of ['beforeInsert', 'afterInsert', 'beforeDelete', 'afterDelete', 'beforeFind'] as const) {
       engine.registerHook(e, async (ctx: any) => {
         memberSeen.push({ event: e, type: typeof ctx.notice });
-        const say = e === 'beforeInsert' ? ctx.input?.data?.say : e === 'afterInsert' ? ctx.result?.say_after : undefined;
+        // [#29538] The write result answers an unwritten declared column
+        // `null`, as the next read does: on the RESULT, `null` is "not said".
+        const say = e === 'beforeInsert' ? ctx.input?.data?.say : e === 'afterInsert' ? (ctx.result?.say_after ?? undefined) : undefined;
         if (say !== undefined) ctx.notice(say);
       }, { object: DEAL.name });
     }
@@ -144,7 +148,8 @@ async function boot(surface: 'envelope' | 'declarative' | 'member') {
       {
         name: 'sn_deal_member', object: DEAL.name, events: ['beforeUpdate', 'afterUpdate'],
         handler: async (ctx: any) => {
-          const say = ctx.event === 'beforeUpdate' ? ctx.input.say : ctx.result?.say_after;
+          // [#29538] On the RESULT, `null` is "not said", as above.
+          const say = ctx.event === 'beforeUpdate' ? ctx.input.say : (ctx.result?.say_after ?? undefined);
           if (say !== undefined) ctx.notice(say);
         },
       },

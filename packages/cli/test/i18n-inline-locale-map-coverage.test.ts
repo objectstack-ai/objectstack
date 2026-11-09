@@ -33,7 +33,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import { computeI18nCoverage, inlineLocaleText } from '../src/utils/i18n-coverage.js';
-import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract.js';
+import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-bundle-extract.js';
 
 const LOCALES = ['en', 'zh-CN', 'ja-JP'];
 
@@ -272,8 +272,16 @@ describe('coverage reads the map the way the renderer does', () => {
     { 'zh-CN': '成员' },
     { default: 'Members', 'zh-CN': '成员' },
     { en: 'Members' },
+    // Both Chinese scripts, in either authoring order (#30910): the renderer
+    // reads the entry of the reader's own script, and so does coverage.
+    { en: 'Members', 'zh-CN': '成员', 'zh-TW': '成員' },
+    { en: 'Members', 'zh-TW': '成員', 'zh-CN': '成员' },
+    { en: 'Members', zh: '成员', 'zh-Hant': '成員' },
+    // An empty entry the renderer reaches (#31074): that reader sees nothing.
+    { en: 'Members', 'zh-CN': '成员', 'zh-TW': '' },
+    { en: 'Members', zh: '成员', 'zh-CN': '' },
   ];
-  const locales = ['en', 'zh', 'zh-CN', 'zh-TW', 'ja-JP', 'es-ES'];
+  const locales = ['en', 'zh', 'zh-CN', 'zh-TW', 'zh-Hans', 'zh-Hant', 'zh-HK', 'ja-JP', 'es-ES'];
 
   it('a covered locale is the entry the renderer picks', () => {
     for (const map of maps) {
@@ -299,5 +307,88 @@ describe('coverage reads the map the way the renderer does', () => {
   it('same language, other region, counts — limb 3 of the shared rule', () => {
     expect(inlineLocaleText({ 'zh-CN': '成员' }, 'zh-TW')).toBe('成员');
     expect(inlineLocaleText({ zh: '成员' }, 'zh-CN')).toBe('成员');
+  });
+
+  it("a map with both Chinese scripts covers each reader with its own script's entry (#30910)", () => {
+    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '成員' }, 'zh-Hant')).toBe('成員');
+    expect(inlineLocaleText({ 'zh-TW': '成員', 'zh-CN': '成员' }, 'zh')).toBe('成员');
+    // (The row that pinned an empty `zh-TW` as covered by `zh-CN` at `zh-Hant`
+    // moved to the #31074 case below: the renderer shows the empty entry.)
+  });
+
+  it('an empty entry the renderer shows is a gap, not covered by another entry (#31074)', () => {
+    // Own script: the reader of the Traditional script sees the blank `zh-TW`.
+    expect(resolveI18nLabel({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-Hant')).toBe('');
+    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-Hant')).toBeUndefined();
+    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-HK')).toBeUndefined();
+    // Own tag: an exact blank `zh-CN` shadows the bare `zh`.
+    expect(resolveI18nLabel({ zh: '成员', 'zh-CN': '' }, 'zh-CN')).toBe('');
+    expect(inlineLocaleText({ zh: '成员', 'zh-CN': '' }, 'zh-CN')).toBeUndefined();
+    // CONTROL: the readers that never reach the blank entry stay covered.
+    expect(inlineLocaleText({ 'zh-CN': '成员', 'zh-TW': '' }, 'zh-Hans')).toBe('成员');
+    expect(inlineLocaleText({ zh: '成员', 'zh-CN': '' }, 'zh')).toBe('成员');
+    expect(inlineLocaleText({ 'zh-CN': '成员' }, 'zh-TW')).toBe('成员');
+  });
+});
+
+// ─── An action param's `helpText` map (objectstack#28266) ─────────────
+
+/**
+ * A param's `helpText` took the inline locale map its siblings keep
+ * (`description`, `outcomeMessages`, a param's `label`), so an inline action —
+ * a page button's, which no bundle reaches — can write its dialog hint per
+ * locale. The walker reads it as it reads a `description` map: authored, its
+ * locales covered, and never scaffolded into a bundle row.
+ */
+const actionParamHelpMap = (): any => ({
+  i18n: { defaultLocale: 'en', supportedLocales: LOCALES },
+  objects: [{ name: 'member', label: 'Member', fields: { email: { label: 'Email' } } }],
+  actions: [
+    {
+      name: 'pause_member',
+      label: 'Pause',
+      objectName: 'member',
+      type: 'api',
+      target: '/api/v1/pause',
+      params: [
+        {
+          name: 'reason',
+          label: 'Reason',
+          type: 'text',
+          helpText: { en: 'Why the member is paused', 'zh-CN': '暂停该成员的原因', 'ja-JP': 'メンバーを一時停止する理由' },
+        },
+      ],
+    },
+  ],
+});
+
+describe("an action param's helpText map is authored text too (#28266)", () => {
+  const key = (config: any) => walkedKeys(config).find((k) => k.endsWith('.params.reason.helpText'));
+
+  it('records the map at the param key and counts every locale it holds as covered', () => {
+    const at = key(actionParamHelpMap());
+    expect(at).toBeDefined();
+    const entry = collectExpectedEntries(actionParamHelpMap()).find((e) => e.path.join('.') === at);
+    expect(entry!.inlineLocales).toEqual({
+      en: 'Why the member is paused',
+      'zh-CN': '暂停该成员的原因',
+      'ja-JP': 'メンバーを一時停止する理由',
+    });
+    expect(gaps(computeI18nCoverage(actionParamHelpMap(), { locales: LOCALES }), at!)).toEqual([]);
+  });
+
+  it('a partial map still reports the locale it omits', () => {
+    const partial = actionParamHelpMap();
+    delete partial.actions[0].params[0].helpText['ja-JP'];
+    const at = key(partial)!;
+    expect(gaps(computeI18nCoverage(partial, { locales: LOCALES }), at)).toEqual(['ja-JP']);
+  });
+
+  it('scaffolds no bundle row for the map, in any locale', () => {
+    const result = extractTranslations(actionParamHelpMap(), { defaultLocale: 'en', locales: LOCALES });
+    for (const locale of LOCALES) {
+      expect(JSON.stringify(result.bundles[locale] ?? {}), locale).not.toContain('暂停该成员的原因');
+      expect(JSON.stringify(result.bundles[locale] ?? {}), locale).not.toContain('Why the member is paused');
+    }
   });
 });

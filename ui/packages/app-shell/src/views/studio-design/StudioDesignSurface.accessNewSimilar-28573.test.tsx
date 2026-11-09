@@ -32,6 +32,10 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { I18nProvider, createI18n } from '@object-ui/i18n';
+// objectstack#29727 — the zh pins read the studio zh catalogue, which loads lazily.
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+await loadStudioCatalogue('zh');
 
 const BASE_PKG = 'hotcrm';
 const CUSTOM_PKG = 'hotcrm.custom';
@@ -130,10 +134,11 @@ function makeClient(published: Record<string, Row>) {
 let doorAnswer: { status: number; body: unknown };
 const calls: Array<{ url: string; method: string; body: unknown }> = [];
 
-/** The door's 200: it saved the copy in `pkg`, which the double then lists. */
-function landedIn(pkg: string | null | 'absent') {
+/** The door's 200: it saved the copy in `pkg`, which the double then lists; `noticeCode` only when given. */
+function landedIn(pkg: string | null | 'absent', noticeCode?: string) {
   const data: Record<string, unknown> = { permissionSet: { ...BASE_BODY, name: COPY_NAME, label: COPY_LABEL }, notice: NOTICE };
   if (pkg !== 'absent') data.package = pkg;
+  if (noticeCode !== undefined) data.noticeCode = noticeCode;
   return { status: 200, body: { success: true, data } };
 }
 
@@ -170,14 +175,20 @@ function StudioAccessRoute() {
   );
 }
 
-function renderAccess(pkg = BASE_PKG) {
-  render(
+function renderAccess(pkg = BASE_PKG, lang: 'en' | 'zh' = 'en') {
+  const tree = (
     <MemoryRouter initialEntries={[`/studio/${pkg}/access`]}>
       <Routes>
         <Route path="/studio/:packageId/access" element={<StudioAccessRoute />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  if (lang === 'en') {
+    render(tree);
+    return;
+  }
+  const zh = createI18n({ defaultLanguage: 'zh', detectBrowserLanguage: false, resources: { zh: {} } });
+  render(<I18nProvider instance={zh}>{tree}</I18nProvider>);
 }
 
 const newSimilar = () => screen.findByRole('button', { name: en('perm.clone.action') }, { timeout: 8000 });
@@ -300,5 +311,58 @@ describe('objectstack#28573 — New similar on a read-only base permission set',
     renderAccess(CUSTOM_PKG);
     expect(await screen.findByRole('heading', { level: 1, name: COPY_LABEL }, { timeout: 8000 })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: en('perm.clone.action') })).toBeNull();
+  });
+});
+
+/**
+ * objectstack#29727 — the door names its notice by a code, one per landing
+ * (`PERMISSION_SET_CLONE_ENVIRONMENT_WIDE`, `_IN_PACKAGE`,
+ * `_IN_CREATED_PACKAGE`), and the package the sentence names is `data.package`.
+ * A zh screen shows each landing's sentence in zh, with that package; the wire
+ * `notice` stays the sentence for a code this console does not know, and for
+ * an answer that sends none (CONTROL).
+ */
+describe('objectstack#29727 — New similar on a permission set: the notice in the reader\'s language', () => {
+  const zh = (key: string) => t(key, 'zh-CN');
+
+  async function cloneInZh(): Promise<HTMLElement> {
+    renderAccess(BASE_PKG, 'zh');
+    fireEvent.click(await screen.findByRole('button', { name: zh('perm.clone.action') }, { timeout: 8000 }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(zh('perm.clone.name')), { target: { value: COPY_NAME } });
+    fireEvent.change(within(dialog).getByLabelText(zh('perm.clone.label')), { target: { value: COPY_LABEL } });
+    fireEvent.click(within(dialog).getByRole('button', { name: zh('perm.clone.confirm') }));
+    return screen.findByTestId('access-new-similar-strip', undefined, { timeout: 8000 });
+  }
+
+  const landings = [
+    { code: 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE', key: 'perm.clone.notice.inCreatedPackage', pkg: CUSTOM_PKG },
+    { code: 'PERMISSION_SET_CLONE_IN_PACKAGE', key: 'perm.clone.notice.inPackage', pkg: CUSTOM_PKG },
+    { code: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE', key: 'perm.clone.notice.environmentWide', pkg: null },
+  ] as const;
+
+  for (const { code, key, pkg } of landings) {
+    it(`zh: ${code} shows its zh sentence${pkg ? ', naming the package the answer names' : ''}, not the wire English`, async () => {
+      doorAnswer = landedIn(pkg, code);
+      const strip = await cloneInZh();
+      if (pkg !== null) {
+        // The copy opens in the package the answer names: the code rides the navigation there.
+        await waitFor(() => expect(new URL(route(), 'http://x').pathname).toBe(`/studio/${pkg}/access`));
+      }
+      expect(strip).not.toHaveTextContent(NOTICE);
+      expect(zh(key)).not.toBe(key);
+      expect(strip).toHaveTextContent(pkg === null ? zh(key) : tFormat(key, 'zh-CN', { package: pkg }));
+      if (pkg !== null) expect(strip).toHaveTextContent(pkg);
+    });
+  }
+
+  it('CONTROL zh: a code this console does not know shows the wire notice as sent', async () => {
+    doorAnswer = landedIn(CUSTOM_PKG, 'PERMISSION_SET_CLONE_SOMEWHERE_NEWER');
+    expect(await cloneInZh()).toHaveTextContent(NOTICE);
+  });
+
+  it('CONTROL zh: an answer with no code shows the wire notice as sent', async () => {
+    doorAnswer = landedIn(CUSTOM_PKG);
+    expect(await cloneInZh()).toHaveTextContent(NOTICE);
   });
 });

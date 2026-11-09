@@ -35,7 +35,7 @@
  * The gate's own predicate is pinned in
  * `packages/runtime/src/action-confirmation-gate.test.ts`, and the two halves
  * are driven together, against a real engine, in
- * `examples/app-todo/test/mcp-actions.e2e.ts`.
+ * `examples/app-todo/test/mcp-actions.test.ts`.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -203,7 +203,10 @@ describe('run_action carries the confirmation member through the real MCP door (
     expect(bridge.calls).toHaveLength(0);
   });
 
-  it('leaves an UNCODED bridge failure as a plain message (the envelope widens, it narrows nothing)', async () => {
+  // [#31271] An uncoded bridge failure answers what `POST /api/v1/actions`
+  // answers it (`actionsDoorAnswerOf`): that door's 400 rejection, with the
+  // failure's own sentence and no `details`.
+  it('answers an UNCODED bridge failure as the /actions door does: 400 VALIDATION_ERROR, its own sentence', async () => {
     const failing = {
       ...bridge,
       async runAction() {
@@ -214,6 +217,8 @@ describe('run_action carries the confirmation member through the real MCP door (
     const res = await runtime.handleHttpRequest(mcpRequest(body), { bridge: failing, parsedBody: body });
     const json: any = await res.json();
     expect(json.result.isError).toBe(true);
-    expect(json.result.content[0].text).toBe('handler exploded');
+    expect(JSON.parse(json.result.content[0].text)).toEqual({
+      error: { code: 'VALIDATION_ERROR', message: 'handler exploded', status: 400 },
+    });
   });
 });

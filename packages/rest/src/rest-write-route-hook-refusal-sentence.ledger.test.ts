@@ -57,6 +57,9 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll, type MockInstance } from 'vitest';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
 import { REST_ROUTE_LEDGER } from './rest-route-ledger.js';
@@ -107,6 +110,14 @@ const FORM_VIEW = {
 
 type Fn = (...args: any[]) => any;
 
+/** [#30675] A record-mode amount and its code column, for the backfill door's row. */
+const RECORD_CURRENCY_FIELDS = {
+    name: { type: 'text' },
+    mz_amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'mz_currency' } },
+    mz_currency: { type: 'text', valueDomain: 'iso_4217_currency' },
+    organization_id: { type: 'text' },
+};
+
 /** Reads the harness answers; every other protocol method rejects with the refusal. */
 const READS: Record<string, Fn> = {
     getDiscovery: async () => ({ version: 'v0', routes: {} }),
@@ -153,14 +164,33 @@ function boot(error: () => Error, protocol: Record<string, Fn> = {}): Booted {
         server[verb] = (path: string, handler: Fn) => direct.set(`${verb.toUpperCase()} ${path}`, handler);
     }
     const service = (label: string) => async () => rejecting(label, calls, error);
-    const caller = { userId: 'u1', systemPermissions: ['manage_metadata', 'manage_platform_settings'] };
-    const engine = { transaction: async (fn: Fn) => fn({}) };
+    // [#30675] `setup.write` and a current organization: the record-currency
+    // backfill door fills that organization's rows under that capability.
+    const caller = { userId: 'u1', tenantId: 'org_mz', systemPermissions: ['manage_metadata', 'manage_platform_settings', 'setup.write'] };
+    // [#30205] The assigned-work hand-over reads and writes through the data
+    // engine itself: one user field to move, an active target, and a row whose
+    // `update` the refusal reaches.
+    const engine = {
+        transaction: async (fn: Fn) => fn({}),
+        getConfigs: () => ({ [OBJECT]: { name: OBJECT, fields: { owner_id: { type: 'lookup', reference: 'sys_user' } } } }),
+        find: async (object: string) => (object === 'sys_user' ? [{ id: 'u2', banned: false }] : [{ id: 'r1', mz_amount: 5, organization_id: 'org_mz' }]),
+        // [#30675] The backfill reads the object's declaration: one record-mode
+        // amount, and the `r1` row above holds it beside a blank code.
+        getObject: (name: string) => (name === OBJECT ? { name, fields: RECORD_CURRENCY_FIELDS } : undefined),
+        count: async () => 0,
+        update: async () => { calls.push('engine.update'); throw error(); },
+        // [#30237] The recycle bin's doors call the engine's own verbs.
+        listRecycleBin: async () => ({ object: OBJECT, entries: [], hasMore: false }),
+        restore: async () => { calls.push('engine.restore'); throw error(); },
+        purge: async () => { calls.push('engine.purge'); throw error(); },
+        empty: async () => { calls.push('engine.empty'); throw error(); },
+    };
     const rest = new RestServer(
         server,
         rejecting('protocol', calls, error, recorded),
         { api: { requireAuth: false } } as any,
         undefined, undefined, undefined, undefined,
-        async () => engine,                 // objectQLProvider (`POST /batch`)
+        async () => engine,                 // objectQLProvider (`POST /batch`, the assigned-work hand-over)
         service('email'),
         service('sharing'),
         undefined,                          // retired slot
@@ -177,7 +207,14 @@ function boot(error: () => Error, protocol: Record<string, Fn> = {}): Booted {
         server,
         recorder: rest,
         ctx: {
-            getService: (name: string) => rejecting(`service:${name}`, calls, error),
+            // No `tenancy` service is registered, as on a deployment that is not
+            // walled: the import door's walled-catalog verdict is then inert,
+            // and the import reaches the federation service whose refusal this
+            // ledger reads. A rejecting stand-in would read as a walled posture.
+            getService: (name: string) => {
+                if (name === 'tenancy') throw new Error(`service '${name}' is not registered`);
+                return rejecting(`service:${name}`, calls, error);
+            },
             logger: { debug() {}, info() {}, warn() {}, error() {} },
         } as any,
         versionedBase: '/api/v1',
@@ -292,6 +329,13 @@ const HOOK_ABORTED_400 = { status: 400, code: 'HOOK_ABORTED' } as const;
  */
 const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     'POST /api/v1/meta/_migrate-stored': { called: 'protocol.migrateStoredMetadata' },
+    // [#30675] Per row, inside a `200`: the hook refuses the row's code write,
+    // and the report's failure entry is the answer.
+    'POST /api/v1/meta/_migrate-record-currency-codes': {
+        called: 'engine.update',
+        body: { object: OBJECT, field: 'mz_amount', code: 'USD', apply: true },
+        answer: (res) => res.body?.data?.failures?.[0]?.error,
+    },
     'PUT /api/v1/meta/:type/:name': { called: 'protocol.saveMetaItem', body: { name: 'name_1', label: 'X' } },
     'DELETE /api/v1/meta/:type/:name': { called: 'protocol.deleteMetaItem' },
     'POST /api/v1/meta/:type/:name/publish': { called: 'protocol.publishMetaItem' },
@@ -341,6 +385,16 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
         },
     },
     'POST /api/v1/security/explain': { called: 'security.explain', body: { object: OBJECT, operation: 'read' } },
+    // [#30205] The hand-over answers per row, inside its `200`: a refused row's
+    // entry in `failures` carries the `/data` door's sentence for that throw.
+    'POST /api/v1/security/users/:id/assigned-work/transfer': {
+        called: 'engine.update', body: { toUserId: 'u2' },
+        answer: (res) => res.body?.data?.objects?.[0]?.failures?.[0]?.message,
+    },
+    // [#30237] The recycle bin's write doors: the engine's verb is what the refusal reaches.
+    'POST /api/v1/data/:object/recycle-bin/:entryId/restore': { called: 'engine.restore' },
+    'DELETE /api/v1/data/:object/recycle-bin/:entryId': { called: 'engine.purge' },
+    'DELETE /api/v1/data/:object/recycle-bin': { called: 'engine.empty' },
     'POST /api/v1/data/:object/:id/shares': { called: 'sharing.grant', body: {} },
     'DELETE /api/v1/data/:object/:id/shares/:shareId': { called: 'sharing.revoke' },
     'POST /api/v1/batch': {

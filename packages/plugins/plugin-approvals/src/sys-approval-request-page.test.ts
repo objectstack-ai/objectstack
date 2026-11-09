@@ -138,9 +138,12 @@ describe('sys_approval_request detail page — the page body', () => {
     // The nodes the slotted page rendered, in the synthesizer's order: the
     // header it fell through to, its `actions` slot, its `highlights` slot and
     // its tab strip, whose first tab is the details body. Its `discussion`
-    // slot was empty, so there is no discussion node.
+    // slot was empty, so there is no discussion node. The header reads the
+    // object's placed header actions live, as the synthesized one did: a bare
+    // `page:header` drew none, so an action another package places on the
+    // object at `record_header` was dropped (#29951).
     expect(COMPONENTS.map((c) => c.type)).toEqual(['page:header', 'record:approval_decision', 'record:highlights', 'page:tabs']);
-    expect(nodeOf('page:header')).toEqual({ type: 'page:header' });
+    expect(nodeOf('page:header')).toEqual({ type: 'page:header', properties: { placedActions: true } });
   });
 
   it('holds ONE record:approval_decision node, with no properties (its props row is empty and strict)', () => {
@@ -305,7 +308,7 @@ describe('sys_approval_request detail page — its label in the translation bund
 
   it('every served locale carries the label, and a translated locale serves its translation', () => {
     const locales = Object.keys(ApprovalsTranslations).sort();
-    expect(locales).toEqual(['en', 'es-ES', 'ja-JP', 'zh-CN']);
+    expect(locales).toEqual(['ar', 'de', 'en', 'es-ES', 'fr', 'ja-JP', 'ko', 'pt-BR', 'ru', 'zh-CN', 'zh-Hant']);
     for (const locale of locales) {
       const served = (ApprovalsTranslations as AnyRec)[locale]?.pages?.[NAME]?.label;
       const authored = (approvalsPageTranslations as AnyRec)[locale]?.[NAME]?.label;

@@ -2,8 +2,10 @@
 //
 // The write-path inverse of the connector read projection, for the keys a
 // connector does not declare: a save of the served form keeps what the read
-// withheld (top level, `retryConfig`, and an `actions` element addressed by
-// its `key`), and a container the author removed is never minted back.
+// withheld at the top level and in an `actions` element addressed by its
+// `key`; a container the author removed is never minted back; and an
+// undeclared key of an object `retryConfig` is not carried forward — a save
+// that sends `retryConfig` replaces the stored one whole (ruling 6593804783).
 //
 // Every value below is an obviously-fake placeholder.
 
@@ -40,9 +42,9 @@ describe('carry-forward of the keys a connector does not declare', () => {
     expect(body.actions[0]).toEqual({ key: 'get_invoice', label: 'Get invoice' });
   });
 
-  it('a save of the served form keeps every withheld value, the edited label included', () => {
+  it('a save of the served form keeps every carried-forward withheld value, the edited label included', () => {
     const out = carryForwardRedactedValues('connector', { ...served(), label: 'Vendor catalog (edited)' }, stored);
-    expect(out).toEqual({ ...stored, label: 'Vendor catalog (edited)' });
+    expect(out).toEqual({ ...stored, label: 'Vendor catalog (edited)', retryConfig: { strategy: 'exponential_backoff' } });
   });
 
   it('an `actions` element is followed by its `key` when the author reorders the list', () => {
@@ -87,6 +89,35 @@ describe('carry-forward of the keys a connector does not declare', () => {
     expect(JSON.stringify(body)).not.toContain('TEST_PLACEHOLDER_UNDECLARED_');
     const out = carryForwardRedactedValues('connector', { ...body, label: 'Vendor catalog (edited)' }, malformed);
     expect(out).toEqual({ ...malformed, label: 'Vendor catalog (edited)' });
+  });
+});
+
+// [ruling 6593804783] An undeclared key of an object `retryConfig` is withheld
+// AND not carried forward: a save that sends `retryConfig` replaces the stored
+// container whole, and the drop is reported.
+describe('an undeclared `retryConfig` key is not carried forward', () => {
+  it('a save of the served form drops it, names it, and still carries the top-level and `actions` values', () => {
+    const { item, dropped } = carryForwardRedactedValuesReportingDrops('connector', served(), stored);
+    expect(item).toEqual({ ...stored, retryConfig: { strategy: 'exponential_backoff' } });
+    expect(dropped).toEqual(['retryConfig.secret']);
+  });
+
+  it('`retryConfig: {}` replaces the stored container whole', () => {
+    const { item, dropped } = carryForwardRedactedValuesReportingDrops('connector', { ...served(), retryConfig: {} }, stored);
+    expect((item as Record<string, any>).retryConfig).toEqual({});
+    expect(dropped).toEqual(['retryConfig.secret']);
+  });
+
+  it('a body that removes `retryConfig` removes it, as before, and says so', () => {
+    const body = served();
+    delete body.retryConfig;
+    const { item, dropped } = carryForwardRedactedValuesReportingDrops('connector', body, stored);
+    expect(item).not.toHaveProperty('retryConfig');
+    expect(dropped).toEqual(['retryConfig.secret']);
+  });
+
+  it('the runtime gate is never told it will be restored', () => {
+    expect(redactedPathsCarriedForward('connector', served(), stored).sort()).toEqual(['actions.0.token', 'apiKey']);
   });
 });
 
@@ -136,8 +167,10 @@ describe('an undeclared `auth` key is not carried forward', () => {
     expect(dropped).toEqual(['auth.token']);
   });
 
-  it('CONTROL: a row with no undeclared `auth` key reports no drop', () => {
-    const { dropped } = carryForwardRedactedValuesReportingDrops('connector', served(), stored);
+  it('CONTROL: a row with no undeclared `auth` or `retryConfig` key reports no drop', () => {
+    const atRest = { ...stored, retryConfig: { strategy: 'exponential_backoff' } };
+    const body = JSON.parse(JSON.stringify(redactMetadataItem('connector', atRest)));
+    const { dropped } = carryForwardRedactedValuesReportingDrops('connector', body, atRest);
     expect(dropped).toEqual([]);
   });
 });

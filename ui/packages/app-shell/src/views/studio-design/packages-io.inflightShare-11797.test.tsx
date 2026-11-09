@@ -5,7 +5,7 @@
  *
  * Opening a package mounts three readers of `GET /api/v1/packages` at once —
  * the switcher list, the writability courtesy gate and the namespace lookup
- * (the `PACKAGE_LIST_TOAST_ID` doc in `StudioDesignSurface.tsx` names all
+ * (the `PACKAGE_LIST_TOAST_ID` doc in `PackageSwitcher.tsx` names all
  * three) — and each one sent its own request. Counted on the wire here: the
  * stubbed `fetch` holds every request open until the test answers it, so
  * "at once" means the first request is genuinely pending when the next call

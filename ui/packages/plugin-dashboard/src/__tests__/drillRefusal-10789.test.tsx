@@ -140,6 +140,7 @@ function renderDatasetWidget(filter: unknown) {
       ],
       object: 'proj_task',
       dimensionFields: { status: 'status_id' },
+      drillScopes: { est_hours: {} },
       drillRawRows: [{ status: 'open' }],
     })),
   };

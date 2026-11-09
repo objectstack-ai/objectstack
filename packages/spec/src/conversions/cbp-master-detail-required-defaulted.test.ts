@@ -18,9 +18,12 @@ import type { ConversionNotice } from './types.js';
  *   with the Required toggle off), which converts to `required: true` and then
  *   parses;
  * - on the shapes it must leave alone, each of which the parse goes on
- *   refusing;
- * - on the authoring funnel, which does not replay it, so a live author is
- *   still refused and taught.
+ *   refusing (and the explicit `required: false`, which it leaves alone and
+ *   the parse now accepts as the optional master, #30905 ruling A);
+ * - on the authoring funnel, which does not replay it. ⚠️ Since ruling A of
+ *   #30905 the parse reads an omitted `required` as the parsed `false`, the
+ *   optional master, so the funnel admits the omission rather than refusing
+ *   it; `os lint` reports it at `error` (`relationship/master-detail-required`).
  */
 
 const ID = 'cbp-master-detail-required-defaulted';
@@ -58,7 +61,11 @@ describe('cbp-master-detail-required-defaulted (ADR-0087 D2)', () => {
 
   it('a stored Studio-shape row (one master_detail, `required` omitted) converts to required:true, then parses whole', () => {
     const row = cbpRow({ opportunity: STUDIO_MASTER, name: { type: 'text', label: 'Name' } });
-    expect(cbpIssuePaths(row), 'refused before the replay').toEqual(['sharingModel']);
+    // [#30905 ruling A] Before the replay the parse admits it as the optional
+    // master (the parsed map reads the omitted `required` as `false`); the
+    // conversion gives it the reading the row was stored with, the required
+    // master, exactly as before the ruling.
+    expect(cbpIssuePaths(row), 'admitted as optional before the replay').toEqual([]);
 
     const { item, notices } = convertStored(row);
     expect(notices).toHaveLength(1);
@@ -73,8 +80,15 @@ describe('cbp-master-detail-required-defaulted (ADR-0087 D2)', () => {
     expect(convertStored(item).notices).toEqual([]);
   });
 
+  it('leaves an explicit required:false untouched, and the parse accepts it as the optional master (#30905 ruling A)', () => {
+    const row = cbpRow({ m: { ...STUDIO_MASTER, required: false } });
+    const { item, notices } = convertStored(row);
+    expect(notices).toEqual([]);
+    expect(item).toEqual(row);
+    expect(cbpIssuePaths(item)).toEqual([]);
+  });
+
   it.each([
-    ['an explicit required:false (the builder refuses it too)', { m: { ...STUDIO_MASTER, required: false } }, 'sharingModel'],
     [
       'two master_details (no pick)',
       { a: STUDIO_MASTER, b: { type: 'master_detail', label: 'Quote', reference: 'crm_quote' } },
@@ -100,15 +114,18 @@ describe('cbp-master-detail-required-defaulted (ADR-0087 D2)', () => {
     expect(item.fields.m).toEqual(STUDIO_MASTER);
   });
 
-  it('the authoring funnel does NOT replay it — defineStack still refuses the same shape and names the fix', () => {
-    expect(() =>
-      defineStack({
-        manifest: { id: 'com.example.cbp-defaulted', namespace: 'cbpd', version: '0.0.1', type: 'app', name: 'CBP' },
-        objects: [
-          { name: 'cbpd_header', label: 'Header', fields: { name: { type: 'text', label: 'Name' } } },
-          { name: 'cbpd_line', label: 'Line', sharingModel: 'controlled_by_parent', fields: { header: { type: 'master_detail', label: 'H', reference: 'cbpd_header' } } },
-        ],
-      } as never),
-    ).toThrow(/`header` is a `master_detail` without `required: true` — add it/);
+  it('the authoring funnel does NOT replay it — defineStack keeps the omission as the parse reads it (#30905 ruling A)', () => {
+    // Reversed, not deleted: this pinned defineStack refusing the omission and
+    // naming the fix. Since ruling A the parse admits the parsed `false` as the
+    // optional master; that the funnel does not replay the conversion is still
+    // the pin: the field comes out `required: false`, never forced to `true`.
+    const stack = defineStack({
+      manifest: { id: 'com.example.cbp-defaulted', namespace: 'cbpd', version: '0.0.1', type: 'app', name: 'CBP' },
+      objects: [
+        { name: 'cbpd_header', label: 'Header', fields: { name: { type: 'text', label: 'Name' } } },
+        { name: 'cbpd_line', label: 'Line', sharingModel: 'controlled_by_parent', fields: { header: { type: 'master_detail', label: 'H', reference: 'cbpd_header' } } },
+      ],
+    } as never) as unknown as { objects: Array<{ fields: Record<string, { required?: boolean }> }> };
+    expect(stack.objects[1]!.fields.header!.required).toBe(false);
   });
 });

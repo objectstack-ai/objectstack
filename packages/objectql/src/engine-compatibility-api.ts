@@ -48,6 +48,7 @@
 import type { ServiceObject } from '@objectstack/spec/data';
 import type { IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
+import { RUNTIME_COMPATIBILITY_PACKAGE_ID } from '@objectstack/core';
 import { isFederatedObject } from './federated-object.js';
 import type { ObjectQL } from './engine.js';
 
@@ -72,7 +73,7 @@ export interface CompatibilityApiHost {
 export function registerObject(
   this: Pick<CompatibilityApiHost, '_registry'>,
   schema: ServiceObject,
-  packageId: string = '__runtime__',
+  packageId: string = RUNTIME_COMPATIBILITY_PACKAGE_ID,
   namespace?: string,
 ): string {
   // Auto-assign field names from keys
@@ -117,7 +118,9 @@ export async function introspectDatasource(
 export async function syncSchemas(
   this: Pick<CompatibilityApiHost, '_registry' | 'getDriverForObject' | 'logger'>,
 ): Promise<void> {
-  const allObjects = this._registry.getAllObjects();
+  // The storage layer's objects: a disabled package's extensions folded in,
+  // so the DDL keeps their columns (`SchemaRegistry.getStorageObject`).
+  const allObjects = this._registry.getAllStorageObjects();
   for (const obj of allObjects) {
     const driver = this.getDriverForObject(obj.name);
     if (!driver) continue;
@@ -187,7 +190,8 @@ export async function syncObjectSchema(
   this: Pick<CompatibilityApiHost, '_registry' | 'getDriverForObject'>,
   objectName: string,
 ): Promise<void> {
-  const obj = this._registry.getObject(objectName) as any;
+  // The storage layer's object, as {@link syncSchemas} reads it.
+  const obj = this._registry.getStorageObject(objectName) as any;
   if (!obj) return;
   const driver = this.getDriverForObject(objectName);
   if (!driver) return;

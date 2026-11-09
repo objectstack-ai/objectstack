@@ -11,8 +11,10 @@
 // exactly the failure #3426 reported:
 //
 //   1. `{{ record.<unknown> }}` — the path head is neither a declared field nor a
-//      system column. Almost always a typo (`{{ record.full_naem }}`). The template
-//      engine resolves it to `undefined` -> '' with no warning.
+//      system column (declared includes every field an `objectExtensions` entry
+//      of the same artifact adds, which the registry serves, #30608). Almost
+//      always a typo (`{{ record.full_naem }}`). The template engine resolves
+//      it to `undefined` -> '' with no warning.
 //
 //   2. `{{ record.<lookup>.<subfield> }}` — a cross-object hop through a lookup /
 //      master_detail / user / tree relation. The seeded flow record carries the
@@ -109,7 +111,7 @@ import {
   unprovisionedAnchorFix,
 } from './system-fields.js';
 import { walkFlowNodes, type WalkedFlowNode } from './flow-walk.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, recordsOf } from './object-graph.js';
 
 export type FlowTemplatePathSeverity = 'error' | 'warning';
 
@@ -162,7 +164,7 @@ const FILTER_VALUE_SLOT_NODE_TYPES: ReadonlySet<string> = new Set([
   'delete_record',
 ]);
 
-/** Build a `fieldName -> type` map for an object (declared fields only). */
+/** Build a `fieldName -> type` map for an object, from the fields it is handed. */
 function fieldTypesOf(obj: AnyRec): Map<string, string> {
   const types = new Map<string, string>();
   for (const f of recordsOf(obj.fields)) {
@@ -493,18 +495,36 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
   const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
 
+  // [#30608] Two reads of each object. `objectsByName` is the declared object:
+  // root resolution and the object-level provenance question
+  // (`unprovisionedInjectedColumnsFor`, `external` and the injected anchors)
+  // stay on it. `servedByName` is the same object as SERVED (`objectsAsServed`,
+  // the package's one fold; `served[i]` is the served form of `declared[i]`),
+  // which the field map below reads: the run's record is the merged object, so
+  // a hole naming a field an `objectExtensions` entry of the same artifact adds
+  // resolves, and a head an extension re-declares is judged on the extension's
+  // type (a lookup there is a traversal, a text there is not), as the
+  // registry's `mergeObjectDefinitions` replaces the owner's definition whole.
   const objectsByName = new Map<string, AnyRec>();
-  for (const obj of recordsOf(stack.objects)) {
-    if (typeof obj.name === 'string') objectsByName.set(obj.name, obj);
-  }
+  const servedByName = new Map<string, AnyRec>();
+  const { objects: served, tied } = objectsAsServed(stack);
+  recordsOf(stack.objects).forEach((obj, i) => {
+    if (typeof obj.name !== 'string') return;
+    objectsByName.set(obj.name, obj);
+    servedByName.set(obj.name, served[i]);
+  });
 
   // One field map per object, not per root: a flow may resolve several roots
   // onto the same object (a trigger record plus a `get_record` re-read of it).
+  // [#30608] A field two packages tie on is a known head of no stated type:
+  // its name is served, and which definition wins is registration order, so
+  // the traversal question (a type question) is not asked of it.
   const fieldTypeCache = new Map<string, Map<string, string>>();
   const fieldTypesFor = (objectName: string, obj: AnyRec): Map<string, string> => {
     let types = fieldTypeCache.get(objectName);
     if (!types) {
-      types = fieldTypesOf(obj);
+      types = fieldTypesOf(servedByName.get(objectName) ?? obj);
+      for (const key of tied.get(objectName) ?? []) if (types.has(key)) types.set(key, '');
       fieldTypeCache.set(objectName, types);
     }
     return types;

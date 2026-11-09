@@ -54,7 +54,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { RestServer } from '@objectstack/rest';
+import { META_LIST_QUERY_PARAMS, RestServer } from '@objectstack/rest';
 import { TRANSLATABLE_METADATA_TYPES } from '@objectstack/spec/system';
 import { pluralToSingular } from '@objectstack/spec/shared';
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -548,6 +548,16 @@ const PARAM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record
     { label: '?preview=draft', param: 'preview', query: { preview: 'draft' } },
     // [#20408] The switch's value is compared case-insensitively on `RestServer`.
     { label: '?preview=DRAFT', param: 'preview', query: { preview: 'DRAFT' } },
+    // [#29236] The batch by-names filter, on every type: it narrows (apps,
+    // objects, views and docs each hold one of these names), an unknown name
+    // is absent, and an EMPTY one is refused (400 VALIDATION_ERROR).
+    { label: '?names=crm,invoice,lead_all,crm_intro', param: 'names', query: { names: 'crm,invoice,lead_all,crm_intro' } },
+    { label: '?names=nope', param: 'names', query: { names: 'nope' } },
+    { label: '?names= (empty)', param: 'names', query: { names: '' } },
+    // …and the list's closed query set: a bracketed `names` key and an
+    // undeclared name are refused by recognition, never answered with the list.
+    { label: '?names[]=crm', param: 'names', query: { 'names[]': 'crm' } },
+    { label: '?name=crm (undeclared)', query: { name: 'crm' } },
 ];
 const PARAM_AXIS = new Set(PARAM_PROBES.map((p) => p.param).filter((p): p is string => !!p));
 
@@ -635,7 +645,7 @@ function deriveListReads(): Derived {
     visit(rest);
     const chain = parse(SHARED_CHAIN_SOURCE);
     for (const s of chain.statements) {
-        if (ts.isFunctionDeclaration(s) && s.name && ['createMetaListAnswer', 'metaRequestLocale', 'translateMetaList'].includes(s.name.text)) {
+        if (ts.isFunctionDeclaration(s) && s.name && ['createMetaListAnswer', 'metaRequestLocale', 'translateMetaList', 'metaListNames'].includes(s.name.text)) {
             readsUnder(chain, s, derived);
         }
     }
@@ -652,6 +662,10 @@ describe('[#20320] the census axes cover every read of RestServer\'s list handle
     it('every query parameter read is a census cell', () => {
         const missing = [...derived.params].filter((p) => !PARAM_AXIS.has(p)).sort();
         expect(missing, 'a list read of a parameter this census never sends: add a probe that moves its answer').toEqual([]);
+    });
+
+    it('[#29236] the list\'s closed query set is exactly what it reads — no name refused that it reads, none admitted that it ignores', () => {
+        expect([...META_LIST_QUERY_PARAMS].sort()).toEqual([...derived.params].sort());
     });
 
     it('every type a projection keys on, and every translatable type, is a census cell', () => {
@@ -705,6 +719,14 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         expect({ status: blankObject.status, code: blankObject.code, items: blankObject.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
         const bracketedObject = await read('/meta/view', { 'object[]': 'lead' });
         expect({ status: bracketedObject.status, code: bracketedObject.code, items: bracketedObject.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
+        // [#29236] `?names=` narrows every type's list; an unknown name is absent; empty is 400.
+        expect(names((await read('/meta/app', { names: 'helpdesk,crm' })).items)).toEqual(['crm', 'helpdesk']);
+        expect(names((await read('/meta/objects', { names: 'invoice' })).items)).toEqual(['invoice']);
+        expect((await read('/meta/view', { names: 'nope' })).items).toEqual([]);
+        const blankNames = await read('/meta/view', { names: '' });
+        expect({ status: blankNames.status, code: blankNames.code, items: blankNames.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
+        const undeclared = await read('/meta/view', { name: 'lead_all' });
+        expect({ status: undeclared.status, code: undeclared.code, items: undeclared.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
         const bracketedPackage = await read('/meta/view', { 'package[]': 'crm' });
         expect({ status: bracketedPackage.status, code: bracketedPackage.code, items: bracketedPackage.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
         const docs = await read('/meta/docs');

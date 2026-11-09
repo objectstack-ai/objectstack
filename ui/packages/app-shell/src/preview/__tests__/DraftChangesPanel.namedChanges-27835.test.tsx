@@ -22,11 +22,14 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
+// objectstack#29704 — the console language the sheet reads, per test (`en` unless set).
+const locale = vi.hoisted(() => ({ language: 'en' }));
+
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
     t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
-    language: 'en',
+    language: locale.language,
   }),
 }));
 
@@ -70,6 +73,7 @@ const NEW_VIEW = {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  locale.language = 'en';
 });
 
 describe('a property reads as its label on the item type form (objectstack#27835)', () => {
@@ -205,14 +209,61 @@ describe('the publish drill-in names each change in words (objectstack#27835)', 
     expect(detail.textContent).not.toContain('~ validations');
   });
 
-  it('heads a NEW view with its body properties by their labels, keeping a key no form row names', async () => {
+});
+
+/*
+ * objectstack#29704 — the drill-in of an UPDATE names top-level keys by the
+ * label the inspector gives them, in the console's language, and lists no
+ * declaration key; a NEW item is added whole and lists no key list.
+ */
+const PUBLISHED_DASHBOARD = { name: 'sales_overview', label: 'Sales overview', columns: 12, widgets: [] };
+// What customizing the base package's dashboard writes into the `.custom` copy:
+// the ADR-0146 D2 declaration, beside the two properties the person edited.
+const CUSTOMIZED_DASHBOARD = {
+  ...PUBLISHED_DASHBOARD,
+  label: '销售总览',
+  columns: 8,
+  overrides: { package: 'com.example.sales', basedOn: '1.0.0' },
+};
+
+describe('the drill-in of a customized dashboard update (objectstack#29704)', () => {
+  it('names each changed key by its translated label and lists no override declaration', async () => {
+    locale.language = 'zh-CN';
+    stubServer('dashboard', 'sales_overview', 'Sales overview', PUBLISHED_DASHBOARD, CUSTOMIZED_DASHBOARD);
+    const detail = await openDetail('Sales overview');
+
+    const rows = (await within(detail).findAllByTestId('draft-key-row')).map((r) => r.textContent);
+    // 「显示名称」「列数」 are the inspector's own zh labels for these rows; each
+    // source label spells its key, so no key chip rides beside it.
+    expect(rows).toEqual(['~ 列数', '~ 显示名称']);
+    expect(detail.textContent).not.toContain('overrides');
+    expect(detail.textContent).not.toContain('Label');
+  });
+
+  it('CONTROL: an English console reads the spec form labels', async () => {
+    stubServer('dashboard', 'sales_overview', 'Sales overview', PUBLISHED_DASHBOARD, CUSTOMIZED_DASHBOARD);
+    const detail = await openDetail('Sales overview');
+    const rows = (await within(detail).findAllByTestId('draft-key-row')).map((r) => r.textContent);
+    expect(rows).toEqual(['~ Columns', '~ Label']);
+  });
+
+  it('computeChangeDetail drops the declaration, keeping what the person changed', () => {
+    const d = computeChangeDetail(PUBLISHED_DASHBOARD, CUSTOMIZED_DASHBOARD, 'dashboard');
+    expect(d.keys).toEqual({ added: [], changed: ['columns', 'label'], removed: [] });
+    expect(d.generated).toEqual([]);
+  });
+});
+
+describe('the drill-in of a NEW item lists no key list (objectstack#29704)', () => {
+  it('says the item is added, and names none of its properties', async () => {
+    locale.language = 'zh-CN';
     stubServer('view', 'work_order_list', 'Work Order list', null, NEW_VIEW);
     const detail = await openDetail('Work Order list');
 
-    const rows = (await within(detail).findAllByTestId('draft-key-row')).map((r) => r.textContent);
-    expect(rows).toContain('+ Columns');
-    expect(rows).toContain('+ Label');
-    expect(rows).toContain('+ viewKind');
-    expect(rows).not.toContain('+ config');
+    expect(within(detail).getByTestId('draft-entry-new')).toHaveTextContent('Publishing adds this item.');
+    expect(within(detail).queryAllByTestId('draft-key-row')).toHaveLength(0);
+    for (const word of ['viewKind', 'isDefault', 'Columns', '标签', 'Includes:', 'Also changed:']) {
+      expect(detail.textContent).not.toContain(word);
+    }
   });
 });

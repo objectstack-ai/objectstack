@@ -17,7 +17,8 @@
  *  - each `packages[]` entry is judged under its own id;
  *  - the refusal comes before the install-mode judgement, so the `unmanaged`
  *    branch is refused too;
- *  - the pair's `region__c` and a vendor extension's plain field install.
+ *  - the pair's `region__c` (into its writable pair) and a vendor extension's
+ *    plain field install.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -61,7 +62,12 @@ function makeRawApp() {
 function makeCtx(rawApp: any, installed: Array<{ id: string; dependencies?: Record<string, string> }>, holdings: Holdings) {
     const hooks = new Map<string, any>();
     const registered: any[] = [];
-    const records = installed.map((p) => ({ manifest: { id: p.id, version: '1.0.0', ...(p.dependencies ? { dependencies: p.dependencies } : {}) } }));
+    const saved: Array<[string, string]> = [];
+    // [ADR-0146 D3] BASE declares the namespace its pair's is derived from,
+    // as `customizationPairManifestRefusal` reads it.
+    const records = installed.map((p) => ({
+        manifest: { id: p.id, version: '1.0.0', ...(p.id === BASE ? { namespace: 'crm' } : {}), ...(p.dependencies ? { dependencies: p.dependencies } : {}) },
+    }));
     const services: Record<string, any> = {
         manifest: { register: (m: any) => registered.push({ manifest: m }) },
         auth: installerAuthService(),
@@ -78,11 +84,17 @@ function makeCtx(rawApp: any, installed: Array<{ id: string; dependencies?: Reco
                 type,
                 items: (holdings[packageId ?? '']?.[type] ?? []).map((i) => ({ ...i, _packageId: packageId })),
             }),
+            // [ADR-0146 D3] The pair's doors: a pair is installed into its
+            // writable pair, each item through the save door.
+            ensureCustomizationPackage: async () => ({ packageId: PAIR, created: true, writable: true }),
+            saveMetaItem: async ({ type, name }: { type: string; name: string }) => { saved.push([type, name]); return { success: true }; },
+            deletePackage: async () => ({ success: true, deletedCount: 0, failedCount: 0 }),
         },
         metadata: { get: async () => undefined },
     };
     return {
         registered,
+        saved,
         ctx: {
             hook: (e: string, h: any) => hooks.set(e, h),
             getService: (name: string) => {
@@ -127,7 +139,7 @@ async function install(
     await k.fire();
     const res = await rawApp.routes.get(ROUTE)!(makeC({ manifest, ...extraBody }));
     const registered = k.registered.map((r) => r.manifest.id).filter((id) => id === manifest.id);
-    return { res, registered, ledger: readdirSync(dir) };
+    return { res, registered, saved: k.saved, ledger: readdirSync(dir) };
 }
 
 const extension = (field: string) => ({ extend: 'crm_account', fields: { [field]: { type: 'text', label: 'Region' } } });
@@ -158,7 +170,7 @@ describe("install-local 1c'' — the `__c` extension-field reservation at the ma
     });
 
     it('(b) the `.custom` pair extending the base with a plain `region` is refused 422', async () => {
-        const manifest = { id: PAIR, version: '1.0.0', dependencies: deps(BASE), objectExtensions: [extension('region')] };
+        const manifest = { id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE), objectExtensions: [extension('region')] };
         const out = await install(manifest);
         expectRefused(out, judgeExtensionFieldSuffix({ packageId: PAIR, objectExtensions: manifest.objectExtensions }));
         expect(out.res.payload.error.details.refusals[0].rule).toBe('unsuffixed_in_pair');
@@ -169,7 +181,7 @@ describe("install-local 1c'' — the `__c` extension-field reservation at the ma
             id: 'com.acme.bundle', version: '1.0.0',
             packages: [
                 { manifest: { id: PARTNER, version: '1.0.0', dependencies: deps(BASE), objectExtensions: [extension('tier')] } },
-                { manifest: { id: PAIR, version: '1.0.0', dependencies: deps(BASE), objectExtensions: [extension('region')] } },
+                { manifest: { id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE), objectExtensions: [extension('region')] } },
             ],
         });
         expect(out.res.status, JSON.stringify(out.res.payload)).toBe(422);
@@ -189,9 +201,11 @@ describe("install-local 1c'' — the `__c` extension-field reservation at the ma
     });
 
     it('CONTROL: the `.custom` pair\'s extension field `region__c` installs, and so does a vendor extension\'s plain field', async () => {
-        const pair = await install({ id: PAIR, version: '1.0.0', dependencies: deps(BASE), objectExtensions: [extension('region__c')] });
+        const pair = await install({ id: PAIR, version: '1.0.0', namespace: 'crm_custom', dependencies: deps(BASE), objectExtensions: [extension('region__c')] });
         expect(pair.res.status, JSON.stringify(pair.res.payload)).toBe(200);
-        expect(pair.registered).toEqual([PAIR]);
+        // [ADR-0146 D3] Into its writable pair, through the save door.
+        expect(pair.registered).toEqual([]);
+        expect(pair.saved).toEqual([['object_extension', 'crm_account']]);
 
         const vendor = await install({ id: PARTNER, version: '1.0.0', dependencies: deps(BASE), objectExtensions: [extension('region')] });
         expect(vendor.res.status, JSON.stringify(vendor.res.payload)).toBe(200);

@@ -297,6 +297,27 @@ export interface AutomationContext {
      * Callers do NOT set this — the engine derives it, exactly like {@link runAs}.
      */
     flowRunId?: string;
+    /**
+     * The administrator (a `sys_user` id) at the keyboard when the request or
+     * write that started this run came from an impersonation session. Every
+     * door that starts a run from an envelope carrying it sets it: the
+     * record-change trigger from the triggering hook's
+     * `provenance.impersonatedBy`, and the manual trigger route and a
+     * `type: 'flow'` action from the caller's `ExecutionContext.impersonatedBy`.
+     * The run's data nodes carry it onto every write as
+     * `ExecutionContext.impersonatedBy`, so the audit writer names the
+     * administrator on the run's writes as on the request that started it.
+     *
+     * ATTRIBUTION ONLY: {@link userId} stays the impersonated user, whose
+     * grants a `runAs:'user'` run resolves, and nothing in the authorization
+     * path reads this. Absent on every run a user's own write started. An
+     * approval decision replaces it for the decider's segment with the
+     * decision's own {@link ResumeSignal.impersonatedBy}: the administrator
+     * when the decider decided from an impersonation session, absent when the
+     * decider acted in their own name, never the stamp of the write that
+     * started the run.
+     */
+    impersonatedBy?: string;
     /** Additional contextual data */
     params?: Record<string, unknown>;
     /**
@@ -352,11 +373,20 @@ export interface ScreenFieldSpec {
      * Widget hint (text/select/boolean/number/date/file/…); the client maps it
      * to a field widget.
      *
-     * Two members are value domains the server re-checks on resume
-     * (`validateScreenInputs`): `'number'` takes a finite JSON number, and
-     * `'file'` (#25801) takes the id of an uploaded `sys_file` — the client
+     * Nine members are value domains the server re-checks on resume
+     * (`validateScreenInputs`): the three numeric kinds `'number'`,
+     * `'currency'` and `'percent'` take a finite JSON number (a numeric
+     * string is refused, ⛔ not coerced; the client renders all three as a
+     * numeric input, which posts a number); `'file'` (#25801) takes the
+     * id of an uploaded `sys_file` — the client
      * renders the platform upload widget and answers with the id the upload
-     * minted, never the expanded `{ id, name, url, … }` read form.
+     * minted, never the expanded `{ id, name, url, … }` read form; and the
+     * five string kinds `'text'`, `'textarea'`, `'email'`, `'url'` and
+     * `'phone'` (#31491) take a JSON string (an object, number, boolean or
+     * array is refused, ⛔ not coerced — `42` is not read as `'42'`). Only the
+     * shape is checked: the format of an email, URL or phone number is not.
+     * A refused value leaves the run paused, so a corrected resume continues
+     * it.
      *
      * One member is not an input at all: `'record_link'` shows the
      * {@link reference} record whose id {@link defaultValue} carries (served
@@ -377,8 +407,9 @@ export interface ScreenFieldSpec {
      * Unlike {@link visibleWhen}, these are NOT client-only: the server
      * re-checks them when the run resumes (`validateScreenInputs`), so a bound
      * holds against a caller that skips the dialog — with no "if the value
-     * happens to be a number" qualifier, because on a `type: 'number'` field a
-     * present non-number is refused outright (`invalid_type`) rather than
+     * happens to be a number" qualifier, because on a numeric field
+     * (`type: 'number'`, `'currency'` or `'percent'`) a present non-number is
+     * refused outright (`invalid_type`) rather than
      * passing the bound it cannot be compared against. ⛔ Not coerced. The
      * client still applies them so the user is stopped at the input rather
      * than at Submit.
@@ -854,6 +885,23 @@ export interface ResumeSignal {
      */
     resumedBy?: string;
     /**
+     * The administrator (a `sys_user` id) at the keyboard when the decider
+     * named by {@link resumedBy} decided from an impersonation session — the
+     * decision request's `ExecutionContext.impersonatedBy`, as the owning
+     * service read it off that request's session. The nodes after the
+     * decision carry it as the segment's
+     * {@link AutomationContext.impersonatedBy}, so the audit writer names the
+     * administrator on the decider's writes as on the decision itself; absent
+     * when the decider acted in their own name, and then the segment carries
+     * none, whatever the run's trigger carried.
+     *
+     * ATTRIBUTION ONLY: {@link resumedBy} stays the decider whose identity the
+     * segment runs with. Honoured ONLY together with {@link resumedBy} on a
+     * signal that also carries {@link RESUME_AUTHORITY_SERVICE}; a signal built
+     * from an HTTP body naming an administrator here changes nothing.
+     */
+    impersonatedBy?: string;
+    /**
      * Set by the service that OWNS the suspension to clear the resume gate on
      * a `resumeAuthority: 'service'` node — or on one that declares no
      * authority, which is gated the same way since #5561 (#3801). See
@@ -1193,9 +1241,10 @@ export interface ConnectorConnectionState {
      * the deployment has no base to derive it from — a connect is then refused
      * `503` — and ⛔ never guessed from the request's origin. Only an
      * `authorization_code` instance has a connection, so no other grant ever
-     * carries it. Read-only: no connection request takes it. Declared ahead of
-     * the service that answers it: until the automation service sets it, no
-     * answer carries it.
+     * carries it. Read-only: no connection request takes it. Its producer is
+     * `@objectstack/service-automation`: `AutomationServicePlugin.getConnectorConnection`
+     * (`packages/services/service-automation/src/plugin.ts`) sets it whenever
+     * the derivation has a base, and it is absent otherwise.
      */
     redirectUri?: string;
 }

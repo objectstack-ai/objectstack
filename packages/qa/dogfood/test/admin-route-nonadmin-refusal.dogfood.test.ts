@@ -278,6 +278,54 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: {},
       note: 'a read: the gate runs first, then the handler confirms the caller\'s own standing; the admin gets 200 with the roster',
     },
+    // ── #30398 — the address the Allowed IP ranges save check judges (a read) ──
+    'GET /api/v1/auth/admin/client-address': {
+      bucket: 'objectstack-gate',
+      note: 'a read: the gate runs first and the handler reads no body and no query parameter; the admin gets 200 { clientAddress, trustProxy }',
+    },
+    // ── #30918 — another person's authorized AI assistants (a read) ─────────
+    'GET /api/v1/auth/admin/authorized-clients': {
+      bucket: 'objectstack-gate',
+      query: `?userId=${targetUserId}`,
+      note: 'a read: the gate runs before the query is read, so anon and member are refused whoever userId names; the admin gets 200 { clients, truncated } for the target',
+    },
+    // ── #31048 — withdraw one of another person's authorized AI assistants ──
+    'POST /api/v1/auth/admin/authorized-clients/withdraw': {
+      bucket: 'objectstack-gate',
+      body: { userId: targetUserId, id: 'refusal-probe-consent' },
+      note: 'the gate runs ahead of any body read, so anon and member are refused whoever the body names; the admin passes it and lands on 404 RESOURCE_NOT_FOUND for the consent the target does not hold',
+    },
+    // ── #30958 — the SCIM connection-credential door (mint + revoke) ────────
+    //
+    // Both mounts run `gateAdmin(c)` as their first statement, ahead of any body
+    // read, so anon 401 / member 403 hold on any body. The admin side on these
+    // payloads: SCIM is on in this boot (OS_SCIM_ENABLED, beforeAll), so the
+    // mint answers 200 with a fresh credential for a probe connection nothing
+    // provisions through (the sweep's own stack, discarded at teardown), and
+    // the revoke lands on 404 RESOURCE_NOT_FOUND for the unknown credential.
+    'POST /api/v1/auth/admin/scim/mint-credential': {
+      bucket: 'objectstack-gate',
+      body: { connectionId: 'refusal-probe-scim' },
+      note: 'the gate runs ahead of any body read; the admin gets 200 and a credential for the probe connection, since SCIM is on in this boot',
+    },
+    'POST /api/v1/auth/admin/scim/revoke-credential': {
+      bucket: 'objectstack-gate',
+      body: { credentialId: 'refusal-probe-credential' },
+      note: 'the gate runs ahead of any body read; the admin passes it and lands on 404 RESOURCE_NOT_FOUND for the unknown credential',
+    },
+    // The identity-provider group mapping door beside it: the same gate first.
+    // The save names a connection with no credential and the delete a mapping
+    // that does not exist, so nothing moves for the admin either.
+    'POST /api/v1/auth/admin/scim/set-group-mapping': {
+      bucket: 'objectstack-gate',
+      body: { connectionId: 'refusal-probe-unminted', groupExternalId: 'refusal-probe-group', permissionSet: 'refusal_probe_set' },
+      note: 'the gate runs ahead of any body read; the admin passes it and lands on 400 VALIDATION_FAILED on connectionId, since the probe connection has no credential',
+    },
+    'POST /api/v1/auth/admin/scim/delete-group-mapping': {
+      bucket: 'objectstack-gate',
+      body: { mappingId: 'refusal-probe-mapping' },
+      note: 'the gate runs ahead of any body read; the admin passes it and lands on 404 RESOURCE_NOT_FOUND for the unknown mapping',
+    },
     // ── #9653: the /admin/sso/* bridges, gated ahead of their delegation ────
     //
     // The ADR-0068 gate runs BEFORE the bridge re-dispatches into better-auth,
@@ -316,6 +364,19 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       bucket: 'objectstack-gate',
       body: { providerId: 'refusal-probe-oidc' },
       note: 'admin passes the gate and lands on 400 DOMAIN_VERIFICATION_DISABLED while SSO is off (#10859 — it answered 404 DOMAIN_VERIFICATION_FAILED before, out of step with the sibling above)',
+    },
+    // #31666 — the SSO Providers form's groups claim, show and set: the same
+    // gate first, ahead of any body read. Neither delegates before reading the
+    // stored provider, so the admin lands on the unknown probe provider.
+    'POST /api/v1/auth/admin/sso/get-groups-claim': {
+      bucket: 'objectstack-gate',
+      body: { providerId: 'refusal-probe-groups-claim' },
+      note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider',
+    },
+    'POST /api/v1/auth/admin/sso/set-groups-claim': {
+      bucket: 'objectstack-gate',
+      body: { providerId: 'refusal-probe-groups-claim', groupsClaim: 'groups' },
+      note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider; nothing is written',
     },
 
     // ── #9652: ban / unban moved from the vendor to an ObjectStack mount ────

@@ -61,6 +61,9 @@ function fakeEngine() {
     ],
     sys_user_position: [],
     sys_user_permission_set: [],
+    // The owners of the keys above exist: an API key authenticates only as an
+    // owner who exists.
+    sys_user: [{ id: 'u_key' }, { id: 'u_ex' }, { id: 'u_ses' }],
   };
   const registered = new Set(Object.keys(tables));
   const engine = {
@@ -119,6 +122,9 @@ function input(over: Partial<RequestExecutionContextInput> & { headers?: Headers
     accessToken: 'withhold',
     oauth: undefined,
     onAdmission: undefined,
+    // [#31898] Required since every key door hands it; these cases judge the
+    // composition's choices, not the client facts, so none is handed.
+    transport: undefined,
     ...over,
   };
 }

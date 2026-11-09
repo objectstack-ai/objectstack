@@ -154,18 +154,27 @@ other adapter.
 | Method | Endpoint | SDK | Description |
 |:-------|:---------|:----|:------------|
 | POST | `/storage/upload/presigned` | `storage.getPresignedUrl` | Step 1 — mint an upload target for a new `sys_file` row |
-| POST | `/storage/upload/complete` | `storage.upload` | Step 3 — commit the uploaded bytes |
+| POST | `/storage/upload/complete` | `storage.upload` | Step 3 — commit the uploaded bytes; with `attachTo`, also attach the file to a record as the caller |
 | POST | `/storage/upload/chunked` | `storage.initChunkedUpload` | Open a chunked / resumable session |
 | PUT | `/storage/upload/chunked/:uploadId/chunk/:chunkIndex` | `storage.uploadPart` | Send one chunk |
 | POST | `/storage/upload/chunked/:uploadId/complete` | `storage.completeChunkedUpload` | Assemble the parts |
 | GET | `/storage/upload/chunked/:uploadId/progress` | `storage.resumeUpload` | Read session progress (first step of a resume) |
 | GET | `/storage/files/:fileId/url` | `storage.getDownloadUrl` | Resolve a short-lived signed download URL |
 | GET | `/storage/files/:fileId` | — | Stable browser URL; 302s to the same signed URL (what file fields carry) |
+| GET | `/storage/upload-links/:token` | — | The page a single-use upload link opens (minted by the MCP `create_upload_link` tool) for the signed-in user it was made for: a file picker |
+| PUT | `/storage/upload-links/:token` | — | Spend the link on the request body, as that signed-in user; the file lands on the record and field the link is bound to |
 
 `storage.upload(file)` runs steps 1–3 for you, including the direct-to-storage
 `PUT` in step 2. Step 1 refuses an empty `mimeType` with `400 INVALID_REQUEST`,
 so for a file whose type the browser does not know (`file.type === ''`) the
 helper sends `application/octet-stream`; a typed file keeps its own type.
+
+To attach the upload to a record's Attachments, send `attachTo: { parentObject,
+parentId }` with step 3 (and start the upload with `scope: 'attachments'`): the
+commit and the `sys_attachment` row are one unit, written as the signed-in
+caller, and the answer carries the `attachmentId`
+([attachment access](/docs/permissions/attachments-access)). A refused attach
+leaves the upload pending.
 
 A file field takes the `fileId` only after step 3. A signed-in record write
 that names a file whose upload was never completed is refused with `400

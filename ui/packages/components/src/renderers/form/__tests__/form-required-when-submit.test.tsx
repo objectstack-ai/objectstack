@@ -191,3 +191,70 @@ describe('form renderer — `requiredWhen` at SUBMIT time (objectui#4161)', () =
     expect(screen.queryByText(/is required/i)).toBeNull();
   });
 });
+
+/**
+ * objectstack#30184 — on an EDIT form `requiredWhen` is a TRANSITION GATE, as
+ * the engine judges it (`Field.requiredWhen`: refused only when the merged
+ * record violates the rule AND the stored row complied). The reported case: a
+ * contract activated before its signed-copy rule existed must still save an
+ * unrelated edit, while activating a contract without the copy stays refused.
+ */
+describe('form renderer — `requiredWhen` judged against the stored row on EDIT (objectstack#30184)', () => {
+  const CONTRACT_FIELDS = [
+    { name: 'status', label: 'Status', type: 'input' },
+    { name: 'end_date', label: 'End Date', type: 'input' },
+    { name: 'signed_copy', label: 'Signed Copy', type: 'input', requiredWhen: "record.status == 'activated'" },
+  ];
+  const signedCopy = () => screen.getByLabelText(/signed copy/i);
+
+  it('saves an unrelated edit to a record already in the gate without the value', async () => {
+    const stored = { status: 'activated', end_date: '2026-12-31', signed_copy: null };
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderForm(CONTRACT_FIELDS, stored, onSubmit, { previousValues: stored });
+
+    expect(signedCopy()).not.toHaveAttribute('aria-required');
+    fireEvent.change(screen.getByLabelText(/end date/i), { target: { value: '2027-06-30' } });
+    submit();
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ status: 'activated', end_date: '2027-06-30' });
+    expect(screen.queryByText(/is required/i)).toBeNull();
+  });
+
+  it('still refuses the edit that moves a record INTO the gate without the value', async () => {
+    const stored = { status: 'draft', end_date: '2026-12-31', signed_copy: null };
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderForm(CONTRACT_FIELDS, stored, onSubmit, { previousValues: stored });
+
+    fireEvent.change(screen.getByLabelText(/status/i), { target: { value: 'activated' } });
+    await waitFor(() => expect(signedCopy()).toHaveAttribute('aria-required', 'true'));
+    submit();
+
+    await waitFor(() => expect(screen.getByText(/signed copy is required/i)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('still refuses clearing the value of a record that held it', async () => {
+    const stored = { status: 'activated', end_date: '2026-12-31', signed_copy: 'copy.pdf' };
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderForm(CONTRACT_FIELDS, stored, onSubmit, { previousValues: stored });
+
+    expect(signedCopy()).toHaveAttribute('aria-required', 'true');
+    fireEvent.change(signedCopy(), { target: { value: '' } });
+    submit();
+
+    await waitFor(() => expect(screen.getByText(/signed copy is required/i)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('still enforces on a CREATE form (no stored row)', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderForm(CONTRACT_FIELDS, { status: 'activated', end_date: '', signed_copy: '' }, onSubmit);
+
+    expect(signedCopy()).toHaveAttribute('aria-required', 'true');
+    submit();
+
+    await waitFor(() => expect(screen.getByText(/signed copy is required/i)).toBeInTheDocument());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});

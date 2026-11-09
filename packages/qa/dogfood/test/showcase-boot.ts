@@ -29,6 +29,9 @@ import { fileURLToPath } from 'node:url';
 import showcaseStack from '@objectstack/example-showcase';
 import { bootStack, type BootOptions, type VerifyStack } from '@objectstack/verify';
 
+/** The home currency `examples/app-showcase/.env` pins (`OS_LOCALIZATION_CURRENCY`). */
+const SHOWCASE_HOME_CURRENCY = 'USD';
+
 /** `examples/app-showcase` — the directory holding the showcase's `objectstack.config.ts`. */
 const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
 
@@ -38,5 +41,14 @@ const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/',
  * this helper's, and a caller's own is overridden.
  */
 export function bootShowcase(opts: BootOptions = {}, config: unknown = showcaseStack): Promise<VerifyStack> {
+  // The showcase pins its home currency in its own `.env`
+  // (`OS_LOCALIZATION_CURRENCY=USD`), which `os dev` / `serve` / `start` read
+  // and `bootStack` does not. The invoice converts every amount into the home
+  // currency at write, against seeded USD-relative rates, so without the pin a
+  // host with no locale boots with no home currency and every seeded invoice
+  // that names a currency is refused (`ERR_HOME_CURRENCY_UNSET`). The same
+  // value as that file, set before the settings service reads the
+  // environment; a value the run already carries is kept.
+  process.env.OS_LOCALIZATION_CURRENCY ??= SHOWCASE_HOME_CURRENCY;
   return bootStack(config, { ...opts, hostRoot: SHOWCASE_DIR });
 }

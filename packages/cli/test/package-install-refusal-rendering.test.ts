@@ -35,7 +35,7 @@ async function runInstall(): Promise<{ out: string; exit: number | undefined }> 
   vi.spyOn(console, 'error').mockImplementation(capture);
   let exit: number | undefined;
   try {
-    await PackageInstall.run(['com.example.handlerjobs', '--runtime', 'http://runtime.test']);
+    await PackageInstall.run(['com.example.handlerjobs', '--url', 'http://runtime.test']);
   } catch (err: any) {
     exit = err?.oclif?.exit ?? err?.code;
   }

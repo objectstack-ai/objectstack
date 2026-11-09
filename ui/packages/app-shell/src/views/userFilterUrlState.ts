@@ -28,6 +28,7 @@
  * | `uf__search` | the search term                           | the term itself                         |
  * | `uf__sort`   | the sort                                  | the spec `ListViewSchema.sort` array    |
  * | `uf__group`  | the toolbar grouping                      | the spec `GroupingConfig`               |
+ * | `uf__page`   | the page a paged list shows (objectstack#30850) | a whole number from 2 up; page 1 is no param |
  *
  * - `uf__filter` is the FilterBuilder group (`FilterBuilderRowGroup`, derived
  *   from `@object-ui/types`' `FilterGroup` — `logic` is its own key) with
@@ -48,6 +49,12 @@
  * - `uf__group` has no empty form: the spec's `GroupingConfig` requires at
  *   least one level, so a cleared grouping deletes the param, and a list
  *   opened without it shows the grouping its view declares.
+ * - `uf__page` is the reader's place in the list, not part of the query: it is
+ *   read on every render rather than seeded once ({@link parseListPageParam}),
+ *   it is left out of {@link userFilterParamsKey}, so a page alone never makes
+ *   an address read as a link that carries list state, and the list's own
+ *   reset to page 1 deletes it. A value that is not a whole number from 1 up
+ *   is dropped, and the list opens on page 1.
  */
 
 import { GroupingConfigSchema, ListViewSchema, ViewFilterRuleSchema } from '@objectstack/spec/ui';
@@ -66,6 +73,8 @@ export const LIST_SEARCH_PARAM = `${PREFIX}_search`;
 export const LIST_SORT_PARAM = `${PREFIX}_sort`;
 /** The list's toolbar grouping (objectui#11860). */
 export const LIST_GROUP_PARAM = `${PREFIX}_group`;
+/** The page a paged list shows (objectstack#30850). */
+export const LIST_PAGE_PARAM = `${PREFIX}_page`;
 
 /**
  * The reserved keys that are list state, not quick-filter selections. Kept out
@@ -77,6 +86,7 @@ const LIST_STATE_PARAMS: ReadonlySet<string> = new Set([
   LIST_SEARCH_PARAM,
   LIST_SORT_PARAM,
   LIST_GROUP_PARAM,
+  LIST_PAGE_PARAM,
 ]);
 
 /** Read `uf_*` params into the UserFilters `initialSelections` shape. */
@@ -121,12 +131,14 @@ export function applyUserFilterParams(
  * state the URL carries, quick filters included. Empty when it carries none.
  *
  * A host compares two of these to tell list state it wrote itself from list
- * state that arrived with the URL (an opened link).
+ * state that arrived with the URL (an opened link). The page
+ * ({@link LIST_PAGE_PARAM}) is not in it: it is where the reader is in the
+ * list, not what the list shows.
  */
 export function userFilterParamsKey(searchParams: URLSearchParams): string {
   const own = new URLSearchParams();
   searchParams.forEach((value, key) => {
-    if (key.startsWith(PREFIX) && value !== '') own.append(key, value);
+    if (key.startsWith(PREFIX) && value !== '' && key !== LIST_PAGE_PARAM) own.append(key, value);
   });
   return own.toString();
 }
@@ -258,12 +270,26 @@ export function parseListStateParams(
   return state;
 }
 
+/**
+ * The page a URL carries (objectstack#30850): a whole number from 1 up, and 1
+ * when the URL carries none or a value that is not one. A page past the end
+ * of the list is the list's to clamp, once its load says where the end is.
+ */
+export function parseListPageParam(searchParams: URLSearchParams): number {
+  const raw = searchParams.get(LIST_PAGE_PARAM);
+  if (!raw || !/^[1-9][0-9]*$/.test(raw)) return 1;
+  const page = Number(raw);
+  return Number.isSafeInteger(page) ? page : 1;
+}
+
 /** What a list reports to write: each piece present is written, `undefined` deletes. */
 export interface ListStatePatch {
   filters?: FilterBuilderRowGroup | null;
   search?: string | null;
   sort?: ReadonlyArray<{ field: string; order: 'asc' | 'desc' }> | null;
   grouping?: GroupingConfig | null;
+  /** The page; page 1 (or `null`) deletes the param, so a list on its first page carries none. */
+  page?: number | null;
 }
 
 function serializeFilterGroup(group: FilterBuilderRowGroup | null | undefined): string | undefined {
@@ -303,5 +329,6 @@ export function applyListStateParams(prev: URLSearchParams, patch: ListStatePatc
         : undefined,
     );
   }
+  if ('page' in patch) write(LIST_PAGE_PARAM, patch.page && patch.page > 1 ? String(patch.page) : undefined);
   return next;
 }

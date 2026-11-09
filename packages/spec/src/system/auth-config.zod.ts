@@ -10,6 +10,7 @@ import { z } from 'zod';
  */
 
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const AuthProviderConfigSchema = lazySchema(() => z.object({
   id: z.string().describe('Provider ID (github, google)'),
   clientId: z.string().describe('OAuth Client ID'),
@@ -297,6 +298,18 @@ export type OidcProviderConfig = z.input<typeof OidcProviderConfigSchema>;
 export type OidcProvidersConfig = z.input<typeof OidcProvidersConfigSchema>;
 
 
+/**
+ * The prescription `EmailAndPasswordConfig.revokeSessionsOnPasswordReset`'s
+ * tombstone carries. plugin-auth's entry guard (`password-reset-ends-sessions.ts`)
+ * answers a host configuration that never passed this schema with the same
+ * text, so both doors say the same thing.
+ */
+export const REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED =
+  '`emailAndPassword.revokeSessionsOnPasswordReset` was removed in @objectstack/spec 18 '
+  + '(ADR-0049 enforce-or-remove) — it could hold only one value: a completed password reset '
+  + 'always ends every session the account holds, on every reset door, and no setting turns '
+  + 'that off. Delete the key; nothing replaces it.';
+
 export const EmailAndPasswordConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(true).describe('Enable email/password auth'),
   disableSignUp: z.boolean().optional().describe('Disable new user registration via email/password'),
@@ -306,18 +319,27 @@ export const EmailAndPasswordConfigSchema = lazySchema(() => z.object({
   minPasswordLength: z.number().optional().describe('Minimum password length (default 8)'),
   maxPasswordLength: z.number().optional().describe('Maximum password length (default 128)'),
   // `externalVocabulary` mirror (#14478 ruling B): this object's own describe
-  // says its options are "forwarded to better-auth", and every sibling here is
-  // a better-auth option name verbatim (`disableSignUp`,
-  // `requireEmailVerification`, `minPasswordLength`, `autoSignIn`,
-  // `revokeSessionsOnPasswordReset`). A key that is forwarded by name cannot be
-  // renamed without breaking the forwarding.
+  // says its options are "forwarded to better-auth", and every live sibling
+  // here is a better-auth option name verbatim, forwarded under that name by
+  // plugin-auth's auth instance (`disableSignUp`, `requireEmailVerification`,
+  // `minPasswordLength`, `maxPasswordLength`, `autoSignIn`). A key that is
+  // forwarded by name cannot be renamed without breaking the forwarding.
   resetPasswordTokenExpiresIn: z.number().optional().describe(
     'Reset-password token TTL in seconds (default 3600)'
   ).meta({ externalVocabulary: 'better-auth `emailAndPassword.resetPasswordTokenExpiresIn`' }),
   autoSignIn: z.boolean().optional().describe('Auto sign-in after sign-up (default true)'),
-  revokeSessionsOnPasswordReset: z.boolean().optional().describe(
-    'Revoke all other sessions on password reset'
-  ),
+  // RETIRED (#29909, ADR-0049 enforce-or-remove): a completed self-service
+  // password reset always ends every session the account holds, on every reset
+  // door, and no setting turns that off (maintainer ruling on #29909). After
+  // plugin-auth made the behaviour unconditional the key could hold one value
+  // only, so it is a tombstone: authoring it is a `tsc` error and a parse
+  // error carrying the prescription. plugin-auth still sets better-auth's own
+  // option of this name itself (`auth-manager-auth-instance.ts`), and refuses
+  // this key at any value where a host configuration enters the manager
+  // unparsed (`password-reset-ends-sessions.ts`). No ADR-0087 D2 conversion:
+  // this is host plugin configuration, not a stack collection member or a
+  // stored row. D3 record: `email-and-password-revoke-sessions-on-reset-retired`.
+  revokeSessionsOnPasswordReset: retiredKey(REVOKE_SESSIONS_ON_PASSWORD_RESET_RETIRED),
 }).optional().describe('Email and password authentication options forwarded to better-auth'));
 
 /**
@@ -373,7 +395,9 @@ export function isAudiencePosture(value: unknown): value is AudiencePosture {
  * their own act, with no per-user operator act). `invite_only` does not —
  * admission there comes only from an explicit operator-side act (a pending
  * invitation, admin create/import, SCIM provisioning, an operator-registered
- * identity provider).
+ * identity provider). An enterprise SSO provider (`@better-auth/sso`, OIDC or
+ * SAML) admits a person with no account and no invitation only when that
+ * provider sets `allowJit`; it is off by default.
  */
 export function audiencePermitsSelfRegistration(posture: AudiencePosture): boolean {
   return posture === 'email_domain' || posture === 'open';
@@ -404,6 +428,10 @@ export const AudienceConfigSchema = lazySchema(() => z.object({
    *   existence only through an operator-side act — a pending invitation
    *   (which admits the invitee's own sign-up), admin create-user / bulk
    *   import, SCIM provisioning, or an operator-registered identity provider.
+   *   An enterprise SSO provider (`@better-auth/sso`, OIDC or SAML) admits a
+   *   person with no account and no invitation only when that provider sets
+   *   `allowJit` (`sys_sso_provider.allow_jit`, off by default); a configured
+   *   `oidcProviders` entry admits as before.
    * - `email_domain`: self-registration is open ONLY to addresses whose domain
    *   is on {@link allowedEmailDomains}. Email verification is forced on, with
    *   no opt-out.
@@ -542,6 +570,31 @@ export const AdvancedAuthConfigSchema = lazySchema(() => z.object({
   cookiePrefix: z.string().optional().describe('Prefix for auth cookie names'),
 }).optional().describe('Advanced / low-level Better-Auth options'));
 
+/**
+ * One registered native-app URI scheme for the mobile sign-in hand-off
+ * (`GET /api/v1/auth/one-time-token/handoff`, see `OneTimeTokenHandoffQuerySchema`).
+ *
+ * Strict, never normalised: a lowercase RFC 3986 scheme written bare (no `:` or
+ * `://` suffix) made of two or more non-empty labels joined by single dots, the
+ * first starting with a letter (so `com..app`, `.com.app` and `com.example.` are
+ * refused). The dot is RFC 8252 section 7.1's
+ * rule that a private-use scheme be a reverse domain name the app's owner
+ * controls (`com.example.app`), which is also what keeps two apps on one device
+ * from claiming the same scheme and intercepting the token. The rule refuses, by
+ * construction, every scheme the hand-off must never redirect to (`http`,
+ * `https`, `ws`, `wss`, `javascript`, `data`, `file`, `blob`, `about`,
+ * `vbscript`): none contains a dot.
+ */
+export const TrustedAppSchemeSchema = lazySchema(() => z.string().regex(/^[a-z][a-z0-9+-]*(\.[a-z0-9+-]+)+$/, {
+  message:
+    'An app scheme is a lowercase reverse-domain URI scheme written bare, e.g. "com.example.app": '
+    + 'no ":" or "://" suffix, no uppercase, and two or more non-empty labels joined by single dots, '
+    + 'the first starting with a letter (RFC 8252 section 7.1). '
+    + 'http, https and other web schemes are never app schemes.',
+}).describe(
+  'A registered native-app URI scheme: lowercase, reverse-domain (two or more non-empty labels joined by single dots, the first starting with a letter), written bare (e.g. com.example.app)',
+));
+
 export const AuthConfigSchema = lazySchema(() => z.object({
   secret: z.string().optional().describe('Encryption secret'),
   baseUrl: z.string().optional().describe('Base URL for auth routes'),
@@ -572,6 +625,25 @@ export const AuthConfigSchema = lazySchema(() => z.object({
   trustedOrigins: z.array(z.string()).optional().describe(
     'Trusted origins for CSRF protection. Supports wildcards (e.g. "https://*.example.com"). ' +
     'The baseUrl origin is always trusted implicitly.'
+  ),
+  /**
+   * Native-app URI schemes the mobile sign-in hand-off may redirect a
+   * one-time token to (`GET /api/v1/auth/one-time-token/handoff`). Each entry
+   * is a {@link TrustedAppSchemeSchema}; an entry that is not is refused, never
+   * dropped or rewritten.
+   *
+   * Absent or empty: no app scheme is registered and the hand-off is not
+   * offered. A hand-off whose `redirect_uri` scheme is not on this list
+   * (compared case-insensitively) is refused with `400 VALIDATION_ERROR` and
+   * NO redirect, so an unregistered scheme never receives a token.
+   *
+   * Separate from `trustedOrigins` on purpose: an origin listed there is
+   * trusted for every redirect better-auth makes, while a scheme listed here
+   * is trusted only as the hand-off's destination.
+   */
+  trustedAppSchemes: z.array(TrustedAppSchemeSchema).optional().describe(
+    'Native-app URI schemes the mobile sign-in hand-off may redirect a one-time token to (e.g. ["com.example.app"]). '
+    + 'A hand-off to any other scheme is refused with 400 VALIDATION_ERROR and no redirect; absent or empty means the hand-off is not offered',
   ),
   socialProviders: SocialProviderConfigSchema,
   oidcProviders: OidcProvidersConfigSchema,
@@ -629,6 +701,7 @@ export type EmailAndPasswordConfig = z.input<typeof EmailAndPasswordConfigSchema
 export type EmailAndPasswordConfigParsed = z.infer<typeof EmailAndPasswordConfigSchema>;
 export type EmailVerificationConfig = z.input<typeof EmailVerificationConfigSchema>;
 export type AdvancedAuthConfig = z.input<typeof AdvancedAuthConfigSchema>;
+export type TrustedAppScheme = z.input<typeof TrustedAppSchemeSchema>;
 export type AuthConfig = z.input<typeof AuthConfigSchema>;
 /** Post-parse shape of {@link AuthConfig} — defaults applied, transforms run (ADR-0122). */
 export type AuthConfigParsed = z.infer<typeof AuthConfigSchema>;

@@ -216,6 +216,9 @@
 // is transpiled with the same-file declarations it references (resolved from
 // its enclosing scopes, transitively) and evaluated. Only the matcher and the
 // declarations it names are executed -- never the test file, never a suite.
+// "Names" means its CODE names them: identifiers are read off the parsed tree,
+// so the words of a string, a template literal's text or a comment never pull
+// a sibling binding into the lift (#29860).
 // Anything that cannot be lifted this way is UNJUDGED and must be declared;
 // it is never treated as passing.
 
@@ -316,7 +319,11 @@ function declaredName(node) {
   return null;
 }
 
-/** Same-file declarations visible from `node`, innermost scope first. */
+/**
+ * Same-file declarations visible from `node`, innermost scope first. Each entry
+ * carries the declaration's TEXT (what the lift executes) and the identifiers
+ * its CODE names (what the lift follows), read off the tree rather than the text.
+ */
 function visibleDeclarations(node, sf) {
   const decls = new Map();
   for (let cur = node.parent; cur; cur = cur.parent) {
@@ -328,22 +335,44 @@ function visibleDeclarations(node, sf) {
       if (ts.isVariableStatement(s)) {
         for (const d of s.declarationList.declarations) {
           if (ts.isIdentifier(d.name) && d.initializer && !decls.has(d.name.text)) {
-            decls.set(d.name.text, `const ${d.name.text} = ${d.initializer.getText(sf)};`);
+            decls.set(d.name.text, {
+              text: `const ${d.name.text} = ${d.initializer.getText(sf)};`,
+              identifiers: identifiersIn(d.initializer),
+            });
           }
         }
       } else if (ts.isFunctionDeclaration(s) && s.name && !decls.has(s.name.text)) {
-        decls.set(s.name.text, s.getText(sf));
+        decls.set(s.name.text, { text: s.getText(sf), identifiers: identifiersIn(s) });
       }
     }
   }
   return decls;
 }
 
-const identifiersIn = (src) => {
+/**
+ * Every identifier the CODE under `node` names — and nothing its TEXT says
+ * (#29860). Walked off the parsed tree, so a string literal, a template
+ * literal's text between its `${…}` holes, a regular expression and a comment
+ * contribute nothing, while an identifier inside a `${…}` hole is code and is
+ * collected. Over-inclusive on purpose in one direction only: a property name
+ * (`row.name`) is still an identifier node, and a name that resolves to no
+ * declaration is skipped by the lift anyway.
+ *
+ * It used to be a word regex over the source text. A refusal message reading
+ * `sparse driver: …` then pulled the sibling `const driver = { name, … }` into
+ * the lift, `name` was a factory parameter the lift cannot supply, and a
+ * CONFORMING matcher read UNJUDGED (`ReferenceError: name is not defined`) —
+ * the gate's verdict hung on which English words a string contained.
+ */
+function identifiersIn(node) {
   const out = new Set();
-  for (const m of src.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\b/g)) out.add(m[1]);
+  const visit = (n) => {
+    if (ts.isIdentifier(n)) out.add(n.text);
+    ts.forEachChild(n, visit);
+  };
+  visit(node);
   return out;
-};
+}
 
 /**
  * Does `body` read `id` as a filter object? The two spellings are exactly the
@@ -474,6 +503,7 @@ export function discoverInSource(text, label) {
             line: line + 1,
             name: declaredName(node) ?? '(anonymous)',
             source: node.getText(sf),
+            sourceIdentifiers: identifiersIn(node),
             declarations: declarations ?? visibleDeclarations(node, sf),
             capturedPath: captured ? w : null,
           });
@@ -498,15 +528,15 @@ function buildCallable(candidate, dropped = new Set()) {
   // cannot supply anyway (`query?.where ?? {}`).
   const skip = captured ? new Set([...dropped, captured[0]]) : dropped;
   const included = new Map();
-  let frontier = identifiersIn(candidate.source);
+  let frontier = candidate.sourceIdentifiers;
   for (let depth = 0; depth < 6; depth++) {
     const next = new Set();
     for (const id of frontier) {
       if (included.has(id) || id === self || skip.has(id)) continue;
       const decl = candidate.declarations.get(id);
       if (!decl) continue;
-      included.set(id, decl);
-      for (const x of identifiersIn(decl)) next.add(x);
+      included.set(id, decl.text);
+      for (const x of decl.identifiers) next.add(x);
     }
     if (next.size === 0) break;
     frontier = next;
@@ -649,7 +679,7 @@ export function measure() {
       const bucket = measured.get(rel);
       if (result.verdict === 'SILENT') bucket.silent++;
       else bucket.unjudged++;
-      bucket.details.push({ ...candidate, declarations: undefined, result });
+      bucket.details.push({ ...candidate, declarations: undefined, sourceIdentifiers: undefined, result });
     }
   }
   return { measured, discovered, conforming, refusing };
@@ -844,6 +874,39 @@ const FIXTURE_CAPTURED_NEGATED = `
 const run = (rows: any[], opts: any) =>
   rows.filter((r) => !Object.entries(opts.where).every(([k, v]) => r[k] === v));`;
 
+// --- #29860: the lift reads identifiers from code, never from text ---------
+// A conforming, refusing matcher inside a factory, beside a sibling binding the
+// lift cannot run (`driver` closes over the factory's `name` parameter). The
+// matcher's refusal MESSAGE says "sparse driver", so a lift that reads words
+// out of template-literal text pulls `driver` in and throws `name is not
+// defined`. The control word is in a plain string literal too, so neither
+// spelling of a string may name a binding into the lift.
+const FIXTURE_TEXT_NAMES_SIBLING = `
+function makeSparseDriver(name: string) {
+  const matches = (row: any, where: any): boolean => {
+    for (const [k, v] of Object.entries(where ?? {})) {
+      if (k.startsWith('$')) throw new Error(\`sparse driver: filter operator \${k} is not implemented\`);
+      if (v !== null && typeof v === 'object') throw new Error('sparse driver: operator is not implemented');
+      if (row[k] !== v) return false;
+    }
+    return true;
+  };
+  const driver = { name, version: '0.0.0' };
+  return { driver, matches };
+}`;
+
+// The other direction: an identifier inside a `\${…}` hole IS code. Here the
+// hole calls a same-file helper on the matcher's answering path, so a lift that
+// stopped reading holes would leave `label` undefined and the control probe
+// would throw — UNJUDGED, not CONFORMING.
+const FIXTURE_HOLE_NAMES_HELPER = `
+const label = (k: string) => k.toUpperCase();
+const matches = (row: any, where: any): boolean => {
+  if (Array.isArray(where.$or) && !where.$or.some((w: any) => matches(row, w))) return false;
+  if (Array.isArray(where.$and) && !where.$and.every((w: any) => matches(row, w))) return false;
+  return Object.entries(where).every(([k, v]) => k.startsWith('$') || \`\${label(k)}\` === k.toUpperCase() && row[k] === v);
+};`;
+
 function judgeFixture(src) {
   const found = discoverInSource(src, 'fixture.test.ts');
   return { found, results: found.map(judge) };
@@ -876,11 +939,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#8615: the captured-filter arm': 17,
   'the dispatch-gates declaration (#13163\'s landing obligation)': 6,
   'the ratchet is ONE-SIDED: a decrease passes and is reported (#26444)': 5,
+  '#29860: the lift reads identifiers from code, never from text': 7,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 4;
+const SELF_TEST_BATTERY_FLOOR = 5;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -990,6 +1054,33 @@ function selfTest() {
   expect('a grown count is an error', reconcile(fakeMeasured, { 'a.test.ts': { silent: 0 } }).length === 1);
   expect('a fallen count PASSES (one-sided, #26444)', reconcile(fakeMeasured, { 'a.test.ts': { silent: 2 } }).length === 0);
   expect('a clean/gone entry PASSES (one-sided, #26444)', reconcile(new Map(), { 'gone.test.ts': { silent: 1 } }).length === 0);
+
+  // --- #29860: the lift reads identifiers from code, never from text -------
+  battery('#29860: the lift reads identifiers from code, never from text');
+  const textNames = judgeFixture(FIXTURE_TEXT_NAMES_SIBLING);
+  expect('a matcher beside text naming a sibling binding is discovered', textNames.found.length === 1);
+  expect(
+    'template-literal TEXT names no identifier: "driver" in the message is not collected',
+    textNames.found[0]?.sourceIdentifiers?.has('driver') === false,
+  );
+  expect(
+    'nor does a plain string literal: its "implemented" is not collected either',
+    textNames.found[0]?.sourceIdentifiers?.has('implemented') === false,
+  );
+  expect(
+    'a matcher beside text naming a sibling binding lifts and is CONFORMING, not UNJUDGED',
+    textNames.results[0]?.verdict === 'CONFORMING' && textNames.results[0]?.refused === true,
+  );
+  const holeNames = judgeFixture(FIXTURE_HOLE_NAMES_HELPER);
+  expect('a matcher calling a helper inside a `${…}` hole is discovered', holeNames.found.length === 1);
+  expect(
+    'the helper named only inside the hole is collected',
+    holeNames.found[0]?.sourceIdentifiers?.has('label') === true,
+  );
+  expect(
+    'so the hole-reading matcher lifts with its helper and is CONFORMING',
+    holeNames.results[0]?.verdict === 'CONFORMING',
+  );
 
   // ── The ratchet is ONE-SIDED: a decrease passes and is reported (#26444) ──
   battery('the ratchet is ONE-SIDED: a decrease passes and is reported (#26444)');
@@ -1110,6 +1201,7 @@ function selfTest() {
     '    parameter callbacks capturing their filter — by name and by access path — are\n' +
     '    discovered and judged, while an unresolvable root, a computed filter and an\n' +
     '    inverted survivor filter are each declined for their own recorded reason; the\n' +
+    '    lift follows identifiers its code names, never the words of its text; the\n' +
     '    ledger reconciles one-sided (a decrease passes and is reported).',
   );
 

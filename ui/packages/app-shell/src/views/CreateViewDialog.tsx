@@ -12,9 +12,10 @@
  * gates it.
  * Step 3: The user enters a display label (required, defaults to "Grid 1" etc.)
  * and a machine `name` (the metadata key). The name auto-fills from the label
- * via `slugify`; for non-Latin (CJK/…) labels slugify yields nothing, so the
- * field is left empty and the user must type a key before Create enables
- * (#2767 P5 — no more silent random names).
+ * via `slugify`, a Chinese label through its pinyin first (`romanizeHan`:
+ * `客户等级` → `kehu_dengji`); for a label that still yields nothing (a
+ * Japanese one, say) the field is left empty and the user must type a key
+ * before Create enables (#2767 P5 — no more silent random names).
  *
  * On submit, calls `onCreate({ type, label, name, [type]: {...picked config} })`
  * and waits for it: the dialog closes only when the save resolves `true`, and
@@ -49,6 +50,7 @@ import {
 import { useObjectTranslation } from '@object-ui/i18n';
 import type { ListViewVisualization } from '@object-ui/core';
 import { slugify } from './metadata-admin/createDerive.js';
+import { romanizeHan, useHanRomanizer } from './metadata-admin/romanizeHan.js';
 import { datasetOptionLabel, useObjectDatasetBinding } from './studio-design/objectDatasets.js';
 import {
   deriveFieldOptions,
@@ -518,12 +520,15 @@ export function CreateViewDialog({
     }
   }, [selectedType, touched, types, existingSet]);
 
-  // Derive the machine name from the label until the user edits it. slugify
-  // returns '' for non-Latin labels, so the field stays empty and the user is
-  // prompted to fill it in (rather than a silent random key — #2767 P5).
+  // Derive the machine name from the label until the user edits it. A Chinese
+  // label derives through its pinyin, re-deriving when the dictionary lands
+  // (`romanizerVersion`); a label that still yields '' leaves the field empty
+  // and the user is prompted to fill it in (rather than a silent random key —
+  // #2767 P5).
+  const romanizerVersion = useHanRomanizer(label);
   useEffect(() => {
-    if (!nameTouched) setName(slugify(label));
-  }, [label, nameTouched]);
+    if (!nameTouched) setName(slugify(romanizeHan(label)));
+  }, [label, nameTouched, romanizerVersion]);
 
   // Required fields for the currently selected type
   const requiredFields = REQUIRED_FIELDS_BY_TYPE[selectedType] ?? [];

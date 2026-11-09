@@ -36,9 +36,17 @@ type Row = Record<string, unknown>;
 
 const OBJECTS = ['sys_organization', 'sys_member', 'sys_user', 'sys_user_permission_set'];
 
-/** Scalar equality only: a combinator or an operator object is refused, never answered silently wrong. */
+/**
+ * Scalar equality, and `{ $in: [...] }` on a field (the by-id read that drops
+ * AI service accounts, ADR-0151 D3). Any other combinator or operator object
+ * is refused, never answered silently wrong.
+ */
 function matches(row: Row, where: Row): boolean {
   return Object.entries(where).every(([k, v]) => {
+    if (!k.startsWith('$') && v !== null && typeof v === 'object' && !Array.isArray(v)
+      && Object.keys(v).length === 1 && Array.isArray((v as { $in?: unknown }).$in)) {
+      return ((v as { $in: unknown[] }).$in).includes(row[k]);
+    }
     if (k.startsWith('$') || (v !== null && typeof v === 'object')) throw new Error(`fake engine: unsupported where '${k}'`);
     return row[k] === v;
   });
@@ -276,5 +284,56 @@ describe('single never reads the setting', () => {
       expect(r.warns).toEqual([]);
       delete process.env[OWNER_ORG_ENV];
     }
+  });
+});
+
+/**
+ * [ADR-0151 D3] An AI service account (a `sys_user` row of kind `agent`) is
+ * never a recipient, and never counted as an administrator of the owner
+ * organization, whatever its grade or grants say. A system or seed writer is
+ * the only one that can store such a grant on an account; these rows are
+ * that write. Each pin sits beside a person holding the same thing.
+ */
+describe('an AI service account is never a recipient and never an administrator here', () => {
+  const withAccounts = (t: Record<string, Row[]>) => {
+    t.sys_user.push(
+      { id: 'usr_bot', email: 'bot@placeholder.invalid', principal_kind: 'agent', accountable_user_id: 'usr_operator' },
+      { id: 'usr_person', email: 'person@vendor.example', principal_kind: 'human' },
+    );
+  };
+
+  it('single: an account holding the Default Organization\'s admin_full_access is not told; a person holding it is', async () => {
+    const r = await deliver(deployment((t) => {
+      withAccounts(t);
+      t.sys_user_permission_set.push(
+        { id: 'g4', user_id: 'usr_bot', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
+        { id: 'g5', user_id: 'usr_person', permission_set: 'admin_full_access', organization_id: DEFAULT_ORG },
+      );
+    }), { walled: false });
+    expect(r.emit!.mock.calls[0][0].audience).toEqual([OPERATOR, 'usr_default_admin', 'usr_person']);
+    expect(r.delivery.recipients).not.toContain('usr_bot');
+  });
+
+  it('walled: an account administering the owner organization by grade or by grant is not flagged; a person is', async () => {
+    const r = await deliver(deployment((t) => {
+      withAccounts(t);
+      t.sys_member.push(
+        { id: 'm5', organization_id: OWNER_ORG, user_id: 'usr_bot', role: 'admin' },
+        { id: 'm6', organization_id: OWNER_ORG, user_id: 'usr_person', role: 'admin' },
+      );
+      t.sys_user_permission_set.push(
+        { id: 'g6', user_id: 'usr_bot', permission_set: 'organization_admin', organization_id: OWNER_ORG },
+      );
+    }), { ownerOrganization: OWNER_ORG });
+    const warn = r.warns.find((w) => w.m.includes('are not configured operators'));
+    expect(warn?.meta).toEqual({ organizationId: OWNER_ORG, administrators: ['usr_person'] });
+  });
+
+  it('walled: an organization whose only extra administrator is an account raises no warning', async () => {
+    const r = await deliver(deployment((t) => {
+      withAccounts(t);
+      t.sys_member.push({ id: 'm5', organization_id: OWNER_ORG, user_id: 'usr_bot', role: 'owner' });
+    }), { ownerOrganization: OWNER_ORG });
+    expect(r.warns).toEqual([]);
   });
 });

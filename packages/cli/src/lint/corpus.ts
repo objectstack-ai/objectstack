@@ -16,7 +16,6 @@
  */
 
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
-import type { MetadataEvalCase } from './metadata-eval.js';
 
 // `id` is a reverse-domain package identifier and `namespace` is a snake_case
 // metadata prefix — one project, two identifiers, contradictory rules
@@ -33,6 +32,20 @@ const manifest = (id: string, namespace: string, name: string) => ({
   // ADR-0087 handshake can refuse an incompatible runtime at the boundary.
   engines: { protocol: `^${PROTOCOL_MAJOR}` },
 });
+
+/** One case of the metadata-generation eval (`metadata-eval.ts` runs them). */
+export interface MetadataEvalCase {
+  /** Stable id (snake_case). */
+  id: string;
+  /** The natural-language authoring goal a generator would receive. */
+  prompt: string;
+  /** Golden/representative stack used in offline mode. */
+  fixture: unknown;
+  /** Minimum score to pass this case (defaults to the runner's `minScore`). */
+  minScore?: number;
+  /** Optional human note about what the case exercises. */
+  note?: string;
+}
 
 export const DEFAULT_METADATA_EVAL_CORPUS: MetadataEvalCase[] = [
   {

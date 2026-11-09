@@ -30,7 +30,7 @@ import { describe, it, expect } from 'vitest';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { createMemoryI18n } from '@objectstack/core';
 
-import { collectExpectedEntries } from '../src/utils/i18n-extract.js';
+import { collectExpectedEntries } from '../src/utils/i18n-bundle-extract.js';
 import { computeI18nCoverage, mergeTranslationBundles } from '../src/utils/i18n-coverage.js';
 import { authoringRuleUnionStack } from '../src/utils/stack-collections.js';
 

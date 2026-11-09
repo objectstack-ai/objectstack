@@ -60,6 +60,7 @@ describe('AppNoAccessEmptyState draws the shared empty state (objectstack#25915)
   it.each([
     ['no-navigation', undefined],
     ['no-readable-object', 'no-readable-object' as const],
+    ['menu-only', 'menu-only' as const],
   ])('carries data-reason=%s on the status node', (expected, reason) => {
     renderState(reason ? { reason } : {});
 
@@ -72,5 +73,23 @@ describe('AppNoAccessEmptyState draws the shared empty state (objectstack#25915)
     const link = screen.getByTestId('app-no-access-open-setup');
     expect(screen.getByRole('status')).toContainElement(link);
     expect(link).toHaveAttribute('href', '/setup/permissions');
+  });
+});
+
+describe("AppNoAccessEmptyState's menu-only reason (objectstack-ai/objectstack#29771)", () => {
+  it('says the app opens from its menu, never the no-access sentence', () => {
+    renderState({ reason: 'menu-only' });
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('{{app}} opens from its menu');
+    expect(status).toHaveTextContent('Choose an entry in its menu to open a link or run an action.');
+    expect(status).not.toHaveTextContent('available to you yet');
+  });
+
+  it('offers no Setup link even when a setup path is given: the member has access', () => {
+    renderState({ reason: 'menu-only', setupPath: '/setup/permissions' });
+
+    expect(screen.getByRole('status')).toHaveAttribute('data-reason', 'menu-only');
+    expect(screen.queryByTestId('app-no-access-open-setup')).not.toBeInTheDocument();
   });
 });

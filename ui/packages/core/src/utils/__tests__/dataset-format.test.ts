@@ -112,3 +112,22 @@ describe('buildDatasetFieldHelpers', () => {
     expect(measureField('nope')).toBeUndefined();
   });
 });
+
+describe('formatMeasure — an unformatted money measure keeps its currency width (#30126 item 7)', () => {
+  it('a whole CNY amount keeps its cents, as the record shows it', () => {
+    expect(formatMeasure(1293, undefined, 'CNY', undefined, 'zh-CN')).toBe('¥1,293.00');
+  });
+
+  it('a half-cent amount is not shortened', () => {
+    expect(formatMeasure(1280.5, undefined, 'CNY', undefined, 'zh-CN')).toBe('¥1,280.50');
+  });
+
+  it('the width is the currency\'s own: JPY has none, KWD has three', () => {
+    expect(formatMeasure(1293, undefined, 'JPY', undefined, 'en-US')).toBe('¥1,293');
+    expect(formatMeasure(1.5, undefined, 'KWD', undefined, 'en-US')).toBe('KWD\u00a01.500');
+  });
+
+  it('an authored pattern still states the width', () => {
+    expect(formatMeasure(1293, '0,0', 'CNY', undefined, 'zh-CN')).toBe('¥1,293');
+  });
+});

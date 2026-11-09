@@ -68,6 +68,28 @@ export const AUTH_GATE_SCOPES: Readonly<Record<AuthGateCode, AuthGateScope>> = O
   MFA_REQUIRED: 'account',
 });
 
+/**
+ * [ADR-0150 D3] The address of ONE granted permission set: the package that
+ * holds it and its name. Permission sets are behavioural metadata, identified
+ * by `(package, name)`, so a name alone does not say which set a principal
+ * holds once two packages may each declare one of that name.
+ *
+ * `packageId` is a non-empty package id, or `null` for a set that no package
+ * holds: one the environment authored, or one the platform registers. It is
+ * always present, never omitted, and never `''`: an address names its
+ * holder, the `null` holder included (the `packageId: z.string().nullable()`
+ * spelling of the pending-drafts read in `api/protocol.zod.ts`, tightened to
+ * non-empty).
+ */
+export const PermissionSetAddressSchema = lazySchema(() => z.object({
+  packageId: z.string().min(1).nullable().describe('The package that holds the permission set, a non-empty package id; `null` for a set no package holds (environment-authored, or registered by the platform). Always present: an address names its holder.'),
+  name: z.string().min(1).describe('The permission set\'s name, as its holder declares it (never rewritten or prefixed).'),
+}).describe('The address of one granted permission set (ADR-0150 D3): the package that holds it (`null` for the environment\'s own or the platform\'s) and its name.'));
+/** Caller-supplied form of {@link PermissionSetAddressSchema}. */
+export type PermissionSetAddress = z.input<typeof PermissionSetAddressSchema>;
+/** Post-parse form of {@link PermissionSetAddressSchema}. */
+export type PermissionSetAddressParsed = z.infer<typeof PermissionSetAddressSchema>;
+
 export const ExecutionContextSchema = lazySchema(() => z.object({
   /** Current user ID (resolved from session) */
   userId: z.string().optional(),
@@ -349,8 +371,56 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    */
   surface: z.enum(['rest', 'mcp']).optional().describe('The door an action invocation came through: `rest` (the REST POST /actions/:object/:action door — console buttons, the SDK) or `mcp` (the /mcp bridge\'s run_action and resume_run tools — an AI client). Set only by those two doors, on the envelope of the invocation they hand the audit writer, from the door\'s own identity (an upstream value, header or body member never moves it); absent on every other operation. ATTRIBUTION ONLY — no security middleware reads it and it is never an authorization subject, scope or gate. Server-constructed only, never client-supplied. Recorded by the audit writer as sys_audit_log.metadata.surface on the action_invocation row.'),
 
+  /**
+   * WHO started the impersonation session this request runs in — the
+   * administrator's `sys_user` id, when better-auth's admin plugin minted the
+   * session for another user (`session.impersonatedBy`, stored as
+   * `sys_session.impersonated_by`). Absent on every other request, and the
+   * ABSENCE is the record: a write carrying no `impersonatedBy` was made by
+   * the user in {@link userId} themselves.
+   *
+   * The subject does not move: {@link userId} stays the impersonated user, so
+   * ownership stamps (`created_by`), `current_user.*` RLS and every permission
+   * still resolve to them — the session IS theirs, which is what impersonation
+   * means. This field only names the person at the keyboard, in the same
+   * additive shape {@link performedBy} names an agent.
+   *
+   * **ATTRIBUTION ONLY**, exactly like {@link attributedUserId} and
+   * {@link performedBy}: nothing in the authorization path reads it, it widens
+   * and narrows nothing, and it never becomes the subject the write is
+   * authorized as. Server-constructed only, never client-supplied — set by the
+   * shared request-identity resolution from the session read that admitted
+   * the caller, and only for a session credential (an API key carries none).
+   *
+   * Surfaced to hooks as `HookContext.provenance.impersonatedBy`, deliberately
+   * NOT folded into `session`: a hook that gates on the caller must keep seeing
+   * the impersonated user. Recorded by the audit writer as
+   * `sys_audit_log.metadata.impersonated_by` and on the `sys_activity` row's
+   * metadata; it does not move `actor` or `user_id` (ADR-0118 D1/D5).
+   */
+  impersonatedBy: z.string().optional().describe('The administrator (a sys_user id) who started the impersonation session this request runs in — better-auth admin plugin session.impersonatedBy, stored as sys_session.impersonated_by. Absent on every other request; absence is the record that the user in userId acted themselves. userId stays the impersonated user, so ownership, current_user.* RLS and permissions still resolve to them. ATTRIBUTION ONLY — no security middleware reads it and it never becomes the authorization subject. Server-constructed only from the session read that admitted the caller, never client-supplied. Surfaced to hooks as HookContext.provenance.impersonatedBy and recorded by the audit writer as sys_audit_log.metadata.impersonated_by and on the sys_activity row metadata; it does not move actor or user_id.'),
+
   /** Aggregated permission names (resolved from PermissionSet) */
   permissions: z.array(z.string()).default([]),
+
+  /**
+   * [ADR-0150 D3] The permission sets the principal was granted, each as its
+   * address `(packageId, name)` ({@link PermissionSetAddressSchema}).
+   *
+   * Filled only from a resolved `(package, name)`: the resolver writes the
+   * holder the D3 resolution rule answered, never a holder it guessed. A name
+   * the rule refuses never appears here.
+   *
+   * {@link permissions} stays the display and compatibility field, with the
+   * same order and contents as before; this field sits beside it and changes
+   * nothing about it. No reader consumes this field yet.
+   *
+   * Optional with NO default: a context resolved without addresses parses
+   * without the key, and since no reader consumes it yet, its absence changes
+   * no answer anywhere. It is not an access gate.
+   * Server-constructed only, never client-supplied.
+   */
+  permissionSetAddresses: z.array(PermissionSetAddressSchema).optional().describe('The permission sets the principal was granted, each as its (packageId, name) address (ADR-0150 D3). Filled only from a resolved (package, name), never from a guessed holder; a name the resolution rule refuses never appears. `permissions` stays the display and compatibility field, same order and contents. Optional with no default: a context resolved without addresses parses without the key, and since no reader consumes it yet its absence changes no answer. Not an access gate. Server-constructed only, never client-supplied.'),
 
   /**
    * Aggregated system permissions (union of `PermissionSet.systemPermissions`

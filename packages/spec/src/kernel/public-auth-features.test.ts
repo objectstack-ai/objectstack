@@ -16,14 +16,15 @@ import {
 describe('PUBLIC_AUTH_FEATURES registry', () => {
   const entries = Object.entries(PUBLIC_AUTH_FEATURES);
 
-  it('classifies all 12 public flags', () => {
-    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(12);
+  it('classifies all 13 public flags', () => {
+    expect(PUBLIC_AUTH_FEATURE_NAMES).toHaveLength(13);
     expect([...PUBLIC_AUTH_FEATURE_NAMES].sort()).toEqual(
       [
         'admin',
         'cloudManaged',
         'degradedTenancy',
         'deviceAuthorization',
+        'emailDelivery',
         'multiOrgEnabled',
         'oidcProvider',
         'organization',
@@ -56,8 +57,8 @@ describe('PUBLIC_AUTH_FEATURES registry', () => {
     expect(hasGates !== hasExempt, 'exactly one of gatedInputs / exempt must be set').toBe(true);
   });
 
-  it('gatedInputs paths follow the <object>.actions.<action>[.params.<name>] grammar', () => {
-    const PATH = /^[a-z][a-z0-9_]*\.actions\.[a-z][a-z0-9_]*(\.params\.[A-Za-z][A-Za-z0-9_]*)?$/;
+  it('gatedInputs paths follow the <object>.actions.<action>[.params.<name>] | <object>.fieldGroups.<key> grammar', () => {
+    const PATH = /^[a-z][a-z0-9_]*\.(actions\.[a-z][a-z0-9_]*(\.params\.[A-Za-z][A-Za-z0-9_]*)?|fieldGroups\.[a-z_][a-z0-9_]*)$/;
     for (const [name, entry] of entries) {
       for (const path of entry.gatedInputs ?? []) {
         expect(path, `${name}: ${path}`).toMatch(PATH);

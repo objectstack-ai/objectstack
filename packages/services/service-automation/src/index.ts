@@ -74,6 +74,10 @@ export type {
     // method is barrel-reachable, so a host building a custom composition
     // needs the name to hand it the loader's set.
     PackagedFlowSource,
+    // [ADR-0150 D3] The reader `AutomationEngine.setFlowNameResolver` takes —
+    // barrel-reachable through that method, for a host composing its own
+    // registry over the one package-scoped resolver.
+    FlowNameResolver,
     // [#28405] The reader `AutomationEngine.setFlowHistorySource` takes —
     // barrel-reachable through that method, for a host composing its own
     // metadata history.
@@ -100,6 +104,7 @@ export type {
 // test) collapses contenders the same deterministic way instead of inventing a
 // second precedence.
 export { resolveFlowPrecedence, describeFlowContender, renderFlowContender } from './flow-precedence.js';
+export type { FlowNameRefusalReader } from './flow-precedence.js';
 export type { FlowPrecedenceWinner } from './flow-precedence.js';
 
 // Per-run summary (#4354): the fold that turns a run's step log into
@@ -148,6 +153,10 @@ export { SysAutomationRun } from './sys-automation-run.object.js';
 export { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
 export type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
 export { SysFlowDispatch } from './sys-flow-dispatch.object.js';
+// [ADR-0150 D8 row R10] The dispatch-key grammar the boot re-key reads, which
+// the triggers (`@objectstack/trigger-schedule`) write; their tests hold the
+// two spellings equal.
+export { bareDispatchKeyFlow, scopedDispatchKey } from './flow-dispatch-key-package-backfill.js';
 
 // [#27238] The Setup → Integrations entry of the connector credential door,
 // registered by AutomationServicePlugin at `kernel:ready` and exported for the

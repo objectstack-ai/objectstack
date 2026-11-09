@@ -87,6 +87,7 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   returnType: 'storage',      // the formula's stored/returned type
   summaryOperations: 'storage', // rollup storage
   currencyConfig: 'storage',  // currency mode can change what is physically stored
+  renamedFrom: 'storage',     // the earlier column(s) a package upgrade carries into this one (cloud#3652 ruling D3) — this driver's DDL does not read it yet, and on a builtin column name the platform's own column takes no data from an old one
 
   // ---- presentation: honoured by layers other than the DDL -----------------
   name: 'presentation',       // identity; the physical column is the field KEY (`columnName` was retired, #2377)

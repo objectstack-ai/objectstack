@@ -33,16 +33,16 @@
 - 全量 = 会话、分支、文件面、交付物、串行约束;成员卡各留一行指针指向锚卡。
 - 标签翻转照旧逐卡执行:省的是评论正文写量,不是状态写入。
 - 验收与解锁扫描的读侧不变,仍逐卡读。
-- 写序:标签翻转只在认领评论写成功之后,两笔不原子。
-- 评论失败而标签已翻即制造一记真半状态;顺序反了就带重试义务,重试未成即回滚标签。
+- 写序:认领一笔 `label-write --comment-file`,评论排首、标签随后;执行器首败即停,标签不先翻。
+- 评论存而标签未翻 ⇒ 非零退出;补标签用不带 `--comment-file` 的 `label-write`,⛔ 不重发评论。
 
 ## 巡查常设项(每席巡查与总监席摘要)
 
 - 座位贴活性归总监席摘要:扫 `label:pm:seat` 挂 `🟢 <github-login>` 的贴,Routine 席读调度器。
 - 判据只认在任者自有产出(评论、认领、改正文)及其作者与时间戳,⛔ 收到的通知不算。
 - >24h 无自有产出 ⇒ 当场降级:改 `⏳ vacant` + 摘 assignee 同笔 + 证据评论(时间戳与链接)。
-- 跨账户复审:每席巡查跑 `is:pr is:open label:needs:contract-review`,剔除本账户署名的 PR。
-- 复核前在 PR 留 `Claim:` 形评论(会话、账户);已有他席认领即跳过(同账户亦然),⛔ 不双做。
+- 跨账户复审:每席巡查跑 `node scripts/pm/check-owed-reviews.mjs`,TAKE 行剔除本账户署名的 PR。
+- 复核前落 `Contract-review-claim:` 行,形、失效、双认照 `contract-review.md`;有活认领 ⛔ 不双做。
 - 复核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席摘要列等候逾 24h 的 PR。
 - 车道巡查同跑:hold/closed 解锁重验回队;本仓无卡 fork PR 按 `external-contributions.md` 立卡。
 
@@ -62,7 +62,6 @@
 ## 分诊两级盘点细则
 
 - 小时层三读法之一,sweep 析取①–⑤ = `list_issues` + `since`。
-- 标签变更会刷新 `updated_at`,半标注照样入窗。
 - 之二,解锁扫描 = 逐张 `pm:blocked` 正向读正文目标:issue 全已关、PR 全已合并才命中走双查。
 - 之三,健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`。
 - 裸卡数例外:标签缺席无计数可读,取本轮析取①的枚举,⛔ 不另发查询。
@@ -86,7 +85,6 @@
 - 交付了一半的阻塞是判断不是 grep,归四件之③,⛔ 不进机械旗。
 - 发布窗口判据:已上膛 = 开着的 head `changeset-release/main` PR,`is:pr is:open head:changeset-release`。
 - 点亮对照 `git ls-remote origin changeset-release/main` 必中;⛔ title 永不是判据。
-- title 由 action 配置,本仓为 `chore: version packages`。
 - 上膛与否不足:真判据是本卡 changeset 已否折进该 head `CHANGELOG.md`,即「离永久还有多远」。
 - 卡上 re-check 命令两条硬线:① 每条 grep 自带阳性对照。
 - 对照取同文件里确定存在、且 ⛔ 绝不是被测词子串的一个词。
@@ -136,10 +134,10 @@
 - 卡线程交回即释放槽位,席位当即告知 coordinator;审核期开着不占槽,REWORK 补丁轮再占一槽。
 - 档位与 effort 席位自推导 ⛔ 不等维护者原话:`--tier` 过路径,MANDATORY 即绑;effort 按难度。
 - 派发令写两者与推导(`--tier` 行或难度读数),协调者照令开线程;常设原话有则作 `reason:`。
-- 席位留认领文本/派发令/契约复核/ACCEPT/落地;线程实施、开 draft PR、驱动 CI 与可合并。
+- 席位留认领/派发令/ACCEPT/落地/复核采纳或补缺;线程实施、开 draft PR、驱动 CI 与可合并。
 - 线程 ⛔ 不做 harness 开 PR 后指派/请审:「审核通过才会推送给我审核」,请审是席位交棒。
 - 派发令由 coordinator 写进线程开场消息,`Writes:` 行逐字在内,⛔ 不落共享目录;卡上留指针。
-- coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写 assignee。
+- coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写卡 assignee。
 - 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领;线程核对最新认领指向本分支方开工。
 - 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。
 - worktree 照建;仓 `.claude/agents` 类型未加载(实测),线程照读 `os-dev.md`。
@@ -163,7 +161,6 @@
 - 改在该 PR 上留言唤醒它自己的 dev(云端 dev 订阅自己的 PR),满一个边界的静默才走接手。
 - PM 会话已死 ⛔ 不推导其 dev 已死;死后恢复查三态:远程 `ls-remote`、仅容器磁盘、真没了。
 - 账号封禁即死会话:接手者重认领,消失的记录(认领/复核/裁决)按正文行在当前 head 重出。
-- 中间那态最值钱:worktree 比 agent 活得久、同容器共享,未提交改动通常还在。
 - 只查远程会令下一个 dev 从零开始;捡到的工作一律标 UNVERIFIED 交接,不丢弃也不继承。
 - worktree 已存在 ⇒ ⛔ 不要新建,`cd` 进去接着做,第二个 worktree 会劈开工作。
 - 先读全部既有提交与未提交改动,逐 hunk 决定保留或修正:既不推倒重来也不盲信。
@@ -217,6 +214,9 @@
 - 文件面两句原文照抄:预期落点是 X。
 - 若实测表明真正的生产者在别包,直接按生产者侧修,落点与理由写进报告和 PR 正文。
 - 跨包常等于跨车道,PM 事后补跨座位声明。
+- 例:`screen-input-contract.ts` 的 grep 命中「ruling A′」,裁决区写 `A′ · 5651909056` 与原句:
+  「a non-number for a numeric field is refused, never silently passed」;路线随之为拒收(A′)。
+- 原令「有限数字串转数字」与之相左,应派发前送复核;栅栏点名 A′ 的 spec 散文在范围。
 - 新 changeset 文件名用 `<issue>-<slug>.md`,⛔ 不用随机词对名。
 - same-day churn 行:派发时 `git log origin/main --oneline -20 -- <paths>` 见当天合并即加一行。
 - 该行原文:基于合并后的代码工作,issue 引用的片段可能已变,先核对当前 main。

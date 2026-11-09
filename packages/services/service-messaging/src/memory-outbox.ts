@@ -11,6 +11,7 @@ import type {
     NotificationDeliveryRecord,
     ReapOptions,
     DueWorkOptions,
+    NextDueOptions,
 } from './outbox.js';
 import {
     NotificationAckError,
@@ -80,6 +81,20 @@ export class MemoryNotificationOutbox implements INotificationOutbox {
             if (r.status === 'pending' && (r.nextAttemptAt == null || r.nextAttemptAt <= now)) return true;
         }
         return false;
+    }
+
+    /** [#29919] Earliest future `nextAttemptAt` of a `pending` row, or claim expiry of an `in_flight` one. */
+    async nextDueAt(opts: NextDueOptions): Promise<number | null> {
+        const now = opts.now ?? this.clock();
+        let due: number | null = null;
+        for (const r of this.rows.values()) {
+            let at: number | undefined;
+            if (r.status === 'pending' && r.nextAttemptAt != null && r.nextAttemptAt > now) at = r.nextAttemptAt;
+            // reapExpired takes a claim strictly older than the TTL.
+            if (r.status === 'in_flight' && r.claimedAt != null) at = r.claimedAt + opts.claimTtlMs + 1;
+            if (at !== undefined && (due === null || at < due)) due = at;
+        }
+        return due;
     }
 
     async claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {

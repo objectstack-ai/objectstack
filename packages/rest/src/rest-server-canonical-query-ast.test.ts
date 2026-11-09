@@ -78,6 +78,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -211,6 +214,10 @@ interface CensusEntry {
  * the record page's stream reads (the discussion, its reactions, the activity
  * and the attachments) go through one server-built slot (`readStream`), so the
  * module's floor is 2.
+ *
+ * [#30205] 6, unchanged: a user's assigned work (`user-work-routes.ts`) hands
+ * the engine no `query:` slot of its own (the counts and reads are built in
+ * `@objectstack/core`), so the new module's floor is 0.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 0,
@@ -233,6 +240,13 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'meta-object-state-routes.ts': 0,
     'record-page-routes.ts': 2,
     'meta-app-bundle-routes.ts': 0,
+    'user-work-routes.ts': 0,
+    // [#30675] The record-currency code backfill door: no slot (the walk's
+    // queries are `@objectstack/objectql`'s, built inside the function it calls).
+    'meta-record-currency-backfill-route.ts': 0,
+    // [#30237] The recycle-bin doors: no slot (the listing's read is built
+    // inside `@objectstack/objectql`'s `listRecycleBin`).
+    'recycle-bin-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -444,6 +458,8 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#27627] The sum 4 → 5: the record page's related list read.
         // [#27627] The sum unchanged by the app metadata bundle (no slot).
         // [#28470] The sum 5 → 6: the record page's stream reads (`readStream`).
+        // [#30675] The sum unchanged by the record-currency code backfill (no slot).
+        // [#30237] The sum unchanged by the recycle-bin doors (no slot).
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

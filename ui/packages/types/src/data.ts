@@ -227,9 +227,8 @@ export interface BatchRef {
  * server contract of `POST /api/v1/batch` (objectstack-ai/objectstack#1604 /
  * ADR-0034 item 4).
  *
- * Distinct from the driver-level `BatchOperation` in `data-protocol.ts`
- * (which speaks `type`/`table`) — this is the DataSource-level, object-aware
- * shape consumed by {@link DataSource.batchTransaction}.
+ * This is the DataSource-level, object-aware shape consumed by
+ * {@link DataSource.batchTransaction}.
  */
 export interface BatchTransactionOperation {
   /** Target object/table name. */
@@ -565,13 +564,31 @@ export interface DataSource<T = any> {
    * @param id - Record identifier. A `string` — see the record-id rule on
    *   {@link DataSource} (objectui#9511).
    * @param opts - Optional write options — see {@link update} for `ifMatch`.
+   *   `opts.onRecycleBinEntry` is told the id of the recycle-bin entry the
+   *   delete wrote (ADR-0148), once the server answers it; it is not called
+   *   when the delete wrote none (a platform object, a server with no recycle
+   *   bin). Pass that id to {@link restoreRecycleBinEntry} to undo the delete.
+   *   Adapters whose backend has no recycle bin never call it.
    * @returns Promise resolving to true if successful
    */
   delete(
     resource: string,
     id: string,
-    opts?: { ifMatch?: string },
+    opts?: { ifMatch?: string; onRecycleBinEntry?: (entryId: string) => void },
   ): Promise<boolean>;
+
+  /**
+   * Restore one recycle-bin entry of `resource` (optional, ADR-0148): its
+   * records are written back under their original ids. It is a restore, never
+   * a create. A refusal rejects with the server's error, whose `code` names
+   * the reason (`RESTORE_UNIQUE_VALUE_TAKEN`, `RESTORE_PARENT_PURGED`,
+   * `RESTORE_PACKAGE_UNINSTALLED`, `RESTORE_PARENT_IN_RECYCLE_BIN`, …).
+   * Absent on an adapter whose backend has no recycle bin.
+   *
+   * @param resource - The object the entry belongs to
+   * @param entryId - The entry id `delete`'s `onRecycleBinEntry` was told
+   */
+  restoreRecycleBinEntry?(resource: string, entryId: string): Promise<unknown>;
 
   /**
    * Execute a bulk operation (optional).

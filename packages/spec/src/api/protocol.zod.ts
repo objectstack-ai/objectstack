@@ -31,6 +31,7 @@ import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { ServedTranslationDataSchema, LocaleSchema } from '../system/translation.zod';
 import { PushVendorSchema } from '../system/push-config.zod';
 import { PUSH_DEVICE_PLATFORMS } from '../system/push-device-platform';
+import { PUSH_SERVER_ORIGIN_MESSAGE, PUSH_SERVER_ORIGIN_PATTERN } from '../system/push-server-origin';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -238,10 +239,45 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
  * must carry it alongside a request do so in a typed transport envelope at
  * their own layer (see `TransportScopedMetaRequest` in `@objectstack/rest`),
  * never by widening these shapes.
+ *
+ * **`names` is the batch by-names read of one type** (ruling A on #29236,
+ * record 6580261740): a caller that wants a handful of items asks the list
+ * once instead of reading the whole type, or reading each item by name. This
+ * member is the protocol's post-parse shape — a LIST of item names; the wire
+ * spelling `?names=a,b,c` (one comma-separated value, the data routes'
+ * convention for `fields` and `searchFields`, which fits the list door's arity
+ * rule that refuses a repeated key) is split by the REST door, not here. The
+ * protocol pushes it down to the store read, so it filters before decorating
+ * and masking and translation run on the named items only.
+ *
+ * The list arm refuses only the EMPTY list, as `searchFieldsArray` does
+ * (`../data/search-fields-names-a-field.ts`): absent means "every item", so an
+ * empty filter read as absent is a widening — the class the list door's `?id=`
+ * / `?object=` refusal closes (`refuseEmptyListFilter` in `@objectstack/rest`).
+ * The schema judges no member: a name that matches no item is not refused,
+ * it is simply absent from the answer, as an unknown `?id=` narrows to the
+ * empty list. A minimum, not a refinement, so the published JSON Schema
+ * states it.
+ *
+ * **Served.** Both list doors (the REST server's and the runtime
+ * dispatcher's `GET /meta/:type`) read `?names=` and push it down here (#29236),
+ * on every type except `package`: a `package` list item is keyed by its id and
+ * carries no `name`, so the `package` list refuses `?names=` with `400`.
  */
 export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
+  names: z.array(z.string())
+    .min(1, 'Name at least one item, or leave `names` out to list every item')
+    .optional()
+    .describe(
+      'Item names to narrow the list to: only the named items of the type '
+      + 'are answered, among those the list would answer without it. Served on every type except '
+      + '`package`, whose items are keyed by id; the `package` list refuses it with 400. Sent over HTTP as one '
+      + 'comma-separated value (`?names=a,b,c`). A name that matches no item is simply absent from the '
+      + 'answer (no 404). An empty value is refused with 400 rather than read as every item; leave the '
+      + 'key out to list every item.',
+    ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
     + 'pending `state=\'draft\'` rows are overlaid on the active list — draft '
@@ -766,8 +802,8 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   ),
   cascadeDeleteObjects: z.array(z.string()).optional().describe(
     'The objects, by name, that deleting a record of this object can also delete: every object whose '
-    + 'relation into it cascades (a `master_detail` by default, a `lookup` or `tree` that declares '
-    + '`deleteBehavior: \'cascade\'`), and the objects that cascade into those in turn, each once, in the '
+    + 'relation into it cascades (a `master_detail` by default, a `lookup`, `tree` or `user` field that '
+    + 'declares `deleteBehavior: \'cascade\'`), and the objects that cascade into those in turn, each once, in the '
     + 'order the delete reaches them. This object itself is named only when a cascading relation leads back '
     + 'to it. A `restrict` or `set_null` relation removes nothing and is not named. Read from the rule the '
     + 'delete runs, and object-level: it never says which records or how many. Present only on an `object` '
@@ -851,7 +887,8 @@ export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
   name: z.string().describe('Item name'),
   packageId: z.string().optional().describe(
     'Optional package ID — scopes the `code` layer so a same-name collision '
-    + 'resolves to the requested package\'s artifact (ADR-0048).',
+    + 'resolves to the requested package\'s artifact (ADR-0048), and the `draft` '
+    + 'layer to that package\'s pending draft row.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
 }));
@@ -859,10 +896,20 @@ export const GetMetaItemLayeredRequestSchema = lazySchema(() => z.object({
 /**
  * Get Metadata Item — LAYERED Response
  *
- * The body of `GET /api/v1/meta/:type/:name/layers`: a three-layer diagnostic
+ * The body of `GET /api/v1/meta/:type/:name/layers`: a layered diagnostic
  * projection that shows the packaged baseline, the tenant's customization row
  * and the merged result SIDE BY SIDE, which is what drives Studio's
  * "code default vs override vs effective" comparison tabs.
+ *
+ * **The pending draft is a layer too** (`draft`, #29855). The ordinary
+ * `?state=draft` read answers the draft as served: translated for the caller's
+ * locale, governed, with the platform's injected columns. An editor that builds
+ * its edit buffer from that body and saves it back writes the translations and
+ * the injected columns into the author's draft. `/layers` is already the
+ * untranslated, author-owned read of the published layers, so the draft as
+ * stored joins them here rather than as a query switch on the ordinary read —
+ * the switch is the "two shapes, chosen by query flag" pattern the ruling below
+ * retired. An edit buffer reads `draft ?? overlay ?? code`.
  *
  * **Why this is a separate schema on a separate path** (#5882, ruled B by the
  * maintainer 2026-08-06). This projection used to be reached by putting
@@ -908,6 +955,14 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
     'LAYER 3 — the merged result, i.e. the value an ordinary '
     + '`GET /meta/:type/:name` would return under `item`. `null` when the item '
     + 'resolves to nothing at all.',
+  ),
+  draft: z.unknown().optional().describe(
+    'LAYER — the pending draft row exactly as stored: untranslated, ungoverned, with no '
+    + 'injected columns (unlike the `?state=draft` item read, which serves the draft '
+    + 'translated and governed). For the requested `packageId` when one is given. `null` '
+    + 'when no draft is pending. A client building an edit buffer reads '
+    + '`draft ?? overlay ?? code`. ABSENT from a server that does not serve this layer: '
+    + 'absence means "not served", never "no draft".',
   ),
   _diagnostics: MetadataValidationResultSchema.optional().describe(
     'Load-time spec-validation verdict for `effective`, so the Studio edit page '
@@ -1234,7 +1289,8 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + 'author did not write, on a draft save too: one `warning` with rule '
     + '`withheld-key-dropped` for each stored position it dropped because the '
     + 'type\'s read redactor withholds it and marks it not carried forward '
-    + '(a connector\'s undeclared `auth` keys, which no door accepts and nothing '
+    + '(a connector\'s undeclared `auth` keys and the undeclared keys of its '
+    + '`retryConfig`, which no door accepts and nothing '
     + 'reads). Its `path` names where the value sat at rest, in the same '
     + 'spelling (`connectors[0].auth.token`).',
   ),
@@ -1353,6 +1409,99 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * [#30348] The most ids one {@link SeedAppliedIdListSchema} list carries: 200
+ * per list, per object. The cloud seed-replay ledger's own cap on
+ * `seeded_record_ids` (objectstack-ai/cloud#3598) is the bound this mirrors in
+ * intent; it could not be read from the platform, so the number follows the
+ * platform's existing bounds on a record-id list —
+ * `EXPLAIN_BATCH_MAX_RECORD_IDS` (200, the cap on record ids crossing the
+ * public API) and the seed loader's own 200-row insert batch. Past it a list
+ * says so ({@link SeedAppliedIdListSchema}'s `truncated` and `total`); ids are
+ * never dropped silently.
+ */
+export const SEED_APPLIED_LANDED_IDS_CAP = 200;
+
+/**
+ * [#30348] One capped list of row ids on a `seedApplied` receipt.
+ *
+ * `ids` is the first {@link SEED_APPLIED_LANDED_IDS_CAP} ids in the loader's
+ * record order, each once (its first occurrence): datasets in the order the
+ * loader ran them, and within a dataset the order its records are authored
+ * (`SeedLoadResult.landedIds` / `insertedIds`). It is NOT the order the writes
+ * completed, since the loader buffers inserts and flushes them after the
+ * skips that follow them. `total` is how many ids the list holds before
+ * the cap, and `truncated` is `true` exactly when `total` exceeds `ids.length`
+ * — the receipt states a cut instead of making a reader count.
+ */
+export const SeedAppliedIdListSchema = lazySchema(() => z.object({
+  ids: z.array(z.string()).max(SEED_APPLIED_LANDED_IDS_CAP).describe(
+    'Row ids in the loader\'s record order (datasets in load order, records as authored), each once '
+    + '— at most `SEED_APPLIED_LANDED_IDS_CAP` (200).',
+  ),
+  total: z.number().int().min(0).describe(
+    'How many ids the list holds before the cap. Equals `ids.length` unless `truncated`.',
+  ),
+  truncated: z.boolean().describe(
+    'True when the cap cut the list: `total` ids exist and only the first `ids.length` are carried.',
+  ),
+}));
+export type SeedAppliedIdList = z.input<typeof SeedAppliedIdListSchema>;
+/** Post-parse shape of {@link SeedAppliedIdList} — defaults applied, transforms run (ADR-0122). */
+export type SeedAppliedIdListParsed = z.infer<typeof SeedAppliedIdListSchema>;
+
+/**
+ * [#30348] Which stored rows a published seed landed on, for one object —
+ * the per-object element of `seedApplied.landed` on BOTH publish responses
+ * ({@link PublishMetaItemResponseSchema}, {@link PublishPackageDraftsResponseSchema}),
+ * declared once so the two cannot drift.
+ *
+ * The seed loader's own answer (`SeedLoadResult.landedIds` / `insertedIds`),
+ * split by what the publish did to the row:
+ *
+ * - `inserted` — rows THIS publish created. The only list a reader may treat
+ *   as the seed's own rows (e.g. to clear sample data later).
+ * - `matched` — rows that already existed and that a seed record's key
+ *   matched: updated, left as they were (a no-op replay, or `ignore` — the
+ *   create-only default since #30081), or matched for an update the engine
+ *   then refused. Such a row may be a customer's own record whose natural key
+ *   the seed happens to share, or a row an EARLIER publish inserted; ⛔ never
+ *   clear it on this receipt's word.
+ *
+ * Per mode: `insert` / `replace` put every row they write in `inserted`;
+ * `ignore` and `upsert` put a created row in `inserted` and a key-matched one in
+ * `matched`; `update` creates nothing, so only `matched`. A record whose write
+ * failed and that matched no row lands nowhere and is in neither list (its
+ * failure is in `errors[]`). An object appears once even when several
+ * datasets of the batch target it; an id `inserted` lists is never also in
+ * `matched`.
+ */
+export const SeedAppliedLandedSchema = lazySchema(() => z.object({
+  object: z.string().describe('The object whose rows the lists name.'),
+  inserted: SeedAppliedIdListSchema.describe(
+    'Rows this publish created. The only ones safe to treat as the seed\'s own.',
+  ),
+  matched: SeedAppliedIdListSchema.describe(
+    'Pre-existing rows a seed record\'s key matched — updated, left as they were, or refused an '
+    + 'update. May be a customer\'s row; never clear these on this receipt\'s word.',
+  ),
+}));
+export type SeedAppliedLanded = z.input<typeof SeedAppliedLandedSchema>;
+/** Post-parse shape of {@link SeedAppliedLanded} — defaults applied, transforms run (ADR-0122). */
+export type SeedAppliedLandedParsed = z.infer<typeof SeedAppliedLandedSchema>;
+
+/** [#30348] The `seedApplied.landed` key's description — one text for both publish responses. */
+const SEED_APPLIED_LANDED_DESCRIPTION =
+  'Per object, the stored rows the seed landed on: `inserted` (created by this publish) and '
+  + '`matched` (pre-existing rows a seed key matched), each capped at '
+  + '`SEED_APPLIED_LANDED_IDS_CAP` (200) ids with `total` and `truncated` stating any cut. One '
+  + 'entry per object the loader ran, empty lists included. When the load threw part-way '
+  + '(`success: false` with `error`), it lists only the datasets that FINISHED before the throw, '
+  + 'and is EMPTY when none had; the dataset that threw is not listed (its rows are in the counts, '
+  + 'its object in `error`). '
+  + 'ABSENT means "not reported" — the apply failed before any load ran (see `error`), or the '
+  + 'producer reports no ids — never "no rows landed".';
+
+/**
  * Publish Metadata Item Response
  *
  * Describes the FULL body `POST /api/v1/meta/:type/:name/publish` returns
@@ -1378,6 +1527,20 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
  *
  * - `seedApplied` — only when the published type is `seed`. Publishing a seed
  *   is what makes its rows live, so the row materialization rides along.
+ *   [#30348] Its `landed` key names the rows, per object
+ *   ({@link SeedAppliedLandedSchema}): `inserted` — the rows this publish
+ *   created, the only ones a reader may treat as the seed's own — and
+ *   `matched` — pre-existing rows a seed key matched, possibly a customer's.
+ *   Each list carries at most {@link SEED_APPLIED_LANDED_IDS_CAP} (200) ids
+ *   and declares a cut with `truncated: true` beside the uncut `total`.
+ *   [#30429] A load that threw part-way still reports `landed` for the
+ *   datasets that FINISHED before the throw, and an empty `landed` when the
+ *   throw came before any had; the dataset that threw is not listed (its ids
+ *   are only partly known), though its rows are in the counts. Absent `landed` means "not reported" (no load ran, or the
+ *   producer reports no ids), never "nothing landed". The same
+ *   key, same schema, rides {@link PublishPackageDraftsResponseSchema}'s
+ *   `seedApplied`. Accepted cost (objectstack-ai/cloud#3598 ruling A): row
+ *   ids on the public publish responses, bounded by the cap.
  * - `materializeApplied` — only when an ADR-0086 P2 publish materializer is
  *   registered for the type (e.g. `flow`, whose draft credentials become the
  *   live ones).
@@ -1436,6 +1599,7 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
       'Per-record failures reported by the seed loader. Present only when the '
       + 'loader ran and returned a non-empty error list.',
     ),
+    landed: z.array(SeedAppliedLandedSchema).optional().describe(SEED_APPLIED_LANDED_DESCRIPTION),
   }).optional().describe(
     'Outcome of materializing a published `seed` body into data rows. Present '
     + 'ONLY when the published type is `seed` — publishing a seed is what makes '
@@ -1736,6 +1900,7 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
       + '. Absent on non-validation failures (driver faults, '
       + 'unreadable bodies), whose whole story is `error` / `errors[]`.',
     ),
+    landed: z.array(SeedAppliedLandedSchema).optional().describe(SEED_APPLIED_LANDED_DESCRIPTION),
   }).optional().describe(
     'Aggregate outcome of materializing EVERY published `seed` body in one '
     + 'multi-pass loader run (cross-seed references need the whole set). '
@@ -3050,6 +3215,16 @@ export const DeleteDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('Object name'),
   id: z.string().describe('Deleted record ID'),
   success: z.boolean().describe('Whether deletion succeeded'),
+  /**
+   * [ADR-0148, #30237] The recycle-bin entry the delete wrote: the entry a
+   * client offers to undo (`POST /data/:object/recycle-bin/:entryId/restore`).
+   * Absent when the delete wrote none: a platform object (`sys_`, `cloud_`,
+   * `ai_`), a composition with no recycle bin, or a store that answered no
+   * entry id.
+   */
+  recycleBinEntryId: z.string().optional().describe(
+    'The recycle-bin entry this delete wrote, to restore it; absent when the delete wrote none',
+  ),
 }));
 
 // ==========================================
@@ -3524,10 +3699,11 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
  * `DELETE /api/v1/notifications/devices/:deviceId`.
  *
  * One request does both: registering a `deviceId` the user already has
- * refreshes that device (its token, vendor, app and locale) instead of adding
- * a second one. A request without `deviceId` gets one minted by the server
- * and answered in {@link RegisterDeviceResponseSchema}; the client keeps it
- * and sends it on every later registration and on unregister.
+ * refreshes that device (its token, vendor, platform, app, locale, origin and
+ * name) instead of adding a second one. A request without `deviceId` gets
+ * one minted by the server and answered in {@link RegisterDeviceResponseSchema};
+ * the client keeps it and sends it on every later registration and on
+ * unregister.
  *
  * The members after `name` (`vendor`, `appId`, `locale`) were added for the
  * push channel, all optional, so the body a client sent before still parses
@@ -3548,7 +3724,17 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
     + 'android means fcm. web has no default vendor: a web registration names apns or fcm, and one without vendor is refused',
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
-  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  locale: LocaleSchema.optional().describe(
+    'Device locale (BCP 47, for example zh-CN). Stored on the device row; no push renders by it: a push arrives in the '
+    + 'recipient\'s language (sys_user.locale, then the deployment default)',
+  ),
+  origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
+    'The origin the Console was loaded from (window.location.origin, for example '
+    + 'https://crm.example.com): the address the mobile shell saved for this server. The Console writes it; the server '
+    + 'stores it on the device row and every push to the device carries it back, so a shell with several saved servers '
+    + 'opens the push on the one that sent it. http or https, a lowercase host and an optional port; a path, another '
+    + 'scheme or a bare host is refused',
+  ),
 }).describe('Register or refresh a push device for the signed-in user'));
 
 export const RegisterDeviceResponseSchema = lazySchema(() => z.object({
@@ -3961,9 +4147,15 @@ export const AiAgentChatRequestSchema = lazySchema(() => z.object({
 // The approval queue an embedding app has to render. `objectui` ships a whole
 // approval UI on these four routes over hand-built URLs.
 
-/** Lifecycle of a proposed action. Mirrors `PendingActionStatus` in contracts. */
+/**
+ * Lifecycle of a proposed action. Mirrors `PendingActionStatus` in contracts.
+ *
+ * `held`: the confirmation was accepted, and the write waits on an approval
+ * outside the conversation. Not a final state: the host that held it writes
+ * `executed`, `rejected` or `failed` when that approval resolves.
+ */
 export const AiPendingActionStatusSchema = lazySchema(() =>
-  z.enum(['pending', 'approved', 'executed', 'failed', 'rejected']));
+  z.enum(['pending', 'approved', 'held', 'executed', 'failed', 'rejected']));
 
 /**
  * One queued action, as the routes return it — the persisted row, snake_case
@@ -4011,10 +4203,15 @@ export const ListAiPendingActionsResponseSchema = lazySchema(() => z.object({
  * `status: 'failed'` is a 200 with a reason, not an HTTP error: the approval
  * succeeded, the execution did not. A caller that only checks `res.ok` will
  * report a failed write as a success.
+ *
+ * `status: 'held'` is a 200 too, and nothing was written: the confirmation was
+ * accepted, and a host policy holds the write for an approval outside the
+ * conversation. A caller that reads every 200 as `executed` reports a write
+ * that has not happened. The host that held it writes the final state later.
  */
 export const ApproveAiPendingActionResponseSchema = lazySchema(() => z.object({
-  status: z.enum(['executed', 'failed']).describe('Outcome of executing the approved action'),
-  result: z.unknown().optional().describe('Tool result, when executed'),
+  status: z.enum(['executed', 'held', 'failed']).describe('Outcome of the approved action: executed, held for an approval outside the conversation (nothing written yet), or failed'),
+  result: z.unknown().optional().describe('Tool result when executed; what the host returned about the hold when held'),
   error: z.string().optional().describe('Failure reason, when failed'),
 }));
 

@@ -192,7 +192,7 @@ const agentSurface = () =>
 describe('Studio copilot chip reads the selected item label (objectui#8219 item 3)', () => {
   it('a labelled leaf: the chip reads the label, its title is type · name, and the agent data is unchanged', async () => {
     renderStudio();
-    await screen.findByRole('button', { name: '客户仪表盘 仪表板' });
+    await screen.findByRole('button', { name: '客户仪表盘 仪表盘' });
     await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在讨论：客户仪表盘'), { timeout: 4000 });
     expect(chip.surfaceContextTitle).toBe('dashboard · b2r4_customer_dashboard');
     // The label is display-only: the agent still receives exactly the

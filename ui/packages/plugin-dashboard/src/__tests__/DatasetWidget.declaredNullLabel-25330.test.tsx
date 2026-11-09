@@ -82,6 +82,7 @@ const auditDataset = (userNullLabel?: string, actionNullLabel?: string) => ({
       ],
       object: 'sys_audit_log',
       dimensionFields: pivot ? { user_id: 'user_id', action: 'action' } : { user_id: 'user_id' },
+      drillScopes: { event_count: {} },
       drillRawRows: pivot
         ? [{ user_id: 'usr_dev', action: 'login' }, { user_id: null, action: 'create' }]
         : [{ user_id: 'usr_dev' }, { user_id: null }],

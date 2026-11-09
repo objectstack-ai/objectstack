@@ -6,9 +6,12 @@
  *
  * Since `@objectstack/spec` 18 (objectstack#23100, ADR-0055 §1) the master is
  * the ONE `master_detail` declared `required: true`; zero or two or more derive
- * none. The row shows that master, or says there is none. Switching a row to
- * `controlled_by_parent` sets `required: true` on its `master_detail` fields in
- * the saved draft, as the per-object Settings tab does. The installed spec's
+ * none. ADR-0055 §1 as amended (objectstack#30905 ruling A) adds an OPTIONAL
+ * master: an object's only `master_detail` declared `required: false`. The row
+ * shows the master, required or optional, or says there is none. Switching a
+ * row to `controlled_by_parent` sets `required: true` on each `master_detail`
+ * that writes no `required`, as the per-object Settings tab does, and keeps an
+ * optional master as written (objectstack#30974). The installed spec's
  * `ObjectSchema` is the oracle for the saved body.
  */
 
@@ -54,9 +57,15 @@ afterEach(cleanup);
 const cbp = (fields: Body): Body => ({ name: 'crm_case', label: 'Case', sharingModel: 'controlled_by_parent', fields });
 
 describe('PackageOwdOverviewPanel — the master shown is the one the runtime derives (objectui#12326)', () => {
+  // [label, fields, the master shown]
   const SHAPES: Array<[string, Body, string | undefined]> = [
     ['one required master', { account: { type: 'master_detail', reference: 'crm_account', required: true } }, 'crm_account'],
-    ['one master without required', { account: { type: 'master_detail', reference: 'crm_account' } }, undefined],
+    ['one master without required', { account: { type: 'master_detail', reference: 'crm_account' } }, 'crm_account'],
+    [
+      'one optional master (required: false)',
+      { account: { type: 'master_detail', reference: 'crm_account', required: false } },
+      'crm_account',
+    ],
     [
       'two required masters',
       {
@@ -86,8 +95,11 @@ describe('PackageOwdOverviewPanel — switching a row to controlled_by_parent (o
       sharingModel: 'private',
       fields: { account: { type: 'master_detail', reference: 'crm_account' } },
     };
-    // The control leg: switching only the model is refused.
-    expect(ObjectSchema.safeParse({ ...body, sharingModel: 'controlled_by_parent' }).success).toBe(false);
+    // The control leg: switching only the model leaves an optional master —
+    // it parses, as `required: false`.
+    const control = ObjectSchema.safeParse({ ...body, sharingModel: 'controlled_by_parent' });
+    expect(control.success).toBe(true);
+    expect((control.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(false);
 
     const { saved } = renderPanel({ crm_case: body });
     await screen.findByTestId('owd-row-crm_case');
@@ -103,7 +115,33 @@ describe('PackageOwdOverviewPanel — switching a row to controlled_by_parent (o
     await waitFor(() => expect(saved.length).toBe(1));
     expect(saved[0].body.sharingModel).toBe('controlled_by_parent');
     expect((saved[0].body.fields as Record<string, Body>).account.required).toBe(true);
-    expect(ObjectSchema.safeParse(saved[0].body).success).toBe(true);
+    const parsed = ObjectSchema.safeParse(saved[0].body);
+    expect(parsed.success).toBe(true);
+    expect((parsed.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(true);
+  });
+
+  it('keeps an optional master as written: the save never turns required: false required (objectstack#30974)', async () => {
+    const body: Body = {
+      name: 'crm_case',
+      label: 'Case',
+      sharingModel: 'private',
+      fields: { account: { type: 'master_detail', reference: 'crm_account', required: false } },
+    };
+    const { saved } = renderPanel({ crm_case: body });
+    await screen.findByTestId('owd-row-crm_case');
+    fireEvent.keyDown(screen.getByTestId('owd-internal-crm_case'), { key: 'ArrowDown' });
+    fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: CBP_LABEL }));
+    expect(screen.getByTestId('owd-master-crm_case')).toHaveTextContent(
+      tFormat('engine.studio.owd.byParent', 'en-US', { master: 'crm_account' }),
+    );
+
+    fireEvent.click(screen.getByTestId('owd-save'));
+    await waitFor(() => expect(saved.length).toBe(1));
+    expect(saved[0].body.sharingModel).toBe('controlled_by_parent');
+    expect((saved[0].body.fields as Record<string, Body>).account.required).toBe(false);
+    const parsed = ObjectSchema.safeParse(saved[0].body);
+    expect(parsed.success).toBe(true);
+    expect((parsed.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(false);
   });
 
   it('a row with two master-detail fields shows no master before the save', async () => {

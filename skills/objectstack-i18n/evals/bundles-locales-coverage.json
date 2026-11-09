@@ -3,8 +3,8 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Add Simplified Chinese for the `support_case` object: its label and plural, the `status` field with options New / Open / Closed, the `close` action, and a welcome message that greets the user by name.",
-      "expected_output": "A `TranslationData` per locale under `objects.support_case` — `label`, `pluralLabel`, `fields.status.label`, `fields.status.options` keyed by the STORED option value (`new`, `open`, `closed`, never the display label), `_actions.close.label` — assembled with `defineTranslationBundle({ en, 'zh-CN': zhCN })` and registered under `defineStack({ translations })`. The message uses double-brace interpolation, `'welcome.user': '欢迎，{{userName}}！'`.",
+      "prompt": "Add Simplified Chinese for the `support_case` object: its label and plural, the `status` field with options New / Open / Closed, the `crm_close` action, and a welcome message that greets the user by name.",
+      "expected_output": "A `TranslationData` per locale under `objects.support_case` — `label`, `pluralLabel`, `fields.status.label`, `fields.status.options` keyed by the STORED option value (`new`, `open`, `closed`, never the display label), `_actions.crm_close.label` — assembled with `defineTranslationBundle({ en, 'zh-CN': zhCN })` and registered under `defineStack({ translations })`. The message uses double-brace interpolation, `'welcome.user': '欢迎，{{userName}}！'`.",
       "files": [],
       "assertions": {
         "must_contain": ["defineTranslationBundle", "objects", "pluralLabel", "options", "_actions", "{{"],
@@ -53,8 +53,8 @@
     },
     {
       "id": 6,
-      "prompt": "Add zh-CN for the `pipeline_by_stage` report, the `sales_manager` permission set, the `regional_lead` position and the `deal_stage` picklist's option labels.",
-      "expected_output": "Top-level groups keyed by name: `reports.pipeline_by_stage` and `positions.regional_lead` (`label`, `description`), `permissions.sales_manager` (the same, spelled as the stack's `permissions[]`, not the camelCase name), `picklists.deal_stage.options` by stored value.",
+      "prompt": "Add zh-CN for the `crm_pipeline_by_stage` report, the `crm_sales_manager` permission set, the `crm_regional_lead` position and the `crm_deal_stage` picklist's option labels.",
+      "expected_output": "Top-level groups keyed by name: `reports.crm_pipeline_by_stage` and `positions.crm_regional_lead` (`label`, `description`), `permissions.crm_sales_manager` (the same, spelled as the stack's `permissions[]`, not the camelCase name), `picklists.crm_deal_stage.options` by stored value.",
       "files": [],
       "assertions": {
         "must_contain": ["reports", "permissions", "positions", "picklists"],
@@ -63,8 +63,8 @@
     },
     {
       "id": 7,
-      "prompt": "In zh-CN the `contact` quick-create form still shows its English heading and the placeholder its `contact_details` section sets on `email`; the `home` page's `overview` tab and the `manager_review` step of the `expense_claim` flow are English too.",
-      "expected_output": "Each key spelled as its source: `objects.contact._views.quick_create.title` (a form's own heading), `objects.contact._sections.contact_details.fields.email.placeholder` (that form's override; `helpText` there, `help` at `fields.email`), `pages.home.components.{tabs_id}.items.overview.label` (by the item's `value`), `flows.expense_claim.approvals.manager_review.label` (the node id). Not a view `label`, an object `_tabs` key or a screen `title`.",
+      "prompt": "In zh-CN the `contact` quick-create form still shows its English heading and the placeholder its `contact_details` section sets on `email`; the `crm_home` page's `overview` tab and the `manager_review` step of the `crm_expense_claim` flow are English too.",
+      "expected_output": "Each key spelled as its source: `objects.contact._views.quick_create.title` (a form's own heading), `objects.contact._sections.contact_details.fields.email.placeholder` (that form's override; `helpText` there, `help` at `fields.email`), `pages.crm_home.components.{tabs_id}.items.overview.label` (by the item's `value`), `flows.crm_expense_claim.approvals.manager_review.label` (the node id). Not a view `label`, an object `_tabs` key or a screen `title`.",
       "files": [],
       "assertions": {
         "must_contain": ["_views", "title", "_sections", "fields", "items", "approvals"],

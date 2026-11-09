@@ -134,13 +134,19 @@ export const NotificationPreference = ObjectSchema.create({
             // stored topic could never match an event the platform can store.
             // '*' is 1 char.
             maxLength: 200,
-            // [#25346, ruling A 2026-10-23] Free text, not a picker: no list of
-            // topics exists to pick from. A topic is whatever string the sender
-            // writes — a flow's notify step names its own, and platform features
-            // send fixed ones (`approval.*` in plugin-approvals, `collab.mention`
-            // in plugin-audit, …) — and nothing registers them. So the help says
-            // where a topic comes from instead. `notification-preference-
-            // topic-channel-help.test.ts` pins both helps.
+            // [#25346, ruling A 2026-10-23] Free text, not a closed select: a
+            // topic is whatever string the sender writes — a flow's notify step
+            // names its own, and platform features send fixed ones (`approval.*`
+            // in plugin-approvals, `collab.mention` in plugin-audit, …) — and
+            // nothing registers them. So the help says where a topic comes from.
+            // [#30208 row 6, ruling E on #30527] The widget hint names the
+            // console's pick-or-type input over the list
+            // `GET /api/v1/messaging/preference-options` serves
+            // (`preference-options.ts`); the field stays `text`, a typed value
+            // the list does not hold is still stored, and an unregistered
+            // widget degrades to the text box. `notification-preference-
+            // topic-channel-help.test.ts` pins both helps and both hints.
+            widget: 'notification-topic',
             description:
                 'The topic the notifications are sent under: the topic a flow\'s notify step names, or one the platform sends, ' +
                 'such as approval.requested or collab.mention. Enter * for all topics. A topic nothing sends matches nothing.',
@@ -157,16 +163,23 @@ export const NotificationPreference = ObjectSchema.create({
             // precedent (sys_session.revoke_reason, maxLength: 64). '*' is
             // 1 char.
             maxLength: 64,
-            // [#25346, ruling A 2026-10-23] Free text, not a picker. The channels
-            // are known only at runtime, and the seam is open (any plugin may
-            // `registerChannel` its own id), while a `select` is closed on the
-            // write path and its option values are machine identifiers, which
-            // cannot spell the stored '*' wildcard. So the help names the ids
-            // this package registers instead; the pin holds that list equal to
-            // the `id`s of the three channels it builds (no `push` exists).
+            // [#25346, ruling A 2026-10-23] Free text, not a closed select. The
+            // channels are known only at runtime, and the seam is open (any
+            // plugin may `registerChannel` its own id), while a `select` is
+            // closed on the write path and its option values are machine
+            // identifiers, which cannot spell the stored '*' wildcard. So the
+            // help names the ids this package builds; the pin holds that list
+            // equal to the `id`s of the four channels it builds (push since
+            // #29041).
+            // [#30208 row 6, ruling E on #30527] The widget hint names the
+            // console's pick-or-type input over the served channel list, which
+            // marks a known channel whose service is not configured; the field
+            // stays `text` and nothing new is refused.
+            widget: 'notification-channel',
             description:
                 'The channel: inbox (notifications shown inside the app, always available), email (once an email service is configured), ' +
-                'sms (once an SMS service is configured), or the id of a channel an installed plugin adds. ' +
+                'sms (once an SMS service is configured), push (once a push service is configured, to the user\'s registered devices), ' +
+                'or the id of a channel an installed plugin adds. ' +
                 'Enter * for all channels. An id no channel uses matches nothing.',
         }),
 
@@ -189,6 +202,13 @@ export const NotificationPreference = ObjectSchema.create({
         quiet_hours: Field.json({
             label: 'Quiet Hours',
             required: false,
+            // [#30208 row 6, #31426] The widget hint names the console's
+            // quiet-hours control (#31421): a time-zone picker and two times
+            // over the same stored `{ tz?, start: 'HH:MM', end: 'HH:MM' }`.
+            // The field stays `json`, nothing new is refused, and an
+            // unregistered widget degrades to the JSON editor.
+            // `notification-preference-topic-channel-help.test.ts` pins it.
+            widget: 'quiet-hours',
             description:
                 'A daily window when notifications are held and delivered when it ends, for example ' +
                 '{ "tz": "Europe/Berlin", "start": "22:00", "end": "07:00" }. Times are HH:MM in that time zone (UTC when tz is left out), ' +

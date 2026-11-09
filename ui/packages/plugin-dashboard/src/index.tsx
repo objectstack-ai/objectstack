@@ -29,15 +29,11 @@ import {
 
 export { DashboardRenderer, DashboardGridLayout, MetricWidget, MetricCard, ObjectMetricWidget, PivotTable, ObjectPivotTable, ObjectDataTable, DashboardConfigPanel, WidgetConfigPanel, DashboardWithConfig, DrillDownDrawer };
 export type { WidgetConfigPanelProps } from './WidgetConfigPanel';
-// objectui#4748 — the config sidebar's provider-less English, exported for the
-// same reason the sibling plugins export theirs: a defaults map that disagrees
-// with the `en` pack renders two labels for one control, and the assertion that
-// it does not needs to be able to import it.
-export {
-  CONFIG_PANEL_DEFAULT_TRANSLATIONS,
-  useConfigPanelTranslation,
-  type ConfigPanelTranslate,
-} from './useConfigPanelTranslation';
+// The config sidebar's translate function type. `CONFIG_PANEL_DEFAULT_TRANSLATIONS`
+// and `useConfigPanelTranslation` left this entry with zero importers outside
+// the package: the defaults-vs-pack mirror gate reads every defaults table
+// from source, so it needs no import from here.
+export type { ConfigPanelTranslate } from './useConfigPanelTranslation';
 export type {
   WidgetDatasetCatalogEntry,
   WidgetDatasetDimension,
@@ -48,17 +44,13 @@ export type {
 // Exported from the entry so the published typings load that declaration for
 // every consumer of this package, not only for this package's own program.
 export type { DashboardMetricNodeSchema } from './widgetDispatch';
-// objectui#9533 — the retirement table and the widget it renders. Exported for
-// the same reason the sibling packages export their tombstones: the assertion
-// that an authored `view:dashboard` is refused BY NAME, with the migration in
-// the refusal's own text, has to be able to import the text it asserts rather
-// than restate it.
-export {
-  RETIRED_DASHBOARD_NODE_TYPES,
-  RetiredDashboardNodeTombstone,
-  reportRetiredDashboardNodeType,
-  resetRetiredDashboardNodeTypeReports,
-} from './retired-node-types';
+// objectui#9533 — the retirement table. Exported so an assertion that an
+// authored `view:dashboard` is refused BY NAME, with the migration in the
+// refusal's own text, can import the text it asserts rather than restate it.
+// The tombstone widget and its report/reset helpers left this entry with zero
+// importers outside the package; the package's own tests import them from
+// `./retired-node-types`.
+export { RETIRED_DASHBOARD_NODE_TYPES } from './retired-node-types';
 
 // Register dashboard component
 //

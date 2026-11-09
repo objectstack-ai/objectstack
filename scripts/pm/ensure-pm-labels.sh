@@ -48,7 +48,8 @@
 # into GitHub's autocomplete. Their leftover label OBJECTS may still exist in
 # the repos; deleting those objects is a separate, deliberate PM action. One
 # TRANSITIONAL exception, recorded at its rows in the domain-lane block below:
-# the three lanes that folded into domain:server on 2026-10-22 keep alias rows
+# the three lanes that folded into domain:server on 2026-10-22, and the
+# domain:rest spelling read the same way since 2026-11-06, keep alias rows
 # until their last open card lands.
 # The objectui-repo STREAM labels domain:spec / domain:devx / domain:tooling,
 # retired in objectui only on 2026-10-22 (maintainer ruling 「甲，现在做」), are
@@ -193,8 +194,11 @@ gh() {
 for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud objectstack-ai/objectos objectstack-ai/hotcrm objectstack-ai/mobile; do
   gh label create pm:queue            -R "$R" -c 0e8a16 -d "Ready for the PM dispatch loop" 2>/dev/null || true
   gh label create pm:dispatched       -R "$R" -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" 2>/dev/null || true
-  # needs-user-decision on a PR means awaiting the maintainer's review (SKILL.md 复核, 终局四件套); on a card it is the ruling inbox.
-  gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch; on a PR: awaiting the maintainer's review" 2>/dev/null || true
+  # needs-user-decision is the RULING inbox and lives on ISSUES only (SKILL.md 状态模型: 只挂决策卡,
+  # ⛔ 永不挂 PR). A PR waiting on the maintainer's own review and merge carries pm:awaiting-merge
+  # (below) instead — the maintainer ruled the two inboxes apart so the decision count and the
+  # awaiting-merge count never share a label.
+  gh label create needs-user-decision -R "$R" -c d93f0b -d "Blocked on a maintainer decision — do not dispatch; decision cards only, never on a PR" 2>/dev/null || true
   gh label create pm:on-hold          -R "$R" -c e4e669 -d "Decision made, deliberately deferred — no dispatch, no nag; restart condition in the hold comment" 2>/dev/null || true
   gh label create pm:blocked          -R "$R" -c b60205 -d "Blocked by another issue/PR — body carries Blocked-by: #N" 2>/dev/null || true
   # pm:awaiting-maintainer — the state for a card whose remaining work is a
@@ -220,6 +224,25 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # Colour: needs-user-decision's family (a HUMAN owes something), one shade
   # lighter because the ruling here is already given.
   gh label create pm:awaiting-maintainer -R "$R" -c e99695 -d "Awaiting a manual maintainer action — ruling already given; no dispatch, no machine exit" 2>/dev/null || true
+  # pm:awaiting-merge — a PULL REQUEST whose landing waits on the maintainer's
+  # own review and merge (SKILL.md 复核 ②: 「PR 悬着等人批,同笔挂 pm:awaiting-merge」;
+  # maintainer ruling, verbatim: 「同意 pm:awaiting-merge」). It exists because that
+  # PR used to carry needs-user-decision, so the maintainer's one inbox mixed
+  # decision cards (a letter owed) with PRs (a review and a click owed) and no
+  # count could tell them apart. ⛔ PRs ONLY — never on an issue; it is NOT one
+  # of the six card states (SKILL.md 状态模型: 不入六态) and never joins
+  # PM_EXCLUSIVE_STATE_LABELS. Kept distinct from pm:awaiting-maintainer, which
+  # is an ISSUE waiting on a human act OUTSIDE GitHub. Named consumers: SKILL.md
+  # 复核 ② (the seat writes it beside the approval request), H48 in
+  # scripts/pm/check-half-states.mjs (GOVERNED_PR_AWAITING_MERGE_LABEL: a
+  # governed PR with an ACCEPT verdict must carry it), acceptedPullWait in
+  # scripts/pm/check-handover.mjs (a stay-behind pull "awaits a human approval"
+  # by this label), and scripts/pm/fleet-roster.mjs (the "awaiting merge" column
+  # and the 「决策卡 N · 待您审合 PR M」 summary line). Per-repo loop: the sweep is
+  # repo-parameterized and a governed PR can be opened on any repo of the loop.
+  # Colour: the same HUMAN-owes family as needs-user-decision, between it and
+  # pm:awaiting-maintainer, because here the click is still owed.
+  gh label create pm:awaiting-merge   -R "$R" -c e07b63 -d "PR only: landing waits on the maintainer's own review and merge (SKILL.md 复核 ②); never on an issue" 2>/dev/null || true
   # priority:p0 is the QUEUE-JUMP tier of the lane pull order, and ordering
   # only: a p0 card still obeys the same-file serial queue and the claim
   # protocol (SKILL.md state model, 「优先是排序,不是豁免」). Set by the triage
@@ -506,17 +529,22 @@ done
 # until they land and open cards are relabelled by triage only after the merge
 # lands, so the objects stay in use for a while and a reader hovering one must
 # learn where it went. The description is the whole point of those rows:
-# create-if-missing is a no-op on objects that exist. The readers that keep
-# seeing every card through the old spellings live in
-# scripts/pm/check-half-states.mjs (LANE_LABEL_ALIASES). The cleanup PR that
-# retires the three objects (zero open cards on each) deletes these three rows
-# and that map together, and the header's rule resumes for them.
+# create-if-missing is a no-op on objects that exist. domain:rest, never a lane
+# of its own and carried by no card, joins them on the maintainer's 2026-11-06
+# 「车道的问题同意」 so its object stops reading as a live lane. The readers that
+# keep seeing every card through the old spellings live in
+# scripts/pm/check-half-states.mjs (LANE_LABEL_ALIASES), and the write doors
+# (issue-create, label-write, fleet-write/dispatch) read that same map to write
+# domain:server in an alias's place. The cleanup PR that retires the objects
+# (zero open cards on each) deletes these rows and that map together, and the
+# header's rule resumes for them.
 for D in server devx spec skills ui; do
   gh label create "domain:$D" -R objectstack-ai/objectstack -c bfd4f2 -d "Domain lane — seat card indexed by label:pm:seat" 2>/dev/null || true
 done
 gh label create domain:engine   -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (engine surface); in-flight cards keep it until they land" 2>/dev/null || true
 gh label create domain:services -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (services surface); in-flight cards keep it until landed" 2>/dev/null || true
 gh label create domain:cli      -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-10-22, alias of domain:server (cli surface); in-flight cards keep it until they land" 2>/dev/null || true
+gh label create domain:rest     -R objectstack-ai/objectstack -c bfd4f2 -d "Retired 2026-11-06, alias of domain:server (rest surface); the relay writes domain:server instead" 2>/dev/null || true
 
 # domain:cloud routes a WHOLE card to the cloud PM (the `repo:cloud` seat): any
 # card that needs cloud code, a cloud producer, a cloud fact or carries a cloud

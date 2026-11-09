@@ -24,11 +24,114 @@
 //
 // Dependency-free on purpose, like `./scheduled-full-run.mjs`: the job runs off
 // a bare checkout with no install step.
+//
+// `snapshotCardStep` is the second step body here (ADR-0125, amendment of
+// 2026-11-06): release.yml's `snapshot-next-card` job hands it the same
+// `github` / `context` / `core`, plus the two upstream jobs' results and the
+// preflight's `refusal`, `reason` and `commit` outputs in its environment, and
+// it files or refreshes the `next` snapshot lane's one card through the SAME
+// `fileOrRefreshCard` and the same callbacks -- no second filer. The case
+// (`snapshotCardCase`), the identity and the body are the decision module's;
+// what is here is the plumbing, driven offline by the self-test below.
 
 import process from 'node:process';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 import * as mod from './scheduled-full-run.mjs';
+
+/** The thin callbacks over the API that `fileOrRefreshCard` is wired with, for either card. */
+function cardCallbacks({ github, owner, repo }) {
+  return {
+    listPage: async (page) => {
+      const res = await github.rest.issues.listForRepo({
+        owner, repo, state: 'open', sort: 'created', direction: 'asc', per_page: 100, page,
+      });
+      return res.data;
+    },
+    updateIssue: async ({ number, body: b }) => {
+      await github.rest.issues.update({ owner, repo, issue_number: number, body: b });
+    },
+    createIssue: async ({ title, body: b, labels }) => {
+      // Additive on create; ⛔ nothing here ever replaces a whole
+      // label set (`check:whole-set-label-write` refuses that verb).
+      const res = await github.rest.issues.create({ owner, repo, title, body: b, labels });
+      return { number: res.data.number };
+    },
+    // Read only for a card carrying `pm:blocked`.
+    listComments: async ({ number, page, perPage }) => {
+      const res = await github.rest.issues.listComments({
+        owner, repo, issue_number: number, per_page: perPage, page,
+      });
+      return res.data;
+    },
+    getIssue: async ({ repo: target, number }) => {
+      const [targetOwner, targetRepo] = target.split('/');
+      const res = await github.rest.issues.get({ owner: targetOwner, repo: targetRepo, issue_number: number });
+      // A PR number answers `closed` merged or not; `merged_at` tells them apart.
+      const pr = res.data.pull_request ? { pull_request: { merged_at: res.data.pull_request.merged_at ?? null } } : {};
+      return { state: res.data.state, closed_at: res.data.closed_at, ...pr };
+    },
+    // The swap: an additive POST and ONE remove by name.
+    addLabels: async ({ number, labels }) => {
+      await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels });
+    },
+    removeLabel: async ({ number, name }) => {
+      await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name });
+    },
+  };
+}
+
+/**
+ * The `next` snapshot card step (release.yml `snapshot-next-card`). The case is
+ * judged HERE as well as in the job's `if:` -- belt and braces -- from the
+ * environment the job hands it: `SNAPSHOT_CARD_PREFLIGHT_RESULT`,
+ * `SNAPSHOT_CARD_PREFLIGHT_REFUSAL`, `SNAPSHOT_CARD_SNAPSHOT_RESULT`,
+ * `SNAPSHOT_CARD_REASON`, `SNAPSHOT_CARD_COMMIT`. A run that is neither case
+ * (a success, a quiet skip, an expected refusal refused loudly on a dispatch,
+ * a snapshot nobody approved) reads nothing and writes nothing.
+ */
+export async function snapshotCardStep({ github, context, core, env = process.env, now = () => new Date() }) {
+  const { owner, repo } = context.repo;
+  const kind = mod.snapshotCardCase({
+    preflightResult: env.SNAPSHOT_CARD_PREFLIGHT_RESULT,
+    preflightRefusal: env.SNAPSHOT_CARD_PREFLIGHT_REFUSAL ?? '',
+    snapshotResult: env.SNAPSHOT_CARD_SNAPSHOT_RESULT,
+  });
+  if (kind === null) {
+    core.info(
+      `nothing to file: preflight ${env.SNAPSHOT_CARD_PREFLIGHT_RESULT ?? 'unset'} (refusal '${env.SNAPSHOT_CARD_PREFLIGHT_REFUSAL ?? ''}'), ` +
+        `snapshot ${env.SNAPSHOT_CARD_SNAPSHOT_RESULT ?? 'unset'} -- a success, a quiet skip or an expected refusal files no card`,
+    );
+    core.setOutput('action', 'none');
+    return;
+  }
+  const identity = mod.snapshotCardIdentity();
+  const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+  const body = mod.renderSnapshotCardBody({
+    identity,
+    kind,
+    reason: env.SNAPSHOT_CARD_REASON ?? '',
+    runUrl,
+    commit: env.SNAPSHOT_CARD_COMMIT ?? '',
+    event: context.eventName,
+    sweptAt: now().toISOString(),
+    version: env.SNAPSHOT_CARD_VERSION ?? '',
+  });
+  const outcome = await mod.fileOrRefreshCard({
+    identity,
+    body,
+    ownerRepo: `${owner}/${repo}`,
+    perPage: 100,
+    maxPages: 10,
+    ...cardCallbacks({ github, owner, repo }),
+  });
+  core.info(`${outcome.action} ${identity.marker} card #${outcome.number} (${body.length} chars)`);
+  if (outcome.block) core.info(`block: ${outcome.blockSummary}`);
+  core.notice(`the next snapshot lane reports a ${kind} — card #${outcome.number} ${outcome.action}.`);
+  core.setOutput('action', outcome.action);
+  core.setOutput('number', String(outcome.number));
+  core.setOutput('case', kind);
+}
 
 /**
  * The step body. `github` / `context` / `core` are the ones
@@ -114,42 +217,7 @@ export async function fileCardStep({ github, context, core, now = () => new Date
     ownerRepo: `${owner}/${repo}`,
     perPage: 100,
     maxPages: 10,
-    listPage: async (page) => {
-      const res = await github.rest.issues.listForRepo({
-        owner, repo, state: 'open', sort: 'created', direction: 'asc', per_page: 100, page,
-      });
-      return res.data;
-    },
-    updateIssue: async ({ number, body: b }) => {
-      await github.rest.issues.update({ owner, repo, issue_number: number, body: b });
-    },
-    createIssue: async ({ title, body: b, labels }) => {
-      // Additive on create; ⛔ nothing here ever replaces a whole
-      // label set (`check:whole-set-label-write` refuses that verb).
-      const res = await github.rest.issues.create({ owner, repo, title, body: b, labels });
-      return { number: res.data.number };
-    },
-    // Read only for a card carrying `pm:blocked`.
-    listComments: async ({ number, page, perPage }) => {
-      const res = await github.rest.issues.listComments({
-        owner, repo, issue_number: number, per_page: perPage, page,
-      });
-      return res.data;
-    },
-    getIssue: async ({ repo: target, number }) => {
-      const [targetOwner, targetRepo] = target.split('/');
-      const res = await github.rest.issues.get({ owner: targetOwner, repo: targetRepo, issue_number: number });
-      // A PR number answers `closed` merged or not; `merged_at` tells them apart.
-      const pr = res.data.pull_request ? { pull_request: { merged_at: res.data.pull_request.merged_at ?? null } } : {};
-      return { state: res.data.state, closed_at: res.data.closed_at, ...pr };
-    },
-    // The swap: an additive POST and ONE remove by name.
-    addLabels: async ({ number, labels }) => {
-      await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels });
-    },
-    removeLabel: async ({ number, name }) => {
-      await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name });
-    },
+    ...cardCallbacks({ github, owner, repo }),
   });
 
   core.info(`${outcome.action} ${identity.marker} card #${outcome.number} (${body.length} chars)`);
@@ -404,10 +472,123 @@ const SELF_TEST_CASES = [
   },
 ];
 
+// ── The `next` snapshot card step, under the same doubles ───────────────────
+//
+// Each case hands `snapshotCardStep` the environment release.yml's
+// `snapshot-next-card` job passes and pins the API calls, the body (as the exact
+// `renderSnapshotCardBody(...)` arguments) and the `core` reports. The three
+// "file nothing" cases pin that NO API call is made at all: a success, a quiet
+// skip (the preflight green with an expected refusal recorded) and an expected
+// refusal refused loudly on a dispatch.
+const SNAPSHOT_CONTEXT = { repo: OWNER_REPO, serverUrl: 'https://github.com', runId: 777, eventName: 'schedule' };
+const SNAPSHOT_RUN_URL = 'https://github.com/objectstack-ai/objectstack/actions/runs/777';
+const SNAPSHOT_ID = () => mod.snapshotCardIdentity();
+const snapshotEnv = (over = {}) => ({
+  SNAPSHOT_CARD_PREFLIGHT_RESULT: 'success',
+  SNAPSHOT_CARD_PREFLIGHT_REFUSAL: '',
+  SNAPSHOT_CARD_SNAPSHOT_RESULT: 'skipped',
+  SNAPSHOT_CARD_REASON: '',
+  SNAPSHOT_CARD_COMMIT: SHA('c'),
+  ...over,
+});
+const snapshotBody = (over = {}) => ({
+  identity: SNAPSHOT_ID(),
+  kind: 'refusal',
+  reason: '',
+  runUrl: SNAPSHOT_RUN_URL,
+  commit: SHA('c'),
+  event: 'schedule',
+  sweptAt: FIXED_NOW.toISOString(),
+  ...over,
+});
+const snapshotCreateCall = () => ({
+  api: 'issues.create',
+  params: { ...OWNER_REPO, title: SNAPSHOT_ID().title, labels: ['bug', 'domain:devx', 'priority:p1'] },
+});
+const snapshotFiled = (number, kind) => [
+  { info: `filed ${SNAPSHOT_ID().marker} card #${number}` },
+  { notice: `the next snapshot lane reports a ${kind} — card #${number} filed.` },
+  { output: ['action', 'filed'] },
+  { output: ['number', String(number)] },
+  { output: ['case', kind] },
+];
+const nothingToFile = (preflight, refusal, snapshot) => [
+  { info: `nothing to file: preflight ${preflight} (refusal '${refusal}'), snapshot ${snapshot} -- a success, a quiet skip or an expected refusal files no card` },
+  { output: ['action', 'none'] },
+];
+
+const SNAPSHOT_CASES = [
+  {
+    label: 'snapshot card: an UNEXPECTED preflight refusal on the schedule, no open card, files one card with the reason and the candidate commit',
+    env: snapshotEnv({ SNAPSHOT_CARD_PREFLIGHT_RESULT: 'failure', SNAPSHOT_CARD_REASON: 'snapshot preflight NOT MEASURED -- npm could not be read for @objectstack/cli' }),
+    context: SNAPSHOT_CONTEXT,
+    api: {
+      'issues.listForRepo': async () => ({ data: [] }),
+      'issues.create': async () => ({ data: { number: 601 } }),
+    },
+    calls: [SCAN, snapshotCreateCall()],
+    body: snapshotBody({ kind: 'refusal', reason: 'snapshot preflight NOT MEASURED -- npm could not be read for @objectstack/cli' }),
+    reports: snapshotFiled(601, 'refusal'),
+  },
+  {
+    label: 'snapshot card: a publish failure after the approval, on a dispatch, refreshes the open card in place (one update, no create, no label write)',
+    env: snapshotEnv({ SNAPSHOT_CARD_SNAPSHOT_RESULT: 'failure', SNAPSHOT_CARD_REASON: 'the snapshot job failed after the approval; read its log' }),
+    context: { ...SNAPSHOT_CONTEXT, eventName: 'workflow_dispatch' },
+    api: {
+      'issues.listForRepo': async () => ({
+        data: [{ number: 602, title: SNAPSHOT_ID().title, body: 'x', state: 'open', labels: [{ name: 'bug' }] }],
+      }),
+      'issues.update': async () => ({ data: {} }),
+    },
+    calls: [SCAN, { api: 'issues.update', params: { ...OWNER_REPO, issue_number: 602 } }],
+    body: snapshotBody({ kind: 'publish-failure', event: 'workflow_dispatch', reason: 'the snapshot job failed after the approval; read its log' }),
+    reports: [
+      { info: `refreshed ${SNAPSHOT_ID().marker} card #602` },
+      { info: 'block: not-blocked' },
+      { notice: 'the next snapshot lane reports a publish-failure — card #602 refreshed.' },
+      { output: ['action', 'refreshed'] },
+      { output: ['number', '602'] },
+      { output: ['case', 'publish-failure'] },
+    ],
+  },
+  {
+    label: 'snapshot card: a success (preflight green, snapshot published) reads nothing and files nothing',
+    env: snapshotEnv({ SNAPSHOT_CARD_SNAPSHOT_RESULT: 'success' }),
+    context: SNAPSHOT_CONTEXT,
+    api: {},
+    calls: [],
+    body: null,
+    reports: nothingToFile('success', '', 'success'),
+  },
+  {
+    label: 'snapshot card: a quiet skip on the schedule (preflight green with an expected refusal recorded) files nothing',
+    env: snapshotEnv({ SNAPSHOT_CARD_PREFLIGHT_REFUSAL: 'debut', SNAPSHOT_CARD_REASON: '@objectstack/service-push has no version on npm' }),
+    context: SNAPSHOT_CONTEXT,
+    api: {},
+    calls: [],
+    body: null,
+    reports: nothingToFile('success', 'debut', 'skipped'),
+  },
+  {
+    label: 'snapshot card: an EXPECTED refusal refused loudly on a dispatch (preflight red, refusal recorded) files nothing',
+    env: snapshotEnv({ SNAPSHOT_CARD_PREFLIGHT_RESULT: 'failure', SNAPSHOT_CARD_PREFLIGHT_REFUSAL: 'stable-lane', SNAPSHOT_CARD_REASON: 'a stable publish prompt is waiting at approval' }),
+    context: { ...SNAPSHOT_CONTEXT, eventName: 'workflow_dispatch' },
+    api: {},
+    calls: [],
+    body: null,
+    reports: nothingToFile('failure', 'stable-lane', 'skipped'),
+  },
+];
+
 // The roster is a LITERAL the table is checked against (see
 // scripts/check-agent-model-declared.mjs): each row label is a battery with a
 // floor of 1, so a deleted or renamed row names itself at the floor.
 const SELF_TEST_BATTERIES = Object.freeze({
+  'snapshot card: an UNEXPECTED preflight refusal on the schedule, no open card, files one card with the reason and the candidate commit': 1,
+  'snapshot card: a publish failure after the approval, on a dispatch, refreshes the open card in place (one update, no create, no label write)': 1,
+  'snapshot card: a success (preflight green, snapshot published) reads nothing and files nothing': 1,
+  'snapshot card: a quiet skip on the schedule (preflight green with an expected refusal recorded) files nothing': 1,
+  'snapshot card: an EXPECTED refusal refused loudly on a dispatch (preflight red, refusal recorded) files nothing': 1,
   'a red run with a green predecessor and no open card files one card over the compare range': 1,
   'no green predecessor in the API window: no compare call, and the body says why there is no range': 1,
   'a refused previous-green lookup files anyway and names the refusal, never an empty range': 1,
@@ -418,7 +599,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a pm:blocked card whose blocker is a PR closed unmerged is held: the PR shape reaches the judgement, no label write': 1,
 });
 // Deleting a roster entry silences its floor as surely as zeroing it.
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 /** Doubles of what github-script hands the step, recording every call. */
 function doubles(caseDef) {
@@ -444,7 +625,7 @@ function doubles(caseDef) {
     notice: (m) => reports.push({ notice: String(m) }),
     setOutput: (k, v) => reports.push({ output: [k, v] }),
   };
-  const context = { repo: OWNER_REPO, payload: { workflow_run: caseDef.run } };
+  const context = caseDef.context ?? { repo: OWNER_REPO, payload: { workflow_run: caseDef.run } };
   return { github: { rest }, context, core, calls, reports, unmodelled };
 }
 
@@ -487,6 +668,34 @@ async function selfTest() {
     }
   }
 
+  for (const c of SNAPSHOT_CASES) {
+    seen.set(c.label, (seen.get(c.label) ?? 0) + 1);
+    const d = doubles(c);
+    try {
+      await snapshotCardStep({ github: d.github, context: d.context, core: d.core, env: c.env, now: () => FIXED_NOW });
+    } catch (error) {
+      fail(c.label, `the step threw: ${error.message}`);
+      continue;
+    }
+    if (d.unmodelled.length > 0) fail(c.label, `called unmodelled API(s) ${d.unmodelled.join(', ')}`);
+    const gotCalls = d.calls.map(({ api, params }) => ({ api, params }));
+    if (!same(gotCalls, c.calls)) {
+      fail(c.label, `API calls\n    expected ${JSON.stringify(c.calls)}\n    actual   ${JSON.stringify(gotCalls)}`);
+    }
+    const written = d.calls.filter((x) => x.api === 'issues.create' || x.api === 'issues.update');
+    if (c.body === null) {
+      if (written.length !== 0) fail(c.label, `expected no card write, got ${written.length}`);
+    } else if (written.length !== 1) {
+      fail(c.label, `expected exactly one card write, got ${written.length}`);
+    } else if (written[0].body !== mod.renderSnapshotCardBody(c.body)) {
+      fail(c.label, 'the card body is not renderSnapshotCardBody() of the arguments this case pins');
+    }
+    const gotReports = d.reports.map((r) => (r.info?.includes(' card #') ? { info: r.info.replace(/ \(\d+ chars\)$/, '') } : r));
+    if (!same(gotReports, c.reports)) {
+      fail(c.label, `core reports\n    expected ${JSON.stringify(c.reports)}\n    actual   ${JSON.stringify(gotReports)}`);
+    }
+  }
+
   const declared = Object.keys(SELF_TEST_BATTERIES);
   if (declared.length < SELF_TEST_BATTERY_FLOOR) {
     failures.push(`SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned ${SELF_TEST_BATTERY_FLOOR}`);
@@ -506,7 +715,7 @@ async function selfTest() {
     for (const f of failures) console.error(`  • ${f}`);
     process.exit(1);
   }
-  console.log(`✓ scheduled-full-run-card --self-test: ${SELF_TEST_CASES.length} cases over the card step's API plumbing.`);
+  console.log(`✓ scheduled-full-run-card --self-test: ${SELF_TEST_CASES.length + SNAPSHOT_CASES.length} cases over the two card steps' API plumbing.`);
   selfTestReachedVerdict = true;
 }
 

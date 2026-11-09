@@ -63,7 +63,7 @@ export interface ClosedAffordanceNoticeProps {
   affordance: ClosedFormAffordance | undefined;
   /** The form's object. Its label is resolved the way the console resolves it. */
   objectName: string;
-  /** The object schema the form resolved; its `label` is the fallback label. */
+  /** The object schema the form resolved; its served `label` names the object. */
   objectSchema: { label?: unknown } | null | undefined;
 }
 
@@ -76,13 +76,12 @@ export function ClosedAffordanceNotice({
   const { t } = useClosedAffordanceTranslation();
   if (!affordance) return null;
 
-  // The object's label: the app's translation of it when one is loaded
-  // (`useObjectLabel`'s convention key), else the label the object declares,
-  // else its name.
-  const declared =
-    typeof objectSchema?.label === 'string' && objectSchema.label ? objectSchema.label : objectName;
+  // The object's label: the label the server serves — already translated, so
+  // drawn as given (objectstack#30390) — else the app's translation of it when
+  // one is loaded (`useObjectLabel`'s convention key), else its name.
+  const served = typeof objectSchema?.label === 'string' && objectSchema.label ? objectSchema.label : undefined;
   const object =
-    'objectLabel' in labels ? labels.objectLabel({ name: objectName, label: declared }) : declared;
+    served ?? ('objectLabel' in labels ? labels.objectLabel({ name: objectName, label: objectName }) : objectName);
   const message =
     affordance === 'record'
       ? t('form.noPermissionToEditRecord')

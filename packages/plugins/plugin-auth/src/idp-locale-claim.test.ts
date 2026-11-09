@@ -84,8 +84,25 @@ describe('closing the claim against the supported locales', () => {
     expect(resolveIdpLocale('ja', SUPPORTED)).toBe('ja-JP');
   });
 
+  // #30456: the one offered-locale matcher Setup's default language accepts by.
+  it('lands a script or region spelling on the offered code the platform table says it means', () => {
+    expect(resolveIdpLocale('zh-TW', ['en', 'zh-Hans', 'zh-Hant'])).toBe('zh-Hant');
+    expect(resolveIdpLocale('zh-CN', ['en', 'zh-Hant', 'zh-Hans'])).toBe('zh-Hans');
+    expect(resolveIdpLocale('fr-FR', ['en', 'fr'])).toBe('fr');
+    expect(resolveIdpLocale('de-DE', ['en', 'fr'])).toBeUndefined();
+  });
+
   it('reads the underscore spelling OIDC Core §5.1 notes as the tag it stands for', () => {
     expect(resolveIdpLocale('zh_CN', SUPPORTED)).toBe('zh-CN');
+  });
+
+  it('answers the supported locale in the BCP-47 case the sys_user column stores', () => {
+    // A supported list spelled off-case would otherwise leave the column
+    // (folded on write) and the idp-locale record (written from this answer)
+    // holding two spellings, and the next sign-in would read the IdP's own
+    // value as a local choice.
+    expect(resolveIdpLocale('zh-CN', ['zh-cn'])).toBe('zh-CN');
+    expect(resolveIdpLocale('ZH-HANS-cn', ['zh-hans-cn'])).toBe('zh-Hans-CN');
   });
 
   it('an unsupported or unknown claim names no locale', () => {

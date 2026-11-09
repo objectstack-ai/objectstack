@@ -285,6 +285,32 @@ export function plotsWholeNumbers(series: readonly NormalizedSeries[]): boolean 
   return series.length > 0 && series.every((s) => isIntegerAggregate(s.aggregate));
 }
 
+/** Recharts' default `tickCount` on a cartesian value axis. */
+const RECHARTS_DEFAULT_TICK_COUNT = 5;
+
+/**
+ * The tick count a whole-number value axis takes so its top tick is the data's
+ * own maximum (objectstack#30126 row 11): `max + 1` ticks, one per whole
+ * number from 0, when the counts top out below recharts' default of five
+ * ticks. With the default, a single count of 1 drew an axis to 4 and the bar
+ * reached a quarter of the plot. `undefined` (recharts' default) when the
+ * largest value already fills five ticks, when any value is negative or not a
+ * whole number, when nothing is plotted, or when the author pinned the axis
+ * (`min`, `max` or `stepSize`), so a declared domain or step is never
+ * overridden.
+ */
+export function wholeNumberTickCount(
+  axis: NormalizedAxis | undefined,
+  values: readonly number[],
+): number | undefined {
+  if (axis?.min !== undefined || axis?.max !== undefined || axis?.stepSize !== undefined) return undefined;
+  const finite = values.filter((v) => Number.isFinite(v));
+  if (finite.length === 0 || finite.some((v) => v < 0 || !Number.isInteger(v))) return undefined;
+  const max = Math.max(...finite);
+  if (max < 1 || max + 1 >= RECHARTS_DEFAULT_TICK_COUNT) return undefined;
+  return max + 1;
+}
+
 export interface NormalizedChartSchema {
   /**
    * The chart family the schema names, as named: `chartType`, else `specType`,

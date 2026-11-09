@@ -17,7 +17,13 @@ import React, { useState, useCallback, useMemo } from 'react';
 import type { FormField, FormSchema, DataSource, ObjectFormSchema, ObjectFormSection } from '@object-ui/types';
 import { Button, cn, toast } from '@object-ui/components';
 import { AlertCircle, Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { resolveFieldRuleState, evalFieldPredicate, isMissingForRequired, isServerOwnedValue } from '@object-ui/core';
+import {
+  resolveFieldRuleState,
+  evalFieldPredicate,
+  isMissingForRequired,
+  isServerOwnedValue,
+  requiredWhenRestsOnStoredRecord,
+} from '@object-ui/core';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { FormSectionContainer } from './FormSection';
 import { SchemaRenderer, useSafeFieldLabel, usePredicateScope } from '@object-ui/react';
@@ -772,6 +778,9 @@ export const WizardForm: React.FC<WizardFormProps> = ({
   // `required` suppression use, so this wizard cannot be seeded as a create
   // form and gated as an edit one.
   const isCreateWizard = isCreateFormMode(schema);
+  // The edit test the step forms already use to hand `persistedRecord` on as
+  // `previousValues`; the final gate's stored-row check reads the same one.
+  const isEditWizard = schema.mode === 'edit';
 
   /**
    * The host shell's global predicate scope (`ExpressionProvider` →
@@ -838,6 +847,20 @@ export const WizardForm: React.FC<WizardFormProps> = ({
    * half is the same mechanism, accepted as a residual under the same refusal
    * of option D on objectui#8069 — ⛔ so `persistedRecord` is deliberately NOT
    * bound here.
+   *
+   * ## `requiredWhen` is a transition gate on an EDIT wizard (objectstack#30220)
+   *
+   * The engine refuses an update only when the merged record violates
+   * `requiredWhen` AND the stored row complied (ADR-0113 non-regression). So on
+   * an EDIT wizard a field the live verdict calls required is skipped when the
+   * stored row already rests inside its gate, as `requiredWhenRestsOnStoredRecord`
+   * answers over `persistedRecord` — the same verdict the step forms read. As
+   * ruled on objectstack#30220 (option A), the persisted record reaches ONLY
+   * that stored-row check: the live `resolveFieldRuleState` call above still
+   * binds no `previous`, so the option-D refusal and its `visibleWhen` residual
+   * stand unchanged. The check can only relax a `requiredWhen`, never a static
+   * `required`, and reports no fault (an unevaluable predicate counts the stored
+   * row as compliant, as on the server).
    */
   const gateFinalSubmit = useCallback(
     (
@@ -896,12 +919,26 @@ export const WizardForm: React.FC<WizardFormProps> = ({
           // A hidden or read-only field is not the user's to fill in.
           if (!viewVisible || !state.visible || state.readonly || !state.required) continue;
           if (!isEmptyValue(record[name])) continue;
+          // The stored row already rests inside this field's `requiredWhen`
+          // gate: the engine lets the write through (see the note above).
+          if (
+            isEditWizard &&
+            !field.required &&
+            requiredWhenRestsOnStoredRecord(
+              (field as any).requiredWhen,
+              name,
+              persistedRecord,
+              predicateScope,
+            )
+          ) {
+            continue;
+          }
           out.set(index, [...(out.get(index) ?? []), (field as any).label || name]);
         }
       });
       return { missing: out, faultedVisibleWhen };
     },
-    [schema.sections, buildSectionFields, isCreateWizard, predicateScope],
+    [schema.sections, buildSectionFields, isCreateWizard, isEditWizard, persistedRecord, predicateScope],
   );
 
   // Handle step data collection (merge partial data into formData)

@@ -187,6 +187,28 @@ describe('ObjectStackClient', () => {
         expect(result.items).toHaveLength(2);
     });
 
+    it('[#29236] sends `names` as ONE comma-separated `?names=` value, on the unscoped and the environment surface', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ type: 'object', items: [{ name: 'customer' }] }),
+        });
+        const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000', fetch: fetchMock });
+
+        await client.meta.getItems('object', { names: ['customer', 'order'] });
+        await client.meta.getItems('object', { packageId: 'com.acme', names: ['customer'] });
+        await client.environment('env_1').meta.getItems('object', { names: ['customer', 'order'] });
+        // An empty list is sent as the empty filter the server refuses, never dropped into "every item".
+        await client.meta.getItems('object', { names: [] });
+
+        const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+        expect(urls).toEqual([
+            'http://localhost:3000/api/v1/meta/object?names=customer%2Corder',
+            'http://localhost:3000/api/v1/meta/object?package=com.acme&names=customer',
+            'http://localhost:3000/api/v1/environments/env_1/meta/object?names=customer%2Corder',
+            'http://localhost:3000/api/v1/meta/object?names=',
+        ]);
+    });
+
     it('should get metadata item by type and name', async () => {
         // The server's body is the spec-declared `GetMetaItemResponseSchema`
         // envelope — `{ type, name, item }`, with the metadata document under

@@ -54,10 +54,13 @@ import { MetadataCtx, notifyDataChanged, useMutationInvalidationBridge } from '@
 import { RelatedCountStore } from '@object-ui/components';
 import type { DataSourceMutationEvent } from '@object-ui/types';
 
+// The page's authenticated fetch. Answers nothing (a bare `vi.fn()`) unless a
+// test gives it an implementation: only the header-action describe does.
+const authFetchSpy = vi.hoisted(() => vi.fn());
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u1', name: 'Ada', image: null }, activeOrganization: null }),
-  createAuthenticatedFetch: () => vi.fn(),
+  createAuthenticatedFetch: () => authFetchSpy,
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
@@ -192,7 +195,7 @@ function makeBackend() {
       return () => listeners.delete(cb);
     },
   };
-  return { ds, rollup };
+  return { ds, rollup, lines };
 }
 
 type FakeDataSource = ReturnType<typeof makeBackend>['ds'];
@@ -203,9 +206,9 @@ function ConsoleHost({ dataSource, children }: { dataSource: unknown; children: 
   return <>{children}</>;
 }
 
-function renderPage(ds: FakeDataSource) {
+function renderPage(ds: FakeDataSource, objects: readonly unknown[] = OBJECTS) {
   const metadata = {
-    objects: OBJECTS,
+    objects,
     pages: [],
     loading: false,
     error: null,
@@ -222,7 +225,7 @@ function renderPage(ds: FakeDataSource) {
           <Routes>
             <Route
               path="/apps/:appName/:objectName/record/:recordId"
-              element={<RecordDetailView dataSource={ds} objects={OBJECTS} onEdit={() => {}} />}
+              element={<RecordDetailView dataSource={ds} objects={objects as typeof OBJECTS} onEdit={() => {}} />}
             />
           </Routes>
         </ConsoleHost>
@@ -243,9 +246,9 @@ const figureShown = (figure: number) => {
   return text.includes(plain) || text.includes(grouped);
 };
 
-async function settledPage() {
+async function settledPage(objects: readonly unknown[] = OBJECTS) {
   const backend = makeBackend();
-  renderPage(backend.ds);
+  renderPage(backend.ds, objects);
   await waitFor(() => expect(parentReads(backend.ds)).toBe(1));
   await screen.findByText('Seat licence');
   await waitFor(() => expect(figureShown(backend.rollup())).toBe(true));
@@ -352,5 +355,79 @@ describe('RecordDetailView — a child write in a related list refreshes the par
       await new Promise((r) => setTimeout(r, 50));
     });
     expect(parentReads(ds)).toBe(3);
+  });
+});
+
+/**
+ * objectstack#30337 item 3 — the reverse direction: a HEADER action on the
+ * parent writes its children, and the page's related lists and their counts
+ * follow at once.
+ *
+ * The reported reach: a team's 「添加成员」 header action (`type: 'api'`,
+ * `refreshAfter: true`) adds a membership row server-side. The page then said
+ * 团队成员 0 on its tab while the list, read when the tab opened, held 2 rows;
+ * only a later row action on the membership list (which posts the CHILD's
+ * name) brought the count to the truth.
+ *
+ * Mechanism: `refreshAfter` is "refresh the view after execution" (the spec's
+ * own description), and on a record page the view is the record AND its
+ * related lists. The page used to post only this record's change, so the
+ * child's lists and the count store (both keyed on the CHILD object) never
+ * heard of the write. An `api` action is opaque — the client cannot know which
+ * objects its target wrote — so the page refreshes what it shows: this record
+ * and every child object it lists.
+ */
+describe('RecordDetailView — a header action with `refreshAfter` refreshes the related lists and their counts (objectstack#30337)', () => {
+  const ACTION_DOOR = `/api/v1/actions/${PARENT}/add_line`;
+  const parentWithAction = {
+    ...parentObject,
+    actions: [
+      {
+        name: 'add_line',
+        label: 'Add line',
+        objectName: PARENT,
+        type: 'api',
+        target: '/api/v1/quotes/add-line',
+        recordIdParam: 'quoteId',
+        locations: ['record_header'],
+        refreshAfter: true,
+      },
+    ],
+  };
+  const objectsWithAction = [parentWithAction, childObject, unrelatedObject];
+
+  afterEach(() => {
+    authFetchSpy.mockReset();
+  });
+
+  it('the click adds a child server-side; the list shows it and the count reads 3, with one parent read', async () => {
+    const backend = await settledPage(objectsWithAction);
+    const { ds, lines } = backend;
+    await waitFor(() => expect(RelatedCountStore.get(CHILD, PARENT, RECORD_ID)).toBe(2));
+    authFetchSpy.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith(ACTION_DOOR) && init?.method === 'POST') {
+        lines.push({ id: 'l-3', name: 'Support plan', quantity: 1, unit_price: 500, [PARENT]: RECORD_ID });
+        return new Response(JSON.stringify({ success: true, data: {} }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return undefined;
+    });
+
+    await act(async () => {
+      await userEvent.click(screen.getByRole('button', { name: 'Add line' }));
+    });
+
+    await waitFor(() => expect(authFetchSpy.mock.calls.map((c) => String(c[0]))).toContain(ACTION_DOOR));
+    await screen.findByText('Support plan');
+    await waitFor(() => expect(RelatedCountStore.get(CHILD, PARENT, RECORD_ID)).toBe(3));
+    // The record and its children are refreshed by one dispatch batch: the
+    // parent row is read once more, not once per object.
+    await waitFor(() => expect(parentReads(ds)).toBe(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(parentReads(ds)).toBe(2);
   });
 });

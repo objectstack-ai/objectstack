@@ -15,7 +15,8 @@
  *   <root>/:type/new           create (a writable package only)
  *   <root>/:type/:name         the generic item page, the item's pillar, or
  *                              the form editor of an email template or a
- *                              translation (`StudioBundleItemEditor`, #28569)
+ *                              translation (`StudioBundleItemEditor`, #28569),
+ *                              and of a read-only package's dataset (#30064)
  *   <root>/:type/:name/history the item's history
  *
  * Mirroring Setup's shapes keeps every relative link the pages emit pointing
@@ -49,6 +50,7 @@ import {
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
 import { BUNDLE_MEMBER_PARAM } from '../metadata-admin/registry.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
+import type { StudioRefusal } from './metadataError.js';
 
 /*
  * The pages load with the area, through the specifier `AppContent` loads them
@@ -118,6 +120,7 @@ interface AreaEditorProps {
   customization: StudioBaseCustomization | null;
   publishNonce: number;
   onDraftSaved?: (saved?: { type: string; name: string }) => void;
+  publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
 }
 
 /**
@@ -152,7 +155,7 @@ function AreaItemOpen({
   const host = useMetadataAreaHost();
   const [opens] = React.useState(() => {
     const at = { packageId: host?.packageId ?? null, type, search };
-    if (areaItemOpensFormEditor(at)) return { formEditor: true, pillarPath: null };
+    if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { formEditor: true, pillarPath: null };
     return { formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
   });
   if (opens.pillarPath) return <Navigate to={opens.pillarPath} replace />;
@@ -167,6 +170,7 @@ function AreaItemOpen({
         customization={editor.customization}
         publishNonce={editor.publishNonce}
         onDraftSaved={editor.onDraftSaved}
+        publishRefusal={editor.publishRefusalFor?.(type, name) ?? null}
         basePath={host.basePath}
       />
     );
@@ -198,6 +202,12 @@ export interface StudioMetadataAreaProps {
   publishNonce?: number;
   /** Told when the form editor saves a draft, so the header's pending count follows it. */
   onDraftSaved?: (saved?: { type: string; name: string }) => void;
+  /**
+   * objectstack#30064 — what the header's last Publish refused for an item,
+   * kept until it is resolved (objectstack#26730): the form editor shows it
+   * at the item it refused.
+   */
+  publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
 }
 
 export function StudioMetadataArea({
@@ -205,6 +215,7 @@ export function StudioMetadataArea({
   customization = null,
   publishNonce = 0,
   onDraftSaved,
+  publishRefusalFor,
 }: StudioMetadataAreaProps): React.ReactElement {
   const { pathname, search } = useLocation();
   const locale = useMetadataLocale();
@@ -219,7 +230,7 @@ export function StudioMetadataArea({
     () => ({ packageId, readOnly: packageId !== null && writable === false, basePath }),
     [packageId, writable, basePath],
   );
-  const editor: AreaEditorProps = { customization, publishNonce, onDraftSaved };
+  const editor: AreaEditorProps = { customization, publishNonce, onDraftSaved, publishRefusalFor };
 
   // The query names the leg (`areaLocationRedirect`). Settled before any page
   // mounts, so no page reads a scope the URL is about to change.

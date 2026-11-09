@@ -25,7 +25,14 @@
  *  - a walled admin (a group posture, not the platform operator) sees
  *    Customize disabled, and the platform operator does not;
  *  - CONTROL: a base with no pair keeps the read-only Publish and reviews
- *    the base, as before.
+ *    the base, as before;
+ *  - objectstack#29691: reviewing the pair, the panel is handed the base's
+ *    label for its "saved to" sentence, and nothing without a pair;
+ *  - objectstack#29691: after Customize, the item header says the same
+ *    sentence (the REAL `SavedToCustomizationNote`; the stubbed panel draws
+ *    its line with the REAL `savedToCustomizationText` from the label the
+ *    host hands it, so the two lines read the same), and nothing before.
+ *    Both come from `preview/savedToCustomization`, which no stub replaces.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -33,6 +40,8 @@ import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { savedToCustomizationText } from '../../preview/savedToCustomization';
 
 const BASE = 'com.example.hotcrm';
 const PAIR = 'com.example.hotcrm.custom';
@@ -77,9 +86,24 @@ vi.mock('sonner', () => ({
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
+/** objectstack#29691 — the sheet's "saved to" line, in the sheet's own words. */
+function SheetSavedTo({ baseLabel }: { baseLabel: string }) {
+  const { t } = useObjectTranslation();
+  return <p data-testid="sheet-saved-to">{savedToCustomizationText(t, baseLabel)}</p>;
+}
+
 vi.mock('../../preview/DraftChangesPanel', () => ({
-  DraftChangesPanel: ({ packageId, onPublish }: { packageId: string | null; onPublish?: () => void | Promise<void> }) => (
-    <div data-testid="changes-panel" data-package={packageId ?? ''}>
+  DraftChangesPanel: ({
+    packageId,
+    onPublish,
+    customizationOf,
+  }: {
+    packageId: string | null;
+    onPublish?: () => void | Promise<void>;
+    customizationOf?: string;
+  }) => (
+    <div data-testid="changes-panel" data-package={packageId ?? ''} data-customization-of={customizationOf ?? ''}>
+      {customizationOf && <SheetSavedTo baseLabel={customizationOf} />}
       {onPublish && (
         <button type="button" data-testid="publish-all-drafts" onClick={() => void onPublish()}>
           publish
@@ -89,6 +113,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
   ),
 }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { t } from '../metadata-admin/i18n';
@@ -190,7 +217,7 @@ beforeEach(() => {
         });
       }
       if (path === '/api/v1/meta/_drafts') {
-        const scope = url.searchParams.get('packageId');
+        const scope = url.searchParams.get('package');
         return json({ drafts: !scope || scope === PAIR ? draftRows() : [] });
       }
       if (path === '/api/v1/meta/app') return json([{ name: 'crm_app', label: 'CRM' }]);
@@ -233,6 +260,8 @@ function renderWorkbench() {
 
 const publishButton = () => screen.getByRole('button', { name: /^Publish/ });
 const panelPackage = () => screen.getByTestId('changes-panel').getAttribute('data-package');
+/** The base label the host hands the sheet's "saved to" sentence (objectstack#29691); '' when none. */
+const panelCustomizationOf = () => screen.getByTestId('changes-panel').getAttribute('data-customization-of');
 const header = () => screen.getByTestId('if-item-header');
 
 async function openPipeline(): Promise<void> {
@@ -246,7 +275,9 @@ describe('a read-only base with its pair listed: Pending, the panel and Publish 
     renderWorkbench();
 
     await waitFor(() => expect(panelPackage()).toBe(PAIR), { timeout: 8000 });
-    await waitFor(() => expect(srv.reads).toContain(`/api/v1/meta/_drafts?packageId=${encodeURIComponent(PAIR)}`));
+    // objectstack#29691 — the sheet names the base the pair's drafts are saved for.
+    expect(panelCustomizationOf()).toBe('HotCRM');
+    await waitFor(() => expect(srv.reads).toContain(`/api/v1/meta/_drafts?package=${encodeURIComponent(PAIR)}`));
     await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
     expect(publishButton().parentElement).not.toHaveAttribute('data-disabled-reason');
 
@@ -259,6 +290,7 @@ describe('a read-only base with its pair listed: Pending, the panel and Publish 
     await waitFor(() => expect(publishButton().parentElement).toHaveAttribute('data-disabled-reason'), { timeout: 8000 });
     expect(publishButton()).toBeDisabled();
     expect(panelPackage()).toBe(BASE);
+    expect(panelCustomizationOf()).toBe('');
     expect(screen.queryByTestId('publish-all-drafts')).toBeNull();
   });
 });
@@ -278,6 +310,7 @@ describe('end to end: the first edit makes the pair, and Pending and Publish fol
     expect(saved!.body).toStrictEqual({ ...PIPELINE, label: 'Pipeline (ours)', overrides: { package: BASE, basedOn: '4.0.0' } });
 
     await waitFor(() => expect(panelPackage()).toBe(PAIR), { timeout: 8000 });
+    expect(panelCustomizationOf()).toBe('HotCRM');
     await waitFor(() => expect(publishButton()).toBeEnabled(), { timeout: 8000 });
     fireEvent.click(screen.getByTestId('publish-all-drafts'));
     await waitFor(() => expect(srv.publishes).toEqual([PAIR]));
@@ -319,5 +352,44 @@ describe('the wall is read from what the server publishes (objectstack#28562)', 
     await new Promise((r) => setTimeout(r, 300));
     expect(button).toBeEnabled();
     expect(within(header()).queryByTestId('studio-customize-blocked')).toBeNull();
+  });
+});
+
+describe('the item header says where the customization is saved (objectstack#29691)', () => {
+  const SAVED_TO = 'Saved to HotCRM’s customizations';
+  const savedTo = () => within(header()).queryByTestId('if-item-saved-to');
+  // objectstack#30436 — and the sheet's second sentence, naming the real pair.
+  const ENVIRONMENT =
+    'These changes are kept in this environment’s database as items of com.example.hotcrm.custom, not in your project’s source. They reach another environment only through os package export.';
+  const environment = () => within(header()).queryByTestId('if-item-saved-to-environment');
+
+  it('after Customize the header says it, and after the first edit it still does, in the sheet’s own words', async () => {
+    renderWorkbench();
+    await openPipeline();
+    fireEvent.click(await within(header()).findByTestId('studio-customize', undefined, { timeout: 8000 }));
+    await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
+    // Before the first save the pair is the `<base>.custom` id that save creates.
+    expect(environment()).toHaveTextContent(ENVIRONMENT);
+    // On its own line under the title row, never in it (the fold measures the row).
+    expect(savedTo()!.closest('[data-slot="item-note"]')).not.toBeNull();
+    expect(within(header()).getByRole('heading', { level: 1 }).parentElement).not.toContainElement(savedTo());
+
+    fireEvent.click(screen.getByRole('button', { name: 'patch the board' }));
+    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    await waitFor(() => expect(panelPackage()).toBe(PAIR), { timeout: 8000 });
+    expect(savedTo()).toHaveTextContent(SAVED_TO);
+    expect(environment()).toHaveTextContent(ENVIRONMENT);
+    // The header line and the sheet line read the same.
+    expect(screen.getByTestId('sheet-saved-to').textContent).toBe(savedTo()!.textContent);
+  });
+
+  it('CONTROL: before Customize the header says nothing of the kind', async () => {
+    renderWorkbench();
+    await openPipeline();
+    await within(header()).findByTestId('studio-customize', undefined, { timeout: 8000 });
+    expect(savedTo()).toBeNull();
+    expect(environment()).toBeNull();
+    expect(header().querySelector('[data-slot="item-note"]')).toBeNull();
+    expect(screen.queryByTestId('sheet-saved-to')).toBeNull();
   });
 });

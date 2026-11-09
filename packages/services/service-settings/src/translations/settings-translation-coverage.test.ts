@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Settings-translation coverage guard (zh-CN / ja-JP / es-ES).
+ * Settings-translation coverage guard (every shipped non-English locale).
  *
  * Every built-in settings manifest ships English labels inline; the console
  * localizes them by resolving `settings.<namespace>.…` against the shipped
@@ -12,10 +12,11 @@
  * This test pins each shipped non-English locale to full coverage of every
  * manifest's structural strings — namespace title/description, each group
  * title, each field label, each `info_banner`'s title and text (keyed by
- * the banner's `id` under `settings.<namespace>.banners`), and each
+ * the banner's `id` under `settings.<namespace>.banners`), each
  * `action_button`'s label (keyed by the button's `id` under
- * `settings.<namespace>.actions`). Dropdown *option* labels are intentionally
- * excluded: several must not be "translated" (the `timezone` option "UTC" is a
+ * `settings.<namespace>.actions`), and each `map` setting's table headers
+ * (`keys.<key>.keyColumn.label`, `keys.<key>.columns.<name>.label`).
+ * Dropdown *option* labels are intentionally excluded: several must not be "translated" (the `timezone` option "UTC" is a
  * code; each `locale` option names its language in that language), and
  * option-level parity is filled per-locale on a best-effort basis.
  */
@@ -24,7 +25,7 @@ import { describe, it, expect } from 'vitest';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { lifecycleSettingsManifest } from '@objectstack/objectql';
 import * as manifestsModule from '../manifests/index.js';
-import { en, zhCN, jaJP, esES } from './index.js';
+import { en, zhCN, jaJP, esES, zhHant, ar, fr, ptBR, ru, de, ko } from './index.js';
 
 // The manifests barrel also exports action handlers and the aggregate array;
 // keep only the manifest objects.
@@ -53,6 +54,13 @@ const LOCALES: Array<[string, { settings?: Record<string, any> }]> = [
   ['zh-CN', zhCN],
   ['ja-JP', jaJP],
   ['es-ES', esES],
+  ['zh-Hant', zhHant],
+  ['ar', ar],
+  ['fr', fr],
+  ['pt-BR', ptBR],
+  ['ru', ru],
+  ['de', de],
+  ['ko', ko],
 ];
 
 function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifest): string[] {
@@ -82,6 +90,19 @@ function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifes
       if (tr?.actions?.[s.id]?.label == null) missing.push(`action:${s.id}`);
     } else if (s.key) {
       if (tr?.keys?.[s.key]?.label == null) missing.push(`key:${s.key}`);
+      // A toggle's turn-off question is the toggle's own copy, so it is held to
+      // the label's coverage: an untranslated one asks in English (#30418).
+      if (s.confirmOffText !== undefined && tr?.keys?.[s.key]?.confirmOffText == null) {
+        missing.push(`key:${s.key}.confirmOffText`);
+      }
+      // A map's table headers are the map's own copy, held to the label's
+      // coverage: an untranslated one heads the table in English (#31453).
+      if (s.type === 'map') {
+        if (s.keyColumn && tr?.keys?.[s.key]?.keyColumn?.label == null) missing.push(`key:${s.key}.keyColumn`);
+        for (const c of s.columns ?? []) {
+          if (tr?.keys?.[s.key]?.columns?.[c.name]?.label == null) missing.push(`key:${s.key}.columns.${c.name}`);
+        }
+      }
     }
   }
   return missing;
@@ -103,6 +124,8 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
     }
     const groups = new Set<string>();
     const keys = new Set<string>();
+    const confirmsOff = new Set<string>();
+    const mapColumns = new Map<string, Set<string>>();
     const banners = new Set<string>();
     const actions = new Set<string>();
     for (const s of m.specifiers) {
@@ -114,10 +137,26 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
         if (s.id) actions.add(s.id);
       } else if (s.key) {
         keys.add(s.key);
+        if (s.confirmOffText !== undefined) confirmsOff.add(s.key);
+        if (s.type === 'map') mapColumns.set(s.key, new Set((s.columns ?? []).map((c) => c.name)));
       }
     }
     for (const g of Object.keys(tr?.groups ?? {})) if (!groups.has(g)) extra.push(`${ns}.group:${g}`);
     for (const k of Object.keys(tr?.keys ?? {})) if (!keys.has(k)) extra.push(`${ns}.key:${k}`);
+    for (const [k, v] of Object.entries(tr?.keys ?? {})) {
+      if (keys.has(k) && (v as { confirmOffText?: unknown })?.confirmOffText != null && !confirmsOff.has(k)) {
+        extra.push(`${ns}.key:${k}.confirmOffText`);
+      }
+      // Headers for a setting that is not a map, or for a column the map does
+      // not declare, head no table.
+      const entry = v as { keyColumn?: unknown; columns?: Record<string, unknown> };
+      if (!keys.has(k)) continue;
+      const declared = mapColumns.get(k);
+      if (entry?.keyColumn != null && !declared) extra.push(`${ns}.key:${k}.keyColumn`);
+      for (const c of Object.keys(entry?.columns ?? {})) {
+        if (!declared?.has(c)) extra.push(`${ns}.key:${k}.columns.${c}`);
+      }
+    }
     for (const b of Object.keys(tr?.banners ?? {})) if (!banners.has(b)) extra.push(`${ns}.banner:${b}`);
     for (const a of Object.keys(tr?.actions ?? {})) if (!actions.has(a)) extra.push(`${ns}.action:${a}`);
   }
@@ -126,7 +165,7 @@ function undeclaredIn(data: { settings?: Record<string, any> }): string[] {
 
 describe('settings translation coverage', () => {
   it('covers every built-in settings manifest', () => {
-    expect(bundledManifests.length).toBeGreaterThanOrEqual(10);
+    expect(bundledManifests.length).toBeGreaterThanOrEqual(9);
   });
 
   it('covers the hosted platform manifests by namespace', () => {

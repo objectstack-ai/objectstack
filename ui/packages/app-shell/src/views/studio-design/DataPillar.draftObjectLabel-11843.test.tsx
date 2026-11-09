@@ -28,7 +28,7 @@ import { MetadataClient } from '@object-ui/data-objectstack';
 const PKG = 'com.example.repairs';
 const BASE = 'http://test.local/api/v1/meta';
 const PUBLISHED_URL = `${BASE}/object?package=${PKG}`;
-const DRAFTS_URL = `${BASE}/_drafts?packageId=${PKG}&type=object`;
+const DRAFTS_URL = `${BASE}/_drafts?package=${PKG}&type=object`;
 const OVERLAID_URL = `${BASE}/object?package=${PKG}&preview=draft`;
 
 const technician = {
@@ -107,6 +107,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';

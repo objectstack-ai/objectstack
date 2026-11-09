@@ -26,6 +26,7 @@
  */
 
 import { resolveI18nLabel, type I18nLabel } from '@objectstack/spec/ui';
+import { clearLocalized, setLocalized } from '@object-ui/i18n';
 import { resolveNavItemLabel, type NavTargetLabelResolver } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
 
@@ -111,18 +112,24 @@ export function navEntryLabelText(
  * language's text. Only the designer locale's entry changes, and every other
  * entry is kept. The entry written is the one `resolveI18nLabel` reads first
  * for this locale — the exact tag, else its bare language (`en` under
- * `en-US`) — so the editor shows the new text straight after the edit. A map
- * with neither gains an entry under the exact tag; an entry the resolver only
- * reached as another language's fallback (`default`, `en` under `zh-CN`, a
- * sibling region) is left as it was. Because the new entry is under the exact
+ * `en-US`), else, where the resolver prefers it over that bare language, a
+ * sibling of the locale's own script (`zh-TW` under `zh-Hant` in
+ * `{ zh, 'zh-TW' }`, because bare `zh` means `zh-Hans`) — so the editor shows
+ * the new text straight after the edit. A map with none of these gains an
+ * entry under the exact tag; an entry the resolver only reached as another
+ * language's fallback (`default`, `en` under `zh-CN`, a sibling region, or the
+ * other Chinese script's entry: `zh` under `zh-Hant`) is left as it was. The
+ * entry is chosen by the shared write limb (`setLocalized`, see
+ * {@link ownsAnEntry}). Because the new entry is under the exact
  * tag, the next edit finds it first: an editor that writes on every keystroke
  * adds that entry once, never one per keystroke.
  */
 export function renamedLabel(cur: I18nLabel | undefined, next: string, locale: string): I18nLabel {
   if (!cur || typeof cur !== 'object' || Array.isArray(cur)) return next;
   const map: Record<string, string> = cur;
-  const key = ownEntryKey(map, locale) ?? locale.trim();
-  return { ...map, [key]: next };
+  const tag = locale.trim();
+  if (!ownsAnEntry(map, tag)) return { ...map, [tag]: next };
+  return setLocalized(map, tag, next) as Record<string, string>;
 }
 
 /**
@@ -139,15 +146,27 @@ export function renamedLabel(cur: I18nLabel | undefined, next: string, locale: s
  */
 export function clearedLabel(cur: I18nLabel | undefined, locale: string): I18nLabel | undefined {
   if (!cur || typeof cur !== 'object' || Array.isArray(cur)) return undefined;
-  const map: Record<string, string> = { ...cur };
-  const key = ownEntryKey(map, locale);
-  if (key !== undefined) delete map[key];
-  return Object.values(map).some((v) => typeof v === 'string') ? map : undefined;
+  const tag = locale.trim();
+  const map = ownsAnEntry(cur, tag) ? clearLocalized(cur, tag) : cur;
+  return map !== undefined && Object.values(map).some((v) => typeof v === 'string')
+    ? (map as Record<string, string>)
+    : undefined;
 }
 
-/** The map entry an edit in `locale` owns: the exact tag, else its bare language; `undefined` when the map has neither. */
-function ownEntryKey(map: Record<string, string>, locale: string): string | undefined {
-  const tag = locale.trim();
+/**
+ * Whether an edit in `tag` owns an entry of `map` at all: the exact tag or the
+ * bare language is present. Which entry it then owns is the shared write limb's
+ * answer (`setLocalized` / `clearLocalized` in `@object-ui/i18n`), the entry
+ * the resolver shows: the exact tag, else the bare language, else, where the
+ * resolver prefers it, a sibling of the locale's own script (`zh-TW` under
+ * `zh-Hant` in `{ zh, 'zh-TW' }`). Where the platform table splits the language
+ * by script, an entry of the OTHER script is never owned: a `zh-Hant` edit over
+ * `{ en, zh }` adds `zh-Hant` and keeps the Simplified text. A sibling the
+ * resolver reaches only because the bare language is ABSENT stays another
+ * region's fallback, as before: the edit adds the exact tag. So this module
+ * keeps no copy of either side's limbs.
+ */
+function ownsAnEntry(map: Record<string, string>, tag: string): boolean {
   const own = (key: string) => Object.prototype.hasOwnProperty.call(map, key) && typeof map[key] === 'string';
-  return [tag, tag.split('-')[0]].find(own);
+  return own(tag) || own(tag.split('-')[0]);
 }

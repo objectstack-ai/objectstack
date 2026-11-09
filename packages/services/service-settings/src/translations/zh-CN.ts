@@ -45,7 +45,7 @@ export const zhCN: PlatformTranslationData = {
         smtp_password: { label: '密码' },
         api_key: { label: 'API 密钥' },
         from_email: { label: '发件地址', help: '示例:no-reply@example.com' },
-        from_name: { label: '发件人名称' },
+        from_name: { label: '发件人名称', help: '留空则使用产品名称(品牌设置),未设置时使用本部署配置的名称。' },
         queue_delivery: {
           label: '持久化队列投递',
           help: '把每封邮件交给任务队列而不是内联发送:投递失败由 worker 按退避重试,进程重启也不会丢失。'
@@ -188,12 +188,8 @@ export const zhCN: PlatformTranslationData = {
         locale: {
           label: '默认语言',
           help: '用于消息文案和数字/日期格式的 BCP-47 语言。',
-          options: {
-            'en-US': '英语(美国)',
-            'zh-CN': '简体中文',
-            'ja-JP': '日语',
-            'es-ES': '西班牙语(西班牙)',
-          },
+          // No `options`: each language is named in its own language, as the
+          // server serves it (`localization-locale-options.ts`).
         },
         default_country: {
           label: '默认国家/地区',
@@ -282,7 +278,10 @@ export const zhCN: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: '启用邮箱/密码登录' },
+        email_password_enabled: {
+          label: '启用邮箱/密码登录',
+          confirmOffText: '使用密码登录的用户将需要其他登录方式。',
+        },
         signup_enabled: {
           label: '允许邮箱注册',
           help: '开启邮箱与密码注册表单。它接纳谁由下方的「自助注册受众」决定:「仅限邀请」下只接纳持有待处理邀请的地址;「邮箱域名」下接纳允许列表中的域名与受邀地址;「开放」下接纳任何人。关闭后,在任何受众下该表单都会关闭,受邀者也不例外。',
@@ -353,6 +352,7 @@ export const zhCN: PlatformTranslationData = {
         },
         mfa_required: {
           label: '要求多因素认证',
+          options: { off: '不强制', administrators: '管理员', everyone: '所有人' },
           help: '未注册身份验证器的用户在宽限期结束后将被阻止访问数据。启用此项也会开启两步验证功能,以便用户注册。',
         },
         mfa_grace_period_days: {
@@ -408,25 +408,23 @@ export const zhCN: PlatformTranslationData = {
       },
     },
 
-    feature_flags: {
-      title: '功能开关',
-      description: '为当前组织开启实验性与测试功能。',
+    access_policy: {
+      title: '访问策略',
+      description: '本组织的登录限制。部署的认证设置始终生效；这里只能在其之上追加限制。',
       groups: {
-        productivity: { title: '生产力' },
-        collaboration: { title: '协作' },
+        network: { title: '网络', description: '本组织成员可以从哪里登录。' },
+        sessions: { title: '会话', description: '成员会话的有效时长。每项限制只能比部署的更短。' },
+        multi_factor: { title: '多因素认证', description: '本组织中哪些人必须用身份验证器应用(TOTP)保护账户。' },
       },
       keys: {
-        ai_enabled: {
-          label: 'AI 助手',
-          help: '启用应用内 AI 助手面板。',
+        allowed_ip_ranges: { label: '允许的 IP 范围' },
+        session_idle_timeout_minutes: { label: '闲置超时(分钟)' },
+        session_absolute_max_hours: { label: '会话最长有效期(小时)' },
+        max_concurrent_sessions_per_user: { label: '每个用户的最大同时会话数' },
+        mfa_required: {
+          label: '要求多因素认证',
+          options: { off: '不强制', administrators: '管理员', everyone: '所有人' },
         },
-        kanban_swimlanes: { label: '看板泳道' },
-        realtime_cursors: { label: '实时光标' },
-        inline_comments: { label: '行内评论' },
-      },
-      banners: {
-        beta_notice: { title: '注意',
-          text: 'Beta 功能可能随时变更,恕不另行通知。在服务器配置中设置的功能会对整个部署锁定开启或关闭,无法在此更改。' },
       },
     },
 
@@ -611,17 +609,23 @@ export const zhCN: PlatformTranslationData = {
         },
         retention_overrides: {
           label: '保留期覆盖',
-          help: '按对象覆盖保留窗口：{ "<object>": { "maxAge": "1y", "expireAfter": "30d" } }。时长单位为 h/d/w/y。'
+          help: '按对象覆盖保留窗口。时长单位为 h/d/w/y。'
             + '按组织设置，因此受监管的组织可以保留数年，开发用的组织只保留数天。'
             + '短于某项平台功能所需最短窗口（例如作业队列的重复检测窗口）的覆盖会被忽略并记为错误，继续沿用默认窗口。',
+          keyColumn: { label: '对象' },
+          columns: { maxAge: { label: '行保留时长' }, expireAfter: { label: '行过期时长' } },
         },
         quotas: {
           label: '行数配额',
-          help: '按对象的最大行数：{ "<object>": 1000000 }。超出时触发治理告警——配额绝不会删除已声明策略之外的数据。',
+          help: '按对象的最大行数。超出时触发治理告警——配额绝不会删除已声明策略之外的数据。',
+          keyColumn: { label: '对象' },
+          columns: { max_rows: { label: '最大行数' } },
         },
         quota_defaults: {
           label: '按类别的默认配额',
-          help: '按生命周期类别的兜底配额：{ "telemetry": 1000000, "transient": 500000, "event": 100000, "audit": 5000000 }。',
+          help: '按生命周期类别的兜底配额（telemetry、transient、event、audit）。',
+          keyColumn: { label: '生命周期类别' },
+          columns: { max_rows: { label: '最大行数' } },
         },
         growth_alert_rows: {
           label: '增长告警阈值（每次清理的行数）',

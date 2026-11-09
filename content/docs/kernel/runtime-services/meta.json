@@ -7,6 +7,7 @@
     "queue-service",
     "email-service",
     "sms-service",
+    "push-service",
     "settings-service",
     "storage-service",
     "examples",

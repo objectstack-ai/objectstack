@@ -27,22 +27,46 @@ vi.mock('nodemailer', () => ({
 
 interface Resolved { value: unknown; source?: string }
 
-function fakeSettings(values: Record<string, Resolved>) {
-  const listeners: Array<() => void> = [];
+/**
+ * `branding` is the namespace's snapshot when the settings service OFFERS it
+ * (a single-posture deployment lists it); absent, the fake lists no
+ * `branding` namespace, as a walled posture does.
+ */
+function fakeSettings(values: Record<string, Resolved>, branding?: Record<string, Resolved>) {
+  const listeners: Array<{ ns: string | undefined; cb: () => void }> = [];
   const actions = new Map<string, (a: any) => Promise<any>>();
+  const read: string[] = [];
+  const emit = async (ns: string) => {
+    for (const l of listeners) if (l.ns === undefined || l.ns === ns) l.cb();
+    // let the async re-apply settle
+    await new Promise((r) => setTimeout(r, 0));
+  };
   return {
     createClient: () => ({}),
-    getNamespace: async () => ({ values }),
-    subscribe: (_ns: string, cb: () => void) => { listeners.push(cb); },
+    /** Every namespace read, in order. */
+    read,
+    getNamespace: async (ns: string) => {
+      read.push(ns);
+      if (ns === 'branding') {
+        if (!branding) throw new Error(`UNKNOWN_NAMESPACE: ${ns}`);
+        return { values: branding };
+      }
+      return { values };
+    },
+    listManifests: () => [{ namespace: 'mail' }, ...(branding ? [{ namespace: 'branding' }] : [])],
+    subscribe: (ns: string | undefined, cb: () => void) => { listeners.push({ ns, cb }); },
     registerAction: (ns: string, id: string, fn: (a: any) => Promise<any>) => {
       actions.set(`${ns}/${id}`, fn);
     },
     /** Simulate a save: patch the snapshot and emit settings:changed. */
     async save(patch: Record<string, Resolved>) {
       Object.assign(values, patch);
-      for (const l of listeners) l();
-      // let the async re-apply settle
-      await new Promise((r) => setTimeout(r, 0));
+      await emit('mail');
+    },
+    /** Simulate a save on Setup → Branding. */
+    async saveBranding(patch: Record<string, Resolved>) {
+      Object.assign(branding!, patch);
+      await emit('branding');
     },
     action: (id: string) => actions.get(`mail/${id}`),
   };
@@ -84,9 +108,13 @@ const MAIL_DEFAULTS: Record<string, Resolved> = {
 };
 
 /** Boot the plugin against fake services and run its kernel:ready hook. */
-async function boot(mailValues: Record<string, Resolved>, opts: any = {}) {
+async function boot(
+  mailValues: Record<string, Resolved>,
+  opts: any = {},
+  branding?: Record<string, Resolved>,
+) {
   const engine = fakeEngine();
-  const settings = fakeSettings({ ...MAIL_DEFAULTS, ...mailValues });
+  const settings = fakeSettings({ ...MAIL_DEFAULTS, ...mailValues }, branding);
   const services: Record<string, unknown> = {
     manifest: { register: () => {} },
     objectql: engine,
@@ -465,5 +493,129 @@ describe('registered email service — isConfigured follows the mail settings', 
 
     expect(transportOf(service)).toBeInstanceOf(ResendTransport);
     expect(service.isConfigured()).toBe(true);
+  });
+});
+
+// ── sender display name ────────────────────────────────────────────────────
+
+// The Setup walkthrough's finding: an administrator who filled in only
+// Settings → Mail → From email got mail from "ObjectStack <…>" while the
+// subject and body named the product (`branding.workspace_name`, which the
+// auth mails read). A sender with no display name of its own now carries the
+// product name the auth mails read: the Branding product name when one is
+// SET, else the deployment's name, else 'ObjectStack'. A From name somebody
+// set always wins.
+describe('sender display name follows the product name when none is set', () => {
+  const SMTP_LIVE: Record<string, Resolved> = {
+    provider: { value: 'smtp', source: 'global' },
+    smtp_host: { value: 'smtp.example.test', source: 'global' },
+    from_email: { value: 'no-reply@acme.test', source: 'global' },
+    // The manifest declares no From name default: an unset one resolves empty.
+    from_name: { value: undefined, source: 'default' },
+  };
+  const fromOnWire = () => nm.sendMail.mock.calls[nm.sendMail.mock.calls.length - 1][0].from;
+  const sendOne = (service: EmailService) =>
+    service.send({ to: 'new.hire@example.test', subject: 'Welcome', text: 'hi' });
+
+  it('names the sender with the Branding product name an administrator set', async () => {
+    const { service } = await boot(SMTP_LIVE, {}, {
+      workspace_name: { value: 'Acme Portal', source: 'tenant' },
+    });
+    await sendOne(service);
+    expect(fromOnWire()).toBe('Acme Portal <no-reply@acme.test>');
+    expect(service.getDefaultFrom()).toEqual({ address: 'no-reply@acme.test', name: 'Acme Portal' });
+  });
+
+  it('falls back to the deployment name when no Branding product name is set', async () => {
+    const { service } = await boot(
+      SMTP_LIVE,
+      { defaultTemplateContext: { appName: 'Acme CRM' } },
+      { workspace_name: { value: undefined, source: 'default' } },
+    );
+    await sendOne(service);
+    expect(fromOnWire()).toBe('Acme CRM <no-reply@acme.test>');
+  });
+
+  it("says 'ObjectStack' only when no product name is configured anywhere", async () => {
+    const { service } = await boot(SMTP_LIVE, {}, {
+      workspace_name: { value: undefined, source: 'default' },
+    });
+    await sendOne(service);
+    expect(fromOnWire()).toBe('ObjectStack <no-reply@acme.test>');
+  });
+
+  it('keeps a From name an administrator set, whatever the product name', async () => {
+    const { service } = await boot(
+      { ...SMTP_LIVE, from_name: { value: 'Acme Support', source: 'global' } },
+      { defaultTemplateContext: { appName: 'Acme CRM' } },
+      { workspace_name: { value: 'Acme Portal', source: 'tenant' } },
+    );
+    await sendOne(service);
+    expect(fromOnWire()).toBe('Acme Support <no-reply@acme.test>');
+  });
+
+  it('does not take a From name that is only a manifest default for a set one', async () => {
+    // A resolver answering a default is no decision anybody made, the rule the
+    // auth mails apply to `workspace_name` itself.
+    const { service } = await boot(
+      { ...SMTP_LIVE, from_name: { value: 'ObjectStack', source: 'default' } },
+      {},
+      { workspace_name: { value: 'Acme Portal', source: 'tenant' } },
+    );
+    await sendOne(service);
+    expect(fromOnWire()).toBe('Acme Portal <no-reply@acme.test>');
+  });
+
+  it('follows a Branding save without a restart, and a cleared name falls back', async () => {
+    const branding: Record<string, Resolved> = { workspace_name: { value: 'Acme Portal', source: 'tenant' } };
+    const { service, settings } = await boot(SMTP_LIVE, { defaultTemplateContext: { appName: 'Acme CRM' } }, branding);
+
+    await settings.saveBranding({ workspace_name: { value: 'Acme Workspace', source: 'tenant' } });
+    await sendOne(service);
+    expect(fromOnWire()).toBe('Acme Workspace <no-reply@acme.test>');
+
+    await settings.saveBranding({ workspace_name: { value: undefined, source: 'default' } });
+    await sendOne(service);
+    expect(fromOnWire()).toBe('Acme CRM <no-reply@acme.test>');
+  });
+
+  it('names a boot-declared sender that carries no display name', async () => {
+    const { service } = await boot(
+      { from_email: { value: undefined, source: 'default' } },
+      { defaultFrom: { address: 'ops@acme.test' } },
+      { workspace_name: { value: 'Acme Portal', source: 'tenant' } },
+    );
+    expect(service.getDefaultFrom()).toEqual({ address: 'ops@acme.test', name: 'Acme Portal' });
+  });
+
+  it('leaves a sender the caller names untouched', async () => {
+    const { service } = await boot(SMTP_LIVE, {}, {
+      workspace_name: { value: 'Acme Portal', source: 'tenant' },
+    });
+    await service.send({
+      to: 'new.hire@example.test', subject: 'Welcome', text: 'hi', from: { address: 'no-reply@acme.test' },
+    });
+    expect(fromOnWire()).toBe('no-reply@acme.test');
+  });
+
+  it('reads no Branding namespace where the settings service does not offer one (walled posture)', async () => {
+    const { service, settings, ctx } = await boot(SMTP_LIVE, { defaultTemplateContext: { appName: 'Acme CRM' } });
+    await sendOne(service);
+    expect(fromOnWire()).toBe('Acme CRM <no-reply@acme.test>');
+    expect(settings.read).not.toContain('branding');
+    const warned = ctx.logger.warn.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(warned.filter((line: string) => /branding/i.test(line))).toEqual([]);
+  });
+
+  it('sends the test mail under the name real mail goes out with', async () => {
+    const { settings } = await boot(SMTP_LIVE, {}, {
+      workspace_name: { value: 'Acme Portal', source: 'tenant' },
+    });
+    const result = await settings.action('test')!({
+      values: { provider: 'smtp', smtp_host: 'smtp.example.test', from_email: 'no-reply@acme.test' },
+      payload: { to: 'admin@example.test' },
+    });
+    expect(result).toMatchObject({ ok: true });
+    expect(fromOnWire()).toBe('Acme Portal <no-reply@acme.test>');
   });
 });

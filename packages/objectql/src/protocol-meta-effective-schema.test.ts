@@ -47,6 +47,8 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
+import { translateMetadataDocument } from '@objectstack/spec/system';
+import { OWNER_FIELD_DEF, QUEUE_FIELD_DEF } from '@objectstack/spec/data';
 
 interface Row {
     id: string;
@@ -352,5 +354,184 @@ describe.each([true, false])('[#6562] /meta object read — effective schema (mu
         const { registryBacked, overlayBacked } = await bothAnswers();
         expect(overlayBacked._diagnostics).toEqual({ valid: true });
         expect(registryBacked._diagnostics).toEqual({ valid: true });
+    });
+});
+
+/**
+ * [#29673] The write door's inverse of the read's TRANSLATION, over the real
+ * registry and the real protocol: the same two producers this file exists
+ * for, one step further along Studio's round trip.
+ *
+ * Measured on `origin/main` (fc558923) through the HTTP doors of a booted
+ * showcase: a zh-CN Studio session's autosave PUT carried `fields.queue.label`
+ * `队列` and `fields.owner_id.label` `负责人` (the read translates the injected
+ * columns through the built-in table); the write path stored both as the
+ * author's own fields; `registerObject` refused the author's `queue` into the
+ * write-through's `console.warn`; `publish-drafts` answered `published`; and
+ * `GET /data/:object` answered 404 `OBJECT_NOT_FOUND`. An `en` read of the
+ * same object was served `负责人`.
+ *
+ * The echo is built with the spec translator the REST read exits call
+ * (`translateMetadataDocument`), over the effective document the protocol
+ * read serves — exactly what reaches Studio, minus the HTTP envelope.
+ */
+describe('[#29673] a zh-CN read echoed back is stored as its source, and publish tells the truth', () => {
+    const zhRead = async (host: ReturnType<typeof makeHost>, name: string): Promise<any> =>
+        translateMetadataDocument('object', (await host.protocol.getMetaItem({ type: 'object', name })).item as any, undefined, { locale: 'zh-CN' });
+    const storedBody = (host: ReturnType<typeof makeHost>, name: string, state = 'active') =>
+        JSON.parse(Array.from(host.rows.values()).find((r) => r.name === name && r.state === state)!.metadata);
+
+    it('the echo stores no injected column, the new field registers, and an en read is English again', async () => {
+        const host = makeHost(false);
+        await host.protocol.saveMetaItem({ type: 'object', name: 'crm_invoice', item: { ...authored(), sharingModel: 'private' }, mode: 'publish' } as any);
+
+        const echo = await zhRead(host, 'crm_invoice');
+        // The precondition: the read really translated the injected columns.
+        expect(echo.fields.queue.label).toBe('队列');
+        expect(echo.fields.owner_id.label).toBe('负责人');
+        // The author's edit rides the echo: one new field, as Studio's autosave sends it.
+        echo.fields.memo = { type: 'text', label: '备注' };
+
+        await host.protocol.saveMetaItem({ type: 'object', name: 'crm_invoice', item: echo, mode: 'publish' } as any);
+
+        const stored = storedBody(host, 'crm_invoice');
+        expect(Object.keys(stored.fields).sort()).toEqual(['amount', 'memo']);
+        // The author's own text is never touched — `备注` was typed, not translated.
+        expect(stored.fields.memo.label).toBe('备注');
+        // Registered: the write-through took the new body (on main it refused the
+        // author's `queue` and kept serving the body without `memo`).
+        expect(Object.keys((host.registry.getObject('crm_invoice') as any).fields)).toContain('memo');
+        const en: any = (await host.protocol.getMetaItem({ type: 'object', name: 'crm_invoice' })).item;
+        expect(en.fields.owner_id.label).toBe('Owner');
+        expect(en.fields.queue.label).toBe('Queue');
+    });
+
+    it('an author\'s own `queue` is refused at the save door with the registry\'s envelope, in both modes', async () => {
+        const host = makeHost(false);
+        for (const mode of ['draft', 'publish'] as const) {
+            const body = { ...authored(), sharingModel: 'private', name: `crm_case_${mode}`, fields: { ...authored().fields, queue: { type: 'text', label: 'Support Queue' } } };
+            const err: any = await host.protocol.saveMetaItem({ type: 'object', name: body.name, item: body, mode } as any)
+                .then(() => null, (e) => e);
+            expect(err, mode).toMatchObject({ name: 'ObjectQueueColumnRefusedError', code: 'INVALID_METADATA', status: 422 });
+            expect(Array.from(host.rows.values()).some((r) => r.name === body.name), mode).toBe(false);
+        }
+    });
+
+    it('a stored draft the registry refuses is refused at publish: nothing promoted, nothing registered', async () => {
+        const host = makeHost(false);
+        // A draft stored before the save door asked (the shape a zh-CN session
+        // left behind, here with an author's own `queue` so no restoration applies).
+        await host.engine.insert('sys_metadata', {
+            type: 'object', name: 'crm_case', organization_id: null, package_id: null, state: 'draft',
+            metadata: JSON.stringify({ ...authored(), sharingModel: 'private', name: 'crm_case', fields: { ...authored().fields, queue: { type: 'text', label: 'Support Queue' } } }),
+        });
+        const err: any = await host.protocol.publishMetaItem({ type: 'object', name: 'crm_case' } as any).then(() => null, (e) => e);
+        // The registry's own refusal, by name — not some other gate's 422.
+        expect(err).toMatchObject({ name: 'ObjectQueueColumnRefusedError', code: 'INVALID_METADATA', status: 422 });
+        expect(Array.from(host.rows.values()).some((r) => r.name === 'crm_case' && r.state === 'active')).toBe(false);
+        expect(host.registry.getObject('crm_case')).toBeUndefined();
+    });
+
+    /** The same host's engine behind a protocol that has an i18n service (and, optionally, a metadata service). */
+    const withServices = (host: ReturnType<typeof makeHost>, bundle: Record<string, unknown>, metadata?: unknown) =>
+        new ObjectStackProtocolImplementation(host.engine, () => new Map<string, any>([
+            ['i18n', { getLocales: () => Object.keys(bundle), getTranslations: (locale: string) => bundle[locale] }],
+            ...(metadata ? [['metadata', metadata] as [string, any]] : []),
+        ]));
+
+    it('an author slot the catalog translated is stored as its source, and the save answer says so on `advisories`', async () => {
+        const host = makeHost(false);
+        const bundle = { 'zh-CN': { objects: { crm_invoice: { fields: { amount: { label: '金额' } } } } } };
+        const protocol = withServices(host, bundle);
+        await protocol.saveMetaItem({ type: 'object', name: 'crm_invoice', item: { ...authored(), sharingModel: 'private' }, mode: 'publish' } as any);
+
+        const echo: any = translateMetadataDocument('object', (await protocol.getMetaItem({ type: 'object', name: 'crm_invoice' })).item as any, bundle as any, { locale: 'zh-CN' });
+        expect(echo.fields.amount.label).toBe('金额');
+        const saved: any = await protocol.saveMetaItem({ type: 'object', name: 'crm_invoice', item: echo, mode: 'publish' } as any);
+
+        expect(storedBody(host, 'crm_invoice').fields.amount.label).toBe('Amount');
+        expect(saved.advisories?.map((a: any) => [a.rule, a.severity, a.path])).toEqual([
+            ['translated-label-echo', 'info', 'objects.crm_invoice.fields.amount.label'],
+        ]);
+    });
+
+    it('the door translates the stored source against the packaged base the read uses: a diverged slot set to the catalog string is kept', async () => {
+        // Seeded through `getPackagedObjectBase`, the accessor the REST read hands
+        // `translateObject` as `packagedBase` (an object's packaged base is only
+        // reachable through a writable package's code layer; the accessor is the
+        // seam both the read and this door ask).
+        const base = { name: 'crm_ticket', label: 'Ticket', fields: { title: { type: 'text', label: 'Title' } } };
+        const bundle = { 'zh-CN': { objects: { crm_ticket: { fields: { title: { label: '标题' } } } } } };
+        const overlay = { name: 'crm_ticket', label: 'Ticket', sharingModel: 'private', fields: { title: { type: 'text', label: 'Subject' } } };
+        // The precondition: the read, with the packaged base, serves the diverged `Subject` untranslated.
+        expect((translateMetadataDocument('object', overlay as any, bundle as any, { locale: 'zh-CN', packagedBase: base }) as any).fields.title.label).toBe('Subject');
+        const typed = { ...overlay, fields: { title: { type: 'text', label: '标题' } } };
+
+        const run = async (withBase: boolean) => {
+            const host = makeHost(false);
+            await host.engine.insert('sys_metadata', {
+                type: 'object', name: 'crm_ticket', organization_id: null, package_id: null, state: 'active', metadata: JSON.stringify(overlay),
+            });
+            const protocol: any = withServices(host, bundle);
+            if (withBase) protocol.getPackagedObjectBase = (name: string) => (name === 'crm_ticket' ? base : undefined);
+            const saved: any = await protocol.saveMetaItem({ type: 'object', name: 'crm_ticket', item: typed, mode: 'publish' } as any);
+            return { label: storedBody(host, 'crm_ticket').fields.title.label, advisories: saved.advisories ?? [] };
+        };
+        // With the packaged base: `标题` is no translation of `Subject`, so it is the author's edit.
+        expect(await run(true)).toEqual({ label: '标题', advisories: [] });
+        // Control, no packaged base: the catalog translates `Subject` by name, so the door restores it.
+        expect((await run(false)).label).toBe('Subject');
+    });
+
+    it('a body the spec gate and the registry both refuse keeps the spec gate\'s structured `issues[]`', async () => {
+        const host = makeHost(false);
+        const body = { ...authored(), sharingModel: 'private', name: 'crm_bad', fields: { ...authored().fields, odd: { type: 'no_such_type', label: 'Odd' } } };
+        const err: any = await host.protocol.saveMetaItem({ type: 'object', name: 'crm_bad', item: body, mode: 'draft' } as any).then(() => null, (e) => e);
+        expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+        expect(err.name).not.toBe('ObjectFieldTypeRefusedError');
+        expect(Array.isArray(err.issues) && err.issues.length > 0).toBe(true);
+        expect(err.message).toContain('failed spec validation');
+    });
+
+    it('a brand-new object saves while the metadata service reports itself degraded: the restoration reads no service', async () => {
+        const host = makeHost(false);
+        const degraded = {
+            get: async () => undefined,
+            getDiagnosed: async () => ({ data: undefined, degraded: true, errors: ['metadata store unreachable'] }),
+        };
+        const protocol = withServices(host, {}, degraded);
+        const saved: any = await protocol.saveMetaItem({ type: 'object', name: 'crm_fresh', item: { ...authored(), name: 'crm_fresh', sharingModel: 'private' }, mode: 'draft' } as any);
+        expect(saved.success).toBe(true);
+        expect(storedBody(host, 'crm_fresh', 'draft').fields.amount.label).toBe('Amount');
+    });
+
+    it('the stored-row migration repairs a row a zh-CN session already stored', async () => {
+        const host = makeHost(false);
+        const echoed = {
+            ...authored(),
+            name: 'crm_lead',
+            fields: {
+                ...authored().fields,
+                queue: { ...(QUEUE_FIELD_DEF as Record<string, unknown>), label: '队列' },
+                owner_id: { ...(OWNER_FIELD_DEF as Record<string, unknown>), label: '负责人' },
+            },
+        };
+        await host.engine.insert('sys_metadata', {
+            type: 'object', name: 'crm_lead', organization_id: null, package_id: null, state: 'active',
+            metadata: JSON.stringify(echoed),
+        });
+
+        const preview: any = await host.protocol.migrateStoredMetadata({ types: ['object'] });
+        const row = preview.rows.find((r: any) => r.name === 'crm_lead');
+        expect(row?.outcome).toBe('pending');
+        expect(row.notices.map((n: any) => [n.conversionId, n.path, n.from, n.to])).toEqual([
+            ['translated-label-echo', 'fields.queue.label', '队列', 'Queue'],
+            ['translated-label-echo', 'fields.owner_id.label', '负责人', 'Owner'],
+        ]);
+
+        const applied: any = await host.protocol.migrateStoredMetadata({ types: ['object'], apply: true });
+        expect(applied.rows.find((r: any) => r.name === 'crm_lead')?.outcome).toBe('rewritten');
+        expect(Object.keys(storedBody(host, 'crm_lead').fields)).toEqual(['amount']);
+        expect(host.registry.getObject('crm_lead')).toBeDefined();
     });
 });

@@ -23,7 +23,7 @@ import type { DataSource } from '@object-ui/types';
 import type { DatasetDrillArgs } from '@object-ui/plugin-report';
 import { DrillDownDrawer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider } from '@object-ui/react';
-import { useOpenRecordList } from './useOpenRecordList.js';
+import { useRecordListDrillNavigation } from './useOpenRecordList.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
 
 // Fallback fields when no schema is available
@@ -68,7 +68,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // Drill-through (ADR-0021 D2): clicking an aggregated row/cell opens the
   // underlying records in an in-place drawer (peek without leaving the report),
   // with an "Open in list →" escape hatch to the full object list page.
-  const openRecordList = useOpenRecordList();
+  const drillNavigation = useRecordListDrillNavigation();
   const [drill, setDrill] = useState<{ object: string; filter: Record<string, unknown>; title: string } | null>(null);
 
   const getFieldsForObject = useCallback(
@@ -409,7 +409,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // paths; DatasetReportRenderer fetches its own rows via `useDatasetRows`.
 
   return (
-    <DrillNavigationProvider value={{ openRecordList }}>
+    <DrillNavigationProvider value={drillNavigation}>
     <div className="flex flex-col h-full overflow-hidden bg-background">
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 sm:gap-4 p-4 sm:p-6 border-b shrink-0">
         <div className="min-w-0 flex-1">

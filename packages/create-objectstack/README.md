@@ -94,7 +94,9 @@ my-app/
     ├── dashboards/index.ts
     ├── apps/index.ts
     ├── skills/index.ts
-    └── picklists/index.ts
+    ├── picklists/index.ts
+    ├── security/index.ts        # permission sets
+    └── datasets/index.ts        # analytics datasets
 ```
 
 Next steps inside the project:

@@ -194,7 +194,10 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
     agents: 'agent',
     tools: 'tool',
     skills: 'skill',
-    ragPipelines: 'rag_pipeline',
+    // `ragPipelines: 'rag_pipeline'` removed (ADR-0049 enforce-or-remove), the
+    // fourth retirement of the `policies` shape: the stack schema declares no
+    // `ragPipelines` key, so the strict parse below refuses a definition that
+    // carries one and this entry could never match.
     hooks: 'hook',
     mappings: 'mapping',
     // Shared option lists. Registered as items here so the artifact boot
@@ -1204,9 +1207,13 @@ export class MetadataPlugin implements Plugin {
      * releases); an artifact authored at the current (or a newer) surface
      * converts nothing and answers to the strict parse, tombstones included.
      * The version key is what keeps this a conversion
-     * rather than an amnesty — the retired keys return with the M2 lifecycle
-     * batch (#1883), and artifacts authored against that surface must never
-     * have them stripped by history.
+     * rather than an amnesty — an artifact authored against the current surface
+     * that still writes a retired key is an authoring error its tombstone must
+     * report (only the #12840 `false` residue is tolerated, at the schema), never
+     * a strip this door performs. (`allowRestore` /
+     * `allowPurge`, the keys this door was built for, stay retired: the recycle
+     * bin's grants are the new keys `allowRestoreOwnDeleted` /
+     * `manageRecycleBin`, ADR-0148 D5.)
      *
      * Notices surface the way the stored-row pass's do — operator-visible and
      * deduped — as one summary line per conversion per artifact rather than

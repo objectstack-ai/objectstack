@@ -11,7 +11,7 @@
  * DOM-free, so both surfaces can share one validated implementation.
  */
 
-import { ObjectSchema } from '@objectstack/spec/data';
+import { ObjectSchema, controlledByParentMasterOf } from '@objectstack/spec/data';
 import { readFields, writeFields } from '../metadata-admin/previews/object-fields-io.js';
 
 /**
@@ -32,39 +32,64 @@ const MASTER_DETAIL = 'master_detail';
 
 /**
  * The master (parent) object a `controlled_by_parent` child inherits its
- * baseline from, read the way the runtime derives it (ADR-0055 §1, enforced
- * since `@objectstack/spec` 18, objectstack#23100): the `reference` of the ONE
- * `master_detail` field declared `required: true`.
+ * baseline from, read the way the runtime derives it from a stored object
+ * (ADR-0055 §1 as amended by objectstack#30905 ruling A). Which field is the
+ * master is the spec's answer, `controlledByParentMasterOf`: the ONE
+ * `master_detail` declared `required: true`, or, with none, the object's only
+ * `master_detail` declared `required: false` (an optional master, whose rows
+ * may name none).
  *
- * Returns undefined when the object declares zero such fields, or two or more:
- * the runtime derives no master from either shape (every read is denied, every
- * write refused), and it never picks one by field order. It used to return the
- * FIRST `master_detail` by order, required or not, which showed a master for
- * an object the runtime derives none from (objectui#12326). A non-required
- * `master_detail` is not a master. Undefined is the authoring error, and the
- * overview says so rather than naming a parent.
+ * An omitted `required` on the object's only `master_detail` reads as
+ * `required: true`, as the spec's stored-row conversion
+ * `cbp-master-detail-required-defaulted` reads it: Studio defaults it to
+ * required, as the builder and stored data do. It names the same master either
+ * way.
+ *
+ * Returns undefined when the spec names no master (two required masters, two
+ * `master_detail` fields none of them required, none at all): the runtime
+ * derives none from those shapes and never picks one by field order. Undefined
+ * is the authoring error, and the overview says so rather than naming a parent.
  */
 export function deriveMasterObject(fields: unknown): string | undefined {
-  const masters = readFields(fields).entries.filter(
-    (e) => e.def.type === MASTER_DETAIL && e.def.required === true,
-  );
-  if (masters.length !== 1) return undefined;
-  const ref = masters[0].def.reference;
+  const entries = readFields(fields).entries;
+  const masterDetails = entries.filter((e) => e.def.type === MASTER_DETAIL);
+  const byName: Record<string, Record<string, unknown>> = {};
+  for (const e of entries) {
+    byName[e.name] =
+      masterDetails.length === 1 && e === masterDetails[0] && e.def.required === undefined
+        ? { ...e.def, required: true }
+        : e.def;
+  }
+  const master = controlledByParentMasterOf(byName);
+  if (!master) return undefined;
+  const ref = byName[master.field].reference;
   return typeof ref === 'string' && ref ? ref : undefined;
 }
 
 /**
+ * Does Studio's write default this field's `required` to `true` on a
+ * `controlled_by_parent` object? A `master_detail` that writes no `required`
+ * at all. An explicit `required: false` is the author's choice, an optional
+ * master (ADR-0055 §1 as amended, objectstack#30905 ruling A), and is kept.
+ */
+export function cbpMasterDetailDefaultsRequired(def: Record<string, unknown>): boolean {
+  return def.type === MASTER_DETAIL && def.required === undefined;
+}
+
+/**
  * The designer's write side of the same rule (objectui#12326): on a
- * `controlled_by_parent` object every `master_detail` field is `required: true`,
- * because the protocol admits no other value there. Returns the fields with
- * that set on each `master_detail` that does not carry it, in the shape they
- * came in, or the input itself when nothing changes, so a caller can skip a
- * write that would change nothing.
+ * `controlled_by_parent` object a `master_detail` field that writes no
+ * `required` is made `required: true`, because the save door would otherwise
+ * read the omission as an optional master. Returns the fields with that set,
+ * in the shape they came in, or the input itself when nothing changes, so a
+ * caller can skip a write that would change nothing.
  *
- * It never picks a master. With two or more `master_detail` fields every one
- * of them is made required, and the spec refuses the object for declaring more
- * than one ({@link cbpMasterRefusal} shows that refusal). The author then
- * chooses which one stays the master, which is the spec's own prescription.
+ * It keeps an explicit `required: false`: that is an optional master the
+ * author chose, and a save never turns it required. It never picks a master.
+ * With two or more `master_detail` fields each omitted one is made required,
+ * and the spec refuses the object when that leaves more than one master
+ * ({@link cbpMasterRefusal} shows that refusal). The author then chooses
+ * which one stays the master, which is the spec's own prescription.
  *
  * `@objectstack/spec`'s `ObjectSchema.create()` applies the same force to an
  * omitted `required` and does not export it, so this is the designer's copy of
@@ -72,15 +97,13 @@ export function deriveMasterObject(fields: unknown): string | undefined {
  */
 export function requireCbpMasterDetails(fields: unknown): unknown {
   const view = readFields(fields);
-  if (!view.entries.some((e) => e.def.type === MASTER_DETAIL && e.def.required !== true)) {
+  if (!view.entries.some((e) => cbpMasterDetailDefaultsRequired(e.def))) {
     return fields;
   }
   return writeFields({
     shape: view.shape,
     entries: view.entries.map((e) =>
-      e.def.type === MASTER_DETAIL && e.def.required !== true
-        ? { name: e.name, def: { ...e.def, required: true } }
-        : e,
+      cbpMasterDetailDefaultsRequired(e.def) ? { name: e.name, def: { ...e.def, required: true } } : e,
     ),
   });
 }

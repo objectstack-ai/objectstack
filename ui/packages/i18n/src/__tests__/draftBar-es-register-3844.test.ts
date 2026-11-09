@@ -121,7 +121,7 @@ const EN_CURRENT = {
  *   - `en producción` for "live", which the pack spells `activo` (see
  *     `publishCta` in this same object, `home.pendingDrafts.published`) and
  *     which additionally collides with the pack's *production environment*
- *     sense in `environment.entitlement.planLockedBody`;
+ *     sense in `environment.entitlement.productionLimitTitle`;
  *   - `Vista previa de borrador`, the prefix that differed from
  *     `messageClean`'s `Vista previa del borrador` so the banner's two halves
  *     opened with different words where `en`'s both open "Draft preview — ".

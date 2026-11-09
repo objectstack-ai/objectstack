@@ -116,7 +116,7 @@ export const SysSetting = ObjectSchema.create({
       label: 'Namespace',
       required: true,
       maxLength: 64,
-      description: 'Manifest namespace (e.g. mail, branding, feature_flags).',
+      description: 'Manifest namespace (e.g. mail, branding, storage).',
     }),
 
     key: Field.text({

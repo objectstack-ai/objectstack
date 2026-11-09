@@ -46,16 +46,27 @@ import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { AggregationNodeSchema } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
-import { StandardErrorCode } from '@objectstack/spec/api';
+import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { actionsDoorAnswerOf, earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, resolveThrownHttpError, sandboxBusinessMessage, serverFaultProvenance, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
   MCP_OAUTH_SCOPE_ACTIONS,
   MCP_OAUTH_SCOPE_METADATA_WRITE,
+  // [ADR-0149 D2] The dataset pair's names and its input shapes, declared once
+  // in spec. The tool `description` comes from the service-analytics
+  // definition the bridge carries; nothing here restates either.
+  LIST_DATASETS_TOOL_NAME,
+  QUERY_DATASET_TOOL_NAME,
+  ListDatasetsInputSchema,
+  QueryDatasetInputSchema,
+  type ListDatasetsInput,
+  type ListDatasetsOutput,
+  type QueryDatasetInput,
+  type QueryDatasetOutput,
 } from '@objectstack/spec/ai';
 // [#15942 / #16293] The confirmation member the `run_action` door accepts and
 // forwards. Imported, never hand-spelled: the door that refuses (the runtime's
@@ -64,6 +75,8 @@ import {
 import {
   AI_ACTION_CONFIRMATION_MEMBER,
   type AIActionConfirmation,
+  type AIToolDefinition,
+  type ActionConfirmationRequiredDetails,
   type ImportObjectResult,
   type RemoteTable,
 } from '@objectstack/spec/contracts';
@@ -71,6 +84,7 @@ import {
   validateExpression,
   introspectScope,
   inferExpressionType,
+  type ExprFaultOutcome,
   type FieldRole,
 } from '@objectstack/formula';
 // [#16913] The unknown-key error map every `strictToolInput` shape below is
@@ -85,11 +99,14 @@ import { strictUnknownKeyError } from '@objectstack/spec/shared';
 // formula checks, so a blank source gets the gate's verdict and its published
 // sentence, never a second blank rule written here.
 import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema } from '@objectstack/spec/shared';
+import { FLOW_TRIGGER_KINDS, type FlowTriggerKind } from '@objectstack/spec/automation';
 import {
   METADATA_UNAVAILABLE_CODE,
   metadataPartialListingSentence,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
+// [#30892] The file seam and what `read_file` renders from it.
+import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
 
 export interface McpObjectSummary {
   name: string;
@@ -203,6 +220,37 @@ export interface McpDataBridge {
       timezone?: string;
     },
   ): Promise<unknown[]>;
+  /**
+   * [ADR-0149 D2] `list_datasets`: the governed datasets this caller may
+   * query, each with its dimensions and measures, their business vocabulary,
+   * and which of `input.terms` matched which member. Runs AS the principal
+   * through the service-analytics executor; the tool layer adds and removes
+   * nothing.
+   *
+   * OPTIONAL, under the same graceful-degradation contract as
+   * {@link McpDataBridge.aggregate}: a host with no analytics service, or one
+   * whose `IAnalyticsService.queryDataset` is absent, omits all three dataset
+   * members ({@link listDatasets}, {@link queryDataset},
+   * {@link datasetToolDefinitions}) and no dataset tool registers. The pair
+   * registers only when all three are present (`registerDatasetTools`).
+   */
+  listDatasets?(input: ListDatasetsInput): Promise<ListDatasetsOutput>;
+  /**
+   * [ADR-0149 D2] `query_dataset`: one saved dataset by name and a selection
+   * against it, answered with rows and the `provenance` the executor composed
+   * from what ran. `maxRows` is the tool's page cap (`maxQueryLimit`, the one
+   * `query_records` uses); the executor holds `selection.limit` to it.
+   * OPTIONAL — see {@link listDatasets}.
+   */
+  queryDataset?(input: QueryDatasetInput, opts: { maxRows: number }): Promise<QueryDatasetOutput>;
+  /**
+   * [ADR-0149 D2] The dataset pair's `AIToolDefinition`s, as the
+   * service-analytics executor defines them — the ONE definition the product
+   * AI registers too. `registerDatasetTools` takes each tool's `description`
+   * (the D3 selection rule the model reads) from here, so `packages/mcp`
+   * holds no second copy of it. OPTIONAL — see {@link listDatasets}.
+   */
+  datasetToolDefinitions?(): ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>;
 }
 
 export interface RegisterObjectToolsOptions {
@@ -243,6 +291,22 @@ export interface McpActionSummary {
   name: string;
   /** The object the action operates on (omitted for object-less actions). */
   objectName?: string;
+  /**
+   * [ADR-0150 D2/D5] The manifest namespace of the package that holds the
+   * action, passed to `run_action` as `namespace` to name this one action
+   * where two packages hold its name. Absent for an environment-authored
+   * action, or one whose package the host cannot place.
+   */
+  namespace?: string;
+  /**
+   * [ADR-0150 D6] The action's AI face: `deriveAiFaceName` over its address —
+   * `OBJECT-ACTION` for an action bound to an object, `NS-NAME` for a
+   * package's object-less action, the bare name for an environment one. The
+   * flat name a model provider lists the action under. Left off a row whose
+   * face another listed action derives too: `list_actions` then names that
+   * face once, under `refusedFaces`, with every action that derives it.
+   */
+  face?: string;
   /** Human label. */
   label?: string;
   /** What the action does (the authored `ai.description` when present). */
@@ -310,8 +374,30 @@ export interface McpActionBridge {
    */
   runAction(
     name: string,
-    input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
+    input: {
+      objectName?: string;
+      /**
+       * [ADR-0150 D5] The namespace of the package whose action is meant: the
+       * exact qualifier. Omitted, the bare name resolves as it always has,
+       * and a name two packages hold is refused naming both.
+       */
+      namespace?: string;
+      recordId?: string;
+      params?: Record<string, unknown>;
+    } & AIActionConfirmation,
   ): Promise<unknown>;
+  /**
+   * [#30771] The capability refusal `runAction` would throw for an action on
+   * `objectName` that {@link listActions} leaves out because the caller lacks
+   * its declared `requiredPermissions` — `{ code, status, message }`, the same
+   * values the by-name call throws. `undefined` for anything else (not
+   * declared, not exposed to AI), so `run_action`'s scoped `sys_*` pre-screen
+   * keeps its system-object refusal there. Runs nothing.
+   *
+   * OPTIONAL: a bridge without it keeps the system-object refusal for every
+   * `sys_*` action its listing leaves out, as before.
+   */
+  capabilityRefusal?(name: string, objectName: string): Promise<ThrownRefusalEnvelope | undefined>;
   /**
    * [#15705] Continue a run that `runAction` answered with `status: 'paused'`
    * and a `screen`, submitting that screen's field values as `values`.
@@ -341,9 +427,12 @@ export interface McpActionBridge {
  * page makes (`GET …/external/tables`, `POST …/tables/:remote/import`).
  *
  * The host binds both to the caller and refuses as the REST routes refuse:
- * listing needs the federation READ capability, importing the WRITE one
- * (`FEDERATION_READ_CAPABILITY` / `FEDERATION_WRITE_CAPABILITY`,
- * `@objectstack/rest`), thrown with the ADR-0112 `code` / `status`.
+ * listing needs the federation READ capability, importing the READ capability
+ * AND the WRITE one — the import answers with the remote table's structure,
+ * which needs the read capability on every door
+ * (`FEDERATION_READ_CAPABILITY` / `FEDERATION_WRITE_CAPABILITY`, judged by
+ * `federationCapabilityRefusal`, `@objectstack/rest`), thrown with the
+ * ADR-0112 `code` / `status`.
  *
  * OPTIONAL as a pair: a bridge without both registers neither tool. The
  * runtime's bridge carries both and answers `503 SERVICE_UNAVAILABLE` per call
@@ -393,6 +482,49 @@ function isListableAction(action: McpActionSummary): boolean {
   return !action.objectName || !isSystemObject(action.objectName) || action.aiExposed === true;
 }
 
+/**
+ * [ADR-0150 D6, Q3] The face list's duplicate refusal on `list_actions`: a face
+ * two listed actions derive is named ONCE, with every action that derives it,
+ * and left off each of those rows — never one of them picked to carry it, and
+ * never a row dropped (each stays addressable by `namespace`, `objectName` and
+ * `name`). Rows without a face pass through unchanged.
+ */
+function faceListOfActions(actions: readonly McpActionSummary[]): {
+  actions: McpActionSummary[];
+  refusedFaces: Array<{ face: string; reason: string }>;
+} {
+  const byFace = new Map<string, McpActionSummary[]>();
+  for (const action of actions) {
+    if (typeof action.face !== 'string') continue;
+    const holders = byFace.get(action.face);
+    if (holders) holders.push(action);
+    else byFace.set(action.face, [action]);
+  }
+  const refusedFaces: Array<{ face: string; reason: string }> = [];
+  for (const [face, holders] of byFace) {
+    if (holders.length < 2) continue;
+    const named = holders.map((a) =>
+      `action "${a.name}"${a.objectName ? ` on "${a.objectName}"` : ''}`
+      + (a.namespace ? ` of namespace "${a.namespace}"` : ' authored in this environment'));
+    refusedFaces.push({
+      face,
+      reason: `The face "${face}" is derived for ${holders.length} actions: ${named.join('; ')}. `
+        + 'A face names one action, so none of them is listed under it: call each by its name, objectName '
+        + 'and namespace.',
+    });
+  }
+  if (refusedFaces.length === 0) return { actions: [...actions], refusedFaces };
+  const refused = new Set(refusedFaces.map((r) => r.face));
+  return {
+    actions: actions.map((a) => {
+      if (typeof a.face !== 'string' || !refused.has(a.face)) return a;
+      const { face: _face, ...rest } = a;
+      return rest;
+    }),
+    refusedFaces,
+  };
+}
+
 function systemObjectActionRefusal(actionName: string, objectName: string): string {
   return (
     `Action "${actionName}" on system object "${objectName}" is not exposed via MCP: a system object's action is ` +
@@ -421,8 +553,6 @@ function errorResult(message: string) {
  * nobody and the agent is back to guessing the member's spelling from
  * documentation.
  *
- * Uncoded throws fall through to `errorResult` unchanged.
- *
  * `run_action` and `resume_run` only. The other catches render through
  * {@link errorResultWithCode}, which serves the same envelope WITHOUT `details`;
  * that function says why.
@@ -445,21 +575,52 @@ function errorResult(message: string) {
  * reaches the `details` read at all. Every other coded refusal keeps its
  * `details` as before, so #15942's confirmation contract and `resume_run`'s
  * REST-built `details` are unchanged.
+ *
+ * [#31271] The answer is the `/api/v1/actions` door's, read off that door's own
+ * reader, `actionsDoorAnswerOf` (`@objectstack/types`), never a copy of its
+ * arms: a code-less sandboxed body abort answers `400 HOOK_ABORTED` with the
+ * body's sentence (it answered the runner's `KIND 'NAME' threw: …` wrapper
+ * naming the body), a plain `Error` the door's `400 VALIDATION_ERROR`
+ * rejection, a sandboxed or in-process crash the door's `500` fault with no
+ * body name and no native text, and an unregistered code is demoted to
+ * `declaredCode` beside the closed `code`, as the door serves it. The lines
+ * the door prints for the operator (the full wrapper, the fault line) are
+ * printed here under `request`. A thrown `details` rides on a refusal (a
+ * status below 500) as before, and never on a fault, whose answer is the
+ * door's sanitised one; the context the door adds (`fields`, `issues`, the
+ * unique arm's `object` / `field`) is not served, as on every other tool
+ * ({@link errorResultWithCode} says why).
+ *
+ * [#31317] A driver string code (`SQLITE_BUSY`) answers what `/actions`
+ * answers, which is the `/api/v1/data` door's fault: `500 DATABASE_ERROR`.
  */
-function errorResultFromThrown(err: unknown) {
-  const envelope = thrownRefusalEnvelope(err);
-  if (!envelope) return errorResult(messageOf(err));
-  if (envelope.code === StandardErrorCode.enum.PERMISSION_DENIED) return errorResultWithCode(err);
-  const details = (err as { details?: unknown }).details;
+function errorResultFromThrown(err: unknown, request: string, objectName?: string) {
+  const answer = actionsDoorAnswerOf(err, objectName);
+  for (const line of answer.operatorLines) console.error(`[MCP] ${request}: ${line}`);
+  const envelope = {
+    code: answer.code,
+    message: answer.message,
+    status: answer.status,
+    ...(answer.declaredCode !== undefined ? { declaredCode: answer.declaredCode } : {}),
+    ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
+  };
+  if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) return codedErrorResult(envelope);
+  // A fault (5xx) carries nothing but the door's sanitised answer: a thrown
+  // `details` rides only on a refusal, as `/actions` serves no producer
+  // context on a fault.
+  const details = answer.status < 500 ? (err as { details?: unknown } | null | undefined)?.details : undefined;
   return codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
 }
 
 /**
- * [#23509] The data tools' and `list_actions`' tool error: a thrown coded
- * refusal renders its `code` and `status` beside the message, in
- * {@link errorResultFromThrown}'s shape. A throw with no code renders as
- * `errorResult(messageOf(err))`, byte-identical to what every one of these
- * catches answered before.
+ * [#23509] `delete_records`' tool error, the coded half of the record data
+ * tools' ({@link dataDoorErrorResult}), and the refusal half of the metadata
+ * tools' and `list_actions`' ({@link metaDoorErrorResult}, #31272):
+ * a thrown coded refusal renders its `code` and `status` beside the message, in
+ * {@link errorResultFromThrown}'s shape. A throw with no code renders here as
+ * `errorResult(messageOf(err))`, byte-identical to what these catches answered
+ * before; the record data tools classify it as the `/data` door does instead
+ * (#31218).
  *
  * These catches used to answer the message alone, so a client never read the
  * code it is meant to branch on. The affected refusals: a key whose owner is
@@ -475,10 +636,275 @@ function errorResultFromThrown(err: unknown) {
  * The runtime dispatcher drops those `details` from the wire, so serving them
  * here would disclose on MCP what REST withholds. `code`, `message` and
  * `status` are what every boundary serves.
+ *
+ * [#31605] Exported for the tool-call interceptor, which answers a throw from
+ * a host's interceptor as the tools' own catches answer one; not on the
+ * package entry.
  */
-function errorResultWithCode(err: unknown) {
+export function errorResultWithCode(err: unknown) {
   const envelope = thrownRefusalEnvelope(err);
   return envelope ? codedErrorResult({ ...envelope }) : errorResult(messageOf(err));
+}
+
+/**
+ * The tools whose throw the `/api/v1/data` door classifies: the record reads
+ * and writes, each the MCP face of one `/data` route. {@link dataDoorErrorResult}
+ * renders their catches.
+ */
+type DataDoorTool =
+  | 'query_records'
+  | 'aggregate_records'
+  | 'get_record'
+  | 'create_record'
+  | 'update_record'
+  | 'delete_record';
+
+/** What the `/data` door answers a thrown value with, read off {@link mapDataError}. */
+interface DataDoorAnswer {
+  code?: string;
+  message: string;
+  status: number;
+  /** [#31373] The producer's unregistered spelling the door demoted, when it serves one. */
+  declaredCode?: string;
+  /** [#31373] The producer's marked end-user sentence the door rides onto its answer, when it serves one. */
+  userMessage?: string;
+}
+
+/**
+ * The `/api/v1/data` door's answer to a thrown value: `mapDataError`
+ * (`@objectstack/types`), the classifier that door answers with, read as the
+ * `code`, sentence and status it would put on the wire. ⛔ Never a second
+ * classification: this file asks the door's own function, so the two doors
+ * cannot drift apart on a throw.
+ *
+ * The sentence is the door's `error` text, which is the caller-addressed one:
+ * a sandboxed hook body's inner sentence without the `<kind> '<name>' threw:`
+ * wrapper, and `Internal server error` for a fault. `object`, `field` and the
+ * other context keys the door adds are not read, as `details` is not
+ * ({@link errorResultWithCode}).
+ *
+ * [#31373] `declaredCode` and `userMessage` are read as the door serves them,
+ * each omitted when it serves none: an unregistered code the door demoted to
+ * its closed code (`{ code: 'VENDOR_DOWN', status: 503 }` answers
+ * `SERVICE_UNAVAILABLE` with `declaredCode: 'VENDOR_DOWN'`), and a producer's
+ * marked end-user sentence, which the door rides onto any answer, a fault's
+ * included. ⛔ Read off the door's body, never a second demotion rule. The
+ * record data faces render them in `run_action`'s order ({@link
+ * errorResultFromThrown}); the metadata tools do not ({@link metaDoorErrorResult}).
+ *
+ * [#31270] Exported for the record resource (`MCPServerRuntime.bridgeResources`),
+ * which answers a code-less throw with the same read; not on the package entry.
+ */
+export function dataDoorAnswerOf(err: unknown, objectName?: string): DataDoorAnswer {
+  const door = mapDataError(err, objectName);
+  const code = typeof door.body.code === 'string' && door.body.code !== '' ? door.body.code : undefined;
+  const message = typeof door.body.error === 'string' && door.body.error !== '' ? door.body.error : messageOf(err);
+  const { declaredCode, userMessage } = door.body;
+  return {
+    ...(code !== undefined ? { code } : {}),
+    message,
+    status: door.status,
+    ...(typeof declaredCode === 'string' && declaredCode !== '' ? { declaredCode } : {}),
+    ...(typeof userMessage === 'string' && userMessage !== '' ? { userMessage } : {}),
+  };
+}
+
+/**
+ * [#31273, #31341] {@link thrownRefusalEnvelope} for a face the `/api/v1/data`
+ * door serves: the coded refusal, unless the door answers the throw as a
+ * server fault. Then the face answers the door's fault instead
+ * ({@link dataDoorAnswerOf}), logged once, which is {@link rowRefusalOf}'s
+ * line drawn with the same reader.
+ *
+ * Two kinds of coded throw are faults at the door:
+ *
+ * - a driver's own errno on `.code` (`SQLITE_BUSY`, `ECONNRESET`, `40P01`),
+ *   with no declared status (#31273). `SQLITE_BUSY` answers `500
+ *   DATABASE_ERROR` `Internal data error`, the errno and driver text withheld.
+ *   It used to reach the agent as `{ code: 'SQLITE_BUSY', message: <driver
+ *   text> }` with no status. The ruling of 2026-08-27 on #12509 says why the
+ *   code goes: the discriminator is the status channel, never the code's
+ *   spelling, so a producer that spells a code and declares no status loses
+ *   it on a 5xx, here as at the door;
+ * - a code with a DECLARED 5xx (#31341), such as `{ code:
+ *   'SERVICE_UNAVAILABLE', status: 503 }`. The door keeps the code and status
+ *   and withholds the producer's sentence (`Internal server error`) unless
+ *   the throw marks itself `refusal: true` (`declaredRefusalMessage`,
+ *   `@objectstack/types`). It used to reach the agent with its own sentence.
+ *   An unregistered code is demoted there to the status's closed code, with
+ *   the producer's spelling in `declaredCode`; the face answers both (#31373,
+ *   {@link dataDoorAnswerOf}).
+ *
+ * ⛔ One reader, never a copy of the withhold rule: the door's answer is
+ * `mapDataError`'s, through {@link dataDoorAnswerOf}, and the fault line is
+ * the doors' own `isServerFault`. The question is asked only of a throw whose
+ * status is a 5xx or undeclared (`serverFaultProvenance`, `@objectstack/types`,
+ * answers `'declared'` or `'undeclared'`): a producer that DECLARED a refusal
+ * status (below 500) keeps its coded answer, as #31246 pins it, and so does
+ * a code the door refuses (`PERMISSION_DENIED` with no status answers 403
+ * there).
+ *
+ * [#31407] …with what the door serves beside that refusal
+ * ({@link refusalAsTheDoorServesIt}): an app's own unregistered code is the
+ * door's closed code with `declaredCode`, and a producer's `userMessage`
+ * rides it. A registered code with no `userMessage`, a coded sandboxed
+ * refusal and the engine's unique violation are unchanged byte for byte.
+ *
+ * Read by the six record data tools ({@link dataDoorErrorResult}),
+ * `delete_records`' selection read and the record resource
+ * (`MCPServerRuntime.bridgeResources`). ⛔ Not by `run_action` / `resume_run`
+ * or the metadata tools, whose doors are not `/data`.
+ */
+export function dataDoorRefusalEnvelope(err: unknown, objectName: string): DataDoorRefusalEnvelope | undefined {
+  const envelope = thrownRefusalEnvelope(err);
+  if (envelope === undefined) return undefined;
+  const door = dataDoorAnswerOf(err, objectName);
+  if (serverFaultProvenance(resolveThrownHttpError(err)) !== undefined && isServerFault(door.status)) return undefined;
+  return refusalAsTheDoorServesIt(envelope, door);
+}
+
+/** [#31407] A coded refusal on a `/data` face, with the members the door serves beside it. */
+export interface DataDoorRefusalEnvelope extends ThrownRefusalEnvelope {
+  declaredCode?: string;
+  userMessage?: string;
+}
+
+/**
+ * [#31407] A coded refusal on a `/data` face, read against the door's answer
+ * to the same throw ({@link dataDoorAnswerOf}, `mapDataError`):
+ *
+ * - when the door DEMOTED the code (it serves `declaredCode`: an app's own
+ *   unregistered code, `{ code: 'LEAVE_EXHAUSTED', status: 409 }`), the face
+ *   answers the door's refusal: the closed code
+ *   (`RESOURCE_CONFLICT`), its sentence, its status and `declaredCode`. It
+ *   used to answer `code: 'LEAVE_EXHAUSTED'`, outside the registered
+ *   vocabulary, with no `declaredCode`;
+ * - otherwise the coded envelope stands, and the door's `userMessage` joins
+ *   it when the door serves one (`PERMISSION_DENIED` + `userMessage` answers
+ *   403 with it there). It used to be dropped.
+ *
+ * ⛔ No second demotion rule: whether a code is demoted is the door's
+ * `declaredCode`, never a vocabulary check here. Members render in
+ * `run_action`'s order ({@link errorResultFromThrown}), each omitted when the
+ * door serves none. Only a refusal reaches here ({@link
+ * dataDoorRefusalEnvelope}); a declared 4xx the door answers as a fault (the
+ * sandbox's own fault) serves no `declaredCode` there, so it keeps the
+ * envelope, as #31246 pins it.
+ */
+function refusalAsTheDoorServesIt(envelope: ThrownRefusalEnvelope, door: DataDoorAnswer): DataDoorRefusalEnvelope {
+  if (door.declaredCode !== undefined && door.code !== undefined) {
+    return {
+      code: door.code,
+      message: door.message,
+      status: door.status,
+      declaredCode: door.declaredCode,
+      ...(door.userMessage !== undefined ? { userMessage: door.userMessage } : {}),
+    };
+  }
+  return door.userMessage !== undefined ? { ...envelope, userMessage: door.userMessage } : envelope;
+}
+
+/**
+ * [#31218] The record data tools' tool error: a CODED throw renders exactly as
+ * {@link errorResultWithCode} renders it, and a throw with NO code renders the
+ * answer the `/api/v1/data` door gives the same throw ({@link dataDoorAnswerOf}),
+ * as `{ error: { code, message, status } }` with `isError`.
+ *
+ * Those catches used to answer a code-less throw as its bare message. Measured
+ * on `MCPServerRuntime`: a sandboxed hook body's `throw new Error('…')` (the
+ * QuickJS runner's `SandboxError`, which carries no `code`) reached the agent
+ * as `hook '<name>' threw: Error: …`, the debug wrapper with the hook's name and
+ * no code, where `/data` answers `400 HOOK_ABORTED` with the inner sentence. The
+ * family is answered the same way, each as the door answers it:
+ *
+ * - an undeclared sandboxed abort: `HOOK_ABORTED`, the door's 4xx, the inner
+ *   sentence only;
+ * - a code hook's bare `throw new Error`, a driver error: `500 INTERNAL_ERROR`,
+ *   `Internal server error`. The thrown message is WITHHELD, as the door
+ *   withholds it, and reaches the operator instead, through the one 5xx log
+ *   line every door prints (`logServerFault`);
+ * - a throw that declared a status and no code (the runtime's
+ *   `{ statusCode: 503, message }` when no data service is registered): the
+ *   status, and no code, since the door invents none. A declared 5xx's prose is
+ *   withheld there too.
+ *
+ * [#31373] The door's `declaredCode` and `userMessage` ride after `status`
+ * when it serves them, as `run_action` renders `/actions`' ({@link
+ * errorResultFromThrown}): `{ error: { code, message, status, declaredCode?,
+ * userMessage? } }`.
+ *
+ * ⛔ The coded path is read FIRST and is unchanged: a thrown `code` keeps
+ * {@link thrownRefusalEnvelope}'s rendering byte for byte, its unique-violation
+ * spelling included. [#31273, #31341] Except where the door answers the coded
+ * throw as a server fault (a driver's own code, a declared 5xx): see
+ * {@link dataDoorRefusalEnvelope}.
+ *
+ * Only these six tools. `delete_records` groups its rows through the same door
+ * ({@link rowRefusalOf}); its outer catch also renders this file's own
+ * code-less sentences, which the door's message heuristics would misread, so
+ * it keeps {@link errorResultWithCode}.
+ */
+function dataDoorErrorResult(err: unknown, tool: DataDoorTool | typeof DELETE_RECORDS_TOOL, objectName: string) {
+  const envelope = dataDoorRefusalEnvelope(err, objectName);
+  if (envelope) return codedErrorResult({ ...envelope });
+  const door = dataDoorAnswerOf(err, objectName);
+  if (isServerFault(door.status)) {
+    logServerFault({
+      status: door.status,
+      error: err,
+      ...(door.code !== undefined ? { code: door.code } : {}),
+      request: { method: 'tools/call', path: `${tool} ${objectName}` },
+    });
+  }
+  return codedErrorResult(door);
+}
+
+/**
+ * The tools whose throw the `/meta` read doors would answer: the object-schema
+ * reads and `list_actions`. {@link metaDoorErrorResult} renders their catches.
+ */
+type MetaDoorTool = 'list_objects' | 'describe_object' | 'validate_expression' | 'list_actions';
+
+/**
+ * [#31272] The metadata tools' and `list_actions`' tool error: a throw the
+ * `/meta` door answers as a server fault renders that door's answer, logged
+ * once for the operator; every other throw renders through
+ * {@link errorResultWithCode}, byte for byte as before.
+ *
+ * Those catches rendered every throw through {@link errorResultWithCode}, so a
+ * bridge member that FAULTED handed the agent its raw text (`socket hang up`)
+ * or, for a driver's own string code, `{ code: SQLITE_BUSY, message: <driver
+ * text> }` as if a rule had refused. The `/meta` read doors answer the same
+ * throws `500 INTERNAL_ERROR 'Internal server error'` and `500 DATABASE_ERROR
+ * 'Internal data error'`: they call `handleRouteError` (`@objectstack/rest`)
+ * with no object, which answers a fault with `mapDataError`'s classification
+ * (`@objectstack/types`). ⛔ So this asks that reader, through
+ * {@link dataDoorAnswerOf} with no object, and decides with the doors' own
+ * `isServerFault`; it holds no copy of either. The thrown text reaches the
+ * operator through `logServerFault`, never the agent.
+ *
+ * A declared 5xx is a fault there too: the object-schema reads' own
+ * `FIELD_VISIBILITY_UNRESOLVED` / 503 keeps its code and status and has its
+ * prose withheld, as the `/meta` object read answers it
+ * (`sendFieldVisibilityFault`).
+ *
+ * ⛔ A refusal (the door answers 4xx) is not reclassified: its code, sentence
+ * and status render as {@link errorResultWithCode} renders them, and a
+ * code-less 4xx keeps its bare message. This is {@link rowRefusalOf}'s line,
+ * drawn with the same reader.
+ */
+function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName?: string) {
+  const door = dataDoorAnswerOf(err);
+  if (!isServerFault(door.status)) return errorResultWithCode(err);
+  logServerFault({
+    status: door.status,
+    error: err,
+    ...(door.code !== undefined ? { code: door.code } : {}),
+    request: { method: 'tools/call', path: objectName !== undefined ? `${tool} ${objectName}` : tool },
+  });
+  // [#31373] The `/data` door's `declaredCode` / `userMessage` are the record
+  // data faces' members; this answer is unchanged by them.
+  return codedErrorResult({ ...(door.code !== undefined ? { code: door.code } : {}), message: door.message, status: door.status });
 }
 
 /**
@@ -488,14 +914,14 @@ function errorResultWithCode(err: unknown) {
  * #28781's carrier the bridge attached, with the stale column logged once at
  * `error`. An agent that read an error would apply the write again. Any other
  * throw, including every refusal raised before the write, renders through
- * `otherwise` exactly as before: {@link errorResultWithCode} for the data tools,
+ * `otherwise`: {@link dataDoorErrorResult} for the data tools,
  * {@link errorResultFromThrown} for `run_action`, whose answer the runtime
  * composed and attached.
  */
 function landedWriteResultOrError(
   err: unknown,
   objectName: string | undefined,
-  otherwise: (err: unknown) => ReturnType<typeof errorResultWithCode> = errorResultWithCode,
+  otherwise: (err: unknown) => ReturnType<typeof errorResultWithCode>,
 ) {
   const earned = earnedAnswerOf(err);
   if (earned === undefined) return otherwise(err);
@@ -503,11 +929,481 @@ function landedWriteResultOrError(
   return textResult(earned);
 }
 
-function codedErrorResult(error: ThrownRefusalEnvelope & { details?: unknown }) {
+/**
+ * The coded-refusal envelope every MCP tool error with a code answers with:
+ * `isError: true`, text `{ "error": { code, message, status, … } }`.
+ * [#31605] Exported for the tool-call interceptor's refusal
+ * (`tool-call-interceptor.ts`), so a host's deny reaches the client in the
+ * envelope the tools' own refusals use; not on the package entry.
+ */
+export function codedErrorResult(error: {
+  code?: string;
+  message: string;
+  status?: number;
+  declaredCode?: string;
+  userMessage?: string;
+  details?: unknown;
+}) {
   return {
     content: [{ type: 'text' as const, text: jsonText({ error }) }],
     isError: true as const,
   };
+}
+
+/**
+ * The code and status the confirmation gate answers with, on `run_action`'s
+ * door (the runtime's `actionConfirmationRefusal`) and on `delete_record`'s
+ * (below). Typed as the registered vocabulary, so a misspelling fails to
+ * compile instead of reaching a client as a code nobody branches on.
+ */
+const ACTION_CONFIRMATION_REQUIRED: ErrorCode = 'ACTION_CONFIRMATION_REQUIRED';
+const ACTION_CONFIRMATION_REQUIRED_HTTP_STATUS = 428;
+
+/** The `details.actionName` a `delete_record` refusal names: the tool the refused call addressed. */
+const DELETE_RECORD_TOOL = 'delete_record';
+
+/**
+ * The confirmation gate on the MCP `delete_record` tool: `run_action`'s gate,
+ * widened by the maintainer's decision to this one tool, for every object.
+ *
+ * A delete over MCP is permanent, and the bridge's checks say whether the
+ * caller MAY delete, never whether a human asked for it. So a call that does
+ * not carry the confirmation member as the boolean `true` is refused with the
+ * refusal `run_action` answers an author-gated action with: the same code,
+ * status, envelope keys and `details` shape (`ActionConfirmationRequiredDetails`),
+ * rendered by the same {@link codedErrorResult}. A client that already handles
+ * that refusal confirms with its human and retries this call unchanged but for
+ * the member.
+ *
+ * The runtime's builder is out of reach (`@objectstack/runtime` and this
+ * package do not depend on each other), so the contract types and the shared
+ * renderer are what hold the two refusals to one shape; the dogfood suite
+ * serves both side by side to one caller.
+ *
+ * What it is NOT, as on `run_action`: `confirm: true` is an unverifiable
+ * caller claim. The gate makes forgetting loud; it does not prove a human.
+ *
+ * Scope, as decided: this tool only. REST `DELETE /api/v1/data/...` (the human
+ * path) and `update_record` stay outside it, no object is exempt, and a future
+ * bulk-delete tool takes the same gate.
+ *
+ * Returns `undefined` when the call may proceed.
+ */
+function recordDeleteConfirmationRefusal(
+  objectName: string,
+  recordId: string,
+  request: AIActionConfirmation,
+): DeleteConfirmationRefusal | undefined {
+  if (isDeleteConfirmed(request)) return undefined;
+  return deleteConfirmationRefusal(
+    DELETE_RECORD_TOOL,
+    objectName,
+    `delete_record on '${objectName}' record '${recordId}' carries no confirmation — nothing was deleted. `
+      + 'A delete over MCP is permanent: confirm with the human in the loop, then retry this call with '
+      + `'${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`,
+  );
+}
+
+/** The refusal both delete tools answer an unconfirmed call with: `run_action`'s, addressed to the tool. */
+type DeleteConfirmationRefusal = ThrownRefusalEnvelope & { details: ActionConfirmationRequiredDetails };
+
+/**
+ * Only the boolean `true` attests; absent, `false` and a truthy string do not.
+ * One predicate for `delete_record` and `delete_records`, so the one-row and
+ * the many-row delete cannot disagree about what a confirmation is.
+ */
+function isDeleteConfirmed(request: AIActionConfirmation): boolean {
+  return request[AI_ACTION_CONFIRMATION_MEMBER] === true;
+}
+
+/**
+ * The ONE builder of the delete tools' confirmation refusal: the code, status
+ * and `details` shape (`ActionConfirmationRequiredDetails`) `run_action`'s gate
+ * answers, with `details.actionName` naming the tool the refused call
+ * addressed. `delete_record` and `delete_records` differ only in the sentence.
+ */
+function deleteConfirmationRefusal(actionName: string, objectName: string, message: string): DeleteConfirmationRefusal {
+  return {
+    code: ACTION_CONFIRMATION_REQUIRED,
+    message,
+    status: ACTION_CONFIRMATION_REQUIRED_HTTP_STATUS,
+    details: {
+      actionName,
+      objectName,
+      confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+    },
+  };
+}
+
+// ── delete_records: many rows of one object in one confirmed call (#30891) ──
+
+/** The `details.actionName` a `delete_records` refusal names: the tool the refused call addressed. */
+const DELETE_RECORDS_TOOL = 'delete_records';
+
+/**
+ * [#30891] The most records one `delete_records` call deletes.
+ *
+ * 200 is the bound the platform's other many-row delete door already applies
+ * per request: REST `POST /data/:object/deleteMany` refuses more ids than
+ * `RestServerConfig.batch.maxBatchSize`, whose default is 200. Like that
+ * route, this tool deletes ONE ROW AT A TIME (each row its own engine delete,
+ * so each row meets its own delete rules and cascade), so the cap also bounds
+ * the length of one call. A selection that matches more answers how many
+ * remain, and the next call continues.
+ */
+export const DELETE_RECORDS_MAX_PER_CALL = 200;
+
+/**
+ * The cap one `delete_records` call runs under: {@link DELETE_RECORDS_MAX_PER_CALL},
+ * or the deployment's read window when that is smaller.
+ *
+ * The selection is READ before anything is deleted, and the data door's read
+ * window refuses (never clamps) a read asking for more rows than
+ * `OS_DATA_MAX_PAGE_SIZE` or walking past `OS_DATA_QUERY_ROW_BUDGET`
+ * (`@objectstack/types`' `query-read-limits.ts`). A cap above either would
+ * make every filter selection a refusal on that host, and the caller has no
+ * `limit` to lower. So the cap follows the window down, and the answer's
+ * `cap` names the number used.
+ */
+export function deleteRecordsCap(env?: Record<string, string | undefined>): number {
+  const { maxPageSize, rowBudget } = resolveQueryReadLimits(env);
+  return Math.min(DELETE_RECORDS_MAX_PER_CALL, maxPageSize ?? Infinity, rowBudget ?? Infinity);
+}
+
+/** How many ids of the selection a preview names. */
+const DELETE_RECORDS_SAMPLE_SIZE = 10;
+
+/** The alias the selection's count is read under. */
+const DELETE_RECORDS_COUNT_ALIAS = 'matched';
+
+/** What one `delete_records` call selects: a filter, or an id list. Exactly one. */
+interface DeleteRecordsSelection {
+  where?: Record<string, unknown>;
+  recordIds?: string[];
+}
+
+/** The selection, resolved under the caller's permissions and row-level security. */
+interface ResolvedDeleteSelection {
+  /** The cap this call runs under ({@link deleteRecordsCap}). */
+  cap: number;
+  /** The ids a confirmed call attempts NOW, at most the cap: by id for a filter, the caller's order for a list. */
+  attempt: string[];
+  /** How many records the selection matches for this caller, when that is known. */
+  matched?: number;
+  /** True when more records match than one call attempts, whether or not `matched` is known. */
+  moreThanCap: boolean;
+  /** The listed ids that name no record this caller can read (an id-list selection only). */
+  notFound: string[];
+}
+
+/** One group of refused rows: the same code, status and reason, as the delete answered each row. */
+interface DeleteRefusalGroup {
+  code?: string;
+  status?: number;
+  reason: string;
+  count: number;
+  recordIds: string[];
+}
+
+/** The rows a bridge's `query` answered, read off the protocol's `{ records }` shape. */
+function queriedRows(result: unknown, objectName: string): Array<Record<string, unknown>> {
+  const records = (result as { records?: unknown } | null | undefined)?.records;
+  if (!Array.isArray(records)) {
+    // Loud, never "nothing matched": an answer this tool cannot read is not a
+    // selection of zero rows, and a delete planned from it would be a guess.
+    throw new Error(`delete_records could not read the records the query on '${objectName}' answered — nothing was deleted.`);
+  }
+  return records as Array<Record<string, unknown>>;
+}
+
+function idOfRow(row: Record<string, unknown>): string | undefined {
+  const id = row?.id;
+  return typeof id === 'string' && id.length > 0 ? id : typeof id === 'number' ? String(id) : undefined;
+}
+
+/**
+ * Resolve a `delete_records` selection to the ids one call attempts, through
+ * the bridge's `query` (and `aggregate`, for the count), so the read runs as
+ * the caller: a record the caller cannot read is never selected, and so never
+ * deleted by this tool.
+ *
+ * A filter is read in id order, at most the cap. Whether more match than one
+ * call attempts is then the count's answer, asked of `aggregate` only when the
+ * read came back full. ⛔ Not a read of one row past the cap: the data door's
+ * read window REFUSES a read over the host's page size or row budget
+ * (`OS_DATA_MAX_PAGE_SIZE` / `OS_DATA_QUERY_ROW_BUDGET`, "refuse, never
+ * clamp"), so a 201-row probe would refuse every filter on a host that sets
+ * either at 200. A bridge without `aggregate` (or whose count cannot be read)
+ * keeps the probe, the one way it has to tell "exactly the cap" from "more".
+ * An id list is at most the cap long (the handler refuses a longer one before
+ * reading), so one read of those ids answers both which exist and how many.
+ */
+async function resolveDeleteSelection(
+  bridge: McpDataBridge,
+  objectName: string,
+  selection: DeleteRecordsSelection,
+  cap: number,
+): Promise<ResolvedDeleteSelection> {
+  if (selection.recordIds) {
+    const listed = [...new Set(selection.recordIds)];
+    const rows = queriedRows(
+      await bridge.query(objectName, { where: { id: { $in: listed } }, fields: ['id'], limit: listed.length }),
+      objectName,
+    );
+    const found = new Set(rows.map(idOfRow).filter((id): id is string => id !== undefined));
+    const attempt = listed.filter((id) => found.has(id));
+    return { cap, attempt, matched: attempt.length, moreThanCap: false, notFound: listed.filter((id) => !found.has(id)) };
+  }
+  const where = selection.where ?? {};
+  const readIds = async (limit: number): Promise<string[]> =>
+    queriedRows(
+      await bridge.query(objectName, { where, fields: ['id'], orderBy: [{ field: 'id', order: 'asc' }], limit }),
+      objectName,
+    )
+      .map(idOfRow)
+      .filter((id): id is string => id !== undefined);
+
+  if (typeof bridge.aggregate === 'function') {
+    const ids = await readIds(cap);
+    if (ids.length < cap) return { cap, attempt: ids, matched: ids.length, moreThanCap: false, notFound: [] };
+    const count = await countSelection(bridge, objectName, where);
+    if (count !== undefined) {
+      // A count below the rows just read is a write landing between the two
+      // reads; the read is the floor.
+      const matched = Math.max(count, ids.length);
+      return { cap, attempt: ids, matched, moreThanCap: matched > cap, notFound: [] };
+    }
+  }
+  const probed = await readIds(cap + 1);
+  const moreThanCap = probed.length > cap;
+  return {
+    cap,
+    attempt: probed.slice(0, cap),
+    ...(moreThanCap ? {} : { matched: probed.length }),
+    moreThanCap,
+    notFound: [],
+  };
+}
+
+/** The selection's count under the caller's row-level security, or `undefined` when the bridge cannot say. */
+async function countSelection(
+  bridge: McpDataBridge,
+  objectName: string,
+  where: Record<string, unknown>,
+): Promise<number | undefined> {
+  if (typeof bridge.aggregate !== 'function') return undefined;
+  const rows = await bridge.aggregate(objectName, {
+    where,
+    aggregations: [{ function: 'count', alias: DELETE_RECORDS_COUNT_ALIAS }],
+  });
+  const value = (rows?.[0] as Record<string, unknown> | undefined)?.[DELETE_RECORDS_COUNT_ALIAS];
+  if (typeof value === 'bigint') return Number(value);
+  // A SQL driver may answer a COUNT as a decimal string (a 64-bit integer).
+  if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** A row the delete stopped at: a fault, not a delete rule's refusal. */
+interface DeleteFault {
+  recordId: string;
+  code?: string;
+  status?: number;
+  message: string;
+}
+
+/** What {@link deleteEach} did with the attempt set, in order. */
+interface DeleteEachOutcome {
+  /** Rows the bridge was asked to delete: every row before a fault, and the faulted one. */
+  attempted: number;
+  deleted: number;
+  refusals: DeleteRefusalGroup[];
+  notRemoved: string[];
+  /** Set when a fault stopped the walk; the rows after it were not attempted. */
+  fault?: DeleteFault;
+  notAttempted: number;
+}
+
+/**
+ * A refused row's group key, or `undefined` when the throw is a FAULT.
+ *
+ * The line is the one the platform's data door already draws, read with its
+ * own classifier so the two doors cannot disagree on a row: `mapDataError`
+ * (`@objectstack/types`), the REST `/data` door's table, which the bulk-import
+ * runner adopts per row too. A 4xx verdict is a refusal; a 5xx verdict is a
+ * fault. That covers the coded and the uncoded throw alike:
+ *
+ * - a delete rule's coded refusal (`RECORD_LOCKED` / 409, `PERMISSION_DENIED`
+ *   / 403, a package's own code at 422) is a 4xx refusal, grouped under the
+ *   code and message {@link thrownRefusalEnvelope} reads, the spelling
+ *   `delete_record` answers;
+ * - a sandboxed hook body's deliberate throw carries no code; the door
+ *   answers it `400 HOOK_ABORTED` with the body's own sentence, and so is it
+ *   grouped here;
+ * - a code hook's bare `throw new Error`, a lost connection, a driver error
+ *   are faults, and so is a driver's OWN string code (`ECONNREFUSED`, a SQL
+ *   state such as `57P01`, `SQLITE_BUSY`): a `code` is not a rule's verdict
+ *   by being a string, and the door answers each of those `500`.
+ *
+ * Measured on a booted stack: REST `DELETE` answers the sandboxed refusal
+ * `400 HOOK_ABORTED` and the code hook's bare throw `500 INTERNAL_ERROR`.
+ */
+function rowRefusalOf(err: unknown, objectName: string): Omit<DeleteRefusalGroup, 'count' | 'recordIds'> | undefined {
+  const door = dataDoorAnswerOf(err, objectName);
+  if (isServerFault(door.status)) return undefined;
+  const envelope = thrownRefusalEnvelope(err);
+  if (envelope) return { code: envelope.code, status: envelope.status ?? door.status, reason: envelope.message };
+  return { ...(door.code !== undefined ? { code: door.code } : {}), status: door.status, reason: door.message };
+}
+
+/**
+ * Delete each id of the attempt set through the bridge's `remove`, the member
+ * `delete_record` deletes with, so each row passes exactly the checks a
+ * one-row delete passes: the object's exposure, the caller's permissions and
+ * row-level security, and the package's delete rules (`beforeDelete` hooks,
+ * restricted relations). No row is deleted any other way, so no rule is
+ * bypassed, for an administrator either (the maintainer's ruling on the card).
+ *
+ * A refused row stays, and its refusal is grouped: rows refused with the same
+ * code, status and reason are one group ({@link rowRefusalOf}; a refusal's
+ * `details` is never read, as the one-row tool renders a throw). A delete
+ * that landed under a parent roll-up the engine could not recompute counts as
+ * deleted, as `delete_record` answers it, with the stale column logged.
+ *
+ * ⛔ A FAULT stops the walk. A driver error or a crash is not a rule's verdict
+ * on that row: grouped as a "refusal" it would read as the rules' answer, and
+ * the rows after it would meet the same broken store. So the first fault ends
+ * the call, and the answer names it, the row it stopped at, and what was
+ * already deleted (those deletes stay deleted).
+ */
+async function deleteEach(
+  bridge: McpDataBridge,
+  objectName: string,
+  ids: readonly string[],
+): Promise<DeleteEachOutcome> {
+  let deleted = 0;
+  let attempted = 0;
+  const notRemoved: string[] = [];
+  const groups = new Map<string, DeleteRefusalGroup>();
+  let fault: DeleteFault | undefined;
+  for (const id of ids) {
+    attempted++;
+    try {
+      const answer = await bridge.remove(objectName, id);
+      // `success: false` is the protocol's "matched, and deliberately NOT
+      // removed" (a reset, not a delete); anything else is a deletion.
+      if ((answer as { success?: unknown } | null | undefined)?.success === false) notRemoved.push(id);
+      else deleted++;
+    } catch (err) {
+      if (earnedAnswerOf(err) !== undefined) {
+        for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) console.error(`[MCP] ${line}`);
+        deleted++;
+        continue;
+      }
+      const refusal = rowRefusalOf(err, objectName);
+      if (!refusal) {
+        const envelope = thrownRefusalEnvelope(err);
+        fault = {
+          recordId: id,
+          ...(envelope ? { code: envelope.code } : {}),
+          ...(envelope?.status !== undefined ? { status: envelope.status } : {}),
+          message: envelope?.message ?? messageOf(err),
+        };
+        break;
+      }
+      const key = JSON.stringify([refusal.code ?? null, refusal.status ?? null, refusal.reason]);
+      const group = groups.get(key) ?? { ...refusal, count: 0, recordIds: [] };
+      group.count++;
+      group.recordIds.push(id);
+      groups.set(key, group);
+    }
+  }
+  // Largest group first; a tie keeps the order the rows were refused in.
+  const refusals = [...groups.values()].sort((a, b) => b.count - a.count);
+  return { attempted, deleted, refusals, notRemoved, ...(fault ? { fault } : {}), notAttempted: ids.length - attempted };
+}
+
+/** How many records one call names: the exact count, or that more than the cap match. */
+function selectionCount(resolved: ResolvedDeleteSelection): { matched: number } | { matchedMoreThan: number } {
+  return resolved.matched !== undefined ? { matched: resolved.matched } : { matchedMoreThan: resolved.cap };
+}
+
+function deleteRecordsPreview(objectName: string, resolved: ResolvedDeleteSelection) {
+  return {
+    object: objectName,
+    ...selectionCount(resolved),
+    wouldAttempt: resolved.attempt.length,
+    cap: resolved.cap,
+    sampleRecordIds: resolved.attempt.slice(0, DELETE_RECORDS_SAMPLE_SIZE),
+    ...(resolved.notFound.length > 0 ? { notFound: resolved.notFound } : {}),
+    note:
+      'Nothing was deleted. The object\'s delete rules (locks, restricted relations, permissions) are judged per '
+      + 'record when the delete runs: a confirmed call deletes the records they allow and answers the rest grouped '
+      + 'by reason, with their ids.',
+  };
+}
+
+/** The unconfirmed `delete_records` call's refusal sentence. */
+function deleteRecordsRefusalMessage(objectName: string, resolved: ResolvedDeleteSelection): string {
+  const count = resolved.matched !== undefined
+    ? `${resolved.matched} record(s)`
+    : `more than ${resolved.cap} records`;
+  return (
+    `delete_records on '${objectName}' carries no confirmation — nothing was deleted. The selection matches ${count}; `
+    + `a confirmed call deletes up to ${resolved.cap} of them. A delete over MCP is permanent: show `
+    + `the preview to the human in the loop, then retry this call with '${AI_ACTION_CONFIRMATION_MEMBER}': true on the request.`
+  );
+}
+
+/** What a confirmed `delete_records` call answers: the outcome per row, counted and grouped. */
+function deleteRecordsOutcome(objectName: string, resolved: ResolvedDeleteSelection, done: DeleteEachOutcome) {
+  const refused = done.refusals.reduce((n, g) => n + g.count, 0);
+  // Of the records the selection matched when this call began, how many still
+  // match: the refused, the not removed, the faulted, the not attempted and
+  // the ones past the cap.
+  const remaining = resolved.matched !== undefined ? resolved.matched - done.deleted : undefined;
+  const beyondCap = resolved.matched !== undefined ? resolved.matched - resolved.attempt.length : undefined;
+  const next: string[] = [];
+  if (resolved.moreThanCap && !done.fault) {
+    next.push(
+      `${beyondCap !== undefined ? beyondCap : 'More'} matching record(s) were past this call's cap of `
+        + `${resolved.cap}: call again with the same selection and confirm: true to continue.`,
+    );
+  }
+  if (refused > 0 && resolved.moreThanCap && !done.fault) {
+    next.push(
+      'Refused records still match the selection and are attempted again first; to move past them, exclude their ids '
+        + '(for example {"id": {"$nin": [...]}} in where).',
+    );
+  }
+  return {
+    object: objectName,
+    ...selectionCount(resolved),
+    attempted: done.attempted,
+    deleted: done.deleted,
+    refused,
+    refusals: done.refusals,
+    ...(done.notRemoved.length > 0 ? { notRemoved: done.notRemoved } : {}),
+    ...(resolved.notFound.length > 0 ? { notFound: resolved.notFound } : {}),
+    ...(done.fault ? { stoppedAt: done.fault.recordId, notAttempted: done.notAttempted } : {}),
+    ...(remaining !== undefined ? { remaining } : {}),
+    cap: resolved.cap,
+    ...(next.length > 0 ? { next: next.join(' ') } : {}),
+  };
+}
+
+/**
+ * The tool error a fault answers: the fault itself (its code and status when
+ * it declared them), the row it stopped at, and the call's progress, since
+ * the records deleted before it stay deleted and an agent that read a bare
+ * error would retry them as if nothing had happened.
+ */
+function deleteRecordsFaultMessage(objectName: string, done: DeleteEachOutcome & { fault: DeleteFault }): string {
+  return (
+    `delete_records on '${objectName}' stopped at record '${done.fault.recordId}': ${done.fault.message} `
+    + 'This is a fault, not a delete rule\'s refusal, so no record after it was attempted. '
+    + `${done.deleted} record(s) were deleted before it and stay deleted; ${done.notAttempted} were not attempted. `
+    + 'Retry the same call once the fault is resolved: it selects what still matches.'
+  );
 }
 
 /** What {@link thrownRefusalEnvelope} reads off a thrown coded refusal. */
@@ -552,14 +1448,41 @@ export interface ThrownRefusalEnvelope {
  * (`developerMessage`, `object`, `field`) in their envelope's context slot;
  * this envelope has none. It is `code`, `message` and `status`, and the data
  * tools withhold `details` by design ({@link errorResultWithCode}).
+ *
+ * ## The caller-addressed sentence of a sandboxed refusal (#31246)
+ *
+ * A QuickJS hook or action body that throws with a declared `code` and
+ * `status` leaves the runner as a `SandboxError` whose `.message` is the
+ * `<kind> '<name>' threw: Error: …` debug wrapper, naming the hook, and whose
+ * `.innerMessage` is the sentence the author addressed to the caller. The
+ * `message` here is `sandboxBusinessMessage` (`@objectstack/types`), the read
+ * the `/api/v1/data` door makes for the same throw, and `.message` only when
+ * that read declines: not a sandbox refusal, or a body that crashed. ⛔ One
+ * reader, never a copy of its logic here, and never a strip of the wrapper's
+ * prose: a non-sandbox refusal keeps its own message byte for byte. The code
+ * and status are unchanged.
+ *
+ * ## A sandboxed body that crashed is not a coded refusal (#31269)
+ *
+ * A body that CRASHED while declaring a code (`throw Object.assign(new
+ * TypeError('boom'), { code, status })`) is a fault: the doors ask
+ * `isSandboxCrash` (`@objectstack/types`) before any code-gated arm and answer
+ * `500 INTERNAL_ERROR`, because a declared code is the author's statement
+ * about a failure mode they handled, and a crash is not one. This reader asks
+ * the same predicate and answers `undefined`, so every face renders the crash
+ * as it renders the same crash with no code: the record data tools answer the
+ * `/data` door's fault ({@link dataDoorErrorResult}), and no face serves the
+ * declared code, its business status or the runner's wrapper as a refusal.
+ * ⛔ One predicate, never a copy of the crash read here.
  */
 export function thrownRefusalEnvelope(err: unknown): ThrownRefusalEnvelope | undefined {
   const thrownCode = (err as { code?: unknown } | null | undefined)?.code;
   if (typeof thrownCode !== 'string' || thrownCode.length === 0) return undefined;
+  if (isSandboxCrash(err)) return undefined;
   const status = (err as { status?: unknown }).status;
   return {
     code: wireCodeOf(err, thrownCode),
-    message: messageOf(err),
+    message: sandboxBusinessMessage(err) ?? messageOf(err),
     ...(typeof status === 'number' ? { status } : {}),
   };
 }
@@ -630,34 +1553,86 @@ function jsonText(value: unknown): string {
  */
 const VALIDATE_SITE_MAP: Record<
   string,
-  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType; optionLabels?: true }
+  {
+    role: FieldRole;
+    scope: 'record' | 'flattened';
+    slot: z.ZodType;
+    optionLabels?: true;
+    /**
+     * [#29904, #29926, #29959] What the gate's runtime does on a fault at this
+     * site, from the caller's optional `severity` / `triggerKind` — the two
+     * facts `@objectstack/lint`'s `faultOutcomeOf` ledger reads off the rule
+     * and the flow — and (#30026) `sweepsTypedObject`, the ledger's third: a
+     * time-relative sweep's object is `objectName` (no `sweepObject`, or the
+     * same one). Absent: the site declares none.
+     */
+    faultOutcome?: (inputs: {
+      severity: ValidationSeverity;
+      triggerKind: FlowTriggerOrNone;
+      sweepsTypedObject: boolean;
+    }) => ExprFaultOutcome | undefined;
+  }
 > = {
   formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
-  validation: { role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema },
-  flow_condition: { role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema },
+  // [#29904, #29926] A `severity: 'error'` rule (the default) fails closed: a
+  // fault refuses the write. An advisory rule (`warning` / `info`) fails open:
+  // the rule is skipped and the write proceeds. The gate grades a
+  // text-vs-number comparison an error worded for each; the tool answers what
+  // the gate will for the severity it is told.
+  validation: {
+    role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema,
+    faultOutcome: ({ severity }) => (severity === 'warning' || severity === 'info' ? 'fail-open' : 'fail-closed'),
+  },
+  // [#29926, #29959] A record-triggered flow's start, edge or `decision`
+  // branch condition (the default `triggerKind`): the trigger record is
+  // flattened into the run's variables, a fault fails the run while the write
+  // that fired it lands, and the gate grades a text-vs-number comparison an
+  // error worded so. A time-relative sweep launches each run with a row of
+  // the swept object as its record, so a sweep of `objectName` is graded the
+  // same; a sweep of another object (`sweepObject`, #30026) binds a row of
+  // THAT object, and like any other trigger kind declares no outcome: the
+  // gate's `type-mismatch-run-may-fail` warning.
+  flow_condition: {
+    role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema,
+    faultOutcome: ({ triggerKind, sweepsTypedObject }) =>
+      (triggerKind === 'record_change' || (triggerKind === 'time_relative' && sweepsTypedObject) ? 'run-fails' : undefined),
+  },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
 };
+
+/** [#29959] A validation rule's `severity`, as `ValidationRuleSchema` spells it. */
+type ValidationSeverity = 'error' | 'warning' | 'info';
+const VALIDATION_SEVERITIES = ['error', 'warning', 'info'] as const satisfies readonly ValidationSeverity[];
+/**
+ * [#29959] A flow's trigger kind, as `resolveFlowTriggerKind` answers it, or
+ * `none` for a flow with no auto-launch trigger (a screen flow, an
+ * autolaunched flow started by hand, an action or a parent flow).
+ */
+type FlowTriggerOrNone = FlowTriggerKind | 'none';
+const FLOW_TRIGGER_INPUTS: [FlowTriggerOrNone, ...FlowTriggerOrNone[]] = ['none', ...FLOW_TRIGGER_KINDS];
 
 // ── Tool arguments: an undeclared key is REFUSED, not stripped (#16913) ──────
 
 /**
- * The one sentence every tool's refusal ends with — why the key the caller
- * just sent used to disappear without a word.
+ * [#30126 row 15] The refusal says which key is wrong and what to send
+ * instead, and stops there: no sentence on why the key used to be dropped.
  *
- * Kept identical across the eleven tools on purpose. Triage's reading of this
- * card was that one tool holding two postures is evidence there was never a
- * rule; the answer to that is one posture, stated in one sentence, on every
- * door — not eleven bespoke ones.
+ * `strictUnknownKeyError` (`@objectstack/spec/shared`) closes every message
+ * with its surface's `history` sentence. On an authorable metadata schema that
+ * sentence tells an author why a file that used to load is now refused; here
+ * the reader is an agent mid-call, and the history of #16913 (a mis-guessed
+ * name used to be stripped by the SDK, so the call succeeded with a different
+ * answer) tells it nothing it can act on. So the factory is handed an empty
+ * history and the separator it leaves is trimmed: the message ends at its last
+ * fix channel. The prose that explains the posture stays in this file, beside
+ * {@link strictToolInput}, where the readers who need it look.
  */
-// ⛔ No tracker id in this string. It is RUNTIME prose — it reaches an MCP
-// client, an agent transcript and any log that captures a tool error, and none
-// of those readers can resolve `#NNNN` (`pnpm check:doc-authoring`). The anchor
-// belongs in a comment, where the reader who can resolve it is already looking:
-// the card is #16913, and the campaign it extends is #4001.
-const UNKNOWN_ARG_HISTORY =
-  'This argument used to be dropped silently and the call still succeeded, so a mis-guessed '
-  + 'parameter name answered a differently filtered or differently ordered set with no way for '
-  + 'the caller to tell.';
+function withoutHistorySentence(map: z.core.$ZodErrorMap): z.core.$ZodErrorMap {
+  return (issue) => {
+    const answer = map(issue);
+    return typeof answer === 'string' ? answer.trimEnd() : answer;
+  };
+}
 
 /**
  * Close an MCP tool's argument shape against keys it does not declare.
@@ -731,12 +1706,12 @@ function strictToolInput<T extends z.ZodRawShape>(
 ) {
   return z
     .object(shape, {
-      error: strictUnknownKeyError({
+      error: withoutHistorySentence(strictUnknownKeyError({
         surface: options.surface,
         knownKeys: Object.keys(shape),
         aliases: options.aliases,
-        history: UNKNOWN_ARG_HISTORY,
-      }),
+        history: '',
+      })),
     })
     .strict();
 }
@@ -767,16 +1742,118 @@ const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
  */
 export function wireBridgeTools(
   server: McpServer,
-  bridge: McpDataBridge & Partial<McpActionBridge> & Partial<McpFederationBridge>,
+  bridge: McpDataBridge & Partial<McpActionBridge> & Partial<McpFederationBridge> & McpFileBridge,
   options: RegisterObjectToolsOptions & RegisterActionToolsOptions = {},
 ): string[] {
   const registered = registerObjectTools(server, bridge, options);
+  // [#30892] `read_file` / `create_upload_link`, each only where the bridge
+  // implements its member.
+  registered.push(...registerFileTools(server, bridge, options));
   if (typeof bridge.listActions === 'function' && typeof bridge.runAction === 'function') {
     registered.push(...registerActionTools(server, bridge as McpActionBridge, options));
   }
   if (typeof bridge.listRemoteTables === 'function' && typeof bridge.importObject === 'function') {
     registered.push(...registerFederationTools(server, bridge as McpFederationBridge, options));
   }
+  // [ADR-0149 D2] `list_datasets` / `query_dataset`, only where the bridge
+  // carries all three dataset members and the grant admits `data:read`.
+  registered.push(...registerDatasetTools(server, bridge, options));
+  return registered;
+}
+
+/** The dataset members together: the pair registers only on a bridge that carries all three. */
+type McpDatasetBridge = Required<Pick<McpDataBridge, 'listDatasets' | 'queryDataset' | 'datasetToolDefinitions'>>;
+
+/** Whether `bridge` carries every dataset member ({@link McpDataBridge.listDatasets}). */
+export function hasDatasetTools(bridge: Partial<McpDataBridge>): bridge is McpDataBridge & McpDatasetBridge {
+  return (
+    typeof bridge.listDatasets === 'function'
+    && typeof bridge.queryDataset === 'function'
+    && typeof bridge.datasetToolDefinitions === 'function'
+  );
+}
+
+/**
+ * [ADR-0149 D2] Register the dataset pair, `list_datasets` and
+ * `query_dataset`, over the bridge's dataset members.
+ *
+ * - **Read family.** Both register under `data:read` exactly as
+ *   `aggregate_records` does: `grantedScopes` undefined (an API key, a
+ *   session) keeps them, a scope list without `data:read` registers neither,
+ *   and the SDK then answers a call as an unknown tool — the refusal every
+ *   other read tool gives outside its grant.
+ * - **Optional.** A bridge missing any of the three members registers
+ *   neither tool, and nothing else on the surface changes (D2: "a bridge that
+ *   omits them registers no dataset tools").
+ * - **One definition.** Each tool's `description` — the D3 selection rule the
+ *   model reads — is the service-analytics definition the bridge hands over
+ *   ({@link McpDataBridge.datasetToolDefinitions}); a tool the bridge defines
+ *   no description for is not registered. The input schema is the spec
+ *   declaration that definition's `parameters` is projected from
+ *   (`ListDatasetsInputSchema` / `QueryDatasetInputSchema`), taken whole the
+ *   way `aggregate_records` takes `AggregationNodeSchema`: the SDK then
+ *   refuses an undeclared key before dispatch with the spec's own
+ *   prescription (`dataset` → `datasetName`, a selection member put beside
+ *   `selection`), which a JSON Schema round-trip would reduce to a bare
+ *   "Unrecognized key".
+ * - **No second gate, none bypassed (D4).** Every call goes to the bridge
+ *   member, which runs the service-analytics executor AS the principal; a
+ *   refusal comes back in its ADR-0112 envelope ({@link errorResultWithCode}).
+ */
+export function registerDatasetTools(
+  server: McpServer,
+  bridge: Partial<McpDataBridge>,
+  options: RegisterObjectToolsOptions = {},
+): string[] {
+  const registered: string[] = [];
+  if (!hasDatasetTools(bridge)) return registered;
+  const scopes = options.grantedScopes;
+  if (scopes && !scopes.includes(MCP_OAUTH_SCOPE_DATA_READ)) return registered;
+  const maxRows = options.maxQueryLimit ?? DEFAULT_MAX_LIMIT;
+  const definitions = bridge.datasetToolDefinitions();
+  const descriptionOf = (name: string): string | undefined =>
+    definitions.find((d) => d.name === name)?.description;
+
+  const listDescription = descriptionOf(LIST_DATASETS_TOOL_NAME);
+  if (listDescription) {
+    registered.push(LIST_DATASETS_TOOL_NAME);
+    server.registerTool(
+      LIST_DATASETS_TOOL_NAME,
+      {
+        description: listDescription,
+        inputSchema: ListDatasetsInputSchema,
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      },
+      async (args: ListDatasetsInput) => {
+        try {
+          return textResult(await bridge.listDatasets(args));
+        } catch (err) {
+          return errorResultWithCode(err);
+        }
+      },
+    );
+  }
+
+  const queryDescription = descriptionOf(QUERY_DATASET_TOOL_NAME);
+  if (queryDescription) {
+    registered.push(QUERY_DATASET_TOOL_NAME);
+    server.registerTool(
+      QUERY_DATASET_TOOL_NAME,
+      {
+        description: queryDescription,
+        inputSchema: QueryDatasetInputSchema,
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      },
+      async (args: QueryDatasetInput) => {
+        try {
+          return textResult(await bridge.queryDataset(args, { maxRows }));
+        } catch (err) {
+          return errorResultWithCode(err);
+        }
+      },
+    );
+  }
+
   return registered;
 }
 
@@ -840,7 +1917,7 @@ export function registerFederationTools(
         'read-only unless writable is true (which also needs the datasource to allow writes), and maps the ' +
         'remote types to field types. A navigation becomes a lookup only when its target is already imported, ' +
         'so import targets first; the result\'s review lists lossy columns and navigations left out. ' +
-        'Requires the federation write capability.',
+        'Requires the federation read and write capabilities.',
       inputSchema: strictToolInput(
         {
           surface: 'this import_object call',
@@ -1002,7 +2079,7 @@ export function registerObjectTools(
             status: 503,
           });
         } catch (err) {
-          return errorResultWithCode(err);
+          return metaDoorErrorResult(err, 'list_objects');
         }
       },
     );
@@ -1026,7 +2103,7 @@ export function registerObjectTools(
           if (!def) return errorResult(`Object "${objectName}" not found`);
           return textResult(def);
         } catch (err) {
-          return errorResultWithCode(err);
+          return metaDoorErrorResult(err, 'describe_object', objectName);
         }
       },
     );
@@ -1042,9 +2119,15 @@ export function registerObjectTools(
         description:
           'Validate a CEL expression against an object\'s schema before authoring it into metadata. Returns ' +
           'build-time errors (bare field refs, unknown fields, unknown functions) and advisory warnings ' +
-          '(text/boolean fields misused in arithmetic, date-equality pitfalls), plus the fields and stdlib ' +
+          '(text/boolean fields misused in arithmetic, an error at a `validation` site, worded for the rule\'s ' +
+          '`severity`, and at a `flow_condition` of a record-triggered or time-relative flow, where it fails the run; ' +
+          'a warning on any other flow; date-equality pitfalls), plus the fields and stdlib ' +
           'functions in scope so you can self-correct. `site` says where the expression will live: a `formula` ' +
-          'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions).',
+          'field, a `validation`/predicate, or a `flow_condition` (fields are bound bare in flow conditions). ' +
+          'Pass the rule\'s `severity` (validation) or the flow\'s `triggerKind` (flow_condition), so the verdict is ' +
+          'the one the publish gate gives that rule or flow. A time-relative flow\'s conditions read a row of the object ' +
+          'its sweep scans (`timeRelative.object`): pass that object as objectName. A start whose objectName names ' +
+          'another object is refused at publish (`flow-time-relative-object-mismatch`).',
         inputSchema: strictToolInput(
           {
             surface: 'this validate_expression call',
@@ -1065,13 +2148,54 @@ export function registerObjectTools(
               .describe(
                 'Where the expression will live. formula/validation bind `record.<field>`; flow_condition binds fields bare. Default: formula.',
               ),
+            severity: z
+              .enum(VALIDATION_SEVERITIES)
+              .optional()
+              .describe(
+                'site validation only: the rule\'s `severity`. A `warning` / `info` rule is advisory, so a fault skips it ' +
+                'instead of refusing the write, and the verdict says so. Default: error, the rule default.',
+              ),
+            triggerKind: z
+              .enum(FLOW_TRIGGER_INPUTS)
+              .optional()
+              .describe(
+                'site flow_condition only: how the flow is started — record_change (start triggerType record-*), ' +
+                'time_relative, schedule, api, or none (started by hand, an action or a parent flow). A type mismatch ' +
+                'is an error on a record_change or time_relative flow (its record is a row of objectName) and a warning ' +
+                'on any other. Default: record_change.',
+              ),
+            sweepObject: z
+              .string()
+              .optional()
+              .describe(
+                'site flow_condition with triggerKind time_relative only: the flow\'s `timeRelative.object`, the object ' +
+                'the sweep scans and whose rows it hands each run as its record. Its conditions are typed against that ' +
+                'object, so it is objectName too. A start whose objectName names another object is refused at publish ' +
+                '(`flow-time-relative-object-mismatch`); passed with another objectName, the verdict is the gate\'s ' +
+                'advisory one for such a flow, a type mismatch warning. Default: objectName.',
+              ),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       },
-      async ({ objectName, expression, site }) => {
+      async ({ objectName, expression, site, severity, triggerKind, sweepObject }) => {
         const bad = guard(objectName);
         if (bad) return errorResult(bad);
+        // [#29959] Each input describes one site; on another it would be
+        // silently meaningless, so it is refused instead.
+        if (severity !== undefined && site !== 'validation') {
+          return errorResult(`\`severity\` describes a validation rule; it applies only with site "validation", not "${site ?? 'formula'}".`);
+        }
+        if (triggerKind !== undefined && site !== 'flow_condition') {
+          return errorResult(`\`triggerKind\` describes a flow; it applies only with site "flow_condition", not "${site ?? 'formula'}".`);
+        }
+        // [#30026] The swept object describes a time-relative flow alone.
+        if (sweepObject !== undefined && (site !== 'flow_condition' || triggerKind !== 'time_relative')) {
+          return errorResult(
+            `\`sweepObject\` describes a time-relative sweep; it applies only with site "flow_condition" and triggerKind ` +
+              `"time_relative", not site "${site ?? 'formula'}" with triggerKind "${triggerKind ?? 'record_change'}".`,
+          );
+        }
         try {
           const def = (await bridge.describeObject(objectName)) as { fields?: unknown } | null;
           if (!def) return errorResult(`Object "${objectName}" not found`);
@@ -1083,14 +2207,29 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope, slot, optionLabels } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const { role, scope, slot, optionLabels, faultOutcome: outcomeOf } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          const faultOutcome = outcomeOf?.({
+            severity: severity ?? 'error',
+            triggerKind: triggerKind ?? 'record_change',
+            sweepsTypedObject: sweepObject === undefined || sweepObject === objectName,
+          });
           // [#28715] The object's option-bearing fields, where the gate reads
           // them: `label(record.<field>)` on a declared field outside this list
           // is refused as `label-field-no-options` by the one validator.
           const optionFields = optionLabels && bridge.optionFieldsOf
             ? await bridge.optionFieldsOf(objectName)
             : null;
-          const hint = { objectName, fields, fieldTypes, scope, ...(optionFields ? { optionFields } : {}) } as const;
+          const hint = {
+            objectName,
+            fields,
+            fieldTypes,
+            scope,
+            ...(optionFields ? { optionFields } : {}),
+            ...(faultOutcome ? { faultOutcome } : {}),
+            // [#30250] A time-relative sweep's run is fired by no write: the
+            // gate's run-fails sentence there names none, and so does this one.
+            ...(site === 'flow_condition' && triggerKind === 'time_relative' ? { timeRelativeSweep: true } : {}),
+          } as const;
           // The gate's envelope verdict first: `validateExpression` treats a
           // blank source as "not authored" and answers ok, while the save gate
           // refuses it. Each issue is the spec schema's own (code and message),
@@ -1123,7 +2262,7 @@ export function registerObjectTools(
             },
           });
         } catch (err) {
-          return errorResultWithCode(err);
+          return metaDoorErrorResult(err, 'validate_expression', objectName);
         }
       },
     );
@@ -1203,7 +2342,7 @@ export function registerObjectTools(
           if (!diagnosed?.narrowed || !diagnosed.statement) return textResult(result);
           return textResult(withDelegationNotice(result, diagnosed.statement));
         } catch (err) {
-          return errorResultWithCode(err);
+          return dataDoorErrorResult(err, 'query_records', objectName);
         }
       },
     );
@@ -1298,7 +2437,7 @@ export function registerObjectTools(
               ...(truncated ? { truncated: true } : {}),
             });
           } catch (err) {
-            return errorResultWithCode(err);
+            return dataDoorErrorResult(err, 'aggregate_records', objectName);
           }
         },
       );
@@ -1325,7 +2464,7 @@ export function registerObjectTools(
           if (record == null) return errorResult(`Record "${recordId}" not found in "${objectName}"`);
           return textResult(record);
         } catch (err) {
-          return errorResultWithCode(err);
+          return dataDoorErrorResult(err, 'get_record', objectName);
         }
       },
     );
@@ -1354,7 +2493,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName);
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'create_record', objectName));
         }
       },
     );
@@ -1388,7 +2527,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.update(objectName, recordId, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName);
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'update_record', objectName));
         }
       },
     );
@@ -1396,26 +2535,204 @@ export function registerObjectTools(
     server.registerTool(
       note('delete_record'),
       {
-        description: 'Delete a record by id. This is destructive.',
+        description:
+          'Delete a record by id. This is destructive and permanent. A call is REFUSED unless it also sends ' +
+          'confirm: true — ask the human first, then retry; nothing is deleted on a refused call.',
         inputSchema: strictToolInput(
           { surface: 'this delete_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
             objectName: z.string().describe('The object/table name'),
             recordId: z.string().describe('The record id'),
+            // The confirmation member, keyed off the contract's constant as
+            // `run_action` declares it. OPTIONAL in the schema on purpose: a
+            // required member would refuse an unconfirmed call as a bare input
+            // validation error, with no code and no retry details, before the
+            // handler could answer the gate's refusal.
+            [AI_ACTION_CONFIRMATION_MEMBER]: z
+              .boolean()
+              .optional()
+              .describe(
+                'Set to true only when the human in the loop has approved deleting THIS record. Without it '
+                + 'the call is refused and nothing is deleted.',
+              ),
           },
         ),
         annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       },
-      async ({ objectName, recordId }) => {
+      async (args) => {
+        const { objectName, recordId } = args;
         const bad = guard(objectName);
         if (bad) return errorResult(bad);
+        // The gate, before the bridge: a refused call reaches no bridge, so
+        // nothing is read or deleted whichever bridge serves this server.
+        const unconfirmed = recordDeleteConfirmationRefusal(objectName, recordId, args);
+        if (unconfirmed) return codedErrorResult(unconfirmed);
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName);
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'delete_record', objectName));
         }
       },
     );
+
+    // [#30891] Registered under BOTH data scopes. Its unconfirmed call reads
+    // the selection (ids and a count) through `query` / `aggregate`, a
+    // list-class read; under `data:write` alone that read would serve ids a
+    // token granted no `data:read` cannot list (seat decision on the review).
+    if (canRead) {
+      // [#30891] Many records of one object in one confirmed call, where the
+      // agent used to plan one `delete_record` per row. It composes the bridge
+      // members the other data tools call — `query` (and `aggregate`) to select,
+      // `remove` to delete each row — so it adds no execution path: each row is
+      // deleted exactly as `delete_record` deletes it, under the caller's
+      // permissions, row-level security and the package's delete rules, and a
+      // rule's refusal holds for every caller, an administrator included
+      // (maintainer's ruling on the card: no bypass).
+      //
+      // The confirmation is `delete_record`'s, by the decision that gated it: an
+      // unconfirmed call is refused with the same code, status and `details`
+      // shape. What the refusal adds is a `preview` beside `error` — the count
+      // and a sample of what a confirmed call would delete — because a human
+      // asked to approve a bulk delete has to see its size. Reading the
+      // selection is the one thing an unconfirmed call does; it deletes nothing.
+      //
+      // ⛔ The preview names no per-record refusal, and claims none: the engine
+      // has no delete dry run (`BatchOptions.validateOnly` was retired for
+      // promising one), and running the delete inside a rolled-back transaction
+      // would still fire `afterDelete` hooks, which do not wait for a commit.
+      // So the delete rules are judged when the delete runs, and the confirmed
+      // call answers them grouped by reason.
+      server.registerTool(
+        note(DELETE_RECORDS_TOOL),
+        {
+          description:
+            'Delete many records of ONE object in one call: those a filter (where) matches, or an id list (recordIds) — '
+            + 'instead of one delete_record per row. Destructive and permanent. A call without confirm: true deletes '
+            + 'nothing: it is REFUSED (ACTION_CONFIRMATION_REQUIRED) with a `preview` of what a confirmed call would '
+            + 'delete (how many match, sample ids). Show that to the human, and retry with confirm: true only once they '
+            + `approve. A confirmed call deletes at most ${DELETE_RECORDS_MAX_PER_CALL} records (fewer when the `
+            + 'deployment\'s read page size or row budget is smaller; the answer\'s cap says), each under your '
+            + 'permissions, row-level security and the object\'s delete rules, which no caller can bypass. Records a '
+            + 'rule refuses stay; the answer counts them grouped by reason with their ids, and says how many still match.',
+          inputSchema: strictToolInput(
+            {
+              surface: 'this delete_records call',
+              aliases: {
+                ...OBJECT_NAME_ALIASES,
+                filters: 'where',
+                filter: 'where',
+                conditions: 'where',
+                criteria: 'where',
+                ids: 'recordIds',
+                record_ids: 'recordIds',
+                recordId: 'recordIds',
+              },
+            },
+            {
+              objectName: z.string().describe('The object/table name'),
+              where: z
+                .record(z.string(), z.unknown())
+                .optional()
+                .describe(
+                  'Filter conditions selecting the records to delete, as query_records takes them, e.g. '
+                    + '{"status":"closed"}. {} selects every record you can see. Send this or recordIds, not both.',
+                ),
+              recordIds: z
+                .array(z.string().min(1))
+                .min(1)
+                .max(DELETE_RECORDS_MAX_PER_CALL)
+                .optional()
+                .describe(
+                  `The ids of the records to delete (at most ${DELETE_RECORDS_MAX_PER_CALL}). Send this or where, not both.`,
+                ),
+              // The confirmation member, as `delete_record` declares it: optional
+              // in the schema so an unconfirmed call reaches the handler and is
+              // answered with the gate's refusal and the preview.
+              [AI_ACTION_CONFIRMATION_MEMBER]: z
+                .boolean()
+                .optional()
+                .describe(
+                  'Set to true only when the human in the loop has approved deleting the records this selection '
+                    + 'matches. Without it nothing is deleted: the call answers a preview.',
+                ),
+            },
+          ),
+          annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+        },
+        async (args) => {
+          const { objectName, where, recordIds } = args;
+          const bad = guard(objectName);
+          if (bad) return errorResult(bad);
+          if ((where === undefined) === (recordIds === undefined)) {
+            return errorResult(
+              where === undefined
+                ? 'delete_records needs a selection: send where (a filter, {} for every record) or recordIds (an id list).'
+                : 'delete_records takes one selection: send where or recordIds, not both.',
+            );
+          }
+          try {
+            const cap = deleteRecordsCap();
+            if (recordIds !== undefined && new Set(recordIds).size > cap) {
+              // Before any read: the read of a longer list would be the read
+              // window's own refusal, naming a `limit` this caller never sent.
+              return errorResult(
+                `delete_records takes at most ${cap} ids per call on this deployment (its read page size or row `
+                  + `budget is ${cap}) — nothing was deleted. Send the list in parts of at most ${cap} ids.`,
+              );
+            }
+            const resolved = await resolveDeleteSelection(bridge, objectName, { where, recordIds }, cap);
+            // [ADR-0090 D10] A count a delegated read narrowed is served with the
+            // narrowing stated, as `query_records` serves its rows. ⛔ The probe
+            // never fails the call it annotates.
+            const narrowing = typeof bridge.diagnoseDelegation === 'function'
+              ? await bridge.diagnoseDelegation(objectName).catch(() => undefined)
+              : undefined;
+            const stated = (value: Record<string, unknown>): unknown =>
+              narrowing?.narrowed && narrowing.statement ? withDelegationNotice(value, narrowing.statement) : value;
+            if (!isDeleteConfirmed(args)) {
+              const refusal = deleteConfirmationRefusal(
+                DELETE_RECORDS_TOOL,
+                objectName,
+                deleteRecordsRefusalMessage(objectName, resolved),
+              );
+              return {
+                content: [{
+                  type: 'text' as const,
+                  text: jsonText({ error: refusal, preview: stated(deleteRecordsPreview(objectName, resolved)) }),
+                }],
+                isError: true as const,
+              };
+            }
+            const done = await deleteEach(bridge, objectName, resolved.attempt);
+            const outcome = stated(deleteRecordsOutcome(objectName, resolved, done));
+            if (done.fault) {
+              const { fault } = done;
+              const error = {
+                ...(fault.code !== undefined ? { code: fault.code } : {}),
+                message: deleteRecordsFaultMessage(objectName, { ...done, fault }),
+                ...(fault.status !== undefined ? { status: fault.status } : {}),
+              };
+              return {
+                content: [{ type: 'text' as const, text: jsonText({ error, progress: outcome }) }],
+                isError: true as const,
+              };
+            }
+            return textResult(outcome);
+          } catch (err) {
+            // [#31273, #31341, #31407] A coded throw from the selection read
+            // answers as the record data tools answer it: the door's fault
+            // when the door answers one (a driver's own code, a declared 5xx),
+            // else the coded refusal with what the door serves beside it
+            // (`declaredCode`, `userMessage`). A code-less throw keeps this
+            // catch's rendering (#31218 says why).
+            if (thrownRefusalEnvelope(err) !== undefined) {
+              return dataDoorErrorResult(err, DELETE_RECORDS_TOOL, objectName);
+            }
+            return errorResultWithCode(err);
+          }
+        },
+      );
+    }
   } // end canWrite (data:write)
 
   return registered;
@@ -1478,9 +2795,15 @@ export function registerActionTools(
       try {
         const actions = await bridge.listActions();
         const visible = allowSystem ? actions : actions.filter(isListableAction);
-        return textResult({ actions: visible, totalCount: visible.length });
+        // [ADR-0150 D6, Q3] A face two listed actions derive is refused once.
+        const faced = faceListOfActions(visible);
+        return textResult({
+          actions: faced.actions,
+          totalCount: faced.actions.length,
+          ...(faced.refusedFaces.length > 0 ? { refusedFaces: faced.refusedFaces } : {}),
+        });
       } catch (err) {
-        return errorResultWithCode(err);
+        return metaDoorErrorResult(err, 'list_actions');
       }
     },
   );
@@ -1523,6 +2846,15 @@ export function registerActionTools(
           .string()
           .optional()
           .describe('The object the action belongs to. Optional; required only to disambiguate a name shared by multiple objects.'),
+        // [ADR-0150 D5] The exact qualifier: the package (by its namespace)
+        // whose action is meant. Optional: a name one package holds needs none.
+        namespace: z
+          .string()
+          .optional()
+          .describe(
+            'The namespace of the package whose action to run, from list_actions. Optional; required only when '
+            + 'two packages hold an action of this name, which is refused without it.',
+          ),
         recordId: z
           .string()
           .optional()
@@ -1565,7 +2897,7 @@ export function registerActionTools(
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async (args) => {
-      const { actionName, objectName, recordId, params } = args;
+      const { actionName, objectName, namespace, recordId, params } = args;
       // Read off the constant, so the member's spelling has exactly one
       // authority in this package (the schema key above is the same constant).
       const confirm = args[AI_ACTION_CONFIRMATION_MEMBER];
@@ -1581,12 +2913,24 @@ export function registerActionTools(
         if (objectName && !allowSystem && isSystemObject(objectName)) {
           const listed = await bridge.listActions();
           const admitted = listed.some(
-            (a) => a.name === actionName && a.objectName === objectName && isListableAction(a),
+            (a) => a.name === actionName && a.objectName === objectName
+              && (namespace === undefined || a.namespace === namespace) && isListableAction(a),
           );
-          if (!admitted) return errorResult(systemObjectActionRefusal(actionName, objectName));
+          if (!admitted) {
+            // [#30771] An exposed action the caller's declared gate refuses is
+            // left out of the listing too: answer that gate's refusal, the one
+            // the by-name call gets, not the system-object sentence. Nothing
+            // runs either way.
+            const refusal = await bridge.capabilityRefusal?.(actionName, objectName);
+            if (refusal) return errorResultWithCode(Object.assign(new Error(refusal.message), refusal));
+            return errorResult(systemObjectActionRefusal(actionName, objectName));
+          }
         }
         const result = await bridge.runAction(actionName, {
           objectName,
+          // [ADR-0150 D5] Forwarded only when given: a call that names no
+          // namespace reaches the bridge exactly as before.
+          ...(namespace !== undefined ? { namespace } : {}),
           recordId,
           params,
           // [#15942] Forwarded, not rebuilt-without. This line and the schema
@@ -1596,7 +2940,11 @@ export function registerActionTools(
         });
         return textResult(result);
       } catch (err) {
-        return landedWriteResultOrError(err, objectName, errorResultFromThrown);
+        return landedWriteResultOrError(
+          err,
+          objectName,
+          (thrown) => errorResultFromThrown(thrown, `run_action ${actionName}`, objectName),
+        );
       }
     },
   );
@@ -1690,7 +3038,183 @@ export function registerActionTools(
           });
           return textResult(result);
         } catch (err) {
-          return errorResultFromThrown(err);
+          return errorResultFromThrown(err, `resume_run ${runId}`);
+        }
+      },
+    );
+  }
+
+  return registered;
+}
+
+/**
+ * [#30892] Register the file pair over {@link McpFileBridge}: `read_file`
+ * (with `data:read`) reads a file a record carries, and `create_upload_link`
+ * (with `data:write`) mints a single-use link through which the user uploads
+ * a file onto a record. Each registers only where the bridge implements its
+ * member, so a host that cannot reach a record's files serves neither.
+ *
+ * Neither tool judges access itself. The bridge reads the record as the
+ * caller first (the `get_record` door), so a record the caller cannot read is
+ * refused here with the code `get_record` answers; the storage service then
+ * asks the download door's own verdict for the file, and the attach rule's
+ * for a link. `sys_*` objects are refused as every object tool refuses them.
+ */
+export function registerFileTools(
+  server: McpServer,
+  bridge: McpFileBridge,
+  options: RegisterObjectToolsOptions = {},
+): string[] {
+  const registered: string[] = [];
+  const note = (name: string): string => {
+    registered.push(name);
+    return name;
+  };
+  const allowSystem = options.allowSystemObjects === true;
+  const scopes = options.grantedScopes;
+  const canRead = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
+  const canWrite = !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_WRITE);
+  const guard = (objectName: string): string | undefined => {
+    if (!objectName || typeof objectName !== 'string') return 'objectName is required';
+    if (!allowSystem && isSystemObject(objectName)) {
+      return `Object "${objectName}" is a system object and is not exposed via MCP`;
+    }
+    return undefined;
+  };
+
+  if (canRead && typeof bridge.readRecordFile === 'function') {
+    const readFn = bridge.readRecordFile.bind(bridge);
+    const listFn = typeof bridge.listRecordFiles === 'function' ? bridge.listRecordFiles.bind(bridge) : undefined;
+    server.registerTool(
+      note('read_file'),
+      {
+        description:
+          'Read a file a record carries: one held by a file field (field, plus fileId when the field holds several) ' +
+          'or one of its attachments (attachmentId). Answers the file\'s facts (name, type, size in bytes, the ' +
+          `byte cap read_file reads, ${READ_FILE_MAX_BYTES}) with a short-lived download link, then its content: the ` +
+          'text of a text file, a PDF or a Word (.docx) document, or the image itself. A larger file answers its ' +
+          'facts and the link only. ' +
+          (listFn
+            ? 'Name neither field nor attachmentId to list the files on the record you can read, with their ids. '
+            : '') +
+          'You can read a file only where you can read its record: a record you cannot read answers as not found.',
+        inputSchema: strictToolInput(
+          {
+            surface: 'this read_file call',
+            aliases: {
+              ...OBJECT_NAME_ALIASES,
+              ...RECORD_ID_ALIASES,
+              fieldName: 'field',
+              field_name: 'field',
+              file_id: 'fileId',
+              attachment_id: 'attachmentId',
+              attachment: 'attachmentId',
+            },
+          },
+          {
+            objectName: z.string().describe('The object/table name'),
+            recordId: z.string().describe('The record id'),
+            field: z.string().optional().describe('A file or image field of the record'),
+            fileId: z
+              .string()
+              .optional()
+              .describe('Which file, when the field holds several (a multi-file field); with field only'),
+            attachmentId: z.string().optional().describe('One of the record\'s attachments, by its id'),
+          },
+        ),
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      },
+      async ({ objectName, recordId, field, fileId, attachmentId }) => {
+        const bad = guard(objectName);
+        if (bad) return errorResult(bad);
+        if (field !== undefined && attachmentId !== undefined) {
+          return errorResult('Name one file: either field (with fileId for a multi-file field) or attachmentId, not both.');
+        }
+        if (fileId !== undefined && field === undefined) {
+          return errorResult('fileId names a file within a field: send field with it.');
+        }
+        try {
+          if (field === undefined && attachmentId === undefined) {
+            if (!listFn) return errorResult('Name the file to read: field (a file field of the record) or attachmentId.');
+            return textResult({ files: await listFn(objectName, recordId) });
+          }
+          const target = attachmentId !== undefined ? { attachmentId } : { field: field as string, ...(fileId !== undefined ? { fileId } : {}) };
+          const file = await readFn(objectName, recordId, target, { maxBytes: READ_FILE_MAX_BYTES });
+          return { content: await renderReadFile(file) };
+        } catch (err) {
+          // [#31826] Over the process-wide extraction cap: the coded refusal,
+          // with the seconds to wait in `details` (the slot the rate limiter's
+          // 429 carries them in), since a tool result has no Retry-After header.
+          if (err instanceof ReadFileExtractionBusyError) {
+            return codedErrorResult({
+              code: err.code,
+              message: err.message,
+              status: err.status,
+              details: { retryAfterSeconds: err.retryAfterSeconds },
+            });
+          }
+          return errorResultWithCode(err);
+        }
+      },
+    );
+  }
+
+  if (canWrite && typeof bridge.createUploadLink === 'function') {
+    const linkFn = bridge.createUploadLink.bind(bridge);
+    server.registerTool(
+      note('create_upload_link'),
+      {
+        description:
+          'Create a link through which the user uploads one file onto a record: into a file field (field) or ' +
+          'as an attachment (attachments: true). Give the link to the user to open in a browser where they are ' +
+          'signed in to this deployment as themselves; it works only for them, once, for this record and field ' +
+          'only, and expires (see expiresAt). The upload is stored as the user, so they must be able to edit the ' +
+          'record (and the field).',
+        inputSchema: strictToolInput(
+          {
+            surface: 'this create_upload_link call',
+            aliases: {
+              ...OBJECT_NAME_ALIASES,
+              ...RECORD_ID_ALIASES,
+              fieldName: 'field',
+              field_name: 'field',
+              attachment: 'attachments',
+            },
+          },
+          {
+            objectName: z.string().describe('The object/table name'),
+            recordId: z.string().describe('The record id'),
+            field: z.string().optional().describe('A file or image field of the record the upload fills'),
+            attachments: z
+              .literal(true)
+              .optional()
+              .describe('true to attach the upload to the record instead of filling a field'),
+          },
+        ),
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      async ({ objectName, recordId, field, attachments }) => {
+        const bad = guard(objectName);
+        if (bad) return errorResult(bad);
+        if ((field === undefined) === (attachments === undefined)) {
+          return errorResult('Say where the upload lands: either field (a file field of the record) or attachments: true.');
+        }
+        try {
+          const target = field !== undefined ? { field } : { attachments: true as const };
+          const link = await linkFn(objectName, recordId, target);
+          return textResult({
+            url: link.url,
+            expiresAt: link.expiresAt,
+            singleUse: true,
+            objectName,
+            recordId,
+            ...(field !== undefined ? { field } : { attachments: true }),
+            instructions:
+              'Give this link to the user to open in a browser where they are signed in to this deployment, and ' +
+              'pick the file. It works only for them, once, until expiresAt.',
+          });
+        } catch (err) {
+          return errorResultWithCode(err);
         }
       },
     );

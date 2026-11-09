@@ -40,21 +40,25 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Organization",
         help: "The organization this grant belongs to."
       },
+      permission_set_package: {
+        label: "Permission Set Package",
+        help: "The app the permission set comes from. Filled in by the platform; empty when the set was created here, or when more than one app provides a set of that name."
+      },
       granted_by: {
         label: "Granted By",
         help: "User who granted this permission set."
       },
       valid_from: {
         label: "Valid From",
-        help: "Grant is inactive before this instant. Null = active immediately. Enforced fail-closed at resolution time — never by a background job."
+        help: "The assignment takes effect at this time. Leave empty for it to take effect at once. It starts on time, with no scheduled job to wait for."
       },
       valid_until: {
         label: "Valid Until",
-        help: "Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires. Mandatory on break-glass activations and agent grants. Enforced at resolution time."
+        help: "The assignment ends at this time (UTC). Leave empty for no end date. Required on emergency access and on an assignment to an AI agent. It ends on time, with no scheduled job to wait for."
       },
       reason: {
         label: "Reason",
-        help: "Why this grant exists. Free text; REQUIRED on delegation and break-glass rows. Agent grants carry the task/run attribution here."
+        help: "Why this assignment exists. Required on delegated and emergency-access assignments. For an AI agent, name the task it was given access for."
       },
       last_certified_at: {
         label: "Last Certified At",
@@ -112,11 +116,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "Grant is inactive before this instant. Null = active immediately. Enforced fail-closed at resolution time — never by a background job."
+        help: "The assignment takes effect at this time. Leave empty for it to take effect at once. It starts on time, with no scheduled job to wait for."
       },
       valid_until: {
         label: "Valid Until",
-        help: "Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires. Mandatory on delegation rows. Enforced at resolution time."
+        help: "The assignment ends at this time (UTC). Leave empty for no end date. Required on a delegated assignment. It ends on time, with no scheduled job to wait for."
       },
       reason: {
         label: "Reason",

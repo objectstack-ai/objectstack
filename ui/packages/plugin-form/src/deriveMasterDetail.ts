@@ -21,6 +21,7 @@ import {
   deriveInlineRowFormFields,
 } from '@objectstack/spec/data';
 import type { BooleanValueLabel, GridColumn } from '@object-ui/fields';
+import { isExpressionComputedField } from '@object-ui/core';
 
 /**
  * Minimal shape of a MASTER-DETAIL CHILD object's schema, as returned by
@@ -95,6 +96,14 @@ export function fieldTypeToColumnType(type: string | undefined): GridColumn['typ
 
 /** Image-flavoured field types whose picker should be restricted to images. */
 const IMAGE_TYPES = new Set(['image', 'avatar']);
+
+/**
+ * The CEL source of a field `isExpressionComputedField` accepts: the bare
+ * string, or the `{ dialect, source }` envelope's `source`.
+ */
+function expressionSource(d: any): string {
+  return typeof d.expression === 'string' ? d.expression : d.expression.source;
+}
 
 /** Carry a file field's upload constraints onto its grid column: `multiple`,
  *  the field's `accept` list, or an `image/*` restriction for image fields.
@@ -236,11 +245,12 @@ function deriveColumn(name: string, d: any, booleanLabel: BooleanValueLabel): Gr
   if (d?.requiredWhen) col.requiredWhen = d.requiredWhen;
   // A field carrying an arithmetic `expression` (e.g. amount = quantity *
   // unit_price) becomes a live read-only computed column. The expression may
-  // be a bare string or the normalized CEL envelope `{ dialect, source }`.
-  const expr = typeof d?.expression === 'string' ? d.expression : d?.expression?.source;
-  if (expr && typeof expr === 'string') {
+  // be a bare string or the normalized CEL envelope `{ dialect, source }`;
+  // `isExpressionComputedField` is the one reading of "carries one", shared
+  // with every other edit gate (objectstack#31759).
+  if (isExpressionComputedField(d)) {
     col.computed = true;
-    col.expr = expr;
+    col.expr = expressionSource(d);
     col.required = false; // computed → never user-entered, so never required
     if (typeof d?.scale === 'number') col.scale = d.scale;
   }
@@ -252,7 +262,7 @@ function deriveColumn(name: string, d: any, booleanLabel: BooleanValueLabel): Gr
  * is reported, because the grid does not read it.
  *
  * A currency amount's decimal places are its currency's: `GridField`'s
- * `currencyWidth` takes the resolved currency's ISO 4217 minor unit and never
+ * `currencyWidth` takes the resolved currency's CLDR fraction digits and never
  * the column's `scale` (ruling B on objectstack-ai/objectstack#19629, ruling 乙
  * on objectstack-ai/objectstack#19910). `@objectstack/spec` 17.5.0 refuses the
  * key on an `inlineColumns` entry that DECLARES `type: 'currency'`, and its own
@@ -298,7 +308,7 @@ function reportCurrencyColumnScale(
   console.warn(
     `[object-ui] \`scale\` is not valid on a \`currency\` inline grid column — delete the key. ` +
       `Inline grid column '${col.name}' ${how}, so its \`scale: ${String(col.scale)}\` is not read: ` +
-      `the currency's ISO 4217 minor unit (2 for USD, 0 for JPY, 3 for KWD) decides how the cell ` +
+      `the currency's CLDR fraction digits (2 for USD, 0 for JPY, 3 for KWD) decide how the cell ` +
       `displays the amount and the width a computed amount is rounded to.`,
   );
 }
@@ -355,10 +365,9 @@ export function hydrateColumns(
     if (next.requiredWhen == null && d?.requiredWhen) {
       next.requiredWhen = d.requiredWhen;
     }
-    const expr = typeof d?.expression === 'string' ? d.expression : d?.expression?.source;
-    if (!next.computed && expr && typeof expr === 'string') {
+    if (!next.computed && isExpressionComputedField(d)) {
       next.computed = true;
-      next.expr = expr;
+      next.expr = expressionSource(d);
       next.required = false; // computed → never user-entered, so never required
       if (typeof d?.scale === 'number') next.scale = d.scale;
     }

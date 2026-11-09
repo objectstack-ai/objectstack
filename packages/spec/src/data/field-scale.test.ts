@@ -55,7 +55,7 @@ describe('resolveFieldScale', () => {
   });
 
   it('declares NO width for currency — the key is retired from the type', () => {
-    // `currency` resolves its cell's fraction digits from ISO 4217 minor units
+    // `currency` resolves its cell's fraction digits from CLDR's count
     // and can no longer declare this key at all (retired from the type,
     // refused at parse).
     expect(resolveFieldScale({ type: 'currency' })).toBeUndefined();

@@ -123,17 +123,29 @@ Arming a red PR does not queue it, it hides it:
 
 ← [`AGENTS.md` › Multi-agent working discipline](../../AGENTS.md#multi-agent-working-discipline)
 
-A check outside those ten is advisory and rides through, and an advisory red
+A check outside those eleven is advisory and rides through, and an advisory red
    that lands rides `main`'s merge ref into every later PR until stanched.
 
 ## Two speeds: which runs carry which battery
 
 ← [`AGENTS.md` › Multi-agent working discipline](../../AGENTS.md#multi-agent-working-discipline)
 
-**Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, 10 minutes of
-   wall per queue entry; `main`'s scheduled (4-hourly) and push runs carry the full battery — dogfood, e2e,
-   `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
-   any approval.
+**Two speeds** (ruling record 6120820653): PR and queue runs carry the fast set, about 20 minutes
+   of wall per queue entry (median, 2026-11-05); `main`'s scheduled (4-hourly) and push runs
+   carry the full battery — dogfood, e2e, `Temporal Conformance (live PG + MySQL)` — read by the publish lane before
+   any approval. Queue runs also carry the three `Dogfood Regression Gate` shards (ruling record
+   6663883327), so a dogfood red shows on the queue build; `Dogfood Verify CLI`,
+   Temporal Conformance and `UI Published Artifacts` stay full-battery only. The `Dogfood Regression
+   Gate` context is in the required set again (ruling record 6669982756), so a dogfood red ejects the entry.
+
+**A push run borrows what the queue ran** (#31519). Every commit the queue lands was tested there on the same
+sha. A push run's `Queue verdict` job walks the pushed commits and reads each one's newest `merge_group` run. When
+every commit has one that is green and built on its first parent, the push runs only the main-only jobs, `Type Check
+UI`, `Lint UI` and the builds, keeps its Turbo seeds through seed-only Test Core and dogfood legs, and records the
+queue runs in its `Borrowed queue verdict` job. `Test UI` is borrowed only when the head's queue run ran the whole
+suite. A missing, red, running or differently based queue run, or any read failure, runs the whole battery. The
+release gate re-reads the head's queue run when a borrowed push decides, and the 4-hourly schedule is unchanged.
+Rules and pins: `scripts/ci/scheduled-full-run.mjs` HALF 4.
 
 ## Re-arm awareness
 

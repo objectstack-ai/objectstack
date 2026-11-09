@@ -5,18 +5,21 @@ import { printError } from '../../utils/format.js';
 import { createControlPlaneApiClient, requireControlPlaneAuth } from '../../utils/api-client.js';
 import { readAuthConfig, writeAuthConfig } from '../../utils/auth-config.js';
 import { recordCloudActiveEnvironmentId } from '../../utils/active-environment.js';
+import { activateCloudDeployTarget } from '../../utils/runtime-target.js';
 
 /**
  * `os environments switch <id>` — set the active environment for this CLI session.
  *
  * Authenticates through `createControlPlaneApiClient` — `credentials.json`'s
  * session where it targets the server, else `cloud.json`'s (the order is
- * written once, there). Calls `POST /api/v1/cloud/environments/:id/activate`
- * to update the server-side session, then persists `activeEnvironmentId` into
+ * written once, there). Calls `POST /api/v1/cloud/environments/:id/activate`,
+ * which confirms the caller is a member of the environment and writes no
+ * server state, then persists `activeEnvironmentId` into
  * `~/.objectstack/credentials.json` so subsequent CLI commands (and any
  * client they create via `createApiClient`) automatically target this
  * environment — unless the switch ran on `cloud.json`'s session, whose server
- * is not the one `credentials.json` names.
+ * is not the one `credentials.json` names. The active environment lives only
+ * in those local files: the server keeps no record of it.
  *
  * When the control plane it just talked to IS the one `~/.objectstack/cloud.json`
  * records, the same id is written there as well, so `os package publish --install`
@@ -24,6 +27,11 @@ import { recordCloudActiveEnvironmentId } from '../../utils/active-environment.j
  * uuid. Two files, two servers, an active environment for each — the id is
  * never carried across, because it would not resolve on the other side. The
  * gate lives in `utils/active-environment.ts`.
+ *
+ * Recorded there, it also makes ObjectOS Cloud the deploy target again when
+ * `os environments use-runtime` had made a self-hosted runtime the target: the
+ * two commands are the two ways to pick where `os deploy` goes, and the one
+ * that ran last wins. The runtime stays remembered.
  */
 export default class EnvironmentsSwitch extends Command {
   static override description = 'Activate an environment for subsequent CLI calls';
@@ -41,7 +49,7 @@ export default class EnvironmentsSwitch extends Command {
     url: Flags.string({ char: 'u', description: 'Server URL', env: 'OS_CLOUD_URL' }),
     token: Flags.string({ char: 't', description: 'Authentication token', env: 'OS_TOKEN' }),
     remote: Flags.boolean({
-      description: 'Also call /activate on the server (updates the session row)',
+      description: 'Also call /activate on the server to confirm access (writes no server state)',
       default: true,
       allowNo: true,
     }),
@@ -65,11 +73,12 @@ export default class EnvironmentsSwitch extends Command {
         await client.environments.activate(environment.id);
       }
 
-      // Cloud store first: the server session is already switched at this
+      // Cloud store first: the server has already confirmed access at this
       // point, so the publish-side record must not be lost to a failure in the
       // runtime store below (a user who only ran `os cloud login` has no
       // `credentials.json` at all).
       const recordedForCloud = await recordCloudActiveEnvironmentId(environment.id, baseUrl);
+      const leftRuntime = recordedForCloud ? await activateCloudDeployTarget() : undefined;
 
       // Runtime store: the copy `createApiClient` reads, so the `data` / `meta`
       // families keep targeting the environment you just switched to. Skipped
@@ -88,11 +97,17 @@ export default class EnvironmentsSwitch extends Command {
       if (recordedForCloud) {
         console.log('  (also recorded in cloud.json — `os package publish --install` will use it)');
       }
+      if (leftRuntime !== undefined) {
+        console.log(
+          `  Deploy target: this environment again, not the self-hosted runtime${leftRuntime ? ` ${leftRuntime}` : ''} `
+          + '(still remembered; `os environments use-runtime <url>` to go back)',
+        );
+      }
       if (!recordedForCloud && !cfg) {
         console.log('  ⚠ no local credential store to record it in — run `os login` or `os cloud login`');
       }
       if (!flags.remote) {
-        console.log('  (local only — server session unchanged)');
+        console.log('  (local only — /activate was not called)');
       }
       console.log('');
     } catch (error: any) {

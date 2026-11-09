@@ -47,6 +47,7 @@
  * of the two defects came back.
  */
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales';
 
 // Derived from the map rather than left as `string[]`: `Object.keys` erases
@@ -75,13 +76,14 @@ const EN_RETIRED_SPELLINGS = [
  */
 const RETIRED: Record<string, RegExp> = {
   en: /duplicate|copy/i,
-  zh: /复制|复刻|拷贝/,
+  'zh-Hans': /复制|复刻|拷贝/,
+  'zh-Hant': /複製|復刻|複製/,
   ja: /複製|コピー/,
   ko: /복제|복사/,
   de: /duplizier|kopier/i,
   fr: /dupliqu|duplic|copi/i,
   es: /dupliqu|duplic|copi/i,
-  pt: /dupliqu|duplic|copi/i,
+  'pt-BR': /dupliqu|duplic|copi/i,
   ru: /копир|скопир/i,
   ar: /نسخ|انسخ/,
 };
@@ -94,13 +96,14 @@ const RETIRED: Record<string, RegExp> = {
  */
 const ANCHORS: Record<string, { systemView: RegExp; inCode: RegExp; readOnly: RegExp }> = {
   en: { systemView: /System view/i, inCode: /code/i, readOnly: /read-only/i },
-  zh: { systemView: /系统视图/, inCode: /代码/, readOnly: /只读/ },
+  'zh-Hans': { systemView: /系统视图/, inCode: /代码/, readOnly: /只读/ },
+  'zh-Hant': { systemView: /系統檢視/, inCode: /程式碼/, readOnly: /只讀/ },
   ja: { systemView: /システムビュー/, inCode: /コード/, readOnly: /読み取り専用/ },
   ko: { systemView: /시스템 보기/, inCode: /코드/, readOnly: /읽기 전용/ },
   de: { systemView: /Systemansicht/i, inCode: /Code/i, readOnly: /schreibgeschützt/i },
   fr: { systemView: /Vue système/i, inCode: /code/i, readOnly: /lecture seule/i },
   es: { systemView: /Vista del sistema/i, inCode: /código/i, readOnly: /solo lectura/i },
-  pt: { systemView: /Exibição do sistema/i, inCode: /código/i, readOnly: /somente leitura/i },
+  'pt-BR': { systemView: /Exibição do sistema/i, inCode: /código/i, readOnly: /somente leitura/i },
   ru: { systemView: /Системное представление/i, inCode: /код/i, readOnly: /чтени/i },
   ar: { systemView: /عرض النظام/, inCode: /كود/, readOnly: /قراءة/ },
 };
@@ -111,7 +114,8 @@ const ANCHORS: Record<string, { systemView: RegExp; inCode: RegExp; readOnly: Re
 // `LocaleCode[]`, which `entries`/`keys` erase by design. A typo'd pack name is
 // now a compile error rather than a case that silently never runs.
 const NATIVE_SCRIPT: Partial<Record<LocaleCode, RegExp>> = {
-  zh: /\p{Script=Han}/u,
+  'zh-Hans': /\p{Script=Han}/u,
+  'zh-Hant': /\p{Script=Han}/u,
   ja: /\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Han}/u,
   ko: /\p{Script=Hangul}/u,
   ru: /\p{Script=Cyrillic}/u,
@@ -120,7 +124,7 @@ const NATIVE_SCRIPT: Partial<Record<LocaleCode, RegExp>> = {
 
 describe('view.readonlyTooltip semantic coverage (objectui#3625)', () => {
   it('covers all ten built-in packs', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(Object.keys(RETIRED).sort()).toEqual([...LANGS].sort());
     expect(Object.keys(ANCHORS).sort()).toEqual([...LANGS].sort());
   });

@@ -72,6 +72,10 @@ function makeStubDriver() {
 
 const sys = { context: { isSystem: true } } as any;
 
+/** The row as the stub driver stored it — what the write persisted, before any engine shaping. */
+const storedRow = (engine: ObjectQL, object: string, id: unknown) =>
+  engine.getDriverForObject(object)!.findOne(object, { where: { id } });
+
 describe('[#7246] the option marked `default: true` is the field default', () => {
   let engine: ObjectQL;
 
@@ -132,7 +136,10 @@ describe('[#7246] the option marked `default: true` is the field default', () =>
       },
     } as any, 'test.issue7246');
     const row: any = await engine.insert('opt_unmarked', { title: 'D' }, sys);
-    expect(row.status).toBeUndefined();
+    // [#29538] The answer reads the unstored column `null`, as the next read
+    // does; "left alone" is the STORED row's own: no key at all.
+    expect(row.status).toBeNull();
+    expect(await storedRow(engine, 'opt_unmarked', row.id)).not.toHaveProperty('status');
   });
 });
 
@@ -348,8 +355,11 @@ describe('[#7246] the default follows the FIELD shape, not the option count', ()
       { label: 'Quick', value: 'quick' },
     ]) as any, 'test.issue7246');
     const row: any = await engine.insert('opt_valueless', {}, sys);
-    expect(row.tags).toBeUndefined();
-    expect(row.tags).not.toBeNull();
+    // [#29538] The answer reads the unstored column `null`, as the next read
+    // does; "left unset" (no value, not even a stored `null`) is the STORED
+    // row's own: no key at all.
+    expect(row.tags).toBeNull();
+    expect(await storedRow(engine, 'opt_valueless', row.id)).not.toHaveProperty('tags');
   });
 });
 
@@ -400,6 +410,8 @@ describe('[#7246] the lint heuristic and the engine agree BY CONSTRUCTION', () =
       },
     } as any, 'test.issue7246');
     const row: any = await engine.insert('opt_alias', {}, sys);
-    expect(row.status).toBeUndefined();
+    // [#29538] The answer reads the unstored column `null`; the STORED row has no key.
+    expect(row.status).toBeNull();
+    expect(await storedRow(engine, 'opt_alias', row.id)).not.toHaveProperty('status');
   });
 });

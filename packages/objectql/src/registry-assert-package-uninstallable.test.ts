@@ -280,3 +280,39 @@ describe('#28408 (ADR-0146 D3) a base whose paired customization package is inst
     expect(forced.getObject('account')).toBeUndefined();
   });
 });
+
+describe('[#29594] ADR-0146 D3 (as amended): the App is the unit — a member is not refused for the App\'s pair', () => {
+  const APP = 'app.objectstack.hotcrm';
+  const MODULE = 'app.objectstack.hotcrm.service';
+  const APP_PAIR = 'app.objectstack.hotcrm.custom';
+  const LEGACY_PAIR = 'app.objectstack.hotcrm.service.custom';
+
+  function hotcrm(opts: { legacy?: boolean } = {}) {
+    const r = new SchemaRegistry({ multiTenant: false });
+    (r as any).logLevel = 'silent';
+    r.installPackage({ id: APP, name: 'HotCRM', version: '6.0.0', type: 'app', namespace: 'crm', dependencies: { [MODULE]: '^6' } } as any, 'marketplace');
+    r.installPackage({ id: MODULE, name: 'HotCRM Service', version: '6.0.0', type: 'module', namespace: 'crm', dependencies: { [APP]: '^6' } } as any, 'marketplace');
+    r.registerObject({ name: 'service_case', fields: {} } as any, MODULE, 'crm', 'own');
+    r.installPackage({ id: APP_PAIR, name: 'HotCRM (custom)', version: '0.1.0', type: 'module', namespace: 'crm_custom', dependencies: { [APP]: '^6' } } as any, 'authored');
+    if (opts.legacy) {
+      r.installPackage({ id: LEGACY_PAIR, name: 'HotCRM Service (custom)', version: '0.1.0', type: 'module', namespace: 'crm_svc_custom', dependencies: { [MODULE]: '^6' } } as any, 'authored');
+    }
+    return r;
+  }
+
+  it('the App is refused naming the App\'s pair; a member module is not', () => {
+    const r = hotcrm();
+    expect(thrownBy(() => r.assertPackageUninstallable(APP)).customizationPackageId).toBe(APP_PAIR);
+    expect(() => r.assertPackageUninstallable(MODULE)).not.toThrow();
+  });
+
+  it('a member that still has the pair an earlier version created for it is refused naming that pair (merge question 12)', () => {
+    const r = hotcrm({ legacy: true });
+    const err = thrownBy(() => r.assertPackageUninstallable(MODULE));
+    expect({ code: err.code, status: err.status, pair: err.customizationPackageId }).toEqual({
+      code: 'RESOURCE_CONFLICT',
+      status: 409,
+      pair: LEGACY_PAIR,
+    });
+  });
+});

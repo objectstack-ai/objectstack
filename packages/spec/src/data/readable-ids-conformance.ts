@@ -271,6 +271,35 @@ export const READABLE_IDS_CASES: readonly ReadableIdsCase[] = [
       + 'hands the inner one to its compiler unresolved and refuses it, or evaluates it as no restriction.',
   },
   {
+    name: 'an optional master\'s read: a leaf whose scope ORs a nested leaf, OR-ed with an empty-reference arm',
+    where: () => ({
+      $or: [
+        {
+          record_id: {
+            $in: composed({
+              $or: [
+                { id: { $in: composed({ owner: 'u2' }) } },
+                { $and: [{ owner: 'u1' }, { id: 'p3' }] },
+              ],
+            }),
+          },
+        },
+        { $and: [{ record_id: null }, { label: 'keep' }] },
+      ],
+    }),
+    verdict: 'matches',
+    holdsComposedLeaf: true,
+    expected: ['c2', 'c3', 'c5'],
+    note: 'ADR-0055 §2 as amended (an optional master): a detail is read through '
+      + '`fk IN (readable masters) OR (fk IS NULL AND owner_id = caller)`, and an intermediate level of a chain '
+      + 'whose own master is optional answers its scope with the same `$or`, so the nested leaf sits in one arm '
+      + 'of an `$or` inside a composed leaf\'s scope. Here `label` stands in for the owner column and the inner '
+      + '`$and` for an intermediate row read by its owner: the parents are p2 (the nested leaf) and p3, so the '
+      + 'children are c2 and c3, plus c5, which names no parent and passes the empty-reference arm. A driver '
+      + 'that evaluates the nested leaf as no restriction returns c1, c6 and c7 too; one that drops the '
+      + 'empty-reference arm loses c5.',
+  },
+  {
     name: 'an uncomposed leaf is refused, never evaluated as no restriction',
     where: () => ({ record_id: { $in: ReadableIds.of(P) } }),
     verdict: 'refuses-uncomposed',

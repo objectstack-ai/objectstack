@@ -105,8 +105,8 @@ const APP_ID = 'com.example.showcase';
 const OBJECT = 'showcase_team';
 // The dev admin `--fresh` seeds (packages/cli `dev --seed-admin`) and the
 // showcase's Auditor persona (examples/app-showcase/src/security/demo-personas.ts:
-// `auditor` position only, so `showcase_auditor` plus the member baseline, which
-// grants Team read and no create). Both are dev-only, well-known credentials.
+// `showcase_auditor` position only, so the `showcase_auditor` set plus the
+// member baseline, which grants Team read and no create). Both are dev-only, well-known credentials.
 const ADMIN = { email: 'admin@objectos.ai', password: 'admin123' };
 const READ_ONLY = { email: 'auditor.demo@example.com', password: 'showcase123' };
 const NEW_TEAM = { name: 'Data Guild', lead: 'ada@example.com', capacity_hours: 120 };

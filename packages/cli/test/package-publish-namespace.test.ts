@@ -132,7 +132,7 @@ describe('os package publish — namespace on the publish payload', () => {
     const path = await artifactAt({ namespace: 'crm' });
     await writeFile(
       join(dir, 'objectstack.manifest.json'),
-      JSON.stringify({ name: 'acme-crm', namespace: 'squatted', displayName: 'Acme CRM' }),
+      JSON.stringify({ namespace: 'squatted', displayName: 'Acme CRM' }),
     );
     process.chdir(dir);
     const calls = stubCloud();

@@ -1,0 +1,262 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * [epic cloud#3652 Q3, #30884] `os package install --dry-run` — the
+ * install-local body's `dryRun`, and how the command prints the runtime's
+ * upgrade plan.
+ *
+ * Pinned:
+ *  - the flag reaches the body as `dryRun: true`; without it the body carries
+ *    no such key;
+ *  - the answer prints as a dry run (nothing installed), each finding with
+ *    the environment's reading beside it: rows in a touched column, rows a
+ *    customer edited that the seed replay would overwrite, a reading that
+ *    failed as "could not be read";
+ *  - a runtime that ignored the key and installed is printed as the failure
+ *    it is, exit 1.
+ */
+
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import PackageInstall, { renderUpgradePlan } from '../src/commands/package/install.js';
+import { previewSchemaUpgradeStop, readSchemaUpgradeRefusal } from '../src/utils/upgrade-plan.js';
+
+type Answer = { ok: boolean; status: number; body: unknown };
+
+function stubRuntime(answer: Answer): { sent: Array<Record<string, unknown>> } {
+  const sent: Array<Record<string, unknown>> = [];
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { body?: string }) => {
+    if (init?.body) sent.push(JSON.parse(init.body));
+    return {
+      ok: answer.ok,
+      status: answer.status,
+      statusText: answer.ok ? 'OK' : 'Refused',
+      headers: { get: () => null },
+      json: async () => answer.body,
+    } as any;
+  }));
+  return { sent };
+}
+
+async function runInstall(args: string[]): Promise<{ out: string; exit: number | undefined }> {
+  const lines: string[] = [];
+  const capture = (...a: unknown[]) => { lines.push(a.map(String).join(' ')); };
+  vi.spyOn(console, 'log').mockImplementation(capture);
+  vi.spyOn(console, 'error').mockImplementation(capture);
+  vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => { lines.push(String(chunk)); return true; }) as any);
+  let exit: number | undefined;
+  try {
+    await PackageInstall.run(['com.acme.crm', '--url', 'http://runtime.test', ...args]);
+  } catch (err: any) {
+    exit = err?.oclif?.exit ?? err?.code ?? 1;
+  }
+  return { out: lines.join('\n'), exit };
+}
+
+const PLAN_ANSWER = {
+  dryRun: true,
+  manifestId: 'com.acme.crm',
+  version: '2.0.0',
+  installedVersion: '1.0.0',
+  plan: {
+    objects: { added: [], removed: ['acme_old'] },
+    fields: {
+      added: [{ object: 'acme_lead', field: 'account_name', type: 'text', required: false, stored: true }],
+      removed: [{ object: 'acme_lead', field: 'company', type: 'text', required: false, stored: true }],
+    },
+    typeChanges: [{ object: 'acme_deal', field: 'amount_value', from: 'text', to: 'number', category: 'needs_confirm', renamedFrom: 'amount' }],
+    declaredRenames: [{ object: 'acme_deal', from: 'amount', to: 'amount_value', fromType: 'text', toType: 'number' }],
+    suspectedRenames: [{ object: 'acme_lead', field: 'company', type: 'text', candidates: [{ field: 'account_name', type: 'text' }] }],
+    seeds: {
+      added: [],
+      removed: [],
+      changed: [{ key: 'acme_stage', object: 'acme_stage', externalId: 'name', mode: 'upsert', records: 3, fromMode: 'upsert', fromRecords: 3, changed: ['records'] }],
+    },
+  },
+  environment: {
+    columns: [
+      { object: 'acme_lead', field: 'company', reasons: ['removed', 'suspected_rename'], rows: 42 },
+      { object: 'acme_deal', field: 'amount', reasons: ['renamed', 'type_change'], rows: null },
+    ],
+    removedObjects: [{ object: 'acme_old', rows: 7 }],
+    seeds: [
+      { key: 'acme_stage', object: 'acme_stage', mode: 'upsert', changed: true, matchedRows: 3, editedRows: 1, editedKeys: ['won'] },
+      { key: 'acme_tier', object: 'acme_tier', mode: 'upsert', changed: false, matchedRows: 2, editedRows: 2, editedKeys: ['gold', 'silver'] },
+    ],
+  },
+};
+
+describe('os package install --dry-run (#30884)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('sends `dryRun: true`, and no such key without the flag', async () => {
+    const { sent } = stubRuntime({ ok: true, status: 200, body: { success: true, data: PLAN_ANSWER } });
+    await runInstall(['--dry-run']);
+    expect(sent[0]).toMatchObject({ packageId: 'com.acme.crm', dryRun: true });
+
+    vi.unstubAllGlobals();
+    const second = stubRuntime({ ok: true, status: 200, body: { success: true, data: { manifestId: 'com.acme.crm', version: '2.0.0', hotLoaded: true } } });
+    await runInstall([]);
+    expect(second.sent[0]).not.toHaveProperty('dryRun');
+  });
+
+  it('prints the plan with each reading beside its finding, and says nothing was installed', async () => {
+    stubRuntime({ ok: true, status: 200, body: { success: true, data: PLAN_ANSWER } });
+    const { out, exit } = await runInstall(['--dry-run']);
+    expect(exit).toBeUndefined();
+    expect(out).toContain('Dry run — nothing was installed or written');
+    expect(out).toContain('2.0.0 (installed: 1.0.0)');
+    expect(out).not.toContain('Package installed');
+  });
+
+  it('the plan lines', () => {
+    expect(renderUpgradePlan(PLAN_ANSWER)).toEqual([
+      '  Objects',
+      '    - acme_old — 7 row(s) in it; the table is not dropped',
+      '  Fields',
+      '    + acme_lead.account_name (text)',
+      '    - acme_lead.company (text) — 42 row(s) hold a value; the column is not dropped',
+      '  Renames declared by renamedFrom',
+      '    acme_deal.amount → amount_value — its rows could not be read',
+      '  Suspected renames (no renamedFrom links them)',
+      '    acme_lead.company → account_name? — 42 row(s) hold a value; the new key would install as a new empty column. '
+        + 'Declare renamedFrom on the new field and rebuild if it is a rename',
+      '  Type changes',
+      '    acme_deal.amount_value: text → number (needs_confirm), renamed from amount — its rows could not be read',
+      '  Seed datasets',
+      '    ~ acme_stage (mode upsert, 3 record(s)): records changed — 1 row(s) a customer edited would be overwritten (won)',
+      '    = acme_tier (mode upsert, unchanged) — 2 row(s) a customer edited would be overwritten (gold, silver)',
+    ]);
+  });
+
+  it('an empty plan says so', () => {
+    expect(renderUpgradePlan({ plan: {}, environment: {} })).toEqual(['  No change to objects, fields or seed datasets.']);
+  });
+
+  it('the advisory overrides: each hiding override and each stale one, beside an otherwise empty plan', () => {
+    const finding = { package: 'com.acme.crm', type: 'view', name: 'acme_lead_list', installedVersion: '1.2.0', incomingVersion: '2.0.0' };
+    const lines = renderUpgradePlan({
+      plan: {},
+      environment: {
+        overrides: {
+          hidesChange: [{ ...finding, basedOn: '1.2.0', change: 'changed', next: 'Open it in Studio.' }],
+          stale: [{ ...finding, name: 'acme_home', type: 'dashboard', basedOn: '1.0.0', next: 'Re-base it.' }],
+        },
+      },
+    });
+    expect(lines).toEqual([
+      '  No change to objects, fields or seed datasets.',
+      '  Overrides that hide a change in this upgrade (advisory; the upgrade installs either way)',
+      "    view 'acme_lead_list': the base changes it; the override was taken from 1.2.0. Open it in Studio.",
+      '  Overrides taken from another version than the installed one (advisory)',
+      "    dashboard 'acme_home': taken from 1.0.0, installed 1.2.0. Re-base it.",
+    ]);
+    // A reading the runtime could not make is said so, never printed as "no override".
+    expect(renderUpgradePlan({ plan: {}, environment: { overrides: null } })).toContain(
+      '  Overrides (advisory): the customizations of this package could not be read.',
+    );
+  });
+
+  it('a runtime that ignored --dry-run and installed is a failure, exit 1', async () => {
+    stubRuntime({ ok: true, status: 200, body: { success: true, data: { manifestId: 'com.acme.crm', version: '2.0.0', hotLoaded: true } } });
+    const { out, exit } = await runInstall(['--dry-run']);
+    expect(exit).toBe(1);
+    expect(out).toContain('does not support a dry run: it ignored `--dry-run` and INSTALLED com.acme.crm@latest');
+  });
+});
+
+/**
+ * [epic cloud#3652 Q3, #30884] `os package install --confirm-upgrade <token>`
+ * — the install-local body's `confirmSchemaUpgrade`, and how the command
+ * renders the runtime's `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED` refusal: every
+ * finding, both ways forward, the exact retry with the token, exit 1.
+ */
+describe('os package install --confirm-upgrade (epic cloud#3652 Q3)', () => {
+  const TOKEN = 'schema-upgrade:0123456789abcdef0123456789abcdef';
+  const INSTALLED = {
+    manifestId: 'com.acme.crm', version: '2.0.0', versionId: 'ver_2', installedAt: '2026-11-07T00:00:00.000Z',
+    hotLoaded: true, storageDir: '/srv/runtime/.objectstack/installed-packages',
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('sends the token verbatim as `confirmSchemaUpgrade`, and no such key without the flag', async () => {
+    let { sent } = stubRuntime({ ok: true, status: 200, body: { success: true, data: INSTALLED } });
+    await runInstall(['--confirm-upgrade', TOKEN]);
+    expect(sent[0]).toMatchObject({ packageId: 'com.acme.crm', confirmSchemaUpgrade: TOKEN });
+
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    ({ sent } = stubRuntime({ ok: true, status: 200, body: { success: true, data: INSTALLED } }));
+    await runInstall([]);
+    expect(sent[0]).not.toHaveProperty('confirmSchemaUpgrade');
+  });
+
+  it('renders the refusal: every finding, renamedFrom or the token, and exits 1', async () => {
+    stubRuntime({
+      ok: false,
+      status: 409,
+      body: {
+        success: false,
+        error: {
+          code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',
+          message: 'Upgrading "com.acme.crm" would change stored fields in a way the schema sync does not carry',
+          details: {
+            manifestId: 'com.acme.crm',
+            findingSet: TOKEN,
+            findings: [
+              { kind: 'suspected_rename', describe: 'acme_lead.company (text) is removed while acme_lead.account_name (text) is added' },
+              { kind: 'type_change', describe: 'acme_deal.amount changes type text → number (needs_confirm)' },
+            ],
+          },
+        },
+      },
+    });
+    const { out, exit } = await runInstall([]);
+    expect(exit).toBe(1);
+    expect(out).toContain('acme_lead.company (text) is removed while acme_lead.account_name (text) is added');
+    expect(out).toContain('acme_deal.amount changes type text → number (needs_confirm)');
+    expect(out).toContain('`renamedFrom`');
+    expect(out).toContain(`os package install com.acme.crm --confirm-upgrade ${TOKEN}`);
+  });
+});
+
+describe('the shared upgrade plan reader (#30887): one reading for os package install and os deploy', () => {
+  it('reads a Q3 refusal into its findings and token, and nothing else as one', () => {
+    const findings = [{ kind: 'suspected_rename', describe: 'x' }];
+    expect(readSchemaUpgradeRefusal({ error: { code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED', details: { findings, findingSet: 'schema-upgrade:1' } } }))
+      .toEqual({ findings, findingSet: 'schema-upgrade:1' });
+    expect(readSchemaUpgradeRefusal({ error: { code: 'ACCESS_UPGRADE_CONFIRMATION_REQUIRED', details: { findings, findingSet: 'fs' } } })).toBeUndefined();
+    expect(readSchemaUpgradeRefusal({ error: { code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED', details: { findings } } }), 'no token, nothing to confirm with').toBeUndefined();
+    expect(readSchemaUpgradeRefusal(null)).toBeUndefined();
+  });
+
+  it("previews the framework verdict off a dry run's plan: a suspected rename and a needs_confirm type change ask; a declared rename, a removal and a safe change do not", () => {
+    const plan = {
+      suspectedRenames: [{ object: 'acme_lead', field: 'company', type: 'text', candidates: [{ field: 'account_name', type: 'text' }] }],
+      typeChanges: [
+        { object: 'acme_deal', field: 'amount', from: 'text', to: 'number', category: 'needs_confirm' },
+        { object: 'acme_deal', field: 'note', from: 'text', to: 'textarea', category: 'safe' },
+      ],
+      declaredRenames: [{ object: 'lead', from: 'phone', to: 'mobile' }],
+      fields: { added: [], removed: [{ object: 'acme_lead', field: 'fax', type: 'text' }] },
+    };
+    expect(previewSchemaUpgradeStop('com.acme.crm', { plan })!.map((f) => [f.kind, f.describe?.split(' ')[0]])).toEqual([
+      ['suspected_rename', 'acme_lead.company'],
+      ['type_change', 'acme_deal.amount'],
+    ]);
+    expect(previewSchemaUpgradeStop('com.acme.crm', { plan: { ...plan, suspectedRenames: [], typeChanges: [] } })).toEqual([]);
+  });
+
+  it('an unreadable installed record previews its one finding; a plan it cannot read previews nothing, never "nothing to confirm"', () => {
+    expect(previewSchemaUpgradeStop('com.acme.crm', { installedRecordUnreadable: true, plan: { suspectedRenames: [], typeChanges: [] } })!
+      .map((f) => f.kind)).toEqual(['installed_record_unreadable']);
+    expect(previewSchemaUpgradeStop('com.acme.crm', { plan: {} })).toBeUndefined();
+    expect(previewSchemaUpgradeStop('com.acme.crm', null)).toBeUndefined();
+  });
+});

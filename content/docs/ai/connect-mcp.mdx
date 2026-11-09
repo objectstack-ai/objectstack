@@ -13,7 +13,7 @@ about the only thing left to do: **connecting a client and proving it works**.
 <Callout type="info">
 To turn the surface off, set `OS_MCP_SERVER_ENABLED=false` — the endpoint then
 returns 404 to a caller with an API key or token (an anonymous caller still gets
-401 first, with no OAuth metadata advertised), and the **Connect an Agent** page
+401 first, with no OAuth metadata advertised), and the **Connect an AI Assistant** page
 disappears with it, along with both its Setup and Account navigation entries. See
 [environment variables](/docs/deployment/environment-variables#mcp-server).
 </Callout>
@@ -22,7 +22,23 @@ disappears with it, along with both its Setup and Account navigation entries. Se
 
 Interactive clients use OAuth — each deployment is its own OAuth 2.1
 authorization server, so there are no admin-minted credentials to pass around.
-The first tool call opens a browser login and you connect **as yourself**:
+The first tool call opens a browser login and you connect **as yourself**.
+
+With the ObjectStack CLI, [`os mcp connect`](/docs/deployment/cli#os-mcp-connect)
+runs the `claude mcp add` line for you. With no flags it registers your
+ObjectOS Cloud environment, picked as `os deploy` picks it, under that
+environment's name; `--url` takes
+a self-hosted or local server's base URL and registers it as `objectstack`. Claude
+Code is the only client it runs (`--client claude-code`); `--print` prints the
+endpoint and the line and runs nothing, for any other client. It stores no token:
+the client runs the server's own sign-in.
+
+```bash
+os mcp connect                              # your ObjectOS Cloud environment
+os mcp connect --url http://localhost:3000  # a self-hosted or local server
+```
+
+Or type the line yourself:
 
 ```bash
 # local dev server
@@ -79,6 +95,27 @@ For a **local or intranet** deployment, connect through
 own machine, so `localhost` and intranet addresses work there.
 </Callout>
 
+## Codex, WorkBuddy, Doubao Work and QwenWork
+
+These desktop assistants add a remote MCP server as a **custom
+connector**. Each one takes the same MCP URL; what differs is the menu path and
+how the client spells the Streamable HTTP transport. Where the client offers a
+browser sign-in, it is the same OAuth login as every other track. Where your
+client version offers none, add the request header
+`Authorization: Bearer <API key>` with a key from [below](#headless-api-keys).
+
+| Client | Where | What to enter |
+|:---|:---|:---|
+| **Codex** (app) | Settings → MCP servers → Add server | Name `objectstack`, transport `Streamable HTTP`, URL `<MCP URL>`; restart, then **Authenticate** to sign in, and `/mcp` to check |
+| **WorkBuddy** | Connectors → Custom connector → Configure MCP (stored in `~/.workbuddy/mcp.json`) | `{ "mcpServers": { "objectstack": { "type": "streamableHttp", "url": "<MCP URL>" } } }`, then click **Trust** on the connector — it stays inactive until trusted |
+| **Doubao Work** (豆包工作) | Skills · Connectors → New → New custom connector | Name `objectstack`, transport `HTTP`, server URL `<MCP URL>` |
+| **QwenWork** (千问办公) | Extensions → Connectors → + Add → Paste JSON config | `{ "mcpServers": { "objectstack": { "type": "streamable-http", "url": "<MCP URL>" } } }` |
+
+The **Connect an AI Assistant** page renders each of these with your deployment's URL
+filled in. A client task that runs in the vendor's cloud, rather than on your
+machine, reaches only a deployment on public HTTPS — the same constraint as
+[claude.ai](#claude-desktop-and-claudeai).
+
 ## Any MCP client (`.mcp.json`)
 
 Clients that read an `mcpServers` map connect the same way. With an API key:
@@ -97,22 +134,24 @@ Clients that read an `mcpServers` map connect the same way. With an API key:
 
 ## Headless: API keys
 
-Mint a key from the **Connect an Agent** page in the Console. One page, two
+Mint a key from the **Connect an AI Assistant** page in the Console. One page, two
 doors — which one you have depends on your permissions:
 
-- **Any signed-in user** — open the avatar menu (top right) → **Profile** to
-  enter the Account app, then **Developer → Connect an Agent** in its sidebar.
+- **Any signed-in user** — open the avatar menu (top right) → **Connect an AI
+  Assistant**. It opens the page in the Account app, whose sidebar lists it
+  under **AI Assistant**.
   Direct link: `/_console/apps/com.objectstack.account/page/connect_agent`.
-- **Platform admins** — **Setup → Connect an Agent**, at
+- **Platform admins** — **Setup → Overview → Connect an AI Assistant**, at
   `/_console/apps/com.objectstack.setup/page/connect_agent`, reached from the
   Setup sidebar. The Setup app requires the `setup.access` permission, so this
   door alone is not enough for an ordinary member; the Account one needs none.
 
 On the page, the **Create key** button sits at the bottom under *API keys*. The
 new key is shown **once**, together with a ready-to-paste `x-api-key: osk_...`
-header line — copy it before you dismiss the panel. The same page carries
-copy-paste connect snippets for Claude Code, Claude Desktop, Cursor, VS Code,
-and Codex, and a download link for the app's `SKILL.md`.
+header line and its `Authorization: Bearer osk_...` form — copy it before you
+dismiss the panel. The same page carries copy-paste connect snippets for
+claude.ai and Claude Desktop, Claude Code, Codex, Cursor, WorkBuddy, Doubao Work
+and QwenWork, and a download link for the app's `SKILL.md`.
 
 Your own keys are listed (prefix only) and revoked under **Account → Developer
 → API Keys**. Platform admins get the tenant-wide list at **Setup → Access
@@ -162,7 +201,7 @@ message names the key's prefix, the date, and the remedy:
 |:---|:---|
 | `API_KEY_EXPIRED` | Past its `expires_at` (or past the grace of a key created with none). |
 | `API_KEY_INACTIVE` | No recorded use for longer than the inactivity window. The key is **not** revoked. |
-| `API_KEY_REVOKED` | Revoked by its owner or an administrator. |
+| `API_KEY_REVOKED` | Revoked by its owner or an administrator. A key a platform administrator revoked for someone else is suspended: only a platform administrator can restore it. |
 
 The remedy is the same for all three: **create a new key and replace the old
 one wherever it is configured** — keys do not renew. To rotate without a gap,
@@ -222,7 +261,8 @@ decision.
 
 ## What the agent gets
 
-Twelve tools, generated from your metadata:
+Thirteen tools, generated from your metadata, and two more for files where the
+storage service is installed:
 
 | Tool | What it does |
 |:---|:---|
@@ -231,8 +271,58 @@ Twelve tools, generated from your metadata:
 | `query_records` / `get_record` | Read data (list queries are capped at 50 rows per page by default) |
 | `aggregate_records` | Grouped aggregation (registered when the active driver supports it) |
 | `create_record` / `update_record` / `delete_record` | Write data |
+| `delete_records` | Delete many records of one object, by a filter or an id list, at most 200 per call (an OAuth token needs both `data:read` and `data:write`) |
 | `list_actions` / `run_action` | Discover and invoke your business actions by name |
 | `resume_run` | Finish a flow action that paused on a screen, by submitting the screen's values |
+| `read_file` | Read a file a record carries: its text (text files, PDF, Word `.docx`) or the image itself, with its size, the byte cap and a short-lived download link |
+| `create_upload_link` | Hand the user a single-use link that uploads one file onto a record's file field or its attachments |
+
+### Files: `read_file` and `create_upload_link`
+
+Both tools are registered only where the storage service is installed (they
+read and write through it), `read_file` with the `data:read` scope and
+`create_upload_link` with `data:write`. Neither judges access on its own: the
+record is read first, exactly as `get_record` reads it, so **no access to the
+record means no file**, refused with the same `RECORD_NOT_FOUND`.
+
+- **`read_file({ objectName, recordId, field?, fileId?, attachmentId? })`**
+  reads one file: the one a file field holds (`field`, plus `fileId` when the
+  field holds several), or one attachment (`attachmentId`). Send neither to
+  list the record's files with their ids. The file is then judged by the same
+  rule as a download from the Console. The answer carries the file's name,
+  type and size, the byte cap `read_file` reads (10 MiB), a download link that
+  expires after five minutes, and the content: the text of a text file, a PDF
+  or a Word document (cut at 100,000 characters or 200 PDF pages), or the image
+  itself for PNG, JPEG, GIF and WebP up to 5 MiB. A larger file answers its
+  facts and the link only; a damaged PDF or Word file answers a sentence
+  saying so.
+- **`create_upload_link({ objectName, recordId, field? | attachments: true })`**
+  needs a record the caller may edit (and, for a field, a field they may
+  write). It answers a link and its expiry (ten minutes). The user opens the
+  link in a browser where they are signed in to this deployment, picks one
+  file, and it lands on exactly that record and field, or as an attachment of
+  that record. On a phone, they sign in there first. The link works only for
+  the user it was made for, and only once: without a session it answers
+  `401`, and a second use, an expired link, an unknown link and another user's
+  link all get the same `404`. The upload is stored as that user, with their
+  access checked again when the file arrives, and it meets the storage
+  service's maximum upload size before the link is spent. Sending a file's
+  bytes through the MCP protocol itself is not supported yet.
+
+Reading a PDF or Word document's text runs on a pool of worker threads, so the
+server keeps answering other requests while it does. Two host settings bound it, so
+one caller's files cannot hold the process for everyone else (a shared
+deployment sets its own values):
+
+| Variable | Default | What it bounds |
+|:--|:--|:--|
+| `OS_MCP_READ_FILE_CPU_BUDGET_MS` | `2000` | The CPU time one PDF or Word extraction may use, in milliseconds. It is checked between PDF pages and between Word paragraphs, never mid-page. When it runs out, `read_file` answers the text read so far with `truncated: true` and a note naming the budget; the rest is in the download link the answer already carries. |
+| `OS_MCP_READ_FILE_MAX_CONCURRENT` | `4` | How many PDF and Word extractions may run at once in the process. One more is refused at once, never queued: `SERVICE_UNAVAILABLE` (503), with `details.retryAfterSeconds` saying how long to wait before trying again. Text files and images are not counted. |
+
+The defaults keep a self-hosted deployment reading files as before: a 9 MiB,
+200-page PDF dense in drawing operators measured about 300 to 650 ms of CPU, well
+inside the budget. Both are read once when the server starts; a value that is
+not a positive whole number stops the start with a message naming the variable.
 
 The tools are a fixed ~10-tool **spine** with the object name as a *parameter*
 (`query_records(objectName, …)`), not one tool per object — so the list stays
@@ -337,8 +427,17 @@ drive this MCP server. Same word, different layer.
 - **Every call runs as the caller.** The MCP bridge resolves the same
   `ExecutionContext` as a REST request, so RBAC, row-level security, and
   field-level security apply to the agent exactly as they do to a person in
-  the Console. Sparse results or denied writes usually mean governance is
-  *working*, not that the connection is broken.
+  the Console. Schema discovery is included: `describe_object`,
+  `list_objects`' `fieldCount` and the fields `validate_expression` puts in
+  scope name only the fields the caller can read, the same field set
+  `GET /api/v1/meta/object/:name` serves that caller. `list_actions` follows
+  the same projection: an action that object door withholds from the caller
+  (one whose param binds a field the caller cannot read, judged on the object
+  the param names, so an object-less action too) is not listed, and a
+  listed action's params carry no label, help text or options of such a
+  field. Sparse results or denied
+  writes usually mean governance is *working*, not that the connection is
+  broken.
 - **OAuth scopes narrow the toolset.** Tokens carry `data:read`,
   `data:write`, and `actions:execute` scopes — tools outside the granted
   scopes are not even registered for that session. API-key and session
@@ -348,11 +447,60 @@ drive this MCP server. Same word, different layer.
   person publishes in the UI); it is served only to a token that carries it,
   never to an API key or a session, and every authoring call is still checked
   against the caller's own metadata permission.
+- **A person can withdraw an assistant they authorized, at any time.**
+  `GET /api/v1/auth/authorized-clients` lists the assistants the signed-in
+  person authorized (each row's `id` is the grant), and
+  `POST /api/v1/auth/authorized-clients/withdraw` with `{ "id": "…" }` revokes
+  one: the grant and the client's refresh tokens are deleted, so the
+  assistant's token is refused on its very next call and the assistant must
+  be authorized again to reconnect. Only the person's own grant is withdrawn;
+  an id that is someone else's answers `404`, exactly as one that names
+  nothing. A platform administrator does the same for a person with
+  `GET /api/v1/auth/admin/authorized-clients?userId=…` and
+  `POST /api/v1/auth/admin/authorized-clients/withdraw` with
+  `{ "userId": "…", "id": "…" }`; a request with no session is refused
+  `401`, and anyone else who is signed in is refused `403`. The SDK
+  spells them `oauth.authorizedClients.list()` / `withdraw(id)` and
+  `listForUser(userId)` / `withdrawForUser(userId, id)`.
+- **A platform administrator can pause an assistant for everyone.** Disabling
+  its client (the Disable action on the OAuth applications list, or
+  `POST /api/v1/auth/admin/oauth2/toggle-disabled` with
+  `{ "client_id": "…", "disabled": true }`) refuses every access token the
+  client already holds on its next call (`401`), and the client gets no new
+  ones: a refresh is refused `invalid_client`. Disabling is a pause, not an
+  end: the grants and refresh tokens stay, so enabling the client again
+  serves them again. To end a grant, withdraw it.
 - **Action bodies run as trusted app code** once invoked (the `ai.exposed`
   gate and `requiredPermissions` are checked at *invoke* time). Treat writing
   an action as a code-review-worthy act — that's the real security boundary.
 - An action can also declare `ai.requiresConfirmation`; destructive-looking
   actions (`confirmText`, danger variants) default to requiring it.
+- **`delete_record` needs `confirm: true` on every call.** A record delete over
+  MCP is permanent, so the tool refuses a call without it with `run_action`'s
+  refusal (`428` `ACTION_CONFIRMATION_REQUIRED`, its `details.actionName`
+  naming `delete_record`) and deletes nothing. The agent asks its human, then retries
+  with `confirm: true`; the flag asserts an approval, it does not obtain one.
+  REST `DELETE /api/v1/data/:object/:id` and `update_record` take no
+  confirmation.
+- **`delete_records` takes the same gate, and its refusal is the preview.** A
+  call without `confirm: true` reads the selection as the caller and deletes
+  nothing: the same `428` refusal (`details.actionName` naming
+  `delete_records`) arrives with a `preview` beside it, saying how many records
+  match, how many a confirmed call attempts and a sample of their ids, for the
+  agent to show its human. A confirmed call deletes at most 200 records, each
+  exactly as `delete_record` would: under the caller's permissions and
+  row-level security, and through the object's delete rules (a package's
+  locking hook, a restricted relation), which no caller bypasses, an
+  administrator included. Records a rule refuses stay, and the answer counts
+  them grouped by reason with their ids; when more than 200 match it says how
+  many remain, and the next call continues. On a deployment whose read page
+  size or row budget (`OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`) is
+  under 200, one call runs at that size instead, and the answer's `cap` says
+  so. A fault (a store error, a crash)
+  is not a refusal: it stops the call, and the error names the record it
+  stopped at and how many were already deleted. Because the preview reads ids
+  and a count, an OAuth token is offered the tool only when it carries both
+  `data:read` and `data:write`.
 
 ## Verify the connection
 
@@ -381,7 +529,7 @@ call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 # → {"result":{"serverInfo":{"name":"objectstack",...},"capabilities":{"tools":{...},"prompts":{}}},...}
 
 call '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | grep -o '"name":"[a-z_]*"'
-# → the twelve tools, list_objects … resume_run
+# → the thirteen tools, list_objects … resume_run (fifteen with read_file and create_upload_link where storage is installed)
 
 call '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"query_records","arguments":{"objectName":"crm_opportunity","limit":3}}}'
 # → {"result":{"content":[{"type":"text","text":"{ \"object\": \"crm_opportunity\", \"records\": [ ... ], \"total\": 23, \"hasMore\": true }"}]}}
@@ -420,7 +568,7 @@ skill and a guided `/objectstack:connect` command.
 | stdio won't start / boot fails closed | `OS_MCP_STDIO_ENABLED=true` but `OS_MCP_STDIO_API_KEY` is missing, unknown, revoked, or expired — fail-closed by design (ADR-0101). Set a valid `osk_` key; there is no unscoped or `system` fallback |
 | `401` on every call | Anonymous or invalid credentials. Interactive clients: complete the browser login (the `WWW-Authenticate` header advertises the OAuth metadata). Headless: check the `osk_` key and header spelling |
 | `403 insufficient_scope` | The OAuth token lacks the scope for that tool family (e.g. writes without `data:write`) — reconnect and grant the scope |
-| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (`script` with a body/handler, `flow` with an automation service, and `api` with a same-origin `target` are — `url`, `modal`, `form`, and an `api` action whose `target` is on another origin never appear), it targets `sys_metadata` / `sys_metadata_history` (refused even when flagged — use the metadata API), or the caller fails its `requiredPermissions` |
+| An action is missing from `list_actions` | `ai.exposed` is not `true`, `ai.description` is shorter than 40 characters, the type isn't headless-callable here (`script` with a body/handler, `flow` with an automation service, and `api` with a same-origin `target` are — `url`, `modal`, `form`, and an `api` action whose `target` is on another origin never appear), it targets `sys_metadata` / `sys_metadata_history` (refused even when flagged — use the metadata API), or the caller fails its `requiredPermissions`, or one of its params binds a field the caller cannot read |
 | Reads return few rows / writes denied | Working as designed — the caller's permissions and RLS apply. Verify with the same user in the Console |
 
 ## Related

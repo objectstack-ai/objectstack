@@ -121,6 +121,16 @@ export class BulkOperationError extends ObjectStackError {
 
 /**
  * Error thrown when connection to ObjectStack server fails
+ *
+ * `statusCode` is the server's answer and nothing else: a 503 / 504 the server
+ * sent (`createErrorFromResponse`), or the status a refused discovery read
+ * came back with (`connect()`). Built without one, the error stands for a
+ * request nothing answered (the host unreachable, `fetch` rejected), and
+ * `statusCode` stays undefined rather than an invented 503: a reader that sees
+ * a numeric status takes it for the server's answer (`answeredLoadFailure`)
+ * and would show "Failed to fetch" as the server's own words
+ * (objectstack#29916, the same rule objectstack#29885 set for
+ * `createErrorFromResponse`).
  */
 export class ConnectionError extends ObjectStackError {
   constructor(
@@ -132,7 +142,7 @@ export class ConnectionError extends ObjectStackError {
     super(
       `Connection error: ${message}`,
       'CONNECTION_ERROR',
-      statusCode || 503,
+      statusCode,
       { url, ...details }
     );
     this.name = 'ConnectionError';
@@ -217,13 +227,21 @@ export class DataApiValidationError extends ObjectStackError {
 
 /**
  * Helper function to create an error from an HTTP response
- * 
+ *
+ * An input that carries no status got no answer (a dropped connection, an
+ * unreachable host: `fetch` rejects with a bare `TypeError`). It comes back as
+ * an `UNKNOWN_ERROR` with `statusCode` left undefined, never with an invented
+ * status: a reader that sees a numeric status takes it for the server's answer
+ * (`answeredLoadFailure`), and would show the browser's "Failed to fetch" as
+ * if the server had said it (objectstack#29885). An input that is an `Error`
+ * is kept as `details.originalError`, whatever its status.
+ *
  * @param response - Response object or error from fetch/axios
  * @param context - Additional context for debugging
  * @returns Appropriate error instance
  */
 export function createErrorFromResponse(response: Record<string, unknown>, context?: string): ObjectStackError {
-  const status = (response?.status as number) || (response?.statusCode as number) || 500;
+  const status = (response?.status as number) || (response?.statusCode as number) || undefined;
   const message = (response?.message as string) || (response?.statusText as string) || 'Unknown error';
   const details = {
     context,
@@ -232,6 +250,9 @@ export function createErrorFromResponse(response: Record<string, unknown>, conte
       data: response?.data,
       headers: response?.headers,
     },
+    // The transport's own error, when the input is one: what the server said
+    // (its status, ADR-0112 code and sentence), or the bare fetch failure.
+    ...(response instanceof Error ? { originalError: response } : {}),
   };
 
   switch (status) {

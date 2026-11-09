@@ -20,6 +20,7 @@
  *    red at the type check, and a code nobody pinned goes red here.
  */
 
+import { inspect } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { celEngine, collectCelRootIdentifiers, type CelRootIdentifiersResult } from './cel-engine';
 import { templateEngine } from './template-engine';
@@ -273,8 +274,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       produce: () => onlyError('predicate', "pge.selectedProjectId != ''", { scope: 'record', roots: ['page'] }),
       params: { name: 'pge', roots: ['page'], suggestion: 'page' },
       message:
-        'unbound root `pge` — beyond the record this authoring surface binds `page`, and `pge` is none of them, ' +
-        'so `pge.…` resolves to nothing and the expression silently evaluates to null. Did you mean `page`?',
+        'unbound root `pge` — beyond the record this authoring surface binds `page`, and `pge` is none of them: ' +
+        '`pge.…` is an unknown variable, so the expression faults with `Unknown variable: pge` instead of reading it. ' +
+        'Did you mean `page`?',
     },
   ],
   'bare-reference': [
@@ -283,7 +285,9 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       params: { name: 'amount' },
       message:
         'bare reference `amount` — a formula/validation expression binds the record as the `record` namespace, ' +
-        'not at top level, so `amount` resolves to nothing and the expression silently evaluates to null. Write `record.amount`.',
+        'not at top level, so `amount` is an unknown variable and the expression faults with `Unknown variable: amount` ' +
+        'instead of reading the field. The site\'s fault rule decides the outcome (a formula field reads null, an ' +
+        '`error` validation rule refuses the write, an action\'s `visible` hides the action). Write `record.amount`.',
     },
   ],
   'date-arithmetic': [
@@ -295,14 +299,74 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'on dates: this faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span ' +
         'in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
+  ],
+  // [#30250] A fail-closed site: the fault refuses the write, nothing reads null.
+  'date-arithmetic-fail-closed': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.close_date + 1 > 3', {
+          scope: 'record',
+          fieldTypes: { close_date: 'date' },
+          faultOutcome: 'fail-closed',
+        }),
+      params: { operands: 'google.protobuf.Timestamp + int', reference: 'record.close_date' },
+      message:
+        'date arithmetic `google.protobuf.Timestamp + int` — `record.close_date` is a date, and CEL can\'t do arithmetic ' +
+        'on dates: this faults at runtime, and here an expression that cannot be evaluated fails closed: the write (or the operation ' +
+        'a hook guards) is refused, not skipped (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  // [#30494] An advisory (fail-open) rule: the fault skips the rule and the
+  // write proceeds, nothing reads null.
+  'date-arithmetic-fail-open': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.close_date + 1 > 3', {
+          scope: 'record',
+          fieldTypes: { close_date: 'date' },
+          faultOutcome: 'fail-open',
+        }),
+      params: { operands: 'google.protobuf.Timestamp + int', reference: 'record.close_date' },
+      message:
+        'date arithmetic `google.protobuf.Timestamp + int` — `record.close_date` is a date, and CEL can\'t do arithmetic ' +
+        'on dates: ' +
+        'this faults at runtime, and here the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: ' +
+        'the write proceeds, the rule is never applied (its advisory never fires), and the only trace is a log line saying ' +
+        'it could not be evaluated. ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  // [#30016] A flattened (flow) condition: the fault fails the run, it never
+  // reads null — `run-fails` where the run is proven to hold the field.
+  'date-arithmetic-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'close_date + 1 > 3', {
+          fields: ['close_date'],
+          fieldTypes: { close_date: 'date' },
+          faultOutcome: 'run-fails',
+        }),
+      params: { operands: 'google.protobuf.Timestamp + int', reference: 'close_date' },
+      message:
+        'date arithmetic `google.protobuf.Timestamp + int` — `close_date` is a date, and CEL can\'t do arithmetic ' +
+        'on dates: this faults at runtime, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-arithmetic-run-may-fail': [
     {
       produce: () =>
         onlyError('predicate', 'close_date + 1 > 3', { fields: ['close_date'], fieldTypes: { close_date: 'date' } }),
       params: { operands: 'google.protobuf.Timestamp + int', reference: 'close_date' },
       message:
         'date arithmetic `google.protobuf.Timestamp + int` — `close_date` is a date, and CEL can\'t do arithmetic ' +
-        'on dates: this faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span ' +
-        'in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'on dates: this faults wherever `close_date` holds the date when the condition runs, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
   'date-text-arithmetic': [
@@ -319,6 +383,61 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
         'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
+  ],
+  'date-text-arithmetic-fail-closed': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.end_date - record.start_date > duration("24h")', {
+          scope: 'record',
+          fieldTypes: { start_date: 'date', end_date: 'date' },
+          faultOutcome: 'fail-closed',
+        }),
+      params: { operands: 'DateText - DateText', reference: 'record.start_date' },
+      message:
+        'date arithmetic `DateText - DateText` — `record.start_date` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults at runtime, and here an expression that cannot be evaluated fails closed: the write (or the operation ' +
+        'a hook guards) is refused, not skipped (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-text-arithmetic-fail-open': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.end_date - record.start_date > duration("24h")', {
+          scope: 'record',
+          fieldTypes: { start_date: 'date', end_date: 'date' },
+          faultOutcome: 'fail-open',
+        }),
+      params: { operands: 'DateText - DateText', reference: 'record.start_date' },
+      message:
+        'date arithmetic `DateText - DateText` — `record.start_date` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults at runtime, and here the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: ' +
+        'the write proceeds, the rule is never applied (its advisory never fires), and the only trace is a log line saying ' +
+        'it could not be evaluated. ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-text-arithmetic-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'end_at - start_at > duration("1h")', {
+          fields: ['start_at', 'end_at'],
+          fieldTypes: { start_at: 'datetime', end_at: 'datetime' },
+          faultOutcome: 'run-fails',
+        }),
+      params: { operands: 'DateText - DateText', reference: 'start_at' },
+      message:
+        'date arithmetic `DateText - DateText` — `start_at` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults at runtime, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-text-arithmetic-run-may-fail': [
     {
       produce: () =>
         onlyError('predicate', 'end_at - start_at > duration("1h")', {
@@ -328,9 +447,11 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
       params: { operands: 'DateText - DateText', reference: 'start_at' },
       message:
         'date arithmetic `DateText - DateText` — `start_at` is a date field, and the runtime holds a date field ' +
-        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: this ' +
-        'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
-        'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults wherever `start_at` holds that text when the condition runs, and ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
   'date-duration-value': [
@@ -369,6 +490,109 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'type mismatch `bool + int` — `record.active` holds a boolean but is used with `+` against a number. This faults ' +
         'at runtime, so the expression silently evaluates to null (unless the value happens to be numeric). Use a number ' +
         'field, or drop the arithmetic/comparison.',
+    },
+  ],
+  // [#29926] One code per fault outcome the caller declares (`faultOutcome`):
+  // the three sentences differ in what the runtime does, so they are three
+  // codes. `type-mismatch-fail-closed` is the sentence #29904 served as
+  // `type-mismatch` with `outcome: 'fail-closed'`, byte for byte.
+  'type-mismatch-fail-closed': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.name > 5', { scope: 'record', fieldTypes: { name: 'text' }, faultOutcome: 'fail-closed' }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'record.name' },
+      message:
+        'type mismatch `string > int` — `record.name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'an expression that cannot be evaluated fails closed: the write (or the operation a hook guards) is refused, not ' +
+        'skipped. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(record.name)` for its ' +
+        'length, `double(record.name)` for its value (which itself faults on text that is not a number).',
+    },
+    {
+      produce: () =>
+        onlyError('predicate', 'record.active > 0', { scope: 'record', fieldTypes: { active: 'boolean' }, faultOutcome: 'fail-closed' }),
+      params: { operands: 'bool > int', operator: '>', held: 'boolean', reference: 'record.active' },
+      message:
+        'type mismatch `bool > int` — `record.active` holds a boolean but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'an expression that cannot be evaluated fails closed: the write (or the operation a hook guards) is refused, not ' +
+        'skipped. Compare a boolean with `true` / `false`, or use a number field.',
+    },
+  ],
+  'type-mismatch-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'name > 5', { scope: 'flattened', fields: ['name'], fieldTypes: { name: 'text' }, faultOutcome: 'run-fails' }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'name' },
+      message:
+        'type mismatch `string > int` — `name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'a flow condition that cannot be evaluated fails the run: the flow stops at this condition, the write that fired ' +
+        'it still lands, and the work the flow exists to do is not done. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
+        'length, `double(name)` for its value (which itself faults on text that is not a number).',
+    },
+  ],
+  // [#30250] The same outcome on a time-relative sweep, which no write fires.
+  'type-mismatch-sweep-run-fails': [
+    {
+      produce: () =>
+        onlyError('predicate', 'name > 5', {
+          scope: 'flattened', fields: ['name'], fieldTypes: { name: 'text' }, faultOutcome: 'run-fails', timeRelativeSweep: true,
+        }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'name' },
+      message:
+        'type mismatch `string > int` — `name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'a flow condition that cannot be evaluated fails the run: the time-relative sweep starts one run per row it finds, ' +
+        'the run for this row stops at this condition and the work the flow exists to do is not done for that row, and ' +
+        'nothing else happens (the sweep logs the failure and goes on to the next row). ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
+        'length, `double(name)` for its value (which itself faults on text that is not a number).',
+    },
+  ],
+  'type-mismatch-fail-open': [
+    {
+      produce: () =>
+        onlyError('predicate', 'record.name > 5', { scope: 'record', fieldTypes: { name: 'text' }, faultOutcome: 'fail-open' }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'record.name' },
+      message:
+        'type mismatch `string > int` — `record.name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and here ' +
+        'the rule is advisory, so a rule that cannot be evaluated is skipped, not refused: the write proceeds, the rule is ' +
+        'never applied (its advisory never fires), and the only trace is a log line saying it could not be evaluated. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(record.name)` for its ' +
+        'length, `double(record.name)` for its value (which itself faults on text that is not a number).',
+    },
+  ],
+  // [#29959] A flow condition the caller declared no outcome for: still a
+  // warning, worded for the failed run a fault is there (never a null). The
+  // second case is the `record.<field>` read, judged as its bare name is.
+  'type-mismatch-run-may-fail': [
+    {
+      produce: () => onlyWarning('predicate', 'name > 5', { scope: 'flattened', fields: ['name'], fieldTypes: { name: 'text' } }),
+      params: { operands: 'string > int', operator: '>', held: 'text', reference: 'name' },
+      message:
+        'type mismatch `string > int` — `name` holds text but is used with `>` against a number. CEL has no such operation, so ' +
+        'wherever the value is not numeric text (an empty value included) the expression faults, and a flow condition that ' +
+        'faults when it is evaluated fails the run: the flow stops at this condition and the work it exists to do is not done ' +
+        '(it does not read null). Whether `name` holds text there depends on what the run binds, which this check cannot ' +
+        'prove here, so this is a warning, not a refusal. ' +
+        'Compare like with like: use a number field, compare text with text, or convert explicitly — `size(name)` for its ' +
+        'length, `double(name)` for its value (which itself faults on text that is not a number).',
+    },
+    {
+      produce: () =>
+        onlyWarning('predicate', 'record.active > 0', { scope: 'flattened', fields: ['active'], fieldTypes: { active: 'boolean' } }),
+      params: { operands: 'bool > int', operator: '>', held: 'boolean', reference: 'record.active' },
+      message:
+        'type mismatch `bool > int` — `record.active` holds a boolean but is used with `>` against a number. CEL has no such ' +
+        'operation, so wherever the value is not numeric text (an empty value included) the expression faults, and a flow ' +
+        'condition that faults when it is evaluated fails the run: the flow stops at this condition and the work it exists ' +
+        'to do is not done (it does not read null). Whether `record.active` holds a boolean there depends on what the run ' +
+        'binds, which this check cannot prove here, so this is a warning, not a refusal. ' +
+        'Compare a boolean with `true` / `false`, or use a number field.',
     },
   ],
   'field-near-miss': [
@@ -509,6 +733,7 @@ const SWEEP_SOURCES: readonly string[] = [
   'close_date + 1 > 3',
   'record.close_date - record.close_date',
   'today() - record.close_date',
+  'close_date - close_date > duration("1h")',
   'record.name > 5',
   'record.active + 1 > 5',
   "record.account == 'a1' && record.account.name == 'x'",
@@ -546,6 +771,49 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     optionFields: ['status'],
   },
   { fields: ['status', 'close_date'], objectName: 'deal', fieldTypes: { close_date: 'date' } },
+  // [#30016] The same flow condition where the run is proven to hold the
+  // field: the date verdicts' `-run-fails` codes (the line above reaches
+  // `-run-may-fail`).
+  { fields: ['status', 'close_date'], objectName: 'deal', fieldTypes: { close_date: 'date' }, faultOutcome: 'run-fails' },
+  // [#29926] The deal schema once per declared fault outcome, so the sweep
+  // reaches each `type-mismatch-*` code and holds its params to its message.
+  ...(['fail-closed', 'run-fails', 'fail-open'] as const).map((faultOutcome): ExprSchemaHint => ({
+    scope: 'record',
+    objectName: 'deal',
+    fields: ['amount', 'name', 'active'],
+    fieldTypes: { name: 'text', active: 'boolean' },
+    faultOutcome,
+  })),
+  // [#30250] A fail-closed site with a date field reaches the date verdicts'
+  // `-fail-closed` codes; a time-relative sweep's `run-fails` condition
+  // reaches `type-mismatch-sweep-run-fails`.
+  {
+    scope: 'record',
+    objectName: 'deal',
+    fields: ['close_date'],
+    fieldTypes: { close_date: 'date' },
+    faultOutcome: 'fail-closed',
+  },
+  // [#30494] The same date schema on an advisory rule reaches the date
+  // verdicts' `-fail-open` codes.
+  {
+    scope: 'record',
+    objectName: 'deal',
+    fields: ['close_date'],
+    fieldTypes: { close_date: 'date' },
+    faultOutcome: 'fail-open',
+  },
+  {
+    scope: 'flattened',
+    objectName: 'deal',
+    fields: ['amount', 'name', 'active'],
+    fieldTypes: { name: 'text', active: 'boolean' },
+    faultOutcome: 'run-fails',
+    timeRelativeSweep: true,
+  },
+  // [#29959] A flattened (flow) condition with no declared outcome reaches
+  // `type-mismatch-run-may-fail`, bare and through `record.`.
+  { scope: 'flattened', objectName: 'deal', fields: ['amount', 'name', 'active'], fieldTypes: { name: 'text', active: 'boolean' } },
   { fields: ['status'] },
   { fieldTypes: { account: 'lookup' }, traversalHydration: true },
 ];
@@ -591,6 +859,40 @@ function expectLocatorsRead(said: { code: string; params: unknown; source: strin
   }
 }
 
+/**
+ * A refusal's identity in the sweep: the whole refusal, which is its `code`,
+ * `params`, `message` and `source` (`refusal()` in `validate.ts` builds exactly
+ * those four). `inspect` and not `JSON.stringify`, because JSON writes an
+ * `undefined` param as absent and `NaN` as `null`, and two refusals that differ
+ * only there must still be judged apart.
+ */
+function refusalKey(said: ExprValidationError): string {
+  return inspect(said, { depth: Infinity, breakLength: Infinity, maxArrayLength: Infinity, maxStringLength: Infinity });
+}
+
+/**
+ * The validateExpression sweep's budget. The case is synchronous: 5,760
+ * validateExpression calls (3 roles x 128 inputs x 15 schemas), most of the
+ * time in building a typed CEL environment for each call. Its work is the
+ * sweep's breadth, which is the claim, so the breadth stays; only re-judging
+ * duplicate refusals was cut (see the case). Readings of the case, in ms:
+ *
+ *   - CI, `main` push run 42192379976, job `Test Core (4/8)` (127808107135), a
+ *     contended shard: 5034, `Test timed out in 5000ms.` A synchronous body
+ *     runs to its end before vitest judges it, so 5034 is the whole run.
+ *     The six other `Test Core` jobs sampled from the same three days: 429
+ *     to 3065.
+ *   - Local, 4 vCPU, this file alone: 757 to 830 before the cut, 534 to 645
+ *     after it. Pinned to one CPU shared with two busy loops: 2542 to 3063
+ *     before, 1961 to 2137 after.
+ *
+ * The rule follows `packages/cli/test/hook-timeout-override-refusal.test.ts`:
+ * 3x the slowest reading, rounded up to the next second. 3 x 5034 = 15102, so
+ * the budget is 16000. If the sweep's inputs or schemas grow, re-measure and
+ * re-size.
+ */
+const VALIDATE_SWEEP_BUDGET_MS = 16_000;
+
 describe('expression refusal codes — the closed set', () => {
   it('has a pin for every code, and no pin for a code outside the set', () => {
     expect(Object.keys(PINS).sort()).toEqual([...EXPRESSION_REFUSAL_CODES].sort());
@@ -605,6 +907,7 @@ describe('expression refusal codes — the closed set', () => {
 
   it('every refusal validateExpression reports on the sweep carries a code from its set, with params the message interpolates', () => {
     const provoked = new Set<string>();
+    const judged = new Set<string>();
     let refusals = 0;
     for (const role of ['predicate', 'value', 'template'] as const) {
       for (const input of SWEEP_INPUTS) {
@@ -612,6 +915,13 @@ describe('expression refusal codes — the closed set', () => {
           const r = validateExpression(role, input, schema);
           for (const said of [...r.errors, ...r.warnings]) {
             refusals++;
+            // At 98f640d581 the sweep's 3,865 refusals are 199 distinct
+            // ones, and every assertion below reads only the refusal itself
+            // — so one that equals a refusal already judged gets that verdict
+            // again, and is judged once.
+            const key = refusalKey(said);
+            if (judged.has(key)) continue;
+            judged.add(key);
             expect(VALIDATE_CODES.has(said.code), `${said.code} from ${JSON.stringify(input)}`).toBe(true);
             expect(typeof said.params).toBe('object');
             expect(said.params).not.toBeNull();
@@ -626,7 +936,7 @@ describe('expression refusal codes — the closed set', () => {
     // producer owns, so a code whose arm stopped being reachable shows up too.
     expect(refusals).toBeGreaterThan(100);
     expect([...provoked].sort()).toEqual([...VALIDATE_CODES].sort());
-  });
+  }, VALIDATE_SWEEP_BUDGET_MS);
 
   it('every refusal collectCelRootIdentifiers reports on the sweep carries a code from its set', () => {
     const provoked = new Set<string>();

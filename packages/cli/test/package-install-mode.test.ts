@@ -51,7 +51,7 @@ async function runInstall(args: string[]): Promise<{ out: string; exit: number |
   vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => { lines.push(String(chunk)); return true; }) as any);
   let exit: number | undefined;
   try {
-    await PackageInstall.run(['com.acme.crm', '--runtime', 'http://runtime.test', ...args]);
+    await PackageInstall.run(['com.acme.crm', '--url', 'http://runtime.test', ...args]);
   } catch (err: any) {
     exit = err?.oclif?.exit ?? err?.code ?? 1;
   }

@@ -11,11 +11,15 @@ import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import type { SetURLSearchParams } from 'react-router-dom';
 import type { useAuth } from '@object-ui/auth';
 import type { usePermissions } from '@object-ui/permissions';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { toast } from 'sonner';
 import {
+    LIST_FILTER_PARAM,
     parseUserFilterParams,
     applyUserFilterParams,
     parseListStateParams,
     applyListStateParams,
+    parseListPageParam,
     userFilterParamsKey,
     type ListStatePatch,
     type ListUrlFieldGate,
@@ -40,7 +44,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 /**
  * objectstack#28950 — the params with the reader's whole `uf_*` list state
  * removed: the Filter panel, search, sort and grouping, and every user-filter
- * chip. Through the owning module's own writers, so the family has one
+ * chip, and (objectstack#30850) the page. Through the owning module's own writers, so the family has one
  * definition. Every other param (`filter[...]` drill scope, `recordId`, ...)
  * is kept.
  */
@@ -49,7 +53,7 @@ export function withoutListStateParams(prev: URLSearchParams): URLSearchParams {
     const cleared = chips
         ? applyUserFilterParams(prev, Object.fromEntries(Object.keys(chips).map(field => [field, []])))
         : new URLSearchParams(prev);
-    return applyListStateParams(cleared, { filters: null, search: null, sort: null, grouping: null });
+    return applyListStateParams(cleared, { filters: null, search: null, sort: null, grouping: null, page: null });
 }
 
 /**
@@ -97,10 +101,30 @@ export function acceptStoredFilters(
     return conditions.length > 0 ? { ...group, conditions } : undefined;
 }
 
+/**
+ * objectstack#31869 — how many conditions a link's `uf__filter` carries, read
+ * from the envelope itself, before any check: `0` for no param, or for a
+ * value that is not the `{ logic, conditions }` envelope at all (that link
+ * carries no filter to refuse, and opens as it always did).
+ */
+function linkFilterConditionCount(searchParams: URLSearchParams): number {
+    const raw = searchParams.get(LIST_FILTER_PARAM);
+    if (!raw) return 0;
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        return 0;
+    }
+    if (!isRecord(parsed) || (parsed.logic !== 'and' && parsed.logic !== 'or')) return 0;
+    return Array.isArray(parsed.conditions) ? parsed.conditions.length : 0;
+}
+
 export function useObjectViewListUrlState({
     objectName,
     objectDef,
     activeView,
+    viewResolving,
     listPrefs,
     perms,
     user,
@@ -110,6 +134,12 @@ export function useObjectViewListUrlState({
     objectName: string | undefined;
     objectDef: ConsoleObjectViewProps['objects'][number];
     activeView: ReturnType<typeof buildViewTabs>[number];
+    /**
+     * objectstack#30034 — the view the address (or the reader's pin) names is
+     * still being resolved (`ObjectView`'s `awaitingPersonalViews`), so
+     * `activeView` is only the view the page falls back to meanwhile.
+     */
+    viewResolving: boolean;
     listPrefs: ReturnType<typeof useObjectListPreferences>;
     perms: ReturnType<typeof usePermissions>;
     user: ReturnType<typeof useAuth>['user'];
@@ -138,10 +168,37 @@ export function useObjectViewListUrlState({
      *    seed waits until that state has been read (`listPrefs.ready`), so a
      *    second browser opens on it rather than on an empty cache.
      *
+     * Neither seed is taken, and nothing is written, while the view the
+     * address names is still being resolved (`viewResolving`, objectstack#30034):
+     * the view on hand then is the fall-back, not the one asked for, and its
+     * stored state written into the address would outlive it. The location
+     * the router hands this page moves in a transition, so a read that lands
+     * between that write and its commit renders against the old address,
+     * finds nothing to change for the resolved view, and the fall-back's
+     * filter and sort stay in a link that a reload or a colleague then opens.
+     *
      * Both seeds pass the same field gate (`acceptField`, objectstack#28949):
      * a field stored before it was deleted, or before this user lost read on
-     * it, is dropped exactly as a stale link's is, and the rest of the state
-     * opens as stored.
+     * it, is dropped, and the rest of the stored state opens as stored.
+     *
+     * A LINK's filter is judged whole (objectstack#31869): when the gate or
+     * the spec's rule schema drops any of the conditions its `uf__filter`
+     * carries, the whole filter is refused — the list opens on the view's own
+     * filter, the address bar loses `uf__filter`, and one notice says so.
+     * Keeping the rest would answer a different question than the link asked:
+     * dropping an AND condition widens the list, dropping an OR one narrows
+     * it, and the reader could not tell. The server's predicate guard takes
+     * the same posture (reject, never rewrite). The link's search, sort and
+     * grouping still apply. The stored state keeps the per-entry drop above:
+     * it is the reader's own state, gone stale.
+     *
+     * The gate reads field permissions only once they are loaded, the same
+     * gate `ListView` puts on its columns. A link opened before then is judged
+     * on the declaration alone, and a condition on a field this reader cannot
+     * read reaches the server, whose predicate guard refuses the query (403):
+     * loud, never a wider list. The seed does not wait for permissions:
+     * `isLoaded` has no loading-or-failed partner, so a wait could never end
+     * on a host whose permission read failed.
      *
      * Then the seed is written back into the URL (replace, never a new history
      * entry), so the address bar shows the list on screen: a restored filter
@@ -165,13 +222,21 @@ export function useObjectViewListUrlState({
     const listIdentityKey = activeView?.id
         ? `${objectName}-${activeView.id}${listResetGeneration ? `~${listResetGeneration}` : ''}`
         : undefined;
-    const listSeedRef = useRef<{ key: string; source: 'url' | 'storage'; state: ListUrlState; reset?: boolean } | undefined>(undefined);
+    const listSeedRef = useRef<{
+        key: string;
+        source: 'url' | 'storage';
+        state: ListUrlState;
+        reset?: boolean;
+        /** objectstack#31869 — the link's `uf__filter` was refused whole; the notice is owed once. */
+        refusedLinkFilter?: boolean;
+    } | undefined>(undefined);
+    const { t } = useObjectTranslation();
     const ownListParamsRef = useRef<string | undefined>(undefined);
     // objectstack#28950 — set by "Reset to view" and taken by the next seed:
     // that list opens from the (just cleared) stored state, never from the
     // `uf_*` params, whoever wrote them, and its write-back strips them all.
     const resetPendingRef = useRef(false);
-    if (listIdentityKey && listPrefs.ready && listSeedRef.current?.key !== listIdentityKey) {
+    if (listIdentityKey && listPrefs.ready && !viewResolving && listSeedRef.current?.key !== listIdentityKey) {
         // A field the object does not declare (a stale link, or a stored state
         // older than the field's deletion) or one this user cannot read is
         // dropped. Field-level permissions gate only once loaded — the same
@@ -183,10 +248,16 @@ export function useObjectViewListUrlState({
         const reset = resetPendingRef.current;
         resetPendingRef.current = false;
         if (carried && carried !== ownListParamsRef.current && !reset) {
+            const state = parseListStateParams(searchParams, acceptField);
+            const carriedConditions = linkFilterConditionCount(searchParams);
+            const refusedLinkFilter = carriedConditions > 0
+                && (state.filters?.conditions.length ?? 0) < carriedConditions;
+            if (refusedLinkFilter) delete state.filters;
             listSeedRef.current = {
                 key: listIdentityKey,
                 source: 'url',
-                state: parseListStateParams(searchParams, acceptField),
+                state,
+                refusedLinkFilter,
             };
         } else {
             const stored = readListFilterState(buildListFilterKey(user?.id, objectName, activeView.id));
@@ -217,14 +288,34 @@ export function useObjectViewListUrlState({
         // view the link names once the saved views arrive.
         if (seed.source === 'storage') ownListParamsRef.current = userFilterParamsKey(next);
         if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+        // objectstack#31869 — once per refused link, whatever replays this effect.
+        if (seed.refusedLinkFilter) {
+            seed.refusedLinkFilter = false;
+            toast.warning(t('console.objectView.linkFilterRefused'));
+        }
         // Once per list identity, by design: later URL writes are the list's
-        // own changes, already on screen. (`listPrefs.ready` because the seed
-        // is taken only once the user's own state has been read.)
+        // own changes, already on screen. (`listPrefs.ready` and
+        // `viewResolving` because the seed is taken only once the user's own
+        // state has been read and the view the address names is resolved; a
+        // resolution that ends on the fall-back keeps the identity unchanged.)
         // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
-    }, [listIdentityKey, listPrefs.ready]);
+    }, [listIdentityKey, listPrefs.ready, viewResolving]);
+    /**
+     * objectstack#30073 — the Filter panel's group as the list last reported
+     * it, held with the list identity it came from. The address cannot say
+     * this alone: a panel the reader emptied leaves no `uf_*` param, exactly as
+     * an untouched one does, and a group the URL form cannot carry is dropped
+     * from it. A save reads the panel here ({@link readPanelFilters}).
+     */
+    const listIdentityKeyRef = useRef(listIdentityKey);
+    listIdentityKeyRef.current = listIdentityKey;
+    const reportedPanelFiltersRef = useRef<{ key: string | undefined; filters: ListStatePatch['filters'] } | undefined>(undefined);
     /** Write the list's own change into the URL — replace, never a history entry per keystroke. */
     const writeListUrlState = useCallback(
         (patch: ListStatePatch) => {
+            if ('filters' in patch) {
+                reportedPanelFiltersRef.current = { key: listIdentityKeyRef.current, filters: patch.filters };
+            }
             setSearchParams(prev => {
                 const next = applyListStateParams(prev, patch);
                 ownListParamsRef.current = userFilterParamsKey(next);
@@ -239,7 +330,8 @@ export function useObjectViewListUrlState({
      * the list reports it (`ListView`'s `onPersonalizationChange`), held with
      * the list identity it came from so a report never outlives its list. The
      * column layout is the one part only this page knows: a stored column
-     * state is the reader's own.
+     * state is the reader's own, and so are the fields they added as columns
+     * (objectstack#30077), which the list draws as columns of the view.
      */
     const [reportedPersonalization, setReportedPersonalization] = useState<{
         key: string;
@@ -257,7 +349,8 @@ export function useObjectViewListUrlState({
             ? reportedPersonalization.parts
             : []),
     ];
-    if (activeView?.id && listPrefs.preference.perView?.[activeView.id]?.columnState
+    const storedViewPreference = activeView?.id ? listPrefs.preference.perView?.[activeView.id] : undefined;
+    if ((storedViewPreference?.columnState || storedViewPreference?.addedFields?.length)
         && !listPersonalizedParts.includes('columns')) {
         listPersonalizedParts.push('columns');
     }
@@ -266,7 +359,7 @@ export function useObjectViewListUrlState({
      * objectstack#28950 — "Reset to view", the marker's one way back: the
      * reader's whole list for the active view returns to the view's own. Their
      * stored entry goes (sort, filters, column layout, density, hidden fields,
-     * objectui#12418), the cached search term with it, and the list opens
+     * objectui#12418; added fields, objectstack#30077), the cached search term with it, and the list opens
      * again from that cleared state (the identity moves, so it remounts and
      * re-seeds; a reset is the one case that WANTS the list's own state thrown
      * away). The new seed ignores the `uf_*` params and its write-back strips
@@ -285,7 +378,47 @@ export function useObjectViewListUrlState({
         resetPendingRef.current = true;
         setListResetGeneration(g => g + 1);
     }, [activeView?.id, listPrefs.resetView, user?.id, objectName]);
+    /**
+     * objectstack#30073 — the list the reader just saved as a view of its own
+     * leaves the view it came from: that view's stored list state (sort,
+     * filters, column layout, density, hidden fields, every part the saved
+     * body carries) and its cached search term go, and the address the page
+     * is leaving loses its `uf_*` params, so neither Back nor the next open
+     * of that view brings the conditions back, nor marks it personalized.
+     * The caller navigates to the saved view next.
+     */
+    /**
+     * objectstack#30073 — the Filter panel's group on screen: the list's last
+     * report for this list, else the group the list opened with (its seed).
+     * `undefined` means the panel holds what the view hands it untouched; a
+     * panel the reader emptied is an empty group, never `undefined`.
+     */
+    const readPanelFilters = useCallback((): ListUrlState['filters'] => {
+        const reported = reportedPanelFiltersRef.current;
+        if (reported && reported.key === listIdentityKeyRef.current) {
+            return reported.filters ?? { id: 'root', logic: 'and', conditions: [] };
+        }
+        const seed = listSeedRef.current;
+        return seed && seed.key === listIdentityKeyRef.current ? seed.state.filters : undefined;
+    }, []);
+    const clearSourceListState = useCallback((viewId: string) => {
+        listPrefs.resetView(viewId);
+        clearListFilterState(buildListFilterKey(user?.id, objectName, viewId));
+        setSearchParams(prev => withoutListStateParams(prev), { replace: true });
+    }, [listPrefs.resetView, user?.id, objectName, setSearchParams]);
+    /**
+     * objectstack#30850 — the page the list shows, read from the address on
+     * every render: `ListView` takes it as a controlled `page`, and its every
+     * move comes back through `writeListUrlState({ page })`, replacing the
+     * entry. So Back from a record opened as a full page, a reload and a copied
+     * link land on the page the reader left; the list's own reset to page 1
+     * deletes the param, and "Reset to view" strips it with the rest.
+     */
+    const listPage = parseListPageParam(searchParams);
     return {
+        clearSourceListState,
+        readPanelFilters,
+        listPage,
         listIdentityKey,
         listSeedRef,
         ownListParamsRef,

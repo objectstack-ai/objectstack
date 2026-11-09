@@ -2,7 +2,8 @@
 //
 // The declaration surface of `scripts/sync-template-versions.mjs` (#9554).
 //
-// That script stamps three version surfaces per bundled template and discovers
+// That script stamps two version surfaces per bundled template (a third, the
+// manifest's `specVersion`, was retired under ADR-0049, #31035) and discovers
 // the template set by WALKING `src/templates/` — "deliberately not a curated
 // list", because a hand-kept list is what let `specVersion` drift eleven majors
 // (#9264). But for one release it declared that set where nobody could read it:
@@ -61,7 +62,7 @@ type SyncModule = {
   TEXT_STAMPS: { file: string; key: string; pattern: RegExp }[];
   findTemplateDirs: (templateRoot?: string) => string[];
   stampedPaths: (options?: { root?: string }) => string[];
-  loadScaffolderVersion: (file?: string) => { version: string; major: string; range: string };
+  loadScaffolderVersion: (file?: string) => { version: string; major: string };
 };
 
 const loadSync = async (file = SYNC_SCRIPT): Promise<SyncModule> =>
@@ -159,10 +160,6 @@ beforeAll(() => {
       path.join(dir, 'objectstack.config.ts'),
       `export default defineStack({ manifest: { engines: { protocol: '^${STALE_MAJOR}' } } });\n`,
     );
-    writeFixtureFile(
-      path.join(dir, 'objectstack.manifest.json'),
-      `{\n  "specVersion": "^${STALE_MAJOR}.0.0",\n  "scaffold": { "variables": [] }\n}\n`,
-    );
   }
 
   // A file, not a directory, beside the templates: the walk must ignore it the
@@ -180,7 +177,7 @@ afterAll(() => {
 /** Every fixture surface, as absolute paths. */
 const allFixtureSurfaces = () =>
   FIXTURE_TEMPLATES.flatMap((template) =>
-    ['package.json', 'objectstack.config.ts', 'objectstack.manifest.json'].map((file) =>
+    ['package.json', 'objectstack.config.ts'].map((file) =>
       path.join(fixtureTemplateDir(template), file),
     ),
   );
@@ -252,29 +249,19 @@ describe('the entry-point guard leaves the CLI path working', () => {
       expect(fs.readFileSync(path.join(dir, 'objectstack.config.ts'), 'utf8')).toContain(
         "engines: { protocol: '^42' }",
       );
-
-      const manifest = fs.readFileSync(path.join(dir, 'objectstack.manifest.json'), 'utf8');
-      expect(
-        manifest,
-        'specVersion stays a RANGE while the deps beside it become exact',
-      ).toContain('"specVersion": "^42.0.0"');
-      expect(
-        manifest,
-        'the manifest is rewritten as TEXT, so unrelated compact structure survives',
-      ).toContain('"scaffold": { "variables": [] }');
     }
 
     // A guard that made the version pass silently stop stamping would be far
     // worse than the finding it fixes, so the run is observed to REPORT both.
     expect(stdout).toContain('2 template(s) in lockstep with create-objectstack@42.0.0');
-    expect(stdout).toContain('second/objectstack.manifest.json');
+    expect(stdout).toContain('second/objectstack.config.ts');
   });
 
-  it('stamps a PRERELEASE verbatim into the deps, and only its major into specVersion', () => {
+  it('stamps a PRERELEASE verbatim into the deps, and only its major into engines.protocol', () => {
     // A release-candidate cut (`cut-rc.yml`) runs this same pass at a version
     // like `19.0.0-rc.0`. The deps take it verbatim, because a scaffold of the
-    // rc must install the rc; `specVersion` keeps the major's range, because it
-    // names the spec line the template is authored against, not a build.
+    // rc must install the rc; `engines.protocol` keeps the protocol major,
+    // because it is the runtime handshake, not a build.
     const prerelease = '43.0.0-rc.2';
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-template-versions-rc-'));
     try {
@@ -297,18 +284,11 @@ describe('the entry-point guard leaves the CLI path working', () => {
         path.join(templateDir, 'objectstack.config.ts'),
         `export default defineStack({ manifest: { engines: { protocol: '^${STALE_MAJOR}' } } });\n`,
       );
-      writeFixtureFile(
-        path.join(templateDir, 'objectstack.manifest.json'),
-        `{\n  "specVersion": "^${STALE_MAJOR}.0.0",\n  "scaffold": { "variables": [] }\n}\n`,
-      );
 
       execFileSync(process.execPath, [script], { encoding: 'utf8' });
 
       const pkg = JSON.parse(fs.readFileSync(path.join(templateDir, 'package.json'), 'utf8'));
       expect(pkg.dependencies['@objectstack/spec']).toBe(prerelease);
-      expect(fs.readFileSync(path.join(templateDir, 'objectstack.manifest.json'), 'utf8')).toContain(
-        '"specVersion": "^43.0.0"',
-      );
       expect(fs.readFileSync(path.join(templateDir, 'objectstack.config.ts'), 'utf8')).toContain(
         "engines: { protocol: '^43' }",
       );
@@ -328,10 +308,8 @@ describe('stampedPaths()', () => {
 
     expect(paths).toEqual([
       `${prefix}/blank/objectstack.config.ts`,
-      `${prefix}/blank/objectstack.manifest.json`,
       `${prefix}/blank/package.json`,
       `${prefix}/second/objectstack.config.ts`,
-      `${prefix}/second/objectstack.manifest.json`,
       `${prefix}/second/package.json`,
     ]);
 

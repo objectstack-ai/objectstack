@@ -49,6 +49,7 @@
       "@objectstack/plugin-security",
       "@objectstack/plugin-sharing",
       "@objectstack/service-sms",
+      "@objectstack/service-push",
       "@objectstack/plugin-webhooks",
       "@objectstack/trigger-record-change",
       "@objectstack/trigger-api",
@@ -82,6 +83,7 @@
       "create-objectstack",
       "@objectstack/connector-openapi",
       "@objectstack/verify",
+      "@objectstack/scenarios",
       "@object-ui/auth",
       "@object-ui/cli",
       "@object-ui/collaboration",
@@ -113,7 +115,6 @@
       "@object-ui/plugin-timeline",
       "@object-ui/plugin-tree",
       "@object-ui/plugin-view",
-      "@object-ui/providers",
       "@object-ui/react",
       "@object-ui/react-runtime",
       "@object-ui/types"

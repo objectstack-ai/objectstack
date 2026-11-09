@@ -135,6 +135,7 @@ describe('#29078 — the dataset table and pivot are 44 px touch targets on a ph
       fields,
       object: 'crm_account',
       dimensionFields: { industry: 'industry' },
+      drillScopes: { account_count: {}, task_count: {} },
       drillRawRows: [{ industry: 'fin' }, { industry: 'tech' }],
     })),
   });
@@ -180,6 +181,7 @@ describe('#29078 — the dataset table and pivot are 44 px touch targets on a ph
         rows: [{ status: 'Open', priority: 'High', task_count: 2 }],
         object: 'task',
         dimensionFields: { status: 'status', priority: 'priority' },
+        drillScopes: { account_count: {}, task_count: {} },
         drillRawRows: [{ status: 'open', priority: 'high' }],
       })),
     };

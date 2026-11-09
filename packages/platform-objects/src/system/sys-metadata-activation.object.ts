@@ -41,9 +41,11 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *    linkage"). Do not re-add them.
  * ─────────────────────────────────────────────────────────────────────
  *
- * Row identity: one row per `(metadata_type, name)`, spelled as the declared
- * `unique: 'global'` index below. There is no third key part, because there is
- * no tenant column on this table — see `systemFields` for why.
+ * Row identity: one row per `(metadata_type, package_id, name)`, spelled as
+ * the declared `unique: 'global'` index below (ADR-0150 D4, D8 row R4): two
+ * packages may each hold a row for an item of the same name. There is no tenant
+ * key part, because there is no tenant column on this table — see
+ * `systemFields` for why.
  *
  * Lifecycle: **no `lifecycle` block on purpose.** The absent block is the
  * back-compat `record` class — durable, never swept. This is not telemetry
@@ -135,15 +137,20 @@ export const SysMetadataActivation = ObjectSchema.create({
       group: 'Identity',
     }),
 
-    // Not part of the row identity (the index below is `(metadata_type,
-    // name)`), and not read by any consumer to decide anything: every reader
-    // keys a row by type and name. It records provenance, and so it is empty
-    // exactly when there is no package to record — a position or permission
-    // set the environment authored through the metadata door, which the
-    // security catalog's activation door switches as well (#22621 → A). The
-    // writer (`ObjectStoreMetadataActivationStore`) stores NO value for such
-    // an item and refuses an empty string, so a package-less row has one
-    // spelling and can never be read as a package named ''.
+    // Part of the row identity (ADR-0150 D4: the index below is
+    // `(metadata_type, package_id, name)`), and the package half of an item's
+    // address (ADR-0126 §4's two facts, two columns: ⛔ never a re-encoded
+    // `package:name` literal in `name`). No consumer decides anything from it
+    // yet: every reader keys a row by type and name until its own type's
+    // ADR-0150 child moves it onto the package. It is empty exactly when there
+    // is no package to record — a position or permission set the environment
+    // authored through the metadata door, which the security catalog's
+    // activation door switches as well (#22621 → A). The writer
+    // (`ObjectStoreMetadataActivationStore`) stores NO value for such an item
+    // and refuses an empty string, so a package-less row has one spelling and
+    // can never be read as a package named ''. A row written before the key
+    // carried the package is bound to its item's one holder by the boot's
+    // backfill (`backfillActivationLedgerPackages`), which never guesses.
     package_id: Field.text({
       label: 'Package',
       maxLength: 255,
@@ -161,8 +168,20 @@ export const SysMetadataActivation = ObjectSchema.create({
   },
 
   indexes: [
-    // ADR-0126 §4 row identity, now that the table carries no tenant column:
-    // one row per `(metadata_type, name)`, installation-wide.
+    // ADR-0126 §4 row identity with the package coordinate (ADR-0150 D4, D8
+    // row R4): one row per `(metadata_type, package_id, name)`,
+    // installation-wide. It was `(metadata_type, name)`; adding the package
+    // relaxes the key, so the new index cannot fail on rows the old one held.
+    //
+    // ⚠️ NULL-distinct: SQL `UNIQUE` exempts a row whose key part is NULL, and
+    // the memory and MongoDB drivers follow SQL. An environment-authored item's
+    // row has a NULL `package_id`, so for those rows this index constrains
+    // nothing. They keep one row per `(metadata_type, name)` through an index
+    // `IndexSchema` cannot declare, `uniq_sys_metadata_activation_packageless`:
+    // `metadata-protocol` builds it at boot on SQL
+    // (`activation-ledger-packageless-index.ts`) and `driver-mongodb` at
+    // collection sync. Not on MariaDB, and not on the memory driver, which
+    // enforces declared indexes only (single-process, never multi-replica).
     //
     // ⛔ Not bare `unique: true`. On a DECLARED index that is the positional
     // spelling of `'global'` (ADR-0120 D1) — the same materialized shape, but
@@ -170,23 +189,16 @@ export const SysMetadataActivation = ObjectSchema.create({
     // (`unique/unscoped-declared-index`) and protocol 18 rejects. `'global'` is
     // the same intent, said out loud.
     //
-    // This used to read `unique: 'organization'`, which asked the driver to
+    // Before that it read `unique: 'organization'`, which asked the driver to
     // prepend the tenant column in its NULL-safe `COALESCE(…, '__global__')`
     // form (ADR-0120 D3) so that an all-NULL tenant column could not void the
     // constraint — a hand-written composite naming that column verbatim would
     // have been NULL-DISTINCT in SQL and enforced nothing at all (#5030,
-    // measured). With the column gone, that hazard is gone with it: there is
-    // no NULL column left to collapse, and `'global'` over the two real key
-    // parts is the whole of the row identity.
-    //
-    // ⚠️ This is a re-SPELLING, not a change of materialized shape.
-    // `normalizeDeclaredIndex` prepends the tenant part only `if (idx.unique
-    // === 'organization' && tenantField)`, and with no tenant column
-    // `tenantField` resolves to `null` — so `'organization'` would already
-    // degrade to exactly these two columns. The index DDL is byte-identical
-    // either way; what changes is that the declaration now states what it
-    // actually gets.
-    { fields: ['metadata_type', 'name'], unique: 'global' },
+    // measured). With the tenant column gone that respelling changed no DDL
+    // (`normalizeDeclaredIndex` prepends the tenant part only when the table
+    // has one). ⛔ Never `'organization'` here: there is no organization scope
+    // on this table to state.
+    { fields: ['metadata_type', 'package_id', 'name'], unique: 'global' },
   ],
 
   enable: {

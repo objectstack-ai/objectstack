@@ -138,6 +138,9 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
       // slots (warnings only); first because it is the registry's first rule.
       'validateStackExpressions',
       'validatePresetComparands',
+      // #30023 — the reference-integrity suite, for its one `page` member
+      // (`validateSortableFields`: a stored page sort the list door refuses).
+      'validateReferenceIntegrity',
       'validateComponentProps',
       'validateComponentTypes',
       'validatePrintPageBlocks',

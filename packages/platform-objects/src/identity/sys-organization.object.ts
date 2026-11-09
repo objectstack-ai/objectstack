@@ -36,7 +36,7 @@ export const SysOrganization = ObjectSchema.create({
   // D2 identity write guard clamps every user-context update on this table to
   // the registered column whitelist, `MANAGED_EXTENSION_EDITABLE_FIELDS
   // .sys_organization` in plugin-auth — the platform-owned extension columns
-  // (`require_mfa`, `parent_organization_id`, `sort_order`, `timezone`) and
+  // (`parent_organization_id`, `sort_order`, `timezone`) and
   // nothing else. Per D4's form-rendering constraint, every column outside that
   // whitelist is marked `readonly` below, so the edit form cannot offer a write
   // the server will refuse or strip.
@@ -332,6 +332,26 @@ export const SysOrganization = ObjectSchema.create({
     using: 'id == current_user.organization_id',
   },
 
+  // Declared in the fields' own order, so every field keeps its place. The
+  // System trio (`id`, `created_at`, `updated_at`) stays in no declared group
+  // and renders last, as before. `group_structure` carries the ADR-0105 D6
+  // reporting fields, which order and group organizations against each other
+  // and so do nothing on a deployment that runs one organization: the group is
+  // gated on `multiOrgEnabled` (lowered at parse into its `visibleWhen`), and
+  // the form and the record page both hide it where the flag is off (ruling
+  // 6670372892 on #30210, row 4 A). Presentation only — the fields stay
+  // readable and writable through the API, and their help still says so.
+  // A group predicate is fail-closed, so the group is also hidden while the
+  // console's `features` is still `{}` (before /auth/config resolves, or if
+  // that fetch fails): on a multi-organization deployment it appears once the
+  // config arrives.
+  fieldGroups: [
+    { key: 'identity', label: 'Identity' },
+    { key: 'branding', label: 'Branding' },
+    { key: 'configuration', label: 'Configuration' },
+    { key: 'group_structure', label: 'Group Structure', requiresFeature: 'multiOrgEnabled' },
+  ],
+
   fields: {
     // ── Identity ─────────────────────────────────────────────────
     // ADR-0092 D4 — with the generic edit affordance open (#15873), every
@@ -360,7 +380,7 @@ export const SysOrganization = ObjectSchema.create({
       description:
         'The organization\'s own name. Change it with Rename Organization at the top of this record. ' +
         'The product name the console shows is a different setting, set in Settings → Branding.',
-      group: 'Identity',
+      group: 'identity',
     }),
 
     slug: Field.text({
@@ -370,7 +390,7 @@ export const SysOrganization = ObjectSchema.create({
       searchable: true,
       maxLength: 255,
       description: 'URL-friendly identifier',
-      group: 'Identity',
+      group: 'identity',
     }),
 
     // ── Branding ─────────────────────────────────────────────────
@@ -378,7 +398,7 @@ export const SysOrganization = ObjectSchema.create({
       label: 'Logo',
       required: false,
       readonly: true,
-      group: 'Branding',
+      group: 'branding',
     }),
 
     // ── Configuration ────────────────────────────────────────────
@@ -389,19 +409,26 @@ export const SysOrganization = ObjectSchema.create({
       required: false,
       readonly: true,
       description: 'JSON-serialized organization metadata',
-      group: 'Configuration',
+      group: 'configuration',
     }),
 
-    // ADR-0069 D3 — per-org MFA tightening above the global floor. When true,
-    // members of this org must enrol TOTP to access data (enforced at the
-    // session-validation gate). An org can only tighten, never loosen, the
-    // global `mfa_required` setting.
+    // ADR-0069 D3 — the toggle-era per-org MFA column, RETIRED. An
+    // organization's multi-factor requirement has three levels now (ruling of
+    // record on objectstack-ai/cloud#3668, 「可以，按三档做（推荐）」) and lives in
+    // its access policy (`access_policy.mfa_required`, plugin-auth's
+    // `organization-access-policy.ts`). plugin-auth's boot move carries a
+    // stored `true` there as `everyone` and clears this column; nothing reads
+    // it otherwise, so it is readonly (the D2 guard strips a user-context
+    // write to it) and kept only for that move.
     require_mfa: Field.boolean({
-      label: 'Require Multi-Factor Auth',
+      label: 'Require Multi-Factor Auth (retired)',
       required: false,
+      readonly: true,
       defaultValue: false,
-      group: 'Configuration',
-      description: 'When true, every member of this organization must enroll an authenticator app to access data.',
+      group: 'configuration',
+      description:
+        'Retired. Set this organization\'s multi-factor requirement in Settings → Access policy. ' +
+        'A value that was on here was moved there as "everyone" and cleared.',
     }),
 
     // #14238 — maintainer ruling 2026-09-02, option A (verbatim 「同意」): the
@@ -437,7 +464,7 @@ export const SysOrganization = ObjectSchema.create({
     // registered in plugin-auth's `MANAGED_EXTENSION_FIELDS` (whose collision
     // guard proves better-auth's organization schema owns no `timezone` at the
     // pinned version) and generically editable under the ADR-0092 D2 whitelist
-    // (`MANAGED_EXTENSION_EDITABLE_FIELDS`) — the path `require_mfa` above and
+    // (`MANAGED_EXTENSION_EDITABLE_FIELDS`) — the path
     // the D6 group-structure fields below take. ⚠️ Same shape as
     // `sys_business_unit.timezone` by design (`text`, optional, `maxLength: 64`,
     // `valueDomain: 'iana_time_zone'`, no default): the card's thesis is that
@@ -453,7 +480,7 @@ export const SysOrganization = ObjectSchema.create({
       valueDomain: 'iana_time_zone',
       description:
         'IANA time zone (e.g. UTC, Asia/Shanghai), kept as the root default for business units without a zone of their own. It does not change any date calculation today: formulas, reports and displayed dates use Settings → Localization → Default timezone.',
-      group: 'Configuration',
+      group: 'configuration',
     }),
 
     // ── Group structure (ADR-0105 D6) ────────────────────────────
@@ -479,16 +506,17 @@ export const SysOrganization = ObjectSchema.create({
     parent_organization_id: Field.lookup('sys_organization', {
       label: 'Parent Organization',
       required: false,
-      group: 'Group Structure',
+      group: 'group_structure',
       description:
-        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference.',
+        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference. Meaningful only where the deployment runs several organizations.',
     }),
 
     sort_order: Field.number({
       label: 'Sort Order',
       required: false,
-      group: 'Group Structure',
-      description: 'Display order among sibling organizations. Presentation only.',
+      group: 'group_structure',
+      description:
+        'Display order among sibling organizations. Presentation only. Meaningful only where the deployment runs several organizations.',
     }),
 
     // ── System ───────────────────────────────────────────────────

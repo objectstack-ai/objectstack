@@ -20,15 +20,18 @@ import {
     type ArtifactForwardConversionResult,
 } from '@objectstack/metadata-core';
 import { OBJECTQL_DRIVERS_READY_HOOK } from '@objectstack/objectql';
-import { resolveTenancyPosture } from '@objectstack/types';
+import { resolveTenancyPosture, type ScheduledWorkPolicySource } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { contributeCodeDatasourceNames } from './code-datasource-names.js';
 import { connectPackageDatasources } from './declared-datasources.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
+import { describeSeedLocale, resolveSeedLocaleForLoad } from './seed-locale.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
 import { loadDisabledPackageIds } from './package-state-store.js';
+import { ensureDependentRulesUninstallGuard, readServedWithheldFieldReaders, servedWithheldFieldReadersMessage } from './domains/packages.js';
+import { asPackageStateStore, ensurePackageStateUninstallCleanup, PACKAGE_STATE_STORE_PLUGIN_NAME } from './package-state-host-store.js';
 import type { IFieldFileService, IMetadataService, IObjectQLEngine, II18nService } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { normalizeFlowFunctionEntry, type NormalizedFlowFunction } from '@objectstack/spec/automation';
@@ -58,13 +61,30 @@ import { countServerTiming } from '@objectstack/observability';
 const SEED_WRITE_OPTIONS = { context: SEED_WRITE_EXECUTION_CONTEXT } as const;
 
 /**
+ * [#30756] The registries whose boot already reads the rules a disabled package
+ * leaves reading a withheld field ({@link AppPlugin.reportWithheldFieldReadersAtBoot}):
+ * one reading per registry, however many `AppPlugin`s share it.
+ */
+const WITHHELD_FIELD_READERS_REPORTED = new WeakSet<object>();
+
+/**
  * [#25779] What every seed loader this plugin builds is given beyond its
  * engine: the `field-files` service a seed file (`seedFile(path)`) is stored
  * through, resolved when a dataset loads. A kernel without
  * `@objectstack/service-storage` answers none, and the loader refuses a row
  * naming a seed file, by name, rather than write an object into a file field.
+ *
+ * [#31021] …and how the load treats the record of which seed rows landed in
+ * the organization it seeds (`sys_seed_landed_key`). Every load this plugin
+ * runs — the boot seed, the per-organization replay, the dev hot-reload
+ * seeder — honours it, so a seed row a person deleted is not inserted again
+ * by the next boot or replay; the replay's deliberate re-seed
+ * (`{ reseed: true }`) inserts every missing row and records them again.
  */
-function seedLoaderOptionsFor(ctx: PluginContext): { getFieldFiles: () => IFieldFileService | undefined } {
+function seedLoaderOptionsFor(
+    ctx: PluginContext,
+    landedKeys: 'honour' | 'reseed',
+): { getFieldFiles: () => IFieldFileService | undefined; landedKeys: 'honour' | 'reseed' } {
     return {
         getFieldFiles: () => {
             try {
@@ -73,6 +93,7 @@ function seedLoaderOptionsFor(ctx: PluginContext): { getFieldFiles: () => IField
                 return undefined;
             }
         },
+        landedKeys,
     };
 }
 
@@ -170,12 +191,19 @@ export class AppPlugin implements Plugin {
      * `start()`, and a database it refuses must be left as it found it — so this
      * plugin's `start()`, which loads the inline seed, runs only after the guard
      * has judged. Order-if-present: every other kernel is unchanged.
+     *
+     * The host's package-state store (`PACKAGE_STATE_STORE_PLUGIN_NAME`,
+     * `./package-state-host-store.ts`, spelled as a literal for the same
+     * reason): `init()` seeds the registry's disabled set from it, so it must
+     * be registered first. Order-if-present: a kernel without it seeds from
+     * the file under `OS_HOME`, as before.
      */
     optionalDependencies = [
         'com.objectstack.engine.objectql',
         'com.objectstack.organization-ownership-boot-guard',
         'com.objectstack.auth',
         'com.objectstack.auth.identity-objects',
+        'com.objectstack.package-state-store',
     ];
     /**
      * The one init-time service this plugin CANNOT degrade without: a
@@ -232,6 +260,14 @@ export class AppPlugin implements Plugin {
      * disagree about which datasources this artifact registers from code — and
      * the residual-owner warning prints once, at whichever read comes first.
      */
+    /**
+     * Which store the boot seed read: `'host'` (the registered
+     * `package-state-store` service) or `'file'` (the file under `OS_HOME`),
+     * `undefined` when there was no engine to seed. `start()` holds a `'file'`
+     * seed against a host store that registered after it — see
+     * {@link refuseLatePackageStateStore}.
+     */
+    private packageStateSeedSource?: 'host' | 'file';
     private codeDatasourceOwners?: Array<{ datasource: any; owner: { packageId?: string; packageVersion?: string } }>;
     /**
      * [#23649] Set once {@link installDatasourceMapping} has handed the stack's
@@ -277,6 +313,8 @@ export class AppPlugin implements Plugin {
      * composition test can pin which registrar a boot shape declared.
      */
     readonly securityMetadataRegistrar: AppPluginSecurityMetadataRegistrar;
+    /** [#31382] The host's per-kernel scheduled-work policy for this app's jobs; absent ⇒ the deployment switch. */
+    private readonly scheduledWorkPolicy: ScheduledWorkPolicySource | undefined;
 
     /**
      * `this.bundle` with every package-owned collection resolved across BOTH
@@ -431,9 +469,18 @@ export class AppPlugin implements Plugin {
             skipSeedData?: boolean;
             skipOnEnable?: boolean;
             securityMetadataRegistrar?: AppPluginSecurityMetadataRegistrar;
+            /**
+             * [#31382] THIS kernel's scheduled-work policy, handed to the
+             * package-jobs binder (`AppArtifactJobSchedulingOptions.scheduledWorkPolicy`).
+             * Give it the same policy as the kernel's automation engine and
+             * schedule triggers (#19834). Absent, the deployment switch decides,
+             * exactly as before.
+             */
+            scheduledWorkPolicy?: ScheduledWorkPolicySource;
         } = {},
     ) {
         this.bundle = bundle;
+        this.scheduledWorkPolicy = opts.scheduledWorkPolicy;
         this.projectContext = projectContext;
         this.skipSeedData = opts.skipSeedData ?? false;
         this.skipOnEnable = opts.skipOnEnable ?? false;
@@ -468,7 +515,7 @@ export class AppPlugin implements Plugin {
                 'objects', 'views', 'apps', 'pages', 'dashboards', 'reports',
                 'flows', 'workflows', 'triggers', 'agents', 'tools', 'skills',
                 'actions', 'permissions', 'positions', 'translations',
-                'sharingRules', 'ragPipelines', 'data', 'emailTemplates',
+                'sharingRules', 'data', 'emailTemplates',
                 'docs', 'books',
             ];
             const hasAppPayload = APP_CATEGORY_KEYS.some((k) => {
@@ -560,7 +607,7 @@ export class AppPlugin implements Plugin {
         // envs, and a package an operator had disabled came back ENABLED on
         // every restart. The seed must land before ANY registration path runs,
         // which is Phase 1, unconditionally.
-        this.seedPersistedDisabledPackages(ctx);
+        await this.seedPersistedDisabledPackages(ctx);
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping init', {
                 pluginName: this.name,
@@ -685,14 +732,55 @@ export class AppPlugin implements Plugin {
      * because that decomposition happens at the `manifest.register()` call at
      * the end of init.
      *
-     * Best-effort — never block boot on this. Degrades silently on kernels
-     * with no engine (metadata-only one-shot commands, mock-engine tests).
+     * The store is the host's when one is registered as the
+     * `package-state-store` service (`createPackageStateStorePlugin`,
+     * `./package-state-host-store.ts`, ordered ahead of this plugin by
+     * `optionalDependencies`), and the file under `OS_HOME` otherwise.
+     *
+     * The file read is best-effort, exactly as before: it never blocks boot.
+     * A HOST store's read that throws fails the boot instead, because seeding
+     * nothing would bring every module its operator switched off back on, and
+     * nothing would look wrong (ADR-0025 §3.5 M1 makes the same call for the
+     * installed-plugin loader: a disable that cannot be read is not read as
+     * "nothing is disabled"). Degrades silently on kernels with no engine
+     * (metadata-only one-shot commands, mock-engine tests).
      */
-    private seedPersistedDisabledPackages(ctx: PluginContext): void {
+    private async seedPersistedDisabledPackages(ctx: PluginContext): Promise<void> {
+        let setter: ((ids: Iterable<string>) => void) | undefined;
+        let ql: { registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void } } | undefined;
         try {
-            const ql = ctx.getService<{ registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void } }>('objectql');
-            const setter = ql?.registry?.setInitialDisabledPackageIds;
-            if (typeof setter === 'function') {
+            ql = ctx.getService<{ registry?: { setInitialDisabledPackageIds?: (ids: Iterable<string>) => void } }>('objectql');
+            setter = ql?.registry?.setInitialDisabledPackageIds;
+        } catch {
+            // No engine on this kernel — nothing to seed.
+        }
+        if (typeof setter !== 'function') return;
+        const hostStore = this.registeredPackageStateStore(ctx);
+        this.packageStateSeedSource = hostStore ? 'host' : 'file';
+        if (hostStore) {
+            let disabled: Set<string>;
+            try {
+                disabled = new Set(
+                    Array.from(await hostStore.loadDisabledPackageIds(this.projectContext?.environmentId))
+                        .filter((id): id is string => typeof id === 'string'),
+                );
+            } catch (err) {
+                throw new Error(
+                    `[AppPlugin] the host's package-state store (${PACKAGE_STATE_STORE_PLUGIN_NAME}) could not read `
+                    + `which packages are disabled, so the boot stops rather than bring them back enabled: `
+                    + `${(err as Error)?.message ?? String(err)}`,
+                );
+            }
+            if (disabled.size > 0) {
+                setter.call(ql!.registry, disabled);
+                ctx.logger.info('[AppPlugin] seeded persisted disabled packages', {
+                    environmentId: this.projectContext?.environmentId,
+                    store: 'host',
+                    disabled: Array.from(disabled),
+                });
+            }
+        } else {
+            try {
                 const disabled = loadDisabledPackageIds(this.projectContext?.environmentId);
                 if (disabled.size > 0) {
                     setter.call(ql!.registry, disabled);
@@ -701,12 +789,91 @@ export class AppPlugin implements Plugin {
                         disabled: Array.from(disabled),
                     });
                 }
+            } catch (err) {
+                ctx.logger.warn('[AppPlugin] failed to seed persisted package state', {
+                    error: (err as Error)?.message ?? String(err),
+                });
             }
-        } catch (err) {
-            ctx.logger.warn('[AppPlugin] failed to seed persisted package state', {
-                error: (err as Error)?.message ?? String(err),
-            });
         }
+        // [#30756] Whichever store seeded the boot, the same final reading.
+        this.reportWithheldFieldReadersAtBoot(ctx);
+    }
+
+    /**
+     * [#30756] The boot half of the enable door's refusal. The state file
+     * records only DISABLES, so a boot has no enable to refuse: a package that
+     * is not listed boots enabled. A reading package that boots enabled beside
+     * a disabled package whose `objectExtensions` field its active rule reads
+     * (a release that added the rule, a state file written before the enable
+     * door judged this) therefore lands in the state the door refuses, and
+     * every write to that object answers `400 VALIDATION_FAILED`. The boot
+     * neither refuses (one object's writes are not worth the whole runtime)
+     * nor rewrites the operator's recorded state: it says so once, naming
+     * every rule and the remedies (`readServedWithheldFieldReaders`).
+     *
+     * Read at `kernel:bootstrapped`, after the `kernel:ready` rehydrates have
+     * registered every package, so the reading is the boot's final one and not
+     * a verdict a later registration contradicts. Once per registry, however
+     * many `AppPlugin`s share it. At `warn`: the requester of every refused
+     * write is told, so nothing claims to persist that did not; the log is the
+     * operator's remedy, not a durability alarm.
+     */
+    private reportWithheldFieldReadersAtBoot(ctx: PluginContext): void {
+        let registry: unknown;
+        try {
+            registry = ctx.getService<{ registry?: unknown }>('objectql')?.registry;
+        } catch {
+            return; // no engine on this kernel — nothing to read
+        }
+        if (!registry || typeof registry !== 'object' || WITHHELD_FIELD_READERS_REPORTED.has(registry)) return;
+        WITHHELD_FIELD_READERS_REPORTED.add(registry);
+        ctx.hook('kernel:bootstrapped', async () => {
+            try {
+                const readers = readServedWithheldFieldReaders(registry);
+                if (readers.length === 0) return;
+                ctx.logger.warn(`[AppPlugin] ${servedWithheldFieldReadersMessage(readers)}`, {
+                    environmentId: this.projectContext?.environmentId,
+                    rules: readers.map((d) => ({ package: d.packageId, object: d.object, rule: d.rule, reads: d.fields, withheldBy: d.withheldBy })),
+                });
+            } catch (err) {
+                ctx.logger.warn('[AppPlugin] failed to read the rules a disabled package leaves reading a withheld field', {
+                    error: (err as Error)?.message ?? String(err),
+                });
+            }
+        });
+    }
+
+    /**
+     * The host's package-state store, or `undefined` when this kernel has
+     * none. The service name is a literal so `check:init-service-contract`
+     * can hold this init-time read to the `optionalDependencies` entry above.
+     */
+    private registeredPackageStateStore(ctx: PluginContext) {
+        let registered: unknown;
+        try {
+            registered = ctx.getService('package-state-store');
+        } catch {
+            return undefined;
+        }
+        return asPackageStateStore(registered);
+    }
+
+    /**
+     * A boot that seeded from the FILE, on a kernel where a host store is
+     * registered by now, read the wrong store: the host's plugin initialized
+     * after this one, so the disables it holds were never seeded while the
+     * package doors will write to it. Refused by name, with the fix, rather
+     * than served with two stores in play.
+     */
+    private refuseLatePackageStateStore(ctx: PluginContext): void {
+        if (this.packageStateSeedSource !== 'file') return;
+        if (this.registeredPackageStateStore(ctx) === undefined) return;
+        throw new Error(
+            `[AppPlugin] a package-state store was registered as the 'package-state-store' service after this `
+            + `plugin's boot seed had already read the file under OS_HOME, so the packages that store holds as `
+            + `disabled would come back enabled. Register it with createPackageStateStorePlugin(store) from `
+            + `@objectstack/runtime, which is ordered ahead of AppPlugin.`,
+        );
     }
 
     /**
@@ -1239,6 +1406,17 @@ export class AppPlugin implements Plugin {
     }
 
     start = async (ctx: PluginContext) => {
+        this.refuseLatePackageStateStore(ctx);
+        // [#31023] The uninstall verb clears a deleted package's disable record
+        // under the key this plugin's boot seed reads. Before the empty-env
+        // return: an empty env is where every package arrives by hydration or
+        // install, and is deleted the same way.
+        ensurePackageStateUninstallCleanup(ctx, this.projectContext?.environmentId);
+        // [#31232] …and refuses, before anything moves, an uninstall that would
+        // withdraw a field an active validation rule of another enabled
+        // package reads: the package doors' verdict, asked by the verb itself
+        // so every in-process caller is refused on it too.
+        ensureDependentRulesUninstallGuard(ctx);
         if (this.empty) {
             ctx.logger.debug('[AppPlugin] empty env — no app payload, skipping start', {
                 pluginName: this.name,
@@ -1696,7 +1874,14 @@ export class AppPlugin implements Plugin {
             const jobsDefinition = this.forwardConverted(ctx).definition;
             if (collectBundleJobs(jobsDefinition).length > 0) {
                 ctx.hook('kernel:ready', async () => {
-                    await scheduleAppArtifactJobs(ctx, jobsDefinition, { appId, ql, source: 'AppPlugin' });
+                    await scheduleAppArtifactJobs(ctx, jobsDefinition, {
+                        appId,
+                        ql,
+                        source: 'AppPlugin',
+                        // [#31382] Undefined when the host gave none: the
+                        // binder then reads the deployment switch as before.
+                        scheduledWorkPolicy: this.scheduledWorkPolicy,
+                    });
                 });
             }
         } catch (err: any) {
@@ -1788,12 +1973,22 @@ export class AppPlugin implements Plugin {
                  const sharedDatasets = mergeSeedDatasets(ctx, normalizedDatasets);
 
                  const loggerRef = ctx.logger;
-                 // [#16595] Same capture posture as `loggerRef`: the replayer
-                 // outlives `start()` and is invoked by SecurityPlugin's
-                 // sys_organization hook, so the locale is resolved once, here,
-                 // from the boot bundle rather than re-read per replay.
-                 const seedLocale = this.resolveSeedLocale();
-                 const replayer = async (organizationId: string) => {
+                 // [#16595] The boot bundle's declared `i18n.defaultLocale`,
+                 // captured once: it is the LAST rung of the per-organization
+                 // locale below, not the answer (ruling A, 2026-11-05).
+                 const appSeedLocale = this.resolveSeedLocale();
+                 // `options.userId` is the person founding the organization,
+                 // when the org-scoping middleware knows one (the insert's
+                 // attributed user). The callable stays `(organizationId)` for
+                 // every caller that has none.
+                 //
+                 // [#31021] `options.reseed` is the DELIBERATE re-seed — a
+                 // host's "restore sample data" or reset action: every missing
+                 // seed row is inserted, including the ones a person removed,
+                 // and recorded as landed again. Without it the replay honours
+                 // the organization's record of landed seed rows
+                 // (`sys_seed_landed_key`) and does not insert those again.
+                 const replayer = async (organizationId: string, options?: { userId?: string; reseed?: boolean }) => {
                      if (!organizationId) return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      const md = ctx.getService('metadata') as IMetadataService | undefined;
                      if (!md) {
@@ -1809,12 +2004,32 @@ export class AppPlugin implements Plugin {
                      if (!Array.isArray(datasetsNow) || datasetsNow.length === 0) {
                          return { inserted: 0, updated: 0, skipped: 0, errors: [] as any[] };
                      }
-                     const seedLoader = new SeedLoaderService(ql, md, loggerRef, seedLoaderOptionsFor(ctx));
+                     // [#30281] Resolved PER ORGANIZATION, at replay time: two
+                     // organizations founded in one process can speak different
+                     // languages, so a locale captured at boot would give every
+                     // one of them the boot's. The organization's Localization
+                     // setting, then the founder's language, then the app's
+                     // declared default (`resolveSeedLocaleForLoad`). At founding
+                     // the organization has no row of its own yet, so the
+                     // founder's language decides unless an env or `global`
+                     // value is set; no founder ⇒ the app's default.
+                     const seedLocale = await resolveSeedLocaleForLoad(ctx, {
+                         seeds: datasetsNow,
+                         organizationId,
+                         userId: options?.userId,
+                         appDefaultLocale: appSeedLocale,
+                     });
+                     loggerRef.info(`[seed-replayer] organization ${organizationId} seeds for locale ${describeSeedLocale(seedLocale)}`);
+                     const seedLoader = new SeedLoaderService(
+                         ql, md, loggerRef, seedLoaderOptionsFor(ctx, options?.reseed === true ? 'reseed' : 'honour'),
+                     );
                      const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                      const request = SeedLoaderRequestSchema.parse({
                          seeds: datasetsNow,
                          config: {
-                             defaultMode: 'upsert',
+                             // [#30081] No mode of its own: each dataset's
+                             // `mode` is the spec default (`ignore`,
+                             // create-only) unless the dataset declares one.
                              multiPass: true,
                              organizationId,
                              // `os.org` is derived from organizationId inside
@@ -1823,12 +2038,12 @@ export class AppPlugin implements Plugin {
                              // lazy guard where it is resolved.
                              identity: seedIdentity,
                              // [#16595] `Seed.locale`'s producer. Spread rather
-                             // than written as `locale: seedLocale` so an app
-                             // with no `i18n.defaultLocale` sends NO key at all
-                             // — `undefined` and absent parse the same here, but
-                             // absence is what the loader's unresolved-scope
-                             // warning is keyed on.
-                             ...(seedLocale ? { locale: seedLocale } : {}),
+                             // than written as `locale: seedLocale` so a load no
+                             // rung answers sends NO key at all — `undefined`
+                             // and absent parse the same here, but absence is
+                             // what the loader's unresolved-scope warning is
+                             // keyed on.
+                             ...(seedLocale ? { locale: seedLocale.locale } : {}),
                          },
                      });
                      const result = await seedLoader.load(request);
@@ -1908,7 +2123,7 @@ export class AppPlugin implements Plugin {
               try {
                   const metadata = ctx.getService('metadata') as IMetadataService | undefined;
                   if (metadata) {
-                      const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx));
+                      const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx, 'honour'));
                       const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                       // [#16595] `Seed.locale`'s producer on the DEFAULT boot
                       // path — see {@link resolveSeedLocale}.
@@ -1916,7 +2131,11 @@ export class AppPlugin implements Plugin {
                       const request = SeedLoaderRequestSchema.parse({
                           seeds: normalizedDatasets,
                           config: {
-                              defaultMode: 'upsert',
+                              // [#30081] No mode of its own: a replay on a
+                              // later boot inserts a missing row and leaves an
+                              // existing one as the customer left it, unless the
+                              // dataset declares `mode: 'upsert'` (the spec
+                              // default, `SeedSchema.mode`, ruling 6631016988).
                               multiPass: true,
                               identity: seedIdentity,
                               ...(seedLocale ? { locale: seedLocale } : {}),
@@ -2243,9 +2462,11 @@ export class AppPlugin implements Plugin {
     }
 
     /**
-     * The producer half of `Seed.locale` (#16595) — the BCP-47 tag every seed
-     * load started by this plugin filters on, read off the app's declared
-     * `i18n.defaultLocale`.
+     * The producer half of `Seed.locale` (#16595) — the BCP-47 tag the boot
+     * seed and the dev hot-reload seeder filter on, read off the app's declared
+     * `i18n.defaultLocale`. The per-organization replay uses it as its LAST
+     * rung only, after the organization's Localization setting and the
+     * founder's language (`resolveSeedLocaleForLoad`, #30281).
      *
      * Same source, same spelling and the same envelope-vs-collection posture as
      * {@link loadTranslations}' `setDefaultLocale` call: `i18n` is an ENVELOPE
@@ -2330,7 +2551,7 @@ export class AppPlugin implements Plugin {
                     ctx.logger.warn('[Seeder] hot-reload seed skipped — metadata service unavailable');
                     return;
                 }
-                const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx));
+                const seedLoader = new SeedLoaderService(ql, metadata, ctx.logger, seedLoaderOptionsFor(ctx, 'honour'));
                 const { SeedLoaderRequestSchema } = await import('@objectstack/spec/data');
                 // [#16595] `Seed.locale`'s producer on the dev hot-reload
                 // path. Resolved from the BOOT bundle, not from `payload`: a
@@ -2340,7 +2561,7 @@ export class AppPlugin implements Plugin {
                 const request = SeedLoaderRequestSchema.parse({
                     seeds,
                     config: {
-                        defaultMode: 'upsert',
+                        // [#30081] No mode of its own — the spec default applies.
                         multiPass: true,
                         ...(seedLocale ? { locale: seedLocale } : {}),
                     },

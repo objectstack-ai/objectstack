@@ -14,7 +14,8 @@
  * ## What is pinned, and what is deliberately NOT
  *
  * Pinned: that the refusal code is admitted by the closed `ErrorCode` union,
- * that the ledger registers it under the package that owns the action doors,
+ * that the ledger registers it under the package that owns the action doors
+ * and under exactly one second emitter, the MCP `delete_record` tool's gate,
  * that it is not a synonym of a standard-catalog member (which is the whole
  * argument for registering it rather than answering `PRECONDITION_REQUIRED`),
  * and that `ActionConfirmationRequiredDetails.confirmationMember` is typed to
@@ -55,6 +56,11 @@ import {
 const CODE = 'ACTION_CONFIRMATION_REQUIRED';
 /** The package that owns both AI-facing action doors, and so owns the code. */
 const OWNER = '@objectstack/runtime';
+/**
+ * The one second EMITTER (provenance, not identity): the MCP `delete_record`
+ * tool's gate stamps the same code on a record delete without the member.
+ */
+const SECOND_EMITTER = '@objectstack/mcp';
 
 /** Identity helpers, so a rejected shape errors on the argument's own line. */
 const asDetails = (d: ActionConfirmationRequiredDetails) => d;
@@ -69,15 +75,17 @@ describe('action-confirmation contract — an unconfirmed gated action is refuse
     expect(ErrorCode.safeParse('ACTION_CONFIRMATION_REQUIRE').success).toBe(false);
   });
 
-  it('the ledger registers it under the package that owns the action doors', () => {
+  it('the ledger registers it under the package that owns the action doors, and under its one second emitter', () => {
     expect(ERROR_CODE_LEDGER[OWNER]).toContain(CODE);
     // Control: the row is not merely somewhere in the ledger. If the code
     // moved owners, the assertion above would still pass under a `flat()`.
+    // The one other package listing it is the MCP `delete_record` gate's; a
+    // further emitter is a new door, and moving this pin is how it says so.
     const otherOwners = Object.entries(ERROR_CODE_LEDGER)
       .filter(([pkg]) => pkg !== OWNER)
       .filter(([, codes]) => (codes as readonly string[]).includes(CODE))
       .map(([pkg]) => pkg);
-    expect(otherOwners).toEqual([]);
+    expect(otherOwners).toEqual([SECOND_EMITTER]);
   });
 
   it('it is NOT a synonym of a standard-catalog member', () => {

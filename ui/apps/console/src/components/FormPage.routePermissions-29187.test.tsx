@@ -137,7 +137,7 @@ vi.mock('../../../../packages/app-shell/src/hooks/useAiSurface', async (importOr
 vi.mock('../LocalizationFetchProvider', () => ({
   LocalizationFetchProvider: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
-vi.mock('../pages/settings/WorkspaceTimezonePrompt', () => ({ WorkspaceTimezonePrompt: () => null }));
+vi.mock('../pages/settings/FirstRunChecklist', () => ({ FirstRunChecklist: () => null }));
 vi.mock('../components/RootLandingRedirect', () => ({ RootLandingRedirect: () => null }));
 vi.mock('../components/SetupRoute', () => ({ SetupRoute: () => null }));
 vi.mock('../components/FormPage', () => ({ FormPage: () => <GrantProbe testId="public-form" /> }));

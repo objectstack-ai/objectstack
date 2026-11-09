@@ -26,6 +26,10 @@
  * only checks it is booked, and its verdicts are pinned in
  * `identity/sys-user-create-user-email-required.test.ts`.
  *
+ * A field group's `visibleWhen` is the third site (#30692): a group declaring
+ * `requiresFeature` is lowered there, booked as `<object>.fieldGroups.<key>`,
+ * and walked in both directions like an action.
+ *
  * Scope notes: objects that moved to capability plugins per ADR-0029 K2
  * (plugin-security / plugin-sharing / plugin-audit / service-realtime /
  * plugin-webhooks) are outside this package and this guard; none of them
@@ -48,7 +52,8 @@ import * as system from './system/index.js';
 
 type AnyParam = { name?: string; field?: string; visible?: { source?: string } };
 type AnyAction = { name?: string; visible?: { source?: string }; params?: AnyParam[] };
-type AnyObject = { name?: string; actions?: AnyAction[] };
+type AnyGroup = { key?: string; visibleWhen?: { source?: string } };
+type AnyObject = { name?: string; actions?: AnyAction[]; fieldGroups?: AnyGroup[] };
 
 // Every exported platform object, keyed by machine name (object.name).
 const objectsByName = new Map<string, AnyObject>();
@@ -138,8 +143,20 @@ function carriesGateConjunct(source: string, gate: string): boolean {
   return conjuncts(source).some((conjunct) => conjunct === gate);
 }
 
-/** Resolve `<object>.actions.<action>[.params.<name|field>]` to its `visible`. */
+/**
+ * Resolve `<object>.actions.<action>[.params.<name|field>]` to its `visible`,
+ * or `<object>.fieldGroups.<key>` to that group's `visibleWhen`.
+ */
 function resolveGatedInput(path: string): { visibleSource: string | undefined } {
+  const groupMatch = /^([a-z0-9_]+)\.fieldGroups\.([a-z0-9_]+)$/.exec(path);
+  if (groupMatch) {
+    const [, objectName, groupKey] = groupMatch;
+    const object = objectsByName.get(objectName);
+    expect(object, `object exists: ${path}`).toBeDefined();
+    const group = (object!.fieldGroups ?? []).find((g) => g.key === groupKey);
+    expect(group, `field group exists: ${path}`).toBeDefined();
+    return { visibleSource: group!.visibleWhen?.source };
+  }
   const match = /^([a-z0-9_]+)\.actions\.([a-z0-9_]+)(?:\.params\.([A-Za-z0-9_]+))?$/.exec(path);
   expect(match, `path grammar: ${path}`).not.toBeNull();
   const [, objectName, actionName, paramName] = match!;
@@ -217,6 +234,11 @@ describe('feature-gate completeness guard (#2874)', () => {
           for (const m of (source ?? '').matchAll(/features\.([A-Za-z0-9_]+)/g)) {
             referencedInputs.push([path, m[1]]);
           }
+        }
+      }
+      for (const group of object.fieldGroups ?? []) {
+        for (const m of (group.visibleWhen?.source ?? '').matchAll(/features\.([A-Za-z0-9_]+)/g)) {
+          referencedInputs.push([`${objectName}.fieldGroups.${group.key}`, m[1]]);
         }
       }
     }

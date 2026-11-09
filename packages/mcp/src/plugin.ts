@@ -32,11 +32,13 @@ import { readEnvWithDeprecation, isMcpServerEnabled, resolveMcpStdioAutoStart } 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IAIService, IAuthService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { MCPServerRuntime, setRuntimeObjectView } from './mcp-server-runtime.js';
+import { MCPServerRuntime, setRuntimeObjectView, setRuntimeStdioPrincipal } from './mcp-server-runtime.js';
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
+import type { ObjectSchemaMaskSecuritySurface } from '@objectstack/metadata-core';
 import {
+  callerObjectView,
   createStdioDataBridge,
   enforceApiExposure,
   GATED_ACTIONS,
@@ -44,11 +46,13 @@ import {
   serveStoredMetadataRow,
   stdioObjectView,
   type StdioObjectReads,
+  type StdioDatasetToolsService,
   type StdioProtocolObjectReads,
   type StoredHashDigest,
 } from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
+import { configureReadFileExtraction } from './file-content.js';
 
 /**
  * [#15348] Resolve the deployment's EFFECTIVE tenancy posture for the stdio
@@ -176,6 +180,41 @@ function resolveStdioApiKeyLifecycle(ctx: PluginContext): ApiKeyLifecyclePolicyS
   return apiKeyLifecyclePolicySourceOf(authService);
 }
 
+/**
+ * [ADR-0149 D2] The `analytics` service when it serves the dataset executor
+ * (`datasetTools`), else `undefined`: no analytics service (it loads opt-in),
+ * or one without the executor. A lookup that throws is "not served".
+ */
+function datasetToolsService(ctx: PluginContext): StdioDatasetToolsService | undefined {
+  let service: Partial<StdioDatasetToolsService> | undefined;
+  try {
+    service = ctx.getService<Partial<StdioDatasetToolsService>>('analytics');
+  } catch {
+    return undefined;
+  }
+  return service && typeof service.datasetTools === 'function' ? (service as StdioDatasetToolsService) : undefined;
+}
+
+/**
+ * [ADR-0150 D2/D6] The manifest namespace of an installed package, by its id,
+ * read from the engine's registry at the moment a face is derived: the
+ * namespace a package-held skill's prompt name and agent's name carry
+ * (`NS-NAME`). `undefined` for an id with no package record, or a host with no
+ * engine, and the face is then the bare name.
+ */
+function installedPackageNamespace(ctx: PluginContext): (packageId: string) => string | undefined {
+  return (packageId) => {
+    let registry: { getPackage?(id: string): unknown } | undefined;
+    try {
+      registry = ctx.getService<{ registry?: { getPackage?(id: string): unknown } }>('objectql')?.registry;
+    } catch {
+      return undefined;
+    }
+    const manifest = (registry?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest;
+    return typeof manifest?.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+  };
+}
+
 /** The status the REST and dispatcher faces answer a held principal with. */
 const AUTH_GATE_REFUSAL_STATUS = 403;
 
@@ -261,13 +300,19 @@ async function resolveStdioExecutionContext(
     tenancyPosture,
     userAuthGates,
     apiKeyLifecycle,
+    // [#31821] A stdio process has no network peer and no user agent: the
+    // `credential_use` row this key's use stamp writes records the address as
+    // absent because of the transport, never a guessed one.
+    client: { transport: 'stdio' },
   });
   return assembleExecutionContext({
     authz,
     // OAuth access tokens are honoured on the `/mcp` HTTP door alone
     // (`acceptOAuthAccessToken`); a stdio process presents an API key, never a
-    // bearer, so `principalKind: 'agent'`, `onBehalfOf` and `oauthScopes` are
-    // not representable here.
+    // bearer, so an OAuth-delegated agent (`onBehalfOf`, `oauthScopes`) is not
+    // representable here. [ADR-0151 D3] An AI service account's key is: the
+    // assembler stamps it `principalKind: 'agent'` from the account's row, with
+    // no `onBehalfOf`.
     oauth: undefined,
     localization,
     // No request to carry a locale preference: a long-lived stdio transport has
@@ -380,6 +425,11 @@ export class MCPServerPlugin implements Plugin {
       logger: ctx.logger,
     };
 
+    // [#31826] `read_file`'s two host bounds on PDF and Word extraction
+    // (`OS_MCP_READ_FILE_CPU_BUDGET_MS`, `OS_MCP_READ_FILE_MAX_CONCURRENT`),
+    // read once here: a malformed value fails the boot naming the variable.
+    configureReadFileExtraction();
+
     this.runtime = new MCPServerRuntime(config);
     ctx.registerService('mcp', this.runtime);
 
@@ -458,6 +508,21 @@ export class MCPServerPlugin implements Plugin {
         return undefined;
       }
     };
+    // [ADR-0106] The `security` service the object-schema mask asks for the
+    // stdio principal's readable fields — resolved at each use, as the
+    // protocol is, and `undefined` on a host that registers none (no
+    // field-level posture there, so the schema is served as declared).
+    const securityReads = (): ObjectSchemaMaskSecuritySurface | undefined => {
+      try {
+        return ctx.getService<ObjectSchemaMaskSecuritySurface>('security') ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    // [ADR-0106 D1/D5] The stdio principal, once this transport has one: the
+    // object resources below serve their schemas to it through the same mask
+    // `list_objects` / `describe_object` do.
+    let schemaPrincipal: (() => Promise<ExecutionContext>) | undefined;
 
     // ── stdio auto-start decision (opt-in, its OWN switch) ──
     // Deliberately stricter than the HTTP-surface default (`isMcpServerEnabled`,
@@ -507,8 +572,8 @@ export class MCPServerPlugin implements Plugin {
       if (!apiKey) {
         throw new Error(
           '[MCP] The stdio transport is enabled (OS_MCP_STDIO_ENABLED / autoStart) but OS_MCP_STDIO_API_KEY is not set. ' +
-            'stdio must run under a real identity — mint an API key on the Connect an Agent page ' +
-            '(Account → Developer for any signed-in user; Setup → Connect an Agent for admins), ' +
+            'stdio must run under a real identity — mint an API key on the Connect an AI Assistant page ' +
+            '(the avatar menu or Account → AI Assistant for any signed-in user; Setup → Overview for admins), ' +
             'or POST /api/v1/keys, and set ' +
             'OS_MCP_STDIO_API_KEY=osk_.... Refusing to start an unscoped stdio server (ADR-0101).',
         );
@@ -729,7 +794,12 @@ export class MCPServerPlugin implements Plugin {
           metadataService,
           protocol: protocolReads,
           resolvePrincipal,
+          security: securityReads,
           keyedDigest: storedHashDigest,
+          // [ADR-0149 D2] Read here, in `start()`: every plugin's services are
+          // registered during `init()`, so an absence now is final (ADR-0116),
+          // and the tools must be registered before the transport attaches.
+          datasetTools: datasetToolsService(ctx),
         });
       } else {
         // Functional degradation, said once and naming the remedy: two of the
@@ -791,6 +861,12 @@ export class MCPServerPlugin implements Plugin {
           storedHashDigest(),
         );
       };
+      schemaPrincipal = resolvePrincipal;
+      // [#31605] The same per-call identity for the AI tools bridged above
+      // (their execution context) and for a tool-call interceptor (the
+      // principal of every stdio call). Bound after `bridgeTools` ran, which is
+      // why the runtime reads it at each call rather than at registration.
+      setRuntimeStdioPrincipal(this.runtime, resolvePrincipal);
       ctx.logger.info(
         `[MCP] stdio transport principal-bound to OS_MCP_STDIO_API_KEY identity ${initial.userId} (RLS/FLS/tenant applied)`,
       );
@@ -801,14 +877,26 @@ export class MCPServerPlugin implements Plugin {
       // `describe_object` answer from (`stdioObjectView`), never the metadata
       // service alone: on a kernel with an `environmentId` that service holds
       // no copy of an object a package registered during the boot.
-      setRuntimeObjectView(this.runtime, stdioObjectView({ metadataService, protocol: protocolReads }));
+      // [ADR-0106 D1/D5] …served to the stdio principal through the
+      // object-schema mask (`callerObjectView`), the view the tools read, so
+      // a resource never names a field the tools withhold. With no principal
+      // (this process starts no stdio transport) the view is the bare one.
+      const objectView = stdioObjectView({ metadataService, protocol: protocolReads });
+      setRuntimeObjectView(
+        this.runtime,
+        schemaPrincipal
+          ? callerObjectView(objectView, { resolvePrincipal: schemaPrincipal, security: securityReads })
+          : objectView,
+      );
       this.runtime.bridgeResources(metadataService, getRecord);
       // Awaited: the prompt bridge reads `skill` metadata to project each
       // skill's instructions onto an MCP prompt (#3905), so the surface must be
       // complete before the transport attaches below.
       // [#8328] `mergedRead` points the skill read at the overlay-aware layer
       // so a runtime `PUT /api/v1/meta/skill/<name>` reaches this surface.
-      await this.runtime.bridgePrompts(metadataService, mergedRead);
+      // [ADR-0150 D6] …and each package-held skill and agent named by its face
+      // (`NS-NAME`), its package's namespace read from the engine's registry.
+      await this.runtime.bridgePrompts(metadataService, mergedRead, installedPackageNamespace(ctx));
     }
 
     // [#8034] BEFORE `start()`, with the resources and prompts: registering a
@@ -829,7 +917,7 @@ export class MCPServerPlugin implements Plugin {
     }
 
     // ── Plugin-carried Setup UI (cloud ADR-0009 principle) ──
-    // "Connect an agent" page + nav entry ship WITH the MCP capability and
+    // "Connect an AI Assistant" page + nav entries ship WITH the MCP capability and
     // follow the HTTP surface's default-on switch: an opted-out deployment
     // advertises nothing, so it gets no page either.
     if (isMcpServerEnabled()) {

@@ -1,0 +1,7 @@
+{
+  "file": "packages/drivers/driver-sql/src/sql-driver-top-level.ts",
+  "adrs": [
+    "ADR-0053"
+  ],
+  "invariant": "ADR-0053 D-F1/D-F2/D-F3: the fold helpers `formatOutput` and `presentReadValue` call — `normalizeSqliteDatetimeOutput`, `presentAuditTimestampOutput`, `isoFromValidDate` and `repairNaiveUtcAuditTimestamp` — apply on EVERY dialect: a `Date` becomes the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text, an Invalid `Date` is handed back unchanged (never nulled, never thrown on), and nothing here alters the pg/mysql2 client parser. Re-gating them on `isSqlite` reverts a maintainer ruling (#13973). They moved here from `sql-driver.ts` with the other top-level declarations (#29520 codemod)."
+}

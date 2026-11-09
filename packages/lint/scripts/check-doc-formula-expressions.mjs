@@ -19,8 +19,9 @@
  * rejects, so it had never run against a stack that parses) and the sweep found
  * two doc examples teaching the bare-reference form — `content/docs/data-modeling/
  * fields.mdx` and `content/blog/context-window-is-the-constraint.mdx` (#5116).
- * A bare reference in a record-scoped CEL expression does not throw: it resolves
- * to nothing and the expression **silently evaluates to null**. Copy that line
+ * A bare reference in a record-scoped CEL expression never reads the field: it
+ * is an unknown variable, the expression faults, and a formula field **silently
+ * reads null** (a predicate takes its site's fault rule instead). Copy that line
  * into an app and `os build` now fails — the docs taught what the platform gate
  * rejects.
  *

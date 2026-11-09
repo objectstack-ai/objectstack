@@ -712,14 +712,14 @@ describe('sharing rules target an object under record-sharing enforcement (#9237
     // red here, not a silently narrower dogfood boot.
     const declared = positions.flatMap((p) => (p.permissionSets ?? []).map((s) => `${p.name} -> ${s}`)).sort();
     expect(declared).toEqual([
-      'auditor -> showcase_auditor',
-      'client_liaison -> showcase_client_liaison',
-      'client_portal_user -> showcase_guest_portal',
-      'contributor -> showcase_contributor',
-      'exec -> showcase_executive',
-      'field_ops_delegate -> showcase_field_ops_delegate',
-      'manager -> showcase_manager',
-      'ops -> showcase_ops',
+      'showcase_auditor -> showcase_auditor',
+      'showcase_client_liaison -> showcase_client_liaison',
+      'showcase_client_portal_user -> showcase_guest_portal',
+      'showcase_contributor -> showcase_contributor',
+      'showcase_exec -> showcase_executive',
+      'showcase_field_ops_delegate -> showcase_field_ops_delegate',
+      'showcase_manager -> showcase_manager',
+      'showcase_ops -> showcase_ops',
     ]);
   });
 

@@ -72,6 +72,12 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
       ...(typeof m.visible === 'undefined' ? [] : [m.visible]),
       ...(m.specifiers ?? []).filter((s: any) => typeof s.visible !== 'undefined').map((s: any) => s.visible),
     ]);
+    // 10 -> 9 at #30204: the `feature_flags` manifest was removed; it declared
+    // no `visible`, so the predicate count does not move.
+    // 9 -> 10 with the `access_policy` manifest (an organization's own access
+    // policy, ADR-0069 TL;DR 6); it declares no `visible`, so the predicate
+    // count does not move. `auth.mfa_grace_period_days` keeps its one
+    // predicate, now over the three-level `mfa_required`.
     expect(builtinSettingsManifests).toHaveLength(10);
     // 94 -> 96 at #11768: the `audience` group added two gated fields
     // (`audience_allowed_email_domains`, `audience_self_registration_permission_set`),

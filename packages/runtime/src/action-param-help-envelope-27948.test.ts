@@ -42,3 +42,22 @@ describe('summarizeActionParams reads a template-envelope helpText (#27948)', ()
         expect(summarizeActionParams(NO_DEPS, action({ dialect: 'template' }), obj)).toEqual(absent);
     });
 });
+
+// #28266: the slot also takes an inline locale map. The agent-facing tool
+// schema reads it in the platform's source language — never the map object,
+// and never the bound field's description in its place.
+describe('summarizeActionParams reads a locale-map helpText (#28266)', () => {
+    it('the map gives its `en` entry, the same param description as that bare string', () => {
+        const map = { 'zh-CN': '为什么暂停 {{ record.name }}？', en: SOURCE };
+        const fromMap = summarizeActionParams(NO_DEPS, actionWith(map), undefined);
+        expect(fromMap).toEqual(summarizeActionParams(NO_DEPS, actionWith(SOURCE), undefined));
+    });
+
+    it('a map with no `en` entry gives its `default`, and the field description stays the fallback for none', () => {
+        const obj = { fields: { reason: { label: 'Reason', type: 'text', description: 'The field help' } } };
+        const action = (helpText: unknown): any => ({ name: 'pause_account', params: [{ field: 'reason', helpText }] });
+        expect(summarizeActionParams(NO_DEPS, action({ default: 'Why', 'zh-CN': '原因' }), obj)[0].description)
+            .toBe('Reason — Why');
+        expect(summarizeActionParams(NO_DEPS, action({}), obj)[0].description).toBe('Reason — The field help');
+    });
+});

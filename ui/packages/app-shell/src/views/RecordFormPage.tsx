@@ -24,15 +24,30 @@
  *     toasts.
  *   - Wraps the form in a sticky page header (back button + title) for a
  *     consistent full-screen chrome.
+ *   - Create mode opens on an AI chat draft carried in the router state
+ *     (objectstack#28104, `utils/recordFormAiDraft.ts`): those values seed the
+ *     form under any query-string prefill, each such field is marked
+ *     「AI 建议」 until edited, and nothing is saved until the person saves.
+ *   - Edit mode opens on an AI chat UPDATE's proposed values carried the same
+ *     way (objectstack#28106): the form applies each over the stored record as
+ *     an unsaved change, before → after, marked 「AI 建议」 with a per-field
+ *     revert, and nothing is saved until the person saves.
  *
  * @module views/RecordFormPage
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
 import { ObjectForm } from '@object-ui/plugin-form';
-import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
-import { ArrowLeft, Building2, Database } from 'lucide-react';
+import {
+  Button,
+  Empty,
+  EmptyTitle,
+  EmptyDescription,
+  SuggestedFieldChangesContext,
+  SuggestedFieldsContext,
+} from '@object-ui/components';
+import { ArrowLeft, Building2, Database, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useObjectTranslation, useObjectLabel, recordSaveMessage } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -49,6 +64,8 @@ import { buildExpressionUser } from '../providers/expressionUser.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { resolveFormViewChrome, selectRecordFormView } from '../utils/recordFormNavigation.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
+import { readRecordFormAiChanges, readRecordFormAiDraft } from '../utils/recordFormAiDraft.js';
 import { useAuth } from '@object-ui/auth';
 
 export interface RecordFormPageProps {
@@ -72,6 +89,7 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const dataSource = useAdapter();
   const { objects, loading: metadataLoading } = useMetadata();
   const { t, language } = useObjectTranslation();
@@ -105,6 +123,38 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, searchParams.toString()]);
+
+  /**
+   * objectstack#28104 — an AI chat draft ("Open the full form" on a
+   * record-write card) arrives in the ROUTER STATE, never the query string.
+   * It seeds a create under the query-string prefill, which still wins per
+   * field: a related-list "+ New" link names its parent on purpose. The
+   * fields the draft really fills are the ones the form marks 「AI 建议」.
+   * An edit reads no draft.
+   */
+  const aiDraftValues = useMemo(
+    () => (mode === 'create' ? readRecordFormAiDraft(location.state) : undefined),
+    [mode, location.state],
+  );
+  const createValues = useMemo<Record<string, unknown> | undefined>(
+    () => (aiDraftValues ? { ...aiDraftValues, ...prefillValues } : prefillValues),
+    [aiDraftValues, prefillValues],
+  );
+  const aiSuggestedFields = useMemo<ReadonlySet<string> | undefined>(() => {
+    if (!aiDraftValues) return undefined;
+    const names = Object.keys(aiDraftValues).filter((name) => !prefillValues || !(name in prefillValues));
+    return names.length > 0 ? new Set(names) : undefined;
+  }, [aiDraftValues, prefillValues]);
+  /**
+   * objectstack#28106 — an AI chat UPDATE's proposed values, carried in the
+   * same router state and bound to the record they were proposed for. The
+   * form applies them over the stored record as unsaved changes; a create
+   * reads none.
+   */
+  const aiProposedChanges = useMemo(
+    () => (mode === 'edit' ? readRecordFormAiChanges(location.state, recordId) : undefined),
+    [mode, location.state, recordId],
+  );
 
   const objectDef = useMemo(
     () => objects.find((o: any) => o.name === objectName),
@@ -143,9 +193,10 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   // Two names, not one (objectui#11733): the title and the toasts speak of ONE
   // record, so they keep the singular; the breadcrumb link opens the object's
   // list, so it reads the plural, as that list page's title and the header
-  // crumb above this page do.
-  const label = objectDef ? objectLabel(objectDef as any) : objectName ?? '';
-  const listLabel = objectDef ? objectPluralLabel(objectDef) : objectName ?? '';
+  // crumb above this page do. Both are the served labels as given; the bundle
+  // only when none is served (objectstack#30390).
+  const label = objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName ?? '';
+  const listLabel = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName ?? '';
   // No inline `defaultValue` on these lookups: every key below is defined in
   // all ten locale packs and `all-locales-key-parity.test.ts` pins that
   // permanently, so i18next always resolves the pack value and a fallback
@@ -355,13 +406,13 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
   // objectstack-ai/objectstack#26843 — the form view's `buttons`, `layout`
   // and `defaults`, which this page used to hard-set over (`showSubmit: true`,
   // `layout: 'vertical'`, its own labels). `defaults` seed a create under the
-  // URL prefill, which still wins per field.
+  // AI chat draft, and both under the URL prefill, which still wins per field.
   const formChrome = resolveFormViewChrome(formDef, {
     flow: mode,
     language,
     submitText: t('form.saveRecord'),
     cancelText: t('common.cancel'),
-    createValues: prefillValues,
+    createValues,
   });
 
   return (
@@ -423,28 +474,47 @@ export function RecordFormPage({ mode }: RecordFormPageProps) {
 
         <div className="flex-1 overflow-auto p-4 sm:p-6">
           <div className="mx-auto max-w-4xl">
-            <ObjectForm
-              key={`${mode}:${objectName}:${recordId ?? 'new'}`}
-              schema={{
-                type: 'object-form',
-                formType: pageFormType,
-                ...formLayoutProps,
-                objectName: objectDef.name,
-                mode,
-                recordId: mode === 'edit' ? recordId : undefined,
-                title: pageTitle,
-                fields,
-                // Master-detail by config: if the object's form view declares
-                // inline child collections, ObjectForm renders them as an atomic
-                // master-detail form on this page — no bespoke page needed.
-                subforms: (objectDef as any).form?.subforms
-                  ?? (objectDef as any).formViews?.default?.subforms,
-                onSuccess: handleSuccess,
-                onCancel: handleCancel,
-                ...formChrome,
-              }}
-              dataSource={dataSource ?? undefined}
-            />
+            {/* objectstack#28104 — the form opened on an AI chat draft: say so
+                once, above it, and that nothing is saved until the person
+                saves. Each field it filled carries its own mark below. The
+                same for an edit opened on an update's proposed values
+                (objectstack#28106). */}
+            {(aiSuggestedFields || aiProposedChanges) && (
+              <p
+                className="mb-4 flex items-start gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-muted-foreground"
+                data-testid="record-form-ai-draft-notice"
+                role="note"
+              >
+                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                <span>{t('form.aiDraftNotice')}</span>
+              </p>
+            )}
+            <SuggestedFieldChangesContext.Provider value={aiProposedChanges}>
+              <SuggestedFieldsContext.Provider value={aiSuggestedFields}>
+                <ObjectForm
+                  key={`${mode}:${objectName}:${recordId ?? 'new'}`}
+                  schema={{
+                    type: 'object-form',
+                    formType: pageFormType,
+                    ...formLayoutProps,
+                    objectName: objectDef.name,
+                    mode,
+                    recordId: mode === 'edit' ? recordId : undefined,
+                    title: pageTitle,
+                    fields,
+                    // Master-detail by config: if the object's form view declares
+                    // inline child collections, ObjectForm renders them as an atomic
+                    // master-detail form on this page — no bespoke page needed.
+                    subforms: (objectDef as any).form?.subforms
+                      ?? (objectDef as any).formViews?.default?.subforms,
+                    onSuccess: handleSuccess,
+                    onCancel: handleCancel,
+                    ...formChrome,
+                  }}
+                  dataSource={dataSource ?? undefined}
+                />
+              </SuggestedFieldsContext.Provider>
+            </SuggestedFieldChangesContext.Provider>
           </div>
         </div>
       </div>

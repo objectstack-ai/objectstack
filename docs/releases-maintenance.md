@@ -190,12 +190,19 @@ nothing.
 
 ### Release channels
 
-There are two npm channels, and both are published by `release.yml`:
+There are two npm channels, and both are published by `release.yml`. `next` has two
+publishers and two version shapes:
 
 | dist-tag | Carries | Published by |
 |---|---|---|
-| `latest` | the stable release (GA) | `release.yml`, outside pre mode — the Version Packages PR flow below |
-| `next` | the pre-release (`X.Y.Z-next.N`) | `release.yml` in pre mode: `.changeset/pre.json` says `mode: pre`, `tag: next`, and `changeset publish` publishes under that tag |
+| `latest` | the stable release (GA) | `release.yml`, outside pre mode — the Version Packages PR flow below. The only path that writes `latest` |
+| `next` | the pre-release (`X.Y.Z-next.N`) during a release-candidate cycle | `release.yml` in pre mode: `.changeset/pre.json` says `mode: pre`, `tag: next`, and `changeset publish` publishes under that tag |
+| `next` | a snapshot of `main` (`0.0.0-next-YYYYMMDDHHMMSS`) outside a cycle | `release.yml`'s snapshot lane, **proposed daily by schedule and published on approval**: a daily cron (or **Actions → Release → Run workflow** with `snapshot_next` checked) starts the preflight, and a required reviewer then approves `Snapshot next of main <commit> (awaiting approval)` at `environment: release` — nothing publishes without that click, and a proposal nobody approves is superseded by the next day's. It cuts the newest commit whose full battery is green on it, runs `changeset version --snapshot next` in the runner only (never committed), and runs `changeset publish --tag next --no-git-tag`: no tag, no GitHub Release, no Version Packages PR change, `latest` untouched. It refuses while `.changeset/pre.json` says `mode: pre` at the selected commit or at main's tip, read again after the approval (the cycle owns `next`), while any fixed-group member has no version on npm (a first publish takes `latest`), when the candidate commit is the one the current `next` was published from (every snapshot records its commit as `gitHead`, read back from npm), when `main` has no fully green commit, and while a stable release prompt is waiting or a stable publish is running. On the daily cron each of those five is a **quiet skip** — a green run, nothing queued, no card — so the schedule is green and proposes nothing until every member has debuted; a human dispatch keeps the loud refusal. An unexpected refusal, or a publish that fails after the approval, files or refreshes one fixed-title card (`snapshot-next-card`); a partial publish is fixed by a fresh complete snapshot, never a republish into it. ADR-0125, amendments of 2026-11-05 and 2026-11-06 |
+
+A snapshot version sorts below every stable version, so the next stable publish's
+dist-tag step moves `next` back up to it. An app that needs a fix the day it lands
+pins `next`; `latest` users see no change. ⛔ No AI seat dispatches the snapshot lane
+or approves its deployment (AGENTS.md Prime Directive 15).
 
 There is no `rc` channel. The Cut RC lane that cut `X.Y.Z-rc.N` is retired and its
 workflow deleted, and a pre-release cycle enters pre mode with tag `next`, never `rc`.
@@ -211,8 +218,10 @@ held, **whole**, at the environment gate until a required reviewer approves it (
 The approval is the release act on that lane, so read ADR-0125 D3 before touching it:
 an environment with no required reviewers passes automatically and silently, which on
 a push-started lane is not a weakened gate but no gate at all. (`release.yml` also
-carries a 6-hourly `schedule`, added by #11233; it reaches only the bookkeeping
-`version-pr` job, which has no publish capability by construction.) That is the
+carries two `schedule` crons: the 6-hourly one, added by #11233, reaches only the
+bookkeeping `version-pr` job, which has no publish capability by construction; the
+daily one, added by the 2026-11-06 amendment, starts only the `next` snapshot
+preflight, whose publish waits at the same `release` gate.) That is the
 2026-08-07 ruling (「版本发布必须是人工的」) re-implemented, not relaxed, and it is not
 negotiable in either direction — see `release.yml`'s header for the two releases that
 were minted without a human and the lane split that ended it.
@@ -228,13 +237,49 @@ waits at `environment: release` for a required reviewer to approve a job named
 `Publish <version> to npm (awaiting approval)` — the version read from the commit,
 never one you supply (ADR-0125 D1/D2). ⛔ **Actions → Release → Run workflow** is
 **not** the GA publish path: since ADR-0125 D4 that dispatch takes no version input at
-all, and left unchecked it starts the repair lane for a publish that died partway —
-checked, it starts the bookkeeping lane described next.
+all, and with neither `refresh_version_pr` nor `snapshot_next` checked it starts the
+repair lane for a publish that died partway — `refresh_version_pr` starts the
+bookkeeping lane described next, and `snapshot_next` the `next` snapshot lane above,
+which runs no stable job.
 
-**First, check #4935 is current** (#11233). It is regenerated on a 6-hourly schedule
-rather than on every push, so at cut time it can be up to one refresh window behind
-main — i.e. it may not yet carry a changeset that landed in the last few hours.
-Compare its head against `main` and, if it is behind, **Actions → Release → Run
+The cut, in order (each step is explained below):
+
+1. **Regenerate the Version Packages PR against current `main` right before you
+   merge it.** List the changesets `main` gained since the PR's branch point:
+
+   ```bash
+   git fetch origin main changeset-release/main
+   base=$(git merge-base origin/main origin/changeset-release/main)
+   git diff --name-only --diff-filter=A "$base" origin/main -- .changeset/ | grep -v README
+   ```
+
+   Anything listed is code the cut would ship without a CHANGELOG entry:
+   refresh (below), wait for its CI, and run the list again before you merge.
+2. **Wait for a nearer `CI` run** before approving the publish (below).
+3. **Confirm the version commit left zero changesets pending.** The Release
+   run that queues the publish says so in its job summary (`Changesets:`),
+   or warns with each changeset it did not consume; on a full clone,
+   `node scripts/release-pending-publish.mjs unconsumed --version-commit SHA
+   --version VERSION` answers the same. If it is not zero, name each one in
+   the curated release page, and list a breaking one under 需手动处理 with
+   the refusal it serves. Never edit the generated `CHANGELOG.md` files or the pending
+   changesets: the next cut consumes them and `annotate-shipped` marks them
+   `**Shipped in VERSION**`.
+
+Why step 1 is a step and not a check: `main` takes a changeset-bearing landing
+about every twenty minutes, so a check that refused a stale Version Packages PR
+would refuse nearly every cut (the measurement is in
+`scripts/release-pending-publish.mjs`, under `annotate-shipped`). 18.3.0 shows
+the leak it leaves: #26517 was refreshed at 13:39Z from `40a35ded` and merged
+at 14:44Z without another refresh, five landings behind, so four changesets
+(one of them breaking, #29923) shipped with no entry in its CHANGELOGs
+(#29957).
+
+**First, check the Version Packages PR is current** (#11233). It is regenerated on a
+6-hourly schedule rather than on every push, so at cut time it can be up to one
+refresh window behind main — i.e. it may not yet carry a changeset that landed in
+the last few hours. Compare its head against `main` (step 1's list) and, if it is
+behind, **Actions → Release → Run
 workflow** with **`refresh_version_pr` checked**, which runs the bookkeeping lane
 only: no audit, no publish, and no deployment parked at the `release` environment.
 Wait for the refreshed PR's CI, then merge it. That merge is still the decision to

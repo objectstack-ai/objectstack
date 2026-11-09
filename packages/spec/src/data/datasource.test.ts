@@ -5,6 +5,8 @@ import {
   DriverType,
   SchemaModeSchema,
   ExternalDatasourceSettingsSchema,
+  EXTERNAL_ROW_CAP_CEILING,
+  EXTERNAL_ROW_CAP_DEFAULT,
   type Datasource,
 } from './datasource.zod';
 
@@ -956,5 +958,65 @@ describe('external.connector — an API-backed datasource borrows a connector in
   it('CONTROL: `credentialsRef` alone on a plugin driver still parses, unchanged', () => {
     const result = DatasourceSchema.safeParse({ ...odata, external: { credentialsRef: 'sys_secret:9f2c' } });
     expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+});
+
+describe('[#29762] external.rowCap — a plugin-driver datasource\'s row cap, bounded by the platform maximum', () => {
+  const plugin = { name: 'plan', driver: 'production_plan', config: {}, schemaMode: 'external' } as const;
+
+  const issuesAt = (raw: unknown, path: string) => {
+    const result = DatasourceSchema.safeParse(raw);
+    return result.success ? [] : result.error.issues.filter((i) => i.path.join('.') === path);
+  };
+
+  it('the default and the ceiling are the ruled numbers', () => {
+    expect(EXTERNAL_ROW_CAP_DEFAULT).toBe(1000);
+    expect(EXTERNAL_ROW_CAP_CEILING).toBe(10_000);
+  });
+
+  it('accepts a whole number from 1 to the ceiling on a plugin driver, in external and validate-only modes', () => {
+    for (const schemaMode of ['external', 'validate-only'] as const) {
+      for (const rowCap of [1, 5000, EXTERNAL_ROW_CAP_CEILING]) {
+        const result = DatasourceSchema.safeParse({ ...plugin, schemaMode, external: { rowCap } });
+        expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+        if (result.success) expect(result.data.external?.rowCap).toBe(rowCap);
+      }
+    }
+  });
+
+  it('is absent unless written — no default is stamped onto a parsed block', () => {
+    const parsed = ExternalDatasourceSettingsSchema.parse({});
+    expect(parsed).not.toHaveProperty('rowCap');
+  });
+
+  it('refuses a value above the ceiling, zero, a negative and a fraction', () => {
+    for (const rowCap of [EXTERNAL_ROW_CAP_CEILING + 1, 0, -1, 2500.5]) {
+      expect(issuesAt({ ...plugin, external: { rowCap } }, 'external.rowCap'), String(rowCap)).toHaveLength(1);
+    }
+  });
+
+  it('folds the near-miss spellings onto `rowCap`', () => {
+    for (const spelling of ['maxRows', 'rowLimit', 'maxRowCount']) {
+      const result = DatasourceSchema.safeParse({ ...plugin, external: { [spelling]: 5000 } });
+      const messages = result.success ? [] : result.error.issues.map((i) => i.message);
+      expect(messages.join('\n'), spelling).toContain(`\`${spelling}\` → \`rowCap\``);
+    }
+  });
+
+  it('refuses the key on a built-in driver, which is never capped', () => {
+    const hits = issuesAt(
+      { name: 'warehouse', driver: 'sqlite', config: { filename: 'warehouse.db' }, schemaMode: 'external', external: { rowCap: 5000 } },
+      'external.rowCap',
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.code).toBe('custom');
+    expect(hits[0]!.message).toContain("'sqlite' driver is built in");
+  });
+
+  it('refuses the key on a managed datasource, through the managed-block refusal that names it', () => {
+    const result = DatasourceSchema.safeParse({ ...plugin, schemaMode: 'managed', external: { rowCap: 5000 } });
+    expect(result.success).toBe(false);
+    const messages = result.success ? [] : result.error.issues.map((i) => i.message).join('\n');
+    expect(messages).toContain('remove: rowCap');
   });
 });

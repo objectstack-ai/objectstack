@@ -1,0 +1,7 @@
+{
+  "file": "packages/services/service-settings/src/settings-service.ts",
+  "adrs": [
+    "ADR-0007"
+  ],
+  "invariant": "An env override in force wins: the resolver answers it with source='env', locked=true, and the setMany pre-flight refuses every write to that key with SettingsLockedError (HTTP 409 locked-by-env) except a clear (`null` / `undefined`). The pin does not refuse a clear; the row locks and the key's write predicates still judge it like any clear. A clear nulls the stored row beneath the override (never deletes it) and changes nothing in force (ADR-0007 D6, amended #30385)."
+}

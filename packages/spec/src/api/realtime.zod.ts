@@ -61,8 +61,9 @@ const REALTIME_EVENT_TYPE_RETIRED: ReadonlyMap<string, string> = new Map([
  * The realtime event names a subscription can listen for: exactly the
  * record-change events the runtime emits, and nothing else.
  *
- * - `data.record.created` / `data.record.updated` / `data.record.deleted` — one
- *   event per written record (`DataEventType`, `events.zod.ts`);
+ * - `data.record.created` / `data.record.updated` / `data.record.deleted` /
+ *   `data.record.restored` — one event per written record (`DataEventType`,
+ *   `events.zod.ts`; `restored` per row a recycle-bin restore writes back);
  * - `data.records.updated` / `data.records.deleted` — the aggregate event a
  *   predicate write (`multi: true`) publishes instead, carrying a count and no
  *   record (`BulkDataEventType`).
@@ -95,6 +96,7 @@ export const RealtimeEventType = z.enum([
   'data.record.created',
   'data.record.updated',
   'data.record.deleted',
+  'data.record.restored',
   'data.records.updated',
   'data.records.deleted',
 ], {

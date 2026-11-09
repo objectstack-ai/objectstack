@@ -6,7 +6,7 @@ import {
   extractTranslations,
   renderTranslationModule,
   stackAuthoredSubtree,
-} from '../src/utils/i18n-extract.js';
+} from '../src/utils/i18n-bundle-extract.js';
 
 const config: any = {
   objects: [

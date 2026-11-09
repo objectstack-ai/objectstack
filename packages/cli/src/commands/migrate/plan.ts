@@ -15,6 +15,7 @@ import {
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
+  addRefusedTableLimits,
   collectDriftApplyLimits,
   describeDatabaseSource,
   describeTelemetryDatabase,
@@ -469,6 +470,8 @@ export default class MigratePlan extends Command {
       // but a drop (it runs no SQLite table rebuild). Empty for a driver that
       // declares nothing, and then everything below reads as it always has.
       const limits = collectDriftApplyLimits(stack, drift);
+      // [#30636] …and every entry on a table the sync refuses: apply leaves it as it is.
+      await addRefusedTableLimits(limits, drift, pending);
       // [#24925, #24958] The drops `os migrate apply` refuses here, each with
       // the gate that refuses it: an `organization_id` drop until the
       // organization-ownership ceremony has verified, and the

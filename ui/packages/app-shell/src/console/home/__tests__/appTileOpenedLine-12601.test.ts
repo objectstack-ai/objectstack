@@ -35,6 +35,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { timeAgo } from '../../../utils/relativeTime';
 import { TILE_OPENED_TIME_FORMAT } from '../appLastOpened';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 const TILE_PX = 112;
 const TILE_PADDING_PX = 8;
@@ -101,7 +102,7 @@ afterAll(() => {
 
 describe('a Home tile’s last-opened line fits its tile (objectui#12601)', () => {
   it(`every pack's line, seconds to a year, is within ${BUDGET_PX} px at ${FONT_PX} px`, () => {
-    expect(PACKS).toHaveLength(10);
+    expect(PACKS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     const over: string[] = [];
     for (const { language, template } of PACKS) {
       expect(template, language).toContain('{{time}}');
@@ -115,7 +116,7 @@ describe('a Home tile’s last-opened line fits its tile (objectui#12601)', () =
 
   it('en and zh read as the card asks, at 6 s, 5 min, 3 h and 2 d', () => {
     const en = PACKS.find((p) => p.language === 'en')!.template;
-    const zh = PACKS.find((p) => p.language === 'zh')!.template;
+    const zh = PACKS.find((p) => p.language === 'zh-Hans')!.template;
     const points = [6 * SECOND, 5 * MINUTE, 3 * HOUR, 2 * DAY];
     expect(points.map((ago) => tileLine(en, 'en', ago))).toEqual([
       '6 sec. ago',
@@ -123,7 +124,7 @@ describe('a Home tile’s last-opened line fits its tile (objectui#12601)', () =
       '3 hr. ago',
       '2 days ago',
     ]);
-    expect(points.map((ago) => tileLine(zh, 'zh', ago))).toEqual(['6秒前打开', '5分钟前打开', '3小时前打开', '2天前打开']);
+    expect(points.map((ago) => tileLine(zh, 'zh-Hans', ago))).toEqual(['6秒前打开', '5分钟前打开', '3小时前打开', '2天前打开']);
   });
 
   it('CONTROL — the long form the tile used to draw is over the budget', () => {

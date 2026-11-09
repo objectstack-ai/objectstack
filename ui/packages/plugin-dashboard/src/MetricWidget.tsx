@@ -30,6 +30,8 @@ const TREND_LABEL_DEFAULTS: Record<string, string> = {
   'dashboard.trend.vsLastYear': 'vs last year',
   'dashboard.trend.vsYesterday': 'vs yesterday',
   'dashboard.trend.vsPreviousPeriod': 'vs previous period',
+  'dashboard.trend.vsThisMonth': 'vs this month',
+  'dashboard.trend.vsThisQuarter': 'vs this quarter',
 };
 
 const useTrendT = createSafeTranslation(TREND_LABEL_DEFAULTS, 'dashboard.trend.vsLastQuarter');
@@ -54,6 +56,10 @@ function trendLabelKey(label: string): string | undefined {
     case 'vs last year':
     case 'vs previous year':
       return 'dashboard.trend.vsLastYear';
+    case 'vs this month':
+      return 'dashboard.trend.vsThisMonth';
+    case 'vs this quarter':
+      return 'dashboard.trend.vsThisQuarter';
     case 'vs yesterday':
       return 'dashboard.trend.vsYesterday';
     case 'vs previous period':
@@ -132,11 +138,16 @@ function formatMetricValue(
   if (isCurrency) {
     const code = currency || symbolMap[trimmed[0]] || 'USD';
     try {
+      // With no pattern the amount keeps the CURRENCY's own width (CNY 2,
+      // JPY 0), which `Intl` applies when no fraction bound is passed: the
+      // width the list cell shows the same amount at. A pattern is the
+      // author's declaration and states its own (`'$0,0'` → 0).
       return formatDisplayNumber(value as number, {
         locale,
         currency: code,
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
+        ...(trimmed === ''
+          ? {}
+          : { minimumFractionDigits: decimals, maximumFractionDigits: decimals }),
       });
     } catch {
       return `${code} ${(value as number).toFixed(decimals)}`;

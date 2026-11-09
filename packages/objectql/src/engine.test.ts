@@ -4,6 +4,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import { SchemaRegistry } from './registry';
 import { HookTargetRebindError, HOOK_TARGET_REBIND_ERROR_CODE } from './hook-target-rebind-errors';
 import type { IDataDriver } from '@objectstack/spec/contracts';
+import { declaredDriverOptionKeys } from './engine-driver-options';
 
 // Mock the SchemaRegistry to avoid side effects between tests.
 // SchemaRegistry is now a per-instance class (one per ObjectQL engine), so the
@@ -65,6 +66,20 @@ vi.mock('./registry', async () => {
     },
   });
 });
+
+/**
+ * The options argument a driver received holds declared driver-option keys
+ * only (a subset of `declaredDriverOptionKeys()`) — the hop rule
+ * `engine-driver-options.test.ts` pins on every verb.
+ */
+const declaredDriverOptionsOnly = {
+  $$typeof: Symbol.for('jest.asymmetricMatcher'),
+  asymmetricMatch: (options: unknown): boolean =>
+    options === undefined
+    || (typeof options === 'object' && options !== null
+      && Reflect.ownKeys(options).every((key) => typeof key === 'string' && declaredDriverOptionKeys().has(key))),
+  toAsymmetricMatcher: () => 'DeclaredDriverOptionsOnly',
+};
 
 describe('ObjectQL Engine', () => {
     let engine: ObjectQL;
@@ -1602,6 +1617,12 @@ describe('ObjectQL Engine', () => {
                     { id: 'file_b', name: 'b.png', size: 20, mime_type: 'image/png', status: 'committed' },
                 ]);
 
+            const seen: Array<{ object: string; expandRead: boolean }> = [];
+            engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+                seen.push({ object: opCtx.object, expandRead: opCtx.context?.__expandRead === true });
+                await next();
+            });
+
             const result = await engine.find('doc', {});
 
             expect(result[0].cover).toEqual({ id: 'file_a', name: 'a.png', size: 10, mimeType: 'image/png', url: '/api/v1/storage/files/file_a' });
@@ -1612,8 +1633,12 @@ describe('ObjectQL Engine', () => {
             expect(mockDriver.find).toHaveBeenLastCalledWith(
                 'sys_file',
                 expect.objectContaining({ where: { id: { $in: ['file_a', 'file_b'] } } }),
-                expect.objectContaining({ context: { __expandRead: true } }),
+                declaredDriverOptionsOnly,
             );
+            // The batched sys_file read is an expansion sub-read: the middleware
+            // sees its `__expandRead` marker; the driver is handed declared
+            // driver options only.
+            expect(seen).toContainEqual({ object: 'sys_file', expandRead: true });
         });
 
         it('leaves inline-blob values and non-matching strings untouched (dual-mode)', async () => {
@@ -1728,9 +1753,10 @@ describe('ObjectQL Engine', () => {
             expect(result[0].assignee).toEqual({ id: 'u1', name: 'Alice', created_at: null, updated_at: null });
             expect(result[1].assignee).toEqual({ id: 'u2', name: 'Bob', created_at: null, updated_at: null });
 
-            // Verify the expand query used $in. The expand sub-read now routes
-            // through the secured `find` path ([#2850]), so the referenced
-            // read carries the `__expandRead` marker in its context.
+            // Verify the expand query used $in. The expand sub-read routes
+            // through the secured `find` path ([#2850]); its `__expandRead`
+            // marker is read by the middleware (pinned by the [#2850] case
+            // below), and the driver is handed declared driver options only.
             expect(mockDriver.find).toHaveBeenCalledTimes(2);
             expect(mockDriver.find).toHaveBeenLastCalledWith(
                 'user',
@@ -1738,7 +1764,7 @@ describe('ObjectQL Engine', () => {
                     object: 'user',
                     where: { id: { $in: ['u1', 'u2'] } },
                 }),
-                expect.objectContaining({ context: { __expandRead: true } }),
+                declaredDriverOptionsOnly,
             );
         });
 
@@ -1775,7 +1801,7 @@ describe('ObjectQL Engine', () => {
             expect(mockDriver.find).toHaveBeenLastCalledWith(
                 'sys_user',
                 expect.objectContaining({ where: { id: { $in: ['u1'] } } }),
-                expect.objectContaining({ context: { __expandRead: true } }),
+                declaredDriverOptionsOnly,
             );
         });
 
@@ -2365,7 +2391,7 @@ describe('ObjectQL Engine', () => {
                 expect.objectContaining({
                     where: { id: { $in: ['u1', 'u2'] } },
                 }),
-                expect.objectContaining({ context: { __expandRead: true } }),
+                declaredDriverOptionsOnly,
             );
             expect(result[0].assignee).toEqual({ id: 'u1', name: 'Alice' });
             expect(result[1].assignee).toEqual({ id: 'u1', name: 'Alice' });

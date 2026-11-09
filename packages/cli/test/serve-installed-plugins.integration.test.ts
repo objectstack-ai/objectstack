@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — spawns the real producer once per single-cause fixture: two boots of the real `os serve --no-server` (OS_MIGRATE_AND_EXIT=1), each over the installs it pins (the first over six, the second after one enable and one uninstall), and the build, installs and lifecycle commands run in process; CI reading 27.08 s (Test Core 5/8, job 123319866423, head af0b3888) x 1.25, rounded up
+// test-budget: 60 — spawns the real producer once per single-cause fixture: three boots of the real `os serve --no-server` (OS_MIGRATE_AND_EXIT=1), each over the installs it pins (a refused one over seven, then one after two disables and an uninstall, then one after one enable and one uninstall), and the build, installs and lifecycle commands run in process; CI reading for the two-boot file 27.08 s (Test Core 5/8, job 123319866423, head af0b3888) x 3/2 for the third boot, x 1.25, rounded up (this head reads 22.41 s locally)
 
 /**
  * [#27123 slice 2] `os serve` loads what `os plugin install` installed
@@ -8,10 +8,16 @@
  * real command, spawned with `OS_MIGRATE_AND_EXIT=1 --no-server` (the
  * kernel-only boot that runs every plugin's `init` and exits).
  *
- * Five signed installs, each with one fate, in ONE boot:
+ * A refused boot first: with `com.acme.tampered` (an unpacked file edited →
+ * `tree_changed`) and a pre-retirement artifact (→ `manifest_invalid`) among
+ * the installs, nothing rules either out as the crypto provider, so `os serve`
+ * refuses to boot, naming both and `os plugin disable <id>`, and no plugin's
+ * `init` runs; the sandbox tier's refusal is ruled out and not named. Then,
+ * after `os plugin disable` of those two, five signed installs, each with one
+ * fate, in ONE boot:
  *   - `com.acme.loads`     `runtime: 'node'`, untouched   → its `init` runs
- *   - `com.acme.sandboxed` `runtime: 'sandbox'`           → refused, `runtime_not_dispatched`
- *   - `com.acme.tampered`  an unpacked file edited        → refused, `tree_changed`
+ *   - `com.acme.sandboxed` `runtime: 'sandbox'`           → refused, `runtime_not_dispatched`, and the boot goes on
+ *   - `com.acme.tampered`  disabled after the refused boot → skipped, says so
  *   - `com.acme.disabled`  `os plugin disable`            → skipped, says so
  *   - `com.acme.removed`   `os plugin uninstall`          → directory removed, record dropped
  * then a second boot after `os plugin enable com.acme.disabled` and
@@ -27,9 +33,10 @@
  * host's own `@objectstack/core` module, not a copy.
  *
  * Each plugin's `init` writes a marker file, so "it ran" and "nothing of it
- * ran" are read off the disk, not off the log. The controls: both boots exit 0
- * and print the migrate path's completion line, so a boot that never reached
- * the plugins cannot pass.
+ * ran" are read off the disk, not off the log. The controls: the two booting
+ * runs exit 0 and print the migrate path's completion line, so a boot that
+ * never reached the plugins cannot pass; the refused run prints each `✗` line,
+ * so it reached the installed plugins before it refused.
  */
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -50,6 +57,15 @@ import PluginEnable from '../src/commands/plugin/enable.js';
 import PluginUninstall from '../src/commands/plugin/uninstall.js';
 import PluginTrustAdd from '../src/commands/plugin/trust/add.js';
 import { CLI, E2E_SECRET_KEY, KERNEL_ASSIGNED_PORT, childEnv } from './helpers/serve-process.js';
+
+// Paid at collection, not inside a clocked case: what the code under test
+// reaches through dynamic `import()`s (`check:test-source-alias`).
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ENV_KEYS = ['OS_HOME', 'OS_DATABASE_URL', 'DATABASE_URL', 'TURSO_DATABASE_URL', 'OS_DATABASE_DRIVER', 'OS_ARTIFACT_PATH', 'OS_ENVIRONMENT_ID'] as const;
@@ -210,6 +226,8 @@ function boot(): Promise<Boot> {
 const RETIRED = 'com.acme.retired';
 const IDS = ['com.acme.loads', 'com.acme.sandboxed', 'com.acme.tampered', 'com.acme.disabled', 'com.acme.removed', RETIRED] as const;
 
+let refusedBoot: Boot;
+let ranInRefused: string[];
 let first: Boot;
 let second: Boot;
 /** Whose `init` had run, read off the markers right after each boot. */
@@ -270,6 +288,13 @@ beforeAll(async () => {
     });
   }
   expect((await run(PluginDisable, ['com.acme.disabled', '--json'])).exitCode).toBe(0);
+
+  refusedBoot = await boot();
+  ranInRefused = [...ran(), ...(existsSync(marker(BUILT)) ? [BUILT] : [])];
+
+  // The way the refusal names to boot without them.
+  expect((await run(PluginDisable, ['com.acme.tampered', '--json'])).exitCode).toBe(0);
+  expect((await run(PluginDisable, [RETIRED, '--json'])).exitCode).toBe(0);
   expect((await run(PluginUninstall, ['com.acme.removed', '--json'])).exitCode).toBe(0);
 
   first = await boot();
@@ -294,6 +319,19 @@ afterAll(() => {
 });
 
 describe('[#27123] os serve loads installed plugins, verified, by tier', () => {
+  it('refuses to boot while a refused installed plugin cannot be ruled out as the crypto provider, naming it and the way to boot without it', () => {
+    expect(refusedBoot.code, refusedBoot.output.slice(-2000)).not.toBe(0);
+    expect(refusedBoot.output).not.toMatch(/Migration complete/);
+    expect(refusedBoot.output).toMatch(/✗ Refused installed plugin com\.acme\.tampered@1\.0\.0 \(tree_changed\)/);
+    expect(refusedBoot.output).toMatch(/✗ Refused installed plugin com\.acme\.sandboxed@1\.0\.0 \(runtime_not_dispatched\)/);
+    expect(refusedBoot.output).toMatch(/Refusing to boot: .*installed plugin com\.acme\.tampered@1\.0\.0 was refused \(tree_changed\)/);
+    expect(refusedBoot.output).toMatch(/installed plugin com\.acme\.retired@1\.0\.0 was refused \(manifest_invalid\)/);
+    expect(refusedBoot.output).toMatch(/os plugin disable com\.acme\.tampered, os plugin disable com\.acme\.retired/);
+    // The sandbox tier is ruled out: refused by name, but not why the boot stopped.
+    expect(refusedBoot.output).not.toMatch(/installed plugin com\.acme\.sandboxed@1\.0\.0 was refused/);
+    expect(ranInRefused).toEqual([]);
+  });
+
   it('both boots reached the plugins and exited cleanly (the controls)', () => {
     for (const b of [first, second]) {
       expect(b.code, b.output.slice(-2000)).toBe(0);
@@ -306,19 +344,20 @@ describe('[#27123] os serve loads installed plugins, verified, by tier', () => {
     expect(first.output).not.toMatch(/Refused installed plugin com\.acme\.loads/);
   });
 
-  it('refuses the sandbox tier and the tampered tree by name, and runs nothing of either', () => {
+  it('refuses the sandbox tier by name and boots on; runs nothing of it, nor of the disabled tampered tree', () => {
     expect(first.output).toMatch(/✗ Refused installed plugin com\.acme\.sandboxed@1\.0\.0 \(runtime_not_dispatched\)/);
-    expect(first.output).toMatch(/✗ Refused installed plugin com\.acme\.tampered@1\.0\.0 \(tree_changed\)/);
+    expect(first.output).toMatch(/Installed plugin com\.acme\.tampered@1\.0\.0 is disabled/);
     expect(ranAfterFirst).not.toContain('com.acme.sandboxed');
     expect(ranInSecond).not.toContain('com.acme.sandboxed');
     expect(ranAfterFirst).not.toContain('com.acme.tampered');
   });
 
-  it("refuses a pre-retirement artifact (packaging: 'manifest-deps') with the schema's prescription, not import_failed, and boots on", () => {
-    expect(first.output).toMatch(
+  it("refuses a pre-retirement artifact (packaging: 'manifest-deps') with the schema's prescription, not import_failed", () => {
+    expect(refusedBoot.output).toMatch(
       /✗ Refused installed plugin com\.acme\.retired@1\.0\.0 \(manifest_invalid\): .*packaging: `packaging: 'manifest-deps'` was removed/,
     );
-    expect(first.output).not.toMatch(/com\.acme\.retired@1\.0\.0 \(import_failed\)/);
+    expect(refusedBoot.output).not.toMatch(/com\.acme\.retired@1\.0\.0 \(import_failed\)/);
+    expect(first.output).toMatch(/Installed plugin com\.acme\.retired@1\.0\.0 is disabled/);
     expect(ranAfterFirst).not.toContain(RETIRED);
     expect(ranInSecond).not.toContain(RETIRED);
   });

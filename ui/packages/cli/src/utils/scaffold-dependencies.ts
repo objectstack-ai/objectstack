@@ -140,7 +140,7 @@ export const SCAFFOLD_DEV_DEPENDENCIES: Record<string, string> = {
   '@types/react-dom': '19.3.0',
   '@vitejs/plugin-react': '^6.0.5',
   autoprefixer: '^10.5.4',
-  postcss: '^8.5.26',
+  postcss: '^8.5.32',
   tailwindcss: '^4.3.3',
   typescript: '^6.0.3',
   vite: '^8.2.1'

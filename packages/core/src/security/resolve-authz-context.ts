@@ -65,10 +65,11 @@ import { SystemObjectName } from '@objectstack/spec/system';
 import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { isValueDomainMember } from '@objectstack/spec/shared';
-import type { AuthSessionApi } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, EffectivePermissionSetOrigin } from '@objectstack/spec/contracts';
 
 import { ApiKeyLifecycleRefusalError, resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyLifecyclePolicySource, ApiKeyRefusalReason } from './api-key.js';
+import type { CredentialUseClientInput } from './credential-use-client.js';
 import { normalizeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
 import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
 import { openUserGrantsCache } from './resolve-user-grants-cache.js';
@@ -84,7 +85,13 @@ import {
   type OrganizationReach,
 } from './organization-reach.js';
 import { derivePosture } from './posture-ladder.js';
-import { securityCatalogReaderOf, type SecurityCatalogReader } from './security-catalog.js';
+import {
+  securityCatalogReaderOf,
+  storedPermissionSetScope,
+  type SecurityCatalogEntry,
+  type SecurityCatalogReader,
+  type SecurityCatalogReferenceScope,
+} from './security-catalog.js';
 import { resolveSystemWriteOrganization, type SystemWriteOrganizationDecision } from './system-write-organization.js';
 import { METADATA_ACTIVATION_TABLE } from '../utils/metadata-activation-store.js';
 
@@ -149,6 +156,13 @@ export interface ResolvedAuthzContext {
    */
   audience?: 'external';
   /**
+   * [ADR-0151 D3] `'agent'` when {@link userId} is an AI service account
+   * ({@link UserAuthzGrants.principalKind}). Only an API key admits one (an
+   * account never holds a session). The shared assembler stamps it as the agent
+   * principal of its own request, with no `onBehalfOf`.
+   */
+  principalKind?: 'agent';
+  /**
    * [#23287, ruling C′ item 3] The credential that admitted {@link userId}:
    * `'api_key'` when an API key did (step 1 below), `'session'` when the
    * session / bearer read did (step 2). Absent for an anonymous request and for
@@ -159,6 +173,19 @@ export interface ResolvedAuthzContext {
    * ({@link authGate}), never by a cookie that rode along beside the key.
    */
   credential?: 'api_key' | 'session';
+  /**
+   * The administrator who started the impersonation session that admitted
+   * {@link userId} — `session.impersonatedBy` off the same session read
+   * (better-auth's admin plugin; `sys_session.impersonated_by`). Set only when
+   * {@link credential} is `'session'`; absent for an API key and for every
+   * session the user started themselves.
+   *
+   * ATTRIBUTION ONLY: carried onto `ExecutionContext.impersonatedBy` so the
+   * audit writer can name the person at the keyboard. Nothing in this
+   * resolver's grant aggregation reads it — {@link userId} stays the
+   * impersonated user, whose grants the request resolves.
+   */
+  impersonatedBy?: string;
   /**
    * [ADR-0069 · #23287, ruling C′ item 3] The principal's authentication-policy
    * posture, decided once here for whichever credential admitted it:
@@ -256,6 +283,13 @@ export interface ResolveAuthzInput {
    * at all — ⛔ never to quiet the compiler at a seam that could reach one.
    */
   apiKeyLifecycle: ApiKeyLifecyclePolicySource | undefined;
+  /**
+   * [#31821] Where the request came from, handed to the key-admission seam
+   * for the `credential_use` row an admitted key's use stamp produces
+   * (`credential-use-client.ts`). Never read for any verdict. Omitted: that
+   * row records the address as `not_supplied`.
+   */
+  client?: CredentialUseClientInput;
 }
 
 /**
@@ -515,6 +549,26 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   return withRequestGrantsMemo(memoEngine, () => resolveAuthzContextInScope(input));
 }
 
+/**
+ * The anonymous entry: what a request that resolved no principal is served —
+ * the guest's grants on a face that takes the guest entry
+ * ({@link ResolveAuthzInput.guestEntry}), the empty envelope otherwise. ONE
+ * helper for both ways to get here (no credential or an unknown key, and a
+ * refused key), so the two answers cannot drift apart.
+ */
+async function anonymousEntry(ctx: ResolvedAuthzContext, input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
+  if (input.guestEntry) {
+    const guest = await resolveGuestAnchorGrants(input.ql, input.tenancyPosture);
+    if (guest) {
+      ctx.tenantId = guest.organizationId;
+      ctx.permissions = guest.permissions;
+      ctx.systemPermissions = guest.systemPermissions;
+      if (guest.tabPermissions) ctx.tabPermissions = guest.tabPermissions;
+    }
+  }
+  return ctx;
+}
+
 async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
   const { ql, headers } = input;
   const ctx: ResolvedAuthzContext = {
@@ -543,6 +597,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     input.tenancyPosture,
     input.userAuthGates,
     input.apiKeyLifecycle,
+    input.client,
   );
   // [#23367, ruling A] A key its own lifecycle refuses — revoked, expired,
   // inactive — is RAISED, branded, so a face that relays the brand answers its
@@ -559,7 +614,8 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // replaced (an API key already outranks a session), and a refusal that
   // quietly becomes a session login is not a refusal.
   if (admission.outcome === 'refused') {
-    // [#15256 / 2A] The `organization_required` decision point. One line, here,
+    // [#15256 / 2A] The decision point of every refusal the admission decides
+    // (`organization_required`, `owner_banned`, `owner_absent`). One line, here,
     // where the admission verdict is read — ⛔ not a second copy inside
     // `api-key.ts`'s admission path, which would log the same refusal twice.
     warnApiKeyRefusal({
@@ -568,7 +624,11 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
       userId: admission.userId,
       organizationId: admission.organizationId,
     });
-    return ctx;
+    // The refused key answers as an unknown key does: the anonymous entry this
+    // face serves (the guest's grants on a face that takes the guest entry,
+    // nothing otherwise), so no composition tells a refused key from a key
+    // that does not exist.
+    return anonymousEntry(ctx, input);
   }
   // [#23287, ruling C′ item 3] A HELD key is a held principal, exactly like a
   // held session: it resolves as the owner, carrying the owner's account-scope
@@ -580,6 +640,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     ? admission.principal
     : undefined;
   let credential: ResolvedAuthzContext['credential'];
+  let impersonatedBy: string | undefined;
   let authGate: AuthGate | undefined = admission.outcome === 'held' ? admission.gate : undefined;
   if (keyPrincipal) {
     userId = keyPrincipal.userId;
@@ -600,6 +661,10 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
       tenantId = tenantId ?? sessionData?.session?.activeOrganizationId;
       if (userId) {
         credential = 'session';
+        // The impersonating administrator, off the same read that admitted the
+        // session. Attribution only — the grants below stay `userId`'s.
+        const by = sessionData?.session?.impersonatedBy;
+        if (typeof by === 'string' && by.trim()) impersonatedBy = by.trim();
         // [ADR-0069 · #23287] The session's posture, off the same read that
         // admitted it — so a door asks one field for either credential.
         authGate = normalizeAuthGate(sessionData?.user) ?? undefined;
@@ -620,23 +685,14 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
     // any position or binding was resolved, so a set bound to the `guest`
     // anchor granted nothing: ADR-0090 D9's declared-not-enforced point. A face
     // that serves the guest now resolves the guest's grants, in the
-    // organization D4 derives. A REFUSED API key never reaches this line (it
-    // returned above): a request whose credential was refused is not served
-    // the guest's grants.
-    if (input.guestEntry) {
-      const guest = await resolveGuestAnchorGrants(ql, input.tenancyPosture);
-      if (guest) {
-        ctx.tenantId = guest.organizationId;
-        ctx.permissions = guest.permissions;
-        ctx.systemPermissions = guest.systemPermissions;
-        if (guest.tabPermissions) ctx.tabPermissions = guest.tabPermissions;
-      }
-    }
-    return ctx;
+    // organization D4 derives. A REFUSED API key gets this same entry (it
+    // returned above through the same helper), never a session.
+    return anonymousEntry(ctx, input);
   }
   ctx.userId = userId;
   if (tenantId) ctx.tenantId = tenantId;
   if (credential) ctx.credential = credential;
+  if (impersonatedBy) ctx.impersonatedBy = impersonatedBy;
   if (authGate) ctx.authGate = authGate;
   if (!ql || typeof ql.find !== 'function') return ctx;
 
@@ -791,6 +847,7 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   if (grants.tabPermissions) ctx.tabPermissions = grants.tabPermissions;
   if (grants.posture) ctx.posture = grants.posture;
   if (grants.audience) ctx.audience = grants.audience;
+  if (grants.principalKind) ctx.principalKind = grants.principalKind;
   if (grants.email && !ctx.email) ctx.email = grants.email;
 
   return ctx;
@@ -845,6 +902,36 @@ export interface UserAuthzGrants {
   audience?: 'external';
   /** The user's unique email (`sys_user`), for `current_user.email` owner RLS. */
   email?: string;
+  /**
+   * [ADR-0151 D3] `'agent'` when the user row is an AI service account
+   * (`sys_user.principal_kind`), absent for a person. Read from the row every
+   * resolution reads, so every envelope built from these grants (a request, an
+   * automation run, an approval, a mention) can stamp the account as the agent
+   * principal it is, with no `onBehalfOf`: it acts for nobody.
+   *
+   * An account's grants are already narrowed here: it does not hold the
+   * `everyone` anchor, it carries no system permission, and no grant confers
+   * platform or organization administrator standing on it. The ceiling over the
+   * sets it does hold is clamped where they are evaluated
+   * (`@objectstack/plugin-security`).
+   */
+  principalKind?: 'agent';
+  /**
+   * [ADR-0090 D6] Where each name in `permissions` came from, keyed by name —
+   * present only when the caller asked for it
+   * ({@link ResolveUserAuthzGrantsOptions.withPermissionOrigins}). Recorded at
+   * the derivation sites themselves, so it cannot disagree with them: `direct`
+   * where an applying grant row of the user's own names an active set (the
+   * `directPermissions` channel), `position` / `default` where a held
+   * position's definition in force names it (`default` for the `everyone`
+   * audience anchor, whose bindings are the default ones), and `derived` where
+   * the configured platform administrators (§6b-config) or the `ai_access` flag
+   * (§7) confer the name. Every name in `permissions` the resolution derived has
+   * at least one origin, each listed once, in the order the envelope lists its
+   * channels — `direct`, then `position` (in held-position order), `default`,
+   * `derived`; a `seedPermissions` name the caller supplied has none.
+   */
+  permissionOrigins?: Record<string, EffectivePermissionSetOrigin[]>;
 }
 
 export interface ResolveUserAuthzGrantsOptions {
@@ -886,6 +973,16 @@ export interface ResolveUserAuthzGrantsOptions {
    * would then trust.
    */
   bypassGrantsCache?: boolean;
+  /**
+   * [ADR-0090 D6] Record where each permission-set name came from, in
+   * {@link UserAuthzGrants.permissionOrigins}. For a surface that DESCRIBES a
+   * user's access (`ISecurityService.describeEffectiveAccess`), never for
+   * enforcement: the envelope is otherwise byte-identical to a resolution
+   * without it. It implies {@link bypassGrantsCache}, for the explainer's ruled
+   * reason: a description is what an administrator reads to verify a change
+   * took effect, and an origin map is recorded only by a resolution that ran.
+   */
+  withPermissionOrigins?: boolean;
 }
 
 /**
@@ -930,7 +1027,8 @@ function grantAppliesInTenant(organizationId: string | null, tenantId: string | 
 /**
  * The columns of a `sys_user_permission_set` grant row this resolver decides
  * on, and the only ones its grant read asks for: the set it names
- * ({@link grantSetNameOf}), its organization ({@link grantOrganizationOf}) and
+ * ({@link grantSetNameOf}) and the package that holds it ([ADR-0150 D8] R1's
+ * `permission_set_package`, {@link storedPermissionSetScope}), its organization ({@link grantOrganizationOf}) and
  * its validity window (`isGrantActive`, `nextGrantValidityBoundary`). The read
  * runs in every request's prelude, and a read naming no columns computes every
  * formula field the object declares — its record title included, which may
@@ -938,7 +1036,30 @@ function grantAppliesInTenant(organizationId: string | null, tenantId: string | 
  * nothing here reads. A helper below that learns to read another column of a
  * grant row adds it here; the read returns nothing it does not name.
  */
-const GRANT_ROW_COLUMNS = ['permission_set', 'organization_id', 'valid_from', 'valid_until'] as const;
+const GRANT_ROW_COLUMNS = ['permission_set', 'permission_set_package', 'organization_id', 'valid_from', 'valid_until'] as const;
+
+/**
+ * [#30454] The columns of a principal's own `sys_member` row this resolver
+ * decides on, and the only ones its membership reads ask for: the
+ * organization (`accessible_org_ids`, §3b), the role ({@link heldPositionNames})
+ * and the ADR-0091 validity window (`isGrantActive`,
+ * `nextGrantValidityBoundary`). The reads run in every request's prelude, and a
+ * read naming no columns computes every formula field the object declares —
+ * the membership's record title reads the person one hop through `user_id`, a
+ * `sys_user` read and a round trip — for values nothing here reads. The two
+ * bounds are named although `sys_member` declares neither today: a read names
+ * an undeclared column to no effect, and so the moment the object declares
+ * them they are read, as §3's comment promises. A helper below that learns to
+ * read another column of a membership row adds it here.
+ */
+const MEMBER_ROW_COLUMNS = ['organization_id', 'role', 'valid_from', 'valid_until'] as const;
+
+/**
+ * [#30454] {@link MEMBER_ROW_COLUMNS} plus the member (`user_id`), for
+ * {@link countPositionHolders}, which reads the organization's memberships
+ * and groups them by person.
+ */
+const MEMBER_HOLDER_ROW_COLUMNS = ['user_id', ...MEMBER_ROW_COLUMNS] as const;
 
 /**
  * [#29281] The bound of the first leg's `sys_member` read for the active
@@ -955,7 +1076,9 @@ const GRANT_ROW_COLUMNS = ['permission_set', 'organization_id', 'valid_from', 'v
  * ordinary member's `sys_user` reads — a people picker's search, a read by id,
  * a lookup label — lost them (the ids are random, so which members vanished was
  * arbitrary and moved as members joined). Unchanged as a bound, so an
- * organization under it issues byte-identically the one read it always did.
+ * organization under it issues the one read it always did; that read asks for
+ * the completion pages' columns ({@link ORG_MEMBER_PAGE_COLUMNS}), the one
+ * value §5 keeps, so it computes no formula field (#30454).
  */
 const ORG_MEMBERS_FIRST_READ_ROWS = 1000;
 
@@ -1325,19 +1448,37 @@ interface CatalogSetBody {
  * [ADR-0131 D3/D4] The body of the permission set `name` names, read from its
  * catalog definition — or `undefined` when the catalog holds no set of that
  * name (or no catalog is bound), which confers nothing.
+ *
+ * [ADR-0150 D7] `position` is the position whose `permissionSets` names it:
+ * the set then resolves from the package that declared the position (D3), and
+ * a name that rule refuses confers nothing. Omitted, the name is a stored
+ * grant's, resolved as a caller with no package.
  */
 async function catalogSetBody(
   catalog: SecurityCatalogReader | undefined,
   name: string,
+  position?: SecurityCatalogEntry,
+  stored?: SecurityCatalogReferenceScope,
 ): Promise<CatalogSetBody | undefined> {
   if (!catalog) return undefined;
-  const entry = await catalog.resolve('permission', name);
+  const entry = await catalog.resolve('permission', name, position ? { position } : stored);
   if (!entry) return undefined;
   return {
     name: entry.name,
     systemPermissions: entry.definition.systemPermissions,
     tabPermissions: entry.definition.tabPermissions,
   };
+}
+
+/** What {@link positionBoundSetNames} reads: each position's set names, and the position each was read from. */
+interface PositionBindings {
+  /** The sets each position's definition names, in declared order. */
+  named: Map<string, string[]>;
+  /**
+   * [ADR-0150 D7] The catalog entry of each position read — what each of its
+   * sets resolves from ({@link catalogSetBody}'s `position`).
+   */
+  entries: Map<string, SecurityCatalogEntry>;
 }
 
 /**
@@ -1351,13 +1492,16 @@ async function catalogSetBody(
 async function positionBoundSetNames(
   catalog: SecurityCatalogReader | undefined,
   positions: readonly string[],
-): Promise<Map<string, string[]>> {
+): Promise<PositionBindings> {
   const named = new Map<string, string[]>();
-  if (!catalog) return named;
+  const entries = new Map<string, SecurityCatalogEntry>();
+  if (!catalog) return { named, entries };
   for (const positionName of positions) {
-    named.set(positionName, positionSetNamesOf((await catalog.resolve('position', positionName))?.definition));
+    const entry = await catalog.resolve('position', positionName);
+    if (entry) entries.set(positionName, entry);
+    named.set(positionName, positionSetNamesOf(entry?.definition));
   }
-  return named;
+  return { named, entries };
 }
 
 /**
@@ -1399,6 +1543,19 @@ function heldPositionNames(
     if (typeof r === 'string' && r && !held.includes(r)) held.push(r);
   }
   return held;
+}
+
+/**
+ * [ADR-0151 D1] Is this `sys_user` row an AI service account? Its
+ * `principal_kind` column reads `agent` — the row shape, or the camel-cased
+ * one a driver may hand back, as `@objectstack/plugin-auth` reads it at the
+ * sign-in refusals. Every other value, and an absent row, is a person: every
+ * row written before the column existed.
+ */
+export function isAgentAccountRow(row: unknown): boolean {
+  if (!row || typeof row !== 'object') return false;
+  const r = row as { principal_kind?: unknown; principalKind?: unknown };
+  return (r.principal_kind ?? r.principalKind) === 'agent';
 }
 
 /**
@@ -1470,14 +1627,14 @@ export async function readPositionGrantsInForce(
 ): Promise<{ inForce: Map<string, string[]>; disabledPositions: Set<string> }> {
   const names = [...new Set(positions.filter((n) => typeof n === 'string' && n !== ''))];
   const catalog = securityCatalogReaderOf(ql);
-  const namedByPosition = await positionBoundSetNames(catalog, names);
+  const { named: namedByPosition, entries: positionEntries } = await positionBoundSetNames(catalog, names);
   const disabled = await readDisabledCatalogNames(ql, names, [...namedByPosition.values()].flat());
   const inForce = setsInForceByPosition(names, namedByPosition, disabled);
   for (const [positionName, setNames] of inForce) {
     const held: string[] = [];
     for (const setName of setNames) {
       if (held.includes(setName)) continue;
-      if (await catalogSetBody(catalog, setName)) held.push(setName);
+      if (await catalogSetBody(catalog, setName, positionEntries.get(positionName))) held.push(setName);
     }
     inForce.set(positionName, held);
   }
@@ -1512,7 +1669,7 @@ export async function countPositionHolders(
   const limit = opts.limit ?? 10000;
   const nowMs = opts.nowMs ?? Date.now();
   const [members, userPositionRows] = await Promise.all([
-    tryFind(ql, 'sys_member', { organization_id: tenantId }, limit),
+    tryFind(ql, 'sys_member', { organization_id: tenantId }, limit, undefined, MEMBER_HOLDER_ROW_COLUMNS),
     tryFind(ql, 'sys_user_position', { organization_id: tenantId }, limit),
   ]);
   if (members.length >= limit || userPositionRows.length >= limit) return counts;
@@ -1705,7 +1862,8 @@ async function resolveGuestAnchorGrants(
 ): Promise<GuestAnchorGrants | undefined> {
   if (!ql || typeof ql.find !== 'function') return undefined;
   const catalog = securityCatalogReaderOf(ql);
-  const bound = (await positionBoundSetNames(catalog, [GUEST_POSITION])).get(GUEST_POSITION) ?? [];
+  const guestBindings = await positionBoundSetNames(catalog, [GUEST_POSITION]);
+  const bound = guestBindings.named.get(GUEST_POSITION) ?? [];
   if (bound.length === 0) return undefined;
 
   const organization = await resolveGuestOrganization(ql, tenancyPosture);
@@ -1721,7 +1879,7 @@ async function resolveGuestAnchorGrants(
   const bodies: CatalogSetBody[] = [];
   for (const name of bound) {
     if (disabled.permissions.has(name)) continue;
-    const body = await catalogSetBody(catalog, name);
+    const body = await catalogSetBody(catalog, name, guestBindings.entries.get(GUEST_POSITION));
     if (body && !bodies.some((b) => b.name === body.name)) bodies.push(body);
   }
   foldCatalogSetBodies(grants, bodies);
@@ -1780,11 +1938,28 @@ export async function resolveUserAuthzGrants(
   // read HERE, before any read of this resolution is issued. Outside that
   // scope (every direct caller of this function) it is `undefined` and nothing
   // changes.
-  const requestMemo = openRequestGrantsMemo(ql, userId, opts, readWriteEpoch(ql));
+  // [ADR-0090 D6] An origin map is recorded only by a resolution that runs, so
+  // asking for one is a fresh resolution (see `withPermissionOrigins`).
+  const cacheOpts = opts.withPermissionOrigins ? { ...opts, bypassGrantsCache: true } : opts;
+  const requestMemo = openRequestGrantsMemo(ql, userId, cacheOpts, readWriteEpoch(ql));
   if (requestMemo?.hit) return requestMemo.hit;
 
-  const grantsCache = openUserGrantsCache(ql, userId, opts);
+  const grantsCache = openUserGrantsCache(ql, userId, cacheOpts);
   if (grantsCache?.hit) return grantsCache.hit;
+
+  // [ADR-0090 D6] The origin record, when asked for: each origin once per name.
+  // Ordered by channel when the envelope is returned (see `permissionOrigins`).
+  const origins = opts.withPermissionOrigins ? new Map<string, EffectivePermissionSetOrigin[]>() : undefined;
+  const recordOrigin = (name: string, origin: EffectivePermissionSetOrigin): void => {
+    if (!origins) return;
+    const list = origins.get(name) ?? [];
+    const same = (o: EffectivePermissionSetOrigin): boolean =>
+      o.kind === origin.kind
+      && (o.kind !== 'position' || (origin.kind === 'position' && o.position === origin.position))
+      && (o.kind !== 'derived' || (origin.kind === 'derived' && o.source === origin.source));
+    if (!list.some(same)) list.push(origin);
+    origins.set(name, list);
+  };
 
   const { tenantId } = opts;
   const grants: UserAuthzGrants = {
@@ -1823,32 +1998,35 @@ export async function resolveUserAuthzGrants(
   // (equivalence pinned in resolve-authz-context.batch-equivalence.test.ts).
   // `getUserRow` stays memoized; issuing it here is not a new read on any
   // path that reads it at all — the email fallback below and §7's ai_seat
-  // synthesis consume the same memo. The CONDITION mirrors the sequential
-  // implementation exactly: `sys_user` was read iff the caller seeded no
-  // email OR did not seed `ai_seat` — a fully-seeded API-key principal never
-  // touched the table, and the batch must not start (equivalence suite pins
-  // the query multiset per fixture).
+  // synthesis consume the same memo.
   //
-  // [#11663 L2] The CONFIG anchor adds a third reason to read `sys_user`: §6b's
-  // config branch compares the caller's STORED email against the declared
-  // administrator list, so the row is needed whenever that list is non-empty.
-  // Resolved here — before the batch — precisely so the read joins the SAME
-  // wave rather than opening a sixth sequential leg after it. The read stays
-  // CONDITIONAL ON CONFIG on purpose (pin P2: empty/unset config answers "not a
-  // platform admin" before touching any row), which is why a deployment that
-  // has not declared administrators issues byte-identically the same queries it
-  // issued before this leg — see the batch-equivalence goldens, which are
-  // unchanged for exactly that reason.
+  // [#11663 L2] §6b's config branch compares the caller's STORED email against
+  // the declared administrator list off this same row, so it joins the SAME
+  // wave rather than opening a sixth sequential leg after it. The config branch
+  // still answers "not a platform admin" before looking at the row when no
+  // administrator is declared (pin P2).
+  //
+  // [ADR-0151 D3] The row is now read on EVERY resolution: its
+  // `principal_kind` says whether the user is an AI service account, and every
+  // caller of this function (a request, an automation run, an approval, a
+  // mention, the explainer) must get the account's narrowed grants, not a
+  // person's. A fully seeded caller (an email AND `ai_seat`) was the only one
+  // that skipped it, and since key scopes are refused (`keys.ts`) no caller
+  // seeds `ai_seat`, so the read was already taken on every live path. The
+  // batch-equivalence goldens that seeded both now record the read.
   const platformAdminConfig = resolvePlatformAdminEmails();
-  const needsUserRow =
-    !grants.email || !grants.permissions.includes('ai_seat') || platformAdminConfig.emails.length > 0;
   const [, members, userPositionRows, orgMembersLeg, upsRowsAll] = await Promise.all([
-    needsUserRow ? getUserRow() : Promise.resolve(undefined),
-    tryFind(ql, 'sys_member', { user_id: userId }, 200),
+    getUserRow(),
+    tryFind(ql, 'sys_member', { user_id: userId }, 200, undefined, MEMBER_ROW_COLUMNS),
     tryFind(ql, 'sys_user_position', { user_id: userId }, 200),
-    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, ORG_MEMBERS_FIRST_READ_ROWS) : Promise.resolve([] as any[]),
+    tenantId ? tryFind(ql, 'sys_member', { organization_id: tenantId }, ORG_MEMBERS_FIRST_READ_ROWS, undefined, ORG_MEMBER_PAGE_COLUMNS) : Promise.resolve([] as any[]),
     tryFind(ql, 'sys_user_permission_set', { user_id: userId }, 100, undefined, GRANT_ROW_COLUMNS),
   ]);
+
+  // [ADR-0151 D3] An AI service account is the agent principal of its own
+  // requests: it holds explicit grants only, under the agent ceiling.
+  const agentAccount = isAgentAccountRow(userRow);
+  if (agentAccount) grants.principalKind = 'agent';
 
   // Resolve the caller's unique email for `current_user.email` RLS owner
   // policies when the caller didn't supply it (e.g. API-key auth).
@@ -1997,7 +2175,13 @@ export async function resolveUserAuthzGrants(
   //     platform baseline nor an app's `isDefault` set nor an accepted package
   //     default bound to it reaches the holder. Its baseline is what its own
   //     identity position names (§6a); everything else is an explicit grant.
-  if (!holdsExternalIdentity(grants.positions) && !grants.positions.includes('everyone')) grants.positions.push('everyone');
+  //
+  //     [ADR-0151 D3] …and an AI service account: its grants are the explicit
+  //     ones an administrator assigned it, so a newly registered account can do
+  //     nothing until it is granted something.
+  if (!agentAccount && !holdsExternalIdentity(grants.positions) && !grants.positions.includes('everyone')) {
+    grants.positions.push('everyone');
+  }
 
   // [#10757 leg 4] The Default Organization read (§6) and the activation-ledger
   // read (§6a) are ONE wave. They used to be two serial round trips, because the
@@ -2046,22 +2230,27 @@ export async function resolveUserAuthzGrants(
   //     effect, a membership-derived role (`org_owner`) included.
   const readPositionLedger = async (): Promise<{
     namedByPosition: Map<string, string[]>;
+    positionEntries: Map<string, SecurityCatalogEntry>;
     disabled: { positions: Set<string>; permissions: Set<string> };
   }> => {
     if (grants.positions.length === 0) {
-      return { namedByPosition: new Map(), disabled: { positions: new Set(), permissions: new Set() } };
+      return {
+        namedByPosition: new Map(),
+        positionEntries: new Map(),
+        disabled: { positions: new Set(), permissions: new Set() },
+      };
     }
     // The definitions first (in-process), so the ONE ledger read can ask about
     // every position and every set this resolution may grant.
-    const namedByPosition = await positionBoundSetNames(catalog, grants.positions);
+    const { named: namedByPosition, entries: positionEntries } = await positionBoundSetNames(catalog, grants.positions);
     const disabled = await readDisabledCatalogNames(
       ql,
       grants.positions,
       [...ledgerSetNames, ...[...namedByPosition.values()].flat()],
     );
-    return { namedByPosition, disabled };
+    return { namedByPosition, positionEntries, disabled };
   };
-  const [defaultOrganizationId, { namedByPosition, disabled }] = await Promise.all([
+  const [defaultOrganizationId, { namedByPosition, positionEntries, disabled }] = await Promise.all([
     anchorReadsDefaultOrganization ? memoisedDefaultOrganizationId(ql) : Promise.resolve(undefined),
     readPositionLedger(),
   ]);
@@ -2073,15 +2262,23 @@ export async function resolveUserAuthzGrants(
   const applyingGrants = upsRows.filter(
     (r) => grantAppliesInTenant(grantOrganizationOf(r), tenantId) || anchorsPlatformStanding(r),
   );
-  // Position-bound sets (§6a), by name, in the order the held positions name them.
-  const boundSetNames: string[] = [];
+  // Position-bound sets (§6a), in the order the held positions name them —
+  // each with the position that names it, since [ADR-0150 D7] a set resolves
+  // from the package that declared its position.
+  const boundSets: Array<{ setName: string; positionName: string }> = [];
   let hasPlatformAdminGrant = false;
   if (disabled.positions.size > 0) {
     grants.positions = grants.positions.filter((n) => !disabled.positions.has(n));
   }
-  for (const setNames of setsInForceByPosition(grants.positions, namedByPosition, disabled).values()) {
+  for (const [positionName, setNames] of setsInForceByPosition(grants.positions, namedByPosition, disabled)) {
     for (const setName of setNames) {
-      if (!boundSetNames.includes(setName)) boundSetNames.push(setName);
+      if (!boundSets.some((b) => b.setName === setName && b.positionName === positionName)) {
+        boundSets.push({ setName, positionName });
+      }
+      // [ADR-0090 D5] The `everyone` anchor's bindings are the default ones.
+      recordOrigin(setName, positionName === 'everyone'
+        ? { kind: 'default' }
+        : { kind: 'position', position: positionName });
     }
   }
 
@@ -2102,13 +2299,18 @@ export async function resolveUserAuthzGrants(
   for (const grant of applyingGrants) {
     const name = grantSetNameOf(grant);
     if (!name) continue;
-    const body = await catalogSetBody(catalog, name);
+    // [ADR-0150 D8 R1] A grant whose `permission_set_package` names its
+    // holder reads that package's set and no other; a null column resolves
+    // with no caller (D3), so two holders confer nothing and nothing is
+    // picked (`storedPermissionSetScope`).
+    const body = await catalogSetBody(catalog, name, undefined, storedPermissionSetScope((grant as Record<string, unknown>).permission_set_package));
     if (!body) continue;
     const active = !disabled.permissions.has(name);
     take(body, active);
     // [#25799] The direct channel, as the explainer reads it: a name this
     // resolution confers through the user's own grant row.
     if (active && !grants.directPermissions.includes(name)) grants.directPermissions.push(name);
+    if (active) recordOrigin(name, { kind: 'direct' });
     // platform_admin (ADR-0068 D2) is DERIVED from the anchoring admin_full_access
     // USER grant — the single source of truth (no trusted stored boolean). The
     // set is the catalog's one `admin_full_access` (ADR-0131 D4); a grant the
@@ -2123,12 +2325,19 @@ export async function resolveUserAuthzGrants(
     // every posture. What a walled rig stops deriving from the grant is
     // PLATFORM_ADMIN STANDING — the rung, the built-in `platform_admin` position
     // and everything downstream of them.
-    if (anchorsPlatformStanding(grant) && active) {
+    //
+    // [ADR-0151 D3] An AI service account is never an administrator: no grant
+    // confers platform standing on it.
+    if (anchorsPlatformStanding(grant) && active && !agentAccount) {
       hasPlatformAdminGrant = true;
     }
   }
-  for (const name of boundSetNames) {
-    const body = await catalogSetBody(catalog, name);
+  for (const { setName: name, positionName } of boundSets) {
+    // Asked per naming position, never once per name: a reference one
+    // position's package cannot resolve (ADR-0150 D3) must not withhold the
+    // set another position names in a scope that resolves it.
+    if (takenNames.has(name)) continue;
+    const body = await catalogSetBody(catalog, name, positionEntries.get(positionName));
     if (!body) continue;
     take(body, !disabled.permissions.has(name));
   }
@@ -2164,7 +2373,8 @@ export async function resolveUserAuthzGrants(
   //     administrator — which is the fail-closed answer the boot-side backstop in
   //     `plugin-security` announces at startup.
   const configConfersPlatformAdmin =
-    platformAdminConfig.emails.length > 0
+    !agentAccount
+    && platformAdminConfig.emails.length > 0
     && matchesConfiguredPlatformAdmin(await getUserRow(), platformAdminConfig);
   if (configConfersPlatformAdmin) {
     // [Choice 6A] The capability CONTENT comes from the one declaration in
@@ -2176,6 +2386,7 @@ export async function resolveUserAuthzGrants(
     // envelope a grant-derived one carries.
     hasPlatformAdminGrant = true;
     if (!grants.permissions.includes(ADMIN_FULL_ACCESS)) grants.permissions.push(ADMIN_FULL_ACCESS);
+    recordOrigin(ADMIN_FULL_ACCESS, { kind: 'derived', source: 'platform_admin_config' });
     for (const p of ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions ?? []) {
       if (!grants.systemPermissions.includes(p)) grants.systemPermissions.push(p);
     }
@@ -2190,6 +2401,22 @@ export async function resolveUserAuthzGrants(
   // ⛔ Do not reintroduce a notice here: a walled holder is told by the BOOT-side
   // fail-closed line (`plugin-security/src/bootstrap-platform-admin.ts`), which is
   // where an operator can act on it, not inside the per-request authorization path.
+
+  // [ADR-0151 D3] An AI service account carries no system permission, from
+  // any set it holds: an action gated by one is closed to it until a decision
+  // widens the agent ceiling. The sets themselves stay on `permissions` and are
+  // clamped where they are evaluated — except the administrative ones. Standing
+  // is still read by NAME in places (the approvals override arms and the
+  // `admin_rescue` slate, the access explainer's tenant-admin read), and the
+  // clamp clears bits, not names, so an account never carries
+  // `admin_full_access` or an organization-administrator set at all: an
+  // administrative grant is a person's to hold.
+  if (agentAccount) {
+    grants.systemPermissions = [];
+    grants.permissions = grants.permissions.filter(
+      (n) => n !== ADMIN_FULL_ACCESS && !ORGANIZATION_ADMIN_GRANTS.includes(n),
+    );
+  }
 
   // 6c. Project the derived platform_admin built-in role (leads the list).
   if (hasPlatformAdminGrant && !grants.positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)) {
@@ -2216,16 +2443,36 @@ export async function resolveUserAuthzGrants(
     isPlatformAdmin: hasPlatformAdminGrant,
     // [ADR-0105 D4] Either org-admin capability set resolves the rung — the
     // wall-less variant differs only by withholding the superuser bits.
-    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n: string) => grants.permissions.includes(n)),
+    // [ADR-0151 D3] Never for an AI service account, whatever it holds.
+    isTenantAdmin: !agentAccount && ORGANIZATION_ADMIN_GRANTS.some((n: string) => grants.permissions.includes(n)),
     isExternal: external,
   });
   if (external) grants.audience = 'external';
 
   // 7. [cloud ADR-0024 §7] Env-side AI seat: synthesize the `ai_seat` capability from the
   //    boolean sys_user.ai_access (sqlite returns 1/0; memory returns boolean).
-  if (!grants.permissions.includes('ai_seat')) {
+  //    An origin record reads the flag even when another channel already named
+  //    `ai_seat`, so a name reached both ways carries both origins; the row is
+  //    the memoised one, and the envelope is unchanged.
+  if (!grants.permissions.includes('ai_seat') || origins) {
     const aiAccess = ((await getUserRow()) as { ai_access?: unknown } | undefined)?.ai_access;
-    if (aiAccess === true || aiAccess === 1 || aiAccess === '1') grants.permissions.push('ai_seat');
+    if (aiAccess === true || aiAccess === 1 || aiAccess === '1') {
+      if (!grants.permissions.includes('ai_seat')) grants.permissions.push('ai_seat');
+      recordOrigin('ai_seat', { kind: 'derived', source: 'ai_access' });
+    }
+  }
+
+  // [ADR-0090 D6] Only names the envelope holds keep an origin: a bound name
+  // the catalog holds no set for, or a switched-off set, confers nothing.
+  if (origins) {
+    const channelRank: Record<EffectivePermissionSetOrigin['kind'], number> = { direct: 0, position: 1, default: 2, derived: 3 };
+    const permissionOrigins: Record<string, EffectivePermissionSetOrigin[]> = {};
+    for (const name of grants.permissions) {
+      const list = origins.get(name);
+      // A stable sort: positions keep the held-position order they were reached in.
+      if (list) permissionOrigins[name] = [...list].sort((a, b) => channelRank[a.kind] - channelRank[b.kind]);
+    }
+    grants.permissionOrigins = permissionOrigins;
   }
 
   // [#11971] Store the fresh envelope (miss path only; the argument list is

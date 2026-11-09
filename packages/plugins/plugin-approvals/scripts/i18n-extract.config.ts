@@ -8,7 +8,7 @@
  * strings were seeded from @objectstack/platform-objects.)
  *
  *   os i18n extract packages/plugins/plugin-approvals/scripts/i18n-extract.config.ts \
- *     --locales=zh-CN,ja-JP,es-ES --fill=default --objects-only --no-metadata-forms \
+ *     --locales=zh-CN,ja-JP,es-ES,zh-Hant,ar,fr,pt-BR,ru,de,ko --fill=default --objects-only --no-metadata-forms \
  *     --source-hashes \
  *     --out=packages/plugins/plugin-approvals/src/translations
  *
@@ -60,6 +60,13 @@ import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../src/translations/es-ES.objects.generated.js';
+import { zhHantObjects } from '../src/translations/zh-Hant.objects.generated.js';
+import { arObjects } from '../src/translations/ar.objects.generated.js';
+import { frObjects } from '../src/translations/fr.objects.generated.js';
+import { ptBRObjects } from '../src/translations/pt-BR.objects.generated.js';
+import { ruObjects } from '../src/translations/ru.objects.generated.js';
+import { deObjects } from '../src/translations/de.objects.generated.js';
+import { koObjects } from '../src/translations/ko.objects.generated.js';
 import { approvalsPageTranslations } from '../src/translations/pages.js';
 
 /**
@@ -84,6 +91,13 @@ const config: ObjectStackDefinition = defineStack({
     { 'zh-CN': { objects: zhCNObjects, pages: approvalsPageTranslations['zh-CN'] } },
     { 'ja-JP': { objects: jaJPObjects, pages: approvalsPageTranslations['ja-JP'] } },
     { 'es-ES': { objects: esESObjects, pages: approvalsPageTranslations['es-ES'] } },
+    { 'zh-Hant': { objects: zhHantObjects, pages: approvalsPageTranslations['zh-Hant'] } },
+    { ar: { objects: arObjects, pages: approvalsPageTranslations['ar'] } },
+    { fr: { objects: frObjects, pages: approvalsPageTranslations['fr'] } },
+    { 'pt-BR': { objects: ptBRObjects, pages: approvalsPageTranslations['pt-BR'] } },
+    { ru: { objects: ruObjects, pages: approvalsPageTranslations['ru'] } },
+    { de: { objects: deObjects, pages: approvalsPageTranslations['de'] } },
+    { ko: { objects: koObjects, pages: approvalsPageTranslations['ko'] } },
   ],
 });
 

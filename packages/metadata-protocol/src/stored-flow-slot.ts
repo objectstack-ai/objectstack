@@ -36,6 +36,7 @@
  * is carried once. Like the binding, it never leaves the process.
  */
 
+import type { InstalledManifestLookup } from '@objectstack/metadata-core';
 import { isServedOverrideRowOf } from './served-override.js';
 import { storedRowBindingOf } from './stored-row-binding.js';
 
@@ -85,7 +86,12 @@ export function shadowedStoredRowsOf(item: unknown): readonly object[] {
  * Returns `true` when `incoming` takes the slot, `false` when the held
  * declared override keeps it. Records the row that loses on the one that wins.
  */
-export function incomingTakesStoredFlowSlot(held: unknown, incoming: unknown, basePackageId: unknown): boolean {
+export function incomingTakesStoredFlowSlot(
+    held: unknown,
+    incoming: unknown,
+    basePackageId: unknown,
+    installed: InstalledManifestLookup,
+): boolean {
     const heldBinding = storedRowBindingOf(held);
     // An empty slot, or one holding no stored row: nothing to settle.
     if (heldBinding === undefined || held === null || typeof held !== 'object') return true;
@@ -97,7 +103,7 @@ export function incomingTakesStoredFlowSlot(held: unknown, incoming: unknown, ba
         return true;
     }
     const isOverride = (item: unknown, binding: string | null | undefined) =>
-        isServedOverrideRowOf({ type: 'flow', package_id: binding ?? null, metadata: item }, basePackageId);
+        isServedOverrideRowOf({ type: 'flow', package_id: binding ?? null, metadata: item }, basePackageId, installed);
     const incomingIsOverride = isOverride(incoming, incomingBinding);
     if (!incomingIsOverride && isOverride(held, heldBinding)) {
         carryShadowed(held, held, incoming);

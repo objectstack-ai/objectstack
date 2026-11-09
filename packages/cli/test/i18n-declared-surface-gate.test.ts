@@ -19,7 +19,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { computeI18nCoverage } from '../src/utils/i18n-coverage';
-import { collectExpectedEntries } from '../src/utils/i18n-extract';
+import { collectExpectedEntries } from '../src/utils/i18n-bundle-extract';
 
 /** Only the user's own metadata; the platform metadata-form baseline is folded away by `os lint`. */
 const userIssues = (report: { issues: Array<{ source: string }> }) =>

@@ -267,8 +267,8 @@
  *     was judged inside the run (the executor fails the action when the
  *     answer lists fewer than sent), so a login sent and absent here is
  *     another actor's later write, said on the row's line;
- *   - the four advisory rows are NOT read back here, by construction, and
- *     that is no missed case. `advisory_report` and `advisory_create` carry
+ *   - the five advisory rows that write are NOT read back here, by
+ *     construction, and that is no missed case. `advisory_report` and `advisory_create` carry
  *     prose (`summary`, `description`, so each is content-creating for rule
  *     ⑤) but no `body`, and the relay's byte-for-byte read-back cannot apply
  *     to them: the seat cannot read an unpublished advisory, a report or a
@@ -280,11 +280,14 @@
  *     names that id in an annotation this file reads and hands on as
  *     `result.annotations.advisories` (`--json`: `advisories`), so the seat
  *     follows with `advisory_collaborators_add` and then reads the advisory
- *     with `advisory_read`. `advisory_collaborators_add` and `advisory_state` carry
- *     no body and are confirmed inside the run on their own PATCH answer (every
- *     login sent listed, the state asked for shown) after the executor's fences
- *     on the advisory. A run that failed (a fence refused it, or the answer did
- *     not show the result) is exit 5 like any failed run, ⛔ never re-sent;
+ *     with `advisory_read`. `advisory_collaborators_add`, `advisory_versions`
+ *     and `advisory_state` carry no prose and are confirmed inside the run on
+ *     their own PATCH answer (every login sent listed, the entries sent
+ *     listed, the state asked for shown) after the executor's fences on the
+ *     advisory. A landed publish also names its id in an advisory annotation,
+ *     handed on the same way, and the seat records the run on its seat post.
+ *     A run that failed (a fence refused it, or the answer did not show the
+ *     result) is exit 5 like any failed run, ⛔ never re-sent;
  *   - `advisory_read` has NO byte read-back either, and needs none: it writes
  *     nothing. Its outcome is the sealed answer, and reading it back IS the
  *     outcome. This file makes the read's key pair (`armAdvisoryReads`: one
@@ -303,7 +306,15 @@
  *     stderr, a log, a file or `--json`, which carries its byte count and
  *     field names alone. A run that failed (a fence refused the read, the
  *     seal failed or did not fit) is exit 5; a read writes nothing, so it may
- *     be re-sent with a fresh key.
+ *     be re-sent with a fresh key;
+ *   - `advisory_list` is the same path end to end — the table derives it
+ *     into `ADVISORY_READ_OPS` because it requires a `public_key` — and has
+ *     NO byte read-back either: its key pair is armed, its parts read back,
+ *     reassembled and opened exactly as a read's, under `advisorySealAad`,
+ *     which binds the op in place of an advisory's id. Its plaintext is the
+ *     padded listing (`ops.mjs`, "The one row that LISTS advisories"); the
+ *     open stays byte for byte on it, and `--reveal` alone prints it with its
+ *     padding trimmed (`advisoryListDisplay`), that op's display alone.
  *
  * ## The started run — the one outcome only the seat can name
  *
@@ -371,7 +382,8 @@
  *
  * ## The run's annotations — the numbers a seat CAN read
  *
- * (An `advisory_report` or `advisory_create` that landed is annotated too, with its own message —
+ * (An `advisory_report` or `advisory_create` that landed is annotated too, and so is a landed publish — an
+ * `advisory_state` to `published`, its other moves never — with its own message —
  * `fleet-write action=<i> op=<op> ghsa_id=<id>`, spelled by
  * `relayAdvisoryAnnotationMessage` and read by `parseRelayAdvisoryAnnotation`,
  * the id and nothing else — and `readRunAnnotations` hands those rows on as
@@ -447,20 +459,40 @@
  *     The read runs after the packer and BEFORE the dry-run exit, so a dry run refuses what the send would; it
  *     needs the token and the proxy route the send needs, and the process re-execs for it the way the send does.
  *
- * `comment_edit` takes no trailer: a comment is a post, never a pull request body. The stored body is the
- * platform's, not this door's: an edit of a pull's body gets the bare footer block appended after the trailer
- * (`platform-readings.md`, the edit side), so send no footer of your own.
+ * `comment_edit` takes no trailer: a comment is a post, never a pull request body. Send no footer of your own: the
+ * read-back reads a pull's edited body `identical`, stored === sent, nothing appended (`platform-readings.md`, the
+ * relay `issue_patch` line), and a footer after the trailer leaves a body the second rule above refuses.
+ *
+ * ## The kind rule — no pm state added to a pull request, no `pm:awaiting-merge` added to an issue (#31253)
+ *
+ * The rule is `.claude/skills/pm-dispatch/SKILL.md`'s, and its predicate and sentence are `label-write.mjs`'s
+ * (`refuseKindLabels`, its header's section of the same name): this file asks them and ⛔ restates neither. It is asked
+ * of the three adding ops (`RETIRED_LANE_REWRITE_OPS`), case-insensitively as GitHub matches label names, and a refusal
+ * sends NOTHING for the whole file:
+ *
+ *   - `pr_create` / `issue_create` name their own kind, so they are judged on the file as handed, right after the
+ *     lane rewrite and before the session — usage (2), no read;
+ *   - a `labels_add` whose labels the rule governs is judged by READING its target — the same
+ *     `GET /repos/{repo}/issues/{issue}`, in the same place (after the packer, BEFORE the dry-run exit) and with the
+ *     same token and proxy route as the trailer read above — asked by label-write's `readTargetKind`, which needs
+ *     `pull_request` and `html_url` to agree. The wrong kind, or a 200 whose two members name no one kind, is usage
+ *     (2); no answer, or any other status, is PREREQUISITE NOT MET (3): ⛔ an unread kind is never a pass. A
+ *     `labels_add` the rule does not govern reads nothing.
+ *
+ * `labels_remove` is never asked: taking a label off is how a wrong one comes off.
  *
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0   the run completed with conclusion `success`, every body it wrote
  *       reads back as the bytes sent, and every run it started is listed.
  *   2   usage, the packed payload refused by the validator, a seat's edit body
- *       carrying no signature line, or a trailer-signed `issue_patch` body whose
- *       target the platform answers is an issue (nothing sent).
+ *       carrying no signature line, a trailer-signed `issue_patch` body whose
+ *       target the platform answers is an issue, or an adding op refused by the
+ *       kind rule (nothing sent).
  *   3   PREREQUISITE NOT MET — no token, no session in dispatch mode, the
  *       dispatch route dead (401/407/0), the run list unreadable, or the target
- *       of a trailer-signed `issue_patch` body unreadable (nothing sent).
+ *       of a trailer-signed `issue_patch` body or of a governed `labels_add`
+ *       unreadable (nothing sent).
  *   4   NOT STORED — the run succeeded and the read-back shows a body the board
  *       does not hold as sent (op, object and first differing byte printed).
  *       Go READ it; ⛔ do not retry.
@@ -479,15 +511,16 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
-import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute, readSignatureLine, SEAT_SIGNATURE_SHAPE, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, LANE_LABEL_ALIASES, PROXY_FLAG, proxyRearmPlan, proxyRoute, readSignatureLine, SEAT_SIGNATURE_SHAPE, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
 // The roster's generator marker, IMPORTED so the one generated body this door exempts is named by its own writer.
 import { ROSTER_MARKER } from '../fleet-roster.mjs';
-import { classifyHttp } from '../label-write.mjs';
+import { KIND_ISSUE, KIND_PULL, KIND_RULE_AWAITING_MERGE_PR_ONLY, KIND_RULE_PATH, KIND_RULE_STATES_ON_ISSUES, classifyHttp, readTargetKind, refuseKindLabels } from '../label-write.mjs';
 import { DEFAULT_BATCH_GAP_MS, DEFAULT_BATCH_THRESHOLD, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
 import {
   ADVISORY_READ_KEY_TYPE,
   ADVISORY_READ_MAX_PARTS,
   ADVISORY_READ_PART_CHARS,
+  ADVISORY_PUBLISHED_STATE,
   CONTAINER_SESSION_ENV,
   CONTAINER_SESSION_SHAPE,
   FIELDS,
@@ -500,7 +533,9 @@ import {
   SESSION_SHAPE,
   TRANSPORTS,
   TRANSPORT_ENV,
+  advisoryListDisplay,
   advisoryReadAad,
+  advisorySealAad,
   openAdvisoryRead,
 } from './ops.mjs';
 import { EVENT_PATH_ENV, refusalText, validatePayload } from './validate.mjs';
@@ -873,6 +908,121 @@ export async function readPullRequestTargets(candidates, { repo, api = DEFAULT_A
   return rows;
 }
 
+/**
+ * A retired lane alias is WRITTEN as the lane that absorbed it. The alias map is
+ * `LANE_LABEL_ALIASES` (`check-half-states.mjs`, the one table every reader of a
+ * card's lane already goes through), so the doors that put a label on a card —
+ * this CLI's `labels_add` / `issue_create` / `pr_create`, `issue-create.mjs` and
+ * `label-write.mjs` — read the same rows and never a copy. ⛔ It rewrites and
+ * never refuses: it is no gate, and a write is never blocked on it.
+ *
+ * Applied at each door, ⛔ never inside `packRequest`: `label-write.mjs` diffs
+ * its read-back against the target it computed, so a rewrite below that target
+ * would read as a stripped label. A duplicate the rewrite itself made
+ * (`domain:engine` beside `domain:server`) collapses to one; a duplicate the
+ * caller wrote is left for the validator to refuse as before. A non-array is
+ * handed back untouched, for the validator to judge.
+ *
+ * @param {unknown} labels
+ * @returns {{ labels: unknown, rewrites: Array<{ from: string, to: string }> }}
+ */
+export function rewriteRetiredLaneLabels(labels) {
+  if (!Array.isArray(labels)) return { labels, rewrites: [] };
+  const out = [];
+  const rewrites = [];
+  const madeByRewrite = new Set();
+  for (const label of labels) {
+    const to = typeof label === 'string' && Object.hasOwn(LANE_LABEL_ALIASES, label) ? LANE_LABEL_ALIASES[label] : label;
+    if (to !== label) rewrites.push({ from: label, to });
+    if (out.includes(to) && (to !== label || madeByRewrite.has(to))) continue;
+    if (to !== label) madeByRewrite.add(to);
+    out.push(to);
+  }
+  return { labels: out, rewrites };
+}
+
+/** The read-back words for one rewrite — every door prints this one spelling. */
+export function retiredLaneRewriteLine({ from, to }) {
+  return `label ${from} → ${to} (retired alias)`;
+}
+
+/**
+ * The ops whose `labels` PUT a label on a card — the adding doors both label rules here ask (the retired-lane rewrite and
+ * `kindRuleRows`). ⛔ `labels_remove` is not one: taking a retired label off must name it, and a removal is never refused.
+ */
+export const RETIRED_LANE_REWRITE_OPS = Object.freeze(['labels_add', 'issue_create', 'pr_create']);
+
+/** An actions file with every adding label list rewritten; each row names its 1-based action and op. */
+export function rewriteRetiredLaneActions(actions) {
+  if (!Array.isArray(actions)) return { actions, rewrites: [] };
+  const rows = [];
+  const out = actions.map((a, i) => {
+    if (!a || typeof a !== 'object' || !RETIRED_LANE_REWRITE_OPS.includes(a.op) || !Array.isArray(a.labels)) return a;
+    const r = rewriteRetiredLaneLabels(a.labels);
+    if (r.rewrites.length === 0) return a;
+    for (const w of r.rewrites) rows.push({ action: i + 1, op: a.op, ...w });
+    return { ...a, labels: r.labels };
+  });
+  return { actions: out, rewrites: rows };
+}
+
+/**
+ * The kind rule at the relay's adding doors (header: "The kind rule"), asked of an actions file. Its predicate and its
+ * sentence are label-write's `refuseKindLabels`, ⛔ never restated here. A create names its own kind — `pr_create` a
+ * pull request, `issue_create` an issue — so it is judged with no read (`refusals`). A `labels_add` names a number
+ * that may be either, so one whose labels the rule governs — `refuseKindLabels` with no kind answers non-null exactly
+ * then — waits for the platform read (`reads`, `readLabelTargetKinds`); any other `labels_add` reads nothing. Pure.
+ *
+ * @returns {{ refusals: { action: number, op: string, refusal: string }[], reads: { action: number, op: string, issue: unknown, labels: string[] }[] }}
+ */
+export function kindRuleRows(actions) {
+  const refusals = [];
+  const reads = [];
+  if (!Array.isArray(actions)) return { refusals, reads };
+  actions.forEach((a, i) => {
+    if (!a || typeof a !== 'object' || !RETIRED_LANE_REWRITE_OPS.includes(a.op) || !Array.isArray(a.labels)) return;
+    const action = i + 1;
+    // Asked inside the call, never at module scope: label-write imports this file, so its constants may not exist yet there.
+    const kind = a.op === 'pr_create' ? KIND_PULL : a.op === 'issue_create' ? KIND_ISSUE : null;
+    if (kind !== null) {
+      const refusal = refuseKindLabels({ kind, add: a.labels, ref: 'its target' });
+      if (refusal !== null) refusals.push({ action, op: a.op, refusal });
+    } else if (refuseKindLabels({ kind: null, add: a.labels }) !== null) {
+      reads.push({ action, op: a.op, issue: a.issue, labels: a.labels });
+    }
+  });
+  return { refusals, reads };
+}
+
+/**
+ * Each governed `labels_add` target's kind, READ: ONE `GET /repos/{repo}/issues/{issue}` per distinct number, its
+ * answer asked by label-write's own `readTargetKind` (`pull_request` and `html_url` must AGREE) and judged by
+ * `refuseKindLabels`. Three verdicts: `pass` (a kind the labels are legal on), `refused` (the wrong kind, or a 200 whose
+ * two members name no one kind — refused rather than guessed, as label-write refuses it), and `unread` (any other
+ * answer, or none — ⛔ never a pass). Reads only, never paced; never throws.
+ *
+ * @returns {Promise<{ action: number, issue: unknown, verdict: 'pass'|'refused'|'unread', kind: string|null, refusal: string|null }[]>}
+ */
+export async function readLabelTargetKinds(reads, { repo, api = DEFAULT_API, fetch, token = '' } = {}) {
+  const seen = new Map();
+  const rows = [];
+  for (const c of reads) {
+    const path = `/repos/${repo}/issues/${c.issue}`;
+    if (!seen.has(c.issue)) seen.set(c.issue, await rest(api, path, {}, { fetch, token }));
+    const r = seen.get(c.issue);
+    const ref = `${repo}#${c.issue}`;
+    if (r.status === 200 && r.json !== null && typeof r.json === 'object' && !Array.isArray(r.json)) {
+      const { kind, why } = readTargetKind(r.json);
+      const refusal = refuseKindLabels({ kind, why, add: c.labels, ref });
+      rows.push({ action: c.action, issue: c.issue, verdict: refusal === null ? 'pass' : 'refused', kind, refusal });
+      continue;
+    }
+    const why = `GET ${path} answered ${r.status === 0 ? `nothing — ${r.detail}` : `HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}`}`;
+    rows.push({ action: c.action, issue: c.issue, verdict: 'unread', kind: null, refusal: refuseKindLabels({ kind: null, why, add: c.labels, ref }) });
+  }
+  return rows;
+}
+
 export function packRequest({ repo, session, actions, requestId = null, now = Date.now } = {}) {
   const payload = { request_id: requestId ?? newRequestId(now()), repo, session, actions };
   const judged = validatePayload(payload);
@@ -954,6 +1104,7 @@ export const RUN_READ_BACK_WINDOW_MS = 60_000;
 // ⛔ No locator for `advisory_read`: it has NO byte read-back, because it writes nothing — no body, no object. Its
 // read-back is the seat opening the sealed answer the run's notices carry with the key only this process holds
 // (`openRunAdvisoryReads`); an answer that does not open is `unverified` (header, "How the callers").
+// ⛔ Nor for `advisory_list`, the same shape: it writes nothing; opening its sealed listing is its read-back.
 // ⛔ No locator for `advisory_report`, on purpose — nor for `advisory_create`, the same shape: its prose rides `summary`
 // and `description`, never `body`, so it is not in `BODY_OPS`, and a byte-for-byte read-back cannot apply to it — the seat cannot read a private report before it
 // is a collaborator, and the executor must not print the answer that holds the stored bytes. Its confirmation is the
@@ -1139,10 +1290,18 @@ export function parseRelayAnnotation(message) {
  * exposes no content, and the run log is public (`ops.mjs`, the advisory rows).
  */
 export const ADVISORY_ANNOTATED_OPS = Object.freeze(['advisory_report', 'advisory_create']);
+/**
+ * The op whose landing is annotated in the same spelling only when it PUBLISHES (`ops.mjs`, the advisory rows): an
+ * `advisory_state` to `published`, whose id is public once it lands — the run names it, which is the point. Its
+ * other moves are not annotated; a row naming one is ignored (`matchRunAdvisories`).
+ */
+export const ADVISORY_PUBLISH_OP = 'advisory_state';
+/** Does this action publish — the one `advisory_state` landing the run annotates? Pure. */
+export const advisoryPublishes = (action) => action?.op === ADVISORY_PUBLISH_OP && action?.advisory_state === ADVISORY_PUBLISHED_STATE;
 
 const RELAY_ADVISORY_ANNOTATION_SHAPE = new RegExp(`^${RELAY_ANNOTATION_PREFIX} action=([1-9][0-9]*) op=([a-z_]+) ghsa_id=(GHSA(?:-[0-9a-z]{4}){3})$`);
 
-/** The message of the one annotation the executor emits for a landed advisory report or draft. Pure. */
+/** The message of the one annotation the executor emits for a landed advisory report, draft or publish. Pure. */
 export function relayAdvisoryAnnotationMessage({ action, op, ghsaId }) {
   return `${RELAY_ANNOTATION_PREFIX} action=${action} op=${op} ghsa_id=${ghsaId}`;
 }
@@ -1150,7 +1309,7 @@ export function relayAdvisoryAnnotationMessage({ action, op, ghsaId }) {
 /** An advisory annotation's `message` as `{ action, op, ghsaId }`, or null for anything else. Pure; never throws. */
 export function parseRelayAdvisoryAnnotation(message) {
   const m = RELAY_ADVISORY_ANNOTATION_SHAPE.exec(typeof message === 'string' ? message : '');
-  if (!m || !ADVISORY_ANNOTATED_OPS.includes(m[2])) return null;
+  if (!m || !(ADVISORY_ANNOTATED_OPS.includes(m[2]) || m[2] === ADVISORY_PUBLISH_OP)) return null;
   return { action: Number(m[1]), op: m[2], ghsaId: m[3] };
 }
 
@@ -1258,7 +1417,7 @@ export function openRunAdvisoryReads(payload, parts, keys = new Map()) {
     if (!privateKey) return shut("this process holds no key for it — a read opens only in the process that made its key");
     let plaintext;
     try {
-      plaintext = openAdvisoryRead({ sealed: r.sealed, privateKey, aad: advisoryReadAad({ requestId: payload.request_id, action: r.action, ghsaId: payload.actions[r.action - 1].ghsa_id }) });
+      plaintext = openAdvisoryRead({ sealed: r.sealed, privateKey, aad: advisorySealAad({ requestId: payload.request_id, action: r.action, op: r.op, ghsaId: payload.actions[r.action - 1].ghsa_id }) });
     } catch (e) {
       return shut(e.message);
     }
@@ -1293,6 +1452,10 @@ export function matchRunAdvisories(payload, parsed) {
     const action = actions[row.action - 1];
     if (!action || action.op !== row.op) {
       ignored.push({ ...row, why: `the stroke's action ${row.action} is ${action ? action.op : 'absent'}, not ${row.op}` });
+      continue;
+    }
+    if (row.op === ADVISORY_PUBLISH_OP && !advisoryPublishes(action)) {
+      ignored.push({ ...row, why: `the stroke's action ${row.action} is no publish, and only a publish is annotated` });
       continue;
     }
     byAction.set(row.action, [...(byAction.get(row.action) ?? []), row]);
@@ -1361,6 +1524,7 @@ function probeValue(spec) {
   if (spec?.kind === 'enum') return spec.values[0];
   if (spec?.kind === 'sha') return '0'.repeat(40);
   if (spec?.kind === 'inputs') return {};
+  if (spec?.kind === 'versions') return [{ package: 'x', vulnerable_version_range: 'x', patched_versions: 'x' }];
   return 'x';
 }
 
@@ -1548,7 +1712,7 @@ export async function readRunAnnotations(runId, deps = {}) {
  */
 async function runAnnotationsFor(payload, run, deps) {
   const annotated = payload.actions.map((a, i) => ({ action: i + 1, op: a.op })).filter((a) => Object.hasOwn(ANNOTATED_OPS, a.op));
-  const filing = payload.actions.map((a, i) => ({ action: i + 1, op: a.op })).filter((a) => ADVISORY_ANNOTATED_OPS.includes(a.op));
+  const filing = payload.actions.map((a, i) => ({ action: i + 1, op: a.op, publishes: advisoryPublishes(a) })).filter((a) => ADVISORY_ANNOTATED_OPS.includes(a.op) || a.publishes);
   const reading = payload.actions.some((a) => ADVISORY_READ_OPS.includes(a.op));
   if (!annotated.length && !filing.length && !reading) return { state: 'none', rows: [], ignored: [], advisories: [], reads: [], why: '' };
   const read = await readRunAnnotations(run.id, deps);
@@ -1557,7 +1721,13 @@ async function runAnnotationsFor(payload, run, deps) {
   const log = deps.log;
   for (const r of rows) log(`fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → ${r.repo}#${r.number} ${r.url} (the platform's own answer).`);
   for (const r of ignored) log(`fleet-write: run ${run.id}'s annotation for action ${r.action} ${r.op} (#${r.number}) is ignored — ${r.why}.`);
-  for (const r of filed.rows) log(`fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} (the platform's own answer) — add whoever works it with advisory_collaborators_add.`);
+  for (const r of filed.rows) {
+    log(
+      r.op === ADVISORY_PUBLISH_OP
+        ? `fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} PUBLISHED, read back with its versions — record run ${run.id} on the seat post, the id alone.`
+        : `fleet-write: run ${run.id}'s annotation names action ${r.action} ${r.op} → advisory ${r.ghsaId} (the platform's own answer) — add whoever works it with advisory_collaborators_add.`,
+    );
+  }
   for (const r of filed.ignored) log(`fleet-write: run ${run.id}'s annotation for action ${r.action} ${r.op} is ignored — ${r.why}.`);
   if (read.state === 'unread') log(`fleet-write: run ${run.id}'s annotations could not be read — ${read.why}; a number no annotation above names is read from the board instead.`);
   for (const a of annotated) {
@@ -1565,7 +1735,10 @@ async function runAnnotationsFor(payload, run, deps) {
   }
   // A report has no fallback a seat can read: until it is a collaborator, the advisory is invisible to it.
   for (const a of filing) {
-    if (!filed.rows.some((r) => r.action === a.action)) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s advisory id — the run's summary row holds it, which a seat container cannot read, and the seat cannot list the repository's advisories: ask the maintainer for the id; ⛔ do not re-send the ${a.op === 'advisory_create' ? 'draft' : 'report'}.`);
+    if (filed.rows.some((r) => r.action === a.action)) continue;
+    // A publish's id is the one the seat sent; the run's success is the executor's read-back as published.
+    if (a.publishes) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s published id — the run succeeded, so the executor read the advisory back as published with its versions; record run ${run.id} on the seat post; ⛔ do not re-send the publish.`);
+    else log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s advisory id — the run's summary row holds it, which a seat container cannot read, and the seat cannot list the repository's advisories: ask the maintainer for the id; ⛔ do not re-send the ${a.op === 'advisory_create' ? 'draft' : 'report'}.`);
   }
   return { state: read.state, rows, ignored, advisories: filed.rows, reads: read.reads ?? [], why: read.why };
 }
@@ -1925,15 +2098,19 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's": 13,
   "the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone": 13,
   "the pull request body at the seat's door: an issue_patch body signed only by its LAST-line trailer passes when the platform answers its target is a pull request, before the dry-run exit; an issue, an unread target and a trailer-less body are refused; comment_edit takes no trailer": 19,
+  "the kind rule at the relay's adding doors: a pm state on pr_create or on a labels_add whose target READS as a pull request, and pm:awaiting-merge on issue_create or on a labels_add whose target reads as an issue, are refused before the dry-run exit with label-write's own sentence, case-insensitively and for the whole file; an unread kind is never a pass; labels_remove and an ungoverned labels_add read nothing": 18,
   "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
   "the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 5,
-  "the advisory rows at the seat: a report, a draft, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id or package, published or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 14,
+  "the advisory rows at the seat: a report, a draft, an advisory's collaborators, its versions and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id, package or versions entry, a state the relay names no move to or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on, as does a publish's; the id rows that never publish read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 17,
+  "retired lane aliases at the seat's door: a domain:engine / services / cli / rest label on labels_add, issue_create or pr_create is written as domain:server and said on stderr, a dry run included; a live domain:* label, a non-lane label and labels_remove pass untouched; the rewrite never refuses": 13,
   "advisory_read at the seat: the key pair made in this process per read — its public half in the action, its private half a KeyObject never exported, written or printed, and a key from the file refused; no byte read-back, said where the read-back is decided; the run's notice parts read back exactly, reassembled 1..n once each and opened with that key byte for byte, end to end through the real executor; what does not open is UNVERIFIED (6) with nothing printed; the text reaches this process's stdout on --reveal alone, never stderr or --json": 17,
+  "advisory_list at the seat: derived from the table into the sealed-read path, so its key pair is made here and a key from the file refused, with no byte read-back, said where the read-back is decided; the real executor's ten notice parts read back, reassembled and opened under the listing's own associated data — never a read's — byte for byte on the padded plaintext; what does not open is UNVERIFIED (6) with nothing printed; --reveal alone prints it, its pad trimmed for that op's display alone, never on stderr or --json": 9,
 });
 // Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
 // hierarchy link seat battery, 24 → 25 with the pull request body battery, 25 → 26 with the advisory rows' seat
-// battery, 26 → 27 with advisory_read's seat battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 27;
+// battery, 26 → 27 with advisory_read's seat battery, 27 → 28 with the retired lane aliases battery, 29 → 30 with
+// advisory_list's seat battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 30;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2722,7 +2899,7 @@ export async function selfTest() {
     }
 
     // ── the advisory rows at the seat ───────────────────────────────────────
-    battery("the advisory rows at the seat: a report, a draft, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id or package, published or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent");
+    battery("the advisory rows at the seat: a report, a draft, an advisory's collaborators, its versions and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id, package or versions entry, a state the relay names no move to or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on, as does a publish's; the id rows that never publish read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent");
     {
       const REPO = 'objectstack-ai/objectstack';
       // A made-up id: the fixture names no real advisory.
@@ -2732,9 +2909,13 @@ export async function selfTest() {
       const DRAFT = { op: 'advisory_create', summary: `${MARKER} — summary`, description: `${MARKER} — description`, packages: ['@objectstack/rest'], severity: 'low', cwe_ids: ['CWE-863'] };
       const ADD = { op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators: ['os-dev-a'] };
       const MOVE = { op: 'advisory_state', ghsa_id: GHSA, advisory_state: 'draft' };
+      // The versions and the publish — a made-up package line, naming no real advisory's versions.
+      const ENTRY = { package: '@objectstack/rest', vulnerable_version_range: '<= 18.2.0', patched_versions: '18.3.0' };
+      const VERSIONS = { op: 'advisory_versions', ghsa_id: GHSA, versions: [ENTRY] };
+      const PUBLISH = { op: 'advisory_state', ghsa_id: GHSA, advisory_state: 'published' };
       const pack = (actions) => packRequest({ repo: REPO, session: SESSION, actions, requestId: 'fw-test-1' });
-      const packed = [REPORT, ADD, MOVE, DRAFT].map((a) => pack([a]));
-      t('each row packs as ONE action carrying exactly its keys, in a stroke of its own', packed.map((p) => [p.ok, p.payload?.actions]), [REPORT, ADD, MOVE, DRAFT].map((a) => [true, [a]]), packed.flatMap((p) => p.errors).join(' | '));
+      const packed = [REPORT, ADD, MOVE, DRAFT, VERSIONS, PUBLISH].map((a) => pack([a]));
+      t('each row packs as ONE action carrying exactly its keys, in a stroke of its own — the versions and the publish among them', packed.map((p) => [p.ok, p.payload?.actions]), [REPORT, ADD, MOVE, DRAFT, VERSIONS, PUBLISH].map((a) => [true, [a]]), packed.flatMap((p) => p.errors).join(' | '));
       const refused = (actions) => {
         const p = pack(actions);
         return { ok: p.ok, payload: p.payload, errors: p.errors };
@@ -2743,7 +2924,11 @@ export async function selfTest() {
         [[REPORT, { op: 'comment', issue: 1, body: 'x' }], 'actions[1] is `comment` in a stroke that carries a `advisory_report`'],
         [[ADD, MOVE], 'in a stroke that carries a `advisory_collaborators_add`'],
         [[{ ...ADD, ghsa_id: `${GHSA}/cve` }], "actions[0].ghsa_id must be one repository advisory's id"],
-        [[{ ...MOVE, advisory_state: 'published' }], 'actions[0].advisory_state is "published", refused by name'],
+        [[{ ...MOVE, advisory_state: 'withdrawn' }], 'actions[0].advisory_state must be one of'],
+        [[VERSIONS, PUBLISH], 'actions[1] is `advisory_state` in a stroke that carries a `advisory_versions`'],
+        [[{ ...VERSIONS, versions: [{ ...ENTRY, package: MARKER }] }], 'actions[0].versions[0].package must be an npm package name'],
+        [[{ ...VERSIONS, versions: [{ ...ENTRY, patched_versions: MARKER }] }], 'actions[0].versions[0].patched_versions must be'],
+        [[{ ...VERSIONS, summary: MARKER }], 'actions[0].summary is not a key `advisory_versions` takes'],
         [[{ ...REPORT, vulnerabilities: [{ package: MARKER }] }], 'actions[0].vulnerabilities is not a key `advisory_report` takes'],
         [[{ ...REPORT, severity: MARKER }], 'actions[0].severity must be one of'],
         [[DRAFT, REPORT], 'actions[1] is `advisory_report` in a stroke that carries a `advisory_create`'],
@@ -2754,17 +2939,19 @@ export async function selfTest() {
         const p = refused(actions);
         return [!p.ok && p.payload === null, p.errors.some((e) => e.includes(needle)), p.errors.some((e) => e.includes('ADVISORY MARKER'))];
       });
-      t('⛔ refused at the packer, before anything is sent: a report beside a comment, two advisory rows together, a malformed id, published, a vulnerabilities key and a severity carrying prose, a draft beside a report, a package that is prose and a draft carrying its own vulnerabilities — each named, and ⛔ no refusal echoes the marker', judged, cases.map(() => [true, true, false]));
+      t('⛔ refused at the packer, before anything is sent: a report beside a comment, two advisory rows together, a malformed id, a state the relay names no move to, the versions beside the publish, a versions entry whose package or patched versions are prose, a summary beside the versions, a vulnerabilities key and a severity carrying prose, a draft beside a report, a package that is prose and a draft carrying its own vulnerabilities — each named, and ⛔ no refusal echoes the marker', judged, cases.map(() => [true, true, false]));
       const reportStroke = packed[0].payload;
       const pacing = strokePacing(reportStroke);
       const draftStroke = packed[3].payload;
-      t('derived from the table: the report and the draft create content but are no body op, no run op and no card annotation — an advisory annotation instead — with no read-back locator and no read-back target; the two id rows are none of these; each stroke is ONE write, never batched', [['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_state'].map((op) => [CONTENT_CREATING_OPS.includes(op), BODY_OPS.includes(op), RUN_OPS.includes(op), Object.hasOwn(ANNOTATED_OPS, op), ADVISORY_ANNOTATED_OPS.includes(op), op in READ_BACK_LOCATORS]), readBackTargets(reportStroke), readBackTargets(draftStroke), pacing.writes, pacing.batched, strokePacing(draftStroke).writes, strokePacing(draftStroke).batched], [[[true, false, false, false, true, false], [true, false, false, false, true, false], [false, false, false, false, false, false], [false, false, false, false, false, false]], [], [], 1, false, 1, false]);
+      t('derived from the table: the report and the draft create content but are no body op, no run op and no card annotation — an advisory annotation instead — with no read-back locator and no read-back target; the three id rows are none of these — the versions carry no prose, so create no content — and each stroke is ONE write, never batched', [['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state'].map((op) => [CONTENT_CREATING_OPS.includes(op), BODY_OPS.includes(op), RUN_OPS.includes(op), Object.hasOwn(ANNOTATED_OPS, op), ADVISORY_ANNOTATED_OPS.includes(op), op in READ_BACK_LOCATORS]), readBackTargets(reportStroke), readBackTargets(draftStroke), pacing.writes, pacing.batched, strokePacing(draftStroke).writes, strokePacing(draftStroke).batched, strokePacing(packed[4].payload).writes, strokePacing(packed[5].payload).writes], [[[true, false, false, false, true, false], [true, false, false, false, true, false], [false, false, false, false, false, false], [false, false, false, false, false, false], [false, false, false, false, false, false]], [], [], 1, false, 1, false, 1, 1]);
       const own = readReal(SELF_PATH, 'utf8');
       const at = own.indexOf('export const READ_BACK_LOCATORS');
       t('⛔ the read-back that cannot apply is said WHERE the read-back is decided: the lines above READ_BACK_LOCATORS name advisory_report and advisory_create and why', [at > 0, own.slice(Math.max(0, at - 700), at).includes('No locator for `advisory_report`, on purpose'), own.slice(Math.max(0, at - 700), at).includes('nor for `advisory_create`')], [true, true, true]);
       // The advisory annotation: one spelling, read back exactly.
       const NOTE = relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: GHSA });
-      t('the advisory annotation is one spelling the reader reads back exactly — and nothing else: a card op\'s message, an id row, a malformed id, trailing text or null', [NOTE, parseRelayAdvisoryAnnotation(NOTE), [relayAnnotationMessage({ action: 1, op: 'issue_create', number: 9, url: `https://github.test/${REPO}/issues/9` }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_state', ghsaId: GHSA }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: 'GHSA-ABCD-2345-WXYZ' }), `${NOTE} ${MARKER}`, null].map(parseRelayAdvisoryAnnotation)], [`fleet-write action=1 op=advisory_report ghsa_id=${GHSA}`, { action: 1, op: 'advisory_report', ghsaId: GHSA }, [null, null, null, null, null]]);
+      t('the advisory annotation is one spelling the reader reads back exactly — and nothing else: a card op\'s message, an id row that never publishes, a malformed id, trailing text or null', [NOTE, parseRelayAdvisoryAnnotation(NOTE), [relayAnnotationMessage({ action: 1, op: 'issue_create', number: 9, url: `https://github.test/${REPO}/issues/9` }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_collaborators_add', ghsaId: GHSA }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_versions', ghsaId: GHSA }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: 'GHSA-ABCD-2345-WXYZ' }), `${NOTE} ${MARKER}`, null].map(parseRelayAdvisoryAnnotation)], [`fleet-write action=1 op=advisory_report ghsa_id=${GHSA}`, { action: 1, op: 'advisory_report', ghsaId: GHSA }, [null, null, null, null, null, null]]);
+      const PUBLISH_NOTE = relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_state', ghsaId: GHSA });
+      t('⭐ the publish annotation is the same spelling under advisory_state, read back exactly — and used only where the action publishes: an advisory_state row under a close or an accept is ignored, saying so', [ADVISORY_PUBLISH_OP, parseRelayAdvisoryAnnotation(PUBLISH_NOTE), [PUBLISH, MOVE, { ...MOVE, advisory_state: 'closed' }, ADD].map(advisoryPublishes), matchRunAdvisories(packed[5].payload, [parseRelayAdvisoryAnnotation(PUBLISH_NOTE)]).rows, matchRunAdvisories(packed[2].payload, [parseRelayAdvisoryAnnotation(PUBLISH_NOTE)]).ignored.map((r) => r.why)], ['advisory_state', { action: 1, op: 'advisory_state', ghsaId: GHSA }, [true, false, false, false], [{ action: 1, op: 'advisory_state', ghsaId: GHSA }], ["the stroke's action 1 is no publish, and only a publish is annotated"]]);
       t('…and a row is used only when its action is that op, one id per action — another op at the index, or two different ids, ignored', [matchRunAdvisories(reportStroke, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }]).rows.length, matchRunAdvisories(packed[1].payload, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }]).ignored.length, matchRunAdvisories(reportStroke, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }, { action: 1, op: 'advisory_report', ghsaId: 'GHSA-wxyz-2345-abcd' }]).rows.length], [1, 1, 0]);
       const withNote = { path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_report', message: NOTE };
       const filed = await drive({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [RUNNER_NOTICE, withNote] }) }, { stroke: reportStroke });
@@ -2779,17 +2966,21 @@ export async function selfTest() {
       const draftUnnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: draftStroke });
       t('a created draft no annotation names: still exit 0, no id handed on, and one line saying to ask the maintainer and never to re-send the draft', [draftUnnamed.annotations?.advisories, draftUnnamed.logs.some((l) => l.includes("action 1 advisory_create's advisory id") && l.includes('do not re-send the draft')), exitForResult(draftUnnamed)], [[], true, EXIT_OK], draftUnnamed.logs.join(' | '));
       const idRows = [];
-      for (const p of packed.slice(1, 3)) {
+      for (const p of [packed[1], packed[2], packed[4]]) {
         const r = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: p.payload });
         idRows.push([r.state, r.readBack?.state, r.annotations?.state, r.seen.filter((s) => s.call === DISPATCH).length, r.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, exitForResult(r)]);
       }
-      t('the two id rows: ONE dispatch each, no annotation read and nothing read back — the executor\'s PATCH answer landed them — exit 0', idRows, [0, 1].map(() => ['success', 'none', 'none', 1, 0, EXIT_OK]));
+      t('the three id rows that never publish — the collaborators, an accept and the versions: ONE dispatch each, no annotation read and nothing read back — the executor\'s PATCH answer landed them — exit 0', idRows, [0, 1, 2].map(() => ['success', 'none', 'none', 1, 0, EXIT_OK]));
+      const published = await drive({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [RUNNER_NOTICE, { ...withNote, title: 'fleet-write advisory_state', message: PUBLISH_NOTE }] }) }, { stroke: packed[5].payload });
+      t("⭐ a publish: ONE dispatch carrying it as judged, nothing read back at the target, and the run's annotation read — the published id handed on, said in one line that names the run to record on the seat post; exit 0", [published.seen.filter((s) => s.call === DISPATCH).map((s) => s.body?.client_payload?.actions), published.state, published.readBack?.state, published.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, published.annotations?.advisories, published.logs.some((l) => l.includes(`advisory ${GHSA} PUBLISHED`) && l.includes('record run') && l.includes('seat post')), exitForResult(published)], [[[PUBLISH]], 'success', 'none', 0, [{ action: 1, op: 'advisory_state', ghsaId: GHSA }], true, EXIT_OK], published.logs.join(' | '));
+      const publishUnnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: packed[5].payload });
+      t('a publish no annotation names: still exit 0 — the run read it back as published — no id handed on, and one line naming the run to record and never to re-send the publish', [publishUnnamed.annotations?.advisories, publishUnnamed.logs.some((l) => l.includes("action 1 advisory_state's published id") && l.includes('do not re-send the publish')), exitForResult(publishUnnamed)], [[], true, EXIT_OK], publishUnnamed.logs.join(' | '));
       const failed = [];
       for (const p of packed) {
         const r = await drive({ runs: () => [RUN('completed', 'failure')] }, { stroke: p.payload });
         failed.push([r.state, exitForResult(r), r.seen.filter((s) => s.call === DISPATCH).length, r.seen.filter((s) => s.call !== DISPATCH && !s.call.startsWith('GET ')).length]);
       }
-      t('⛔ a run that failed — a fence refused it, or the answer did not show the result — is exit 5 after ONE dispatch for each row, never re-sent and never a direct write', failed, [0, 1, 2, 3].map(() => ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]));
+      t('⛔ a run that failed — a fence refused it, or the answer did not show the result — is exit 5 after ONE dispatch for each row, the publish among them, never re-sent and never a direct write', failed, [0, 1, 2, 3, 4, 5].map(() => ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]));
       t('⛔ no seat line of those runs carries the report\'s or the draft\'s text', [filed, unnamed, drafted, draftUnnamed].some((r) => r.logs.some((l) => l.includes('ADVISORY MARKER'))), false);
       // The CLI hands the id on in --json, beside the card annotations.
       writeFileSync(join(dir, 'advisory-report.json'), JSON.stringify([REPORT]), 'utf8');
@@ -2843,7 +3034,7 @@ export async function selfTest() {
       t("⛔ a public_key already in the actions file is REFUSED, never used — a key made elsewhere means a private key kept elsewhere — and the refusal never echoes it", [supplied.refused.length, supplied.keys.size, supplied.refused[0]?.includes('actions[0].public_key is set in the actions file'), supplied.refused.some((l) => l.includes('ADVISORY MARKER'))], [1, 0, true, false]);
       // Derived from the table.
       const stroke = packRequest({ repo: REPO, session: SESSION, actions: [armed.actions[0]], requestId: 'fw-test-1' }).payload;
-      t('derived from the table: advisory_read is the one op whose answer comes back sealed — no body op, no run op, no content, no card or advisory annotation, no read-back locator or target, and ZERO writes in its stroke', [ADVISORY_READ_OPS, [BODY_OPS, RUN_OPS, CONTENT_CREATING_OPS, ADVISORY_ANNOTATED_OPS].map((list) => list.includes('advisory_read')), Object.hasOwn(ANNOTATED_OPS, 'advisory_read'), 'advisory_read' in READ_BACK_LOCATORS, readBackTargets(stroke), strokePacing(stroke).writes], [['advisory_read'], [false, false, false, false], false, false, [], 0]);
+      t('derived from the table: advisory_read and advisory_list are the ops whose answer comes back sealed — the read no body op, no run op, no content, no card or advisory annotation, no read-back locator or target, and ZERO writes in its stroke', [ADVISORY_READ_OPS, [BODY_OPS, RUN_OPS, CONTENT_CREATING_OPS, ADVISORY_ANNOTATED_OPS].map((list) => list.includes('advisory_read')), Object.hasOwn(ANNOTATED_OPS, 'advisory_read'), 'advisory_read' in READ_BACK_LOCATORS, readBackTargets(stroke), strokePacing(stroke).writes], [['advisory_read', 'advisory_list'], [false, false, false, false], false, false, [], 0]);
       const at = own.indexOf('export const READ_BACK_LOCATORS');
       t("⛔ that advisory_read has NO byte read-back is said WHERE the read-back is decided, and in the header's account of the callers", [own.slice(Math.max(0, at - 1200), at).includes('No locator for `advisory_read`: it has NO byte read-back, because it writes nothing'), own.includes('`advisory_read` has NO byte read-back either, and needs none: it writes')], [true, true]);
       // The parts: one spelling, read back exactly.
@@ -2936,6 +3127,96 @@ export async function selfTest() {
       writeFileSync(join(dir, 'comment-reveal.json'), JSON.stringify([{ op: 'comment', issue: 19701, body: 'x' }]), 'utf8');
       const misplaced = await cli(['--repo', REPO, '--actions-file', join(dir, 'comment-reveal.json'), '--request-id', 'fw-test-1', '--reveal']);
       t('⛔ refused before anything is sent, exit 2: a public_key in the actions file (never echoed), and --reveal on a stroke carrying no advisory_read', [keyed.code, keyed.seen.length, keyed.errs.some((l) => l.includes('ADVISORY MARKER')), misplaced.code, misplaced.seen.length], [EXIT_USAGE, 0, false, EXIT_USAGE, 0]);
+    }
+
+    // ── advisory_list at the seat ───────────────────────────────────────────
+    battery("advisory_list at the seat: derived from the table into the sealed-read path, so its key pair is made here and a key from the file refused, with no byte read-back, said where the read-back is decided; the real executor's ten notice parts read back, reassembled and opened under the listing's own associated data — never a read's — byte for byte on the padded plaintext; what does not open is UNVERIFIED (6) with nothing printed; --reveal alone prints it, its pad trimmed for that op's display alone, never on stderr or --json");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const MARKER = 'ADVISORY MARKER: never in a seat line';
+      const { executeFleetWrite } = await import('./execute.mjs');
+      const { ADVISORY_LIST_PADDED_BYTES, ADVISORY_LIST_STATES, ADVISORY_READ_OPEN_FAILED, advisoryListPagePath, advisoryListPadded, advisoryListPlaintext, advisoryReadParts, sealAdvisoryRead } = await import('./ops.mjs');
+      const LIST = { op: 'advisory_list' };
+      // Made-up ids: the fixture names no real advisory.
+      const idOf = (k) => `GHSA-${k.toString(36).padStart(4, '0')}-2345-wxyz`;
+      const item = (k, state) => ({ ghsa_id: idOf(k), state, severity: 'low', created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-02T00:00:00Z', summary: MARKER, description: MARKER, vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER } }] });
+      const pages = { triage: [item(1, 'triage')], draft: [item(2, 'draft'), item(3, 'draft')], closed: [] };
+      const listed = advisoryListPlaintext([...pages.triage, ...pages.draft]);
+      const armed = armAdvisoryReads([LIST]);
+      t("the key pair is made HERE for a listing too — derived from the table, because the row requires a public_key: the listing gains a key the validator accepts, the private half a KeyObject in the map; a key from the file is refused", [ADVISORY_READ_OPS.includes('advisory_list'), Object.keys(armed.actions[0]), validatePayload({ request_id: 'fw-test-1', repo: REPO, session: SESSION, actions: armed.actions }).ok, [...armed.keys.keys()], armed.keys.get(1)?.asymmetricKeyType, armAdvisoryReads([{ ...LIST, public_key: MARKER }]).refused.length], [true, ['op', 'public_key'], true, [1], 'x25519', 1]);
+      const stroke = packRequest({ repo: REPO, session: SESSION, actions: armed.actions, requestId: 'fw-test-1' }).payload;
+      const own = readReal(SELF_PATH, 'utf8');
+      const at = own.indexOf('export const READ_BACK_LOCATORS');
+      t("no body op, no run op, no content, no annotation, no locator or read-back target, ZERO writes — and that it has no byte read-back is said WHERE the read-back is decided and in the header's account of the callers", [[BODY_OPS, RUN_OPS, CONTENT_CREATING_OPS, ADVISORY_ANNOTATED_OPS].map((l) => l.includes('advisory_list')), Object.hasOwn(ANNOTATED_OPS, 'advisory_list'), 'advisory_list' in READ_BACK_LOCATORS, readBackTargets(stroke), strokePacing(stroke).writes, own.slice(Math.max(0, at - 1400), at).includes('Nor for `advisory_list`, the same shape: it writes nothing'), own.includes('`advisory_list` is the same path end to end')], [[false, false, false, false], false, false, [], 0, true, true]);
+      t("a listing's part is the read's one spelling under its own op, read back exactly — and the reader takes no op the table does not derive", [parseRelayAdvisoryReadAnnotation(relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_list', part: 3, of: 10, sealed: 'AA' })), parseRelayAdvisoryReadAnnotation(relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_lists', part: 1, of: 1, sealed: 'AA' }))], [{ action: 1, op: 'advisory_list', part: 3, of: 10, sealed: 'AA' }, null]);
+      // ⭐ End to end: the REAL executor walks, projects, pads and seals; its notices become the run's annotations.
+      const PERM_A = `GET /repos/${REPO}/collaborators/os-dev-a/permission`;
+      const executed = async (payload) => {
+        const lines = [];
+        const answers = { [PERM_A]: { status: 200, json: { permission: 'write', role_name: 'write' } }, ...Object.fromEntries(ADVISORY_LIST_STATES.map((st) => [`GET ${advisoryListPagePath(REPO, st)}`, { status: 200, json: pages[st] }])) };
+        const r = await executeFleetWrite({ payload, sender: 'os-dev-a', token: TOKEN }, {
+          fetch: async (url, init) => {
+            const u = new URL(url);
+            const a = answers[`${init?.method ?? 'GET'} ${u.pathname}${u.search}`] ?? { status: 404, json: { message: 'Not Found' } };
+            return { status: a.status, headers: new Headers({ 'x-ratelimit-remaining': '4999' }), json: async () => a.json };
+          },
+          log: (l) => lines.push(l),
+        });
+        const notes = lines.filter((l) => l.startsWith('::notice ')).map((l) => ({ path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_list', message: l.slice(l.indexOf('::', 2) + 2) }));
+        return { ...r, notes };
+      };
+      const relayed = await executed(stroke);
+      const runOf = (notes, keys = armed.keys) => drive({ runs: () => [RUN('completed', 'success')], notes: () => notes }, { stroke, keys });
+      const ok = await runOf({ status: 200, json: [RUNNER_NOTICE, ...relayed.notes] });
+      const padded = advisoryListPadded(listed);
+      t("⭐ END TO END — the real executor's ten parts opened by the key this process made: success, exit 0, the plaintext BYTE FOR BYTE the padded listing, its fields count and advisories, and no marker in it", [relayed.exit, relayed.notes.length, ok.state, exitForResult(ok), ok.reads?.map((r) => [r.action, r.op, r.state, r.parts, r.bytes, r.fields]), ok.reads?.[0]?.plaintext === padded, ok.reads?.[0]?.plaintext.includes('ADVISORY MARKER')], [EXIT_OK, 10, 'success', EXIT_OK, [[1, 'advisory_list', 'opened', 10, ADVISORY_LIST_PADDED_BYTES, ['count', 'advisories']]], true, false]);
+      t('⛔ …and the seat\'s lines say the counts and the field names — never the marker, never a listed id', [ok.logs.some((l) => l.includes("action 1 advisory_list's sealed answer in 10 part(s)") && l.includes('fields count, advisories')), ok.logs.some((l) => l.includes('ADVISORY MARKER') || [1, 2, 3].some((k) => l.includes(idOf(k))))], [true, false]);
+      // ⛔ The listing's own associated data — never a read's.
+      const asRead = (() => {
+        const sealed = sealAdvisoryRead({ plaintext: padded, publicKey: armed.actions[0].public_key, aad: advisoryReadAad({ requestId: 'fw-test-1', action: 1 }) });
+        return advisoryReadParts(sealed).map((chunk, k) => ({ path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_list', message: relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_list', part: k + 1, of: 10, sealed: chunk }) }));
+      })();
+      const stranger = armAdvisoryReads([LIST]);
+      const otherSeal = await executed(packRequest({ repo: REPO, session: SESSION, actions: stranger.actions, requestId: 'fw-test-1' }).payload);
+      const tampered = relayed.notes.map((n, k) => (k === 4 ? { ...n, message: n.message.replace(/sealed=(.)/, (m, c) => `sealed=${c === 'A' ? 'B' : 'A'}`) } : n));
+      const unread = [await runOf({ status: 200, json: asRead }), await runOf({ status: 200, json: tampered }), await runOf({ status: 200, json: otherSeal.notes }), await runOf({ status: 200, json: relayed.notes }, new Map()), await runOf({ status: 200, json: relayed.notes.slice(1) })];
+      t("⛔ UNVERIFIED, exit 6, nothing printed: the padded listing sealed under a READ's associated data, a part tampered with, parts sealed to another seat's key, no key in this process, and a part missing", unread.map((r) => [r.state, exitForResult(r), r.reads?.[0]?.state, r.reads?.[0]?.plaintext ?? null, r.logs.some((l) => l.includes('ADVISORY MARKER'))]), unread.map(() => ['unverified', EXIT_UNCONFIRMED, 'unverified', null, false]));
+      t('…the first three with the one sentence an answer that does not open earns', unread.slice(0, 3).map((r) => r.reads[0].why), [ADVISORY_READ_OPEN_FAILED, ADVISORY_READ_OPEN_FAILED, ADVISORY_READ_OPEN_FAILED]);
+      // The CLI: --reveal alone prints it, the pad trimmed for this op's display alone.
+      writeFileSync(join(dir, 'advisory-list.json'), JSON.stringify([LIST]), 'utf8');
+      const cli = async (args) => {
+        let nowMs = T0;
+        const clock = { now: () => nowMs, elapsed: () => nowMs - T0 };
+        const seen = [];
+        const notes = () => {
+          const sent = seen.find((s) => s.call === DISPATCH)?.body?.client_payload;
+          const action = sent?.actions?.[0];
+          if (!action?.public_key) return { status: 200, json: [] };
+          const sealed = sealAdvisoryRead({ plaintext: padded, publicKey: action.public_key, aad: advisorySealAad({ requestId: sent.request_id, action: 1, op: 'advisory_list' }) });
+          return { status: 200, json: advisoryReadParts(sealed).map((chunk, k) => ({ path: '.github', annotation_level: 'notice', title: 'fleet-write advisory_list', message: relayAdvisoryReadAnnotationMessage({ action: 1, op: 'advisory_list', part: k + 1, of: 10, sealed: chunk }) })) };
+        };
+        const out = [];
+        const errs = [];
+        const [log, err] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = (l) => errs.push(String(l));
+        let code;
+        try {
+          code = await main(args, {
+            env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION },
+            send: { fetch: platform({ runs: () => [RUN('completed', 'success')], notes }, seen, clock), pace: paceFor(join(dir, `pace-cli-${paceCase++}.jsonl`)), now: clock.now, sleep: async (ms) => { nowMs += ms; }, log: (l) => errs.push(String(l)), ceilings: { startMs: 90_000, ceilingMs: 300_000, pollMs: 5_000, notes: [] } },
+          });
+        } finally {
+          [console.log, console.error] = [log, err];
+        }
+        return { code, out, errs, seen };
+      };
+      const base = ['--repo', REPO, '--actions-file', join(dir, 'advisory-list.json'), '--request-id', 'fw-test-1'];
+      const quiet = await cli([...base, '--json']);
+      const quietJson = quiet.out.length ? JSON.parse(quiet.out[quiet.out.length - 1]) : null;
+      t('⛔ the CLI without --reveal: exit 0, ONE --json line whose advisory_reads carry the op, the state, the padded byte count, ten parts and the field names alone — no listed id anywhere, stdout or stderr', [quiet.code, quiet.out.length, quietJson?.advisory_reads?.map((r) => [r.op, r.state, r.bytes, r.parts, r.fields]), [...quiet.out, ...quiet.errs].some((l) => [1, 2, 3].some((k) => l.includes(idOf(k))))], [EXIT_OK, 1, [['advisory_list', 'opened', ADVISORY_LIST_PADDED_BYTES, 10, ['count', 'advisories']]], false]);
+      const loud = await cli([...base, '--reveal']);
+      t("⭐ the CLI with --reveal: THIS process's stdout is the listing's JSON with its pad trimmed — exactly the projected listing, not one trailing space — and never a stderr line", [loud.code, loud.out, advisoryListDisplay(padded) === listed, loud.errs.some((l) => l.includes(idOf(2)))], [EXIT_OK, [listed], true, false]);
     }
 
     // ── the hierarchy link at the seat ──────────────────────────────────────
@@ -3158,6 +3439,36 @@ export async function selfTest() {
       t(`⭐ --route behind a proxy that answers nothing: the process re-execs with ${PROXY_FLAG}, the read gets no answer, and the verdict is exit 3 with the error naming it — never direct`, [routeDeadProxy.status, deadOut?.transport ?? null, (deadOut?.error ?? '').includes('no answer'), routeDeadProxy.stderr.includes(PROXY_FLAG)], [EXIT_PREREQUISITE, null, true, true], routeDeadProxy.stderr.slice(-300));
     }
 
+    // ── retired lane aliases at the seat's door ─────────────────────────────
+    battery("retired lane aliases at the seat's door: a domain:engine / services / cli / rest label on labels_add, issue_create or pr_create is written as domain:server and said on stderr, a dry run included; a live domain:* label, a non-lane label and labels_remove pass untouched; the rewrite never refuses");
+    {
+      const RW = (labels) => rewriteRetiredLaneLabels(labels);
+      t('each of the four retired spellings is written as domain:server, one rewrite row each', ['domain:engine', 'domain:services', 'domain:cli', 'domain:rest'].map((l) => [RW([l]).labels.join(), RW([l]).rewrites.length]), [['domain:server', 1], ['domain:server', 1], ['domain:server', 1], ['domain:server', 1]]);
+      t('the rows read from the ONE alias map, never a copy: every key it names is rewritten to its value', Object.entries(LANE_LABEL_ALIASES).every(([from, to]) => RW([from]).labels[0] === to && RW([from]).rewrites[0].from === from), true);
+      t('control: a live domain:* label passes untouched, no row', [RW(['domain:server', 'domain:spec', 'domain:skills']).labels, RW(['domain:server', 'domain:spec', 'domain:skills']).rewrites], [['domain:server', 'domain:spec', 'domain:skills'], []]);
+      t('control: a non-lane label and a retired-looking prefix pass untouched', RW(['pm:queue', 'domain:engine-core', 'repo:cloud']).labels, ['pm:queue', 'domain:engine-core', 'repo:cloud']);
+      t('a duplicate the rewrite made collapses to one, in either order — so the validator sees no "named twice"', [RW(['domain:engine', 'domain:server']).labels, RW(['domain:server', 'domain:cli', 'pm:queue']).labels, RW(['domain:engine', 'domain:cli']).labels], [['domain:server'], ['domain:server', 'pm:queue'], ['domain:server']]);
+      t('…while a duplicate the caller wrote is left for the validator, as before', RW(['a', 'a']).labels, ['a', 'a']);
+      t('the read-back words name both spellings and why', retiredLaneRewriteLine({ from: 'domain:engine', to: 'domain:server' }), 'label domain:engine → domain:server (retired alias)');
+      const acts = rewriteRetiredLaneActions([
+        { op: 'labels_add', issue: 1, labels: ['domain:engine', 'pm:queue'] },
+        { op: 'labels_remove', issue: 1, labels: ['domain:engine'] },
+        { op: 'issue_create', title: 't', body: 'b', labels: ['domain:rest'] },
+        { op: 'pr_create', title: 't', head: 'h', base: 'main', labels: ['domain:cli'] },
+        { op: 'comment', issue: 1, body: 'domain:engine' },
+      ]);
+      t('labels_add, issue_create and pr_create are rewritten; ⛔ labels_remove keeps the retired name it must take off; a body is never read', acts.actions.map((a) => a.labels ?? a.body), [['domain:server', 'pm:queue'], ['domain:engine'], ['domain:server'], ['domain:server'], 'domain:engine']);
+      t('…each row naming its 1-based action and op', acts.rewrites.map((r) => `${r.action}:${r.op}:${r.from}`), ['1:labels_add:domain:engine', '3:issue_create:domain:rest', '4:pr_create:domain:cli']);
+      t('…and the rewritten stroke still packs through the shared validator', packRequest({ repo: 'objectstack-ai/objectstack', session: SESSION, actions: rewriteRetiredLaneActions([{ op: 'labels_add', issue: 1, labels: ['domain:engine', 'domain:server'] }]).actions }).ok, true);
+      t('a stroke with no alias is handed back as the same objects, nothing rewritten', (() => { const a = [{ op: 'labels_add', issue: 1, labels: ['x'] }]; const r = rewriteRetiredLaneActions(a); return [r.actions[0] === a[0], r.rewrites.length]; })(), [true, 0]);
+      t('the adding ops are exactly three and each carries labels in the table; labels_remove is not one', [[...RETIRED_LANE_REWRITE_OPS], RETIRED_LANE_REWRITE_OPS.every((op) => [...OPS[op].required, ...OPS[op].optional].includes('labels')), RETIRED_LANE_REWRITE_OPS.includes('labels_remove')], [['labels_add', 'issue_create', 'pr_create'], true, false]);
+      writeFileSync(join(dir, 'lane-alias.json'), JSON.stringify([{ op: 'labels_add', issue: 7, labels: ['domain:engine', 'tooling'] }]), 'utf8');
+      const laneEnv = { ...process.env, GITHUB_TOKEN: TOKEN, GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '', OS_PM_WRITE_PACE_FILE: join(dir, 'lane-pace.jsonl'), [SESSION_ENV]: SESSION, [CONTAINER_SESSION_ENV]: '' };
+      const laneDry = spawnSync(process.execPath, [SELF_PATH, '--repo', 'objectstack-ai/objectstack', '--actions-file', join(dir, 'lane-alias.json'), '--dry-run'], { encoding: 'utf8', env: laneEnv });
+      const laneSent = laneDry.status === EXIT_OK ? JSON.parse(laneDry.stdout).client_payload.actions[0].labels : laneDry.stderr.slice(-300);
+      t('end to end through the CLI: the dry run exits 0, its payload carries domain:server, and stderr says the rewrite', [laneDry.status, laneSent, laneDry.stderr.includes('fleet-write/dispatch: action 1 (labels_add): label domain:engine → domain:server (retired alias)')], [EXIT_OK, ['domain:server', 'tooling'], true]);
+    }
+
     // ── the signature at the seat's door ────────────────────────────────────
     battery("the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone");
     {
@@ -3269,6 +3580,94 @@ export async function selfTest() {
         const body = src.slice(src.lastIndexOf('export async function main('));
         const at = body.indexOf('readPullRequestTargets(candidates');
         return at > body.indexOf('packRequest(') && at < body.indexOf('if (opts.dryRun)');
+      })());
+    }
+
+    // ── the kind rule at the relay's adding doors ──────────────────────────
+    battery("the kind rule at the relay's adding doors: a pm state on pr_create or on a labels_add whose target READS as a pull request, and pm:awaiting-merge on issue_create or on a labels_add whose target reads as an issue, are refused before the dry-run exit with label-write's own sentence, case-insensitively and for the whole file; an unread kind is never a pass; labels_remove and an ungoverned labels_add read nothing");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const RULE = (text) => typeof text === 'string' && text.includes(KIND_RULE_PATH) && text.includes(KIND_RULE_STATES_ON_ISSUES) && text.includes(KIND_RULE_AWAITING_MERGE_PR_ONLY);
+      const ROWS = (actions) => kindRuleRows(actions);
+      const prState = ROWS([{ op: 'pr_create', title: 't', head: 'h', base: 'main', labels: ['skip-changeset', 'pm:queue'] }]);
+      t('⭐ a pm state in pr_create\'s labels is refused with no read, quoting the rule from label-write\'s constants', [prState.refusals.map((r) => `${r.action}:${r.op}`), prState.reads, RULE(prState.refusals[0]?.refusal), prState.refusals[0]?.refusal.includes('`pm:queue` is a pm card STATE and its target is a pull request')], [['1:pr_create'], [], true, true]);
+      const issueAwaiting = ROWS([{ op: 'issue_create', title: 't', body: 'b', labels: ['pm:awaiting-merge'] }]);
+      t('⭐ pm:awaiting-merge in issue_create\'s labels is refused with no read', [issueAwaiting.refusals.map((r) => `${r.action}:${r.op}`), issueAwaiting.refusals[0]?.refusal.includes('its target is an issue'), [KIND_RULE_PATH, KIND_RULE_AWAITING_MERGE_PR_ONLY].every((q) => issueAwaiting.refusals[0]?.refusal.includes(q))], [['1:issue_create'], true, true]);
+      const mixedCreates = ROWS([{ op: 'pr_create', title: 't', head: 'h', base: 'main', labels: ['Needs-User-Decision'] }, { op: 'issue_create', title: 't', body: 'b', labels: ['PM:Awaiting-Merge'] }]);
+      t('⭐ MIXED CASE at each create is refused like the lower-case name, its spelling named as written', [mixedCreates.refusals.map((r) => `${r.action}:${r.op}`), mixedCreates.refusals[0]?.refusal.includes('`Needs-User-Decision` is `needs-user-decision`'), mixedCreates.refusals[1]?.refusal.includes('`PM:Awaiting-Merge` is `pm:awaiting-merge`')], [['1:pr_create', '2:issue_create'], true, true]);
+      const legal = ROWS([{ op: 'pr_create', title: 't', head: 'h', base: 'main', labels: ['pm:awaiting-merge'] }, { op: 'issue_create', title: 't', body: 'b', labels: ['pm:queue', 'needs-user-decision'] }, { op: 'labels_remove', issue: 7, labels: ['pm:queue', 'pm:awaiting-merge'] }]);
+      t('control: each label on its own kind passes, and ⛔ labels_remove is never a row — a removal is never refused or read', [legal.refusals, legal.reads], [[], []]);
+      const adds = ROWS([{ op: 'labels_add', issue: 7, labels: ['tooling'] }, { op: 'labels_add', issue: 8, labels: ['PM:Queue'] }, { op: 'labels_add', issue: 9, labels: ['pm:awaiting-merge'] }]);
+      t('a labels_add waits for the read only when the rule governs a label it adds — mixed case included; an ungoverned one reads nothing', [adds.refusals, adds.reads.map((r) => `${r.action}:${r.issue}`)], [[], ['2:8', '3:9']]);
+      // The platform, faked at fetch: GET /repos/{repo}/issues/{n} answers from `store`, and every request is recorded.
+      const readFake = (store) => {
+        const seen = [];
+        const fetch = async (url, init) => {
+          const path = new URL(url).pathname;
+          seen.push(`${init?.method ?? 'GET'} ${path}`);
+          const answer = store[path];
+          if (answer === undefined) throw new Error('connect ECONNREFUSED (fixture)');
+          return { status: answer.status, headers: { get: () => null }, json: async () => answer.json };
+        };
+        return { fetch, seen, api: 'https://api.github.test' };
+      };
+      const PULL = (n) => ({ status: 200, json: { number: n, html_url: `https://github.com/${REPO}/pull/${n}`, pull_request: { url: `https://api.github.test/repos/${REPO}/pulls/${n}` } } });
+      const ISSUE = (n) => ({ status: 200, json: { number: n, html_url: `https://github.com/${REPO}/issues/${n}` } });
+      const at = (n) => `/repos/${REPO}/issues/${n}`;
+      const read = async (store, reads) => {
+        const f = readFake(store);
+        return { rows: await readLabelTargetKinds(reads, { repo: REPO, api: f.api, fetch: f.fetch, token: TOKEN }), seen: f.seen };
+      };
+      const kinds = await read({ [at(1)]: PULL(1), [at(2)]: ISSUE(2) }, [{ action: 1, issue: 1, labels: ['pm:dispatched'] }, { action: 2, issue: 1, labels: ['pm:awaiting-merge'] }, { action: 3, issue: 2, labels: ['pm:awaiting-merge'] }, { action: 4, issue: 2, labels: ['pm:queue'] }]);
+      t('the kind is READ by label-write\'s readTargetKind: a state on a PR and awaiting-merge on an issue refused, each on its own kind passing — ONE GET per number', [kinds.rows.map((r) => `${r.action}:${r.verdict}:${r.kind}`), kinds.seen], [['1:refused:pull request', '2:pass:pull request', '3:refused:issue', '4:pass:issue'], [`GET ${at(1)}`, `GET ${at(2)}`]]);
+      const blind = await read({ [at(5)]: { status: 200, json: { number: 5, html_url: `https://github.com/${REPO}/pull/5` } }, [at(6)]: { status: 503, json: { message: 'down' } } }, [{ action: 1, issue: 5, labels: ['pm:queue'] }, { action: 2, issue: 6, labels: ['pm:queue'] }, { action: 3, issue: 7, labels: ['pm:queue'] }]);
+      t('⛔ a 200 whose members disagree is REFUSED rather than guessed; a 503 and no answer are UNREAD — each says why, never a pass', [blind.rows.map((r) => r.verdict), blind.rows[0].refusal.includes('refused rather than guessed'), blind.rows[1].refusal.includes('HTTP 503'), blind.rows[2].refusal.includes('ECONNREFUSED')], [['refused', 'unread', 'unread'], true, true, true]);
+      // The CLI, in process: the read deps stand in for the platform; a send dep records anything that would leave.
+      const cli = async (actions, store, { envExtra = {}, dryRun = true } = {}) => {
+        const file = join(dir, `kind-${paceCase++}.json`);
+        writeFileSync(file, JSON.stringify(actions), 'utf8');
+        const f = readFake(store);
+        const sent = [];
+        const out = [];
+        const err = [];
+        const [log, error] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = (l) => err.push(String(l));
+        try {
+          const argv = ['--repo', REPO, '--actions-file', file, '--request-id', 'fw-kind-1', ...(dryRun ? ['--dry-run'] : [])];
+          const code = await main(argv, { env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION, ...envExtra }, read: { api: f.api, fetch: f.fetch }, send: { api: 'https://api.github.test', pace: paceFor(join(dir, `kind-pace-${paceCase++}.jsonl`)), fetch: async (url, init) => { sent.push(`${init?.method ?? 'GET'} ${new URL(url).pathname}`); throw new Error('fixture: nothing may be sent'); } } });
+          return { code, out: out.join('\n'), err: err.join('\n'), seen: f.seen, sent };
+        } finally {
+          [console.log, console.error] = [log, error];
+        }
+      };
+      const PR_ACT = (labels) => ({ op: 'pr_create', title: 't', head: 'h', base: 'main', body: 'Fixes #1', labels });
+      const cliPr = await cli([PR_ACT(['pm:queue'])], {});
+      t('⭐ CLI: pr_create with a state is usage (2) on a DRY RUN, zero reads, no payload, the refusal naming the action', [cliPr.code, cliPr.seen, cliPr.out.includes('"event_type"'), cliPr.err.includes('REFUSED — action 1 (pr_create)')], [EXIT_USAGE, [], false, true], cliPr.err.slice(-300));
+      const cliIssue = await cli([{ op: 'issue_create', title: 't', body: 'b', labels: ['PM:Awaiting-Merge'] }], {});
+      t('⭐ CLI: issue_create with pm:awaiting-merge in MIXED CASE is usage (2), zero reads, no payload', [cliIssue.code, cliIssue.seen, cliIssue.out.includes('"event_type"')], [EXIT_USAGE, [], false], cliIssue.err.slice(-300));
+      const cliAddPull = await cli([{ op: 'labels_add', issue: 1, labels: ['pm:dispatched'] }], { [at(1)]: PULL(1) });
+      t('⭐ CLI: labels_add of a state on a target that READS as a pull request is usage (2), one GET, no payload', [cliAddPull.code, cliAddPull.seen, cliAddPull.out.includes('"event_type"'), cliAddPull.err.includes(`${REPO}#1 is a pull request`)], [EXIT_USAGE, [`GET ${at(1)}`], false, true], cliAddPull.err.slice(-300));
+      const cliAddMixed = await cli([{ op: 'labels_add', issue: 1, labels: ['Needs-User-Decision'] }], { [at(1)]: PULL(1) });
+      t('⭐ CLI: labels_add of `Needs-User-Decision` on a pull request is refused like the lower-case name', [cliAddMixed.code, cliAddMixed.err.includes('`Needs-User-Decision` is `needs-user-decision`')], [EXIT_USAGE, true], cliAddMixed.err.slice(-300));
+      const cliAddIssue = await cli([{ op: 'labels_add', issue: 2, labels: ['pm:awaiting-merge'] }], { [at(2)]: ISSUE(2) });
+      t('⭐ CLI: labels_add of pm:awaiting-merge on a target that reads as an issue is usage (2), no payload', [cliAddIssue.code, cliAddIssue.out.includes('"event_type"'), cliAddIssue.err.includes(`${REPO}#2 is an issue`)], [EXIT_USAGE, false, true], cliAddIssue.err.slice(-300));
+      const cliBlind = await cli([{ op: 'labels_add', issue: 6, labels: ['pm:queue'] }], { [at(6)]: { status: 503, json: { message: 'down' } } });
+      t('⭐ CLI: an UNREADABLE kind on labels_add is PREREQUISITE NOT MET (3), the rule quoted, no payload — never a pass', [cliBlind.code, cliBlind.err.includes('PREREQUISITE NOT MET') && RULE(cliBlind.err), cliBlind.out.includes('"event_type"')], [EXIT_PREREQUISITE, true, false], cliBlind.err.slice(-300));
+      const cliLegal = await cli([{ op: 'labels_add', issue: 2, labels: ['pm:queue'] }], { [at(2)]: ISSUE(2) });
+      t('a state on an issue packs: exit 0, one GET, the payload printed with the labels as written', [cliLegal.code, cliLegal.seen, cliLegal.code === EXIT_OK ? JSON.parse(cliLegal.out).client_payload.actions[0].labels : null], [EXIT_OK, [`GET ${at(2)}`], ['pm:queue']], cliLegal.err.slice(-300));
+      const cliQuiet = await cli([{ op: 'labels_add', issue: 1, labels: ['tooling'] }, { op: 'labels_remove', issue: 1, labels: ['pm:queue', 'Needs-User-Decision'] }], {});
+      t('⛔ a removal is never refused and an ungoverned labels_add reads nothing: exit 0, ZERO reads', [cliQuiet.code, cliQuiet.seen], [EXIT_OK, []], cliQuiet.err.slice(-300));
+      const cliWhole = await cli([{ op: 'comment', issue: 2, body: 'domain:skills#3 · huangyiirene · ' + SESSION + '\nnote' }, { op: 'labels_add', issue: 1, labels: ['pm:blocked'] }], { [at(1)]: PULL(1) }, { dryRun: false });
+      t('⭐ a refusal sends NOTHING for the whole file: a real (non-dry) run with a legal comment beside it is usage (2) with zero requests sent', [cliWhole.code, cliWhole.sent, cliWhole.err.includes('REFUSED — action 2 (labels_add)')], [EXIT_USAGE, [], true], cliWhole.err.slice(-300));
+      const cliNoToken = await cli([{ op: 'labels_add', issue: 1, labels: ['pm:queue'] }], { [at(1)]: PULL(1) }, { envExtra: { GITHUB_TOKEN: '', GH_TOKEN: '' } });
+      t('…and with no token a governed labels_add\'s kind cannot be read: exit 3 before any request', [cliNoToken.code, cliNoToken.seen, cliNoToken.err.includes('(labels_add) adds a label the kind rule allows on only one kind')], [EXIT_PREREQUISITE, [], true]);
+      t('structural: the create refusal runs in main before the session; the labels_add read after the packer and BEFORE the dry-run exit', (() => {
+        const src = readReal(SELF_PATH, 'utf8');
+        const body = src.slice(src.lastIndexOf('export async function main('));
+        const rows = body.indexOf('kindRuleRows(actions)');
+        const read = body.indexOf('readLabelTargetKinds(labelReads');
+        return rows > body.indexOf('rewriteRetiredLaneActions(actions)') && rows < body.indexOf('const session = opts.session') && read > body.indexOf('packRequest(') && read < body.indexOf('if (opts.dryRun)');
       })());
     }
 
@@ -3426,9 +3825,10 @@ export async function selfTest() {
       "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent; " +
       "a started workflow run read back from the target's run list within a bounded window, UNCONFIRMED (6) when it is not there; " +
       "a batched stroke waited for as long as the runner is told to pause, and one the relay job cannot hold refused before it leaves; " +
-      "an advisory report or draft never read back, by construction, its id handed on from the run's advisory annotation; " +
+      "an advisory report or draft never read back, by construction, its id handed on from the run's advisory annotation, and a publish's id read off the same annotation; " +
       "an advisory read whose one-time key pair this process made and never let out, its sealed answer reassembled from the run's notices and opened byte for byte, " +
-      'UNVERIFIED (6) when it does not open, and printed to stdout on --reveal alone; ' +
+      'UNVERIFIED (6) when it does not open, and printed to stdout on --reveal alone; an advisory listing opened the same way under its own associated data, ' +
+      'its pad trimmed for its --reveal display alone; ' +
       'and every relay sender, discovered from the source, answering an accepted dispatch with no run, or none completed, UNCONFIRMED (6) with ZERO direct writes, under auto as under dispatch (the no-run conformance).',
   );
   selfTestReachedVerdict = true;
@@ -3479,6 +3879,7 @@ const USAGE = [
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json [--session session_…] [--request-id id] [--json]',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json --dry-run',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file read.json [--reveal]   # one advisory_read: { op, ghsa_id }',
+  '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file list.json [--reveal]   # one advisory_list: { op }',
   '  node scripts/pm/fleet-write/dispatch.mjs --route        # ONE JSON line: the transport this environment resolves to, and why',
   '  node scripts/pm/fleet-write/dispatch.mjs --self-test',
   '',
@@ -3492,7 +3893,8 @@ const USAGE = [
   '  read from the platform, a dry run included — an issue refused (2), an unread target refused (3).',
   '  An advisory_read names ghsa_id alone: this process makes its one-time key pair, sends the public half, and opens',
   '  the sealed answer with the private half, which never leaves memory. --reveal prints the opened text to stdout, and',
-  '  nothing else ever prints it; a public_key in the actions file is refused (2).',
+  '  nothing else ever prints it; a public_key in the actions file is refused (2). An advisory_list names nothing at all',
+  '  and is sealed and opened the same way: the triage, draft and closed advisories, five fields each.',
   `  Exits: ${EXIT_OK} run succeeded, every body reads back as sent and every started run is listed · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
   `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, a body not read back, or a started run not listed) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
@@ -3563,6 +3965,19 @@ export async function main(argv, deps = {}) {
     console.error('fleet-write/dispatch: nothing was sent.');
     return EXIT_USAGE;
   }
+  // A retired lane alias is written as its lane, said once per label on stderr — a dry run included (header of
+  // `rewriteRetiredLaneLabels`): a rewrite, never a refusal.
+  const lanes = rewriteRetiredLaneActions(actions);
+  for (const r of lanes.rewrites) console.error(`fleet-write/dispatch: action ${r.action} (${r.op}): ${retiredLaneRewriteLine(r)}`);
+  actions = lanes.actions;
+  // The kind rule at a create, which names its own kind: judged on the file as handed, before the session — a dry run
+  // included — and the whole file refused, nothing sent (header: "The kind rule"). A labels_add waits for its read below.
+  const kindRule = kindRuleRows(actions);
+  if (kindRule.refusals.length > 0) {
+    for (const r of kindRule.refusals) console.error(`fleet-write/dispatch: REFUSED — action ${r.action} (${r.op}): ${r.refusal}`);
+    console.error('fleet-write/dispatch: nothing was sent.');
+    return EXIT_USAGE;
+  }
   // A read's one-time key pair, made HERE, in memory (header, "How the callers"): the public half goes in the action;
   // the private half stays in `armed.keys` and dies with this process. A process re-executed through the proxy below
   // makes its own; this one's is discarded with it.
@@ -3573,7 +3988,7 @@ export async function main(argv, deps = {}) {
     return EXIT_USAGE;
   }
   if (opts.reveal && armed.keys.size === 0) {
-    console.error("fleet-write/dispatch: --reveal prints an advisory_read's opened answer, and this stroke carries no advisory_read. Nothing was sent.");
+    console.error(`fleet-write/dispatch: --reveal prints a sealed read's opened answer (${ADVISORY_READ_OPS.join(', ')}), and this stroke carries none. Nothing was sent.`);
     return EXIT_USAGE;
   }
   actions = armed.actions;
@@ -3592,17 +4007,24 @@ export async function main(argv, deps = {}) {
   }
   // A trailer-signed issue_patch body passes only on a pull request — READ from the platform, never judged from the
   // body, and before the dry-run exit so a dry run refuses what the send would (header).
+  // The same read, and the same place, decide a governed labels_add's target kind (header: "The kind rule").
   const candidates = pullRequestBodyCandidates(actions);
-  if (candidates.length > 0) {
-    const readToken = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+  const labelReads = kindRule.reads;
+  const readToken = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+  if (candidates.length > 0 || labelReads.length > 0) {
     if (!readToken) {
-      console.error(`fleet-write/dispatch: PREREQUISITE NOT MET — action ${candidates[0].action} (issue_patch)'s body is signed by its trailer, which passes only on a pull request, and with no GITHUB_TOKEN / GH_TOKEN in the environment the target cannot be read. Nothing was sent.`);
+      const needs = candidates.length > 0
+        ? `action ${candidates[0].action} (issue_patch)'s body is signed by its trailer, which passes only on a pull request`
+        : `action ${labelReads[0].action} (labels_add) adds a label the kind rule allows on only one kind`;
+      console.error(`fleet-write/dispatch: PREREQUISITE NOT MET — ${needs}, and with no GITHUB_TOKEN / GH_TOKEN in the environment the target cannot be read. Nothing was sent.`);
       return EXIT_PREREQUISITE;
     }
     if (!deps.read) {
       const rearmedForRead = rearmThroughProxy(argv);
       if (rearmedForRead !== null) return rearmedForRead;
     }
+  }
+  if (candidates.length > 0) {
     const targets = await readPullRequestTargets(candidates, { repo: opts.repo, token: readToken, ...(deps.read ?? {}) });
     const issues = targets.filter((r) => r.verdict === 'issue');
     const unread = targets.filter((r) => r.verdict === 'unread');
@@ -3615,6 +4037,18 @@ export async function main(argv, deps = {}) {
       if (unread.length > 0) console.error('  ⛔ An unread target is never a pass: re-run once the read answers, or sign the body on its first line.');
       console.error('fleet-write/dispatch: nothing was sent.');
       return issues.length > 0 ? EXIT_USAGE : EXIT_PREREQUISITE;
+    }
+  }
+  if (labelReads.length > 0) {
+    const kinds = await readLabelTargetKinds(labelReads, { repo: opts.repo, token: readToken, ...(deps.read ?? {}) });
+    for (const r of kinds) {
+      if (r.verdict === 'pass') console.error(`fleet-write/dispatch: action ${r.action} (labels_add) — ${opts.repo}#${r.issue} reads as ${r.kind === KIND_ISSUE ? 'an' : 'a'} ${r.kind}, and its labels are legal there.`);
+      else console.error(`fleet-write/dispatch: ${r.verdict === 'unread' ? 'PREREQUISITE NOT MET' : 'REFUSED'} — action ${r.action} (labels_add): ${r.refusal}`);
+    }
+    const refused = kinds.filter((r) => r.verdict === 'refused');
+    if (refused.length > 0 || kinds.some((r) => r.verdict === 'unread')) {
+      console.error('fleet-write/dispatch: nothing was sent.');
+      return refused.length > 0 ? EXIT_USAGE : EXIT_PREREQUISITE;
     }
   }
   if (opts.dryRun) {
@@ -3634,7 +4068,8 @@ export async function main(argv, deps = {}) {
   const tool = 'scripts/pm/fleet-write/dispatch.mjs';
   const result = await sendFleetWrite(packed.payload, { token, advisoryReadKeys: armed.keys, reveal: opts.reveal, ...(deps.send ?? {}) });
   // ⛔ The opened text reaches THIS process's stdout, and only on --reveal — never stderr, a log, a file or --json.
-  if (opts.reveal) for (const r of result.reads ?? []) if (r.state === 'opened') console.log(r.plaintext);
+  // A listing's opened text is padded to the channel's size: its display alone trims the pad (`advisoryListDisplay`).
+  if (opts.reveal) for (const r of result.reads ?? []) if (r.state === 'opened') console.log(r.op === 'advisory_list' ? advisoryListDisplay(r.plaintext) : r.plaintext);
   if (!result.ok && (result.state === 'no-run' || result.state === 'timeout')) console.error(unconfirmedText(result, tool));
   if (result.notStored) console.error(notStoredText(result, tool));
   if (result.state === 'unverified') console.error(unverifiedText(result, tool));

@@ -19,9 +19,23 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { arObjects } from './ar.objects.generated.js';
+import { frObjects } from './fr.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+import { zhHantGeneratedSourceHashes } from './zh-Hant.source-hashes.generated.js';
+import { arGeneratedSourceHashes } from './ar.source-hashes.generated.js';
+import { frGeneratedSourceHashes } from './fr.source-hashes.generated.js';
+import { ptBRGeneratedSourceHashes } from './pt-BR.source-hashes.generated.js';
+import { ruGeneratedSourceHashes } from './ru.source-hashes.generated.js';
+import { deGeneratedSourceHashes } from './de.source-hashes.generated.js';
+import { koGeneratedSourceHashes } from './ko.source-hashes.generated.js';
 import { messagingMessages } from './messages.js';
 
 /**
@@ -74,5 +88,33 @@ export const MessagingTranslations: TranslationBundle = {
   'es-ES': withSourceFallback(
     { objects: esESObjects, messages: messagingMessages['es-ES'] },
     enSource, undefined, esESGeneratedSourceHashes,
+  ),
+  'zh-Hant': withSourceFallback(
+    { objects: zhHantObjects, messages: messagingMessages['zh-Hant'] },
+    enSource, undefined, zhHantGeneratedSourceHashes,
+  ),
+  'ar': withSourceFallback(
+    { objects: arObjects, messages: messagingMessages['ar'] },
+    enSource, undefined, arGeneratedSourceHashes,
+  ),
+  'fr': withSourceFallback(
+    { objects: frObjects, messages: messagingMessages['fr'] },
+    enSource, undefined, frGeneratedSourceHashes,
+  ),
+  'pt-BR': withSourceFallback(
+    { objects: ptBRObjects, messages: messagingMessages['pt-BR'] },
+    enSource, undefined, ptBRGeneratedSourceHashes,
+  ),
+  'ru': withSourceFallback(
+    { objects: ruObjects, messages: messagingMessages['ru'] },
+    enSource, undefined, ruGeneratedSourceHashes,
+  ),
+  'de': withSourceFallback(
+    { objects: deObjects, messages: messagingMessages['de'] },
+    enSource, undefined, deGeneratedSourceHashes,
+  ),
+  'ko': withSourceFallback(
+    { objects: koObjects, messages: messagingMessages['ko'] },
+    enSource, undefined, koGeneratedSourceHashes,
   ),
 };

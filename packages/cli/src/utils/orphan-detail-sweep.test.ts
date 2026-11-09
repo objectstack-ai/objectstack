@@ -13,7 +13,8 @@ import { describe, it, expect, vi } from 'vitest';
 import type { DanglingReference, DanglingReferenceReport } from '@objectstack/objectql';
 import {
   buildOrphanDetailExport,
-  objectsWithRequiredMaster,
+  masterFieldsOf,
+  objectsWithMaster,
   planOrphanDetailSweep,
   recordKey,
   recordsToDelete,
@@ -33,10 +34,34 @@ const CONFIGS = {
   },
   sw_absent: { name: 'sw_absent', fields: { master: { type: 'master_detail', reference: 'sw_master', required: true } } },
   sw_plain: { name: 'sw_plain', fields: { link: { type: 'lookup', reference: 'sw_master' } } },
+  // [#30976] A controlled-by-parent object whose one master is OPTIONAL (ruling A of #30905).
+  sw_optional: {
+    name: 'sw_optional',
+    sharingModel: 'controlled_by_parent',
+    fields: {
+      master: { type: 'master_detail', reference: 'sw_master', required: false },
+      link: { type: 'lookup', reference: 'sw_master' },
+    },
+  },
+  // The same lone optional `master_detail` on an object that is not controlled by a parent: no master.
+  sw_optional_private: {
+    name: 'sw_optional_private',
+    sharingModel: 'private',
+    fields: { master: { type: 'master_detail', reference: 'sw_master', required: false } },
+  },
+  // Controlled by a parent through its REQUIRED master; the optional `master_detail` beside it is an ordinary parent.
+  sw_required_cbp: {
+    name: 'sw_required_cbp',
+    sharingModel: 'controlled_by_parent',
+    fields: {
+      master: { type: 'master_detail', reference: 'sw_master', required: true },
+      other_parent: { type: 'master_detail', reference: 'sw_master', required: false },
+    },
+  },
 };
 
-const finding = (recordId: string, field: string, value: string): DanglingReference =>
-  ({ objectName: 'sw_detail', recordId, field, target: 'sw_master', value });
+const finding = (recordId: string, field: string, value: string, objectName = 'sw_detail'): DanglingReference =>
+  ({ objectName, recordId, field, target: 'sw_master', value });
 
 function report(dangling: DanglingReference[], extra: Partial<DanglingReferenceReport> = {}): DanglingReferenceReport {
   return {
@@ -58,15 +83,17 @@ function engineWith(rep: DanglingReferenceReport, cascade: (object: string, id: 
 const rootOnly = async (object: string, id: string | number) => [{ object, id: String(id) }];
 
 describe('[#24964] planOrphanDetailSweep', () => {
-  it('reads only the objects that declare a REQUIRED master-detail, and not a table the boot measured absent', async () => {
-    expect(objectsWithRequiredMaster(CONFIGS)).toEqual(['sw_detail', 'sw_absent']);
+  it('reads only the objects that declare a master, and not a table the boot measured absent', async () => {
+    expect(objectsWithMaster(CONFIGS)).toEqual(['sw_detail', 'sw_absent', 'sw_optional', 'sw_required_cbp']);
     const { engine, inspectDanglingReferences } = engineWith(report([]), rootOnly);
 
     const plan = await planOrphanDetailSweep({ engine, maxRows: 50, absent: (o) => o === 'sw_absent' });
 
-    expect(inspectDanglingReferences).toHaveBeenCalledWith({ objects: ['sw_detail'], rowsPerObject: 50, maxRows: 50 });
+    expect(inspectDanglingReferences).toHaveBeenCalledWith({
+      objects: ['sw_detail', 'sw_optional', 'sw_required_cbp'], rowsPerObject: 50, maxRows: 50,
+    });
     expect(plan.notRead).toEqual(['sw_absent']);
-    expect(plan.objects).toEqual(['sw_detail']);
+    expect(plan.objects).toEqual(['sw_detail', 'sw_optional', 'sw_required_cbp']);
   });
 
   it('an orphan is a dangling REQUIRED master-detail; a lookup or an optional master-detail is named and never deletable', async () => {
@@ -116,6 +143,36 @@ describe('[#24964] planOrphanDetailSweep', () => {
     expect(plan.orphans).toEqual([]);
     expect(plan.notes.join(' ')).toMatch(/Unknown is not missing/);
     expect(plan.notes.join(' ')).toMatch(/--max-rows/);
+  });
+});
+
+describe('[#30976] the optional master of a controlled-by-parent object', () => {
+  it('is a master field; a lone optional master-detail elsewhere, or one beside a required master, is not', () => {
+    expect(masterFieldsOf(CONFIGS.sw_optional)).toEqual(['master']);
+    expect(masterFieldsOf(CONFIGS.sw_optional_private)).toEqual([]);
+    expect(masterFieldsOf(CONFIGS.sw_required_cbp)).toEqual(['master']);
+    // CONTROL: the required masters read as they did before the optional master existed.
+    expect(masterFieldsOf(CONFIGS.sw_detail)).toEqual(['master', 'second']);
+  });
+
+  it('a dangling optional master makes its row an orphan; a dangling lookup on the same object is named, never deletable', async () => {
+    const { engine } = engineWith(report([
+      finding('o1', 'master', 'gone_a', 'sw_optional'),
+      finding('o2', 'link', 'gone_b', 'sw_optional'),
+      finding('r1', 'other_parent', 'gone_c', 'sw_required_cbp'),
+    ]), rootOnly);
+
+    const plan = await planOrphanDetailSweep({ engine, maxRows: 50 });
+
+    expect(plan.orphans).toEqual([{
+      object: 'sw_optional',
+      recordId: 'o1',
+      fields: [{ field: 'master', master: 'sw_master', missingMasterId: 'gone_a' }],
+      cascade: [],
+    }]);
+    expect(plan.otherDangling.map((d) => `${d.objectName}/${d.recordId}.${d.field}`))
+      .toEqual(['sw_optional/o2.link', 'sw_required_cbp/r1.other_parent']);
+    expect(recordsToDelete(plan).map((r) => `${r.object}/${r.id}`)).toEqual(['sw_optional/o1']);
   });
 });
 

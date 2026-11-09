@@ -55,8 +55,8 @@ const OBJECT = 'service_case';
 const FLOW = 'case_escalate';
 const ACTION_MESSAGE = 'Case escalated';
 const FLOW_MESSAGE = 'Escalation recorded';
-/** The runner's own default text, in the en pack. */
-const RUNNER_DEFAULT = 'Action completed successfully';
+/** The runner's own default text, in the en pack: it names the labelled action (#30126). */
+const RUNNER_DEFAULT = 'Escalate case completed';
 /** The declared action, as the object metadata carries it. */
 const DECLARED_WITHOUT_MESSAGE = { name: 'escalate_case', label: 'Escalate case', type: 'flow', target: FLOW };
 const DECLARED = { ...DECLARED_WITHOUT_MESSAGE, successMessage: ACTION_MESSAGE };

@@ -25,7 +25,7 @@
 //     something other than the control;
 //   - discovery advertises the default `/data` and `/meta` bases (the crud and
 //     metadata acceptance[3]/[1] defaults);
-//   - metadata acceptance[3] / negative[1]: a `client_liaison`-bound member's
+//   - metadata acceptance[3] / negative[1]: a `showcase_client_liaison`-bound member's
 //     served `showcase_project` schema carries no budget, spent or
 //     budget_remaining at all, while the admin's copy carries all three.
 
@@ -76,7 +76,7 @@ describe('[#26572] the default RestServerConfig on a booted showcase: crud, batc
     const user = await ql.findOne('sys_user', { where: { email: LIAISON_EMAIL }, ...SYS });
     const membership = await ql.findOne('sys_member', { where: { user_id: user.id }, ...SYS });
     await ql.insert('sys_user_position', {
-      user_id: user.id, position: 'client_liaison', organization_id: membership?.organization_id,
+      user_id: user.id, position: 'showcase_client_liaison', organization_id: membership?.organization_id,
     }, SYS);
     taskId = (await call(admin, 'GET', '/data/showcase_task?$top=1')).json.records[0].id;
     expect(taskId).toBeTruthy();

@@ -49,6 +49,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { FILTER_LOGICAL_KEYS, ODATA_SPELLING, QUERY_PARAM_NEAR_MISS, invalidSortError, isObjectOfDisabledPackage, isPlainRecord, nearMissKey, objectPackageDisabledError, quotedQueryValue, suggestFieldName } from './protocol.js';
 import { objectNotFoundError, relationConditionSites } from '@objectstack/core';
 import { collectInternalWriteResponseFields } from './write-response-internal-fields.js';
+import { resolveObjectSortability } from '@objectstack/spec/api';
 import { AggregationFunction, DateGranularity, REFERENCE_VALUE_TYPES, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS, SEARCH_FLAG_EXCLUDED_TYPES, apiExposureDenialReason, canServeApiOperation, classifyDottedFilterHead, effectiveOperationsArray, isCredentialFieldType, isFilterAST, isVirtualSearchField, parseFilterAST, referenceTargetOf, resolveEffectiveApiMethods, resolveSearchFieldResolution } from '@objectstack/spec/data';
 
 /**
@@ -643,7 +644,10 @@ export function assertSortFieldsExist(
     const unmaterialized = names.filter(
         (f) => UNMATERIALIZED_SORT_TYPES.has(String(gate.fields[f]?.type ?? '')),
     );
-    if (unmaterialized.length === 0) return;
+    if (unmaterialized.length === 0) {
+        assertSortFieldsAreOffered(gate.schema, object, names, param);
+        return;
+    }
     const virtualFirst = unmaterialized[0];
     const virtualType = String(gate.fields[virtualFirst]?.type);
     throw invalidSortError(
@@ -665,6 +669,47 @@ export function assertSortFieldsExist(
                 + ' column behind it the ORDER BY reaches the driver, finds nothing, and is'
                 + ' dropped — the arbitrary order this refusal replaces.',
             extra: { field: virtualFirst, fields: unmaterialized, object },
+        },
+    );
+}
+
+/**
+ * [#29896] The fourth verdict on the sort axis, after `unknown` > `dotted` >
+ * unmaterializable: a REAL, stored, undotted field the served sortability
+ * projection calls unsortable — today exactly a field whose author declared
+ * `sortable: false` (`reason: 'author-declared'`).
+ *
+ * Judged by the projection itself ({@link resolveObjectSortability}, the
+ * resolver the `GET /meta/object/:name` envelope serves the grid and the Sort
+ * picker from), never by a second reading of the key here, so the door and
+ * the affordance cannot disagree: what the grid does not offer, the Data API
+ * does not perform. Measured before this verdict (base eee41490, real
+ * `SqlDriver` + `ObjectQL` + this protocol + `RestServer`): the projection
+ * served `nosort: { sortable: true }` and `GET /data/:object?sort=nosort`
+ * answered 200 sorted by the column, while `?sort=<formula>` was already
+ * refused `400 INVALID_SORT` — the answer this verdict now gives too, through
+ * the same {@link invalidSortError}.
+ *
+ * Ingress only, deliberately: the engine door (`assertOrderByIsMaterializable`)
+ * answers whether a driver CAN order by a column, and a stored column can, so
+ * an in-process caller (a hook, a flow) keeps its sort. `sortable: false`
+ * governs what the platform offers callers, not what its storage can do.
+ */
+function assertSortFieldsAreOffered(
+    schema: unknown, object: string, names: readonly string[], param: string): void {
+    const projection = resolveObjectSortability(schema).fields;
+    const refused = names.filter((f) => !f.includes('.') && projection[f]?.sortable === false);
+    if (refused.length === 0) return;
+    const first = refused[0];
+    throw invalidSortError(
+        param,
+        `sorts by '${first}', a field on '${object}' that declares \`sortable: false\``
+        + (refused.length > 1 ? ` (also: ${refused.slice(1).join(', ')})` : ''),
+        {
+            hint: ' The object\'s author chose not to offer a sort on this field, so the list'
+                + ' header and the Sort picker do not offer it either. Sort by another field,'
+                + ' or remove `sortable: false` from the field to make it sortable.',
+            extra: { field: first, fields: refused, object },
         },
     );
 }

@@ -33,7 +33,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const { zh, en } = builtInLocales;
+const { 'zh-Hans': zh, en } = builtInLocales;
 const zhShare = zh.shareDialog;
 
 function dialog(language: 'zh' | null, recordLabel?: string) {

@@ -35,6 +35,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ソース",
         help: "リクエストの発生元 — ノード駆動の承認では `flow:<flowName|nodeId>`"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "フロー",
         help: "このリクエストを開いたフローのラベル（リクエストを開いた時点の値）"
@@ -366,7 +370,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_until: {
         label: "Valid Until",
-        help: "Rule is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires."
+        help: "The rule stops applying at this time (UTC). Leave empty for no end date."
       },
       reason: {
         label: "Reason",

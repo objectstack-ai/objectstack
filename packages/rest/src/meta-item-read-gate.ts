@@ -66,12 +66,14 @@
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
-import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+import { preferredLocaleFromHeader, renderOperationMessage } from '@objectstack/spec/system';
 import { apiExposureDenialReason } from '@objectstack/spec/data';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
 import {
     ObjectSchemaMaskEvaluationError,
+    actionObjectOverrideTargets,
+    actionServedWithoutOwnObject,
     applyObjectSchemaMask,
     isObjectSchemaMaskExempt,
     relateObjectSchemaMaskPosture,
@@ -143,7 +145,19 @@ export interface MetaReadGateAudienceSources {
      * gated audiences DENY (ADR-0049).
      */
     resolveSecurityService(): Promise<MetaReadGatePermissionSetResolver | undefined>;
+    /**
+     * [#30126 row 12] The deployment's `errors.*` override lookup (an
+     * `II18nService.t`-compatible function), or `undefined` when there is none —
+     * the hook `renderOperationMessage` reads first, as plugin-security's
+     * refusals hand it. Absent: the built-in catalog alone, still in the
+     * caller's locale. A rejection is read as "no override", never as a fault:
+     * a refusal's wording must not turn a 403 into a 500.
+     */
+    resolveMessageTranslator?(): Promise<MetaReadGateMessageTranslator | undefined>;
 }
+
+/** An `II18nService.t`-compatible lookup, as {@link MetaReadGateAudienceSources.resolveMessageTranslator} answers it. */
+export type MetaReadGateMessageTranslator = (key: string, locale: string, params?: Record<string, unknown>) => string;
 
 /** How a transport reads a whole metadata type (the list half of the ports). */
 export interface MetaReadGateListSource {
@@ -790,11 +804,44 @@ function callerSystemPermissions(ctx: MetaReadGateCaller | undefined): Set<strin
     return new Set<string>(Array.isArray(ctx.systemPermissions) ? ctx.systemPermissions : []);
 }
 
+/**
+ * [#30126 row 12] The sentence a `403 PERMISSION_DENIED` of this gate carries:
+ * the operation catalog's `permission_denied`, rendered in the caller's locale
+ * (`ExecutionContext.locale`, which the shared assembler resolved from the
+ * request's `Accept-Language`, then the `localization` settings) — the one
+ * catalog plugin-security's object and capability refusals render, ⛔ never a
+ * second one here. It names nothing, as that key never does
+ * (`operation-message.ts` states why): the caller already knows which app,
+ * dashboard or view they opened, and its API name (`com.objectstack.setup`)
+ * is exactly the vocabulary that must not reach a person. The name stays on
+ * the request URL.
+ *
+ * Resolution is `renderOperationMessage`'s: the deployment's
+ * `errors.permission_denied` override where the transport hands a lookup in,
+ * then the built-in catalog for the locale, then `en`.
+ */
+async function permissionDeniedMessage(
+    sources: MetaReadGateAudienceSources,
+    ctx: MetaReadGateCaller | undefined,
+): Promise<string> {
+    const locale = typeof ctx?.locale === 'string' && ctx.locale.length > 0 ? ctx.locale : undefined;
+    let translate: MetaReadGateMessageTranslator | undefined;
+    try {
+        translate = await sources.resolveMessageTranslator?.();
+    } catch {
+        translate = undefined;
+    }
+    return renderOperationMessage({ messageKey: 'permission_denied' }, { locale, translate });
+}
+
 /** [#22639] The by-name refusal of a list view or a dashboard the caller may not open — the app arm's whole refusal (#8013). */
-function audienceRefusal(kind: 'view' | 'dashboard', name: string): MetaItemReadRefusal {
+async function audienceRefusal(
+    sources: MetaReadGateAudienceSources,
+    ctx: MetaReadGateCaller | undefined,
+): Promise<MetaItemReadRefusal> {
     return {
         reason: 'audience-permission', status: 403, code: 'PERMISSION_DENIED',
-        message: `You do not have permission to open the '${name}' ${kind}.`,
+        message: await permissionDeniedMessage(sources, ctx),
     };
 }
 
@@ -1618,7 +1665,9 @@ const DOCS_HOLDER_MESSAGE = 'This documentation is limited to holders of a permi
 export function createMetaItemReadGate(
     sources: MetaItemReadGateSources,
     metaType: string,
-    name: string,
+    // [#30126 row 12] Read by no gate since the refusals stopped naming the
+    // item; kept so both transports' calls stay as they are.
+    _name: string,
     documents: readonly any[],
     policy: MetaReadGatePolicy,
 ): (document: any) => Promise<MetaItemReadVerdict> {
@@ -1632,6 +1681,8 @@ export function createMetaItemReadGate(
 
     if (metaType === 'app') {
         type AppGateInputs = {
+            /** [#30126 row 12] The caller, kept for the refusal's locale. */
+            ctx: MetaReadGateCaller;
             sysPerms: Set<string>;
             serviceGate?: (n: string) => boolean;
             servabilityGate?: NavServabilityGate;
@@ -1668,7 +1719,7 @@ export function createMetaItemReadGate(
             const docAudienceGate = authorExempt
                 ? undefined
                 : await resolveNavDocAudience(sources, documents);
-            return { sysPerms, serviceGate, servabilityGate, docAudienceGate, authorExempt };
+            return { ctx, sysPerms, serviceGate, servabilityGate, docAudienceGate, authorExempt };
         })());
         return async (document) => {
             if (document == null) return serve(document);
@@ -1690,7 +1741,7 @@ export function createMetaItemReadGate(
                 if (gated.withheld === 'permission') {
                     return refuse({
                         reason: 'app-permission', status: 403, code: 'PERMISSION_DENIED',
-                        message: `You do not have permission to open the '${name}' app.`,
+                        message: await permissionDeniedMessage(sources, gateInputs.ctx),
                     });
                 }
                 // [#18066] The transport's own absence answer, so this arm
@@ -1722,7 +1773,7 @@ export function createMetaItemReadGate(
             // whole refusal, author or not.
             const sysPerms = callerSystemPermissions(ctx);
             if (sysPerms && !holdsRequiredPermissions(document.requiredPermissions, sysPerms)) {
-                return refuse(audienceRefusal('dashboard', name));
+                return refuse(await audienceRefusal(sources, ctx));
             }
             if (policy.arms !== 'all') return serve(document);
             // ADR-0057 D10: gate dashboard widgets by `requiresService` (mirrors
@@ -1747,7 +1798,7 @@ export function createMetaItemReadGate(
             const gated = filterViewForUser(document, sysPerms, isAggregatedViewContainer);
             // ONE view the caller does not hold: refused whole, on every door,
             // author or not — the app arm's whole refusal.
-            if (gated == null) return refuse(audienceRefusal('view', name));
+            if (gated == null) return refuse(await audienceRefusal(sources, ctx));
             // A container's entries are pruned per caller; on a door that
             // honours ruling 5856774816's author exemption, a caller who may
             // write the container reads it as stored (see
@@ -2185,12 +2236,22 @@ export function metaTypeReadRefusal(
  *
  * Its READ row exists because its read door requires
  * `manage_platform_settings`. Its WRITE door — `POST
- * /datasources/:name/external/refresh-catalog` — requires
+ * /datasources/:name/external/refresh-catalog` — requires, for the write,
  * `FEDERATION_WRITE_CAPABILITY` (`manage_metadata`, in
  * `./external-datasource-routes.ts`), which every `/meta` write door already
  * demands. ⛔ A row here names the capability the type's own WRITE door
- * requires — matched, never minted; a type whose write door asks nothing beyond
- * the authoring admission has no row.
+ * requires FOR THE WRITE — matched, never minted; a type whose write door asks
+ * nothing beyond the authoring admission for the write has no row.
+ *
+ * That door also requires `manage_platform_settings` (the 2026-11-03 ruling:
+ * seeing a datasource's remote structure needs the read capability on every
+ * route, writes included), and for what it ANSWERS, not for the write: it
+ * answers with the snapshot it wrote. The `/meta` write doors answer a
+ * receipt — the save, the publish, the rollback and the delete each return
+ * `success` with a version token or `seq`, never the stored document (their
+ * declared return types in `@objectstack/metadata-protocol`) — so there is no
+ * remote structure for that requirement to guard here. Where `/meta` does
+ * answer the snapshot, it already asks it: the READ row above.
  *
  * ## Which requests
  *
@@ -2423,7 +2484,7 @@ export interface MetaItemQueryRefusal {
     readonly status: 400;
     readonly code: 'VALIDATION_ERROR';
     readonly message: string;
-    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter';
+    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter' | 'names-on-package';
 }
 
 /**
@@ -2515,9 +2576,11 @@ function repeatedOnceRefusal(
 }
 
 /**
- * [#23214] The `/meta` doors whose only query rule is ARITY: none of them
- * declares a closed query set, so recognition (rule 1 of
- * {@link metaItemQueryRefusal}) never applies to them.
+ * [#23214] The `/meta` doors that read their query under the ARITY rule. None
+ * of the last three declares a closed query set, so recognition (rule 1 of
+ * {@link metaItemQueryRefusal}) never applies to them; [#29236] the list
+ * declares one ({@link META_LIST_QUERY_PARAMS}), asked first, by
+ * {@link metaListQueryRefusal}.
  *  - `list` — `GET /meta/:type`;
  *  - `book-tree` — `GET /meta/book/:name/tree`;
  *  - `drafts` — `GET /meta/_drafts`;
@@ -2536,19 +2599,23 @@ export type MetaQueryArityDoor = 'list' | 'book-tree' | 'drafts' | 'state';
  *    one inclusion, and `?id=` the app list's one app. Each is compared or
  *    joined as one value, so a repeat would become a name no item has (`'a,b'`)
  *    or a filter that matches nothing, or would read as absent: for `package`,
- *    a list of every package.
+ *    a list of every package. [#29236] `?names=` is the list's batch by-names
+ *    filter, ONE comma-separated value ({@link metaListNames}): a repeat would
+ *    be two lists of names, of which reading either one drops the other.
  *  - `book-tree`: `?package=` scopes the book and doc reads.
- *  - `drafts`: `?packageId=` and `?type=` each narrow the draft list to one
- *    package and one type; a repeat reached `listDrafts` as an array.
+ *  - `drafts`: `?package=` and `?type=` each narrow the draft list to one
+ *    package and one type; a repeat reached `listDrafts` as an array. [#31490]
+ *    `?package=` is the list's spelling, read through the same binding; the
+ *    door read `?packageId=` before, which is retired.
  *  - `state`: `?from=` is ONE current state; a repeat became the joined name
  *    `'a,b'`, which matches no transition key, so the answer was a dead end.
  *
  * Declared in this order on purpose: two repeated names answer for the first.
  */
 export const META_QUERY_ARITY_DOORS: Readonly<Record<MetaQueryArityDoor, readonly string[]>> = Object.freeze({
-    list: Object.freeze(['package', 'preview', 'object', 'include', 'id']),
+    list: Object.freeze(['package', 'preview', 'object', 'include', 'id', 'names']),
     'book-tree': Object.freeze(['package']),
-    drafts: Object.freeze(['packageId', 'type']),
+    drafts: Object.freeze(['package', 'type']),
     state: Object.freeze(['from']),
 });
 
@@ -2567,6 +2634,180 @@ export function metaQueryArityRefusal(door: MetaQueryArityDoor, query: unknown):
     if (!query || typeof query !== 'object') return undefined;
     return repeatedOnceRefusal(query as Record<string, unknown>, META_QUERY_ARITY_DOORS[door])
         ?? metaBracketedFilterRefusal(door, query);
+}
+
+/**
+ * [#29236] The closed query-parameter set of `GET /meta/:type`, the list
+ * (AGENTS.md 〈Route & surface ownership〉 rule 5; the ingress policy in
+ * `./query-allowlist.ts`). It declared none, so every name it does not read
+ * was ignored: `?names=` before this card, a misspelt `?name=`, or `?ids=`
+ * each answered the whole list with `200`, which a caller cannot tell from a
+ * filter that matched everything.
+ *
+ * **Measured** from the read points of both transports' list and of the chain
+ * they share ({@link createMetaListAnswer}): `package` (the scope,
+ * `metaItemPackageBinding`), `preview` (the draft overlay), `object` (the view
+ * switcher), `include` (the doc bodies, the position grants), `id` (the app
+ * list's one app), `names` (the batch by-names filter, {@link metaListNames}),
+ * and `locale` — read a frame down, by {@link metaRequestLocale} behind the doc
+ * locale collapse and the translation step, never in a handler body. The
+ * maintainer's ruling named the first six; `locale` joins them because the list
+ * already reads it, so leaving it out would turn every working
+ * `?locale=zh-CN` list read into a `400` (the item read's closed set carries it
+ * for the same reason, {@link META_ITEM_READ_PARAMS}).
+ *
+ * `meta-list-projection-parity.test.ts` in `@objectstack/runtime` derives the
+ * list's read points from the source and holds this set equal to them, so a
+ * name the list starts reading reaches it, or the census goes red.
+ */
+export const META_LIST_QUERY_PARAMS: readonly string[] = Object.freeze([
+    'package', 'preview', 'object', 'include', 'id', 'names', 'locale',
+]);
+
+/**
+ * The bracketed spellings (`param[`…) the list judges with its own located
+ * sentence, by the type whose step reads `param`: `package` on every type, at
+ * the door's arity step ({@link metaBracketedFilterRefusal}); `id` on `app` and
+ * `object` on `view`, in the chain ({@link refuseBracketedListFilter}).
+ * Recognition leaves exactly these to that sentence, which names the one
+ * spelling the filter takes; every other bracketed key — `names[]`, `id[]` on a
+ * type that reads no `id` — is a name the list does not read, refused here.
+ */
+function bracketedKeyJudgedByList(metaType: string, key: string): boolean {
+    if (key.startsWith('package[')) return true;
+    if (metaType === 'app' && key.startsWith('id[')) return true;
+    return metaType === 'view' && key.startsWith('object[');
+}
+
+/**
+ * [#29236] THE query decision of the `/meta/:type` list's entry, for both
+ * transports, asked before any read of the query:
+ *
+ *  1. **recognition** — a name outside {@link META_LIST_QUERY_PARAMS}, answered
+ *     with the located sentence `refuseUnknownQueryParams` answers
+ *     (`unknownQueryParamRefusalMessage`, `./query-allowlist.ts`), so a
+ *     misspelt filter is `400`, never the whole list with `200`. A bracketed
+ *     spelling the list judges itself ({@link bracketedKeyJudgedByList}) is
+ *     left to that sentence;
+ *  2. **arity** — {@link metaQueryArityRefusal} for the `list` door, which
+ *     unwraps a one-element array IN PLACE.
+ *
+ * `metaType` is the FOLDED singular type. `RestServer`'s door writes the
+ * answer in the nested `{ error: { code, message } }` its recognition and
+ * arity gates write; the runtime dispatcher's twin writes it through
+ * `deps.error`, with the same `error.code` and message.
+ */
+export function metaListQueryRefusal(metaType: string, query: unknown): MetaItemQueryRefusal | undefined {
+    return metaListUnknownParamRefusal(metaType, query) ?? metaQueryArityRefusal('list', query);
+}
+
+/**
+ * Rule 1 of {@link metaListQueryRefusal} alone, for `RestServer`'s door, which
+ * asks rule 2 through `refuseRepeatedQueryParams` (the gate it has always
+ * asked) right after it.
+ */
+export function metaListUnknownParamRefusal(metaType: string, query: unknown): MetaItemQueryRefusal | undefined {
+    if (!query || typeof query !== 'object') return undefined;
+    const judged: Record<string, true> = {};
+    for (const key of Object.keys(query)) {
+        if (!bracketedKeyJudgedByList(metaType, key)) judged[key] = true;
+    }
+    const message = unknownQueryParamRefusalMessage(judged, META_LIST_QUERY_PARAMS);
+    if (message !== undefined) return { status: 400, code: 'VALIDATION_ERROR', message, rule: 'unknown-parameter' };
+    if (metaType === 'package' && Object.prototype.hasOwnProperty.call(query, 'names')) {
+        return { status: 400, code: 'VALIDATION_ERROR', message: NAMES_ON_PACKAGE_LIST_MESSAGE, rule: 'names-on-package' };
+    }
+    return undefined;
+}
+
+/**
+ * [#31490] The closed query-parameter set of `GET /meta/_drafts` (AGENTS.md
+ * 〈Route & surface ownership〉 rule 5), measured from both transports' read
+ * points: `package` (the scope, read through `metaItemPackageBinding`, the
+ * list's own spelling and binding) and `type` (the one metadata type). The door
+ * read `?packageId=` and declared no set, so `?package=ID`, the spelling every
+ * sibling `/meta` read takes, was dropped and the drafts of every package
+ * answered `200`, as was any misspelt name. `packageId` is retired, not
+ * aliased: it is refused here like any other name the door does not read.
+ */
+export const META_DRAFTS_QUERY_PARAMS: readonly string[] = Object.freeze(['package', 'type']);
+
+/**
+ * [#31490] Rule 1 of {@link metaDraftsQueryRefusal} alone — RECOGNITION, for
+ * `RestServer`'s door, which asks the arity through `refuseRepeatedQueryParams`
+ * right after it, as the list door does. A bracketed spelling of one of the
+ * door's two filters (`package[`…, `type[`…) is left to
+ * {@link metaBracketedFilterRefusal}'s located sentence.
+ */
+export function metaDraftsUnknownParamRefusal(query: unknown): MetaItemQueryRefusal | undefined {
+    if (!query || typeof query !== 'object') return undefined;
+    const judged: Record<string, true> = {};
+    for (const key of Object.keys(query)) {
+        if (!key.startsWith('package[') && !key.startsWith('type[')) judged[key] = true;
+    }
+    const message = unknownQueryParamRefusalMessage(judged, META_DRAFTS_QUERY_PARAMS);
+    return message === undefined
+        ? undefined
+        : { status: 400, code: 'VALIDATION_ERROR', message, rule: 'unknown-parameter' };
+}
+
+/**
+ * [#31490] THE query decision of `GET /meta/_drafts`' entry, for the runtime
+ * dispatcher's twin: recognition ({@link metaDraftsUnknownParamRefusal}), then
+ * the door's arity ({@link metaQueryArityRefusal}), which unwraps a
+ * one-element array IN PLACE. Ask it before any read of the query.
+ */
+export function metaDraftsQueryRefusal(query: unknown): MetaItemQueryRefusal | undefined {
+    return metaDraftsUnknownParamRefusal(query) ?? metaQueryArityRefusal('drafts', query);
+}
+
+/**
+ * [#29236, contract review 6672872746] `?names=` on the `package` list. A
+ * `package` list item is keyed by its id (`manifest.id`) and carries no
+ * `name`, so a names filter there could never match and would answer `200 []`
+ * for every value: the silent zero the list's closed set exists to remove. It
+ * is refused instead, on both transports, before any read. Matching packages
+ * by id is a different behaviour and not served here.
+ */
+export const NAMES_ON_PACKAGE_LIST_MESSAGE =
+    "Query parameter 'names' is not served on the 'package' list: package items are keyed by id, not by name, "
+    + 'so no name could match. The list was not served. Leave the parameter out to list every package you can see.';
+
+/**
+ * [#29236, ruling 6580261740 letter A] THE reading of `?names=` on the
+ * `/meta/:type` list, for both transports and the chain: ONE comma-separated
+ * value (the data routes' spelling of `fields`, `searchFields`, `orderby`),
+ * each name trimmed, blanks dropped, repeats folded. Absent, `undefined`: no
+ * filter. A value that names no item at all (`?names=`, `?names=,`) is
+ * REFUSED — `400 VALIDATION_ERROR`, never read as every item, the #28548 rule
+ * the list's other narrowing filters keep — and THROWN, so each transport's own
+ * `catch` shapes it, as {@link refuseEmptyListFilter} does.
+ *
+ * Ask it AFTER {@link metaListQueryRefusal}, which refuses a repeated `names`
+ * and unwraps a one-element array, so the value read here is one string. A
+ * value that is not a string is no filter this reading knows, so it is read as
+ * absent — the decision above never hands one over.
+ *
+ * A name that matches no item is simply absent from the answer (no `404`): the
+ * list answers the items it would answer without the filter, narrowed to these
+ * names (`GetMetaItemsRequestSchema.names` in `@objectstack/spec/api`).
+ */
+export function metaListNames(query: Readonly<Record<string, unknown>> | undefined): readonly string[] | undefined {
+    const raw = query?.names;
+    if (typeof raw !== 'string') return undefined;
+    const names = [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))];
+    if (names.length === 0) {
+        const err: any = new Error(
+            `Query parameter 'names' names no item; got ${JSON.stringify(raw)}. The list was not served: `
+            + 'a list of no names is not a filter. Name at least one item, spelled ?names=A,B, or leave the '
+            + 'parameter out to list every item you can see.',
+        );
+        err.status = 400;
+        err.code = 'VALIDATION_ERROR';
+        err.param = 'names';
+        throw err;
+    }
+    return names;
 }
 
 /**
@@ -2600,7 +2841,7 @@ const META_BRACKETED_FILTERS: Readonly<Partial<Record<MetaQueryArityDoor, readon
         { param: 'package', names: 'package', takes: `${PACKAGE_ID_TAKES} ?package=ID`, served: 'tree', unscoped: 'read the tree across every package' },
     ] as const),
     drafts: Object.freeze([
-        { param: 'packageId', names: 'package', takes: `${PACKAGE_ID_TAKES} ?packageId=ID`, served: 'list', unscoped: 'list the drafts of every package' },
+        { param: 'package', names: 'package', takes: `${PACKAGE_ID_TAKES} ?package=ID`, served: 'list', unscoped: 'list the drafts of every package' },
         { param: 'type', names: 'metadata type', takes: 'one metadata type, spelled ?type=TYPE', served: 'list', unscoped: 'list the drafts of every type' },
     ] as const),
 });
@@ -2608,8 +2849,8 @@ const META_BRACKETED_FILTERS: Readonly<Partial<Record<MetaQueryArityDoor, readon
 /**
  * The answer of an arity door to a BRACKETED spelling of one of its narrowing
  * filters ({@link META_BRACKETED_FILTERS}): `?package[]=ID` or `?package[0]=ID`
- * on the list and the book tree, `?packageId[]=ID` or `?type[]=TYPE` on
- * `_drafts` — any key that opens `param[`. A client that serialises arrays
+ * on the list, the book tree and `_drafts`, or `?type[]=TYPE` on `_drafts` —
+ * any key that opens `param[`. A client that serialises arrays
  * qs-style sends it; every adapter hands the key through as spelled
  * (`readQuery` in `plugin-hono-server`, `readDispatchQuery` in
  * `@objectstack/hono`), so the door, which reads `query[param]`, read no
@@ -2931,12 +3172,19 @@ export function metaTranslateOptions(
  *    serves (`getPackagedDashboardBase`, `getPackagedViewBase`,
  *    `getPackagedReportBase`). A view is looked up by the served item's
  *    registry name, the qualified `<object>.<viewKey>` — never the bare key
- *    the catalog addresses it by under its object.
+ *    the catalog addresses it by under its object;
+ *  - [#30062] `page`, `dataset`, `app` and `book` — sealed (no org overlay,
+ *    ADR-0131 D6), but a `.custom` pair's declared override replaces the
+ *    base's item on every read (ADR-0146 D2), so the served document can
+ *    differ from the one the catalog translates (`getPackagedPageBase`,
+ *    `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`).
+ *    The label order the base feeds is ruling record 6631250894's: a
+ *    translation in the pair ({@link pairTranslationBundleOf}), then the
+ *    override's own label, then the base's translation.
  *
- * A translatable type without a row (`action`, `app`, `dataset`, `page`) is
- * ADR-0126 tier B — a write against its packaged item answers
- * `NOT_OVERRIDABLE`, so no org overlay of a packaged item exists for it —
- * and the protocol has no packaged-base accessor for it.
+ * The one translatable type without a row, `action`, has no packaged-base
+ * accessor: its override waits for ADR-0146 D9's conditions, so no read serves
+ * one over a packaged action.
  *
  * ⛔ One table, never a second resolver beside it: a type that gains a
  * packaged-base accessor on the protocol adds its row here.
@@ -2946,6 +3194,10 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['dashboard', 'getPackagedDashboardBase'],
     ['view', 'getPackagedViewBase'],
     ['report', 'getPackagedReportBase'],
+    ['page', 'getPackagedPageBase'],
+    ['dataset', 'getPackagedDatasetBase'],
+    ['app', 'getPackagedAppBase'],
+    ['book', 'getPackagedBookBase'],
 ]);
 
 /**
@@ -2953,8 +3205,9 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
  * metadata document, for `translateMetadataDocument`'s `packagedBase` — the
  * per-type resolver over {@link PACKAGED_BASE_ACCESSORS}: an `object` answers
  * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`,
- * a `view` `getPackagedViewBase(name)` and a `report`
- * `getPackagedReportBase(name)`.
+ * a `view` `getPackagedViewBase(name)`, a `report`
+ * `getPackagedReportBase(name)`, and [#30062] a `page`, `dataset`, `app` or
+ * `book` its own `getPackaged<Type>Base(name)`.
  *
  * `undefined` on every uncertainty — a type with no row, an empty name, a
  * protocol without the accessor (they are server-only extensions, so
@@ -2976,13 +3229,138 @@ export function packagedObjectBaseOf(protocol: unknown, type: string, name: unkn
     }
 }
 
+/**
+ * [#30062, ADR-0146 D2] The translations a served document's `.custom` pair
+ * ships itself, for `translateMetadataDocument`'s `pairBundle` — or
+ * `undefined` when the document is not a pair's declared override.
+ *
+ * Two protocol questions, both the protocol's to answer:
+ * `servedOverrideBaseOf(type, document)` — is this served document the
+ * declared override of a base, and of which (read off the envelope the read
+ * stamped on it); then `getPairTranslationBundle(base)` — that base's pair's
+ * own `translation` rows, locale-keyed. The deployment catalog cannot answer
+ * the second: it is every package's translations deep-merged, ids dropped.
+ *
+ * `undefined` on every uncertainty, {@link packagedObjectBaseOf}'s rule: a
+ * protocol without the accessors (server-only, feature-detected), an accessor
+ * that throws or rejects. The translator reads `undefined` as before the option
+ * existed: a string the override changed keeps its own text.
+ *
+ * `memo` is one read's cache, by base: a list serves many overrides of one
+ * base, and their pair's translations are read once.
+ */
+export async function pairTranslationBundleOf(
+    protocol: unknown,
+    type: string,
+    document: unknown,
+    memo?: Map<string, Promise<unknown>>,
+): Promise<unknown> {
+    const p: any = protocol;
+    if (!p || typeof p.servedOverrideBaseOf !== 'function' || typeof p.getPairTranslationBundle !== 'function') {
+        return undefined;
+    }
+    let base: unknown;
+    try {
+        base = p.servedOverrideBaseOf(type, document);
+    } catch {
+        return undefined;
+    }
+    return pairTranslationBundleOfBase(p, base, memo);
+}
+
+/**
+ * `getPairTranslationBundle(base)` on `protocol`, read once per base through
+ * `memo` — {@link pairTranslationBundleOf}'s second question, also asked by
+ * {@link withoutStaleObjectPlural} for the base an object's owner ships in.
+ * `undefined` on every uncertainty, {@link pairTranslationBundleOf}'s rule.
+ */
+function pairTranslationBundleOfBase(
+    protocol: unknown,
+    base: unknown,
+    memo?: Map<string, Promise<unknown>>,
+): Promise<unknown> {
+    const p: any = protocol;
+    if (typeof base !== 'string' || base === '') return Promise.resolve(undefined);
+    if (!p || typeof p.getPairTranslationBundle !== 'function') return Promise.resolve(undefined);
+    let pending = memo?.get(base);
+    if (pending === undefined) {
+        pending = Promise.resolve()
+            .then(() => p.getPairTranslationBundle(base))
+            .catch(() => undefined);
+        memo?.set(base, pending);
+    }
+    return pending;
+}
+
+/** A non-empty string, or `undefined`. */
+function nonEmptyText(value: unknown): string | undefined {
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * [#30391] `translated` — what the object translator answered for the served
+ * object `input` — without a plural the catalog made up for a renamed object.
+ *
+ * An object extension that renames `label` and declares no `pluralLabel` is
+ * served without one (the fold takes the plural of the old label off,
+ * `mergeObjectDefinitions` in `@objectstack/objectql`). The translator answers
+ * a missing `pluralLabel` with the catalog's `objects.NAME.pluralLabel`, and
+ * that entry is the base package's translation of the plural the extension
+ * left behind: it names the old label. So where `input` carries no plural, the
+ * packaged base declares one, and `input`'s `label` diverged from the packaged
+ * one, the catalog's plural is not served. In its place, the ruled order
+ * (ruling record 6631250894: a translation in the pair, then the override's
+ * own text, then the base's translation): the base's pair's own translation of
+ * the plural when it ships one, read through the same translator over the
+ * pair's bundle alone; otherwise what `input` carries, which is no plural —
+ * what an object that declares no `pluralLabel` is served.
+ *
+ * An object served WITH a plural (an extension that sets one, a tenant rename
+ * that kept one) and an object whose label is the packaged one are served
+ * unchanged, as is every object with no packaged base. Returns `translated`
+ * itself when nothing changes; the pair is read only when the rule applies.
+ */
+async function withoutStaleObjectPlural(
+    protocol: unknown,
+    input: Record<string, unknown>,
+    translated: Record<string, unknown>,
+    packagedBase: unknown,
+    translateOptions: Record<string, unknown>,
+    memo?: Map<string, Promise<unknown>>,
+): Promise<Record<string, unknown>> {
+    if (nonEmptyText(input.pluralLabel) !== undefined) return translated;
+    const packaged = packagedBase && typeof packagedBase === 'object' ? packagedBase as Record<string, unknown> : undefined;
+    if (!packaged || nonEmptyText(packaged.pluralLabel) === undefined) return translated;
+    const label = nonEmptyText(input.label);
+    if (label === undefined || label === packaged.label) return translated;
+    const pairBundle = await pairTranslationBundleOfBase(protocol, packaged._packageId, memo);
+    let pairPlural: string | undefined;
+    if (pairBundle !== undefined && typeof input.name === 'string') {
+        const { translateMetadataDocument } = await import('@objectstack/spec/system');
+        const read = translateMetadataDocument('object', { name: input.name } as any, pairBundle as any, translateOptions as any);
+        pairPlural = nonEmptyText((read as Record<string, unknown> | undefined)?.pluralLabel);
+    }
+    if (pairPlural !== undefined) {
+        return translated.pluralLabel === pairPlural ? translated : { ...translated, pluralLabel: pairPlural };
+    }
+    if (!('pluralLabel' in input)) {
+        if (!('pluralLabel' in translated)) return translated;
+        const served: Record<string, unknown> = { ...translated };
+        delete served.pluralLabel;
+        return served;
+    }
+    return translated.pluralLabel === input.pluralLabel ? translated : { ...translated, pluralLabel: input.pluralLabel };
+}
+
 /** How a transport reaches what the list translation reads. */
 export interface MetaListTranslationSources {
     /** This request's i18n service, or `undefined` when the deployment has none. */
     resolveI18nService(): Promise<unknown>;
     /**
      * This request's protocol, for the packaged base of an object, dashboard,
-     * view or report ({@link packagedObjectBaseOf}); `undefined` when unreachable.
+     * view, report, page, dataset, app or book ({@link packagedObjectBaseOf})
+     * and a declared override's pair translations
+     * ({@link pairTranslationBundleOf}); `undefined` when unreachable.
      */
     resolveProtocol(): Promise<unknown>;
     /**
@@ -3028,19 +3406,31 @@ export async function translateMetaList(
     if (!locale) return items;
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
     // [#8284 · #20730] One protocol resolution for the whole page, for every
-    // type with a packaged base (object, dashboard, view, report); the lookup
-    // itself is a synchronous in-memory registry read per element, by that
-    // element's own registry name — a view's qualified `<object>.<viewKey>`.
+    // type with a packaged base (object, dashboard, view, report, and since
+    // #30062 page, dataset, app, book); the lookup itself is a synchronous
+    // in-memory registry read per element, by that element's own registry
+    // name — a view's qualified `<object>.<viewKey>`.
     const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
+    // [#30062] A declared override's pair translations, read once per base for the page.
+    const pairBundles = new Map<string, Promise<unknown>>();
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
-    const translated = arr.map((item) => {
+    const translated = await Promise.all(arr.map(async (item) => {
+        const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, item, pairBundles);
+        const packagedBase = packagedObjectBaseOf(p, metaType, item?.name);
         const out = translateMetadataDocument(metaType, item, bundle, {
             ...metaTranslateOptions(i18n, locale),
-            packagedBase: packagedObjectBaseOf(p, metaType, item?.name),
+            packagedBase,
+            ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
         });
-        return metaType === 'view' && item && typeof item === 'object' ? withoutInventedViewLabel(item, out) : out;
-    });
+        if (!item || typeof item !== 'object') return out;
+        if (metaType === 'view') return withoutInventedViewLabel(item, out);
+        // [#30391] A renamed object's plural, read once per base for the page.
+        if (metaType === 'object') {
+            return withoutStaleObjectPlural(p, item, out, packagedBase, metaTranslateOptions(i18n, locale), pairBundles);
+        }
+        return out;
+    }));
     return Array.isArray(raw) ? translated : { ...raw, items: translated };
 }
 
@@ -3056,7 +3446,9 @@ export async function translateMetaList(
  * built-in fallbacks still apply); no locale is. The i18n service is resolved
  * only for a translatable type, and the protocol only for a type with a
  * packaged base — an object, a dashboard, a view or a report (#8284, #20730, #25788:
- * {@link packagedObjectBaseOf}).
+ * {@link packagedObjectBaseOf}), and since #30062 a page, a dataset, an app or a
+ * book, each also handed its pair's own translations when the document is a
+ * declared override ({@link pairTranslationBundleOf}).
  *
  * Moved here, unchanged, from `RestServer.translateMetaItem` (which now
  * delegates), so the runtime dispatcher's item read translates with the same
@@ -3096,14 +3488,24 @@ export async function translateMetaDocument(
         }
     }
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
-    const packagedBase = PACKAGED_BASE_ACCESSORS.has(metaType)
-        ? packagedObjectBaseOf(await sources.resolveProtocol(), metaType, (document as any)?.name)
-        : undefined;
+    const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
+    const packagedBase = packagedObjectBaseOf(p, metaType, (document as any)?.name);
+    // [#30062] A declared override's pair translations: the ruled order's first rank.
+    const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, document);
     const translated = translateMetadataDocument(metaType, document as any, bundle, {
         ...metaTranslateOptions(i18n, locale),
         packagedBase,
+        ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
     });
-    return metaType === 'view' ? withoutInventedViewLabel(document as Record<string, unknown>, translated) : translated;
+    if (metaType === 'view') return withoutInventedViewLabel(document as Record<string, unknown>, translated);
+    if (metaType === 'object' && translated && typeof translated === 'object') {
+        // [#30391] A renamed object's plural.
+        return withoutStaleObjectPlural(
+            p, document as Record<string, unknown>, translated as Record<string, unknown>, packagedBase,
+            metaTranslateOptions(i18n, locale),
+        );
+    }
+    return translated;
 }
 
 /**
@@ -3370,6 +3772,197 @@ export function projectMetaObjectSchema(
 }
 
 /**
+ * What {@link projectMetaActionForCaller} answers for one action entry:
+ *
+ *  - `serve` — the entry is served to this caller as declared (the object
+ *    door's projection keeps it; it is never rewritten). `object` is the
+ *    action's own object as this caller is served it, present only where that
+ *    object was projected; `cacheControl` is the
+ *    {@link META_UNDETERMINED_CACHE_CONTROL} an undetermined posture owes;
+ *  - `withhold` — the projection drops it: the caller is answered as for an
+ *    action that does not exist;
+ *  - `fault` — the caller's field visibility on `object` cannot be evaluated,
+ *    or the projection would leave it no field (ADR-0106 D6), which the door
+ *    answers as its field-visibility fault.
+ */
+export type MetaActionProjection =
+    | { kind: 'serve'; object?: any; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL }
+    | { kind: 'withhold' }
+    | { kind: 'fault'; object: string };
+
+/** What {@link projectMetaActionForCaller} reads, for one request. */
+export interface MetaActionProjectionSources {
+    /** This request's object-schema masker (`resolveObjectMasker` for `object`), asked per object name. */
+    masker(objectName: string): Promise<ObjectSchemaMaskPosture>;
+    /** The definition of the object `name`, or `undefined` when there is none. A rejection is a fault, never "none". */
+    readObject(name: string): Promise<unknown>;
+}
+
+/** An object definition the object projection can project: a record carrying a `fields` record. */
+function projectableObject(definition: unknown): definition is Record<string, unknown> {
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return false;
+    const fields = (definition as Record<string, unknown>).fields;
+    return !!fields && typeof fields === 'object' && !Array.isArray(fields);
+}
+
+/**
+ * [ADR-0106 D1] ONE action entry as this caller is served it — the one rule
+ * every door that serves an action entry asks: the `/meta` action list and
+ * item read on both transports, and MCP `list_actions`.
+ *
+ * It is the `/meta` object door's projection, not a second one. The action is
+ * projected as its own object's only `actions` entry
+ * ({@link projectMetaObjectSchema} over the posture related to that document,
+ * `maskDeniedFieldReferences` → `actionParamReadsDenied`), so it is withheld
+ * exactly where `GET /meta/object/:name` drops it from that object: a param
+ * whose `field` the caller cannot read, judged on the object the param names
+ * (`objectOverride` if set, else the action's own object), or any other
+ * position of the action that reads such a field.
+ *
+ * `ownerName` is the action's own object, `undefined` for an object-less one.
+ * Where it names no object definition the action carries no field of an own
+ * object, so only its `objectOverride` params are judged
+ * (`actionServedWithoutOwnObject`), each against the caller's posture on the
+ * object it names: a posture that cannot be evaluated or is undetermined
+ * withholds the action (fail closed, as a related object does on the object
+ * door).
+ *
+ * Who is projected is the masker's decision alone (ADR-0106 D4/D6/D8): a
+ * `passthrough` posture — a D4-exempt caller, a deployment with no security
+ * service or with the mask switched off — is served every action as declared,
+ * with no object read.
+ */
+export async function projectMetaActionForCaller(
+    sources: MetaActionProjectionSources,
+    action: unknown,
+    ownerName: string | undefined,
+): Promise<MetaActionProjection> {
+    if (ownerName !== undefined) {
+        let posture: ObjectSchemaMaskPosture | undefined;
+        let evaluationError: ObjectSchemaMaskEvaluationError | undefined;
+        try {
+            posture = await sources.masker(ownerName);
+        } catch (error) {
+            if (!(error instanceof ObjectSchemaMaskEvaluationError)) throw error;
+            evaluationError = error;
+        }
+        if (posture?.kind === 'passthrough') return { kind: 'serve' };
+        const definition = await sources.readObject(ownerName);
+        if (projectableObject(definition)) {
+            if (evaluationError || !posture) return { kind: 'fault', object: ownerName };
+            const document = { ...definition, actions: [action] };
+            const masked = projectMetaObjectSchema(await relateObjectSchemaMaskPosture(posture, document), document);
+            if (!masked.ok) return { kind: 'fault', object: ownerName };
+            const kept = Array.isArray(masked.document?.actions) && masked.document.actions.length === 1;
+            if (!kept) return { kind: 'withhold' };
+            return masked.cacheControl
+                ? { kind: 'serve', object: masked.document, cacheControl: masked.cacheControl }
+                : { kind: 'serve', object: masked.document };
+        }
+    }
+    const targets = actionObjectOverrideTargets(action, ownerName);
+    if (targets.length === 0) return { kind: 'serve' };
+    const related = new Map<string, ReadonlySet<string> | undefined>();
+    for (const target of targets) {
+        let posture: ObjectSchemaMaskPosture | undefined;
+        try {
+            posture = await sources.masker(target);
+        } catch (error) {
+            if (!(error instanceof ObjectSchemaMaskEvaluationError)) throw error;
+        }
+        if (posture?.kind === 'passthrough') return { kind: 'serve' };
+        related.set(target, posture?.kind === 'project' ? posture.readable : undefined);
+    }
+    return actionServedWithoutOwnObject(action, ownerName, related) ? { kind: 'serve' } : { kind: 'withhold' };
+}
+
+/**
+ * [ADR-0106 D1] The own object of a STANDALONE `action` entry the `/meta`
+ * doors serve: its spec `objectName`, or `undefined` for an object-less one.
+ */
+function metaActionOwnerName(action: unknown): string | undefined {
+    const objectName = action && typeof action === 'object' ? (action as { objectName?: unknown }).objectName : undefined;
+    return typeof objectName === 'string' && objectName !== '' ? objectName : undefined;
+}
+
+/**
+ * [ADR-0106 D1] {@link MetaActionProjectionSources} for one `/meta` request:
+ * the transport's masker, each object's posture asked once, and the object
+ * definitions read once, from the gate's own `object` list read (none of it is
+ * served). A list read that is absent or rejects is a fault, ⛔ never "no
+ * object": that would judge every action as object-less.
+ */
+function metaActionProjectionSources(
+    listSource: MetaReadGateListSource,
+    masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
+): MetaActionProjectionSources {
+    const postures = new Map<string, Promise<ObjectSchemaMaskPosture>>();
+    let objects: Promise<Map<string, unknown>> | undefined;
+    const readObjects = async (): Promise<Map<string, unknown>> => {
+        const pending = listSource.listMetaItems('object');
+        if (pending === undefined) {
+            throw new TypeError('No metadata list read is available to resolve the objects an action entry reads.');
+        }
+        const byName = new Map<string, unknown>();
+        for (const item of metaItemsArray(await pending)) {
+            if (item && typeof item === 'object' && typeof item.name === 'string') byName.set(item.name, item);
+        }
+        return byName;
+    };
+    return {
+        masker: (objectName) => {
+            let posture = postures.get(objectName);
+            if (!posture) postures.set(objectName, (posture = masker(objectName)));
+            return posture;
+        },
+        readObject: async (name) => (await (objects ??= readObjects())).get(name),
+    };
+}
+
+/**
+ * [ADR-0106 D1] ONE `action` item a `/meta` item read is about to serve, as
+ * this caller is served it ({@link projectMetaActionForCaller}, over the
+ * transport's masker and its gate's `object` list read). Asked by the item
+ * chain ({@link createMetaItemAnswer} step 4a) and by `RestServer`'s cached
+ * arm, which is `GET /meta/action/:name`'s default door: one decision for both
+ * arms. A `withhold` is answered as the read answers a name with nothing
+ * behind it.
+ */
+export async function projectMetaActionItem(
+    sources: MetaReadGateListSource & Pick<MetaItemAnswerSources, 'resolveObjectMasker'>,
+    action: unknown,
+): Promise<MetaActionProjection> {
+    return projectMetaActionForCaller(
+        metaActionProjectionSources(sources, await sources.resolveObjectMasker()),
+        action, metaActionOwnerName(action),
+    );
+}
+
+/**
+ * [ADR-0106 D1] Every action entry of a listed `action` page as this caller is
+ * served it ({@link projectMetaActionForCaller}): a withheld entry is left out,
+ * as the object door leaves it out of its object. One object whose field
+ * visibility cannot be evaluated fails the whole list (`ok: false`, naming it),
+ * as the `object` list does; the page is served `private, no-store` when any
+ * entry's posture was undetermined.
+ */
+async function projectMetaActionList(
+    sources: MetaActionProjectionSources,
+    items: readonly any[],
+): Promise<{ ok: true; items: any[]; cacheControl?: typeof META_UNDETERMINED_CACHE_CONTROL } | { ok: false; object: string }> {
+    const served: any[] = [];
+    let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
+    for (const item of items) {
+        const projected = await projectMetaActionForCaller(sources, item, metaActionOwnerName(item));
+        if (projected.kind === 'fault') return { ok: false, object: projected.object };
+        if (projected.kind === 'withhold') continue;
+        cacheControl ??= projected.cacheControl;
+        served.push(item);
+    }
+    return cacheControl ? { ok: true, items: served, cacheControl } : { ok: true, items: served };
+}
+
+/**
  * [ADR-0106 D5(2)] Project every object schema of a listed `object` page. One
  * unevaluable object fails the whole list (`ok: false`, naming it) — serving the
  * rest would leave a hole in the projection no client can see — whether its
@@ -3451,7 +4044,7 @@ export interface MetaListAnswerSources extends MetaItemReadGateSources {
 export interface MetaListRequest {
     /** The SINGULAR type (the caller folds `/meta/docs` once, at its boundary). */
     readonly metaType: string;
-    /** The list route's query. The chain reads `id`, `object` and `include` off it (and `locale`, through `requestLocale`). */
+    /** The list route's query. The chain reads `id`, `object`, `include` and [#29236] `names` off it (and `locale`, through `requestLocale`). */
     readonly query: Readonly<Record<string, unknown>> | undefined;
     /**
      * `?preview=draft`, ADMITTED — the transport's own declaration, made with
@@ -3652,6 +4245,20 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     narrows (permission decides what exists for this caller; the filter
  *     narrows within it, never the reverse, ADR-0045 §3), and on the raw doc
  *     items, before the locale collapse (`_packageId` scopes membership).
+ *  2a. [#29236] Every type — `?names=a,b` keeps the items of those names
+ *     ({@link metaListNames}: an EMPTY value is refused `400
+ *     VALIDATION_ERROR`; a name that matches nothing is simply absent, never a
+ *     404). After the gate, by the rule step 3 keeps, and before the mask and
+ *     the translation, so those run on the named items only. Each transport
+ *     also hands the names to the store read (`GetMetaItemsRequest.names`), so
+ *     the protocol filters before it decorates; this step is what holds the
+ *     answer for a store that does not filter. Narrowing the gate's INPUT that
+ *     way moves no verdict: every list gate judges an item on its own facts and
+ *     on per-request facts (the books, the registered services and objects),
+ *     never on which sibling items are listed. The doc list's corpus IS the
+ *     listed docs, but a book claims a doc by that doc's own placement keys
+ *     (`resolveDocAudiences`), so a doc's audience is the same in any corpus
+ *     that holds it.
  *  3. `app` — `?id=<app>` narrows to the app of that `name` (#7566); absent
  *     means no filter, and [#28548] an EMPTY value is refused (`400
  *     VALIDATION_ERROR`), never read as absent, as is a bracketed key
@@ -3667,6 +4274,10 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *  7. `object` — the ADR-0106 mask ({@link projectMetaObjectSchema} over the
  *     transport's {@link MetaListAnswerSources.resolveObjectMasker}), and the
  *     `private, no-store` an undetermined posture owes (D6 tier 2).
+ *  7a. `action` — each entry as the object door's projection serves it to this
+ *     caller ({@link projectMetaActionForCaller}, the same masker): an entry
+ *     binding a field the caller cannot read, on the object its param names,
+ *     is left out.
  *  8. `position` — `?include=grants`: each position as the resolver enforces
  *     it for a holder ({@link describeMetaPositionList}).
  *  9. The translation step ({@link translateMetaList}, reached through
@@ -3711,6 +4322,19 @@ export function createMetaListAnswer(
             if (list) {
                 const judged = await createMetaListReadGate(sources, metaType)(list);
                 if (judged !== list) visible = withItems(visible, judged);
+            }
+        }
+
+        // 2a. [#29236] `?names=a,b`, on every type — after the gate, before
+        // the mask and the translation. An EMPTY one is refused, never read as
+        // absent ({@link metaListNames}).
+        const names = metaListNames(query);
+        if (names) {
+            const list = listItemsOf(visible);
+            if (list) {
+                const wanted = new Set(names);
+                const named = list.filter((it: any) => it && typeof it === 'object' && wanted.has(it.name));
+                if (named.length !== list.length) visible = withItems(visible, named);
             }
         }
 
@@ -3781,6 +4405,20 @@ export function createMetaListAnswer(
             }
         }
 
+        // 7a. [ADR-0106 D1] `action` — each entry as the object door's
+        //     projection serves it to this caller; a withheld one is left out.
+        if (metaType === 'action') {
+            const list = listItemsOf(visible);
+            if (list && list.length > 0) {
+                const projected = await projectMetaActionList(
+                    metaActionProjectionSources(sources, await sources.resolveObjectMasker()), list,
+                );
+                if (!projected.ok) return projected;
+                if (projected.items.length !== list.length) visible = withItems(visible, projected.items);
+                cacheControl = projected.cacheControl;
+            }
+        }
+
         // 8. [#25333] `position` — `?include=grants`.
         if (metaType === 'position' && query?.include === 'grants') {
             const list = listItemsOf(visible);
@@ -3821,6 +4459,13 @@ export interface MetaItemAnswerSources extends MetaItemReadGateSources {
         document: unknown,
         runtimeDocument?: unknown,
     ): Promise<unknown>;
+    /**
+     * [ADR-0106 D1] This request's object-schema masker — the same port
+     * {@link MetaListAnswerSources.resolveObjectMasker} is — asked only for an
+     * `action` item, which the chain serves as the object door's projection
+     * serves it ({@link projectMetaActionForCaller}).
+     */
+    resolveObjectMasker(): Promise<(objectName: string) => Promise<ObjectSchemaMaskPosture>>;
 }
 
 /** The request facts the item chain reads — no transport shape. */
@@ -3891,6 +4536,10 @@ export type MetaItemAnswer =
  *     `translations` map is dropped whatever the locale).
  *  4. `object` — the ADR-0106 mask ({@link projectMetaObjectSchema}) under the
  *     posture resolved before the fetch.
+ *  4a. `action` — the entry as the object door's projection serves it to this
+ *     caller ({@link projectMetaActionForCaller}, over
+ *     {@link MetaItemAnswerSources.resolveObjectMasker}); a withheld one is
+ *     `absent`, the answer step 1 gives a name with nothing behind it.
  *  5. The body ({@link translateMetaEnvelope}, through the transport's entry):
  *     the translation, and `sortability` beside an object schema — derived
  *     from the caller's runtime view ([#22250] `resolveObjectSchemaRuntimeView`:
@@ -3928,12 +4577,23 @@ export function createMetaItemAnswer(
         if (!masked.ok) return { kind: 'mask-fault', object: name };
         visible = masked.document;
 
+        // 4a. [ADR-0106 D1] `action` — served as the object door's projection
+        //     serves it to this caller; a withheld one is answered `absent`,
+        //     exactly as a name with nothing behind it (step 1).
+        let cacheControl = masked.cacheControl;
+        if (metaType === 'action') {
+            const projected = await projectMetaActionItem(sources, visible);
+            if (projected.kind === 'withhold') return { kind: 'refuse', refusal: { reason: 'absent' } };
+            if (projected.kind === 'fault') return { kind: 'mask-fault', object: projected.object };
+            cacheControl ??= projected.cacheControl;
+        }
+
         // 5. The body — translation, and `sortability` beside an object schema,
         //    over [#22250] the caller's runtime view of what step 4 serves.
         const runtime = await resolveObjectSchemaRuntimeView(visible, maskPosture);
         const served = await sources.translateEnvelope(envelope ?? {}, visible, runtime.document);
         // 6. [#27627] The validator of what is served — over `served`, never an earlier stage of it.
-        return { kind: 'serve', envelope: served, ...metaRepresentationCaching(served, masked.cacheControl) };
+        return { kind: 'serve', envelope: served, ...metaRepresentationCaching(served, cacheControl) };
     };
 }
 
@@ -3976,11 +4636,20 @@ export function metaItemLayersDeprecationHeaders(
         : { Deprecation: 'true', Link: `<${itemPath}/layers>; rel="successor-version"` };
 }
 
-/** The layers a layered answer carries, in the order the gate judges them: `effective` first — it is what the plain read serves, so its refusal is the plain read's own. */
-const META_ITEM_LAYERS = ['effective', 'code', 'overlay'] as const;
+/**
+ * The layers a layered answer carries, in the order the gate judges them: `effective` first — it is what the plain read serves, so its refusal is the plain read's own.
+ * [#29814] `draft` last: the pending draft row as stored, present only when the transport admitted its caller to pending drafts and asked for it.
+ */
+const META_ITEM_LAYERS = ['effective', 'code', 'overlay', 'draft'] as const;
 
 /** The layers in the order the ADR-0106 mask projects them. */
-const META_ITEM_MASKED_LAYERS = ['code', 'overlay', 'effective'] as const;
+const META_ITEM_MASKED_LAYERS = ['code', 'overlay', 'effective', 'draft'] as const;
+
+/**
+ * [#29814] The layers an answer may leave out: absent means "not served", so the
+ * mask never writes the key in. The other three are always on the answer.
+ */
+const META_ITEM_OPTIONAL_LAYERS: ReadonlySet<string> = new Set(['draft']);
 
 /** The request facts the layered chain reads — no transport shape. */
 export interface MetaLayeredRequest {
@@ -4107,6 +4776,22 @@ export type MetaLayeredAnswer =
  *  3. [ADR-0106 D5(4)] The mask on every layer — each is a full object schema —
  *     through {@link projectMetaObjectSchema} under the posture resolved before
  *     the read, and the `private, no-store` an undetermined posture owes.
+ *  3a. [ADR-0106 D1] `action` — every present layer as the object door's
+ *     projection serves it to this caller ({@link projectMetaActionForCaller},
+ *     over {@link MetaItemAnswerSources.resolveObjectMasker}; a layer that
+ *     names no `objectName` is judged on the one another layer names). Any
+ *     layer withheld answers the read `absent`, as step 1 answers a name with
+ *     nothing behind it.
+ *
+ * [#29814] `draft` — the pending draft row as stored
+ * (`GetMetaItemLayeredResponseSchema.draft`) — is a layer like the other three
+ * for every step above: it counts for step 1's presence (an admitted author's
+ * never-published item is its draft), the gate judges it under the same
+ * stored-version policy, and the mask projects it. It reaches this chain only
+ * when the transport asked the protocol for it, which each transport does only
+ * for a caller its draft-read admission (`mayReadPendingDrafts`) admits; for
+ * any other caller the answer carries no `draft` key, so it says nothing about
+ * whether a draft exists. The mask never writes an absent `draft` key in.
  *
  * The protocol's answer is never mutated. A layer the gate or the mask leaves as
  * it was is served as it was, and every other key of the answer
@@ -4115,7 +4800,7 @@ export type MetaLayeredAnswer =
  * answers that fault, ⛔ never a layered view with a layer missing.
  */
 export function createMetaLayeredAnswer(
-    sources: MetaItemReadGateSources,
+    sources: MetaItemReadGateSources & Pick<MetaItemAnswerSources, 'resolveObjectMasker'>,
     request: MetaLayeredRequest,
 ): (layered: unknown) => Promise<MetaLayeredAnswer> {
     const { metaType, name, packageId, member, maskPosture } = request;
@@ -4159,15 +4844,36 @@ export function createMetaLayeredAnswer(
         // 3. [ADR-0106 D5(4)] The mask, on every layer — under one posture
         //    related [#21884] over every layer, so each object an `objectOverride`
         //    param names is asked about once.
-        const layerDocuments = META_ITEM_MASKED_LAYERS.map((layer) => (served.has(layer) ? served.get(layer) : layered?.[layer]));
+        const maskedLayers = META_ITEM_MASKED_LAYERS.filter(
+            (layer) => !META_ITEM_OPTIONAL_LAYERS.has(layer) || (layered != null && layer in layered),
+        );
+        const layerDocuments = maskedLayers.map((layer) => (served.has(layer) ? served.get(layer) : layered?.[layer]));
         const layerPosture = await relateObjectSchemaMaskPosture(maskPosture, ...layerDocuments);
         let cacheControl: typeof META_UNDETERMINED_CACHE_CONTROL | undefined;
-        for (const layer of META_ITEM_MASKED_LAYERS) {
+        for (const layer of maskedLayers) {
             const document = served.has(layer) ? served.get(layer) : layered?.[layer];
             const masked = projectMetaObjectSchema(layerPosture, document);
             if (!masked.ok) return { kind: 'mask-fault', object: name };
             cacheControl ??= masked.cacheControl;
             if (masked.document !== document) served.set(layer, masked.document);
+        }
+
+        // 3a. [ADR-0106 D1] `action` — every present layer as the object door's
+        //     projection serves it to this caller; any layer withheld answers
+        //     the whole read `absent`, the answer step 1 gives a name with
+        //     nothing behind it, ⛔ never a layered view with a layer missing.
+        if (metaType === 'action') {
+            const actionSources = metaActionProjectionSources(sources, await sources.resolveObjectMasker());
+            const layerOwner = present.map((layer) => metaActionOwnerName(served.get(layer))).find((owner) => owner !== undefined);
+            for (const layer of present) {
+                const document = served.get(layer);
+                const projected = await projectMetaActionForCaller(
+                    actionSources, document, metaActionOwnerName(document) ?? layerOwner,
+                );
+                if (projected.kind === 'withhold') return { kind: 'refuse', refusal: { reason: 'absent' } };
+                if (projected.kind === 'fault') return { kind: 'mask-fault', object: projected.object };
+                cacheControl ??= projected.cacheControl;
+            }
         }
 
         let answer: unknown = raw;
@@ -4184,7 +4890,8 @@ export function createMetaLayeredAnswer(
 
 /** Everything {@link createMetaBookTreeAnswer} reads, supplied by the transport. */
 export interface MetaBookTreeSources
-    extends MetaReadGateAudienceSources, Pick<MetaListTranslationSources, 'resolveI18nService'> {
+    extends MetaReadGateAudienceSources, Pick<MetaListTranslationSources, 'resolveI18nService'>,
+        Partial<Pick<MetaListTranslationSources, 'resolveProtocol'>> {
     /**
      * One list read of `type` for the tree, env-wide, scoped to `packageId` when
      * the request names one (`?package=`, ADR-0048). A THROW propagates: an
@@ -4234,8 +4941,10 @@ export type MetaBookTreeAnswer =
  *     group's `label` from the bundle's `books` group — through
  *     {@link translateMetaDocument}, the table every `/meta/book` read
  *     translates through, so the tree and the list the console's sidebar
- *     draws cannot disagree. Translated AFTER the gate: the audience is
- *     judged on the book as stored, and a label is not an access input.
+ *     draws cannot disagree ([#30062] its packaged base and its pair's
+ *     translations included, over the transport's `resolveProtocol`).
+ *     Translated AFTER the gate: the audience is judged on the book as
+ *     stored, and a label is not an access input.
  *  6. The tree, its ENTRIES narrowed by each doc's effective audience, so a
  *     reader never sees an entry that would refuse them on fetch.
  */
@@ -4267,7 +4976,14 @@ export async function createMetaBookTreeAnswer(
             tags: d.tags,
             packageId: d._packageId,
         }));
-    // A book has no packaged base (`PACKAGED_BASE_ACCESSORS`), so the protocol is never asked for.
-    const served = await translateMetaDocument({ ...sources, resolveProtocol: async () => undefined }, 'book', book);
+    // [#30062] The book's packaged base and its pair's translations, as the
+    // `/meta/book` list the sidebar draws reads them, so the two never disagree
+    // on a pair's override. A transport that supplies no protocol gets the
+    // catalog alone, as before.
+    const served = await translateMetaDocument(
+        { ...sources, resolveProtocol: sources.resolveProtocol ?? (async () => undefined) },
+        'book',
+        book,
+    );
     return { ok: true, tree: audience.readableTree(served as typeof book, docs) };
 }

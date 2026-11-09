@@ -87,6 +87,7 @@ import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
 import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@objectstack/core';
 import { RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import { isPlatformOwnershipFloorPolicy } from './platform-ownership-policies.js';
+import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { noteResolverStagedKeys, policiesReadCurrentUserKey, stageDeclaredMembershipKeys } from './object-membership-keys.js';
 import { stageKernelQueues } from './kernel-queue-membership.js';
 import {
@@ -169,7 +170,9 @@ export async function computeLayeredRlsFilter(
   // The two are computed independently and never share a compiler, a merge
   // step, or a bypass bit (closes W1 by construction, W2 structurally).
   const meta = await this.getObjectSecurityMeta(object);
-  const isWrite = operation === 'insert' || operation === 'update' || operation === 'delete';
+  // [#30237] A lifecycle verb is the write class it is judged as.
+  const rlsOperation = rlsOperationForVerb(operation);
+  const isWrite = rlsOperation === 'insert' || rlsOperation === 'update' || rlsOperation === 'delete';
   // Posture permits a platform admin to cross the tenant wall (ADR-0066 ①):
   // private / platform-global / better-auth-managed objects. Public tenant
   // business objects do NOT permit it, so a platform admin stays org-scoped.
@@ -368,7 +371,7 @@ export async function computeLayeredRlsFilter(
     // reached on exactly the same inputs as before.
     if (
       !collected.some((p) => policyDeclaresClause(p, 'using')) &&
-      (operation === 'update' || operation === 'delete') &&
+      (rlsOperation === 'update' || rlsOperation === 'delete') &&
       !(
         posturePermits &&
         this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate })
@@ -510,7 +513,29 @@ export async function computeLayeredRlsFilter(
   // ONLY the read-side Layer 0 is lifted. Layer 1 (business RLS, object/field
   // permissions, the write `check` path) is untouched by construction — this
   // branch rewrites the `layer0` half of the split and nothing else.
-  if (!isWrite && layer0 !== null && (await this.isVerifiedPlatformOwnerSession(context))) {
+  //
+  // [ADR-0015 §10] ONE Layer 0 answer is not the wall's to lift: the `deny` an
+  // EXTERNAL object earns by stating no organization scope (security-channel
+  // ruling 2026-11-04, option A). That deny is not a filter on the reader's
+  // organization — it is the verdict on a configuration defect: whose rows the
+  // object serves is a fact only its author can state, and an unstated scope
+  // reads as empty for every caller, the verified platform owner included,
+  // until the object declares one of the three (`external-organization-scope.ts`).
+  // So the owner's read crossing stands down on exactly that verdict, and the
+  // probe is not even consulted there. Every other answer is crossed as
+  // before: the `isolated` equality, the `group` union, and the deny sentinel
+  // an org-less session hits — on a local object and on an external object
+  // that declares its own `organization_id` alike. The recorded verdict stays
+  // `deny` (the return below): a reader must not learn `none` from a wall
+  // that still stands.
+  const deniedForUndeclaredExternalScope =
+    tenantLayer0Verdict.kind === 'deny' && tenantLayer0Input.externalOrganizationScopeUndeclared === true;
+  if (
+    !isWrite &&
+    layer0 !== null &&
+    !deniedForUndeclaredExternalScope &&
+    (await this.isVerifiedPlatformOwnerSession(context))
+  ) {
     // The audit floor (hard piece 3 of the ruling): a structured warn-level
     // log with the stable event name, per wall-bypassing READ computation —
     // the only bypass kind left. plugin-audit is not wired into

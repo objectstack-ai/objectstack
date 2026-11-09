@@ -24,8 +24,8 @@ import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
  *
  * Shape only, by decision: membership has no registry to check against
  * (`Intl.getCanonicalLocales('xx-YY')` succeeds, which is why
- * `shared/value-domain.zod.ts` dropped a `bcp47_locale` domain), and case is
- * not judged because the resolvers fold it (`zh-cn` resolves to `zh-CN`).
+ * `shared/value-domain.zod.ts` dropped a `bcp47_locale` domain). Case is not
+ * refused either; it is corrected, see {@link canonicalLocaleCase}.
  * The primary subtag is held to the 2–3 letters of the ISO 639 codes every
  * tag in use starts with: BCP-47 reserves 4 letters and registers no 5–8
  * letter language, so the only values that wider grammar ever admitted were
@@ -42,11 +42,108 @@ const LOCALE_TAG_REFUSAL =
   + 'is under a locale no session ever asks for, so its strings never render. Separate subtags with '
   + '`-`, not `_`, and write the tag, not the name (`zh-CN`, not `Chinese`).';
 
+const LOCALE_TAG_DESCRIPTION = 'BCP-47 Language Tag (e.g. en-US, zh-CN)';
+
+/**
+ * A tag's BCP-47 case (RFC 5646 §2.1.1): the language subtag lower case, a
+ * 2-character subtag upper case (the region: `CN`), a 4-character one title
+ * case (the script: `Hans`), everything else lower case, and every subtag
+ * after a singleton (`-u-`, `-x-`) lower case. `zh-cn` → `zh-CN`,
+ * `ZH-HANS-cn` → `zh-Hans-CN`, `EN` → `en`; a canonical tag is returned as is.
+ *
+ * Why the parse corrects case instead of leaving it to the resolvers: a
+ * resolver answers ONE locale for a request, exact match first, so a
+ * translation stored under `zh-cn` beside the stock `zh-CN` bundle was never
+ * merged into it; a `zh-CN` session kept rendering the stock strings, with no
+ * diagnostic (#28993). Folding at the parse gives every reader one spelling,
+ * and a lowercase author is corrected rather than refused, so nothing that
+ * parsed before is refused now.
+ *
+ * Case only, deliberately not `Intl.getCanonicalLocales`, measured on Node 22:
+ * that also replaces legacy and macrolanguage subtags (`iw` → `he`,
+ * `tl` → `fil`, `cmn` → `zh`), which would move a translation to a locale its
+ * author never named, and it THROWS on tags {@link LOCALE_TAG_SHAPE} accepts
+ * (`zh-Hans-Hans`, `en-GB-oed`), which would turn a shape refusal into a
+ * crash. Its output also depends on the runtime's ICU data, where this fold
+ * is the same string in every runtime the spec ships to.
+ *
+ * ⛔ Package-internal: the public answer is a {@link LocaleSchema} parse, and
+ * an exported fold would be an invitation to fold a second time in a consumer.
+ */
+function canonicalLocaleCase(tag: string): string {
+  let afterSingleton = false;
+  return tag
+    .split('-')
+    .map((subtag, index) => {
+      if (index === 0 || afterSingleton) return subtag.toLowerCase();
+      if (subtag.length === 1) {
+        afterSingleton = true;
+        return subtag.toLowerCase();
+      }
+      if (subtag.length === 2) return subtag.toUpperCase();
+      if (subtag.length === 4) return subtag.charAt(0).toUpperCase() + subtag.slice(1).toLowerCase();
+      return subtag.toLowerCase();
+    })
+    .join('-');
+}
+
+/**
+ * The tag shape alone, without the case fold: the KEY of the two bundle
+ * records below. A record cannot fold its keys one at a time, because two
+ * keys that fold to one tag would land on one entry and the later one would
+ * silently replace the earlier; the records judge their keys together
+ * ({@link refuseLocaleKeysFoldingTogether}) and then fold them
+ * ({@link foldLocaleKeys}). Same pattern, same refusal and description as
+ * {@link LocaleSchema}, so the published shape of a bundle key does not move.
+ */
+const LocaleTagKeySchema = lazySchema(() => z
+  .string()
+  .regex(LOCALE_TAG_SHAPE, LOCALE_TAG_REFUSAL)
+  .describe(LOCALE_TAG_DESCRIPTION));
+
 export const LocaleSchema = lazySchema(() => z
   .string()
   .regex(LOCALE_TAG_SHAPE, LOCALE_TAG_REFUSAL)
-  .describe('BCP-47 Language Tag (e.g. en-US, zh-CN)'));
+  .overwrite(canonicalLocaleCase)
+  .describe(LOCALE_TAG_DESCRIPTION));
 export type Locale = z.input<typeof LocaleSchema>;
+
+/**
+ * Refuses a bundle holding two locale keys that fold to one tag (`zh-cn` and
+ * `zh-CN`), naming both. Picking a winner would discard one translator's
+ * strings without a word, which is the policy the stored-row conversion
+ * (`translation-locale-tag-case-folded`) already follows for the same
+ * collision. Runs before {@link foldLocaleKeys}, so it sees the keys as written.
+ */
+function refuseLocaleKeysFoldingTogether(bundle: Record<string, unknown>, ctx: z.RefinementCtx): void {
+  const firstByTag = new Map<string, string>();
+  for (const key of Object.keys(bundle)) {
+    const tag = canonicalLocaleCase(key);
+    const first = firstByTag.get(tag);
+    if (first === undefined) {
+      firstByTag.set(tag, key);
+      continue;
+    }
+    ctx.addIssue({
+      code: 'custom',
+      path: [key],
+      message:
+        `locale keys \`${first}\` and \`${key}\` are one locale, \`${tag}\`. Refused since `
+        + "@objectstack/spec 18, because a locale tag's case is corrected on parse, so both entries would "
+        + 'land on one key and one set of strings would be dropped. Merge the two by hand and keep one '
+        + `key, \`${tag}\`.`,
+    });
+  }
+}
+
+/** Every locale key in its BCP-47 case; the input itself when none moves. */
+function foldLocaleKeys<T>(bundle: Record<string, T>): Record<string, T> {
+  const keys = Object.keys(bundle);
+  if (keys.every((key) => canonicalLocaleCase(key) === key)) return bundle;
+  const folded: Record<string, T> = {};
+  for (const key of keys) folded[canonicalLocaleCase(key)] = bundle[key] as T;
+  return folded;
+}
 
 /**
  * Shared history sentence for every shape in this file.
@@ -148,6 +245,22 @@ export const FieldTranslationSchema = lazySchema(() => strictObject({
    * (translated) label.
    */
   inlineTitle: z.string().optional().describe("Translated inline master-detail grid title — overlays the field's own `inlineTitle`"),
+  /**
+   * The field's own `relatedListTitle` — the title of the related list a
+   * `master_detail` / `lookup` field draws on its PARENT's record page (the
+   * side card, or the full-width table of a `relatedList: 'primary'` list).
+   * The field lives on the child object, so the address is the child's:
+   * `objects.<child>.fields.<field>.relatedListTitle`. Overlaid by
+   * `translateObject` on the served child object, which is what the console
+   * derives the related list's title from.
+   *
+   * No fallback to the child object's translated label: an authored
+   * `relatedListTitle` with no entry here keeps its authored text, because a
+   * bundle translates an attribute and never swaps another attribute in over
+   * authored text. An absent `relatedListTitle` already renders the child's
+   * (translated) label.
+   */
+  relatedListTitle: z.string().optional().describe("Translated detail-page related list title — overlays the field's own `relatedListTitle`"),
 }).describe('Translation data for a single field'));
 
 export type FieldTranslation = z.input<typeof FieldTranslationSchema>;
@@ -182,6 +295,39 @@ export const ActionResultDialogTranslationSchema = lazySchema(() => strictObject
 }).describe('Translations for an action result dialog'));
 
 export type ActionResultDialogTranslation = z.input<typeof ActionResultDialogTranslationSchema>;
+
+/**
+ * Action Preflight Translation Schema
+ *
+ * Translations for an action's `preflight` panel (the same-origin read the
+ * param dialog shows above its params). Shared by object `_actions` and
+ * `globalActions`.
+ *
+ * Convention:
+ *   …_actions.<action_name>.preflight.fields.<path>
+ *
+ * `fields` is keyed exactly as `resultDialog.fields` is: by the **literal**
+ * `preflight.fields[].path` from the action metadata (e.g. `"findings"`,
+ * `"verdict.summary"`), each value the translated label itself. Keys may
+ * contain dots — resolvers must index the record directly, not split on `.`.
+ * There is no `title` leaf: a preflight declares none, and the console draws
+ * its panel under its own translated heading.
+ *
+ * Module-local, unlike `ActionResultDialogTranslationSchema`: it is reachable
+ * as `TranslationDataSchema`'s `…preflight` node, and a new named export would
+ * rewrite the published skills' reference indexes, which list this module's
+ * exports.
+ */
+const ActionPreflightTranslationSchema = lazySchema(() => strictObject({
+  surface: 'this action preflight translation',
+  history: TRANSLATION_HISTORY,
+  guidance: {
+    title: 'A preflight declares no `title`: the console draws its panel under its own translated heading, so there is nothing here to translate.',
+  },
+}, {
+  fields: z.record(z.string(), z.string()).optional()
+    .describe('Preflight panel field labels keyed by the literal field path declared in the action metadata (keys may contain dots)'),
+}).describe('Translations for an action preflight panel'));
 
 /**
  * Action translations — one shape, used at two addresses: an object's
@@ -252,6 +398,12 @@ const actionTranslationSchema = (surface: string) => strictObject({
   })).optional().describe('Action parameter translations keyed by parameter name'),
   resultDialog: ActionResultDialogTranslationSchema.optional()
     .describe('Translations for the action result dialog'),
+  // `ActionSchema.preflight` (#31840) — the panel's field labels, keyed by
+  // the literal `preflight.fields[].path` exactly as `resultDialog.fields`
+  // is; overlaid by `translateAction` (`resolveActionPreflight`) for the
+  // fields the action declares.
+  preflight: ActionPreflightTranslationSchema.optional()
+    .describe('Translations for the action preflight panel'),
 });
 
 /**
@@ -527,6 +679,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
    *   objects.<object>._actions.<action_name>.params.<param_name>.options.<value>
    *   objects.<object>._actions.<action_name>.resultDialog.*
+   *   objects.<object>._actions.<action_name>.preflight.fields.<path>
    */
   _actions: z.record(z.string(), actionTranslationSchema('this object action translation'))
     .optional().describe('Action translations keyed by action name'),
@@ -917,21 +1070,19 @@ const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  * exist for.
  */
 /**
- * The measured exclusion on `datasets.<name>.dimensions.<d>` and
- * `.measures.<m>`.
+ * [ADR-0149 D1] Why `datasets.<name>.dimensions.<d>` and `.measures.<m>` carry
+ * no `synonyms` key, though the authoring members declare one.
  *
- * Not inherited by symmetry from the dataset's own `description`: the authoring
- * schema states it directly. `DatasetDimensionSchema` and `DatasetMeasureSchema`
- * each carry a `guidance` entry for `description` reading "its author-facing
- * text is `label`. `description` is declared on the DATASET itself" — so a key
- * here would parse clean and translate nothing, the ADR-0078 shape this file
- * keeps paying to remove.
+ * A synonym is MATCH INPUT, not display copy: the dataset tools compare a
+ * question's words against every synonym a member lists, in every language at
+ * once. A per-locale bundle key would invite a reader to match only the active
+ * locale's list — the one thing a synonym list must not do — so the words of
+ * every language go in the one authored `synonyms` array.
  */
-const DATASET_MEMBER_NO_DESCRIPTION =
-  'a dataset dimension/measure has no `description` — its author-facing text is `label`, and '
-  + '`DatasetDimensionSchema` / `DatasetMeasureSchema` say so at the authoring site too. '
-  + '`description` is declared on the DATASET itself: translate it at '
-  + "'datasets.<dataset_name>.description'.";
+const DATASET_MEMBER_SYNONYMS_NOT_TRANSLATED =
+  '`synonyms` are not translated: they are the words a question is matched against, in every '
+  + 'language at once, so a dimension or measure lists the words of every language in its one '
+  + 'authored `synonyms` array (ADR-0149 D1). Display copy is translated here: `label` and `description`.';
 
 /**
  * The tombstone prescription for `dashboards.<name>.widgets.<id>.subCaption`
@@ -1057,6 +1208,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.params.<param_name>.placeholder
    *   globalActions.<action_name>.params.<param_name>.options.<value>
    *   globalActions.<action_name>.resultDialog.*
+   *   globalActions.<action_name>.preflight.fields.<path>
    */
   globalActions: z.record(z.string(), actionTranslationSchema('this global action translation'))
     .optional().describe('Global action translations keyed by action name'),
@@ -1170,8 +1322,8 @@ const appTranslationDataShape = () => ({
    * Convention (auto-resolved by `translateDataset`):
    *   datasets.<name>.label
    *   datasets.<name>.description
-   *   datasets.<name>.dimensions.<dimension_name>.label
-   *   datasets.<name>.measures.<measure_name>.label
+   *   datasets.<name>.dimensions.<dimension_name>.label / .description
+   *   datasets.<name>.measures.<measure_name>.label / .description
    *
    * **The hole this closes (#14253).** A dataset reads like a back-office
    * definition, but a measure label is drawn ON THE DASHBOARD — under every
@@ -1191,14 +1343,13 @@ const appTranslationDataShape = () => ({
    * definition, one key.
    *
    * **The key face is measured against `DatasetSchema`.** A dimension and a
-   * measure each declare exactly one piece of display copy — `label` — and
-   * `dataset.zod.ts` says so twice, in the `guidance` it already gives an
-   * author who writes `description` on either: *"its author-facing text is
-   * `label`. `description` is declared on the DATASET itself"*. So
-   * `description` is declared here on the dataset and NOWHERE below it; a
-   * `dimensions.<d>.description` key would parse clean and translate nothing.
+   * measure each declare two pieces of display copy — `label` and, since
+   * ADR-0149 D1, `description` (a business definition in plain language) —
+   * and both are translated here. Their `synonyms` are not: a synonym is match
+   * input, not display copy, and the members' `guidance` says so to an author
+   * who reaches for a `synonyms` key.
    *
-   * ⚠️ These four are `I18nLabelSchema` at the authoring site, so a dataset's
+   * ⚠️ These six are `I18nLabelSchema` at the authoring site, so a dataset's
    * copy may already be an inline `{ en, 'zh-CN' }` map (#5728).
    * `translateDataset` writes ONLY where the bundle actually has an entry, so
    * an inline map the bundle does not cover is left intact rather than
@@ -1228,17 +1379,21 @@ const appTranslationDataShape = () => ({
       surface: 'this dataset dimension translation',
       history: TRANSLATION_HISTORY,
       aliases: { name: 'label', title: 'label', displayName: 'label', text: 'label' },
-      guidance: { description: DATASET_MEMBER_NO_DESCRIPTION },
+      guidance: { synonyms: DATASET_MEMBER_SYNONYMS_NOT_TRANSLATED },
     }, {
       label: z.string().optional().describe('Translated dimension label (drawn on chart axes and group headers)'),
+      description: z.string().optional()
+        .describe("Translated dimension description — overlays the dimension's own business definition (ADR-0149 D1)"),
     })).optional().describe('Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`)'),
     measures: z.record(z.string(), strictObject({
       surface: 'this dataset measure translation',
       history: TRANSLATION_HISTORY,
       aliases: { name: 'label', title: 'label', displayName: 'label', text: 'label' },
-      guidance: { description: DATASET_MEMBER_NO_DESCRIPTION },
+      guidance: { synonyms: DATASET_MEMBER_SYNONYMS_NOT_TRANSLATED },
     }, {
       label: z.string().optional().describe('Translated measure label (drawn under every metric tile and on chart axes)'),
+      description: z.string().optional()
+        .describe("Translated measure description — overlays the measure's own business definition (ADR-0149 D1)"),
     })).optional().describe('Measure translations keyed by measure name (`DatasetMeasureSchema.name`)'),
   })).optional().describe('Analytics dataset translations keyed by dataset name'),
 
@@ -2125,6 +2280,29 @@ const appTranslationDataShape = () => ({
 });
 
 /**
+ * One column header of a settings `map` specifier: the key column
+ * (`keys.<key>.keyColumn`) or one value column (`keys.<key>.columns.<name>`).
+ * Its leaves are the two strings `SpecifierMapColumnSchema` and
+ * `SpecifierMapKeyColumnSchema` declare: `label`, and `description` translated
+ * as `help`, the spelling the setting's own entry uses for its `description`.
+ */
+const settingsMapColumnTranslation = (surface: string) => strictObject({
+  surface,
+  history: TRANSLATION_HISTORY,
+  aliases: { title: 'label', header: 'label', heading: 'label', helpText: 'help', hint: 'help', description: 'help' },
+  // A specifier column pasted in whole carries these two. Neither is copy:
+  // the column's `name` is the record key this entry sits under, and its
+  // `kind` is declared by the specifier, so neither is renamed to a leaf here.
+  guidance: {
+    name: "a column's `name` is not translated: it is the key this entry sits under (`columns.<name>`), so write the entry there and drop `name`",
+    kind: "a column's `kind` is not translated: the `map` specifier declares it, so drop it from the translation",
+  },
+}, {
+  label: z.string().optional().describe('Translated column header'),
+  help: z.string().optional().describe('Translated column help text'),
+});
+
+/**
  * The one group that is PLATFORM-ONLY, as a shape rather than a schema.
  *
  * `settings` is keyed by `SettingsManifest.namespace`, and a manifest is
@@ -2167,6 +2345,11 @@ const platformSettingsShape = () => ({
    *   settings.<namespace>.keys.<setting_key>.help
    *   settings.<namespace>.keys.<setting_key>.placeholder
    *   settings.<namespace>.keys.<setting_key>.options.<option_value>
+   *   settings.<namespace>.keys.<setting_key>.confirmOffText
+   *   settings.<namespace>.keys.<setting_key>.keyColumn.label
+   *   settings.<namespace>.keys.<setting_key>.keyColumn.help
+   *   settings.<namespace>.keys.<setting_key>.columns.<column_name>.label
+   *   settings.<namespace>.keys.<setting_key>.columns.<column_name>.help
    *   settings.<namespace>.actions.<action_id>.label
    *   settings.<namespace>.actions.<action_id>.confirmText
    *   settings.<namespace>.actions.<action_id>.successMessage
@@ -2179,6 +2362,12 @@ const platformSettingsShape = () => ({
    * `groups` already uses for the same field), and its `bannerText` as
    * `text`. A banner without an `id` has no address here and renders its
    * manifest literals.
+   *
+   * `keyColumn` and `columns` are a `map` specifier's table headers, spelled
+   * as the specifier spells them: `keyColumn` is the key column, `columns` the
+   * value columns keyed by each column's `name`. Both carry the two strings a
+   * map column declares, its `label` and its `description`, the latter as
+   * `help` as on the setting itself.
    */
   settings: z.record(z.string(), strictObject({
     surface: 'this settings manifest translation',
@@ -2198,13 +2387,24 @@ const platformSettingsShape = () => ({
     keys: z.record(z.string(), strictObject({
       surface: 'this setting translation',
       history: TRANSLATION_HISTORY,
-      aliases: { title: 'label', name: 'label', helpText: 'help', hint: 'help', description: 'help', choices: 'options', values: 'options' },
+      aliases: {
+        title: 'label', name: 'label', helpText: 'help', hint: 'help', description: 'help', choices: 'options', values: 'options',
+        keyHeader: 'keyColumn', headers: 'columns', columnLabels: 'columns',
+      },
     }, {
       label: z.string().optional().describe('Translated setting label'),
       help: z.string().optional().describe('Translated setting help text'),
       placeholder: z.string().optional().describe('Translated input placeholder'),
       options: z.record(z.string(), z.string()).optional()
         .describe('Enum option value → translated label'),
+      confirmOffText: z.string().optional()
+        .describe("Translated confirm text shown before a toggle's value changes to off"),
+      keyColumn: settingsMapColumnTranslation('this settings map key-column translation')
+        .optional()
+        .describe("A map setting's key column header: `label` translates the specifier's `keyColumn.label`, `help` its `keyColumn.description`"),
+      columns: z.record(z.string(), settingsMapColumnTranslation('this settings map column translation'))
+        .optional()
+        .describe("A map setting's value column headers keyed by column `name`: `label` translates the column's `label`, `help` its `description`"),
     })).optional().describe('Per-setting field translations keyed by setting key'),
     actions: z.record(z.string(), strictObject({
       surface: 'this settings action translation',
@@ -2364,7 +2564,11 @@ export type ServedTranslationData = z.input<typeof ServedTranslationDataSchema>;
 // Translation Bundle (all locales)
 // ────────────────────────────────────────────────────────────────────────────
 
-export const TranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, TranslationDataSchema).describe('Map of locale codes to per-app translation data'));
+export const TranslationBundleSchema = lazySchema(() => z
+  .record(LocaleTagKeySchema, TranslationDataSchema)
+  .superRefine(refuseLocaleKeysFoldingTogether)
+  .overwrite(foldLocaleKeys)
+  .describe('Map of locale codes to per-app translation data'));
 
 export type TranslationBundle = z.input<typeof TranslationBundleSchema>;
 
@@ -2374,7 +2578,11 @@ export type TranslationBundle = z.input<typeof TranslationBundleSchema>;
  * the bundle that needs it; a platform package authoring only groups the
  * per-app face also declares can keep the narrower {@link TranslationBundle}.
  */
-export const PlatformTranslationBundleSchema = lazySchema(() => z.record(LocaleSchema, PlatformTranslationDataSchema).describe('Map of locale codes to platform translation data'));
+export const PlatformTranslationBundleSchema = lazySchema(() => z
+  .record(LocaleTagKeySchema, PlatformTranslationDataSchema)
+  .superRefine(refuseLocaleKeysFoldingTogether)
+  .overwrite(foldLocaleKeys)
+  .describe('Map of locale codes to platform translation data'));
 
 export type PlatformTranslationBundle = z.input<typeof PlatformTranslationBundleSchema>;
 

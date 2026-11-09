@@ -41,8 +41,9 @@
  */
 
 import type { FormField } from '@object-ui/types';
-import { evalFieldPredicate, isBlankPredicateText, type FieldRulePredicate } from '@object-ui/core';
+import { evalFieldPredicate, isBlankPredicateText, isExpressionComputedField, type FieldRulePredicate } from '@object-ui/core';
 import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText } from '@object-ui/fields';
+import { withHomeAmountSource } from '@object-ui/i18n';
 import { isCreateFormMode, isRequiredInForm } from './schemaDefaults';
 import { findCustomFieldMember } from './customFieldsMerge';
 import { isInlineFieldDef } from './submitTarget';
@@ -281,6 +282,19 @@ export function warnSectionMemberExcludedByFields(
 }
 
 /**
+ * The label a declared field without one is drawn under: its name with the
+ * first letter capitalised and underscores as spaces (`part_no` → `Part no`).
+ *
+ * The spec's `FieldSchema.label` is optional, so a label-less field is valid
+ * metadata, and the list draws it under exactly this rule
+ * (`objectGridGenerateColumns`, plugin-grid). The form follows it, so one
+ * field reads the same in the list and in its form (objectstack#30328).
+ */
+export function fieldNameLabel(fieldName: string): string {
+  return fieldName.charAt(0).toUpperCase() + fieldName.slice(1).replace(/_/g, ' ');
+}
+
+/**
  * Build a runtime FormField from object-schema metadata for `fieldName`.
  *
  * The ONE object-field-to-FormField mapping in this package. Exported because
@@ -311,7 +325,7 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
   }
   return {
     name: fieldName,
-    label: ctx.fieldLabel(ctx.objectName, fieldName, field.label || fieldName),
+    label: ctx.fieldLabel(ctx.objectName, fieldName, field.label || fieldNameLabel(fieldName)),
     // The widget id is a function of the (type, multiple) PAIR, not of the type
     // alone: a `select` declared `multiple: true` renders the multi-value chip
     // picker, and the label-association declaration is keyed on the widget that
@@ -329,7 +343,9 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     // (`fieldHelpText` from `@object-ui/fields`, objectui#12213).
     description: fieldHelpText(field),
     validation: buildValidationRules(field),
-    field,
+    // A home field (ADR-0144 D5) carries the amount, rate and document date
+    // that produced it, so its widget can draw the read face and say so.
+    field: withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName),
     options: field.options,
     multiple: field.multiple,
     // Field-level conditional rules (ADR-0036) — the form renderer resolves
@@ -338,6 +354,11 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     visibleWhen: field.visibleWhen,
     readonlyWhen: field.readonlyWhen,
     requiredWhen: field.requiredWhen,
+    // A stored field carrying an `expression` is computed by the engine on
+    // every write, so a typed value never stands (objectstack#31759): it draws
+    // its type's read face, and the edit submit omits it. The same stamp as
+    // `ObjectForm`'s generated fields.
+    ...(isExpressionComputedField(field) ? { readonly: true } : {}),
   } as FormField;
 }
 

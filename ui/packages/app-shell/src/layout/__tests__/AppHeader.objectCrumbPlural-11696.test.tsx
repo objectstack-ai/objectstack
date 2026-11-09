@@ -167,15 +167,28 @@ const BUNDLE = {
   },
 };
 
-/** The objects as served: two declare a plural, one does not. */
-const OBJECTS = [
-  { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects' },
-  { name: 'showcase_task', label: 'Task', pluralLabel: 'Tasks' },
-  { name: 'showcase_note', label: 'Note' },
-];
+/**
+ * The objects as served: two declare a plural, one does not.
+ * The served object document carries the session language's text, as the
+ * server translates it (objectstack#30311: a served label is drawn as served),
+ * so a zh-CN session is served the zh-CN label and plural.
+ */
+const SERVED_OBJECTS = {
+  en: [
+    { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects' },
+    { name: 'showcase_task', label: 'Task', pluralLabel: 'Tasks' },
+    { name: 'showcase_note', label: 'Note' },
+  ],
+  'zh-CN': [
+    { name: 'showcase_project', label: '项目', pluralLabel: '项目清单' },
+    { name: 'showcase_task', label: '任务', pluralLabel: '任务清单' },
+    { name: 'showcase_note', label: 'Note' },
+  ],
+};
 
 function renderAt(pathname: string, language: 'en' | 'zh-CN', recordTitle?: string) {
   route.pathname = pathname;
+  const OBJECTS = SERVED_OBJECTS[language];
   meta.value = {
     apps: [],
     objects: OBJECTS,

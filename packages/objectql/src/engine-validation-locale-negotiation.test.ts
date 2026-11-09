@@ -9,8 +9,10 @@ import { SchemaRegistry } from './registry';
  * #15757 — ONE negotiation rule, not two.
  *
  * `@objectstack/spec`'s `resolveBundleLocale` already decides which bundle a
- * requested tag reaches (exact → case-insensitive → base language → VARIANT
- * expansion, which is where a bare `zh` reaches a `zh-CN` bundle). `pickData`
+ * requested tag reaches (`resolveLocaleAmong`'s five steps: exact →
+ * case-insensitive → platform locale table language, which is where a bare
+ * `zh` reaches a `zh-CN` bundle → base language → VARIANT expansion, which
+ * is where a `de-AT` reaches a `de-DE` bundle). `pickData`
  * calls it, and every document translator — `translateObject`,
  * `translateView`, `translateDataset`, … — goes through `pickData`.
  *

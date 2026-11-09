@@ -1,16 +1,17 @@
 # ObjectUI Skill
 
-[![skills.sh](https://skills.sh/b/objectstack-ai/objectui)](https://skills.sh/objectstack-ai/objectui)
-
 A single, tree-based Agent Skill consolidating all ObjectUI development knowledge, aligned with [shadcn/ui's skill structure](https://github.com/shadcn-ui/ui/tree/main/skills/shadcn). Works with Claude Code, Cursor, Codex, GitHub Copilot, Windsurf, Gemini, Cline, and other agents on [skills.sh](https://skills.sh).
 
 ## Install
 
-```bash
-npx skills add objectstack-ai/objectui
-```
+The skill ships in `@objectstack/skills` beside the `objectstack-*` skills. Install
+that package as the [catalog README](https://github.com/objectstack-ai/objectstack/blob/main/skills/README.md) teaches (other package managers
+and agents are there too):
 
-The CLI auto-detects your agent and writes the skill to the right location (e.g. `.claude/skills/objectui/` for Claude Code, `.github/copilot/skills/objectui/` for GitHub Copilot). See [skills.sh/docs](https://skills.sh/docs) for the full list of supported agents.
+```bash
+pnpm add -D "@objectstack/skills@$(node -p "require('@objectstack/spec/package.json').version")"
+npx skills@1.7.2 experimental_sync --agent claude-code --copy -y
+```
 
 Once installed, the skill activates automatically when you describe ObjectUI work (schema-driven pages, plugins, `@object-ui/*` packages, etc.). No further configuration required.
 
@@ -61,4 +62,4 @@ The published packages this skill covers. Nothing checks this list against the
 ## Reference
 
 - shadcn/ui skill structure: https://github.com/shadcn-ui/ui/tree/main/skills/shadcn
-- ObjectUI repository: https://github.com/objectstack-ai/objectui
+- ObjectUI source: https://github.com/objectstack-ai/objectstack/tree/main/ui

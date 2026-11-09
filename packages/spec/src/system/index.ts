@@ -126,6 +126,9 @@ export * from './worker.zod';
 export * from './notification.zod';
 export * from './translation.zod';
 export * from './i18n-resolver';
+// The platform locale table (ruling F of #29349): the one list of languages
+// the platform supports, and the read aliases that keep stored codes valid.
+export * from './platform-locales';
 // Localized templates for the built-in field-validation messages (#3957).
 export * from './validation-message';
 // Localized templates for OPERATION-level data refusals (#7307) — a write the
@@ -158,6 +161,9 @@ export * from './registry-config.zod';
 export * from './deploy-bundle.zod';
 export * from './app-install.zod';
 export * from './environment-artifact.zod';
+// What a target environment does not let metadata do, published by that
+// environment (objectstack-ai/cloud#3659 ruling A); an absent profile means no restriction.
+export * from './restriction-profile.zod';
 
 // Constants
 export * from './constants';

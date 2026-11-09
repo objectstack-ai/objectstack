@@ -52,7 +52,7 @@ export default function DocsIndex() {
     <DocShell>
       <div className="mx-auto max-w-4xl p-4 sm:p-6">
         <header className="mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">Documentation</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t('help.documentation', { defaultValue: 'Documentation' })}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Books and guides from your installed packages.
           </p>

@@ -236,6 +236,23 @@ const ADMITTED = [
   // gate still honours the legacy role scalar). No body is read, and no
   // stored state moves, so it has no individual effect pin below.
   'POST /api/v1/auth/admin/list-platform-admins',
+  // #30398 — the address the Allowed IP ranges save check judges, shown on
+  // the Authentication settings page before a save. A READ: an ObjectStack raw
+  // mount carrying the ADR-0068 gate first; no body or query parameter is
+  // read and no stored state moves, so it has no individual effect pin below.
+  'GET /api/v1/auth/admin/client-address',
+  // #30918 — another person's authorized AI assistants (OAuth consents) and
+  // when each was last used. A READ: an ObjectStack raw mount carrying the
+  // ADR-0068 gate first, then the closed `{ userId }` query; no stored state
+  // moves, so it has no individual effect pin below.
+  'GET /api/v1/auth/admin/authorized-clients',
+  // #31048 — withdraw one of another person's authorized AI assistants: an
+  // ObjectStack raw mount whose FIRST statement is the ADR-0068 gate, then the
+  // closed `{ userId, id }` body. The probe names a consent the target does
+  // not hold, so the admin reaches the handler and gets 404 and nothing
+  // moves; the withdraw's effect is pinned in
+  // `authorized-client-withdraw.dogfood.test.ts`.
+  'POST /api/v1/auth/admin/authorized-clients/withdraw',
   'POST /api/v1/auth/admin/unlock-user',
   'POST /api/v1/auth/admin/import-users',
   'POST /api/v1/auth/admin/oauth2/toggle-disabled',
@@ -244,6 +261,29 @@ const ADMITTED = [
   'POST /api/v1/auth/admin/sso/register-saml',
   'POST /api/v1/auth/admin/sso/request-domain-verification',
   'POST /api/v1/auth/admin/sso/verify-domain',
+  // #31666 — the SSO Providers form's groups claim (show, and set or clear):
+  // ObjectStack raw mounts whose FIRST statement is the ADR-0068 gate. The
+  // probe names a provider this boot does not hold, so the admin reaches the
+  // handler and gets 404 and nothing moves; the stored effect (the mapping
+  // written where the register door writes it, and the grant at sign-in) is
+  // pinned in plugin-auth's `sso-oidc-refusal-cause.test.ts`.
+  'POST /api/v1/auth/admin/sso/get-groups-claim',
+  'POST /api/v1/auth/admin/sso/set-groups-claim',
+  // #30958 — the SCIM connection credential door: ObjectStack raw mounts whose
+  // FIRST statement is the ADR-0068 gate. SCIM is on at this boot
+  // (`OS_SCIM_ENABLED`), so the mint reaches a 200 and stores a credential;
+  // the revoke of an id that does not exist reaches the handler and answers
+  // 404. Their stored effects (the bearer provisions, is refused once revoked,
+  // and is audited) are pinned in `admin-identity-audit-trail.dogfood.test.ts`.
+  'POST /api/v1/auth/admin/scim/mint-credential',
+  'POST /api/v1/auth/admin/scim/revoke-credential',
+  // The identity-provider group mapping door, beside it: ObjectStack raw
+  // mounts whose FIRST statement is the ADR-0068 gate. The save names a
+  // connection with no credential, so the admin reaches the handler and gets
+  // 400 VALIDATION_FAILED on connectionId; the delete names a mapping that does
+  // not exist and gets 404. Nothing moves.
+  'POST /api/v1/auth/admin/scim/set-group-mapping',
+  'POST /api/v1/auth/admin/scim/delete-group-mapping',
 ] as const;
 
 /**
@@ -705,6 +745,13 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       // #28793. No body is read; the empty one is what the console's action
       // sends besides the `organizationId` it adds, which the handler ignores.
       'POST /api/v1/auth/admin/list-platform-admins': { body: {} },
+      // #30918. The one parameter the read takes: with none the handler answers
+      // `400 VALIDATION_ERROR` past the gate, which the `diedBeforeTheGate`
+      // predicate below reads as a void reading.
+      'GET /api/v1/auth/admin/authorized-clients': { query: `?userId=${targetUserId}` },
+      // #31048. Both body keys are required: with none the handler answers
+      // `400 VALIDATION_ERROR` past the gate, a void reading below.
+      'POST /api/v1/auth/admin/authorized-clients/withdraw': { body: { userId: targetUserId, id: 'standing-probe-consent' } },
       'POST /api/v1/auth/admin/oauth2/toggle-disabled': { body: { client_id: 'standing-probe-client', disabled: false } },
       'POST /api/v1/auth/admin/sso/register': {
         body: {
@@ -726,6 +773,20 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       },
       'POST /api/v1/auth/admin/sso/request-domain-verification': { body: { providerId: 'standing-probe-oidc' } },
       'POST /api/v1/auth/admin/sso/verify-domain': { body: { providerId: 'standing-probe-oidc' } },
+      // #31666. `providerId` is required by both; the set takes the claim as
+      // text (a non-text one answers `400 INVALID_REQUEST` past the gate).
+      'POST /api/v1/auth/admin/sso/get-groups-claim': { body: { providerId: 'standing-probe-groups-claim' } },
+      'POST /api/v1/auth/admin/sso/set-groups-claim': {
+        body: { providerId: 'standing-probe-groups-claim', groupsClaim: 'groups' },
+      },
+      // #30958. A connection id is the only required field; the revoke names a
+      // credential id that does not exist, so it moves nothing.
+      'POST /api/v1/auth/admin/scim/mint-credential': { body: { connectionId: 'standing-probe-scim' } },
+      'POST /api/v1/auth/admin/scim/revoke-credential': { body: { credentialId: 'standing-probe-credential' } },
+      'POST /api/v1/auth/admin/scim/set-group-mapping': {
+        body: { connectionId: 'standing-probe-unminted', groupExternalId: 'standing-probe-group', permissionSet: 'standing_probe_set' },
+      },
+      'POST /api/v1/auth/admin/scim/delete-group-mapping': { body: { mappingId: 'standing-probe-mapping' } },
       'POST /api/v1/auth/admin/ban-user': { body: { userId: targetUserId, banReason: 'sweep' } },
       'POST /api/v1/auth/admin/unban-user': { body: { userId: targetUserId } },
       'POST /api/v1/auth/admin/impersonate-user': { body: { userId: targetUserId } },

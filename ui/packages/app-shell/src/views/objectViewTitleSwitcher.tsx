@@ -77,11 +77,15 @@ export interface ObjectViewTitleSwitcherProps {
     description?: string;
     onViewChange: (viewId: string) => void;
     /** The reader's pinned view for this object, if any. */
-    pinnedViewId: string | null;
-    /** Pin a view (it opens by default), or `null` to unpin. */
-    onPinnedViewChange: (viewId: string | null) => void;
-    /** The views the reader opened lately, most recent first. */
-    recentViewIds: readonly string[];
+    pinnedViewId?: string | null;
+    /**
+     * Pin a view (it opens by default), or `null` to unpin. Absent ⇒ no row
+     * offers 📌 and no Pinned section is listed: a host with no reader of its
+     * own (the Studio, objectstack#30046) has no default to pin.
+     */
+    onPinnedViewChange?: (viewId: string | null) => void;
+    /** The views the reader opened lately, most recent first; absent ⇒ no Recent section. */
+    recentViewIds?: readonly string[];
     /** The ☆ of each row; absent off an app route, where no row offers one. */
     favorites: ListViewFavorites | null;
     viewTypeIcons?: Record<string, ComponentType<{ className?: string }>>;
@@ -123,9 +127,9 @@ export function ObjectViewTitleSwitcher({
     count,
     description,
     onViewChange,
-    pinnedViewId,
+    pinnedViewId = null,
     onPinnedViewChange,
-    recentViewIds,
+    recentViewIds = [],
     favorites,
     viewTypeIcons = VIEW_TYPE_ICONS,
     onAddView,
@@ -144,7 +148,7 @@ export function ObjectViewTitleSwitcher({
     const all = useMemo(() => authoredFirst(views), [views]);
     const shared = all.filter((v) => !v.personal);
     const mine = all.filter((v) => v.personal);
-    const pinned = pinnedViewId ? byId.get(pinnedViewId) : undefined;
+    const pinned = pinnedViewId && onPinnedViewChange ? byId.get(pinnedViewId) : undefined;
     const recent = recentViewIds
         .filter((id) => id !== pinned?.id)
         .map((id) => byId.get(id))
@@ -227,21 +231,23 @@ export function ObjectViewTitleSwitcher({
                         <Star className={cn('h-3.5 w-3.5', starred && 'fill-current text-amber-500')} />
                     </button>
                 )}
-                <button
-                    type="button"
-                    data-testid="view-switcher-pin"
-                    aria-label={pinLabel}
-                    title={pinLabel}
-                    aria-pressed={isPinned}
-                    onClick={() => onPinnedViewChange(isPinned ? null : view.id)}
-                    className={cn(
-                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                        isPinned ? 'text-foreground' : reveal,
-                    )}
-                >
-                    <Pin className={cn('h-3.5 w-3.5', isPinned && 'fill-current')} />
-                </button>
+                {onPinnedViewChange && (
+                    <button
+                        type="button"
+                        data-testid="view-switcher-pin"
+                        aria-label={pinLabel}
+                        title={pinLabel}
+                        aria-pressed={isPinned}
+                        onClick={() => onPinnedViewChange(isPinned ? null : view.id)}
+                        className={cn(
+                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                            isPinned ? 'text-foreground' : reveal,
+                        )}
+                    >
+                        <Pin className={cn('h-3.5 w-3.5', isPinned && 'fill-current')} />
+                    </button>
+                )}
                 {view.personal && onRenamePersonalView && (
                     <button
                         type="button"

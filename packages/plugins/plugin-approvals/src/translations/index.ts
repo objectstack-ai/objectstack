@@ -18,9 +18,23 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { arObjects } from './ar.objects.generated.js';
+import { frObjects } from './fr.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
+import { zhHantGeneratedSourceHashes } from './zh-Hant.source-hashes.generated.js';
+import { arGeneratedSourceHashes } from './ar.source-hashes.generated.js';
+import { frGeneratedSourceHashes } from './fr.source-hashes.generated.js';
+import { ptBRGeneratedSourceHashes } from './pt-BR.source-hashes.generated.js';
+import { ruGeneratedSourceHashes } from './ru.source-hashes.generated.js';
+import { deGeneratedSourceHashes } from './de.source-hashes.generated.js';
+import { koGeneratedSourceHashes } from './ko.source-hashes.generated.js';
 import { approvalsPageTranslations, pageSourceHashes } from './pages.js';
 import { approvalMessages } from './messages.js';
 
@@ -74,5 +88,33 @@ export const ApprovalsTranslations: TranslationBundle = {
   'es-ES': withSourceFallback(
     { objects: esESObjects, pages: approvalsPageTranslations['es-ES'], messages: approvalMessages['es-ES'] },
     enSource, pageSourceHashes['es-ES'], esESGeneratedSourceHashes,
+  ),
+  'zh-Hant': withSourceFallback(
+    { objects: zhHantObjects, pages: approvalsPageTranslations['zh-Hant'], messages: approvalMessages['zh-Hant'] },
+    enSource, pageSourceHashes['zh-Hant'], zhHantGeneratedSourceHashes,
+  ),
+  ar: withSourceFallback(
+    { objects: arObjects, pages: approvalsPageTranslations['ar'], messages: approvalMessages['ar'] },
+    enSource, pageSourceHashes['ar'], arGeneratedSourceHashes,
+  ),
+  fr: withSourceFallback(
+    { objects: frObjects, pages: approvalsPageTranslations['fr'], messages: approvalMessages['fr'] },
+    enSource, pageSourceHashes['fr'], frGeneratedSourceHashes,
+  ),
+  'pt-BR': withSourceFallback(
+    { objects: ptBRObjects, pages: approvalsPageTranslations['pt-BR'], messages: approvalMessages['pt-BR'] },
+    enSource, pageSourceHashes['pt-BR'], ptBRGeneratedSourceHashes,
+  ),
+  ru: withSourceFallback(
+    { objects: ruObjects, pages: approvalsPageTranslations['ru'], messages: approvalMessages['ru'] },
+    enSource, pageSourceHashes['ru'], ruGeneratedSourceHashes,
+  ),
+  de: withSourceFallback(
+    { objects: deObjects, pages: approvalsPageTranslations['de'], messages: approvalMessages['de'] },
+    enSource, pageSourceHashes['de'], deGeneratedSourceHashes,
+  ),
+  ko: withSourceFallback(
+    { objects: koObjects, pages: approvalsPageTranslations['ko'], messages: approvalMessages['ko'] },
+    enSource, pageSourceHashes['ko'], koGeneratedSourceHashes,
   ),
 };

@@ -32,11 +32,16 @@
  * declared elsewhere on the object — the case the legacy form exists to serve —
  * is PROMOTED to that def so it dispatches for real.
  *
- * Names that resolve to nothing stay in `unresolved` and are still dispatched
- * by name: consumers may have registered a runner handler under exactly that
- * name (`runner.registerHandler('my_action', …)`), and that path must keep
- * working. When no such handler exists the runner now reports the dead end
- * rather than toasting success.
+ * A name that resolves to nothing draws nothing. The spec's own sentence is
+ * the rule: a bare `rowActions` / `bulkActions` name "names an action the
+ * object declares" (`bulk-action.zod.ts`), and lint `action-name-undefined`
+ * (ADR-0049) refuses an undeclared one at authoring. An action a disabled
+ * package withholds is absent from the served `objectDef.actions` for the same
+ * reason, so it leaves the row menu with the rest of that package. The name
+ * is returned in `undeclared` only so the grid can say, once and in
+ * development, which names it did not draw (`describeUndeclaredActionNames`).
+ * A handler a host registers under a bare name is not a declaration and does
+ * not bring the entry back.
  */
 
 /** The subset of an `ActionDef` this fold needs: everything is passed through. */
@@ -63,12 +68,15 @@ export function resolveLegacyRowActions(opts: {
    * every render of a view that has no legacy names to fold.
    */
   defs: readonly NamedActionDef[];
-  /** Legacy names that matched no declared action; dispatched by name. */
-  unresolved: string[];
+  /**
+   * Legacy names that matched no declared action. NOT drawn and NOT
+   * dispatched: they exist for the development warning only.
+   */
+  undeclared: string[];
 } {
   const defs = Array.isArray(opts.rowActionDefs) ? opts.rowActionDefs : [];
   const names = Array.isArray(opts.rowActions) ? opts.rowActions : [];
-  if (names.length === 0) return { defs, unresolved: [] };
+  if (names.length === 0) return { defs, undeclared: [] };
 
   const objectActions = Array.isArray(opts.objectActions) ? opts.objectActions : [];
   const claimed = new Set(
@@ -76,7 +84,7 @@ export function resolveLegacyRowActions(opts: {
   );
 
   const promoted: NamedActionDef[] = [];
-  const unresolved: string[] = [];
+  const undeclared: string[] = [];
 
   for (const name of names) {
     if (typeof name !== 'string' || name === '') continue;
@@ -87,13 +95,13 @@ export function resolveLegacyRowActions(opts: {
     if (match) {
       claimed.add(name);
       promoted.push(match);
-    } else {
-      unresolved.push(name);
+    } else if (!undeclared.includes(name)) {
+      undeclared.push(name);
     }
   }
 
   return {
     defs: promoted.length > 0 ? [...defs, ...promoted] : defs,
-    unresolved,
+    undeclared,
   };
 }

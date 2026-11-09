@@ -15,6 +15,13 @@ export const ExternalCustomer = ObjectSchema.create({
   // object is RLS-owned / intentionally public; without this the new secure
   // default (unset OWD => private) would owner-filter it.
   sharingModel: 'public_read_write',
+  // [ADR-0015 §10] Under a walled tenancy posture every external object states
+  // its organization scope. The remote `customers` table carries no
+  // organization column — it is the deployment's analytics catalogue, read by
+  // every organization alike — so this object declares itself shared. (The
+  // other declaration is an `organization_id` field of its own, when the
+  // remote rows carry one.)
+  tenancy: { enabled: false },
   label: 'External Customer',
   pluralLabel: 'External Customers',
   icon: 'database',

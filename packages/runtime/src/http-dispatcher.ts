@@ -17,11 +17,12 @@ import {
     AuthzStoreUnavailableError,
     type AuthGate,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage, inProcessSessionReadInput, isEngineDuplicateRecordEnvelope, structuredCodeAnswer, driverNotNullRefusalAnswer } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, declaredUserMessage, inProcessSessionReadInput, driverNotNullRefusalAnswer, thrownAnswerOf } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { AuthSessionApi, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { PrimaryDatasourceVerdict } from '@objectstack/objectql';
+import { declaresMultiNode, probeClusterDriverHealth, type ClusterDriverHealth } from '@objectstack/service-cluster';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import type { ServiceInfo } from '@objectstack/spec/api';
 // [#20477] The caller's VETTED organization, read by the one helper `RestServer`
@@ -38,6 +39,7 @@ import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from 
 // only — `actionExecutionDeps` hands the endpoint step the same `deps` object
 // every domain already passes to `callData`, without this file calling it.
 import type { ActionExecutionDeps } from './action-execution.js';
+import { admittingCredentialKind } from './security/admitting-credential.js';
 import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analytics.js';
 import { isServiceServeable } from './service-serveable.js';
 import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
@@ -371,6 +373,23 @@ type PrimaryDatasourceReading =
     | { readonly kind: 'unresolved'; readonly reason: string };
 
 /**
+ * A `/ready` 200 body with the cluster driver's reading folded in (#31601).
+ *
+ * With no reading the body is returned AS GIVEN — the same object, no key
+ * added — so a deployment the reading does not apply to (single node, or no
+ * redis cluster driver) answers byte-identically to before. With one, the body
+ * gains a `cluster` entry, and an unreachable store turns `status` into
+ * `'degraded'` (PM decision D4: still 200 — see `clusterReadiness`).
+ */
+function withClusterReading<T extends { status: string }>(
+    body: T,
+    cluster: ClusterDriverHealth | undefined,
+): T | (Omit<T, 'status'> & { status: string; cluster: ClusterDriverHealth }) {
+    if (!cluster) return body;
+    return { ...body, status: cluster.reachable ? body.status : 'degraded', cluster };
+}
+
+/**
  * [#16402] What {@link HttpDispatcher.classifyService} answers — the classified
  * service lookup's three non-fault outcomes.
  *
@@ -389,43 +408,6 @@ type ClassifiedServiceLookup =
     | { readonly outcome: 'resolved'; readonly value: any }
     | { readonly outcome: 'never-registered' }
     | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
-
-/**
- * [#23686] The structured context `RestServer`'s duplicate-record arm states
- * beside its `UNIQUE_VIOLATION`, for the dispatcher envelope's `details`.
- * Asked only for the engine's own `DuplicateRecordError` (see
- * `HttpDispatcher.errorFromThrown`, "One wire spelling").
- *
- * ONE classification, not a third spelling: the fields are read off the arm
- * `structuredCodeAnswer` (`@objectstack/types`) answers the same throw
- * through, so this door carries what the REST door and the Hono doors carry,
- * each field only when the producer stated it, and an arm that grows a field
- * grows it here too. ⛔ Never list the fields here. The arm's own sentence
- * (`error`) and `code` are dropped because the envelope already carries both,
- * as `message` and `code`.
- *
- * The arm must AGREE with the envelope already decided, as at the Hono doors:
- * its status must be the thrown one and its code the envelope's, so it can
- * only add context, never change the answer. Disagreeing, it adds nothing.
- * The envelope's code for this class is itself read off the same arm
- * (`HttpDispatcher.errorFromThrown`, #23714), so this function spells no copy
- * of it either.
- *
- * ⛔ Deliberately not every arm. The dispatcher's other 409s
- * (`CONCURRENT_UPDATE`, `DELETE_RESTRICTED`) keep the body they have; widening
- * the context this door carries for them is a change of its own.
- */
-function duplicateArmContext(
-    thrown: unknown,
-    envelope: { status: number; code: string },
-): Record<string, unknown> | undefined {
-    const arm = structuredCodeAnswer(thrown);
-    if (arm === undefined || arm.status !== envelope.status || arm.body.code !== envelope.code) return undefined;
-    const context = Object.fromEntries(
-        Object.entries(arm.body).filter(([key]) => key !== 'error' && key !== 'code'),
-    );
-    return Object.keys(context).length > 0 ? context : undefined;
-}
 
 /**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
@@ -481,6 +463,16 @@ export class HttpDispatcher {
      */
     private driverHealthMemo?: DriverReadiness & { at: number };
     private static readonly DRIVER_HEALTH_TTL_MS = 1_000;
+    /**
+     * Short-TTL memo for `/ready`'s cluster-driver probe (#31601), on the same
+     * TTL and for the same reason as {@link driverHealthMemo}: a replica polled
+     * every few seconds must not become a Redis round-trip per poll, and a
+     * store that is down must not cost every concurrent probe its own timeout.
+     * `reading` is `undefined` when the probe does not apply (see
+     * {@link clusterReadiness}) — memoized too, so the answer "not declared"
+     * costs nothing either.
+     */
+    private clusterHealthMemo?: { at: number; reading: ClusterDriverHealth | undefined };
     /**
      * When `true`, scoped data-plane routes enforce a
      * `sys_environment_member` lookup and return 403 for non-members.
@@ -603,6 +595,11 @@ export class HttpDispatcher {
             return null;
         },
         getRegisteredAiRoutes: (context) => (this.requestKernel(context) as any)?.__aiRoutes,
+        isRequestKernelReady: (context) => {
+            const kernel = this.requestKernel(context);
+            return typeof kernel?.hasBootPhaseSettled === 'function'
+                && kernel.hasBootPhaseSettled('kernel:ready') === true;
+        },
     };
 
     /**
@@ -880,7 +877,8 @@ export class HttpDispatcher {
                 }
                 const { unhealthy, primary } = await this.driverReadiness();
                 if (unhealthy.length === 0) {
-                    return { handled: true, response: this.success({ status: 'ready', state }) };
+                    const cluster = await this.clusterReadiness();
+                    return { handled: true, response: this.success(withClusterReading({ status: 'ready', state }, cluster)) };
                 }
                 // #13408: drain only when the PRIMARY datasource is the one
                 // that is down — or when we could not establish which
@@ -890,17 +888,18 @@ export class HttpDispatcher {
                 // reading (a resolved primary, absent from the unhealthy set),
                 // never the absence of a negative one.
                 if (primary?.kind === 'resolved' && !unhealthy.includes(primary.datasource)) {
+                    const cluster = await this.clusterReadiness();
                     return {
                         handled: true,
                         // The healthy 200 body is untouched — `degraded` appears
                         // only on this branch, so a probe consumer that never
                         // sees a degraded secondary sees exactly what it saw
                         // before #13408.
-                        response: this.success({
+                        response: this.success(withClusterReading({
                             status: 'ready',
                             state,
                             degraded: { drivers: unhealthy, primaryDatasource: primary.datasource },
-                        }),
+                        }, cluster)),
                     };
                 }
                 // Byte-identical to the pre-#13408 envelope, deliberately: this
@@ -978,6 +977,51 @@ export class HttpDispatcher {
             ? { unhealthy }
             : { unhealthy, primary: this.primaryDatasource() };
         this.driverHealthMemo = { at: Date.now(), ...reading };
+        return reading;
+    }
+
+    /**
+     * The cluster driver's reachability, for `/ready` (#31601) — or `undefined`
+     * when the reading does not apply, which leaves the body exactly as it was.
+     *
+     * Applies only behind BOTH halves of the cloud epic #3814 R3 ruling, read
+     * verbatim: 「同意：每张卡都只在"声明多副本并接上 Redis 驱动"时才生效」 —
+     * the operator DECLARES a multi-node deployment (`declaresMultiNode`, the
+     * same predicate the split-brain guard and the shared cache read), AND the
+     * registered `cluster` service runs the `redis` driver and offers its
+     * connection. A single-node boot never resolves the `cluster` service here,
+     * so its readiness probe does exactly the work it did before.
+     *
+     * ⭐ Reports, never drains — PM decision D4: an unreachable store answers
+     * 200 with `status: 'degraded'`, not 503. Every replica loses a shared store
+     * at the same moment, so a 503 here would take EVERY replica out of
+     * rotation and turn a degraded cluster into a total outage while the
+     * database, still the source of truth, can serve. Which is also why it is
+     * consulted only on the 200 branches: the booting / stopping 503 and the
+     * primary-datasource 503 are reached before it and stay byte-identical.
+     *
+     * Never throws: `probeClusterDriverHealth` answers every probe failure as a
+     * reading, and a `cluster` lookup that throws reads as "not applicable" —
+     * the declaration is still loud at boot, where the split-brain guard and
+     * the shared cache read it.
+     */
+    private async clusterReadiness(): Promise<ClusterDriverHealth | undefined> {
+        const memo = this.clusterHealthMemo;
+        if (memo && Date.now() - memo.at < HttpDispatcher.DRIVER_HEALTH_TTL_MS) {
+            return memo.reading;
+        }
+        let reading: ClusterDriverHealth | undefined;
+        if (declaresMultiNode(typeof process !== 'undefined' ? process.env : {})) {
+            let cluster: unknown;
+            try {
+                // [#5155] Host kernel — see the `/ready` handler.
+                cluster = (this.defaultKernel as any)?.getService?.('cluster');
+            } catch {
+                cluster = undefined;
+            }
+            reading = await probeClusterDriverHealth(cluster, 'redis');
+        }
+        this.clusterHealthMemo = { at: Date.now(), reading };
         return reading;
     }
 
@@ -1239,7 +1283,7 @@ export class HttpDispatcher {
      * registered code without being the engine's class) keeps its own code
      * and its own body. Beside the code,
      * the envelope's `details` carries what `RestServer`'s arm carries beside
-     * its own, read off that one classification ({@link duplicateArmContext})
+     * its own, read off that one classification (`thrownAnswerOf`, `@objectstack/types`, #31319)
      * rather than listed here: `developerMessage`, `object`, and `field` when
      * the driver named the column. `message` stays the thrown one, as on every
      * other code at this door and at the Hono doors; `declaredCode` stays
@@ -1252,59 +1296,25 @@ export class HttpDispatcher {
      * divergence is declared rather than closed by a second translator.
      */
     private errorFromThrown(e: any, fallbackStatus = 500) {
-        const thrown = resolveThrownHttpError(e, fallbackStatus);
-        // [#23686] The code this envelope carries: the resolver's, except the
-        // engine's unique-constraint envelope, which crosses HTTP as the one
-        // ruled wire spelling (see "One wire spelling" above).
-        //
-        // [#23714] That wire code is read off the shared classification's arm
-        // for the class (`structuredCodeAnswer`, the arm `RestServer` answers
-        // with), so this package spells no copy of it: the stamp stays where
-        // the error-code ledger lists it, under `@objectstack/types`. The
-        // resolver's code is kept only if that arm ever answered no string
-        // code for the class.
-        const engineDuplicate = isEngineDuplicateRecordEnvelope(e);
-        const duplicateArmCode = engineDuplicate ? structuredCodeAnswer(e)?.body.code : undefined;
-        const code = typeof duplicateArmCode === 'string' ? duplicateArmCode : thrown.code;
-        const armContext = engineDuplicate ? duplicateArmContext(e, { status: thrown.status, code }) : undefined;
-        const details = armContext ? { ...thrown.details, ...armContext } : thrown.details;
-        // [#9106] `code`, the NARROWED spelling — the same one the REST door
-        // has served since #8016, so the two doors now agree on `error.code`
-        // unconditionally (maintainer ruling 2026-08-16: `error.code` is a
-        // closed vocabulary at every door). A producer's unregistered spelling
-        // is not dropped: it rides the wire's `declaredCode`
-        // (`ApiErrorSchema.declaredCode`, the open author-authored channel),
-        // which is how a metadata app's own thrown code — the #7867 capability,
-        // measured as the tenant-authored limb no ledger can enumerate — still
-        // reaches the wire. Emitted only when the demote actually happened, so
-        // presence means demotion (see `demotedDeclaredCode`'s note).
-        //
-        // [#8087] The producer sweep is unchanged by this: platform producers
-        // must still register — `./dispatcher-error-vocabulary.ts` carries the
-        // classified list and `pnpm check:dispatcher-error-vocabulary` fails on
-        // an unswept producer, whose semantic code would otherwise silently
-        // demote off the wire. `error-envelope.conformance.test.ts` drives
-        // every dispatcher-reachable member of that list through this method
-        // and parses the body against `ApiErrorSchema`, which now PASSES for
-        // every body this door emits — the "parse every body it emits" half.
-        const declaredCode = demotedDeclaredCode(thrown);
-        // [commit 79c46da90] The producer-side user-facing marking rides as a declared
-        // sibling of `code`/`message` (`ApiErrorSchema.userMessage`), exactly
-        // like `declaredCode` — the shared resolver already answered whether
-        // the throw declared one (`declaredUserMessage`'s non-empty-string
-        // rule), so this door and the REST door agree by construction. Note
-        // `this.error`'s 5xx leak-withholding touches only `message`; the
-        // marked channel is authored user text, never the withheld prose.
+        // [#31319] The answer is composed ONCE, by `thrownAnswerOf`
+        // (`@objectstack/types`), the function the `/actions` door's reader
+        // (`actionsDoorAnswerOf`) answers its declared-status and rejection
+        // arms with. Every term the notes above describe (the resolver's
+        // closed code, the engine duplicate's wire spelling and arm context,
+        // the demoted `declaredCode`, the declared `userMessage`, the 5xx leak
+        // withhold) is that function's, so no door answering a thrown value
+        // carries a copy that could drift from the others. `this.error` stays
+        // the one construction point for the envelope.
+        const answer = thrownAnswerOf(e, fallbackStatus);
         const extra = {
-            ...(declaredCode !== undefined ? { declaredCode } : {}),
-            ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+            ...(answer.declaredCode !== undefined ? { declaredCode: answer.declaredCode } : {}),
+            ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
         };
         return this.error(
-            thrown.message, thrown.status, details, code,
+            answer.message, answer.status, answer.details, answer.code,
             Object.keys(extra).length > 0 ? extra : undefined,
         );
     }
-
 
     /**
      * 404 Route Not Found — no route is registered for this path.
@@ -1663,6 +1673,36 @@ export class HttpDispatcher {
         // `domains/automation-hooks.test.ts`.
         if (matchInboundHookRoute(path, method)) return null;
 
+        return this.judgeEnvironmentMembership(context);
+    }
+
+    /**
+     * The environment-membership check for a request a host serves OUTSIDE
+     * `dispatch()`: the declarative-endpoint step on the dispatcher plugin's
+     * fallback seam, which resolves the request through
+     * {@link resolveRequestScope} and so owes it the same check `dispatch()`
+     * runs after that resolution. A `403 PROJECT_MEMBERSHIP_REQUIRED` answer
+     * for a caller who is not a member of the resolved environment, else
+     * `null`; off when the host turned the check off.
+     *
+     * None of `dispatch()`'s path carve-outs apply: they name built-in routes
+     * (`/auth`, share links, the approval action page, the inbound hook), and
+     * a declared endpoint is none of them, whatever its path spells.
+     */
+    async environmentMembershipRefusal(
+        context: HttpProtocolContext,
+    ): Promise<{ status: number; body: any } | null> {
+        if (!this.enforceMembership) return null;
+        return this.judgeEnvironmentMembership(context);
+    }
+
+    /**
+     * The membership judgment both checks share: the caller this request
+     * resolved, against `sys_environment_member` for `context.environmentId`.
+     */
+    private async judgeEnvironmentMembership(
+        context: HttpProtocolContext,
+    ): Promise<{ status: number; body: any } | null> {
         const environmentId = context.environmentId;
         if (!environmentId) return null; // Unscoped legacy routes fall through.
 
@@ -1673,6 +1713,7 @@ export class HttpDispatcher {
         // and single-tenant setups run without auth.
         let userId: string | undefined;
         let activeOrganizationId: string | undefined;
+        let sessionUnread = false;
         try {
             // [#4127 batch 4] This read was `authService?.api?.getSession?.(…)`
             // with NO `getApi()` fallback — the only one of the three `.api`
@@ -1698,8 +1739,32 @@ export class HttpDispatcher {
             userId = sessionData?.user?.id ?? sessionData?.session?.userId;
             activeOrganizationId = sessionData?.session?.activeOrganizationId;
         } catch {
+            sessionUnread = true;
+        }
+
+        // The gate judges the principal this request RESOLVED
+        // (`resolveRequestScope`), whichever credential admitted it. A
+        // principal an API key or an OAuth access token admitted (with or
+        // without a cookie beside it) is the one judged, in the organization
+        // its resolution vetted; which credential that was is the one reading
+        // the api-action forward takes too (`admittingCredentialKind`). A
+        // session principal is the user the session read above names, in the
+        // organization its resolution vetted (below).
+        const resolved = context.executionContext;
+        const admittedBy = admittingCredentialKind(context);
+        if ((admittedBy === 'api_key' || admittedBy === 'oauth') && resolved?.userId) {
+            userId = resolved.userId;
+            activeOrganizationId = resolved.tenantId;
+        } else if (sessionUnread) {
             // Auth resolution failed — do not block the request on RBAC.
             return null;
+        } else {
+            // A session principal acts in the organization its resolution
+            // vetted (`resolveAuthzContext`), the one every other door reads
+            // (`resolveActiveOrganizationId`).
+            activeOrganizationId = resolved?.userId !== undefined && resolved.userId === userId
+                ? resolved.tenantId
+                : undefined;
         }
 
         if (!userId) return null; // Anonymous requests — upstream auth will decide.

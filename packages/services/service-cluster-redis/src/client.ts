@@ -1,6 +1,23 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Redis, type RedisOptions } from 'ioredis';
+import type { ClusterDriverLiveness } from '@objectstack/service-cluster';
+
+/**
+ * The longest one Redis command may take before it fails: 2 s.
+ *
+ * Without a bound a black-holed Redis (a socket that accepts and never
+ * answers) holds every caller until ioredis' own connection limits give up —
+ * measured at about 30 s for a sign-in counting through the shared cache.
+ * Every command this driver and the cache it shares its connection with issue
+ * is O(1) (GET/SET/INCR/EVAL of a short script/PUBLISH), answered in well under
+ * a millisecond by a healthy server, so 2 s leaves three orders of magnitude
+ * for a loaded server or a cross-zone hop while keeping a request that touches
+ * an unreachable store to about 2 s. The bound applies to commands queued
+ * while the connection is down too (ioredis arms the timer before queueing).
+ * It is a default: `options.commandTimeout` overrides it.
+ */
+export const REDIS_COMMAND_TIMEOUT_MS = 2_000;
 
 /**
  * Options accepted by {@link createRedisClient}.
@@ -40,6 +57,9 @@ export interface CreateRedisOptions {
  * Defaults applied when `existing` is absent:
  *   - `lazyConnect: true` — don't crash boot if Redis is briefly down
  *   - `maxRetriesPerRequest: 3` — bound the failure window before surfacing
+ *   - `commandTimeout: REDIS_COMMAND_TIMEOUT_MS` — bound a black-holed server
+ *     (see {@link REDIS_COMMAND_TIMEOUT_MS}); `client.duplicate()` inherits it,
+ *     so the shared cache's derived connection is bounded the same way
  *   - `enableAutoPipelining: true` — modest throughput boost for batch workloads
  *
  * @example
@@ -56,6 +76,7 @@ export function createRedisClient(opts: CreateRedisOptions = {}): Redis {
     const base: RedisOptions = {
         lazyConnect: opts.lazyConnect ?? true,
         maxRetriesPerRequest: 3,
+        commandTimeout: REDIS_COMMAND_TIMEOUT_MS,
         enableAutoPipelining: true,
     };
 
@@ -72,4 +93,36 @@ export function createRedisClient(opts: CreateRedisOptions = {}): Redis {
  */
 export function duplicateForPubSub(client: Redis): Redis {
     return client.duplicate();
+}
+
+/**
+ * Report `client`'s connection transitions to `liveness` under `source`: an
+ * `error` or an unexpected `close` is a failure, `ready` is a recovery.
+ *
+ * Attaching the `error` listener is also what keeps ioredis from printing
+ * `[ioredis] Unhandled error event` with a stack per reconnect attempt: the
+ * liveness logs the outage once instead, credential-free.
+ *
+ * @returns a disposer that removes the three listeners — call it BEFORE a
+ * deliberate `quit()`, so the close that follows is not reported as an outage.
+ */
+export function watchRedisConnection(
+    client: Redis,
+    liveness: ClusterDriverLiveness,
+    source: string,
+): () => void {
+    // The one listener style (`ClusterDriverLiveness.watchConnection`), shared
+    // with the connections derived from this one (`watchClusterDriverConnection`).
+    return liveness.watchConnection(client, source);
+}
+
+/**
+ * `host:port` of `client`'s server — never the URL, which can carry a password.
+ * `undefined` when the client does not say (a mock, a socket path).
+ */
+export function describeRedisTarget(client: Redis): string | undefined {
+    const options = (client as { options?: { host?: unknown; port?: unknown; path?: unknown } }).options;
+    if (!options) return undefined;
+    if (typeof options.host === 'string' && options.port !== undefined) return `${options.host}:${String(options.port)}`;
+    return undefined;
 }

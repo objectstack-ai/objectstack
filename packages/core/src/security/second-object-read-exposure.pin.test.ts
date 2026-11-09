@@ -133,7 +133,8 @@ const CALLERS: Record<string, Classification> = {
     wiring: { file: 'packages/metadata-protocol/src/protocol.ts', call: 'this.servedExpand(' },
     pin: 'packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts',
   },
-  'packages/objectql/src/engine.ts': {
+  // [#29986] The codemod split moved the body of `ObjectQL.expandRelatedRecords` out of engine.ts.
+  'packages/objectql/src/engine-summaries-and-expansion.ts': {
     kind: 'executes',
     read: "the expansion sub-read (`ObjectQL.expandRelatedRecords`), for the data door's `$expand`",
     decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',
@@ -188,6 +189,20 @@ const CALLERS: Record<string, Classification> = {
       "each target the decision before the engine reads it: the data door's `refuseUnservedRelationTarget`, the MCP " +
       "stdio data bridge's `enforceRelationTargetExposure` and the runtime `callData`'s `refuseUnservedRelationTargets`",
   },
+  'packages/qa/scenarios/src/score/scenario-graph.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the scenario scorer's artifact reader (`artifactToEvalGraph`): it reads a field's declared target out of a " +
+      'built metadata artifact offline, only to score whether the reference resolves to an object the build carries; ' +
+      'it reads no record and serves nothing of the target to any caller',
+  },
+  'packages/qa/scenarios/src/score/scenario-tags.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the scenario scorer's capability-tag checks: they read a field's declared target out of a built metadata " +
+      "artifact offline (whether an approver's field holds a user, a controlled-by-parent detail's master), only to " +
+      'judge a capability check; they read no record and serve nothing of the target to any caller',
+  },
   'packages/lint/src/object-graph.ts': {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
@@ -228,6 +243,19 @@ const CALLERS: Record<string, Classification> = {
       '`beforeRelationTarget` hook (the data door hands it `refuseUnservedRelationTarget`). Pinned by ' +
       '`packages/objectql/src/internal-field-evaluation-guard.test.ts` (the refusals assert the driver was never asked)',
   },
+  // [#29986] The codemod split of engine.ts moved two arbiter callers out of it.
+  'packages/objectql/src/engine-security-resolvers.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "a formula field's relation hop (`resolveFormulaRelated`): it judges the formula's own path against the " +
+      "target's DECLARED field map and loads through `resolveOneHopRelated` (its row), serving nothing of the target here",
+  },
+  'packages/objectql/src/engine-top-level.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      'the delete walk names the object a relation points at (`deleteWalkTargetOf`: a `user` field answers `sys_user`) ' +
+      'to plan a cascade or a restrict; it reads no record and serves nothing of the target',
+  },
   // [#25522 cut 10] The write-path reference check, moved out of engine.ts.
   'packages/objectql/src/engine-referential-integrity.ts': {
     kind: 'not-a-served-read',
@@ -236,12 +264,32 @@ const CALLERS: Record<string, Classification> = {
       "resolves on the target (the engine's `referenceExists` probe) and answers `reference_not_found` or nothing, " +
       'never a field of the target',
   },
+  // The grant-holder membership refusal's hand-off to that check.
+  'packages/plugins/plugin-security/src/grant-holder-membership-refusal.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the grant-holder membership refusal (`referenceCheckAsksCaller`, `callerReadsHolder`) asks whether a grant's `user_id` is a reference " +
+      "the write-path reference check judges. Its one read of the target is the CALLER's own read door, projected to " +
+      '`id`, and its answer only decides whether that check (`engine-referential-integrity.ts`, its row) answers the ' +
+      'holder; it reads no field of the target and serves nothing of it. Pinned by ' +
+      '`packages/plugins/plugin-security/src/grant-holder-membership-refusal.test.ts` (a holder the caller cannot read ' +
+      "is read only through the caller's own door, projected to `id`, and the answer served is the same whatever the " +
+      'target holds)',
+  },
   // [#25522 cut 14] The validation-predicate reads, moved out of engine.ts.
   'packages/objectql/src/engine-master-detail-related.ts': {
     kind: 'not-a-served-read',
     reason:
       'the validation-predicate reads (`resolvePredicateRelated`: a pass/fail verdict, the value never served), and ' +
       "`resolveOneHopRelated`, the one-hop loader they and the formula fields read through, as the caller's own `find`",
+  },
+  // [#30205] A user's assigned work: which fields hold work for a user.
+  'packages/core/src/security/user-assigned-work.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      'picks the fields whose target is the user object, then counts and updates rows of the object that DECLARES ' +
+      'them, under the caller\'s own context; the only read of the target is the hand-over recipient\'s ban state ' +
+      '(a fixed platform object), and no field of it is served',
   },
   'packages/objectql/src/integrity/dangling-reference-audit.ts': {
     kind: 'not-a-served-read',
@@ -274,6 +322,24 @@ const CALLERS: Record<string, Classification> = {
       'itself creates and then deletes, through the REST data routes (where that object is the ADDRESSED one, ' +
       "judged as such) and the engine's system delete. It reads those records back only through the harness's " +
       'system read, to see whether the delete removed them, and serves no field of the target to any caller',
+  },
+  // [#29946] The record page's related-list check.
+  'packages/rest/src/record-page-routes.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "compares a related list's field target with the page's own object, only to admit the entry or refuse it " +
+      '(`invalid_relationship` / 400) before anything is read; it reads no record of the target. The target is the ' +
+      "ADDRESSED object, whose record is `getData` behind the route's own `get` exposure gate, and the related rows " +
+      "are the child's `findData` behind the child's `list` exposure. Pinned by `packages/rest/src/record-page-routes.test.ts`",
+  },
+  // [#30379] The package disable door's dependent-rule scan.
+  'packages/runtime/src/domains/packages.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "the package disable door's dependent-rule scan (`readDisableDependentRules`, also asked by the install door's " +
+      '`enableOnInstall: false` arm): a rule\'s `record.REF.FIELD` hop names the object REF points at, only to ask ' +
+      'whether FIELD is one the disable would withhold from it, from the registry\'s DECLARED metadata. It reads no ' +
+      'record of the target and serves none of its fields; the door answers a `409` naming the rule, or proceeds',
   },
 };
 

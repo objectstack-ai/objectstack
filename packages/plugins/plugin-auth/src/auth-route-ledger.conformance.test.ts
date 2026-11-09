@@ -43,6 +43,9 @@ const LEDGERED_PLUGIN_CONFIG = {
   deviceAuthorization: true,
 };
 
+/** Registered app schemes: mounts the mobile sign-in hand-off's `one-time-token` plugin. */
+const LEDGERED_APP_SCHEMES = ['com.example.ledger'];
+
 /**
  * `buildPluginList` reads env vars that can flip plugins on top of the config
  * above (`OS_SSO_ENABLED`, `OS_SCIM_ENABLED`, …). A developer with any of them
@@ -76,6 +79,10 @@ beforeAll(async () => {
     secret: 'route-ledger-conformance-secret-32-chars',
     baseUrl: 'http://localhost:9',
     plugins: LEDGERED_PLUGIN_CONFIG,
+    // The one-time-token plugin is switched by a registered app scheme, not
+    // by a `plugins` flag: one is registered so the maximal surface carries
+    // its two vendor routes.
+    trustedAppSchemes: LEDGERED_APP_SCHEMES,
   } as never);
   // No dataEngine: createDatabaseConfig() falls back to better-auth's in-memory
   // adapter. Route registration does not touch the database — only request
@@ -213,14 +220,48 @@ describe('auth route ledger hygiene', () => {
     // ruling of 2026-08-23).
     const own = AUTH_ROUTE_LEDGER.filter((e) => e.source === 'objectstack').map((e) => e.route).sort();
     expect(own).toEqual([
+      // [#30918] Both authorized-clients reads, on this pin's own terms:
+      // `auth-plugin.ts` mounts each itself (a `rawApp.get` on the
+      // `${basePath}/admin/authorized-clients` and
+      // `${basePath}/authorized-clients` templates, ahead of the catch-all),
+      // and the `live.has(route)` loop below holds them to the same proof —
+      // better-auth's own consent read is `/oauth2/get-consents`, a different
+      // path.
+      'GET /api/v1/auth/admin/authorized-clients',
+      // [#30398] On this pin's own terms: `auth-plugin.ts` mounts it itself (a
+      // `rawApp.get` on the `${basePath}/admin/client-address` template, ahead
+      // of the catch-all), and the `live.has(route)` loop below holds it to the
+      // same proof — better-auth serves no address read.
+      'GET /api/v1/auth/admin/client-address',
+      'GET /api/v1/auth/authorized-clients',
       'GET /api/v1/auth/bootstrap-status',
+      // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
+      // `rawApp.get` on the `${basePath}/client-address` template, ahead of
+      // the catch-all), the organization administrator's twin of the
+      // platform-admin read above, and the `live.has(route)` loop below holds
+      // it to the same proof — better-auth serves no address read.
+      'GET /api/v1/auth/client-address',
       'GET /api/v1/auth/config',
+      // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
+      // `rawApp.get` on the `${basePath}/one-time-token/handoff`
+      // template, ahead of the catch-all), and the `live.has(route)` loop
+      // below holds it to the same proof — the vendor plugin publishes only
+      // `/one-time-token/generate` and `/one-time-token/verify`.
+      'GET /api/v1/auth/one-time-token/handoff',
       // [#26020] On this pin's own terms: `auth-plugin.ts` mounts it itself (a
       // `rawApp.get` on the `${basePath}/organization/invitation-preview`
       // template, ahead of the catch-all), and the `live.has(route)` loop below
       // holds it to the same proof — better-auth's own read is
       // `/organization/get-invitation`, a different path.
       'GET /api/v1/auth/organization/invitation-preview',
+      // [#31048] Both withdraws, on this pin's own terms: `auth-plugin.ts`
+      // mounts each itself (a `rawApp.post` on the
+      // `${basePath}/admin/authorized-clients/withdraw` and
+      // `${basePath}/authorized-clients/withdraw` templates, ahead of the
+      // catch-all), and the `live.has(route)` loop below holds them to the same
+      // proof — better-auth's own withdraw is `/oauth2/delete-consent`, a
+      // different path.
+      'POST /api/v1/auth/admin/authorized-clients/withdraw',
       'POST /api/v1/auth/admin/import-users',
       // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
       // `rawApp.post` on the `${basePath}/admin/list-platform-admins`
@@ -228,6 +269,18 @@ describe('auth route ledger hygiene', () => {
       // below holds it to the same proof — better-auth serves no roster.
       'POST /api/v1/auth/admin/list-platform-admins',
       'POST /api/v1/auth/admin/oauth2/toggle-disabled',
+      // [#30958] On this pin's own terms: `auth-plugin.ts` mounts both itself
+      // (`rawApp.post` on the `${basePath}/admin/scim/mint-credential` and
+      // `${basePath}/admin/scim/revoke-credential` templates, ahead of the
+      // catch-all), and the `live.has(route)` loop below holds them to the
+      // same proof — stable `@better-auth/scim` serves no credential endpoint.
+      // The identity-provider group mapping door (delete and set), on the
+      // same terms: two `rawApp.post` templates `auth-plugin.ts` mounts beside
+      // the credential door; the vendor serves no mapping endpoint.
+      'POST /api/v1/auth/admin/scim/delete-group-mapping',
+      'POST /api/v1/auth/admin/scim/mint-credential',
+      'POST /api/v1/auth/admin/scim/revoke-credential',
+      'POST /api/v1/auth/admin/scim/set-group-mapping',
       // [#16678] The thirteenth, added on this pin's own terms exactly as the
       // set-initial-password row below was: `auth-plugin.ts` mounts it itself
       // (a `rawApp.post` on the `${basePath}/admin/set-user-manager`
@@ -235,12 +288,36 @@ describe('auth route ledger hygiene', () => {
       // below holds it to the same proof as the other twelve — better-auth
       // publishes no manager endpoint at all.
       'POST /api/v1/auth/admin/set-user-manager',
+      // [#31666] The groups-claim show and edit of the SSO Providers form, on
+      // this pin's own terms: `auth-plugin.ts` mounts both itself (a
+      // `rawApp.post` on the `${basePath}/admin/sso/get-groups-claim` and
+      // `${basePath}/admin/sso/set-groups-claim` templates, ahead of the
+      // catch-all), and the `live.has(route)` loop below holds them to the same
+      // proof — `@better-auth/sso` serves no groups-claim endpoint. The set row
+      // sorts below, after request-domain-verification.
+      'POST /api/v1/auth/admin/sso/get-groups-claim',
       'POST /api/v1/auth/admin/sso/register',
       'POST /api/v1/auth/admin/sso/register-saml',
       'POST /api/v1/auth/admin/sso/request-domain-verification',
+      'POST /api/v1/auth/admin/sso/set-groups-claim',
       'POST /api/v1/auth/admin/sso/verify-domain',
       'POST /api/v1/auth/admin/unlock-user',
+      'POST /api/v1/auth/authorized-clients/withdraw',
       'POST /api/v1/auth/organization/add-member',
+      // [ADR-0151 D1/D4/D6] The AI service account's registration, key mint
+      // and lifecycle, on this pin's own terms: `auth-plugin.ts` mounts all
+      // eight itself (a `rawApp.post` on each `${basePath}/service-account/…`
+      // template, ahead of the catch-all), and the `live.has(route)` loop
+      // below holds them to the same proof — better-auth serves no
+      // service-account endpoint.
+      'POST /api/v1/auth/service-account/create-key',
+      'POST /api/v1/auth/service-account/register',
+      'POST /api/v1/auth/service-account/restore-key',
+      'POST /api/v1/auth/service-account/resume',
+      'POST /api/v1/auth/service-account/retire',
+      'POST /api/v1/auth/service-account/revoke-key',
+      'POST /api/v1/auth/service-account/set-owner',
+      'POST /api/v1/auth/service-account/suspend',
       'POST /api/v1/auth/set-initial-password',
       'POST /api/v1/auth/sys-oauth-application/register',
       // The fourteenth, on this pin's own terms: `auth-plugin.ts` mounts it

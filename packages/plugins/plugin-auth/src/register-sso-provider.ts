@@ -25,6 +25,9 @@
 import { carryForwardedClientAddress } from './client-address-forwarding.js';
 import { inProcessRedispatchUrl } from './in-process-redispatch.js';
 import { readJsonRequestBody } from './request-json-body.js';
+import { recoverInternalFieldsForSystemRead, type InternalFieldResolvingEngine } from './internal-field-readback.js';
+import { SSO_GROUPS_USER_INFO_KEY } from './sso-group-projection.js';
+import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 
 export interface RegisterSsoFormResult {
   /** HTTP status to return to the caller. */
@@ -187,10 +190,13 @@ export async function runRegisterSsoProviderFromForm(
       },
     };
   }
-  oidcConfig.mapping = {
-    email: str(body?.mapEmail) || 'email',
-    name: str(body?.mapName) || 'name',
-  };
+  // The groups claim lands where `/sso/register` keeps every other claim of the
+  // provider, `mapping.extraFields.groups`, the member the sign-in grant reads
+  // (`sso-group-projection.ts`). Blank leaves it out: the provider maps no groups.
+  oidcConfig.mapping = mappingWithGroupsClaim(
+    { email: str(body?.mapEmail) || 'email', name: str(body?.mapName) || 'name' },
+    str(body?.mapGroups),
+  );
 
   // Re-dispatch to the real /sso/register (same origin, sibling path) so the
   // admin gate + public-IdP trustedOrigins allowance + discovery hydration run.
@@ -246,7 +252,8 @@ export async function runRegisterSsoProviderFromForm(
  *
  * `@better-auth/sso` (samlify-backed) registers a SAML IdP via the SAME
  * `/sso/register` endpoint, with the protocol fields nested under `samlConfig`
- * ({ entryPoint, cert, callbackUrl, identifierFormat? }) instead of `oidcConfig`.
+ * ({ entryPoint, cert, callbackUrl, idpMetadata: { entityID }, spMetadata,
+ * identifierFormat? }) instead of `oidcConfig`.
  * The UI action collects FLAT fields; this helper reshapes them, derives the
  * per-provider ACS callback URL (`/sso/saml2/sp/acs/<providerId>`), and
  * re-dispatches through `/sso/register` so the admin gate + provisioning run.
@@ -298,11 +305,22 @@ export async function runRegisterSamlProviderFromForm(
     entryPoint,
     cert,
     callbackUrl: acsUrl,
+    // The IdP descriptor. The form carries no metadata XML, so this is the
+    // vendor's manual-configuration arm, which requires the IdP's own EntityID
+    // (`idpMetadata.entityID`) — the form's `issuer` field ("IdP Entity ID").
+    // Without it `/sso/register` refuses every form with 400. The IdP SSO URL
+    // and signing cert stay top-level (`entryPoint`, `cert`), which the vendor
+    // reads when `idpMetadata` names no `singleSignOnService` / `cert`.
+    idpMetadata: { entityID: issuer },
     // better-auth requires an SP descriptor (its inner fields are optional). Use
     // the SP metadata URL as our EntityID — the value the IdP keys this SP on.
     spMetadata: { entityID: spMetadataUrl },
   };
   if (identifierFormat) samlConfig.identifierFormat = identifierFormat;
+  // Same member as the OIDC form's: a SAML attribute name under
+  // `mapping.extraFields.groups`. Blank sends no mapping, as before.
+  const mapGroups = str(body?.mapGroups);
+  if (mapGroups) samlConfig.mapping = mappingWithGroupsClaim(undefined, mapGroups);
 
   const headers = forwardAuthHeaders(request, origin);
 
@@ -553,4 +571,211 @@ export async function runVerifyDomain(
   // is the registered ledger entry (#10716). The `message` above still carries
   // the specific diagnosis for each expected failure mode.
   return { status: resp.status, body: { success: false, error: { code: parsed?.code || 'DOMAIN_VERIFICATION_FAILED', message } } };
+}
+
+
+// ── The groups claim (IdP group → permission set) ───────────────────────────
+//
+// An SSO sign-in grants the permission sets its IdP groups are mapped to
+// (`sso-group-projection.ts`), reading the groups from `userInfo.groups`, which
+// `@better-auth/sso` fills from the provider's own `mapping.extraFields.groups`:
+// the OIDC claim or SAML attribute name. That member is the ONE place the claim
+// is stored — the register door writes it there, and so do the forms: the two
+// register bridges above take it as `mapGroups`, and the two bridges below show
+// and change it on a provider that already exists.
+//
+// Neither the record nor the vendor carries it back out: `oidc_config` /
+// `saml_config` are `internal` (stripped from every generic read), and
+// `/sso/get-provider` answers no mapping. So both bridges read the stored blob
+// themselves, through the system read seam, and answer ONLY the claim name —
+// never another member of the blob (client secret, certificates, endpoints).
+//
+// The vendor's `/sso/update-provider` REPLACES the whole mapping it is handed
+// (`mergeOIDCConfig` / `mergeSAMLConfig`: `mapping: updates.mapping ??
+// current.mapping`), so the set bridge sends the stored mapping back with only
+// `extraFields.groups` changed; every other member is kept as stored.
+
+/** The `extraFields` member the sign-in grant reads (`userInfo.groups`). */
+const GROUPS_EXTRA_FIELD = SSO_GROUPS_USER_INFO_KEY;
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * `mapping` with its groups claim set to `claim`, or removed when `claim` is
+ * blank. A copy: every other member, and every other `extraFields` member, is
+ * kept as it was. An `extraFields` left empty is dropped, so a cleared mapping
+ * is the mapping a provider saved without the claim has.
+ */
+export function mappingWithGroupsClaim(mapping: unknown, claim: string): Record<string, unknown> {
+  const next: Record<string, unknown> = isPlainObject(mapping) ? { ...mapping } : {};
+  const extra: Record<string, unknown> = isPlainObject(next.extraFields) ? { ...next.extraFields } : {};
+  if (claim) extra[GROUPS_EXTRA_FIELD] = claim;
+  else delete extra[GROUPS_EXTRA_FIELD];
+  if (Object.keys(extra).length > 0) next.extraFields = extra;
+  else delete next.extraFields;
+  return next;
+}
+
+/** The groups claim a stored mapping names, or `null` when it names none. */
+export function groupsClaimOfMapping(mapping: unknown): string | null {
+  const extra = isPlainObject(mapping) ? mapping.extraFields : undefined;
+  const claim = isPlainObject(extra) ? extra[GROUPS_EXTRA_FIELD] : undefined;
+  return typeof claim === 'string' && claim.trim() !== '' ? claim : null;
+}
+
+/** A stored protocol blob (JSON text, or an object on a driver that hands one back); `null` when unusable. */
+function parseStoredConfig(value: unknown): Record<string, unknown> | null {
+  if (isPlainObject(value)) return value;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One provider's two stored protocol blobs, as the store holds them. */
+export interface StoredSsoProviderConfigs {
+  oidcConfig: unknown;
+  samlConfig: unknown;
+}
+
+/** Reads a provider's stored blobs by its `providerId`; `null` when no provider has that id. */
+export type SsoProviderConfigReader = (providerId: string) => Promise<StoredSsoProviderConfigs | null>;
+
+/** The engine surface {@link createEngineSsoProviderConfigReader} needs. */
+export interface SsoProviderConfigEngine extends InternalFieldResolvingEngine {
+  findOne(object: string, query: Record<string, unknown>, options?: unknown): Promise<unknown>;
+}
+
+/**
+ * The reader over the data engine: a system read of the `sys_sso_provider` row,
+ * with the two `internal` blobs recovered through the system read seam
+ * (`internal-field-readback.ts`). Nothing it reads leaves this module except
+ * the claim name.
+ */
+export function createEngineSsoProviderConfigReader(getEngine: () => SsoProviderConfigEngine | null | undefined): SsoProviderConfigReader {
+  return async (providerId) => {
+    const engine = getEngine();
+    if (!engine) throw new Error('no data engine to read the SSO provider through');
+    const row = (await engine.findOne(
+      'sys_sso_provider',
+      { where: { provider_id: providerId } },
+      { context: { isSystem: true } },
+    )) as Record<string, unknown> | null;
+    if (!row || row.provider_id !== providerId) return null;
+    await recoverInternalFieldsForSystemRead(engine, 'sys_sso_provider', row, ['oidc_config', 'saml_config']);
+    return { oidcConfig: row.oidc_config, samlConfig: row.saml_config };
+  };
+}
+
+type SsoGroupsClaimProtocol = 'oidc' | 'saml';
+
+/** A provider's protocol and stored mapping, or why there is none. */
+async function readProviderMapping(
+  read: SsoProviderConfigReader,
+  providerId: string,
+): Promise<{ ok: true; protocol: SsoGroupsClaimProtocol; mapping: unknown } | { ok: false; refusal: SsoGroupsClaimResult }> {
+  const stored = await read(providerId);
+  if (!stored) {
+    return { ok: false, refusal: { status: 404, body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: `SSO provider "${providerId}" was not found.` } } } };
+  }
+  // A SAML provider carries a `saml_config`; any other is OIDC (the vendor's
+  // own reading, `sanitizeProvider`).
+  const saml = parseStoredConfig(stored.samlConfig);
+  if (saml) return { ok: true, protocol: 'saml', mapping: saml.mapping };
+  const oidc = parseStoredConfig(stored.oidcConfig);
+  if (oidc) return { ok: true, protocol: 'oidc', mapping: oidc.mapping };
+  return {
+    ok: false,
+    refusal: {
+      status: 400,
+      body: { success: false, error: { code: 'INVALID_REQUEST', message: `SSO provider "${providerId}" has no OIDC or SAML configuration to map groups in.` } },
+    },
+  };
+}
+
+/** The two groups-claim bridges' answer: the provider and its stored claim, nothing else. */
+export interface SsoGroupsClaimResult {
+  status: number;
+  body: {
+    success: boolean;
+    data?: { providerId: string; groupsClaim: string | null };
+    error?: { code: string; message: string };
+  };
+}
+
+/** The body both bridges read: `providerId`, and for the set bridge `groupsClaim`. */
+async function readGroupsClaimBody(
+  request: Request,
+): Promise<{ ok: true; providerId: string; groupsClaim: unknown } | { ok: false; refusal: SsoGroupsClaimResult }> {
+  const read = await readFormBody(request);
+  if (!read.ok) return { ok: false, refusal: read.refusal as SsoGroupsClaimResult };
+  const providerId = typeof read.body?.providerId === 'string' ? read.body.providerId.trim() : '';
+  if (!providerId) {
+    return { ok: false, refusal: { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Missing required field: providerId' } } } };
+  }
+  return { ok: true, providerId, groupsClaim: read.body?.groupsClaim };
+}
+
+/**
+ * Show a provider's groups claim. Body: `{ providerId }`. Answers
+ * `{ providerId, groupsClaim }` (`null` when the provider maps no groups);
+ * `404 RESOURCE_NOT_FOUND` for an unknown provider.
+ */
+export async function runShowSsoGroupsClaim(request: Request, read: SsoProviderConfigReader): Promise<SsoGroupsClaimResult> {
+  const body = await readGroupsClaimBody(request);
+  if (!body.ok) return body.refusal;
+  const stored = await readProviderMapping(read, body.providerId);
+  if (!stored.ok) return stored.refusal;
+  return { status: 200, body: { success: true, data: { providerId: body.providerId, groupsClaim: groupsClaimOfMapping(stored.mapping) } } };
+}
+
+/**
+ * Set or clear a provider's groups claim. Body: `{ providerId, groupsClaim }`;
+ * a blank (or absent) `groupsClaim` removes it, after which the provider signs
+ * users in exactly as one saved without it. Writes through the vendor's own
+ * `/sso/update-provider` (so its provider-access check and plugin-auth's
+ * mutation guards run), handing it the stored mapping with only the claim
+ * changed. Answers the claim now stored, read back.
+ */
+export async function runSetSsoGroupsClaim(
+  handle: AuthRequestHandler,
+  request: Request,
+  read: SsoProviderConfigReader,
+): Promise<SsoGroupsClaimResult> {
+  const body = await readGroupsClaimBody(request);
+  if (!body.ok) return body.refusal;
+  const { providerId } = body;
+  if (body.groupsClaim !== undefined && body.groupsClaim !== null && typeof body.groupsClaim !== 'string') {
+    return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'groupsClaim must be text: the OIDC claim or SAML attribute name that carries the user\'s groups.' } } };
+  }
+  const claim = typeof body.groupsClaim === 'string' ? body.groupsClaim.trim() : '';
+
+  const stored = await readProviderMapping(read, providerId);
+  if (!stored.ok) return stored.refusal;
+
+  const rw = rewriteSsoAdminUrl(request, /\/admin\/sso\/set-groups-claim$/, '/sso/update-provider');
+  if (!rw) return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: 'Bad request URL' } } };
+  const headers = forwardAuthHeaders(request, rw.origin);
+  const configKey = stored.protocol === 'saml' ? 'samlConfig' : 'oidcConfig';
+  const update = { providerId, [configKey]: { mapping: mappingWithGroupsClaim(stored.mapping, claim) } };
+
+  // [#22398] The inner route reads the session (`sessionMiddleware`); only its
+  // status comes back from here. Its body is not relayed: a vendor refusal can
+  // describe the stored configuration, and this bridge answers the claim alone.
+  const resp = await handle(new Request(inProcessRedispatchUrl(rw.innerUrl, headers), { method: 'POST', headers, body: JSON.stringify(update) }));
+  await resp.text().catch(() => '');
+  if (!resp.ok) {
+    return {
+      status: resp.status,
+      body: { success: false, error: { code: standardErrorCodeForHttpStatus(resp.status), message: `The groups claim of SSO provider "${providerId}" was not saved: the provider update was refused (HTTP ${resp.status}).` } },
+    };
+  }
+
+  const saved = await readProviderMapping(read, providerId);
+  if (!saved.ok) return saved.refusal;
+  return { status: 200, body: { success: true, data: { providerId, groupsClaim: groupsClaimOfMapping(saved.mapping) } } };
 }

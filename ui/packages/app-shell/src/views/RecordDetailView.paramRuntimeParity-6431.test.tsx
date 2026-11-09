@@ -223,6 +223,10 @@ const ACTION = {
 const DIALOG_READS = [
   // The dismiss button's label (`cancelText`), resolved by each runtime.
   'cancelText',
+  // The host-composed panel above the params (objectstack#30205). This suite's
+  // action carries none, so it is written `undefined`; the key is on both
+  // runtimes' state, which is what parity reads.
+  'companion',
   'description',
   // The runner's template filler for each param's `helpText` (objectui#12967).
   // This suite's handlers are called without one, so it is written `undefined`;

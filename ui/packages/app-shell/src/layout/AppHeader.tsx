@@ -85,18 +85,20 @@ import { AppSwitcher } from './AppSwitcher.js';
 import type { ConnectionState } from '@object-ui/data-objectstack';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import type { BreadcrumbItem as BreadcrumbItemType } from '@object-ui/types';
 import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledReads } from '../providers/bundledReads.js';
 import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
-import { resolveKeyedI18nLabel, preferLocal, matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
+import { preferLocal, matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
+import { connectAssistantPath } from '../console/connect/connectAssistantPath.js';
 import { getIcon } from '../utils/getIcon.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
 import { useUrlOverlay } from '../hooks/useUrlOverlay.js';
-import { metadataText } from '../hooks/useNavTargetLabel.js';
+import { metadataText, servedObjectPluralLabel } from '../hooks/useNavTargetLabel.js';
 import { KEYBOARD_SHORTCUTS_PARAM } from '../urlParams.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
@@ -474,7 +476,8 @@ export function AppHeader({
   // Same signal as the FAB and the `/ai` route guard.
   const { enabled: aiEnabled } = useAiSurfaceEnabled();
   const { t, language } = useObjectTranslation();
-  const { objectPluralLabel, dashboardLabel, pageLabel, reportLabel, viewLabel, appLabel } = useObjectLabel();
+  const { objectPluralLabel, dashboardLabel, pageLabel, reportLabel, viewLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // The dashboard, page and report lists are LAZY getters: reading one starts
   // its `/meta/:type` read. They are read below only on the route type that
   // names one (the phone bar's title), never destructured here, so a route of
@@ -625,6 +628,13 @@ export function AppHeader({
 
   const safeObjects = objects ?? [];
 
+  // Connect an AI Assistant: every signed-in person's own door to connecting an
+  // AI client, so it sits in the avatar menu beside Profile (objectstack#30895).
+  // Drawn only while the served Account app carries the page: `@objectstack/mcp`
+  // contributes that entry exactly when it registers the page, so a deployment
+  // with MCP turned off shows no dead item.
+  const connectAssistantHref = connectAssistantPath(metadataApps);
+
   // The app the route is in.
   const appNameKey = activeAppName || currentAppName || appNameFromRoute;
   // ADR-0048 (A) — appNameKey may be a package id (route segment); match by it.
@@ -733,10 +743,14 @@ export function AppHeader({
                   () => metadata.pages,
                   metadata.getTypeStatus?.('page'),
                 ).item;
-        // A page's `label` may be an inline locale map; drawn raw, the phone
-        // bar's title blanked the page (objectui#13488).
-        const fallback = metadataText(pageDef?.label, language) ?? humanizeSlug(pageName);
-        routeTitle = pageLabel({ name: pageName, label: fallback });
+        // A page the read served carries its label already translated, by
+        // the server's order for an overridden item (objectstack#30244), so it
+        // is drawn as given, as the dashboard's above is. Only the humanized
+        // slug, which no server translated, goes through the bundle. The label
+        // may be an inline locale map; drawn raw, the phone bar's title blanked
+        // the page (objectui#13488).
+        routeTitle = metadataText(pageDef?.label, language)
+          ?? pageLabel({ name: pageName, label: humanizeSlug(pageName) });
       }
     } else if (routeType === 'report') {
       // No 「Reports」 type crumb either (objectui#12273), for the dashboard
@@ -744,10 +758,14 @@ export function AppHeader({
       if (pathParts[3]) {
         const reportName = pathParts[3];
         const reportDef = preferLocal(metadata.reports as any[], reportName, (currentApp as any)?._packageId);
-        // A report's `label` may be an inline locale map; drawn raw, the crumb
+        // A served report's label is already translated (objectstack#30244),
+        // so it is drawn as given; only the humanized slug goes through the
+        // bundle. The label may be an inline locale map; drawn raw, the crumb
         // blanked the report page (objectui#13470).
-        const fallback = metadataText(reportDef?.label, language) ?? humanizeSlug(reportName);
-        extraSegments.push({ label: reportLabel({ name: reportName, label: fallback }) });
+        extraSegments.push({
+          label: metadataText(reportDef?.label, language)
+            ?? reportLabel({ name: reportName, label: humanizeSlug(reportName) }),
+        });
       }
     } else if (routeType === 'system') {
       extraSegments.push({ label: t('console.breadcrumb.system') });
@@ -757,7 +775,10 @@ export function AppHeader({
     } else if (routeType) {
       const currentObject = safeObjects.find((o: any) => o.name === routeType);
       if (currentObject) {
-        routeTitle = objectPluralLabel(currentObject);
+        // A served object's label is already translated (objectstack#30311):
+        // drawn as given, as the object page's own header draws it.
+        const listTitle = servedObjectPluralLabel(currentObject, language, objectPluralLabel);
+        routeTitle = listTitle;
         if (pathParts[3] === 'record' && pathParts[4]) {
           const shortId = pathParts[4].length > 12 ? `${pathParts[4].slice(0, 8)}…` : pathParts[4];
           const trimmedTitle = recordTitle?.trim();
@@ -791,7 +812,7 @@ export function AppHeader({
             currentObject.name,
             servedViews,
             viewLabel,
-            objectPluralLabel(currentObject),
+            listTitle,
             language,
           );
         }
@@ -1258,6 +1279,16 @@ export function AppHeader({
                 <User className="mr-2 h-4 w-4" />
                 {t('user.profile', { defaultValue: 'Profile' })}
               </DropdownMenuItem>
+              {connectAssistantHref && (
+                <DropdownMenuItem
+                  onClick={() => leaveTo(connectAssistantHref)}
+                  className="cursor-pointer"
+                  data-testid="header-connect-ai-assistant"
+                >
+                  <Bot className="mr-2 h-4 w-4" />
+                  {t('user.connectAiAssistant', { defaultValue: 'Connect an AI Assistant' })}
+                </DropdownMenuItem>
+              )}
               {/*
                * Workspace entries. The header-left WorkspaceSwitcher carries
                * the same destinations, but it renders NOTHING below two orgs
@@ -1313,7 +1344,7 @@ export function AppHeader({
                 .filter((a: any) => a.active !== false && a.hidden === true && a.name !== 'account')
                 .map((app: any) => {
                   const AppIcon = getIcon(app.icon);
-                  const label = appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) });
+                  const label = appLabel(app);
                   return (
                     <DropdownMenuItem
                       key={`hidden_app_${app.name}`}

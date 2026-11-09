@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-webhooks",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "license": "Apache-2.0",
   "description": "Persistent, cluster-aware webhook dispatcher. Durable outbox + per-partition cluster.lock for exactly-once-ish delivery across nodes. See content/docs/concepts/webhook-delivery.mdx.",
   "type": "module",
@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/spec": "workspace:*",
@@ -45,7 +46,6 @@
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
-    "@objectstack/objectql": "workspace:*",
     "@types/node": "^26.6.5",
     "hono": "^4.13.9",
     "tsx": "^4.23.15",

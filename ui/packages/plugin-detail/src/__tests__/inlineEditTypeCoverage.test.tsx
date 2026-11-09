@@ -231,11 +231,17 @@ describe('inline-edit type coverage — every type has exactly one decision (#42
     expect(byBucket).toEqual({
       excluded: [
         'auto_number', 'autonumber', 'composite', 'filter-condition', 'formula',
-        'grid', 'html', 'object', 'object-ref', 'password',
+        'grid', 'html', 'notification-channel', 'notification-topic',
+        'object', 'object-ref', 'password',
         // objectui#7611: the registry-name pickers, widget hints like
-        // `object-ref`.
+        // `object-ref` — and their fillable arm's two keys above
+        // (objectstack#31062).
         'permission-ref', 'position-ref',
+        // objectstack#31421: the quiet-hours window, a widget hint over `json`.
+        'quiet-hours',
         'recipient-picker', 'record', 'repeater', 'richtext', 'secret',
+        // objectstack#31217: the sharing-rule object picker, an `object-ref` arm.
+        'shareable-object-ref',
         'summary', 'vector',
       ],
       // `owner` stood between `number` and `percent` until objectui#4814

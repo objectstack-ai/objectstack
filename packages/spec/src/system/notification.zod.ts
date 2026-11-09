@@ -9,9 +9,11 @@ import { lazySchema } from '../shared/lazy-schema';
  * Supported notification delivery channels.
  *
  * ⚠️ PARTIALLY ENFORCED — the delivery channels actually registered by
- * `service-messaging` are `inbox`, `email`, and `sms` (#3197). `push`,
- * `slack`, `teams`, and `webhook` have no delivery implementation, and the
- * dispatcher dead-letters any message addressed to an unregistered channel.
+ * `service-messaging` are `inbox`, `email`, `sms` (#3197) and `push` (#29041),
+ * each but the inbox mounted while its transport service is registered (`push`:
+ * `@objectstack/service-push`). `slack`, `teams`, and `webhook` have no
+ * delivery implementation, and fan-out refuses any message addressed to an
+ * unregistered channel.
  * Note also the naming drift: this enum says `in-app` while the implemented
  * channel registers as `inbox` (which this enum does not contain) —
  * reconcile before wiring this enum into the runtime.
@@ -60,9 +62,13 @@ export const NotificationChannelSchema = lazySchema(() => z.enum([
 //     `template-renderer.ts`; the provider-side template is Aliyun's
 //     pre-registered `TemplateCode` in `service-sms` (`aliyun.ts`), a vendor
 //     API shape, not a spec constant.
-//   - push / in-app — no delivery implementation at all (#3197): the
-//     dispatcher dead-letters them. Declaring their payload shapes here
-//     advertised a capability nothing delivers.
+//   - push   — no template: the `push` channel (`push-channel.ts` in
+//     service-messaging, #29041) sends the notification's own title and body,
+//     already in the recipient's language, with `PushDeliveryDataSchema`
+//     (`api/push-delivery.zod.ts`) as its data, through `@objectstack/service-push`.
+//   - in-app — no delivery implementation under that name (#3197); the inbox
+//     channel is `inbox`. Declaring payload shapes here advertised a
+//     capability nothing delivered.
 //
 // The channel vocabulary above stays: `NotificationChannel` is re-exported by
 // `@objectstack/spec/contracts` and consumed by `service-messaging`.

@@ -59,14 +59,7 @@ export { isCommentAuthor } from './commentAuthorship.js';
 export {
   useCollaborationTranslation,
   COLLAB_DEFAULT_TRANSLATIONS,
-  type CollaborationTranslate,
 } from './useCollaborationTranslation.js';
-
-export {
-  useMentionNotifications,
-  type MentionNotificationsConfig,
-  type MentionNotificationsResult,
-} from './useMentionNotifications.js';
 
 export {
   PresenceAvatars,

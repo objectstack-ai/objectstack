@@ -84,6 +84,16 @@ vi.mock('./FieldDesigner', () => ({
 
 import { MetadataFieldsPage } from './MetadataFieldsPage';
 
+/**
+ * objectstack#30786 — the page takes its edit base off the layered read
+ * (`GET …/layers`, `overlay ?? code`), not the served item read, so this double
+ * answers that read: the item it used to serve becomes the `code` layer (and
+ * `effective`), beside the same envelope carriers.
+ */
+function servedAsLayers({ item, ...carriers }: { item: unknown } & Record<string, unknown>) {
+  return { ...carriers, code: item, overlay: null, effective: item };
+}
+
 /** The authoring door's refusal for a field carrying both keys. */
 function doorRefusal(body: Row): string[] {
   return Object.entries((body.fields ?? {}) as Record<string, Row>)
@@ -122,8 +132,8 @@ function realClient(): MetadataClient {
             )
           : json({ success: true, name: 'acme_account' });
       }
-      if (/\/meta\/object\/acme_account(\?|$)/.test(url)) {
-        return json({ type: 'object', name: 'acme_account', item: SERVED });
+      if (/\/meta\/object\/acme_account\/layers(\?|$)/.test(url)) {
+        return json(servedAsLayers({ type: 'object', name: 'acme_account', item: SERVED }));
       }
       return json({ items: [] });
     }) as unknown as typeof fetch,

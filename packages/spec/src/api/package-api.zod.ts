@@ -522,22 +522,35 @@ export type PackageInstallBody = z.input<typeof PackageInstallBodySchema>;
 export type PackageInstallBodyParsed = z.infer<typeof PackageInstallBodySchema>;
 
 /**
- * Response after installing a package.
+ * Response after installing a package (`POST /api/v1/packages`): the envelope,
+ * with the installed row itself as `data`.
+ *
+ * ## `data` is the BARE row the door serves
+ *
+ * The install door answers `success(pkg)` with status `201`, where `pkg` is the
+ * `InstalledPackage` row `SchemaRegistry.installPackage` recorded, on both
+ * install arms (the protocol service's and the no-protocol fallback). So `data`
+ * is {@link InstalledPackageSchema}, reused rather than restated.
+ *
+ * Until #30464 this declared `data: { package, dependencyResolution?,
+ * namespaceConflicts?, message? }`, a wrapper no surface ever sent: an
+ * integrator coding against it read `data.package` and got `undefined`. The
+ * first-party client had already followed the wire (#12034:
+ * `client.packages.install` resolves to `InstalledPackage`). ⛔ The fix is the
+ * contract following the wire, never the door growing the old envelope.
+ *
+ * The row is at the AUTHORING stage, because this door installs the manifest
+ * its own request schema ({@link PackageInstallBodySchema}) declares. It carries
+ * no `writable` / `disableable`: those are the READ doors' per-read verdicts
+ * (`InstalledPackageAtEitherStageSchema`, `./package-api-assembled.zod.ts`),
+ * which this door does not compute.
+ *
+ * Contract-vs-wire pin (the real dispatcher's answer parsed with
+ * `PackageApiContracts.installPackage.output`):
+ * `packages/client/src/packages-write-envelope.test.ts`.
  */
 export const PackageInstallResponseSchema = lazySchema(() => BaseResponseSchema.extend({
-  data: z.object({
-    package: InstalledPackageSchema.describe('Installed package details'),
-    dependencyResolution: DependencyResolutionResultSchema.optional()
-      .describe('Dependency resolution result'),
-    namespaceConflicts: z.array(z.object({
-      type: z.literal('namespace_conflict').describe('Error type'),
-      requestedNamespace: z.string().describe('Requested namespace'),
-      conflictingPackageId: z.string().describe('Conflicting package ID'),
-      conflictingPackageName: z.string().describe('Conflicting package name'),
-      suggestion: z.string().optional().describe('Suggested alternative'),
-    })).optional().describe('Namespace conflicts detected'),
-    message: z.string().optional().describe('Installation status message'),
-  }),
+  data: InstalledPackageSchema.describe('The installed package row, served bare as `data`: the row the registry recorded, at the authoring stage'),
 }).describe('Install package response'));
 export type PackageInstallResponse = z.input<typeof PackageInstallResponseSchema>;
 /** Post-parse shape of {@link PackageInstallResponse} — defaults applied, transforms run (ADR-0122). */

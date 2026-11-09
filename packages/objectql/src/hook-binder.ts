@@ -178,6 +178,10 @@ function hookHandlerNotInPackageRefusal(
  * Idempotent on `(packageId, hook.name, event, object)`: re-binding the
  * same set after a hot reload first calls `unregisterHooksByPackage`
  * (when `packageId` is provided).
+ *
+ * @throws {BareNameConflictError} once the cold boot has sealed the registry,
+ *   when `opts.functions` brings a function another package holds
+ *   (`bare-name-one-holder.ts`) — before anything is registered or bound.
  */
 export function bindHooksToEngine(
   engine: ObjectQL,
@@ -199,6 +203,18 @@ export function bindHooksToEngine(
   // such `script` node failed with "no function named 'x' is registered",
   // naming the one thing the author had actually done.
   if (opts.functions && typeof (engine as any).registerFunction === 'function') {
+    // [#30803] One name, one package holder for a function
+    // (`bare-name-one-holder.ts`): the engine's function registry keeps one
+    // function per name and a `script` node or an action `target` resolves it
+    // with no package, so once the cold boot has sealed the registry a bind
+    // bringing a function another package holds is refused here, ahead of
+    // every registration below, naming both holders. Before the seal the
+    // claims are only recorded, for the cold boot to read.
+    const claimable = Object.entries(opts.functions)
+      .filter(([, entry]) => normalizeFlowFunctionEntry(entry) !== undefined)
+      .map(([name]) => name);
+    const registry = (engine as { registry?: { claimBareNameFunctions?: (owner: string | undefined, names: readonly string[]) => void } }).registry;
+    if (typeof registry?.claimBareNameFunctions === 'function') registry.claimBareNameFunctions(opts.packageId, claimable);
     for (const [name, entry] of Object.entries(opts.functions)) {
       const fn = normalizeFlowFunctionEntry(entry);
       if (!fn) {

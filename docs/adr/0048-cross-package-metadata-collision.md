@@ -1,11 +1,11 @@
 # ADR-0048: Cross-package metadata collision — package-id identity, namespace install gate, package-scoped resolution
 
-**Status**: Revised (2026-06-13) — supersedes the original *per-item collision detection* framing. The runtime guard shipped under the original proposal is **retained as a same-package authoring backstop**; the strategic direction for the app-marketplace era is revised below. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — §3.3's sentence that a context-free read "is best-effort: it returns the first match": a read of a name a code package ships has an owner — that package, or the declared override its paired `<base>.custom` publishes — and a same-named item of a package outside that closure is served only under its own address (ADR-0146 D8); and §3.4's coexistence "by construction", for a base's dependency closure only: the paired `<base>.custom`'s item bearing a base item's name is a declared override or is refused at publish — declare or rename — and any other dependent package's item bearing a base item's name is refused at publish — rename; only the pair declares (ADR-0146 D2, ruled 2026-10-31 on #28364 and #28390). Packages with no dependency relation keep §3.3 and §3.4 as written; qualify-to-cross, the same-package overwrite and the 2026-10-08 addendum stand.
+**Status**: Revised (2026-06-13) — supersedes the original *per-item collision detection* framing. The runtime guard shipped under the original proposal is **retained as a same-package authoring backstop**; the strategic direction for the app-marketplace era is revised below. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — §3.3's sentence that a context-free read "is best-effort: it returns the first match": a read of a name a code package ships has an owner — that package, or the declared override its paired `<base>.custom` publishes — and a same-named item of a package outside that closure is served only under its own address (ADR-0146 D8); and §3.4's coexistence "by construction", for a base's dependency closure only: the paired `<base>.custom`'s item bearing a base item's name is a declared override or is refused at publish — declare or rename — and any other dependent package's item bearing a base item's name is refused at publish — rename; only the pair declares (ADR-0146 D2, ruled 2026-10-31 on #28364 and #28390). Packages with no dependency relation keep §3.3 and §3.4 as written; qualify-to-cross, the same-package overwrite and the 2026-10-08 addendum stand. · **Amended** (2026-11-07, [#30794](https://github.com/objectstack-ai/objectstack/issues/30794)): §3.5 — rename-on-install ships for **unmanaged** copies, through the one rename engine `duplicatePackage` applies; a managed install is never renamed and §3.2 stands for it as written. See the dated note under §3.5. · **Amended by [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md)** (proposed 2026-11-08): the 2026-11-06 addendum's one-holder refusal retires type by type as each type's readers carry the package; it stays for platform-requested bare names and, as ruled (ADR-0150 Q2 = A, record [`6724050556`](https://github.com/objectstack-ai/objectstack/issues/31527#issuecomment-6724050556) on #31527), for positions. This line takes effect when ADR-0150 is accepted. · **Amended** (2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685)): §5's authoring-lint bullet, rewritten in place — since ADR-0150 child P ([#31669](https://github.com/objectstack-ai/objectstack/issues/31669)) the bare-name finding of `naming/namespace-prefix` judges only capabilities and positions, and the refusal #30806 phase 3 was to add is withdrawn. §3.4's lint sentence stands as written; see the dated note under §3.4.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay precedence), [ADR-0008](./0008-metadata-repository-and-change-log.md) (metadata repository, `MetaRef` identity), [ADR-0010](./0010-metadata-protection-model.md) (package provenance / `_packageId` stamping)
 **Consumers**: `@objectstack/objectql` (`SchemaRegistry.registerItem`, `ObjectQL.registerApp`, install path), `@objectstack/console` / `objectui` (routing + metadata resolution), package authors, CLI/CI install path, the app marketplace registry.
 **Surfaced by**: ADR-0046 review (doc naming) → generalised to all bare-named metadata → re-examined through the app-marketplace install lens.
-**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Proposed**; additive to §3.2, supersedes nothing).
+**Addenda**: [2026-08-08 — publish-time / marketplace namespace exclusivity](#addendum-2026-08-08-publish-time--marketplace-namespace-exclusivity) (**Accepted** 2026-08-08 — maintainer ruling on #1825, [acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687), landed by PR #6671; additive to §3.2, supersedes nothing); [2026-11-06 — bare names resolved without a package hold one package](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed) (**Accepted**, ruling C on #30798, phase 1; narrows §3.4 for picklists, mappings, datasets, APIs, object-less actions, engine functions, flows, webhooks, connectors, email templates, agents and skills — phase 1 complete — and, by its dated note P1.10 (2026-11-08), tools; supersedes nothing).
 
 ---
 
@@ -266,6 +266,39 @@ package — stays covered by the `naming/namespace-prefix` lint in `os lint`.
 > above. Every other type keeps §3.4 as written. See
 > [Addendum (2026-10-08)](#addendum-2026-10-08-the-security-catalog-holds-one-name-per-deployment--34-narrowed).
 
+> **Narrowed (2026-11-06) — picklists, mappings, datasets, APIs, object-less
+> actions, engine functions, flows, webhooks, connectors, email templates, agents
+> and skills are out of §3.4, and tools since 2026-11-08 (P1.10).** Their consumers resolve the name with no package — a field's
+> `picklist`, an import's `mappingName`, a dashboard's `datasetName`, the
+> endpoint matcher's one API per name, `/actions/global/NAME`, a flow `script`
+> node's function, the automation engine's one armed flow per name, the
+> dispatcher's one declared webhook per name, the connector picker's one
+> connector per name, a send's `template`, `/meta/agent/NAME`, an MCP client's
+> skill prompt, `/meta/tool/NAME` and a skill's `tools` — so with two holders every caller is
+> served one of them, chosen by registration order, measured on a booted
+> two-package deployment (#30803). Once the cold boot has sealed the registry, a
+> package whose picklist, mapping, dataset, API, object-less action, flow,
+> webhook, connector, email template, agent, skill or tool bears a name another
+> installed package holds is refused at managed install and at package registration (a built-in's
+> name, at managed install), and a package whose handlers bring a function
+> another package holds is refused at the hook binder's bind, each naming both
+> holders and the rename. ⛔ The environment catalog is never a holder: an
+> environment item under a package's name is the ADR-0005 overlay. ⛔ Nor is the
+> email service's built-in template bundle: an app's same-named template
+> overrides it by contract (ADR-0131 D6), so that package holds no template name
+> and is refused none. Every other type keeps §3.4 as written, among them an
+> action bound to an object. See
+> [Addendum (2026-11-06)](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed).
+
+> **Note (2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685)) — the
+> lint sentence above still holds.** [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md)
+> child P ([#31669](https://github.com/objectstack-ai/objectstack/issues/31669)) retired the
+> rule's bare-name finding for the types ADR-0150 D1 puts in buckets 2–4, and kept the finding
+> this section relies on (ADR-0150 D9): two items of one type that land on one registry key
+> inside one package — among its apps, pages, dashboards, flows, actions (per `objectName`),
+> reports and datasets (`DUPLICATE_KEYED_TYPES`, `packages/cli/src/commands/lint.ts`) — are
+> still reported. What the rule covers now is in §5.
+
 ### 3.5 Namespace rename-on-install is deferred (non-goal)
 
 Renaming a colliding namespace on install would require rewriting **every**
@@ -273,6 +306,45 @@ object name (`crm_account` → `acme_account`), every cross-reference, and every
 formula / view / flow that names `crm_account`. That is a deep rewrite, not a
 URL change. v1 is **refuse-on-conflict** (§3.2). Rename-on-install is recorded
 as future work, not part of this decision.
+
+> **Amended (2026-11-07, #30794) — rename-on-install ships for unmanaged copies, and only for them.**
+> An unmanaged install ([ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6)
+> may name a `targetNamespace`. The copy's new base takes it as its `namespace`. Every copied object
+> name takes it in place of the package's, and a name that lacks the package's prefix takes it in front.
+> Every reference the engine reads follows (the first bullet below says where). That is the deep rewrite this section describes, done by
+> the one engine `duplicatePackage` already applies (ADR-0070 D4): `planNamespaceRename`,
+> `packages/metadata-protocol/src/package-namespace-rename.ts`. Both doors call it, so the two renames
+> cannot drift. The doors share the rename and nothing more: only the duplicate rebinds a permission
+> set's `packageId` (ADR-0086 D3), which the import never does, and only the import judges the copy
+> names against the item-name grammar and the identifier limits below.
+>
+> - **The rename runs after view containers are expanded.** A view item follows its object, and so
+>   does a view container (a view named exactly like an object) and every view it expands into; this
+>   holds on both doors, so a bare object's container now follows it under the duplicate too.
+>   Translations are named `<targetNamespace>_<locale>`, with the object keys inside them renamed. A
+>   field keeps its key. Free text is renamed only at a whole prefixed object name.
+> - **Every refusal the names can answer comes before the base exists**: a copy name another object's
+>   copy takes, a copy name the item-name grammar refuses, a copy name longer than an object's table
+>   identifier (63) or an item name (255) may be, and a renamed key that meets a key the item already
+>   holds. `targetNamespace` is judged by `manifest.namespace`'s own declaration, and the shared
+>   namespaces `base`, `system` and `sys` are refused; both refusals answer `400 INVALID_REQUEST`,
+>   naming `targetNamespace`.
+> - **§3.2's refuse-on-conflict runs on the renamed names.** A `targetNamespace` another package owns
+>   is refused, and so is a renamed name the environment or a managed package holds.
+> - ⛔ **A managed install is never renamed.** It keeps the package's namespace and its upgrade
+>   channel, and `targetNamespace` beside it is refused (`400 INVALID_REQUEST`) before anything is
+>   fetched. For a managed install, §3.2 stands exactly as written.
+> - **Provenance** is the import answer's `sourceNamespace` and the install-local answer's
+>   `installedFrom.namespace`. Both are information only, as ADR-0131 D6 records provenance.
+> - **The request carries it, the CLI does not.** `targetNamespace` is a key of the import's request
+>   (`importUnmanagedPackage`) and of the `POST /api/v1/marketplace/install-local` body;
+>   `os package install` sends none.
+>
+> Not in this amendment: renaming bare non-object names (ruling C on #30798 makes every
+> package-authored top-level name carry the namespace, see the
+> [2026-11-06 addendum](#addendum-2026-11-06-bare-names-resolved-without-a-package-hold-one-package--34-narrowed)),
+> seed data (the import copies none), and the hosted-cloud default namespace
+> (objectstack-ai/cloud#3624).
 
 ### 3.6 The package-id URL is transparent; a friendly alias is optional
 
@@ -318,9 +390,34 @@ alias is optional and out of scope for the phases below.
 Status legend: **[done]** shipped · **[proposed]** not yet built ·
 **[deferred]** out of scope here.
 
-- **[done]** Authoring lint: `naming/namespace-prefix` in `os lint` (warns on
-  non-prefixed `app`/`page`/`dashboard`/`flow`/`action`/`report`/`dataset`;
-  exempts the namespace-named app per ADR-0019 and `sys_` names; warning-only).
+- **[done]** Authoring lint: `naming/namespace-prefix` in `os lint` reports two
+  warning-only findings over the declarations of one package (amended in place
+  2026-11-09, [#31685](https://github.com/objectstack-ai/objectstack/issues/31685), after
+  ADR-0150 child P, [#31669](https://github.com/objectstack-ai/objectstack/issues/31669)).
+  - **The duplicate finding** (§3.4, kept by ADR-0150 D9): a name declared twice in one
+    package among its apps, pages, dashboards, flows, actions (per `objectName`), reports
+    and datasets (`DUPLICATE_KEYED_TYPES`). It asks for a distinct name, never for a prefix.
+  - **The bare-name finding** judges only the collections whose names keep the literal
+    prefix (`PREFIX_JUDGED_COLLECTIONS`): capabilities, spelled `NS.SHORT` (ADR-0150 D1
+    bucket 1; maintainer ruling 2026-11-06T11:08Z, recorded in
+    [#30804 comment 6683456244](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6683456244)),
+    and positions, one slot per name in the environment (ADR-0150 D7). It judges a package
+    that declares `manifest.namespace`, and gives the rename as its `fix`. A name carries
+    the namespace when it is the namespace itself, starts with `<ns>_`, is a dotted
+    `<ns>.<short>` name, or starts with `sys_`; an item that declares `overrides` is not
+    judged.
+  - **Every other type keeps its short name.** ADR-0150 identifies buckets 2–4 by
+    (package, name) (D1), so child P retired the warning that asked for `<ns>_<short>`
+    there (D9), and a name already prefixed stays valid. The permission set `guest_portal`,
+    exempted by ruling 2026-11-06T14:57Z
+    ([#30804 comment 6687835712](https://github.com/objectstack-ai/objectstack/issues/30804#issuecomment-6687835712);
+    `PLATFORM_REQUESTED_BARE_NAMES`), is no longer judged at all: permission sets are
+    bucket 2.
+  - **No refusal follows.** Phase 3 of ruling C on #30798 (#30806), which was to turn the
+    bare-name finding into a refusal at `defineStack` and the save door, is withdrawn
+    (maintainer ruling A 「转向包寻址」, recorded in
+    [#30806 comment 6721941146](https://github.com/objectstack-ai/objectstack/issues/30806#issuecomment-6721941146);
+    ADR-0150's status line).
 - **[done] Phase 1 — install-time namespace gate.** `NamespaceConflictError` +
   the gate in `SchemaRegistry.installPackage` (refuses a package whose
   `manifest.namespace` is already owned by a different installed package;
@@ -367,7 +464,12 @@ Status legend: **[done]** shipped · **[proposed]** not yet built ·
 
 ## Addendum (2026-08-08): publish-time / marketplace namespace exclusivity
 
-> **Status of this addendum: Proposed.** It is **additive to §3.2** and
+> **Status of this addendum: Accepted (2026-08-08).** The maintainer accepted
+> it as drafted, D2 and D3 rule 2 included, on #1825
+> ([acceptance comment 5226411687](https://github.com/objectstack-ai/objectstack/issues/1825#issuecomment-5226411687),
+> 2026-08-08 13:55Z); PR #6671 landed it the same day with this line still
+> reading "Proposed", that comment being the acceptance record of authority
+> until the line caught up (2026-11-06, #30814). It is **additive to §3.2** and
 > **supersedes no text above** — §§1–6 stand verbatim, the install-time gate's
 > semantics are unchanged, and §3.5 (namespace rename-on-install) stays
 > deferred. What it adds is a **second, earlier checkpoint** in front of the
@@ -716,14 +818,27 @@ publishers there is no cross-vendor collision to prevent, which is exactly why
 the work sat on hold. This addendum therefore draws the **contract** now and
 lets the enterprise-side implementation be scheduled against the opening date.
 
+> **Note (2026-11-06, #30814) — where the precondition stands; no decision
+> changes.** Phase A2, the publish-time gate (§A.6), stays bound to this
+> precondition: it lands before third-party publishing opens, and the opening
+> waits for it. While publishing is first-party only, first-party namespaces
+> are reserved at switch-on by D2 and D4 (the D3 whitelist aside, which is
+> never reserved and stays first-party-tier only): the back-fill awards each
+> published namespace to the publisher of its earliest published version, and
+> the reservation is held by that publisher. So no separate official reserved
+> list is needed. Phase A1 is landed: PR #6864 (2026-08-09) carries
+> `namespace` on the publish payload in this repository, read off the
+> artifact's `manifest.namespace`, with its cloud-side receiver in
+> objectstack-ai/cloud#1927 (per #30814).
+
 ### A.6 Phasing
 
 Status legend as in §5.
 
-- **[proposed] Phase A1 — carry the namespace to publish.** `namespace` on
+- **[done] Phase A1 — carry the namespace to publish.** `namespace` on
   `PackageSchema` / `CreatePackageRequestSchema`; `objectstack package publish`
   reads it off the artifact manifest. Open-side, this repo. Prerequisite for
-  everything below.
+  everything below. Landed by PR #6864 (2026-08-09).
 - **[proposed] Phase A2 — the publish-time gate (minimal version A).** §A.2's
   algorithm in the marketplace review pipeline, plus the reservation store.
   Enterprise-side. **This is the item bound by §A.5.**
@@ -851,3 +966,307 @@ for a package-bound registration that reaches the registry directly. Every packa
 registration reaches the package door before any in-memory registrar runs, so the
 boot of a conflicting composition — an artifact boot included — is refused in its
 first phase.
+
+---
+
+## Addendum (2026-11-06): bare names resolved without a package hold one package — §3.4 narrowed
+
+> **Status of this addendum: Accepted** — it records phase 1 of a maintainer
+> ruling. It **narrows §3.4 for more metadata types, one family per change (P1.2,
+> P1.7, P1.8, P1.9 — the last), and supersedes no other text**: §§1–6, the 2026-08-08 addendum and
+> the 2026-10-08 addendum stand verbatim.
+>
+> **Ruling this addendum records** — #30798, answered by the maintainer
+> 「同意 c」 (ruling record 6676670839, 2026-11-06). The ruled option's text,
+> verbatim:
+>
+> > **C. Every name carries the namespace** — Extend ADR-0129's literal prefix to
+> > every package-authored top-level metadata name (`crm_send_email`), except
+> > names already derived from a prefixed object (fields, object extensions,
+> > container views) or already namespaced (translations `<ns>_<locale>`);
+> > enforced at `defineStack`/`os validate` and the save door; same-name clashes
+> > become impossible by construction
+>
+> and its phasing, verbatim: "**Now:** extend the existing registration refusal
+> (A's mechanism) to the silent types. It closes silent mis-resolution for
+> packages already in the field. After phase 3 it remains only as the backstop
+> for the cases C cannot reach: packages that declare no namespace, the shared
+> `base`/`system`/`sys` namespaces, and third-party packages inside the
+> deprecation window." Phase 1 is #30803; the lint, the templates and the skills
+> are phase 2 (#30804, #30805); `defineStack`, the save door and the ADR-0129
+> amendment are phase 3 (#30806).
+
+### P1.1 Why §3.4's premise does not hold for the data family: `picklist`, `mapping`, `dataset`
+
+§3.4 rests on every caller carrying its package id. These three consumers carry
+none when they resolve the name. Measured on a booted showcase with two packages,
+`alpha` and `beta`, each shipping one item per type under the same bare name, in
+both registration orders (#30803, stage 1):
+
+- **`picklist`** — a field's `picklist: NAME` resolves the first-registered
+  package's list for both packages' objects: the second package's object is
+  served the other package's options, and its own values are refused at write
+  (`VALIDATION_FAILED`).
+- **`mapping`** — an import's `mappingName` resolves the first-registered
+  package's mapping; the other package's import answers `400
+  MAPPING_TARGET_MISMATCH`.
+- **`dataset`** — a dashboard's `datasetName` query runs the first-registered
+  package's dataset.
+
+Each answer flips with registration order, and none warns.
+
+### P1.2 What is refused
+
+Once the cold boot has sealed the registry (P1.3), a package registration is
+refused when a picklist, mapping or dataset it declares bears a name another
+holder already holds — at managed install (the package door,
+`SchemaRegistry.installPackage`, ahead of every mutation) and at package
+registration (the item seam, `SchemaRegistry.registerItem`, for a package-bound
+registration that reaches the registry directly). The holders:
+
+- **an installed package** — including a disabled one, which is still installed
+  and still holds its names; a nested plugin declares under its parent package;
+- **a built-in** — none today for these types; the vocabulary keeps the holder so
+  a platform-held name is refused the way the security catalog refuses one, and,
+  as there, only the package door asks it.
+
+⛔ **Never the environment catalog** — the one difference from N.2. For these
+types an item authored in this environment under a package's name is the ADR-0005
+overlay of that package's item, not a second holder; a registration with no
+package is never judged, and the registry's bare slot is never read as a holder.
+
+The error is N.2's envelope (`422`, the §3.2 namespace gate's code), lists every
+conflicting name in one refusal, names both holders, and carries the rename that
+clears it: the incoming package's namespace prefixed to the name (`beta_status`),
+the one naming rule ruling C ends at. A package with no namespace, or one in a
+shared `base`/`system`/`sys` namespace, is refused without a rename.
+
+### P1.3 The cold boot
+
+Every package registers again at every boot, through the same two doors, so a
+deployment that already holds a clash would stop booting if the doors refused
+then. During a boot the doors therefore judge nothing. Once every package of the
+boot has registered — `kernel:bootstrapped`, after the `kernel:ready` rehydrates —
+the engine plugin seals the registry, and every name two installed packages
+already hold is handled by one switch, `BARE_NAME_COLD_BOOT_MODE`:
+
+- **`'warn'`** — one warning line naming every such name, both holders and the
+  rename; the boot continues and changes nothing about which holder each caller
+  is served;
+- **`'refuse'`** — the boot is refused with the P1.2 envelope, as N.3's
+  amendment refuses the security catalog's.
+
+The maintainer ruled the cold boot of a deployment that already holds a clash on
+2026-11-06 (#30803): it warns, and only a new holder is refused — the switch is
+`'warn'`. In either mode the doors refuse a NEW
+holder after the seal. A package that already holds a name is never a new holder
+of it: a reload, a re-install or an upgrade of a package that came through the
+boot beside another holder keeps its name, while a third package is refused,
+naming both. A kernel that withholds the boot-phase hooks never seals, and there
+the doors never refuse.
+
+### P1.4 What stays as §3.4 has it
+
+- **Same-package re-registration** is one holder, not two.
+- **Every type not listed** keeps §3.4's coexistence: two packages' `page/home`
+  still coexist, an object-bound action stays keyed `objectName:name`, a job stays
+  keyed `appId:jobName`, and the unmanaged import's own all-type refusal is
+  unchanged.
+- **A picklist extension** (`picklistExtensions`) adds values to another
+  package's list by design; it holds no name.
+- **A paired `.custom` package's declared override** (ADR-0146 D2) is a stored
+  row bound to its pair, never a package holder, so the refusal does not close
+  the override path.
+- **No downgrade.** `OS_METADATA_COLLISION=warn` softens the §3.2 namespace gate
+  only.
+
+### P1.5 The series, complete
+
+Phase 1 joined P1.2's list one family per change under #30803, each measured
+first, as the maintainer ordered on 2026-11-06 (all of them kept in #30803): the
+data family (P1.1), the request family (P1.7), the flow family (P1.8) and, last,
+the AI family — `agent` and `skill` (P1.9). P1.9's change closes phase 1. `tool`
+and `rag_pipeline` were never in the ruling's list; P1.9 records what was
+measured of them. `tool` joined afterwards, on its own card and measurement
+(P1.10, 2026-11-08); `rag_pipeline` stays out.
+
+### P1.6 Where it is implemented
+
+`@objectstack/objectql`: the rule, the holders, the overridable baseline
+(`OVERRIDABLE_BASELINE_PACKAGES`, P1.8) and the switch in
+`bare-name-one-holder.ts`; the package door in `SchemaRegistry.installPackage` and
+the item seam in `SchemaRegistry.registerItem`; the function door in
+`bindHooksToEngine`, through `SchemaRegistry.claimBareNameFunctions`; the seal in
+`SchemaRegistry.sealBareNameHolders`, called by the engine plugin at
+`kernel:bootstrapped` through `sealBareNameHoldersAtColdBoot`.
+
+### P1.7 The request family: `api`, the object-less `action`, the engine function registry
+
+Measured with P1.1's two packages, in both orders (#30803, stage 1):
+
+- **`api`** — the endpoint matcher keeps one API per name, the last-registered:
+  that package's path answers `200` and the other package's declared path `404`.
+- **the object-less `action`** — `/actions/global/NAME` runs the last-registered
+  package's handler while `/meta/action/NAME` serves the first-registered
+  package's declaration, so the button a client draws and the code that runs
+  come from two packages. The handler bind warns that it replaces one, naming
+  neither package.
+- **the engine function registry** — one function per name, the last-registered,
+  resolved with no package by a flow `script` node's `function` and an action's
+  `target`.
+
+**What is refused.** An API and an object-less action join P1.2's list: the same
+two doors, the same holders, the same envelope and rename. An action **bound to
+an object** (`objectName`, or a collector's `object`) is not covered — it is keyed
+`objectName:name` from declaration to handler — so it neither holds a name nor is
+refused over one, whatever object-less action shares its name.
+
+A function is not a registry item: a package's functions are code its runtime
+module brings, and the one door they pass is the hook binder's bind
+(`bindHooksToEngine`, `functions`), which the runtime makes for a package under
+the handler owner `app:<packageId>` — read as that package. The bind records the
+package's claim to each function name; once the cold boot has sealed the
+registry, a bind bringing a function another package holds is refused ahead of
+every registration and bind it would make, every conflicting name in one
+refusal, naming both holders and the rename. A package binding its own functions
+again (a hot reload) is no new holder, and uninstalling a package releases its
+claims. Not judged: a bind naming no owner, an entry with no callable handler,
+and a direct `ObjectQL.registerFunction` call — the imperative registration a
+host's own code makes outside any package's bind. A hook's `handler` was never
+ambiguous: the binder resolves it among its own package's functions only.
+
+**The cold boot** reads the bind claims with the registry's holders, under P1.3's
+switch: two packages of one boot binding one function name are named in the same
+warning line, as packages, never as their handler owners.
+
+### P1.8 The flow family: `flow`, `webhook`, `connector`, `email_template`
+
+Measured with P1.1's two packages, in both orders (#30803, PR 3):
+
+- **`flow`** — the automation engine keys its flow map by the bare name and
+  arms ONE flow per name: the lexicographically-first package's
+  (`resolveFlowPrecedence`), whichever registered first, with a warning naming
+  both — the one type of the nine that warns; `/meta/flow/NAME` serves the
+  FIRST-registered package's declaration, so in one order the body the designer
+  opens and the body that runs come from two packages. A third package installed
+  after the boot under that name installs (`200`) and is shadowed.
+- **`webhook`** — the dispatcher's declared-webhook reader keeps the
+  FIRST-registered package's declaration per name and never subscribes the
+  other, silently; `/meta/webhook/NAME` serves the same one.
+- **`connector`** — `/meta/connector/NAME` (the by-name door the designer's
+  connector picker reads) serves the FIRST-registered package's descriptor,
+  silently. Two provider-bound instances under one name at boot are already
+  refused by the automation service (ADR-0097's duplicate, fatal at boot); after
+  the boot the second is logged at `error` and skipped, its install answering
+  `200`.
+- **`email_template`** — a send's `template: NAME` resolves the
+  FIRST-registered package's bundle, silently; `/meta/email_template/NAME` serves
+  the same one.
+
+**What is refused.** All four join P1.2's list: the same two doors, the same
+holders, the same envelope and rename. A provider-bound connector instance and a
+catalog descriptor hold the name alike — it is the connector's identity in the
+engine's registry and the picker both. An email template's NAME holds its
+bundle: the registry keys the type by `(name, locale)` (`pkg:name@locale`), the
+holder reading strips the member, two members of one package's bundle are one
+holder, and another package's member of that name — another locale included — is
+one conflict, on the name.
+
+**The overridable baseline.** The platform's built-in auth templates are
+code-declared under the email service's own package
+(`EmailServicePlugin.init`, `@objectstack/plugin-email`), and the template loader
+serves any OTHER package's `(name, locale)` member over them by contract
+(ADR-0131 D6/D10: an app declaring `auth.password_reset` overrides the
+platform's copy). So that package is an overridable baseline for
+`email_template` (`OVERRIDABLE_BASELINE_PACKAGES`): it neither holds a template
+name nor is refused one, at the package door, the item seam and the cold boot
+alike. The first other package to take a built-in name holds it; a second is
+refused naming the first, never the baseline. No other type has a baseline today.
+
+**Not judged.** A paired `.custom` package's declared override of a base
+package's flow (ADR-0146 D9 item 1) is a stored row bound to its pair, hydrated
+into the bare slot — the environment catalog, never a package holder, so the
+override path stays open. The automation service's own duplicate refusal of two
+provider-bound instances in ONE boot (ADR-0097) runs before the seal and stands;
+the doors here judge the install that follows a boot. The kernel `metadata`
+service's `(type, name)` overwrite is not a consumer of these four on a
+composed runtime (the webhook reader falls back to it only with no registry),
+and is not judged.
+
+**The cold boot** reads the four with the registry's other holders, under
+P1.3's switch: the flow precedence warning keeps naming both packages and arming
+one, as before; the bare-name warning names every clash once with its rename.
+
+### P1.9 The AI family: `agent`, `skill` — the series' last
+
+Measured with P1.1's two packages, in both orders, plus a third package
+installed after the boot (#30803, PR 4):
+
+- **`agent`** — `/meta/agent/NAME` serves the FIRST-registered package's
+  agent, silently. It is the one by-name read of an agent the open framework
+  serves: the kernel `metadata` service, which the MCP `agent_prompt` reads,
+  answers no package agent at all on the composed runtime (ADR-0063 §2: agents
+  are platform-owned), and the agent runtime that resolves an agent by name for
+  chat is the cloud's, not measured here.
+- **`skill`** — an MCP client's `prompts/get` of a skill resolves the
+  FIRST-registered package's skill (`listSkillPrompts` keeps the first row per
+  name and drops the other), silently; `/meta/skill/NAME` serves the same one.
+  ADR-0063 §2 names the skill the third-party extension primitive, so this is
+  the family's live collision.
+
+A third package installed after the boot under either name installs (`200`) and
+is shadowed. Neither type warns.
+
+**What is refused.** Both join P1.2's list: the same two doors, the same
+holders, the same envelope and rename. Neither is bundled, and neither has an
+overridable baseline or a built-in name. An agent and a skill are two types: one
+package's agent and another's skill under one name never meet.
+
+**Not in the list.** A `tool` is not covered by this change — the ruling's types
+do not name it. Measured beside them: `/meta/tool/NAME` serves the
+first-registered package's tool as well. (It joined the list later, on its own
+card and measurement: P1.10.) A
+`rag_pipeline` cannot be declared through `defineStack` (the stack schema
+refuses `ragPipelines`) and registered nothing in the measurement. `rag_pipeline` is left
+as §3.4 has it.
+
+**The cold boot** reads the two with the registry's other holders, under P1.3's
+switch (`'warn'`). This is the series' closing change: phase 1's list is
+complete, and phase 2 (#30804, #30805) and phase 3 (#30806) follow.
+
+### P1.10 (2026-11-08) `tool` joins the list, after the AI family
+
+A dated note under this addendum; it narrows §3.4 for one more type. The
+header's Addenda entry, §3.4's 2026-11-06 note, P1.5 and P1.9's "Not in the
+list" name it beside the earlier types. The maintainer accepted a separate card for `tool` out of P1.9's
+measurement (「以上都同意」, 2026-11-08, #31414): measure the readers that resolve a
+tool by name, and if any carries no package, `tool` joins P1.2's list the way
+the AI family did.
+
+**Measured** on objectstack `69244406`, beside P1.9's booted measurement:
+
+- `/meta/tool/NAME` serves the FIRST-registered package's tool, silently, in
+  either registration order (P1.9), and a third package installed after the boot
+  under that name installs (`200`) and is shadowed.
+- Every reference to a tool carries its bare name and nothing else. A skill's
+  `tools` list admits only a snake_case name (the spec's `SkillSchema`, bound by
+  the cloud agent runtime); an AI tool definition and a tool call carry a name
+  and no package (`AIToolDefinition`, `ToolCallPart` in the AI service
+  contract); the MCP bridge registers each tool under its name and calls it by
+  that name, and an MCP server holds one tool per name (a second registration of
+  a name throws). An agent's guardrail matches a tool by its name.
+- The cloud agent runtime (read by the cloud seat at objectstack-ai/cloud
+  `ba6f0fa`, #31414) resolves a tool by bare name too, for chat (a skill's
+  `tools`) and MCP alike, against an in-process tool registry keyed by the name
+  that plugins fill in code; the metadata `tool` item is a mirror for Studio and
+  reaches no handler there. So no reader on either side carries a package, and
+  one such reader is enough.
+
+**What is refused.** `tool` joins P1.2's list, last: the same two doors, the
+same holders, the same envelope and rename. It is not bundled, and it has no
+overridable baseline and no built-in name. An agent, a skill and a tool are
+three types: one package's item of one and another package's item of another
+under one name never meet.
+
+**The cold boot** reads it with the registry's other holders, under P1.3's
+switch (`'warn'`). `rag_pipeline` stays as P1.9 left it.

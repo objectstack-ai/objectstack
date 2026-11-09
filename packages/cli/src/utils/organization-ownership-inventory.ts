@@ -759,6 +759,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the environment's trusted plugin-publisher keys, ` +
       'read by key id under the system context, never by organization',
   },
+  {
+    object: 'sys_lifecycle_state',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the lifecycle sweeper's clock state, one row per ` +
+      'datastore, written by the sweep under the system context, never by organization',
+  },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   {
     object: 'sys_flow_credential',
@@ -775,6 +783,26 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     citation:
       `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: a declarative connector's stored credential is environment-level, ` +
       'read by the reference its instances name, never by organization',
+  },
+  {
+    object: 'sys_cloud_binding_credential',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the deployment's one cloud binding credential, read by its ` +
+      'fixed slot under the system context, never by organization',
+  },
+  // #30959 (ruling record 6718345088, fork 1 (a)) — an identity-provider group
+  // mapping is saved by the platform administrator for one SCIM connection and
+  // always carries the organization that owns the connection's credential (the
+  // save refuses a connection whose credential names none), so a NULL row has
+  // no producer.
+  {
+    object: 'sys_idp_group_mapping',
+    census: PMAIN,
+    fate: 'attribution',
+    citation: `${CENSUS_MAIN} (in reach, added since the first census; one row per SCIM connection, in the organization that owns it); ${D10_SINGLE}`,
+    anchors: [],
   },
   // ADR-0143 D3 — a connector connection is made by an organization's
   // administrator and dispatched with by that organization's runs (Q1 = A):
@@ -794,15 +822,30 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_mail_message', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the message's mailbox carries the organization`, anchors: [parent('mailbox_id', 'sys_mailbox')] },
   { object: 'sys_mail_association', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the association's message carries the organization`, anchors: [parent('mail_message_id', 'sys_mail_message')] },
   // Ownership queues (`@objectstack/plugin-sharing`, ADR-0142): an organization
-  // authors its queues and their members, and the assignment engine writes its
-  // cursor, each under that organization. A member and a cursor name their
-  // queue or rule by name, not by id, so no parent anchors them.
+  // authors its queues, their members and its own assignment rules, and the
+  // assignment engine writes its cursor, each under that organization. A
+  // member, a cursor and a rule name their queue or rule by name, not by id,
+  // so no parent anchors them.
   { object: 'sys_queue', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_queue_member', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its queue by name, not by id; ${D10_SINGLE}`, anchors: [] },
   { object: 'sys_assignment_cursor', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); names its rule by name, not by id; ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_assignment_rule', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); its organization column is required, so no NULL row has a producer; ${D10_SINGLE}`, anchors: [] },
   // Exchange rates (`@objectstack/platform-objects`, #27185): an organization's
   // administrators author its own rate table; no parent row anchors a rate.
   { object: 'sys_exchange_rate', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // The recycle bin (`@objectstack/platform-objects`, ADR-0148, #30237): the
+  // engine writes each entry with the organization of the record it holds,
+  // else the deleting context's. A NULL row comes only from a delete with
+  // neither (a tenancy-disabled object deleted by a context with no active
+  // organization). The record an entry names is gone, so no parent row
+  // anchors an entry.
+  { object: 'sys_recycle_bin', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // The record of landed seed rows (`@objectstack/platform-objects`, #31021):
+  // the seed loader writes each row with the organization the load seeds and
+  // writes none when the load seeds no organization, so a NULL row has no
+  // producer. A key names a seed row by its natural key, not by id, so no
+  // parent row anchors it.
+  { object: 'sys_seed_landed_key', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   // A reader's own named list views (`@objectstack/platform-objects`, ruling
   // 6570568131 on #28971): user data on the preference template, each row in
   // its owner's organization; no parent row anchors a view.

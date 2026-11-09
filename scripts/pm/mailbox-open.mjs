@@ -42,8 +42,8 @@
  * a login as a seat any more.
  *
  * A seat is spelled `LANE#N` — `domain:ui#4`, `repo:cloud#1`, `triage`,
- * `epic:#27293#1` — its lane one of the five a seat post's title names
- * (`domain:<x>`, `repo:<x>`, `triage`, `director`, `security`) or the epic lane
+ * `epic:#27293#1` — its lane one of the eight a seat post's title names
+ * (`domain:<x>`, `repo:<x>`, `triage`, `director`, `security`, `review`, `qa`, `eval`) or the epic lane
  * `epic:#<parent>`, the seat signature's spelling for the PM delegated a
  * `pm:epic` parent card (pm-dispatch `seat-lifecycle.md` 〈Epic 子树车道〉), so a
  * login never reads as a seat, and an absent number read as seat 1
@@ -51,8 +51,8 @@
  * number (`triage#1`, `epic:#12#1`). Its SLUG is that key as one ref segment,
  * because a ref cannot carry `:` or `#`: the default `domain:` kind dropped,
  * every other `:` (with the epic lane's `#` after it) and the seat's `#` turned
- * into `-` (`ui-4`, `repo-cloud-1`, `triage-1`, `security-1`, `epic-27293-1`). No `domain:`
- * lane may be named `triage`, `director`, `security`, `repo-…` or `epic-…` — `seatKey`
+ * into `-` (`ui-4`, `repo-cloud-1`, `triage-1`, `security-1`, `review-1`, `epic-27293-1`). No `domain:`
+ * lane may be named `triage`, `director`, `security`, `review`, `qa`, `eval`, `repo-…` or `epic-…` — `seatKey`
  * refuses one — which keeps the slug one-to-one.
  *
  * ## What it does, in order (open)
@@ -76,7 +76,11 @@
  *      nothing else is sent. `--head <branch>` names a branch that already
  *      exists instead (a thread's own pushed branch, as #25392 used) and skips
  *      the push; it must be ahead of `<base>`, because GitHub refuses a pull
- *      with no commits.
+ *      with no commits. A cloud seat names it `claude/mailbox-<slug>`, the one
+ *      head `--close` deletes. Any other `--head` opens as before, after ONE
+ *      warning on stderr (`headLeftWarning`, dry run included) that `--close`
+ *      will leave that branch — a warning, never a refusal: a session limited
+ *      to its designated branch can push no other name.
  *   ③ ONE relay stroke: `pr_create` (draft is forced by the relay) with labels
  *      `pm:mailbox`, `pinned` and `skip-changeset`, sent through
  *      `fleet-write/dispatch.mjs` as `objectstack-fleet[bot]`. `pinned` is
@@ -94,7 +98,13 @@
  *
  * `--close <n>` reads the pull first and REFUSES (exit 4) unless it is open
  * and carries `pm:mailbox`, so a mistyped number can never close a real PR;
- * then one stroke: the closing `comment` and `issue_patch state: closed`.
+ * then one stroke: the closing `comment`, `issue_patch state: closed` and,
+ * when the head read is `claude/mailbox-*`, `mailbox_branch_delete` of it (the
+ * relay's one ref op, ruling 6674408912, fenced as `ops.mjs`'s header lists),
+ * so a cloud seat's mailbox leaves no branch. A delete the relay refuses
+ * leaves the pull closed, which `--close` then refuses, so the failure line
+ * prints the one bare action to send (`closeRemedy`). Any other head is left:
+ * a thread's branch is not the mailbox's; a local seat deletes `mailbox/…`.
  *
  * ## CI on an empty diff — exempt where a label can exempt it, red by design elsewhere
  *
@@ -138,6 +148,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
+import { MAILBOX_BRANCH_SHAPE, MAILBOX_LABEL } from './fleet-write/ops.mjs';
 import { validateStroke } from './fleet-write/validate.mjs';
 import { ghApi, PER_PAGE, readAllPages } from './gh-pages.mjs';
 
@@ -150,7 +161,7 @@ export const EXIT_USAGE = 2;
 export const EXIT_PREREQUISITE = 3;
 export const EXIT_REFUSED = 4;
 
-export const MAILBOX_LABEL = 'pm:mailbox';
+export { MAILBOX_LABEL };
 /** Appended to every search query that enumerates open PRs for landing. */
 export const LEDGER_EXCLUSION = `-label:${MAILBOX_LABEL}`;
 export const MAILBOX_BRANCH_PREFIX = 'mailbox/';
@@ -163,16 +174,17 @@ const REPO_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const LOGIN_SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const BRANCH_SHAPE = /^(?!\/|.*\/\/|.*\.\.|.*[\s~^:?*[\\]|.*\.lock$|.*\/$)[A-Za-z0-9._/-]+$/;
 const SESSION_SHAPE = /^(?:session|cse)_[A-Za-z0-9]+$/;
-// A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, `security`, the five a seat post's title names,
-// or the epic lane `epic:#<parent>` — then `#N`; absent = seat 1. Read lower-cased. The bare lanes are a closed set of
-// three, so a login is never read as a seat. The lists below are the ONE spelling of those lane words: the shape is
-// built from them, and so is the reserved set a `domain:` lane may not be named after (`seatKey`). The same three
-// words close the seat signature's lane alternation (`SIGNATURE_LANE_SOURCE`, check-half-states.mjs), which this
-// list does not import; a bare lane admitted there is admitted here in the same PR.
+// A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, `security`, `review`, `qa`, `eval`, the eight a seat
+// post's title names, or the epic lane `epic:#<parent>` — then `#N`; absent = seat 1. Read lower-cased. The bare lanes are a
+// closed set of six, so a login is never read as a seat. The lists below are the ONE spelling of those lane words: the shape is
+// built from them, and so is the reserved set a `domain:` lane may not be named after (`seatKey`). The same
+// six words close the seat signature's lane alternation (`SIGNATURE_LANE_SOURCE`, check-half-states.mjs), which this
+// list cannot import (the patrol loads this file lazily, so that edge would be a cycle); fleet-roster's self-test,
+// which imports both, holds the two equal, `coordinator` (it signs and has no mailbox) aside.
 /** The lane kinds that carry a name after the colon: `domain:<x>`, `repo:<x>`. `domain` is the default kind the slug drops. */
 export const SEAT_LANE_KINDS = Object.freeze(['domain', 'repo']);
-/** The bare lanes, a closed set: `triage`, `director`, `security` (the seat that owns security findings, `lanes/security.md`). */
-export const SEAT_BARE_LANES = Object.freeze(['triage', 'director', 'security']);
+/** The bare lanes, a closed set: `triage`, `director`, `security` (the seat that owns security findings, `lanes/security.md`), `review` (the contract-review seat, `lanes/review.md`), `qa` (the QA routines seat, `lanes/qa.md`), `eval` (the AI eval seat, `lanes/eval.md`). */
+export const SEAT_BARE_LANES = Object.freeze(['triage', 'director', 'security', 'review', 'qa', 'eval']);
 /** The epic lane's kind: `epic:#<parent>` names the `pm:epic` parent card's number, never a word (`epic:#27293#1`). */
 export const SEAT_EPIC_KIND = 'epic';
 const SEAT_SHAPE = new RegExp(`^((?:${SEAT_LANE_KINDS.join('|')}):[a-z0-9._-]+|${SEAT_EPIC_KIND}:#[1-9][0-9]*|${SEAT_BARE_LANES.join('|')})(?:#([1-9][0-9]*))?$`);
@@ -284,12 +296,25 @@ export function planOpen({ repo, seat, login, head = null, base = 'main', sessio
   return { kind: 'open', repo, seat: s, login, branch, base, push: head === null, actions, errors: validateStroke(repo, actions) };
 }
 
-export function planClose({ repo, pull }) {
+/**
+ * The warning an open prints before the pull is created when its `--head` is not `MAILBOX_BRANCH_SHAPE` — the one
+ * head `--close` deletes (`planClose`) — naming the `claude/mailbox-<slug>` spelling; null for a pushed default
+ * branch or a matching head. It changes no exit code and no stroke. Pure.
+ */
+export function headLeftWarning(plan) {
+  if (plan?.kind !== 'open' || plan.push || !plan.seat || MAILBOX_BRANCH_SHAPE.test(String(plan.branch ?? ''))) return null;
+  return `⚠️  mailbox-open: --head ${plan.branch} is not a claude/mailbox-* branch, so --close will LEAVE it behind for a person to delete — the relay deletes only that shape. Name the head claude/mailbox-${plan.seat.slug} to have --close delete it.`;
+}
+
+/** `head` is the pull's head as read live; a `claude/mailbox-*` one is deleted in the same stroke, after the close (header). */
+export function planClose({ repo, pull, head = null }) {
+  const branch = typeof head === 'string' && MAILBOX_BRANCH_SHAPE.test(head) ? head : null;
   const actions = [
     { op: 'comment', issue: pull, body: 'Mailbox closed: the seat handed over or switched account. The successor opens its own with `scripts/pm/mailbox-open.mjs`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_' },
     { op: 'issue_patch', issue: pull, state: 'closed' },
+    ...(branch ? [{ op: 'mailbox_branch_delete', pull, branch }] : []),
   ];
-  return { kind: 'close', repo, pull, actions, errors: validateStroke(repo, actions) };
+  return { kind: 'close', repo, pull, branch, actions, errors: validateStroke(repo, actions) };
 }
 
 const labelNames = (pr) => (Array.isArray(pr?.labels) ? pr.labels.map((l) => (typeof l === 'string' ? l : l?.name)) : []);
@@ -331,6 +356,13 @@ export function legacyMailboxesOf(pulls, login) {
   return openMailboxes(pulls).filter((m) => m.owner.slug === null && String(m.owner.login ?? '').toLowerCase() === want).map((m) => m.pr);
 }
 
+/** A failed close stroke that carried the delete: the bare re-send `--close` can no longer make (header), or null. Pure. */
+export function closeRemedy(plan) {
+  if (!plan.branch) return null;
+  const action = JSON.stringify([{ op: 'mailbox_branch_delete', pull: plan.pull, branch: plan.branch }]);
+  return `if the stroke stopped at mailbox_branch_delete, #${plan.pull} is closed and --close refuses a re-run: once the refusal named above no longer holds, send the delete alone — node scripts/pm/fleet-write/dispatch.mjs --repo ${plan.repo} --actions-file FILE --json, FILE holding ${action}`;
+}
+
 /** Why `pr` may not be closed as a mailbox, or null when it may. Pure. */
 export function closeRefusal(pr, pull) {
   if (!pr || typeof pr !== 'object') return `#${pull} could not be read`;
@@ -352,7 +384,7 @@ export function planText(plan) {
     lines.push(`  ④ read back the open pull on ${plan.branch} and print its number`);
   } else {
     lines.push(`  ① read #${plan.pull}; refuse unless it is open and carries ${MAILBOX_LABEL}`);
-    lines.push('  ② one relay stroke (fleet-write/dispatch.mjs), the actions file below');
+    lines.push('  ② one relay stroke (fleet-write/dispatch.mjs), the actions file below — plus mailbox_branch_delete when the head read is claude/mailbox-*');
   }
   lines.push('--- actions file ---', JSON.stringify(plan.actions, null, 2));
   return lines.join('\n');
@@ -408,7 +440,7 @@ async function openLive(plan, opts) {
     }
     const pushed = run('bash', [join(PM_DIR, 'with-fleet.sh'), '--kind', 'git push', '--', 'git', 'push', 'origin', `${sha.out}:refs/heads/${plan.branch}`]);
     if (!pushed.ok) {
-      console.error(`✗ mailbox-open: the push of ${plan.branch} was refused (with-fleet exit ${pushed.status}). A cloud seat cannot push it — pass --head <a branch this session pushed>. A legacy branch ${MAILBOX_BRANCH_PREFIX}${plan.login} refuses it too: git nests no ref under an existing one, so delete that branch once its mailbox is closed. No PR was opened.`);
+      console.error(`✗ mailbox-open: the push of ${plan.branch} was refused (with-fleet exit ${pushed.status}). A cloud seat cannot push it — push claude/mailbox-${plan.seat.slug} itself and pass --head claude/mailbox-${plan.seat.slug} (--close deletes that name). A legacy branch ${MAILBOX_BRANCH_PREFIX}${plan.login} refuses it too: git nests no ref under an existing one, so delete that branch once its mailbox is closed. No PR was opened.`);
       return EXIT_PREREQUISITE;
     }
   } else {
@@ -443,8 +475,10 @@ async function closeLive(plan, opts) {
     console.error(`✗ mailbox-open: ${refusal}. Nothing was sent.`);
     return EXIT_REFUSED;
   }
-  const code = sendStroke(plan, opts);
-  if (code === EXIT_OK) console.log(`✓ mailbox #${plan.pull} closed on ${plan.repo}.`);
+  const live = planClose({ repo: plan.repo, pull: plan.pull, head: read.value.head?.ref });
+  const code = sendStroke(live, opts);
+  if (code === EXIT_OK) console.log(`✓ mailbox #${plan.pull} closed on ${plan.repo}; ${live.branch ? `its branch ${live.branch} deleted` : `its head ${read.value.head?.ref ?? '(none)'} left — the relay deletes a claude/mailbox-* head alone`}.`);
+  else if (closeRemedy(live)) console.error(`✗ mailbox-open: ${closeRemedy(live)}`);
   return code;
 }
 
@@ -475,6 +509,8 @@ export async function main(argv, { env = process.env } = {}) {
     console.error('  Nothing was sent.');
     return EXIT_USAGE;
   }
+  const headWarning = headLeftWarning(plan);
+  if (headWarning) console.error(headWarning);
   if (opts.dryRun) {
     console.log(planText(plan));
     return EXIT_OK;
@@ -491,13 +527,13 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: the two modes and every refusal': 14,
   'the seat: canonical key, ref slug, and the per-seat branch': 11,
-  'the open plan: branch, labels, body, and the relay validator': 11,
-  'the close plan: comment then close, judged by the validator': 3,
+  'the open plan: branch, labels, body, and the relay validator': 12,
+  'the close plan: comment then close, then the delete of a claude/mailbox-* head, judged by the validator': 7,
   'whose mailbox a pull is: the seat on the body line or the head, a legacy login, neither': 8,
   "finding a seat's open mailbox: by seat, never by login": 10,
   'refusing to close what is not an open mailbox': 4,
   'the ledger exclusion and the footer': 4,
-  'the CLI: dry run prints the actions file and sends nothing': 7,
+  'the CLI: dry run prints the actions file and sends nothing': 8,
   'paging: a three-page read through the loop equals the slurped array': 4,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
@@ -541,6 +577,7 @@ async function selfTest() {
   t('domain:ui#4 → key domain:ui#4, slug ui-4 (the default kind dropped)', seatKey('domain:ui#4'), { key: 'domain:ui#4', slug: 'ui-4' });
   t('an absent number is seat 1, spelled', [seatKey('triage'), seatKey('domain:skills')], [{ key: 'triage#1', slug: 'triage-1' }, { key: 'domain:skills#1', slug: 'skills-1' }]);
   t('⭐ the security seat is a bare lane: `security#1` → key security#1, slug security-1; `security` alone is seat 1; `security#2` is its own seat', [seatKey('security#1'), seatKey('security'), seatKey('security#2').slug], [{ key: 'security#1', slug: 'security-1' }, { key: 'security#1', slug: 'security-1' }, 'security-2']);
+  t('⭐ the review seat is a bare lane: `review#1` → key review#1, slug review-1; `review` alone is seat 1; `review#2` is its own seat, and a `Mailbox-of: review#2 · login` body reads back as it', [seatKey('review#1'), seatKey('review'), seatKey('review#2').slug, mailboxOwner({ head: { ref: 'claude/project-thread-r' }, body: 'Mailbox-of: review#2 · os-zhuang', labels: [{ name: MAILBOX_LABEL }] })], [{ key: 'review#1', slug: 'review-1' }, { key: 'review#1', slug: 'review-1' }, 'review-2', { seat: 'review#2', slug: 'review-2', login: 'os-zhuang' }]);
   t('another kind keeps its name, its colon turned into a hyphen', [seatKey('repo:cloud#1').slug, seatKey('repo:www.objectos.ai#2').slug], ['repo-cloud-1', 'repo-www.objectos.ai-2']);
   t('read lower-cased, so one seat has one key', [seatKey('Domain:UI#4').key, seatKey(' domain:ui#4 ').key], ['domain:ui#4', 'domain:ui#4']);
   t('not a seat ⇒ null — ⛔ a login above all, the confusion a per-login mailbox made', ['', 'ui 4', 'domain:ui#0', '#4', 'domain:', null, 'os-bill', 'marchtian'].map(seatKey), [null, null, null, null, null, null, null, null]);
@@ -549,9 +586,9 @@ async function selfTest() {
   t('⛔ a `domain:` lane named `epic-…` is refused — its slug would be an epic seat\'s — while `domain:epic` and `domain:epics` read', [seatKey('domain:epic-12#1'), seatKey('domain:epic-tools'), seatKey('domain:epic').slug, seatKey('domain:epics').slug], [null, null, 'epic-1', 'epics-1']);
   t('⭐ the epic slug collides with no lane slug: one key per slug across every lane kind', (() => { const keys = ['epic:#12#1', 'domain:epic#12', 'domain:epic-12#1', 'repo:epic-12#1', 'domain:12#1', 'triage#12', 'epic:#1#21', 'epic:#12#1'].map(seatKey).filter(Boolean); return new Set(keys.map((k) => k.slug)).size === new Set(keys.map((k) => k.key)).size; })(), true);
   t('⛔ a short form is not a seat — `skills#2` names no lane, so it is refused as a login is', ['skills#2', 'ui#4', 'server', 'skills'].map(seatKey), [null, null, null, null]);
-  t('⛔ a `domain:` lane named after a reserved lane word is refused — its slug would be another seat\'s', ['domain:triage', 'domain:director#2', 'domain:repo-cloud#1', 'Domain:Triage#1', 'domain:security#1'].map(seatKey), [null, null, null, null, null]);
+  t('⛔ a `domain:` lane named after a reserved lane word is refused — its slug would be another seat\'s', ['domain:triage', 'domain:director#2', 'domain:repo-cloud#1', 'Domain:Triage#1', 'domain:security#1', 'domain:review#1', 'domain:qa#1', 'domain:eval#1'].map(seatKey), [null, null, null, null, null, null, null, null]);
   t('…while a `domain:` lane that merely CONTAINS a reserved word, and the reserved words as their own lanes, still read', [seatKey('domain:triage-tools#1').slug, seatKey('domain:directory').slug, seatKey('domain:repository').slug, seatKey('triage#2').slug, seatKey('repo:cloud').slug], ['triage-tools-1', 'directory-1', 'repository-1', 'triage-2', 'repo-cloud-1']);
-  t('the shape and the reserved set are built from the ONE set of lane-word lists', SEAT_LANE_KINDS.join() === 'domain,repo' && SEAT_BARE_LANES.join() === 'triage,director,security' && SEAT_EPIC_KIND === 'epic' && SEAT_BARE_LANES.every((w) => seatKey(w)?.key === `${w}#1` && seatKey(`domain:${w}`) === null) && seatKey(`${SEAT_EPIC_KIND}:#7`)?.key === 'epic:#7#1' && seatKey(`domain:${SEAT_EPIC_KIND}-7`) === null, true);
+  t('the shape and the reserved set are built from the ONE set of lane-word lists', SEAT_LANE_KINDS.join() === 'domain,repo' && SEAT_BARE_LANES.join() === 'triage,director,security,review,qa,eval' && SEAT_EPIC_KIND === 'epic' && SEAT_BARE_LANES.every((w) => seatKey(w)?.key === `${w}#1` && seatKey(`domain:${w}`) === null) && seatKey(`${SEAT_EPIC_KIND}:#7`)?.key === 'epic:#7#1' && seatKey(`domain:${SEAT_EPIC_KIND}-7`) === null, true);
   t('the branch is mailbox/<login>/<slug> — no `:` and no `#` in a ref', mailboxBranch('os-bill', seatKey('domain:ui#4')), 'mailbox/os-bill/ui-4');
   t('an epic seat\'s branch is mailbox/<login>/epic-N-K', mailboxBranch('sunhaolin', seatKey('epic:#27293#1')), 'mailbox/sunhaolin/epic-27293-1');
   t('⭐ two seats under ONE login get two branches', [mailboxBranch('os-sales', seatKey('domain:server#1')), mailboxBranch('os-sales', seatKey('domain:ui#1'))], ['mailbox/os-sales/server-1', 'mailbox/os-sales/ui-1']);
@@ -569,13 +606,20 @@ async function selfTest() {
   const ph = planOpen({ repo: 'o/r', seat: 'triage', login: 'os-bill', head: 'claude/project-thread-x' });
   t('--head names the branch and skips the push; the body still names the seat', [ph.branch, ph.push, ph.actions[0].head, ph.actions[0].body.split('\n')[0]], ['claude/project-thread-x', false, 'claude/project-thread-x', 'Mailbox-of: triage#1 · os-bill']);
   t('no draft key is sent — the relay forces draft itself', 'draft' in p.actions[0], false);
+  t('⭐ a --head --close will leave warns, naming the claude/mailbox-<slug> spelling; a claude/mailbox-* head, the pushed default and a close do not', [/--head claude\/project-thread-x is not a claude\/mailbox-\* branch, so --close will LEAVE it/.test(headLeftWarning(ph)), headLeftWarning(ph).includes('claude/mailbox-triage-1'), headLeftWarning(planOpen({ repo: 'o/r', seat: 'triage', login: 'os-bill', head: 'claude/mailbox-triage-1' })), headLeftWarning(p), headLeftWarning(planClose({ repo: 'o/r', pull: 1 }))], [true, true, null, null, null]);
   const pe = planOpen({ repo: 'objectstack-ai/objectstack', seat: 'Epic:#27293#1', login: 'sunhaolin' });
   t('⭐ an epic seat\'s plan: its branch, its Mailbox-of line, its To: line, and the validator accepts it', [pe.branch, pe.actions[0].title, pe.actions[0].body.split('\n')[0], pe.actions[0].body.includes('the line `To: epic:#27293#1`'), pe.errors], ['mailbox/sunhaolin/epic-27293-1', 'pm:mailbox — epic:#27293#1 · sunhaolin', 'Mailbox-of: epic:#27293#1 · sunhaolin', true, []]);
 
-  battery('the close plan: comment then close, judged by the validator');
+  battery('the close plan: comment then close, then the delete of a claude/mailbox-* head, judged by the validator');
   const c = planClose({ repo: 'o/r', pull: 25392 });
   t('comment first, then issue_patch closed', c.actions.map((a) => [a.op, a.issue, a.state ?? null]), [['comment', 25392, null], ['issue_patch', 25392, 'closed']]);
   t('the relay validator accepts the stroke', c.errors, []);
+  const cd = planClose({ repo: 'objectstack-ai/objectstack', pull: 30141, head: 'claude/mailbox-ui-3' });
+  t('⭐ a claude/mailbox-* head is deleted in the SAME stroke, last — after the close the relay fences on — and the validator accepts it', [cd.branch, cd.actions.map((a) => a.op), cd.actions[2], cd.errors], ['claude/mailbox-ui-3', ['comment', 'issue_patch', 'mailbox_branch_delete'], { op: 'mailbox_branch_delete', pull: 30141, branch: 'claude/mailbox-ui-3' }, []]);
+  t('⛔ any other head is left — a thread branch, a local seat\'s mailbox/ branch, a look-alike, none read', ['claude/project-thread-mvsts5', 'mailbox/os-zhuang/triage-1', 'claude/mailbox-UI-3', 'claude/mailbox-ui-3/x', null].map((head) => planClose({ repo: 'o/r', pull: 1, head })).map((x) => [x.branch, x.actions.length]), [[null, 2], [null, 2], [null, 2], [null, 2], [null, 2]]);
+  const bare = JSON.parse(closeRemedy(cd).split('FILE holding ')[1]);
+  t('a failed close stroke that carried the delete names the bare re-send — dispatch.mjs, the one action — and the validator accepts it', [closeRemedy(cd).includes('--close refuses a re-run'), closeRemedy(cd).includes('node scripts/pm/fleet-write/dispatch.mjs --repo objectstack-ai/objectstack'), bare, validateStroke('objectstack-ai/objectstack', bare)], [true, true, [cd.actions[2]], []]);
+  t('…and a close stroke with no delete names none', closeRemedy(c), null);
   t('the comment carries the bare footer under its rule line', c.actions[0].body.endsWith('\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_'), true);
 
   battery('whose mailbox a pull is: the seat on the body line or the head, a legacy login, neither');
@@ -652,6 +696,7 @@ async function selfTest() {
   t('close dry run exits 0 and prints both actions', [cli(['--repo', 'o/r', '--close', '7', '--dry-run']).status, (cli(['--repo', 'o/r', '--close', '7', '--dry-run']).stdout.match(/"op":/g) ?? []).length], [EXIT_OK, 2]);
   t('a usage error is exit 2 — an open with no --seat among them', [cli(['--repo', 'o/r']).status, cli(['--repo', 'o/r', '--login', 'os-bill', '--dry-run']).status], [EXIT_USAGE, EXIT_USAGE]);
   t('--help is exit 0', cli(['--help']).status, EXIT_OK);
+  t('⭐ a dry run on a --head --close will leave prints the warning once on stderr and still exits 0 with the same stroke; a claude/mailbox-* head prints none', (() => { const OPEN_H = ['--repo', 'o/r', '--seat', 'domain:skills#2', '--login', 'zhuangjianguo', '--dry-run', '--head']; const w = cli([...OPEN_H, 'claude/project-thread-a81t4h']); const m = cli([...OPEN_H, 'claude/mailbox-skills-2']); return [w.status, (w.stderr.match(/--close will LEAVE it/g) ?? []).length, w.stderr.includes('claude/mailbox-skills-2'), w.stdout.includes('"head": "claude/project-thread-a81t4h"'), m.status, /LEAVE/.test(m.stderr)]; })(), [EXIT_OK, 1, true, true, EXIT_OK, false]);
   t('an epic seat\'s dry run exits 0 and pushes its own branch; a malformed epic is exit 2', (() => { const e = cli(['--repo', 'o/r', '--seat', 'epic:#27293#1', '--login', 'sunhaolin', '--dry-run']); return [e.status, e.stdout.includes('refs/heads/mailbox/sunhaolin/epic-27293-1'), cli(['--repo', 'o/r', '--seat', 'epic:27293', '--login', 'sunhaolin', '--dry-run']).status]; })(), [EXIT_OK, true, EXIT_USAGE]);
 
   const floor = [];

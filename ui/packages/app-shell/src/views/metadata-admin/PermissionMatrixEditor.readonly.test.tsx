@@ -145,6 +145,23 @@ function renderMatrix(props?: { readOnly?: boolean }) {
   );
 }
 
+/**
+ * Every "Read-only" that names the PACKAGE as its reason: the identity strip's
+ * chip and, since objectstack#29705, the header badge, which draws the same
+ * word through the same key. A type-gate lock carries no such reason.
+ */
+function packageReadOnlyMarks(): HTMLElement[] {
+  return screen
+    .queryAllByText('Read-only', { exact: true })
+    .filter((el) => (el.getAttribute('title') ?? '').includes('Read-only package'));
+}
+
+/** The package names itself as the reason, and every "Read-only" on screen gives that reason. */
+function expectPackageReadOnly(): void {
+  expect(packageReadOnlyMarks()).not.toHaveLength(0);
+  expect(screen.getAllByText('Read-only', { exact: true })).toEqual(packageReadOnlyMarks());
+}
+
 describe('PermissionMatrixEditPage — read-only package gate (host readOnly)', () => {
   it('locks the whole matrix and hides Save when readOnly is set', async () => {
     renderMatrix({ readOnly: true });
@@ -182,8 +199,7 @@ describe('PermissionMatrixEditPage — read-only package gate (host readOnly)', 
 
     // Same wording as the Studio top-bar package chip — the screen agrees
     // with itself about WHY it is read-only.
-    const badge = screen.getByText('Read-only', { exact: true });
-    expect(badge).toHaveAttribute('title', expect.stringContaining('Read-only package'));
+    expectPackageReadOnly();
     expect(screen.queryByText(/OS_METADATA_WRITABLE/)).toBeNull();
   });
 
@@ -194,7 +210,7 @@ describe('PermissionMatrixEditPage — read-only package gate (host readOnly)', 
     // objectui#11787 — the package door autosaves: no Save button; the live controls are the writability read.
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
     expect(screen.getByLabelText('a_account Read')).toBeEnabled();
-    expect(screen.queryByText('Read-only', { exact: true })).toBeNull();
+    expect(packageReadOnlyMarks()).toHaveLength(0);
     expect(screen.queryByText(/OS_METADATA_WRITABLE/)).toBeNull();
   });
 });
@@ -221,7 +237,7 @@ describe('PermissionMatrixEditPage — type-level gate keeps its own wording', (
     expect(badge).toHaveAttribute('title', expect.stringContaining('allowRuntimeCreate'));
     expect(badge).toHaveAttribute('title', expect.stringContaining('OS_METADATA_WRITABLE'));
     // Package wording must NOT be borrowed for a type-gate lock.
-    expect(screen.queryByText('Read-only', { exact: true })).toBeNull();
+    expect(packageReadOnlyMarks()).toHaveLength(0);
   });
 
   /**
@@ -256,7 +272,7 @@ describe('PermissionMatrixEditPage — type-level gate keeps its own wording', (
     // …and no read-only badge of EITHER wording is claiming otherwise.
     expect(screen.queryByText(/OS_METADATA_WRITABLE/)).toBeNull();
     expect(screen.queryByText(/no runtime write channel/)).toBeNull();
-    expect(screen.queryByText('Read-only', { exact: true })).toBeNull();
+    expect(packageReadOnlyMarks()).toHaveLength(0);
   });
 
   it('MUST NOT CHANGE — the package gate still wins over allowRuntimeCreate', async () => {
@@ -270,8 +286,7 @@ describe('PermissionMatrixEditPage — type-level gate keeps its own wording', (
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
     // …and it is still the PACKAGE that is named as the reason.
-    const badge = screen.getByText('Read-only', { exact: true });
-    expect(badge).toHaveAttribute('title', expect.stringContaining('Read-only package'));
+    expectPackageReadOnly();
     expect(screen.queryByText(/no runtime write channel/)).toBeNull();
   });
 
@@ -284,7 +299,7 @@ describe('PermissionMatrixEditPage — type-level gate keeps its own wording', (
     // objectui#11787 — the package door autosaves: no Save button; the live controls are the writability read.
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull();
     expect(screen.getByLabelText('a_account Read')).toBeEnabled();
-    expect(screen.queryByText('Read-only', { exact: true })).toBeNull();
+    expect(packageReadOnlyMarks()).toHaveLength(0);
     expect(screen.queryByText(/no runtime write channel/)).toBeNull();
   });
 });
@@ -334,8 +349,7 @@ describe('PermissionMatrixEditPage — the caller gate names the capability, not
     renderMatrix({ readOnly: true });
     await screen.findByText('Account');
 
-    const badge = screen.getByText('Read-only', { exact: true });
-    expect(badge).toHaveAttribute('title', expect.stringContaining('Read-only package'));
+    expectPackageReadOnly();
     expect(screen.queryByText(CAPABILITY_BADGE)).toBeNull();
     expect(screen.queryByText(/no runtime write channel/)).toBeNull();
   });

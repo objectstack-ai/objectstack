@@ -29,6 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CLI, childEnv } from './helpers/serve-process.js';
 import { defineStackSource, defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-fixture.js';
+import { DATE_RANGE_PRESETS } from '@objectstack/spec/data';
 
 const MANIFEST = {
   id: 'com.example.verify-dashboard-windows',
@@ -161,7 +162,14 @@ describe('os verify --dashboard-windows', () => {
     const report = docOf(proven).dashboardWindows!;
     expect(report.door).toBe('rest');
     expect(report.results).toEqual([expect.objectContaining({ dashboard: 'vdw_board', widget: 'cases', status: 'proven' })]);
-    expect(report.summary).toMatchObject({ widgets: { proven: 1, contradicted: 0 }, probes: 13, held: 13, inert: 0, hardFailures: 0 });
+    // One probe per preset of the picker, read from the vocabulary so a new preset moves it too.
+    expect(report.summary).toMatchObject({
+      widgets: { proven: 1, contradicted: 0 },
+      probes: DATE_RANGE_PRESETS.length,
+      held: DATE_RANGE_PRESETS.length,
+      inert: 0,
+      hardFailures: 0,
+    });
     expect(docOf(proven).hardFailures).toBe(0);
   });
 

@@ -18,7 +18,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "監査ログ",
     pluralLabel: "監査ログ",
-    description: "プラットフォームイベントの不変の監査証跡",
+    description: "プラットフォームイベントの監査証跡。レコードはプラットフォームだけが書き込み、データ API と設定では読み取り専用です。",
     fields: {
       created_at: {
         label: "タイムスタンプ"
@@ -37,8 +37,13 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "アカウントロック",
           config_change: "構成変更",
           import: "インポート",
+          export: "エクスポート",
           platform_admin_standing_change: "プラットフォーム管理者権限の変更",
-          action_invocation: "アクション実行"
+          action_invocation: "アクション実行",
+          package_uninstall: "パッケージのアンインストール",
+          package_unmanaged_import: "Package Unmanaged Import",
+          credential_use: "Credential Use",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {
@@ -113,9 +118,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_activity: {
-    label: "アクティビティ",
-    pluralLabel: "アクティビティ",
-    description: "最近のアクティビティストリームエントリ（軽量、非正規化）",
+    label: "アクティビティフィード",
+    pluralLabel: "アクティビティフィード",
+    description: "最近レコードに対して行われた操作を新しい順に表示します：誰が何を作成、変更、削除したか。エントリは 14 日間保持されます。",
     fields: {
       id: {
         label: "アクティビティ ID"
@@ -192,6 +197,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       milestone_key: {
         label: "マイルストーンキー",
         help: "発火したアクティビティマイルストーンについて、発火時にオブジェクトの activityMilestones 宣言が監視していた全フィールドをソートしてカンマで連結したキー。その他の行では NULL。書き込み時にプラットフォームが付与し、決して返されません。読み取りルールが現在の宣言と比較します。"
+      }
+    },
+    _views: {
+      recent: {
+        label: "最近のアクティビティ",
+        emptyState: {
+          title: "最近のアクティビティはありません",
+          message: "レコードへの変更がここに新しい順で表示されます。"
+        }
+      },
+      all: {
+        label: "すべてのエントリ"
       }
     }
   },

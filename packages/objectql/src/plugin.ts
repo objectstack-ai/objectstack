@@ -10,11 +10,11 @@ import {
 } from './engine.js';
 import { OWNERSHIP_QUEUE_SOURCE_SLOT, describeMissingOwnershipQueueService } from './assignment-rules.js';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
-import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
-import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
+import { assembleMetadataProtocol, isServedOverrideRowOf } from '@objectstack/metadata-protocol';
+import { installedManifestsOf, isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageEntries, artifactPackageId, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
+import { resolveArtifactPackageEntries, artifactPackageId, declaredDependencyIds, readDeploymentOrgScopingEntitlement } from '@objectstack/core';
 // [ADR-0130 D4] The residual rule's decision half — which top-level items of a
 // multi-package stack no body declares, and the id they take. See
 // `unclaimedTopLevelObjects` below.
@@ -28,14 +28,24 @@ import { applyConversionsToStoredItem, expandViewContainer, isAggregatedViewCont
 // body's (see `registerUnclaimedTopLevelItems`).
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
+// [ADR-0150 D2, #31720] The residual as one holder of the stack's namespace,
+// for the namespace name rule (see the residual registration below).
+import { residualNamespacePackageOf } from './namespace-co-owner-names.js';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { applyProtection } from '@objectstack/spec/shared';
 // [#21777] The ONE "is this schema the remote's?" predicate, shared with `ObjectQL.syncSchemas`.
 import { isFederatedObject } from './federated-object.js';
 // [#22070] The builtin audit stamps are wrapped like a bound hook but registered in code.
 import { wrapDeclarativeHook } from './hook-wrappers.js';
+import { announceStoredExpressionHoles } from './stored-expression-backfill.js';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
+import { readRecycleBinRetentionEnv, type RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
+import {
+    lifecycleClassKeySource,
+    lifecycleObjectKeySource,
+    type LifecycleKeySource,
+} from './lifecycle/lifecycle-key-options.js';
 import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
 import {
   GLOBAL_ACTION_OBJECT_KEY,
@@ -63,9 +73,19 @@ import {
 // [ADR-0048 N.3] The security catalog's one-holder envelope, raised here by the
 // cold-boot check (see `refuseEnvironmentHeldSecurityCatalogNames`).
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
+// One name, one package holder for the bare-name types (a picklist, a mapping, a
+// dataset, an API, an object-less action, a function, a flow, a webhook, a
+// connector, an email template, an agent, a skill, a tool) — the cold boot's seal and its one switch
+// (`bare-name-one-holder.ts`, "The cold boot").
+import { sealBareNameHoldersAtColdBoot } from './registry.js';
+import { backfillActivationLedgerAtBoot } from './activation-ledger-backfill.js';
+import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
+import { planPackageUpgrade, type UpgradeServedOverride } from './package-upgrade-environment.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
 // re-derived, when a residual object's name is already owned.
 import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeBoundActionCollision, describeUnboundActionTargets, FIND_BOUND_ACTION_COLLISIONS, type BoundActionCollision } from './registry.js';
+// [#31715] The one schema-migration lock `os migrate apply` takes too.
+import { acquireSchemaMigrationLock, type SchemaMigrationLock } from './schema-migration-lock.js';
 
 export type { Plugin, PluginContext };
 
@@ -394,6 +414,19 @@ export interface ObjectQLPluginOptions {
     initialDelayMs?: number;
     referenceAudit?: Omit<DanglingReferenceAuditOptions, 'signal'> & { enabled?: boolean };
   };
+  /**
+   * [#30237, ADR-0148 D3] The recycle bin's retention seam: the host's
+   * retention resolver (`RecycleBinRetentionResolver`, `@objectstack/spec/data`)
+   * and the opaque token to call it with, the same one the host's
+   * `resolveFeatures` receives. One kernel serves one environment, so the
+   * token is fixed at boot; the engine never reads it.
+   *
+   * Absent, or a resolver answering `undefined`: `OS_RECYCLE_BIN_RETENTION_DAYS`,
+   * else 30 days. That variable is read once in `init()` as well, so a value
+   * that is not a positive whole number of days stops the boot with the
+   * refusal rather than the first delete.
+   */
+  recycleBinRetention?: RecycleBinRetentionSettings;
 }
 
 /**
@@ -536,6 +569,8 @@ export class ObjectQLPlugin implements Plugin {
   /** ADR-0057 lifecycle enforcement (Reaper/Rotator/Archiver). */
   private lifecycleService: LifecycleService | undefined;
   private lifecycleOptions: ObjectQLPluginOptions['lifecycle'];
+  /** [#30237] The host's recycle-bin retention seam, handed to the engine in `init()`. */
+  private recycleBinRetention: ObjectQLPluginOptions['recycleBinRetention'];
 
   constructor(qlOrOptions?: ObjectQL | ObjectQLPluginOptions, hostContext?: Record<string, any>) {
     // Back-compat: legacy callers passed `(ObjectQL, hostContext)` positionally.
@@ -563,6 +598,7 @@ export class ObjectQLPlugin implements Plugin {
     this.hydrateMetadataFromDb = opts.hydrateMetadataFromDb === true;
     this.registerProtocol = opts.registerProtocol !== false;
     this.lifecycleOptions = opts.lifecycle;
+    this.recycleBinRetention = opts.recycleBinRetention;
   }
 
   /**
@@ -795,6 +831,14 @@ export class ObjectQLPlugin implements Plugin {
     // plugins read it — see SKIP_SCHEMA_SYNC_ENGINE_KEY.
     (this.ql as unknown as Record<string, unknown>)[SKIP_SCHEMA_SYNC_ENGINE_KEY] = this.skipSchemaSync;
 
+    // [#30237, ADR-0148 D3] The recycle bin's retention: the variable is read
+    // now, so a defect in it stops the boot with the refusal instead of
+    // refusing the first delete, and the host's resolver is handed over. The
+    // resolver itself is asked per delete: its answer may change with the
+    // host's plan, and each entry keeps the one it was given.
+    readRecycleBinRetentionEnv();
+    if (this.recycleBinRetention) this.ql.setRecycleBinRetention(this.recycleBinRetention);
+
     // [ADR-0139 D2] The engine composes a `ReadableIds` leaf from the
     // registered `security` service. Handed over as a SOURCE in the engine's
     // slot (`SECURITY_SERVICE_SOURCE_SLOT`, not public surface), read at use and
@@ -911,15 +955,38 @@ export class ObjectQLPlugin implements Plugin {
         // against the registry or against a list the artifact itself declares.
         // A refused install registers nothing.
         if (this.picklistVocabularySealed) {
-          const declared = new Set<string>();
-          for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
-          const known = (name: string) => declared.has(name) || ql.registry.resolvePicklistOptions(name) !== undefined;
-          const unresolved = ordered
-            .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
-            .filter((ref) => !known(ref.picklist));
-          const orphans = ordered
-            .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
-            .filter((ext) => !known(ext.picklist));
+          // [ADR-0150 D3, child E6] A reference is reached the way the served
+          // field will reach it: from the package that writes it, through the
+          // package-scoped resolver, against a registry view holding the
+          // artifact's manifests — their declared dependencies and the lists
+          // each one declares. A list the reference's OWN manifest declares is
+          // its own; every other list, a sibling's in this artifact included,
+          // is R's to answer (epic seat review on #31731: no artifact-wide
+          // "declared somewhere" pass). A reference R refuses — the
+          // environment's own list included (D3 (a)) — is refused here,
+          // loudly, naming every candidate. An extension's target is a
+          // contribution, judged caller-less (epic seat ruling X on #31678;
+          // `SchemaRegistry.picklistContributions`).
+          const judge = <R extends { picklist: string; packageId: string | undefined }>(
+            ref: R,
+            own: ReadonlySet<string>,
+            caller: string | null | undefined,
+          ): R & { refusal?: string } | undefined => {
+            if (own.has(ref.picklist)) return undefined;
+            const verdict = ql.registry.picklistReferenceVerdict(ref.picklist, caller, ordered);
+            if (verdict.status === 'resolved') return undefined;
+            return verdict.status === 'refused' ? { ...ref, refusal: verdict.message } : ref;
+          };
+          const unresolved = ordered.flatMap((manifest) => {
+            const own = collectManifestPicklistNames(manifest);
+            return collectManifestPicklistReferences(manifest, artifactPackageId(manifest))
+              .flatMap((ref) => judge(ref, own, ref.packageId) ?? []);
+          });
+          const orphans = ordered.flatMap((manifest) => {
+            const own = collectManifestPicklistNames(manifest);
+            return collectManifestPicklistExtensions(manifest, artifactPackageId(manifest))
+              .flatMap((ext) => judge(ext, own, null) ?? []);
+          });
           const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
           if (refusal) throw refusal;
         }
@@ -941,33 +1008,72 @@ export class ObjectQLPlugin implements Plugin {
           if (refusal) throw refusal;
         }
 
-        for (const { manifest, source } of entries as Array<{ manifest: any; source?: 'code' | 'marketplace' }>) {
-          ql.registerApp(manifest, scope, source ?? options?.source);
-          ctx.logger.debug('Manifest registered via manifest service', {
-            id: manifest.id || manifest.name
-          });
-        }
-        // [ADR-0130 D4] The residual's objects, AFTER every body — the order
-        // the metadata door registers the same stack in — under the id the
-        // residual rule names, through the registry verb a body's own objects
-        // take (`registerApp` step 2). There is no package record for that id:
-        // the residual is not a package, and when the id names one of the
-        // bodies (a composed stack keeps one member's manifest) that body's
-        // record must not be replaced.
-        // [#28534] …and the door's statement of where that owner came from,
-        // recorded before anything of it registers: no package row answers the
-        // id, and a reader of an item's origin must tell the host's own
-        // residual from an installed bundle's (`ObjectQL.recordResidualOwner`).
-        // The residual is not an artifact entry, so it states no source of its
+        // [#31564] The whole artifact registers in ONE restore run: every
+        // package body and then the residual. A refusal anywhere in it — a
+        // later member refused by a registry verb part-way or by a judge that
+        // reads its body alone, or the residual refused after every body —
+        // puts back every entry ANY of them wrote, in the registry and in the
+        // engine's own maps (`SchemaRegistry.restoringOnRefusal`, which each
+        // `registerApp` joins), and the refusal propagates unchanged. A first
+        // install leaves no member registered; an upgrade leaves the installed
+        // version of every member serving. Before this, each body put back
+        // only itself, so the members registered before a refused one stayed
+        // in the running kernel while the install door answered the refusal
+        // and ledgered nothing. A single-package artifact is the one-body run
+        // `registerApp` opens on its own, answered as before.
+        // [ADR-0150 D2, #31720] The residual as one holder of the stack's
+        // namespace — judged below, recorded once the artifact has registered.
+        const residualHolder = residualNamespacePackageOf(artifact, residualAnswer);
+        ql.registry.restoringOnRefusal(() => {
+          for (const { manifest, source } of entries as Array<{ manifest: any; source?: 'code' | 'marketplace' }>) {
+            ql.registerApp(manifest, scope, source ?? options?.source);
+            ctx.logger.debug('Manifest registered via manifest service', {
+              id: manifest.id || manifest.name
+            });
+          }
+          // [ADR-0150 D2, #31720] The residual is one more holder of the
+          // stack's namespace: refused, in the package door's envelope, when it
+          // declares an item of the covered types under a name another package
+          // of that namespace holds — judged here, once every body has
+          // installed and before anything of the residual registers, so a
+          // refusal puts back the whole artifact like any other in this run.
+          ql.registry.refuseResidualNamespaceNameConflicts(residualHolder);
+          // [ADR-0130 D4] The residual's objects, AFTER every body — the order
+          // the metadata door registers the same stack in — under the id the
+          // residual rule names, through the registry verb a body's own objects
+          // take (`registerApp` step 2). There is no package record for that id:
+          // the residual is not a package, and when the id names one of the
+          // bodies (a composed stack keeps one member's manifest) that body's
+          // record must not be replaced.
+          if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
+          // [ADR-0015 D7, ADR-0130 D4] Every other residual item, the same way
+          // and in the same place: after every body, under the residual rule's
+          // id, through the registration a body's own item of that type takes.
+          // See {@link registerUnclaimedTopLevelItems}.
+          if (residualItems) this.registerUnclaimedTopLevelItems(ctx, residualItems);
+        });
+        // [#28534] …and the door's statement of where the residual's owner
+        // came from: no package row answers the id, and a reader of an item's
+        // origin must tell the host's own residual from an installed bundle's
+        // (`ObjectQL.recordResidualOwner`). Recorded once the artifact has
+        // registered whole — a refused one records nothing, since a recorded
+        // `marketplace` origin is never taken back — and before anything reads
+        // it (the bridge below, every reader after the door answers). The
+        // residual is not an artifact entry, so it states no source of its
         // own; the door's word, `code` when it states none, is its origin.
         const residualOwnerId = residual?.ownerId ?? residualItems?.ownerId;
         if (residualOwnerId !== undefined) ql.recordResidualOwner(residualOwnerId, options?.source ?? 'code');
-        if (residual) this.registerUnclaimedTopLevelObjects(ctx, residual, ordered);
-        // [ADR-0015 D7, ADR-0130 D4] Every other residual item, the same way
-        // and in the same place: after every body, under the residual rule's
-        // id, through the registration a body's own item of that type takes.
-        // See {@link registerUnclaimedTopLevelItems}.
-        if (residualItems) this.registerUnclaimedTopLevelItems(ctx, residualItems);
+        // [ADR-0130 D4, epic #31527 R2] …and what the residual's owner
+        // declares it depends on (the stack's own manifest): no package record
+        // carries it, so the one closure walk reads it here, and a residual
+        // reaches its declared dependencies through every reader of the walk.
+        if (residualOwnerId !== undefined) {
+          ql.registry.recordResidualOwnerDependencies(residualOwnerId, declaredDependencyIds((artifact as { manifest?: unknown })?.manifest ?? artifact));
+        }
+        // [ADR-0150 D2, #31720] …and the residual as a holder of its namespace,
+        // so a package registering after this stack is judged against it too.
+        // Recorded on the same terms: once the artifact has registered whole.
+        ql.registry.recordResidualNamespaceHolder(residualHolder);
         // [#24472] The boot reported every same-name pair it found
         // (`kernel:ready`, below); an artifact arriving later is judged once it
         // has registered, for the pairs naming one of its packages on either
@@ -1000,6 +1106,26 @@ export class ObjectQLPlugin implements Plugin {
       // {@link restoreExtendedObjectCopies}.
       restoreExtendedObjectCopies: (packageId: string): Promise<void> =>
         this.restoreExtendedObjectCopies(ctx, packageId),
+      // [epic cloud#3652 Q3, #30884] The package upgrade plan with what only this
+      // environment knows: rows in each column the upgrade touches and rows a
+      // customer edited that the seed replay overwrites. Read-only; the install
+      // door's dry run and a host's install door call it. See
+      // {@link planPackageUpgrade}. [ADR-0146 D2, as amended] Its advisory
+      // class reads the base's served overrides through the protocol's one
+      // list, resolved when the plan is asked (the protocol may register
+      // after this service); a runtime without it answers that class `null`.
+      planUpgrade: (installed: unknown, incoming: unknown) => {
+        let protocol: { listServedOverrides?: (request: { packageId: string }) => Promise<UpgradeServedOverride[]> } | undefined;
+        try { protocol = ctx.getService('protocol') as typeof protocol; } catch { /* no protocol service */ }
+        const listServedOverrides = protocol?.listServedOverrides;
+        return planPackageUpgrade(ql, installed, incoming, {
+          getObject: (name) => ql.registry.getObject(name),
+          warn: (message, meta) => ctx.logger.warn(message, meta),
+          ...(typeof listServedOverrides === 'function'
+            ? { listOverrides: (packageId: string) => listServedOverrides.call(protocol, { packageId }) }
+            : {}),
+        });
+      },
     });
 
     ctx.logger.info('ObjectQL engine registered', {
@@ -1124,6 +1250,22 @@ export class ObjectQLPlugin implements Plugin {
             this.ql?.registry.findOrphanPicklistExtensions() ?? [],
         );
         if (unresolvedPicklists) throw unresolvedPicklists;
+        // [ADR-0150 D3, child E6] A packaged reference whose every holder is
+        // outside its package's declared dependency closure — an
+        // environment-authored list (D3 (a)) or a package it does not depend
+        // on, a same-artifact sibling included (N1, ruled on #31678) — is
+        // refused by the package-scoped resolver: the field is served with no
+        // options and the record validator refuses its values. A refused
+        // REFERENCE, never a refused boot (ruling N2), so it is named here,
+        // once per reference, in the resolver's own words, and the boot goes on.
+        for (const ref of this.ql?.registry.findOutsideClosurePicklistReferences() ?? []) {
+            ctx.logger.warn(
+                `[ObjectQLPlugin] Field '${ref.object}.${ref.field}' of package '${ref.packageId}' is served with no `
+                + `options and refuses every value: ${ref.refusal}`,
+                { object: ref.object, field: ref.field, packageId: ref.packageId, picklist: ref.picklist },
+            );
+        }
+
         this.picklistVocabularySealed = true;
         // [#24400] A top-level action bound by `objectName` to an object no
         // package registers fails the boot, naming the action, its package and
@@ -1169,7 +1311,19 @@ export class ObjectQLPlugin implements Plugin {
         // ADR-0057 P4: surface the lifecycle governance namespace in Settings
         // (overrides / quotas / growth alerts) when a SettingsService exists.
         try {
-            const settings = ctx.getService('settings') as { registerManifest?: (m: unknown) => void };
+            const settings = ctx.getService('settings') as {
+                registerManifest?: (m: unknown) => void;
+                registerOptionSource?: (namespace: string, key: string, source: LifecycleKeySource) => void;
+            };
+            // [#30208] The keys each lifecycle map admits are what this
+            // deployment has: its lifecycle-declared objects, the lifecycle
+            // classes. Registered BEFORE the manifest, so its registration-time
+            // audit of `OS_LIFECYCLE_*` overrides leaves these keys to be judged
+            // when read, against the registry as it then stands.
+            const objectKeys = lifecycleObjectKeySource(() => this.ql?.registry);
+            settings?.registerOptionSource?.('lifecycle', 'retention_overrides', objectKeys);
+            settings?.registerOptionSource?.('lifecycle', 'quotas', objectKeys);
+            settings?.registerOptionSource?.('lifecycle', 'quota_defaults', lifecycleClassKeySource());
             settings?.registerManifest?.(lifecycleSettingsManifest);
         } catch {
             // No settings service — governance stays at declared defaults.
@@ -1183,6 +1337,22 @@ export class ObjectQLPlugin implements Plugin {
     // would tell a brand-new deployment its gates are open moments after they
     // were closed.
     ctx.hook('kernel:bootstrapped', async () => {
+        // [#30803] Seal the bare-name holders (`bare-name-one-holder.ts`): every
+        // package of this boot has registered by now — the AppPlugin bodies in
+        // `init()` and their functions in `start()`, the install-local rehydrate
+        // at `kernel:ready` — so from here on the package door, the item seam
+        // and the hook binder's function bind refuse a NEW holder of a covered
+        // name. A name the boot left held twice is
+        // the switch's: warned once, naming both holders and the rename, or the
+        // boot refused. Never sealed on a kernel that withholds the boot-phase
+        // hooks: there the doors never refuse.
+        const registry = this.ql?.registry;
+        if (registry) sealBareNameHoldersAtColdBoot(registry, BARE_NAME_COLD_BOOT_MODE, ctx.logger);
+        // [ADR-0150 D8 row R4] With the holders sealed, bind every activation
+        // ledger row that names no package to the one package that holds its
+        // item, and report the rows two packages hold (never guessed). Writes
+        // only `package_id`, so every later boot finds nothing new; never fatal.
+        await backfillActivationLedgerAtBoot(this.ql, registry, ctx.logger);
         // [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail over a master
         // the engine composes no read over fails the boot, naming both and the
         // remedy. Judged HERE, not at `kernel:ready`: the object-scoped read
@@ -1196,6 +1366,13 @@ export class ObjectQLPlugin implements Plugin {
         );
         if (unservable) throw unservable;
         await this.ql?.announceOpenMigrationGates();
+        // [#29961] A stored computed field declared on an object that already
+        // held rows is NULL on them until each is next written: name the
+        // fields and `os migrate stored-expressions`. Here, beside the gate
+        // advisory, for its reason: schema sync has run and every object is
+        // registered. A bounded sample read that writes nothing and never fails
+        // the boot (`stored-expression-backfill.ts`).
+        if (this.ql) await announceStoredExpressionHoles(this.ql, ctx.logger);
     });
     ctx.hook('metadata:reloaded', async (payload?: unknown) => {
         await this.resyncAuthoredHooks(ctx);
@@ -1398,37 +1575,48 @@ export class ObjectQLPlugin implements Plugin {
     // table; we only assume the DDL is in place and skip straight to
     // hydration. This avoids one round-trip per table × N objects on
     // every cold boot.
-    await this.installRegisteredSchemas(ctx);
+    //
+    // [#31715] Phases 1 to 3 are this boot's schema sync, and they run under
+    // the schema-migration lock, released in `finally` once Phase 3 is done:
+    // N replicas booting together otherwise each read the same missing tables
+    // and each create them (a `pg_type` collision, measured). See
+    // {@link acquireBootSchemaMigrationLock}.
+    const migrationLock = await this.acquireBootSchemaMigrationLock(ctx);
+    try {
+      await this.installRegisteredSchemas(ctx);
 
-    // Phase 2: Hydrate SchemaRegistry from sys_metadata (loads custom/template objects).
-    // Project kernels (environmentId set) USUALLY source metadata from the
-    // artifact (MetadataPlugin) or a control-plane proxy and have no local
-    // sys_metadata, so hydration is skipped to avoid querying a table that
-    // does not exist (or, worse, a proxied remote one). EXCEPTION: an
-    // isolated, proxy-free project kernel that persists its OWN sys_metadata
-    // locally (the cloud single-env tenant runtime) opts in via
-    // `hydrateMetadataFromDb` so objects CREATED AT RUNTIME there re-enter the
-    // registry after a restart — otherwise registry.getObject() returns
-    // nothing for them and every registry consumer (the unknown-$select
-    // guard, hooks, relationships) silently degrades. Safe because each engine
-    // owns its registry (no cross-kernel leakage) and hydration tolerates a
-    // missing table.
-    if (this.environmentId === undefined || this.hydrateMetadataFromDb) {
-        await this.restoreMetadataFromDb(ctx);
-    } else {
-        ctx.logger.info('Project kernel — skipping sys_metadata hydration (metadata sourced from artifact)');
+      // Phase 2: Hydrate SchemaRegistry from sys_metadata (loads custom/template objects).
+      // Project kernels (environmentId set) USUALLY source metadata from the
+      // artifact (MetadataPlugin) or a control-plane proxy and have no local
+      // sys_metadata, so hydration is skipped to avoid querying a table that
+      // does not exist (or, worse, a proxied remote one). EXCEPTION: an
+      // isolated, proxy-free project kernel that persists its OWN sys_metadata
+      // locally (the cloud single-env tenant runtime) opts in via
+      // `hydrateMetadataFromDb` so objects CREATED AT RUNTIME there re-enter the
+      // registry after a restart — otherwise registry.getObject() returns
+      // nothing for them and every registry consumer (the unknown-$select
+      // guard, hooks, relationships) silently degrades. Safe because each engine
+      // owns its registry (no cross-kernel leakage) and hydration tolerates a
+      // missing table.
+      if (this.environmentId === undefined || this.hydrateMetadataFromDb) {
+          await this.restoreMetadataFromDb(ctx);
+      } else {
+          ctx.logger.info('Project kernel — skipping sys_metadata hydration (metadata sourced from artifact)');
+      }
+
+      // [ADR-0048 N.3, ruling letter A on #22307] The environment catalog is in
+      // the registry now, and every package registered before it: a package-held
+      // position or permission-set name the environment already holds refuses the
+      // boot here, before any other plugin starts. See
+      // {@link refuseEnvironmentHeldSecurityCatalogNames}.
+      this.refuseEnvironmentHeldSecurityCatalogNames();
+
+      // Phase 3: Sync any new schemas that were just hydrated from the DB
+      // (e.g. CRM objects seeded via template — they must have tables before use).
+      await this.installRegisteredSchemas(ctx);
+    } finally {
+      await migrationLock?.release();
     }
-
-    // [ADR-0048 N.3, ruling letter A on #22307] The environment catalog is in
-    // the registry now, and every package registered before it: a package-held
-    // position or permission-set name the environment already holds refuses the
-    // boot here, before any other plugin starts. See
-    // {@link refuseEnvironmentHeldSecurityCatalogNames}.
-    this.refuseEnvironmentHeldSecurityCatalogNames();
-
-    // Phase 3: Sync any new schemas that were just hydrated from the DB
-    // (e.g. CRM objects seeded via template — they must have tables before use).
-    await this.installRegisteredSchemas(ctx);
 
     // Bridge all SchemaRegistry objects to metadata service.
     //
@@ -2091,8 +2279,9 @@ export class ObjectQLPlugin implements Plugin {
    * exactly the incomplete test double #9154 measured.
    *
    * @param seam - the calling method, named in the thrown message.
+   * @param layer - `storage` for a DDL / binding reader, `served` otherwise.
    */
-  private readRegisteredObjects(seam: string): ServiceObject[] {
+  private readRegisteredObjects(seam: string, layer: 'served' | 'storage' = 'served'): ServiceObject[] {
     const registry: any = (this.ql as any)?.registry;
     const read: unknown = registry?.getAllObjects;
     if (registry == null || typeof read !== 'function') {
@@ -2106,6 +2295,13 @@ export class ObjectQLPlugin implements Plugin {
           '`getAllObjects()` — a duck-typed engine or an incomplete test double is the only way to reach this line.',
       );
     }
+    // A STORAGE reader (DDL, the federated binding) reads the objects with
+    // every extension folded in, a disabled package's included: a disable must
+    // not take a column away from the data it keeps
+    // (`SchemaRegistry.getAllStorageObjects`). A registry without that read
+    // answers its served fold, as before.
+    const storage: unknown = registry.getAllStorageObjects;
+    if (layer === 'storage' && typeof storage === 'function') return (storage as () => ServiceObject[]).call(registry);
     return (read as () => ServiceObject[]).call(registry);
   }
 
@@ -2178,7 +2374,7 @@ export class ObjectQLPlugin implements Plugin {
     // looks healthy while declared data is simply not reachable.
     let allObjects: ServiceObject[];
     try {
-      allObjects = this.readRegisteredObjects('reconcileFederatedBindings');
+      allObjects = this.readRegisteredObjects('reconcileFederatedBindings', 'storage');
     } catch (e: unknown) {
       ctx.logger.error(
         'Federated (external) object reconciliation did NOT run — the object registry could not be read, so this boot ' +
@@ -2270,6 +2466,43 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * [#31715] The schema-migration lock ({@link acquireSchemaMigrationLock}) for
+   * the boot's schema sync — the same lock, under the same name and key, that
+   * `os migrate apply` takes, so a server boot, an `OS_MIGRATE_AND_EXIT=1` job
+   * and a migrator exclude one another on one database.
+   *
+   * Taken on the DEFAULT datasource's driver, the database the boot's tables
+   * live in; Postgres and MySQL only, so every other driver answers `null`
+   * without a statement. Taken even when nothing turns out to be pending: the
+   * sync reads what is missing and then creates it, and only a read made under
+   * the lock is still true when the write lands. Uncontended it is one
+   * statement and prints nothing.
+   *
+   * `null`, no statement, for a boot that performs no DDL here:
+   *  - `skipSchemaSync` — the DDL is managed out of band;
+   *  - a default driver holding its DDL back (`schemaDdlDeferred`, armed by
+   *    `os migrate plan` / `apply`) — that command takes the lock itself, before
+   *    it reads what the boot held back, so taking it here as well would only
+   *    make one migrator wait twice.
+   *
+   * The wait is bounded by half this plugin's start budget, so a boot queued
+   * behind a long migration refuses with the lock's own message (which names
+   * the lock and says nothing was changed) instead of the kernel's start
+   * timeout, and keeps the other half for its own sync.
+   */
+  private async acquireBootSchemaMigrationLock(ctx: PluginContext): Promise<SchemaMigrationLock | null> {
+    if (this.skipSchemaSync || !this.ql) return null;
+    const name = this.ql.getDefaultDriverName();
+    const driver = name ? this.ql.getDriverByName(name) : undefined;
+    if (!driver || (driver as { schemaDdlDeferred?: unknown }).schemaDdlDeferred === true) return null;
+    return acquireSchemaMigrationLock(driver, {
+      database: "the default datasource's database",
+      warn: (line) => ctx.logger.warn(line),
+      waitMs: Math.trunc(this.startupTimeout / 2),
+    });
+  }
+
+  /**
    * Install every registered object's schema with its driver — the ONE seam
    * `start()` uses for that, on both the syncing and the DDL-free path.
    *
@@ -2330,7 +2563,7 @@ export class ObjectQLPlugin implements Plugin {
     // [#9285] Same propagation contract as the sync pass: "the registry holds
     // nothing" and "the registry could not be read" have opposite consequences
     // and only the first is a truthful reason to register nothing.
-    const allObjects = this.readRegisteredObjects('registerSchemasWithoutDdl');
+    const allObjects = this.readRegisteredObjects('registerSchemasWithoutDdl', 'storage');
     if (allObjects.length === 0) return;
 
     const groups = new Map<any, ServiceObject[]>();
@@ -2415,7 +2648,7 @@ export class ObjectQLPlugin implements Plugin {
     // against a store whose DDL was never run. On the `metadata:reloaded` path
     // the caller already catches this and reports it at `error` (#4632), so
     // propagation there is a loud durability report, not a dead kernel.
-    const allObjects = this.readRegisteredObjects('syncRegisteredSchemas');
+    const allObjects = this.readRegisteredObjects('syncRegisteredSchemas', 'storage');
     if (allObjects.length === 0) return;
 
     let synced = 0;
@@ -3705,7 +3938,10 @@ export class ObjectQLPlugin implements Plugin {
       for (const row of rows) {
         if (legacy.has(String(row.id))) continue;
         const data = parseRow(row, 'action');
-        if (data && typeof data.name === 'string') actions.push(data);
+        if (data && typeof data.name === 'string') {
+          actions.push(data);
+          if (this.isDeclaredArtifactActionOverride(row, data)) this.declaredActionOverrides.add(data);
+        }
       }
 
       // Embedded shape: authored object rows may carry their own actions.
@@ -3736,6 +3972,49 @@ export class ObjectQLPlugin implements Plugin {
       });
       return null;
     }
+  }
+
+  /**
+   * [#30065, ADR-0146 D9 `action`] The parsed rows {@link readAuthoredActionRows}
+   * read that are the declared `.custom` override of an action a code package
+   * ships ({@link isDeclaredArtifactActionOverride}): the authored rows the
+   * resync binds over the base's handler although the name is
+   * artifact-shipped. Keyed on the parsed body, so a row read by an older
+   * resync is never mistaken for one of this read.
+   */
+  private readonly declaredActionOverrides = new WeakSet<object>();
+
+  /**
+   * [#30065, ADR-0146 D9 `action`] Whether a stored `action` row is the
+   * declared override of the action a code package ships under its name, on
+   * the same object: the row is bound to that package's `.custom` pair and
+   * declares `overrides.package` = that package — judged by the one
+   * served-override predicate the reads serve it by
+   * (`isServedOverrideRowOf`, on the row's own `package_id` and body), so the
+   * handler bound is the declaration every read serves.
+   *
+   * A base the registry does not hold yet is judged by the row's own
+   * declaration: a marketplace-installed base is registered, and its
+   * handlers bound, by the install plugin's `kernel:ready` rehydrate, after
+   * the boot's resync. Bound as an override then, the row's handler stays on
+   * top when the base's arrives, which slots beneath it
+   * (`ObjectQL#registerAction`), so the reads and the run agree from the
+   * first request. [#30542] Only the base the row declares slots beneath:
+   * a row of another base's pair that ships the same key is replaced by the
+   * real base's handler when it arrives, as the reads decline it.
+   */
+  private isDeclaredArtifactActionOverride(row: unknown, action: any): boolean {
+    const registry: any = this.ql?.registry;
+    if (!registry || typeof registry.getArtifactItem !== 'function') return false;
+    const installed = installedManifestsOf(registry);
+    const artifact: any = registry.getArtifactItem('action', action.name);
+    if (artifact === undefined || artifact === null) {
+      return isServedOverrideRowOf(row as any, action?.overrides?.package, installed);
+    }
+    const base = artifact?._packageId;
+    if (typeof base !== 'string' || base === '') return false;
+    if (standaloneActionOwnerKey(artifact) !== standaloneActionOwnerKey(action)) return false;
+    return isServedOverrideRowOf(row as any, base, installed);
   }
 
   /**
@@ -4103,8 +4382,10 @@ export class ObjectQLPlugin implements Plugin {
       if (a && typeof a.name === 'string') byKey.set(`${standaloneActionOwnerKey(a)}:${a.name}`, a);
     }
 
+    // [#30065, ADR-0146 D9 `action`] …save a declared `.custom` override of
+    // a shipped action, whose body is bound over the base's handler.
     const bindable = Array.from(byKey.values()).filter(
-      (a) => !this.isArtifactShippedAction(a),
+      (a) => !this.isArtifactShippedAction(a) || this.declaredActionOverrides.has(a),
     );
 
     // Full replace: tear down the package set, then re-register survivors —
@@ -4138,7 +4419,14 @@ export class ObjectQLPlugin implements Plugin {
         skippedNoHandler++; // no body (target/flow/url action) or invalid body shape
         continue;
       }
-      ql.registerAction(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service');
+      // [#30065] A declared override is bound OVER the base's handler, which
+      // the teardown above restores when the override is gone: one resync
+      // rebinds the name, in either direction, with no window between.
+      if (this.declaredActionOverrides.has(action) && typeof ql.registerActionOverride === 'function') {
+        ql.registerActionOverride(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service', action.overrides?.package);
+      } else {
+        ql.registerAction(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service');
+      }
       registered++;
     }
     if (typeof runner !== 'function' && bindable.length > 0) {

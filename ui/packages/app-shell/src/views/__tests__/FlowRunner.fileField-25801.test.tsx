@@ -20,7 +20,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 // Module scope, per AGENTS.md 测试纪律: the file leg reaches `FileField`
 // through a `React.lazy` factory inside `@object-ui/fields`.
 import '@object-ui/fields';
-import { UploadProvider, type UploadResult } from '@object-ui/providers';
+import { UploadProvider, type UploadResult } from '@object-ui/fields';
 import { FlowRunner, type ScreenFlowState } from '../FlowRunner';
 import { screenResumeValues } from '../ScreenView';
 

@@ -185,13 +185,15 @@ describe('Studio landing: a read-only base says "n customized, m switched off" (
     const { requested } = stubWire({ 'com.example.showcase': served('com.example.showcase', 1, 0, 0) });
     renderLanding();
 
-    await screen.findByText('Showcase pair');
+    await screen.findByText('HotCRM customizations');
     await waitFor(() =>
       expect(within(cardOf('Showcase')).getByTestId('studio-landing-customizations')).toHaveAttribute('data-state', 'read'),
     );
     expect(within(cardOf('Acme')).queryByTestId('studio-landing-customizations')).not.toBeInTheDocument();
+    // A pair whose base is not listed keeps its card, with no line.
     expect(within(cardOf('HotCRM customizations')).queryByTestId('studio-landing-customizations')).not.toBeInTheDocument();
-    expect(within(cardOf('Showcase pair')).queryByTestId('studio-landing-customizations')).not.toBeInTheDocument();
+    // A pair whose base is listed has no card at all (#29691's describe below).
+    expect(screen.queryByText('Showcase pair')).not.toBeInTheDocument();
     expect(customizationRequests(requested)).toEqual(['/api/v1/packages/com.example.showcase/customizations']);
   });
 
@@ -208,5 +210,53 @@ describe('Studio landing: a read-only base says "n customized, m switched off" (
       expect(line).toHaveAttribute('data-state', 'loading');
       expect(line.textContent).not.toMatch(/\d/);
     }
+  });
+});
+
+/**
+ * objectstack#29691 (ADR-0146 D3) — the landing gives a base's `.custom` pair
+ * no card of its own: the pair is folded under its base, as the package
+ * switcher folds it, and the base's card carries it through its customized
+ * line and link. The pair's export and delete stay on the Packages page.
+ */
+describe('Studio landing: a base’s .custom pair has no card of its own (ADR-0146 D3)', () => {
+  /** Every package card the landing draws, by the id line each card shows. */
+  const cardIds = () =>
+    Array.from(document.querySelectorAll('.rounded-lg.border .font-mono')).map((el) => el.textContent);
+
+  it('draws one card for a base and its writable pair: the base’s, with its customized count and the pair link', async () => {
+    packages.list = [HOTCRM, HOTCRM_PAIR, WRITABLE];
+    stubWire({ hotcrm: served('hotcrm', 2, 1, 0) });
+    renderLanding();
+
+    const line = await within(await waitFor(() => cardOf('HotCRM'))).findByTestId('studio-landing-customizations');
+    await waitFor(() => expect(line).toHaveAttribute('data-state', 'read'));
+    expect(within(line).getByTestId('studio-landing-customizations-pair')).toHaveTextContent(customizedText(3));
+    expect(within(line).getByTestId('studio-landing-customizations-pair')).toHaveAttribute('href', '/studio/hotcrm.custom/data');
+
+    // The pair draws no card, under 我的软件包 or anywhere else.
+    expect(screen.queryByText('HotCRM customizations')).not.toBeInTheDocument();
+    expect(cardIds()).not.toContain('hotcrm.custom');
+    // CONTROL: a writable package that is no pair keeps its card.
+    expect(cardIds()).toEqual(['com.acme.app', 'hotcrm']);
+  });
+
+  it('folds a read-only pair under its listed base too', async () => {
+    packages.list = [SHOWCASE, READONLY_PAIR];
+    stubWire({ 'com.example.showcase': served('com.example.showcase', 1, 0, 0) });
+    renderLanding();
+
+    await waitFor(() => cardOf('Showcase'));
+    expect(screen.queryByText('Showcase pair')).not.toBeInTheDocument();
+    expect(cardIds()).toEqual(['com.example.showcase']);
+  });
+
+  it('keeps the card of a pair whose base is not listed', async () => {
+    packages.list = [HOTCRM_PAIR];
+    stubWire({});
+    renderLanding();
+
+    await waitFor(() => cardOf('HotCRM customizations'));
+    expect(cardIds()).toEqual(['hotcrm.custom']);
   });
 });

@@ -21,6 +21,11 @@ import {
   // [#23367] The API-key lifecycle policy source, and its branded refusal.
   apiKeyLifecyclePolicySourceOf,
   isApiKeyLifecycleRefusalError,
+  type RequestAuthService,
+  // [#30237] A write's class (purge → delete, restore/transfer → update): the
+  // one mapping plugin-security's write gates read too.
+  rlsOperationForVerb,
+  credentialUseClientFor,
 } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type {
@@ -56,9 +61,12 @@ import {
   SysQueue,
   SysQueueMember,
   SysAssignmentCursor,
+  SysAssignmentRule,
 } from './objects/index.js';
+import { SysQueueDetailPage } from './sys-queue.page.js';
 import { OwnershipQueueService, specsReadBusinessUnits, type OwnershipQueueEngine } from './ownership-queue-service.js';
 import { bindQueueGuards, bindQueueRecipientRecompute, reportShadowedAuthoredQueues } from './queue-hooks.js';
+import { bindAssignmentRuleGuards, reportShadowedAuthoredAssignmentRules } from './assignment-rule-hooks.js';
 import { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 import {
   SharingService,
@@ -70,7 +78,15 @@ import {
 import { SharingRuleService, bindDeclaredRuleNameGuard, bindSharingRuleActivationReconcile } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
-import { bindRuleHooks, unbindAllRuleHooks, bindRuleCriteriaGuard, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
+import { SHAREABLE_OBJECTS_ROUTE, registerShareableObjectsRoutes } from './shareable-objects-routes.js';
+import { SharingRulesNotRunningError } from './shareable-objects.js';
+import {
+  bindRuleHooks,
+  unbindAllRuleHooks,
+  bindRuleCriteriaGuard,
+  bindRuleObjectEnforcementGuard,
+  RULE_REBIND_TRIGGER_PACKAGE,
+} from './rule-hooks.js';
 import { bindRuleProvenanceStamp, unbindRuleProvenanceStamp } from './sharing-rule-provenance.js';
 import { bindPrimaryBuHooks, backfillPrimaryBu } from './primary-bu-projection.js';
 import { bindBusinessUnitTreeRecompute } from './bu-tree-recompute.js';
@@ -79,6 +95,7 @@ import { bindRecordShareCascade } from './record-share-cascade.js';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { inProcessSessionReadInput } from '@objectstack/types';
+import { backfillStoredDeclarationPackagesAtBoot } from './stored-declaration-package-backfill.js';
 
 /**
  * One page of the boot's organization enumeration. A PAGE size, not a cap: the
@@ -630,6 +647,47 @@ export class SharingServicePlugin implements Plugin {
     );
   };
 
+  /**
+   * [#30209 row 5 B] Mount `GET /api/v1/sharing/shareable-objects`
+   * (`shareable-objects-routes.ts`, ledger `sharing-route-ledger.ts`). The
+   * list is `SharingRuleService.listShareableObjects`, read at request time,
+   * so a rule service that never started answers 501 there instead of the
+   * path going unmounted. Canonical `http.server` first, the deprecated
+   * `http-server` alias second, as the share-link mount reads them.
+   */
+  private mountShareableObjectsRoute(ctx: PluginContext): void {
+    const readServer = (name: string): IHttpServer | null => {
+      try { return ctx.getService<IHttpServer>(name); } catch { return null; }
+    };
+    const http: IHttpServer | null = readServer('http.server') ?? readServer('http-server');
+    if (!http) {
+      ctx.logger.warn(
+        'SharingServicePlugin: no HTTP server — GET ' + SHAREABLE_OBJECTS_ROUTE + ' (the sharing-rule object '
+          + 'picker list) not registered. SharingRuleService.listShareableObjects is still reachable via '
+          + 'kernel.getService("sharingRules").',
+      );
+      return;
+    }
+    const optional = <T>(name: string): T | undefined => {
+      try { return ctx.getService<T>(name); } catch { return undefined; }
+    };
+    const kernel = ctx.getKernel?.() as
+      | { getServiceAsync?: <T>(name: string) => Promise<T> }
+      | undefined;
+    registerShareableObjectsRoutes(http, {
+      getEngine: () => optional<unknown>('objectql'),
+      getAuth: () => optional<RequestAuthService>('auth'),
+      tenancy: kernel && typeof kernel.getServiceAsync === 'function'
+        ? () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy')
+        : undefined,
+      listShareableObjects: (context) => {
+        if (!this.ruleService) throw new SharingRulesNotRunningError();
+        return this.ruleService.listShareableObjects(context);
+      },
+    });
+    ctx.logger.info(`SharingServicePlugin: shareable objects list mounted at GET ${SHAREABLE_OBJECTS_ROUTE}`);
+  }
+
   async init(ctx: PluginContext): Promise<void> {
     // Register sys_record_share via the manifest service.
     ctx.getService<{ register(m: any): void }>('manifest').register({
@@ -646,12 +704,17 @@ export class SharingServicePlugin implements Plugin {
         SysBusinessUnit,
         SysBusinessUnitMember,
         SysShareLink,
-        // [ADR-0142 D1/D5] Authored queues, their members, and the round-robin
-        // cursor the engine's assignment step advances.
+        // [ADR-0142 D1/D5] Authored queues, their members, the round-robin
+        // cursor the engine's assignment step advances, and an organization's
+        // own assignment rules (ruling A on organization-authored routing).
         SysQueue,
         SysQueueMember,
         SysAssignmentCursor,
+        SysAssignmentRule,
       ],
+      // The queue's record page: its fields, and its members listed by the
+      // queue's name with "New" pre-filled (`sys-queue.page.ts`).
+      pages: [SysQueueDetailPage],
       // ADR-0029 D7 — contribute the sharing entries into the Setup app's
       // `group_access_control` slot (priority 200). This plugin owns these
       // objects (K2).
@@ -672,6 +735,7 @@ export class SharingServicePlugin implements Plugin {
             { id: 'nav_record_shares', type: 'object', label: 'Record Shares', objectName: 'sys_record_share', viewName: 'all_shares', icon: 'link', requiresObject: 'sys_record_share', requiredPermissions: ['manage_platform_settings'] },
             { id: 'nav_queues', type: 'object', label: 'Queues', objectName: 'sys_queue', icon: 'inbox', requiresObject: 'sys_queue', requiredPermissions: ['manage_platform_settings'] },
             { id: 'nav_queue_members', type: 'object', label: 'Queue Members', objectName: 'sys_queue_member', icon: 'users', requiresObject: 'sys_queue_member', requiredPermissions: ['manage_platform_settings'] },
+            { id: 'nav_assignment_rules', type: 'object', label: 'Assignment Rules', objectName: 'sys_assignment_rule', icon: 'route', requiresObject: 'sys_assignment_rule', requiredPermissions: ['manage_platform_settings'] },
           ],
         },
       ],
@@ -774,6 +838,20 @@ export class SharingServicePlugin implements Plugin {
         }
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: queue guards not bound', { error: err?.message });
+      }
+
+      // [ADR-0142 D5, ruling A on organization-authored routing] An
+      // organization's own assignment rules: the save guard on the table this
+      // plugin owns (name namespace, object, entry shape, CEL compile, user
+      // target membership), bound regardless of `enforce`, and the boot report
+      // of an authored rule a later declaration shadows.
+      try {
+        if (typeof engine.registerHook === 'function') {
+          bindAssignmentRuleGuards(engine as any);
+          await reportShadowedAuthoredAssignmentRules(engine as any, ctx.logger as any);
+        }
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: assignment-rule guard not bound', { error: err?.message });
       }
 
       // [ADR-0057 D12] Maintain sys_user.primary_business_unit_id as a
@@ -934,8 +1012,15 @@ export class SharingServicePlugin implements Plugin {
             // it: this one IS an access-control surface.
             bindBusinessUnitTreeRecompute(engine, this.ruleService, ctx.logger as any, async (rule) => {
               // [ADR-0142 D2] A queue recipient reads the BU tree exactly when
-              // its queue has a business-unit member.
-              const queue = await this.queues?.resolveQueue(rule.recipient_id, rule.organization_id ?? null);
+              // its queue has a business-unit member — the queue the rule's
+              // grants are read from, so a declared rule's from its package
+              // (ADR-0150 D3).
+              const callerPackageId = await this.ruleService?.queueRecipientPackageOf(rule);
+              const queue = await this.queues?.resolveQueue(
+                rule.recipient_id,
+                rule.organization_id ?? null,
+                callerPackageId ? { callerPackageId } : undefined,
+              );
               return queue ? specsReadBusinessUnits(queue.members) : false;
             });
 
@@ -957,6 +1042,10 @@ export class SharingServicePlugin implements Plugin {
             // sys_sharing_rule — it bypasses defineRule's validation, so the
             // match-all criteria gate has to sit on the table itself too.
             bindRuleCriteriaGuard(engine, ctx.logger as any);
+
+            // [#30621] …and so must the refusal of a rule whose object is not
+            // under record-sharing enforcement: it would save and share nothing.
+            if (this.service) bindRuleObjectEnforcementGuard(engine, this.service);
 
             // [ADR-0131 D6 regime C] …and so must the refusal of a row, new or
             // renamed, that takes a declared rule's name: `defineRule` makes it
@@ -1103,6 +1192,9 @@ export class SharingServicePlugin implements Plugin {
                   userAuthGates: userAuthGateSourceOf(authService),
                   // [#23367] The API-key lifecycle policy, from the same service.
                   apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
+                  // [#31898] Where the request came from, for the `credential_use` row an
+                  // admitted API key writes; the auth service applies the trust rule.
+                  client: credentialUseClientFor(authService, { headers, remoteAddress: req.remoteAddress || undefined }),
                 });
                 // [ADR-0069 · #23287] The envelope carries the posture the
                 // shared resolver decided for whichever credential admitted
@@ -1149,6 +1241,12 @@ export class SharingServicePlugin implements Plugin {
       } catch (err: any) {
         ctx.logger.warn('SharingServicePlugin: share-link subsystem not started', { error: err?.message });
       }
+
+      // [#30209 row 5 B] The objects a sharing rule can take effect on, for
+      // Setup's sharing-rule object picker. Mounted whenever an HTTP server is
+      // present; with no rule service running it answers 501 rather than an
+      // unmounted path (see `shareable-objects-routes.ts`).
+      this.mountShareableObjectsRoute(ctx);
     });
 
     // [#2926 ③] Materialize sharing grants for rows already present at boot.
@@ -1163,6 +1261,18 @@ export class SharingServicePlugin implements Plugin {
     // loader) has settled. Idempotent: a runtime write that already
     // materialized a grant is reconciled to the same state.
     ctx.hook('kernel:bootstrapped', async () => {
+      // [ADR-0150 D8 rows R5, R6, R13] Managed sharing-rule rows, queue
+      // members and assignment cursors gain the package that holds the
+      // declared item they name, from its one package holder; the ambiguous
+      // set is reported, never bound. Before the rule passes below, so the
+      // rule-row writes it makes are reconciled by them, not one by one. Never
+      // fails the boot. See `stored-declaration-package-backfill.ts`.
+      try {
+        await backfillStoredDeclarationPackagesAtBoot(this.engine as any, (this.engine as any)?.registry, ctx.logger as any);
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: declared-item package backfill (kernel:bootstrapped) failed', { error: err?.message });
+      }
+
       // [#3865] Normalise retired `access_level: 'full'` rows FIRST, so the
       // rule reconcile below materialises grants from already-canonical rules
       // (and any `full` share rows it re-grants land as `edit` in one pass
@@ -1423,12 +1533,23 @@ export function buildSharingMiddleware(
     // WRITES — gate on the per-VERB check. [ADR-0111 D3] update and delete no
     // longer share a gate: `canEdit` accepts an edit-level share, `canDelete`
     // does not (a share widens which rows a principal reaches, never which
-    // verbs). The middleware picks the gate by `op`.
-    if (op === 'update' || op === 'delete') {
-      const verb: 'update' | 'delete' = op;
+    // verbs). The middleware picks the gate by the write CLASS of `op`
+    // (`rlsOperationForVerb`, #30237): a `purge` is judged as the `delete` it
+    // is, so the permanent delete of a row by id asks `canDelete`, and a bulk
+    // permanent delete is scoped to the rows the caller may delete.
+    const writeClass = rlsOperationForVerb(op);
+    if (writeClass === 'update' || writeClass === 'delete') {
+      const verb: 'update' | 'delete' = writeClass;
       const data: any = ctx.data;
       const options: any = ctx.options;
       const id = inferTargetId(data, options);
+      // [#30237] The recycle bin's own doors — `restore(entryId)`,
+      // `purge(entryId)`, `empty(object)` — dispatch their verb with no id and
+      // no AST: they address no live row, so there is no row to gate and no
+      // query to scope here (the engine checks the entry's owner and the
+      // tenant wall itself). Only a verb that is not update/delete itself
+      // arrives this way; an ordinary update/delete keeps its path below.
+      if (id == null && !ctx.ast && op !== 'update' && op !== 'delete') return next();
       if (id != null) {
         // [#27175] The by-id gate is ONE service method,
         // `SharingService.admitsByIdWrite`, and this middleware refuses exactly

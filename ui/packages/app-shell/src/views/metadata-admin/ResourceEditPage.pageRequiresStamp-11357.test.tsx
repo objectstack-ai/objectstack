@@ -152,7 +152,9 @@ const mockClient = vi.hoisted(() => {
     references: vi.fn(async () => []),
     layered: vi.fn(async (type: string, name: string, _opts?: { packageId?: string }) => {
       const eff = server.active.get(k(type, name)) ?? null;
-      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, editable: true, deletable: true, resettable: false, lock: 'none' };
+      // `draft`: the pending draft as stored, the server's stamp included (objectstack#29814).
+      const draft = server.drafts.get(k(type, name)) ?? null;
+      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, draft, editable: true, deletable: true, resettable: false, lock: 'none' };
     }),
     getDraft: vi.fn(async (type: string, name: string, _opts?: { packageId?: string }) => {
       const row = server.drafts.get(k(type, name));

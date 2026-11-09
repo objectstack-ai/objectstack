@@ -323,6 +323,29 @@ describe('audit writers — operational plumbing is excluded (#5193, ADR-0057 D5
     }
   });
 
+  it('writes NO audit/activity row for the lifecycle sweeper\'s watermark, first insert or hourly update (ADR-0057 §3.3)', async () => {
+    // `LifecycleService` inserts the `sys_lifecycle_state` row after its first
+    // completed sweep and updates it after every one since. Audited, each
+    // sweep fed the ledger a row the next sweep archives: cleanup re-feeding
+    // the table it drains.
+    const { engine, fire, created } = makeEngine({ ...SCHEMA, sys_lifecycle_state: ['id', 'last_swept_at'] });
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'sys_lifecycle_state',
+      input: { id: 'lifecycle', last_swept_at: '2026-11-06T00:00:00.000Z' },
+      result: { id: 'lifecycle', last_swept_at: '2026-11-06T00:00:00.000Z' },
+      session: { isSystem: true },
+    });
+    await fire('afterUpdate', {
+      object: 'sys_lifecycle_state',
+      input: { id: 'lifecycle', last_swept_at: '2026-11-06T01:00:00.000Z' },
+      previous: { id: 'lifecycle', last_swept_at: '2026-11-06T00:00:00.000Z' },
+      result: { id: 'lifecycle', last_swept_at: '2026-11-06T01:00:00.000Z' },
+      session: { isSystem: true },
+    });
+    expect(created).toEqual([]);
+  });
+
   it('pays no before-phase snapshot read — for the skipped object OR the business one (#6656)', async () => {
     // [#6656] This case used to assert the saving for `sys_job_queue` only,
     // with `crm_lead` as the CONTROL that still paid — because #5860 could
@@ -519,6 +542,69 @@ describe('audit writers — chunked upload sessions are excluded (#5202, ADR-005
       object: 'crm_lead',
       input: { id: 'lead-1' },
       result: { id: 'lead-1', name: 'Acme' },
+      session: { userId: 'user-1' },
+    });
+    expect(created.map((c) => c.object)).toEqual(['sys_audit_log', 'sys_activity']);
+  });
+});
+
+describe('audit writers — recycle-bin entries are excluded (ADR-0148 D4, ADR-0057 §3.3)', () => {
+  // An entry as the engine writes it: `snapshot` holds every declared column of
+  // the deleted rows, `internal: true` ones included. Nothing here may reach
+  // the ledger through the generic writer.
+  const SCHEMA = {
+    sys_audit_log: SINGLE_TENANT.sys_audit_log,
+    sys_activity: SINGLE_TENANT.sys_activity,
+    sys_recycle_bin: ['id', 'object_name', 'record_id', 'record_count', 'snapshot', 'deleted_by', 'deleted_at', 'retention_days', 'purge_after', 'organization_id'],
+    crm_lead: ['id', 'name'],
+  };
+  const entry = (deletedBy: string | null) => ({
+    id: 'rb-1',
+    object_name: 'crm_lead',
+    record_id: 'lead-1',
+    record_count: 1,
+    snapshot: { rows: [{ object: 'crm_lead', id: 'lead-1', values: { id: 'lead-1', name: 'Acme', scoring_notes: 'internal only' } }], clearedReferences: [] },
+    deleted_by: deletedBy,
+    deleted_at: '2026-11-06T00:00:00.000Z',
+    retention_days: 30,
+    purge_after: '2026-12-06T00:00:00.000Z',
+    organization_id: 'org-1',
+  });
+
+  it('writes NO audit/activity row for the lifecycle reap of an entry', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterDelete', {
+      object: 'sys_recycle_bin',
+      input: { id: 'rb-1' },
+      previous: entry('user-1'),
+      result: { id: 'rb-1' },
+      session: { isSystem: true },
+    });
+    expect(created).toEqual([]);
+  });
+
+  it("writes NO audit/activity row when a user's delete clears an entry's deleted_by", async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterUpdate', {
+      object: 'sys_recycle_bin',
+      input: { id: 'rb-1', deleted_by: null },
+      previous: entry('user-1'),
+      result: entry(null),
+      session: { userId: 'user-admin' },
+    });
+    expect(created).toEqual([]);
+  });
+
+  it('still audits the business delete the entry was taken for (the skip stays narrow)', async () => {
+    const { engine, fire, created } = makeEngine(SCHEMA);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterDelete', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      previous: { id: 'lead-1', name: 'Acme' },
+      result: { id: 'lead-1' },
       session: { userId: 'user-1' },
     });
     expect(created.map((c) => c.object)).toEqual(['sys_audit_log', 'sys_activity']);
@@ -2909,5 +2995,76 @@ describe('audit writers — the activity row of an org-less record names the der
     const activities = created.filter((c) => c.object === 'sys_activity').map((c) => c.row.organization_id);
     expect(activities).toEqual(['org-A', 'org-B']);
     expect(asked).toBe(0);
+  });
+});
+
+/**
+ * [#30960] A SCIM connection's write names the connection, and only that write.
+ *
+ * plugin-auth hands every write of a SCIM protocol request to the engine as
+ * `{ isSystem: true, actor: 'svc:scim:CONNECTION_ID' }` with no
+ * `attributedUserId` (pinned at the engine by plugin-auth's
+ * `scim-transaction-scope.test.ts`, which spells the same label), and the
+ * engine surfaces it as `session.actor`. The ledger row then carries the
+ * label on `actor`, the connection id alone as `metadata.scim_connection_id`,
+ * and a null `user_id`: no human acted.
+ */
+describe('audit writers — a SCIM connection is the actor of its writes (#30960)', () => {
+  const SCIM_ACTOR = 'svc:scim:okta-30960';
+
+  it.each([
+    ['the SCIM create', 'afterInsert', 'create', { result: { id: 'u_1', email: 'ann@example.com' } }],
+    [
+      'the deactivation’s ban update',
+      'afterUpdate',
+      'update',
+      { previous: { id: 'u_1', banned: false }, result: { id: 'u_1', banned: true } },
+    ],
+    ['the delete', 'afterDelete', 'delete', { previous: { id: 'su_1', user_name: 'ann' }, result: { id: 'su_1' } }],
+  ])('%s: actor names the connection, metadata carries its id, user_id stays null', async (_label, event, action, rows) => {
+    const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire(event, {
+      object: action === 'delete' ? 'sys_scim_user' : 'sys_user',
+      input: { id: (rows.result as { id: string }).id },
+      ...rows,
+      session: { isSystem: true, actor: SCIM_ACTOR },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit?.row.action).toBe(action);
+    expect(audit?.row.actor).toBe(SCIM_ACTOR);
+    expect(audit?.row.user_id).toBeNull();
+    expect(JSON.parse(audit?.row.metadata)).toEqual({ scim_connection_id: 'okta-30960' });
+  });
+
+  it('another service principal’s row is unchanged: actor recorded, no metadata', async () => {
+    for (const actor of ['svc:cloud-control', 'svc:flow:mirror_status', 'svc:scim']) {
+      const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+      installAuditWriters(engine as any, 'test.audit');
+      await fire('afterInsert', {
+        object: 'crm_lead',
+        input: { id: 'lead-1' },
+        result: { id: 'lead-1', name: 'Acme' },
+        session: { isSystem: true, actor },
+      });
+      const audit = created.find((c) => c.object === 'sys_audit_log');
+      expect(audit?.row.actor, actor).toBe(actor);
+      expect(audit?.row.metadata, actor).toBeUndefined();
+    }
+  });
+
+  it('a user’s write carries no SCIM key even beside a SCIM label: the user is the actor', async () => {
+    const { engine, fire, created } = makeEngine(SINGLE_TENANT);
+    installAuditWriters(engine as any, 'test.audit');
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme' },
+      session: { userId: 'user-7', actor: SCIM_ACTOR },
+    });
+    const audit = created.find((c) => c.object === 'sys_audit_log');
+    expect(audit?.row.actor).toBe('user-7');
+    expect(audit?.row.user_id).toBe('user-7');
+    expect(audit?.row.metadata).toBeUndefined();
   });
 });

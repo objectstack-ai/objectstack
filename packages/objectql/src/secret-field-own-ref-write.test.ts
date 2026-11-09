@@ -2,15 +2,17 @@
 
 /**
  * [#27582] A non-system write may only seal a new value or keep its own
- * record's ref.
+ * record's ref — and "its own" is the value its caller reads in that column.
  *
  * A `secret` field's stored value is an opaque `secret:` ref. On a write that
- * is not the system principal's, a value already spelled as a ref is accepted
- * only when it is the ref that same record's same column already holds, and
- * then it changes nothing (like the echoed read mask). Any other ref is
- * refused with the ADR-0112 `VALIDATION_ERROR` / 400 pair, before any
- * credential row or record is written, and with one answer whatever the ref
- * names. A system write keeps the pass-through.
+ * is not the system principal's, a value already spelled as a ref is compared
+ * with the rows the write lands on only as the caller's own read door serves
+ * them, and the read door serves a `secret` column masked to every caller. So
+ * no ref is one such a write keeps: every ref is refused with the ADR-0112
+ * `VALIDATION_ERROR` / 400 pair, before any credential row or record is
+ * written, with one answer whatever the ref names and whatever the column
+ * holds — the ref the row itself holds included. The echoed read mask is
+ * still a no-op, and a system write keeps the pass-through.
  *
  * Driven through a real {@link ObjectQL} over an in-memory stub driver, on
  * every engine write door the credential pass sits on: insert (single, batch
@@ -122,7 +124,7 @@ const USER = { context: { isSystem: false, userId: 'u1' } } as any;
 /** A ref spelled like a stored one, naming no `sys_secret` row at all. */
 const UNKNOWN_REF = makeSecretRef('sec_none');
 
-describe('[#27582] a non-system write may only seal a new value or keep its own record\'s ref', () => {
+describe('[#27582] a non-system write may only seal a new value, never send a ref', () => {
   let engine: ObjectQL;
   let d: ReturnType<typeof makeDriver>;
   let crypto: ReturnType<typeof makeCrypto>;
@@ -210,22 +212,25 @@ describe('[#27582] a non-system write may only seal a new value or keep its own 
     });
   });
 
-  describe('by-id update: only the ref this record already holds', () => {
-    it('keeping its own ref is accepted and changes nothing', async () => {
+  describe('by-id update: a ref is answered the same whatever the column holds', () => {
+    it('the ref this record holds is refused exactly as another record\'s, and nothing is written', async () => {
       const own = await seed('r1', 'mine');
-      const before = secrets().map((s) => s.id);
-      await engine.update(VAULT, { id: 'r1', name: 'renamed', token: own }, USER);
-      expect(stored('r1')).toMatchObject({ name: 'renamed', token: own });
-      // Kept, not rewritten: the statement leaves the column alone, as for the echoed mask.
-      expect(d.lastStatement(VAULT)).toMatchObject({ name: 'renamed' });
-      expect(d.lastStatement(VAULT)).not.toHaveProperty('token');
-      expect(secrets().map((s) => s.id)).toEqual(before);
+      const theirs = await seed('r2', 'theirs');
+      const before = { secrets: secrets().map((s) => s.id), statement: d.lastStatement(VAULT) };
+      const kept = await caught(engine.update(VAULT, { id: 'r1', name: 'renamed', token: own }, USER));
+      const named = await caught(engine.update(VAULT, { id: 'r1', name: 'renamed', token: theirs }, USER));
+      expect(kept).toMatchObject(refusal());
+      expect(named).toMatchObject(refusal());
+      expect(kept!.message).toBe(named!.message);
+      expect(stored('r1')).toMatchObject({ name: 'r1', token: own });
+      expect(d.lastStatement(VAULT)).toBe(before.statement);
+      expect(secrets().map((s) => s.id)).toEqual(before.secrets);
       expect(await engine.resolveSecretField(VAULT, 'r1', 'token')).toBe('mine');
     });
 
-    it('keeping its own ref as the only key is accepted too', async () => {
+    it('the ref this record holds, as the only key, is refused too', async () => {
       const own = await seed('r1', 'mine');
-      await engine.update(VAULT, { id: 'r1', token: own }, USER);
+      expect(await caught(engine.update(VAULT, { id: 'r1', token: own }, USER))).toMatchObject(refusal());
       expect(refOf('r1')).toBe(own);
       expect(await engine.resolveSecretField(VAULT, 'r1', 'token')).toBe('mine');
     });
@@ -236,10 +241,20 @@ describe('[#27582] a non-system write may only seal a new value or keep its own 
       expect(refOf('r1')).toBe(own);
     });
 
-    it('a beforeUpdate hook that writes the stored row back keeps its own ref', async () => {
+    it('a beforeUpdate hook that writes the stored row back is judged on the ref it carries, as a caller is', async () => {
       const own = await seed('r1', 'mine');
       engine.registerHook('beforeUpdate', (ctx: any) => {
         ctx.input.data = { ...ctx.previous, ...ctx.input.data };
+      }, { object: VAULT });
+      expect(await caught(engine.update(VAULT, { id: 'r1', name: 'renamed' }, USER))).toMatchObject(refusal());
+      expect(stored('r1')).toMatchObject({ name: 'r1', token: own });
+    });
+
+    it('a beforeUpdate hook that writes the stored row back without its secret column lands', async () => {
+      const own = await seed('r1', 'mine');
+      engine.registerHook('beforeUpdate', (ctx: any) => {
+        const { token: _held, ...rest } = ctx.previous;
+        ctx.input.data = { ...rest, ...ctx.input.data };
       }, { object: VAULT });
       await engine.update(VAULT, { id: 'r1', name: 'renamed' }, USER);
       expect(stored('r1')).toMatchObject({ name: 'renamed', token: own });
@@ -282,18 +297,21 @@ describe('[#27582] a non-system write may only seal a new value or keep its own 
     });
   });
 
-  describe('predicate update: only a ref every matched record already holds', () => {
+  describe('predicate update: a ref is answered the same whatever the matched rows hold', () => {
     const multi = (where: Row) => ({ ...USER, where, multi: true });
 
-    it('a ref every matched row already holds is accepted and changes nothing', async () => {
+    it('a ref every matched row holds is refused exactly as one none holds, and nothing is written', async () => {
       await seed('r1', 'one');
       await seed('r2', 'two');
       await engine.update(VAULT, { token: 'shared' }, { ...SYSTEM, where: { tier: 'gold' }, multi: true });
       const shared = refOf('r1');
       expect(refOf('r2')).toBe(shared);
-      await engine.update(VAULT, { name: 'renamed', token: shared }, multi({ tier: 'gold' }));
-      expect(d.rowsOf(VAULT).map((r) => [r.name, r.token])).toEqual([['renamed', shared], ['renamed', shared]]);
-      expect(d.lastStatement(VAULT)).not.toHaveProperty('token');
+      const held = await caught(engine.update(VAULT, { name: 'renamed', token: shared }, multi({ tier: 'gold' })));
+      const unknown = await caught(engine.update(VAULT, { name: 'renamed', token: UNKNOWN_REF }, multi({ tier: 'gold' })));
+      expect(held).toMatchObject(refusal());
+      expect(unknown).toMatchObject(refusal());
+      expect(held!.message).toBe(unknown!.message);
+      expect(d.rowsOf(VAULT).map((r) => [r.name, r.token])).toEqual([['r1', shared], ['r2', shared]]);
       expect(await engine.resolveSecretField(VAULT, 'r2', 'token')).toBe('shared');
     });
 

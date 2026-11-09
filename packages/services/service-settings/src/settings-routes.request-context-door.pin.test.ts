@@ -77,6 +77,8 @@ function services(host: Host): Record<string, unknown> {
       { user_id: 'u_ses', organization_id: ORG, role: 'member' },
       { user_id: 'u_held', organization_id: ORG, role: 'member' },
     ],
+    // The keys' owners exist: an API key authenticates only as an owner who exists.
+    sys_user: [{ id: 'u_key' }, { id: 'u_ex' }, { id: 'u_mfa' }],
   };
   const objectql = bindCatalogFromTables({
     async find(object: string, q: { where?: Record<string, unknown>; limit?: number } | undefined) {

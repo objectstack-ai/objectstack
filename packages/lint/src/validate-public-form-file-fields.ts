@@ -39,6 +39,8 @@
  * (folded onto `sections` at parse), because `os lint` hands this rule the
  * unparsed stack. A form whose bound object, or whose field, does not resolve
  * in the stack is not judged here: the field-reference rules own that answer.
+ * A field resolves on the object as served, every `objectExtensions` field of
+ * the same artifact folded in ({@link indexFieldTypes}).
  */
 
 import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
@@ -49,7 +51,7 @@ import {
 } from '@objectstack/spec/ui';
 
 import { collectionEntries } from './collection-entries.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
 
 export const PUBLIC_FORM_FILE_FIELD = 'public-form-file-field';
 
@@ -75,20 +77,37 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** object name → field name → declared type. Reads the map and the list shapes of `fields`. */
+/**
+ * object name → field name → type. Reads the map and the list shapes of
+ * `fields`.
+ *
+ * [#30608] Over the objects as SERVED (`objectsAsServed`, the package's one
+ * fold): the anonymous doors serve the merged object, so a file field an
+ * `objectExtensions` entry of the same artifact adds is a field the public form
+ * collects, and an owner's field an extension re-declares is judged on the
+ * extension's type, which replaces the owner's definition whole (the
+ * registry's `mergeObjectDefinitions`). The type is the field's definition, so
+ * a field two packages tie on is left out (`objectsWithoutTiedFields`) and goes
+ * unjudged: which definition wins is registration order. An object that
+ * declares no field keeps its empty map, extended or not, as the write and
+ * readonly rules keep such an object (an introspected schema) unjudged.
+ */
 function indexFieldTypes(stack: AnyRec): Map<string, Map<string, string>> {
   const idx = new Map<string, Map<string, string>>();
-  for (const obj of recordsOf(stack.objects)) {
+  const declared = recordsOf(stack.objects);
+  const served = objectsWithoutTiedFields(objectsAsServed(stack));
+  declared.forEach((obj, i) => {
     const name = strName(obj.name);
-    if (!name) continue;
+    if (!name) return;
     const types = new Map<string, string>();
-    for (const field of recordsOf(obj.fields)) {
+    const declaresAny = recordsOf(obj.fields).some((field) => strName(field.name));
+    for (const field of declaresAny ? recordsOf(served[i].fields) : []) {
       const fieldName = strName(field.name);
       const type = strName(field.type);
       if (fieldName && type) types.set(fieldName, type);
     }
     idx.set(name, types);
-  }
+  });
   return idx;
 }
 

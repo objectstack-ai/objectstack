@@ -126,10 +126,21 @@ const FIELDS = {
  */
 const UNLABELLED_VIEW = { grid: { type: 'grid', columns: ['name'] } };
 
-const OBJECTS = [
-  { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: FIELDS, listViews: UNLABELLED_VIEW },
-  { name: 'showcase_note', label: 'Note', fields: FIELDS, listViews: UNLABELLED_VIEW },
-];
+/**
+ * The served objects, per language: the server translates what it serves under
+ * the request's language from the same catalog the console loads, so a zh-CN
+ * session holds the zh-CN answer (objectstack#30311).
+ */
+const OBJECTS: Record<Lang, Array<Record<string, unknown>>> = {
+  en: [
+    { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: FIELDS, listViews: UNLABELLED_VIEW },
+    { name: 'showcase_note', label: 'Note', fields: FIELDS, listViews: UNLABELLED_VIEW },
+  ],
+  'zh-CN': [
+    { name: 'showcase_project', label: '项目', pluralLabel: '项目清单', fields: FIELDS, listViews: UNLABELLED_VIEW },
+    { name: 'showcase_note', label: 'Note', fields: FIELDS, listViews: UNLABELLED_VIEW },
+  ],
+};
 
 /** The catalog as the console loads it: `zh-CN` translates both scalars. */
 const BUNDLE: Record<Lang, Record<string, unknown>> = {
@@ -179,7 +190,7 @@ async function mountList(lang: Lang, objectName: string): Promise<void> {
           <Routes>
             <Route
               path="/apps/:appName/:objectName"
-              element={<ObjectView dataSource={dataSource} objects={OBJECTS} onEdit={() => {}} />}
+              element={<ObjectView dataSource={dataSource} objects={OBJECTS[lang] as never} onEdit={() => {}} />}
             />
             <Route path="/apps/:appName/:objectName/record/:recordId" element={<OriginProbe />} />
           </Routes>

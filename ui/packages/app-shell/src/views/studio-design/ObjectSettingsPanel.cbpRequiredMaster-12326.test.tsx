@@ -6,11 +6,13 @@
  *
  * Since `@objectstack/spec` 18 (objectstack#23100, ADR-0055 §1) a
  * `controlled_by_parent` object derives its master from exactly one
- * `master_detail` field declared `required: true`, and the save door refuses
- * any other shape. The designer forces the value: the pick writes
- * `required: true` on the master in the same patch. With two or more
- * `master_detail` fields it picks none for the author, and shows the spec's own
- * refusal, which names the fix.
+ * `master_detail` field declared `required: true`. Since ADR-0055 §1 as
+ * amended (objectstack#30905 ruling A) the spec also reads an object's only
+ * `master_detail` that is not required as an OPTIONAL master, whose rows may
+ * name none. The designer forces the value: the pick writes `required: true`
+ * on the master in the same patch, so every row names its master. With two or
+ * more `master_detail` fields it picks none for the author, and shows the
+ * spec's own refusal, which names the fix.
  *
  * The installed spec's `ObjectSchema` is the oracle: the object the patch
  * leaves behind is parsed as the save door parses it.
@@ -54,8 +56,11 @@ const TWO_MASTERS = {
 describe('ObjectSettingsPanel — controlled_by_parent forces the master required (objectui#12326)', () => {
   it('choosing it with one non-required master writes required: true, and the object parses', async () => {
     const draft = { name: 'crm_case', sharingModel: 'private', fields: ONE_MASTER };
-    // The control leg: as the draft stands, switching only the model is refused.
-    expect(ObjectSchema.safeParse({ ...draft, sharingModel: 'controlled_by_parent' }).success).toBe(false);
+    // The control leg: as the draft stands, switching only the model leaves an
+    // optional master — it parses, as `required: false`.
+    const control = ObjectSchema.safeParse({ ...draft, sharingModel: 'controlled_by_parent' });
+    expect(control.success).toBe(true);
+    expect((control.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(false);
 
     const { onPatch } = renderPanel(draft);
     await pickSharing(CBP_LABEL);
@@ -69,7 +74,9 @@ describe('ObjectSettingsPanel — controlled_by_parent forces the master require
         account: { type: 'master_detail', label: 'Account', reference: 'crm_account', required: true },
       },
     });
-    expect(ObjectSchema.safeParse({ ...draft, ...patch }).success).toBe(true);
+    const parsed = ObjectSchema.safeParse({ ...draft, ...patch });
+    expect(parsed.success).toBe(true);
+    expect((parsed.data?.fields as Record<string, { required?: boolean }>).account.required).toBe(true);
   });
 
   it('writes only the model when the master is already required', async () => {

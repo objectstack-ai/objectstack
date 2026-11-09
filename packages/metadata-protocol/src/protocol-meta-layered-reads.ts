@@ -26,12 +26,13 @@ import {
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
     // fallback so a hydrated row is never answered as the code layer.
     isTenantAuthored,
+    isPairOf,
+    pairsOf,
 } from '@objectstack/metadata-core';
 import {
     type MetadataLock,
     type MetadataLockSource,
     type MetadataProvenance,
-    customizationPackageId,
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import {
@@ -40,7 +41,7 @@ import {
     storedRowDocument,
     withItemLockFamily,
 } from './item-lock.js';
-import { type MetadataDiagnostics, computeMetadataDiagnostics, withFormLayoutWarnings } from './metadata-diagnostics.js';
+import { type MetadataDiagnostics, computeMetadataDiagnostics, withViewLintWarnings } from './metadata-diagnostics.js';
 import { redactMetadataItem } from './metadata-redaction.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import {
@@ -58,6 +59,7 @@ import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
@@ -76,19 +78,25 @@ export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'pa
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemLayered`; the method's docblock there is its contract. */
-export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'governServedObject' | 'isArtifactBacked' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessReadAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'resolveRowlessExpandedView' | 'resolveWritePackageScope' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'throwMetadataServiceUnavailable'>, request: {
+export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'governServedObject' | 'isArtifactBacked' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessReadAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'resolveRowlessExpandedView' | 'resolveWritePackageScope' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
         type: string;
         name: string;
         packageId?: string;
         /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
-    }): Promise<{
+    }, opts: { withDraft?: boolean } = {}): Promise<{
         type: string;
         name: string;
         code: unknown | null;
         overlay: unknown | null;
         overlayScope: 'env' | null;
         effective: unknown | null;
+        /**
+         * [#29814] The pending draft row as stored — present only when the
+         * caller asked for it (`opts.withDraft`); `null` when no draft is
+         * pending. See the class method's docblock.
+         */
+        draft?: unknown | null;
         /**
          * Load-time validation result for the effective payload — same
          * shape attached to getMetaItems/getMetaItem by
@@ -393,19 +401,22 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         }
         const memberWhere = overlayMemberWhere(request.type, member);
         const boundTo = (row: StoredOverlayRow): string | undefined => boundPackageOf(row.package_id);
+        const installed = installedManifestsOfEngine(host.engine);
         const orphan = rows
             .filter((row) => rowMatchesOverlayWhere(row, memberWhere))
             .filter((row) => {
                 const owner = boundTo(row);
                 if (owner === undefined || owner === base) return false;
-                if (isServedOverrideRowOf(row, base)) return false;
-                const pair = customizationPackageId(base);
-                if (pair.ok && pair.value === owner) return true;
+                if (isServedOverrideRowOf(row, base, installed)) return false;
+                if (isPairOf(owner, base, installed)) return true;
                 return host.resolveWritePackageScope(owner)?.dependencies.includes(base) === true;
             })
             .sort((a, b) => {
-                const pair = customizationPackageId(base);
-                const rank = (row: StoredOverlayRow) => (pair.ok && boundTo(row) === pair.value ? 0 : 1);
+                const pairs = pairsOf(base, installed);
+                const rank = (row: StoredOverlayRow) => {
+                    const at = pairs.indexOf(boundTo(row) ?? '');
+                    return at === -1 ? pairs.length : at;
+                };
                 return rank(a) - rank(b) || String(boundTo(a)).localeCompare(String(boundTo(b)));
             })[0];
         if (orphan !== undefined) {
@@ -415,6 +426,60 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             );
             overlayScope = 'env';
             orphaned = true;
+        }
+    }
+
+    // ── [#29814] The pending DRAFT layer, only when the caller asked ──
+    //
+    // The row the strict `state: 'draft'` read of {@link getMetaItem} serves,
+    // at the same address: the requested package's draft when one is named,
+    // else the draft {@link strictDraftReadAddress} names (the address the
+    // draft save, the per-item publish and the discard naming none act on),
+    // with that read's best-effort first match when two or more packages hold
+    // drafts and none is package-unbound. Read as the `overlay` layer is read:
+    // the stored body through the conversion chain and nothing else. ⛔ Not
+    // governed (no injected columns), not translated, no `_packageId` stamp:
+    // an edit buffer built from it and saved back writes what the author
+    // wrote. The strict read decorates and governs; this layer is the draft
+    // as stored, which is the whole reason it exists.
+    //
+    // Asked for by the DOOR, never by default: a door asks only for a caller
+    // its draft-read admission admits (`mayReadPendingDrafts`), so no
+    // in-process resolution reader of this method (the security catalog echo,
+    // the packaged-permission-set lock gate, `/published`) reads drafts.
+    let draft: unknown | null | undefined;
+    if (opts.withDraft === true) {
+        draft = null;
+        const draftAddress = request.packageId
+            ? undefined
+            : await host.strictDraftReadAddress(request.type, request.name, member);
+        try {
+            let draftRow = (await host.findServedOverlayRow({
+                type: request.type,
+                name: request.name,
+                state: 'draft',
+                ...(request.packageId
+                    ? { packageId: request.packageId }
+                    : draftAddress ? { packageId: draftAddress.packageId } : {}),
+                ...memberOption(member),
+            }))?.row;
+            if (!draftRow && draftAddress?.bestEffort) {
+                draftRow = (await host.findServedOverlayRow({
+                    type: request.type,
+                    name: request.name,
+                    state: 'draft',
+                    ...memberOption(member),
+                }))?.row;
+            }
+            if (draftRow) {
+                draft = host.convertStoredItem(
+                    String(draftRow.type ?? request.type),
+                    storedRowDocument(draftRow),
+                );
+            }
+        } catch (error) {
+            // [#5707] A read that did not happen is not "no draft pending".
+            host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
     }
 
@@ -517,9 +582,11 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // serves for each name the view spells). Warnings only, so `valid` stays
     // the schema's answer. This door has no execution face: it is the
     // `?layers=true` authoring read, the one Studio's item editor takes when
-    // no draft is pending, so the pass runs unconditionally here.
+    // no draft is pending, so the pass runs unconditionally here. [#31866]
+    // The list-view field warnings ({@link withListViewFieldWarnings}) ride
+    // the same pass, as `getMetaItem` serves them.
     const _diagnostics = effective !== null && typeof effective === 'object' && !Array.isArray(effective)
-        ? (await withFormLayoutWarnings(
+        ? (await withViewLintWarnings(
             request.type,
             { ...(effective as Record<string, unknown>), _diagnostics: schemaDiagnostics },
             (name) => host.engine?.registry?.getObject?.(name),
@@ -565,6 +632,9 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     const servedCode = redactMetadataItem(request.type, code);
     const servedOverlay = redactMetadataItem(request.type, overlay);
     const servedEffective = redactMetadataItem(request.type, effective);
+    // [#29814] …and the draft layer, by the same reasoning: redaction
+    // subtracts a credential and nothing else.
+    const servedDraft = draft === undefined ? undefined : redactMetadataItem(request.type, draft);
 
     return {
         type: request.type,
@@ -573,6 +643,7 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         overlay: servedOverlay,
         overlayScope,
         effective: servedEffective,
+        ...(servedDraft !== undefined ? { draft: servedDraft } : {}),
         ...(_diagnostics ? { _diagnostics } : {}),
         lock: lockState.lock,
         ...(lockState.lockReason !== undefined ? { lockReason: lockState.lockReason } : {}),

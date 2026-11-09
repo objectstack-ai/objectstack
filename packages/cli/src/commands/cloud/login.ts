@@ -75,7 +75,33 @@ import { Command, Flags } from '@oclif/core';
 import type { CliExitCode } from '../../utils/format.js';
 import { printHeader, printKV, printSuccess, printError, emitJson, errorCodeFields } from '../../utils/format.js';
 import { loginWithBrowser, loginWithPassword } from '../../utils/auth-flows.js';
-import { DEFAULT_CLOUD_URL, readCloudConfig, writeCloudConfig } from '../../utils/cloud-config.js';
+import { DEFAULT_CLOUD_URL, readCloudConfig, tryReadCloudConfig, writeCloudConfig, type CloudConfig } from '../../utils/cloud-config.js';
+import { isSameControlPlane } from '../../utils/active-environment.js';
+
+/**
+ * The `cloud.json` a successful login writes: the new credential, plus the
+ * active environment the previous file recorded — when it is still about the
+ * same control plane and the same account.
+ *
+ * A login used to rewrite the file whole, so `activeEnvironmentId` (written by
+ * `os environments switch` / `os environments create --activate`, read back as
+ * the install target by `os package publish --install` and `os deploy`) was
+ * gone after every login and the next install refused for want of it.
+ *
+ * Kept only when both hold, because an environment id only resolves on the
+ * server it was chosen on (`active-environment.ts`) and only for an account
+ * that can reach it:
+ *   - the previous file's url names the same control plane as this login's;
+ *   - it is the same account — the user ids agree, or one side recorded none.
+ * Otherwise the id is dropped, exactly as before. Nothing else is carried
+ * over: every other key is the new login's.
+ */
+export function mergeCloudLogin(previous: CloudConfig | undefined, next: CloudConfig): CloudConfig {
+  if (!previous?.activeEnvironmentId) return next;
+  if (!isSameControlPlane(previous.url, next.url)) return next;
+  if (previous.userId && next.userId && previous.userId !== next.userId) return next;
+  return { ...next, activeEnvironmentId: previous.activeEnvironmentId };
+}
 
 /**
  * Emit ONE NDJSON record on stdout — the only `--json` writer in this command.
@@ -219,13 +245,15 @@ export default class CloudLogin extends Command {
             })
           : await this.fallbackPasswordPrompt(url, flags.email);
 
-      await writeCloudConfig({
-        url,
-        token: result.token,
-        email: result.user?.email,
-        userId: result.user?.id,
-        createdAt: new Date().toISOString(),
-      });
+      await writeCloudConfig(
+        mergeCloudLogin(await tryReadCloudConfig(), {
+          url,
+          token: result.token,
+          email: result.user?.email,
+          userId: result.user?.id,
+          createdAt: new Date().toISOString(),
+        }),
+      );
 
       if (flags.json) {
         // Record 2 of 2 on the device path, and the only record on the
@@ -237,7 +265,7 @@ export default class CloudLogin extends Command {
         if (result.user?.id) printKV('User ID', result.user.id);
         console.log('');
         console.log('  Credentials stored in ~/.objectstack/cloud.json');
-        console.log('  Next: `os package publish` to push a package, `os cloud whoami` to verify.');
+        console.log('  Next: `os deploy` to put this app on your cloud environment, `os cloud whoami` to verify.');
         console.log('');
       }
     } catch (error: any) {

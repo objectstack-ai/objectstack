@@ -984,7 +984,9 @@ import * as ZodBarrel from '../zod/index.zod.js';
 import { AppComponentSchema, AppSchemaRendererNodeSchema, MenuItemSchema as AppMenuItemSchema, NavigationAreaSchema, NavigationItemSchema } from '../zod/app.zod.js';
 import { BaseSchema, ComponentConfigSchema, ComponentInputSchema, ComponentMetaSchema, KeyedI18nLabelSchema, SchemaNodeSchema } from '../zod/base.zod.js';
 import { CloudWorkspaceTimezoneNoticeSchema } from '../zod/cloud.zod.js';
-import { ChecklistBlockItemSchema, ChecklistBlockSchema, HeroBlockSchema, StatBlockSchema, TileGridBlockAddTileSchema, TileGridBlockItemSchema, TileGridBlockSchema, UsageBarBlockSchema } from '../zod/product-blocks.zod.js';
+import { McpAuthorizedAssistantsSchema } from '../zod/mcp-authorized-assistants.zod.js';
+import { SecurityEffectiveAccessSchema } from '../zod/security-effective-access.zod.js';
+import { ChecklistBlockItemSchema, ChecklistBlockSchema, HeroBlockSchema, RowTableBlockSchema, RowTableColumnSchema, StatBlockSchema, TileGridBlockAddTileSchema, TileGridBlockItemSchema, TileGridBlockSchema, UsageBarBlockSchema } from '../zod/product-blocks.zod.js';
 import { RecordApprovalDecisionBlockSchema } from '../zod/record-approval-decision.zod.js';
 import { RecordApprovalsBlockSchema, RecordAttachmentsBlockSchema } from '../zod/record-panels.zod.js';
 import { CalendarEventSchema, CalendarViewSchema, CarouselItemSchema, CarouselSchema, ChatbotSchema, ChatbotEnhancedSchema, ChatbotFloatingSchema, ChatMessageSchema, ChatMessageSourceSchema, ChatToolInvocationSchema, DashboardComponentSchema, DashboardConfigSchema, DashboardWidgetConfigSchema, DashboardWidgetLayoutSchema, DashboardWidgetSchema, FilterBuilderSchema, FilterFieldSchema, KanbanCardSchema, KanbanColumnSchema, CardTemplateSchema, FilterGroupSchema } from '../zod/complex.zod.js';
@@ -1004,7 +1006,9 @@ import { DetailSectionNodeSchema, DetailViewFieldSchema, DetailViewSchema, Detai
 import type { AppComponentSchema as Ts_AppComponentSchema, AppSchemaRendererNodeSchema as Ts_AppSchemaRendererNodeSchema, NavigationArea as Ts_NavigationArea } from '../app';
 import type { BaseSchema as Ts_BaseSchema, ComponentConfig as Ts_ComponentConfig, ComponentInput as Ts_ComponentInput, ComponentMeta as Ts_ComponentMeta, KeyedI18nLabel as Ts_KeyedI18nLabel } from '../base';
 import type { CloudWorkspaceTimezoneNoticeSchema as Ts_CloudWorkspaceTimezoneNoticeSchema } from '../cloud';
-import type { ChecklistBlockItem as Ts_ChecklistBlockItem, ChecklistBlockSchema as Ts_ChecklistBlockSchema, HeroBlockSchema as Ts_HeroBlockSchema, StatBlockSchema as Ts_StatBlockSchema, TileGridBlockAddTile as Ts_TileGridBlockAddTile, TileGridBlockItem as Ts_TileGridBlockItem, TileGridBlockSchema as Ts_TileGridBlockSchema, UsageBarBlockSchema as Ts_UsageBarBlockSchema } from '../product-blocks';
+import type { McpAuthorizedAssistantsSchema as Ts_McpAuthorizedAssistantsSchema } from '../mcp-authorized-assistants';
+import type { SecurityEffectiveAccessSchema as Ts_SecurityEffectiveAccessSchema } from '../security-effective-access';
+import type { ChecklistBlockItem as Ts_ChecklistBlockItem, ChecklistBlockSchema as Ts_ChecklistBlockSchema, HeroBlockSchema as Ts_HeroBlockSchema, RowTableBlockSchema as Ts_RowTableBlockSchema, RowTableColumn as Ts_RowTableColumn, StatBlockSchema as Ts_StatBlockSchema, TileGridBlockAddTile as Ts_TileGridBlockAddTile, TileGridBlockItem as Ts_TileGridBlockItem, TileGridBlockSchema as Ts_TileGridBlockSchema, UsageBarBlockSchema as Ts_UsageBarBlockSchema } from '../product-blocks';
 import type { RecordApprovalDecisionBlockSchema as Ts_RecordApprovalDecisionBlockSchema } from '../record-approval-decision';
 import type { RecordApprovalsBlockSchema as Ts_RecordApprovalsBlockSchema, RecordAttachmentsBlockSchema as Ts_RecordAttachmentsBlockSchema } from '../record-panels';
 import type { CalendarEvent as Ts_CalendarEvent, CalendarViewSchema as Ts_CalendarViewSchema, CarouselItem as Ts_CarouselItem, CarouselSchema as Ts_CarouselSchema, ChatbotSchema as Ts_ChatbotSchema, ChatbotEnhancedSchema as Ts_ChatbotEnhancedSchema, ChatbotFloatingSchema as Ts_ChatbotFloatingSchema, ChatMessage as Ts_ChatMessage, ChatMessageSource as Ts_ChatMessageSource, ChatToolInvocation as Ts_ChatToolInvocation, DashboardComponentSchema as Ts_DashboardComponentSchema, DashboardWidgetLayout as Ts_DashboardWidgetLayout, DashboardWidgetSchema as Ts_DashboardWidgetSchema, FilterBuilderSchema as Ts_FilterBuilderSchema, FilterField as Ts_FilterField, KanbanCard as Ts_KanbanCard, KanbanColumn as Ts_KanbanColumn, CardTemplate as Ts_CardTemplate } from '../complex';
@@ -1852,10 +1856,16 @@ const MIRRORS = {
   'base.zod.ts#KeyedI18nLabelSchema': KeyedI18nLabelSchema,
   // objectui#11930 — the arm and its TS twin landed together.
   'cloud.zod.ts#CloudWorkspaceTimezoneNoticeSchema': CloudWorkspaceTimezoneNoticeSchema,
+  // The arm and its TS twin landed together with the widget's registration.
+  'mcp-authorized-assistants.zod.ts#McpAuthorizedAssistantsSchema': McpAuthorizedAssistantsSchema,
+  // The arm and its TS twin landed together with the widget's registration.
+  'security-effective-access.zod.ts#SecurityEffectiveAccessSchema': SecurityEffectiveAccessSchema,
   // objectui#12197 — the product-page blocks' arms and their TS twins landed together.
   'product-blocks.zod.ts#ChecklistBlockItemSchema': ChecklistBlockItemSchema,
   'product-blocks.zod.ts#ChecklistBlockSchema': ChecklistBlockSchema,
   'product-blocks.zod.ts#HeroBlockSchema': HeroBlockSchema,
+  'product-blocks.zod.ts#RowTableBlockSchema': RowTableBlockSchema,
+  'product-blocks.zod.ts#RowTableColumnSchema': RowTableColumnSchema,
   'product-blocks.zod.ts#StatBlockSchema': StatBlockSchema,
   'product-blocks.zod.ts#TileGridBlockAddTileSchema': TileGridBlockAddTileSchema,
   'product-blocks.zod.ts#TileGridBlockItemSchema': TileGridBlockItemSchema,
@@ -2058,9 +2068,13 @@ interface Declared {
   'base.zod.ts#ComponentMetaSchema': Ts_ComponentMeta;
   'base.zod.ts#KeyedI18nLabelSchema': Ts_KeyedI18nLabel;
   'cloud.zod.ts#CloudWorkspaceTimezoneNoticeSchema': Ts_CloudWorkspaceTimezoneNoticeSchema;
+  'mcp-authorized-assistants.zod.ts#McpAuthorizedAssistantsSchema': Ts_McpAuthorizedAssistantsSchema;
+  'security-effective-access.zod.ts#SecurityEffectiveAccessSchema': Ts_SecurityEffectiveAccessSchema;
   'product-blocks.zod.ts#ChecklistBlockItemSchema': Ts_ChecklistBlockItem;
   'product-blocks.zod.ts#ChecklistBlockSchema': Ts_ChecklistBlockSchema;
   'product-blocks.zod.ts#HeroBlockSchema': Ts_HeroBlockSchema;
+  'product-blocks.zod.ts#RowTableBlockSchema': Ts_RowTableBlockSchema;
+  'product-blocks.zod.ts#RowTableColumnSchema': Ts_RowTableColumn;
   'product-blocks.zod.ts#StatBlockSchema': Ts_StatBlockSchema;
   'product-blocks.zod.ts#TileGridBlockAddTileSchema': Ts_TileGridBlockAddTile;
   'product-blocks.zod.ts#TileGridBlockItemSchema': Ts_TileGridBlockItem;
@@ -5371,6 +5385,8 @@ const SPEC_DERIVED_PAIRS: readonly string[] = [
   'product-blocks.zod.ts#ChecklistBlockItemSchema',
   'product-blocks.zod.ts#ChecklistBlockSchema',
   'product-blocks.zod.ts#HeroBlockSchema',
+  'product-blocks.zod.ts#RowTableBlockSchema',
+  'product-blocks.zod.ts#RowTableColumnSchema',
   'product-blocks.zod.ts#StatBlockSchema',
   'product-blocks.zod.ts#TileGridBlockAddTileSchema',
   'product-blocks.zod.ts#TileGridBlockItemSchema',
@@ -5397,7 +5413,7 @@ const ZOD_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'zod');
  * MINUEND under it had moved. Nothing failed on any of those days, because nothing
  * compared the registry to a number. objectui#7433 is that absence, not the digits.
  */
-const EXPECTED_MIRROR_PAIRS = 197;
+const EXPECTED_MIRROR_PAIRS = 201;
 
 /**
  * A ledger this file can size from its own AST. `WiderThanDeclared` joined at

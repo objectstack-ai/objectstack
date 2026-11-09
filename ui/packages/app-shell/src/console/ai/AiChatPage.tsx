@@ -16,7 +16,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
-import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
+import { useObjectTranslation } from '@object-ui/i18n';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { toast } from 'sonner';
 import { Package as PackageIcon, Sparkles as SparklesIcon } from 'lucide-react';
 import { useAdapter } from '../../providers/AdapterProvider.js';
@@ -63,6 +64,8 @@ import {
   detectProposedPlan,
   detectBuilderHandoff,
   detectRecordHandoff,
+  detectRecordWrite,
+  detectSampleDataCleanup,
   detectProposedChanges,
   detectReplayOutcome,
   detectAuthoringVerdict,
@@ -109,6 +112,7 @@ import {
 import { AppHeader } from '../../layout/AppHeader.js';
 import { CONSOLE_TOP_BAR } from '../../layout/consoleTopBar.js';
 import { armChatDockExpanded, readDockReturnLocation } from '../../layout/chatDockState.js';
+import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
 import {
   useAdvertiseShortcut,
   type AdvertisedShortcut,
@@ -142,6 +146,48 @@ import { isConversationZh } from './conversationLanguage.js';
 import { resolveOutboundAgentText, type OutboundAgentTextKey } from './outboundAgentText.js';
 import { resolveApiBase } from './resolveApiBase.js';
 import { AiUnavailable } from './AiUnavailable.js';
+import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
+
+/**
+ * The app segment a record of `objectName` lives under: the object's owning
+ * package, read from `/api/v1/meta/object/<name>` (`_packageId`), with `setup`
+ * as the fallback shell for an object no package claims. Best-effort: a failed
+ * read still lands on the record. Shared by the record hand-off (cloud#1658)
+ * and the record-write card's form hand-off (cloud#3565).
+ */
+async function appOfObject(objectName: string): Promise<string> {
+  try {
+    const r = await fetch(`/api/v1/meta/object/${encodeURIComponent(objectName)}`, {
+      credentials: 'include',
+    });
+    if (r.ok) {
+      const j = (await r.json()) as { item?: { _packageId?: unknown } };
+      if (typeof j?.item?._packageId === 'string' && j.item._packageId) return j.item._packageId;
+    }
+  } catch {
+    /* resolution is best-effort; the caller's fallback still lands on the record */
+  }
+  return 'setup';
+}
+
+/**
+ * objectstack#31869 — the console address of the list a chat list link names:
+ * `/apps/APP/OBJECT`, plus `view` and the Filter panel conditions under the
+ * list route's own `uf__filter` param when the link carried them. Built from
+ * the parsed values, so nothing of the href's own query string is forwarded.
+ */
+export function listLinkTarget(
+  app: string,
+  target: { objectName: string; view?: string; filter?: { logic: 'and' | 'or'; conditions: unknown[] } },
+): string {
+  const params = new URLSearchParams();
+  if (target.view) params.set('view', target.view);
+  if (target.filter) {
+    params.set('uf__filter', JSON.stringify({ logic: target.filter.logic, conditions: target.filter.conditions }));
+  }
+  const query = params.toString();
+  return `/apps/${encodeURIComponent(app)}/${encodeURIComponent(target.objectName)}${query ? `?${query}` : ''}`;
+}
 
 function partString(part: HydratedUIMessagePart, key: string): string | undefined {
   const value = part[key];
@@ -237,6 +283,10 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
         // four; this is its hydration counterpart.
         const builderHandoff = detectBuilderHandoff(result);
         const recordHandoff = detectRecordHandoff(result);
+        // cloud#3565 — the record-write card rides the pending approval the
+        // id below is lifted from; it must survive a reload like the rest.
+        const recordWrite = detectRecordWrite(result);
+        const sampleDataCleanup = detectSampleDataCleanup(result);
         const proposedChanges = detectProposedChanges(result);
         // objectui#5695 — a confirm-replay result becomes a terminal state on
         // the original 确认修改 card; it must never rehydrate as an ordinary
@@ -284,6 +334,8 @@ export function hydratedMessagesToChatMessages(messages: HydratedUIMessage[]): C
           ...(proposedPlan ? { proposedPlan } : {}),
           ...(builderHandoff ? { builderHandoff } : {}),
           ...(recordHandoff ? { recordHandoff } : {}),
+          ...(recordWrite ? { recordWrite } : {}),
+          ...(sampleDataCleanup ? { sampleDataCleanup } : {}),
           ...(proposedChanges ? { proposedChanges } : {}),
           ...(replayOutcome ? { replayOutcome } : {}),
           ...(part.errorText ? { errorText: String(part.errorText) } : {}),
@@ -1572,11 +1624,7 @@ interface ChatPaneProps {
    * `context.surface` on every turn (the transport reads the body per send),
    * and surfaced to the user as a chip above the composer.
    */
-  surfaceContext?: {
-    pillar?: string;
-    artifact?: { type: string; name: string };
-    mode?: string;
-  };
+  surfaceContext?: ChatSurfaceContext;
   /**
    * objectui#8219 — the display label of `surfaceContext.artifact`, when the
    * host knows it (Studio: the Interfaces pillar's open leaf). Display-only: the
@@ -1597,6 +1645,13 @@ interface ChatPaneProps {
   /** ADR-0070 "Edit with AI": the package the user opened to edit (from `?package=`),
    *  forwarded to the build agent as `context.packageId` to scope it to that app. */
   editPackageId?: string;
+  /**
+   * objectstack#30043 — the app the user has selected, by its package: the
+   * console app the dock sits in, whichever agent it runs. Sent as
+   * `context.activeApp`; absent, `editPackageId` (the app picked for editing)
+   * is the selection, and with neither the key is omitted, never a placeholder.
+   */
+  activeAppPackageId?: string;
   /** A1.b bind-on-create: fired when this pane's build history binds to a package
    *  while the surface has no `?package=` — the page re-keys the conversation to
    *  `app:${pkg}:build` and writes `?package=` onto the URL. */
@@ -1636,6 +1691,7 @@ export function ChatPane({
   apiBase,
   conversationId,
   editPackageId,
+  activeAppPackageId,
   surfaceContext,
   surfaceArtifactLabel,
   onPackageBound,
@@ -1701,21 +1757,49 @@ export function ChatPane({
   // shell for an object no package claims.
   const openRecord = useCallback(
     async (handoff: { objectName: string; recordId: string }) => {
-      let app = 'setup';
-      try {
-        const r = await fetch(`/api/v1/meta/object/${encodeURIComponent(handoff.objectName)}`, {
-          credentials: 'include',
-        });
-        if (r.ok) {
-          const j = (await r.json()) as { item?: { _packageId?: unknown } };
-          if (typeof j?.item?._packageId === 'string' && j.item._packageId) app = j.item._packageId;
-        }
-      } catch {
-        /* resolution is best-effort; the fallback below still lands on the record */
-      }
+      const app = await appOfObject(handoff.objectName);
       navigate(
         `/apps/${encodeURIComponent(app)}/${encodeURIComponent(handoff.objectName)}/record/${encodeURIComponent(handoff.recordId)}`,
       );
+    },
+    [navigate],
+  );
+
+  // objectstack#31869 — a `/list/OBJECT` link in an answer opens that list.
+  // The address is BUILT here from the parsed values, never copied from the
+  // href: the view by name, and the Filter panel conditions under the list
+  // route's own param (`uf__filter`, `LIST_FILTER_PARAM` in
+  // `views/userFilterUrlState.ts`, spelled out so this chunk does not load
+  // that module). The list page then judges the conditions itself: a field
+  // this reader cannot read refuses the whole filter, with a notice.
+  const openList = useCallback(
+    async (target: { objectName: string; view?: string; filter?: { logic: 'and' | 'or'; conditions: unknown[] } }) => {
+      const app = await appOfObject(target.objectName);
+      navigate(listLinkTarget(app, target));
+    },
+    [navigate],
+  );
+
+  // cloud#3565 — 打开完整表单 on a record-write card. A create opens the New
+  // form with the card's values in the ROUTER STATE of this navigation, never
+  // the query string: a chat draft carries contact details, and a URL is
+  // copied, shared and logged (objectstack#28104, `recordFormAiDraft.ts`).
+  // The form marks each of those fields 「AI 建议」 until the person edits
+  // it, and opens unsaved; the form's own defaults fill the rest. An update
+  // opens the record's edit form on the stored record with the card's
+  // proposed values in the same router state (objectstack#28106): the form
+  // applies each as an unsaved change, before → after, marked 「AI 建议」 with
+  // a per-field revert. The card cancelled the pending write before calling
+  // this, so a record saved here is never written a second time.
+  const openRecordForm = useCallback(
+    async (write: {
+      operation: 'create' | 'update';
+      objectName: string;
+      recordId?: string;
+      fields: Array<{ name: string; value: unknown }>;
+    }) => {
+      const target = recordWriteFormTarget(write, await appOfObject(write.objectName));
+      navigate(target.to, target.state ? { state: target.state } : undefined);
     },
     [navigate],
   );
@@ -1869,6 +1953,7 @@ export function ChatPane({
   // pane mounts while the catalog is still loading, and a server without an
   // AI service answers that catalog empty and `/models` with a 501.
   const { models: aiModels, defaultModelId } = useAiModels({ apiBase, enabled: agents.length > 0 });
+  const selectedApp = activeAppPackageId || editPackageId || undefined;
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
   const effectiveModelId = selectedModelId ?? defaultModelId;
 
@@ -1892,7 +1977,10 @@ export function ChatPane({
     onError: handleChatError,
     body: {
       context: {
-        activeApp: 'AI',
+        // objectstack#30043 — the app the user has selected, never a constant:
+        // the agent was told "AI" while the user stood in their CRM. Omitted
+        // when nothing is selected.
+        ...(selectedApp ? { activeApp: selectedApp } : {}),
         agentName: activeAgent,
         // Tell the agent the environment's publish posture so its narration
         // matches reality (an auto-published build is live, not "to publish").
@@ -1902,6 +1990,7 @@ export function ChatPane({
         ...(editPackageId ? { packageId: editPackageId } : {}),
         // cloud#1610 — what the user is currently discussing (advisory; the
         // transport reads the body per send, so this stays fresh per turn).
+        // The console dock sends the page in view too (objectstack#30043).
         ...(surfaceContext ? { surface: surfaceContext } : {}),
       },
     },
@@ -2125,7 +2214,7 @@ export function ChatPane({
   // Narrow the loosely-typed provider apps once (see MetadataAppItem) so the
   // derivations below read fields without per-access casts.
   const metadataApps = apps as MetadataAppItem[] | undefined;
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   // Fold-insensitive, measured: this walks every message irrespective of role
   // and reads `draftReview`/`builderHandoff`, which the adapter spreads through.
   const boundPackageId = useMemo(
@@ -2146,7 +2235,7 @@ export function ChatPane({
     const app = (metadataApps ?? []).find(
       (a) => a._packageId === boundPackageId,
     );
-    return app ? appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) }) : boundPackageId;
+    return app ? appLabel(app) : boundPackageId;
   }, [boundPackageId, metadataApps, appLabel, t]);
 
   // ADR-0057 A1.b edit mode — the resolved name of the app being EDITED
@@ -2158,7 +2247,7 @@ export function ChatPane({
     const app = (metadataApps ?? []).find(
       (a) => a._packageId === editPackageId,
     );
-    return app ? appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) }) : undefined;
+    return app ? appLabel(app) : undefined;
   }, [editPackageId, metadataApps, appLabel, t]);
 
   // objectui#11658 — the plan card's extend-mode scope chip names the existing
@@ -2167,7 +2256,7 @@ export function ChatPane({
   const resolveAppLabel = useCallback(
     (appName: string) => {
       const app = (metadataApps ?? []).find((a) => a.name === appName);
-      return app ? appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) }) : undefined;
+      return app ? appLabel(app) : undefined;
     },
     [metadataApps, appLabel, t],
   );
@@ -2331,7 +2420,7 @@ export function ChatPane({
       if (!pkg || byPackage.has(pkg) || isPlatformBuiltinApp(app)) {
         continue;
       }
-      byPackage.set(pkg, appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) }));
+      byPackage.set(pkg, appLabel(app));
     }
     return Array.from(byPackage, ([id, label]) => ({ id, label }));
   }, [metadataApps, appLabel, t]);
@@ -2602,6 +2691,24 @@ export function ChatPane({
         builderHandoffOpenLabel={t('console.ai.builderHandoffOpen')}
         builderHandoffSupersededTitle={t('console.ai.builderHandoffSuperseded')}
         onOpenRecord={openRecord}
+        onOpenList={openList}
+        // cloud#3565 — the record-write card's three buttons and its states.
+        onOpenRecordForm={openRecordForm}
+        recordWriteCreateTitle={(objectLabel) => t('console.ai.recordWriteCreateTitle', { object: objectLabel })}
+        recordWriteUpdateTitle={(objectLabel) => t('console.ai.recordWriteUpdateTitle', { object: objectLabel })}
+        recordWriteConfirmLabel={t('console.ai.recordWriteConfirm')}
+        recordWriteOpenFormLabel={t('console.ai.recordWriteOpenForm')}
+        recordWriteCancelLabel={t('console.ai.recordWriteCancel')}
+        recordWriteCancelReason={t('console.ai.recordWriteCancelReason')}
+        recordWriteOpenFormReason={t('console.ai.recordWriteOpenFormReason')}
+        recordWriteDroppedLabel={t('console.ai.recordWriteDropped')}
+        recordWriteSubmittingLabel={t('console.ai.recordWriteSubmitting')}
+        recordWriteWrittenLabel={t('console.ai.recordWriteWritten')}
+        recordWriteCancelledLabel={t('console.ai.recordWriteCancelled')}
+        sampleDataCleanupTitleLabel={t('console.ai.sampleDataCleanupTitle')}
+        sampleDataCleanupIrreversibleLabel={t('console.ai.sampleDataCleanupIrreversible')}
+        sampleDataCleanupAbsentLabel={(count) => t('console.ai.sampleDataCleanupAbsent', { count })}
+        sampleDataCleanupEditedLabel={(count) => t('console.ai.sampleDataCleanupEdited', { count })}
         surface="plain"
         maxHeight="100%"
         headerSlot={headerSlot}

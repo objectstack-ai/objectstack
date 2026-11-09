@@ -73,7 +73,7 @@ export const ContributorPermissionSet = definePermissionSet({
   //
   // No policy below lists `positions`, deliberately. A set's row-level policies
   // are part of what the set grants, so they hold for EVERY holder of the set,
-  // whichever way it is held: through the `contributor` position's declared
+  // whichever way it is held: through the `showcase_contributor` position's declared
   // `permissionSets` (positions.ts) or granted directly (the delegated admin below may
   // hand this set out). `positions` narrows a policy to callers holding one of
   // the listed positions (ADR-0090 P2) — a tool for a policy on a baseline set
@@ -153,7 +153,7 @@ export const ContributorPermissionSet = definePermissionSet({
  * the open edition fails closed to owner-only, so this open example does not
  * author them (declared ≠ enforced is the one thing a showcase must never
  * do). BUSINESS-UNIT-shaped visibility in the open edition is instead
- * demonstrated by the `share_new_inquiries_with_field_ops` sharing rule
+ * demonstrated by the `showcase_share_new_inquiries_with_field_ops` sharing rule
  * (BU-subtree recipient — see sharing-rules.ts).
  */
 export const ManagerPermissionSet = definePermissionSet({
@@ -382,7 +382,7 @@ export const MemberDefaultPermissionSet = definePermissionSet({
  * No door runs that tier yet, because no door binds a set to `guest`: a save
  * of the packaged `guest` position answers 403 `NOT_OVERRIDABLE` (ADR-0138 D3
  * item 5), and the tier check belongs to the bind door when it is built (item
- * 4). Here the set reaches people through the `client_portal_user` position.
+ * 4). Here the set reaches people through the `showcase_client_portal_user` position.
  */
 export const GuestPortalPermissionSet = definePermissionSet({
   name: 'showcase_guest_portal',

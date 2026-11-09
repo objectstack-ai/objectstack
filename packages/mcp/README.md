@@ -89,9 +89,9 @@ or the `autoStart` option.
 
 `OS_MCP_STDIO_API_KEY` is not optional and has no fallback: a stdio server with
 no resolvable principal **refuses to start** rather than serving data unscoped
-(ADR-0101). Mint a key on the **Connect an Agent** page — under **Account →
-Developer** for any signed-in user, or **Setup → Connect an Agent** for
-platform admins — or `POST /api/v1/keys`.
+(ADR-0101). Mint a key on the **Connect an AI Assistant** page — from the avatar
+menu or **Account → AI Assistant** for any signed-in user, or **Setup → Overview**
+for platform admins — or `POST /api/v1/keys`.
 
 The legacy `MCP_SERVER_*` spellings are still honoured with a deprecation
 warning.
@@ -117,7 +117,8 @@ apply):
 'get_record'           // Fetch one by id
 'create_record'        // Create
 'update_record'        // Update by id
-'delete_record'        // Delete by id (destructive)
+'delete_record'        // Delete by id (destructive; refused without confirm: true)
+'delete_records'       // Delete many by filter or id list, ≤200 per call (refused with a preview without confirm: true)
 
 // Business actions — operate the app, not just its rows
 'list_actions'         // Invokable business actions the caller may run
@@ -131,7 +132,8 @@ seams serves the rest and advertises nothing it cannot do.
 
 OAuth scopes narrow the families at consent time: `data:read` covers
 list/describe/query/aggregate/get, `data:write` covers create/update/delete, and
-`actions:execute` covers `list_actions` / `run_action` / `resume_run`. A tool outside the grant
+`actions:execute` covers `list_actions` / `run_action` / `resume_run`. `delete_records` needs both
+`data:read` and `data:write`: its preview reads the selection's ids and count. A tool outside the grant
 is **not registered at all**, so the SDK rejects it as an unknown tool — the
 grant doubles as dispatch-time enforcement.
 

@@ -14,6 +14,8 @@
  * `phoneNumber`, `magicLink`, the generic OAuth providers, the OIDC provider
  * with its `jwt` plugin, `sso`, `scim`, device authorization and the custom
  * session — each with its own failure tier, as the method's docblock states.
+ * (Since the move one plugin joined the list: the one-time token, ahead of
+ * the custom session, for the mobile sign-in hand-off.)
  * The `organization` factory's body was moved out by cut 15; its arrow, which
  * hands that body its host, moves here with the rest.
  *
@@ -69,6 +71,7 @@ import {
   resolveDcrEnabled,
   resolveOidcProviderEnabled,
   resolveScimEnabled,
+  resolveTwoFactorEnabled,
   type AuthManager,
 } from './auth-manager.js';
 import {
@@ -79,8 +82,18 @@ import {
   buildTwoFactorPluginSchema,
 } from './auth-schema-config.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import { SSO_PROVIDER_SIGN_IN_FIELDS, ssoSamlOptions } from './sso-sign-in-options.js';
+import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
+import {
+  ONE_TIME_TOKEN_EXPIRES_IN_MINUTES,
+  oneTimeTokenStoreHasher,
+  registeredAppSchemesOf,
+} from './one-time-token-handoff.js';
 import { userInfoLocaleClaim } from './oidc-userinfo-locale-claim.js';
+import { refuseGrantForBannedUser } from './oauth-grant-ban-refusal.js';
+import { refuseUserInfoForBannedUser } from './oauth-token-read-ban-refusal.js';
 import { buildTurnstileSignUpPlugin, reportHalfConfiguredTurnstile, resolveTurnstileKeys } from './turnstile-sign-up.js';
+import { readMountDoor, readRequestClientAddress } from './request-client-address.js';
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -180,11 +193,13 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   // better-auth build would otherwise mount SCIM with its ADR-0134
   // deprovisioning path silently declined.
   assertScimAdminCoherence(pluginConfig);
-  const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
   const hibpFromEnv = readBooleanEnv('OS_AUTH_PASSWORD_REJECT_BREACHED');
   const enabled = {
     organization: pluginConfig.organization ?? true,
-    twoFactor: twoFactorFromEnv ?? pluginConfig.twoFactor ?? false,
+    // [#30201] Shared decision point (env → config), see
+    // resolveTwoFactorEnabled — the MFA gate and the require_mfa write guard
+    // ask the same question, so a requirement is never enforced unenrollable.
+    twoFactor: resolveTwoFactorEnabled(pluginConfig),
     passwordRejectBreached: hibpFromEnv ?? pluginConfig.passwordRejectBreached ?? false,
     passkeys: pluginConfig.passkeys ?? false,
     magicLink: pluginConfig.magicLink ?? false,
@@ -347,6 +362,15 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
     // by the admin create-user/import routes with a placeholder email
     // (see placeholder-email.ts), never by OTP self-signup.
     const otpCfg = this.config.phoneOtp ?? {};
+    // The reset text, sent the way the emailed reset sends its mail
+    // (`sendResetPassword`, `auth-manager-auth-instance.ts`): on the public
+    // door after the response, its failure logged on the server.
+    const sendPasswordResetText = sendAfterResponseOnPublicDoor(
+      async ({ phoneNumber: phone, code }: { phoneNumber: string; code: string }) => {
+        await this.deliverPhoneOtp(phone, code);
+      },
+      (error) => logAfterResponseSendFailure(this.config.logger, 'phone password-reset text', error),
+    );
     return phoneNumber({
       schema: buildPhoneNumberPluginSchema(),
       // Wrong-code attempts before the stored OTP is invalidated. Explicit
@@ -366,13 +390,19 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         await this.deliverPhoneOtp(phone, code);
       },
       // Self-service password reset OTP (`/phone-number/request-password-
-      // reset`). better-auth invokes this via runInBackgroundOrAwait —
-      // errors are logged, the route still answers {status:true} — so a
-      // throw here can neither 500 the request nor leak whether the number
-      // is registered.
-      sendPasswordResetOTP: async ({ phoneNumber: phone, code }) => {
-        await this.deliverPhoneOtp(phone, code);
-      },
+      // reset`). The request answers the same way for any number, answers
+      // at once and does not wait on the SMS send, as the emailed reset
+      // does: a call that carries a `Request` — the public door — resolves
+      // immediately and the text is built and sent after the response
+      // (`sendAfterResponseOnPublicDoor`); what the send does is logged on
+      // the server and never reaches the caller, who is answered
+      // `{ status: true }` either way. better-auth hands this callback the
+      // endpoint context, not the `Request` the emailed reset is handed
+      // (`sendPasswordResetOTP(data, ctx)`, better-auth 1.7.12
+      // `plugins/phone-number/routes.mjs`), so the context's own `request`
+      // is what decides: a server-side `auth.api.*` call carries none and
+      // still awaits its send.
+      sendPasswordResetOTP: (data, ctx) => sendPasswordResetText(data, ctx?.request),
     });
     });
   }
@@ -661,20 +691,36 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       // `IAuthService.verifyMcpAccessToken` contract names.
       customAccessTokenClaims: ({ referenceId }) =>
         referenceId ? { [OAUTH_ORGANIZATION_CLAIM]: referenceId } : {},
+      // ── A banned user is minted no token (`oauth-grant-ban-refusal.ts`) ──
+      // The provider's one pre-write callback for every grant that acts for a
+      // user, with that user's row in hand: while the ban holds, the grant is
+      // answered as an invalid grant of its type and nothing is written. It
+      // contributes no response field.
+      customTokenResponseFields: async ({ grantType, user }) => {
+        await refuseGrantForBannedUser({ grantType, user });
+        return {};
+      },
       // ── The standard `locale` claim at userinfo (OIDC Core §5.1) ──
       // `sys_user.locale` under the `profile` scope, so an environment that
       // signs in through this OP follows the user's language; the rule and
       // its failure posture live in `oidc-userinfo-locale-claim.ts`. Userinfo
       // only: the provider keeps profile claims out of the ID token, and the
       // platform RP reads userinfo.
-      customUserInfoClaims: ({ user, scopes }) =>
-        userInfoLocaleClaim(
+      //
+      // A banned user's token reads no claims while the ban holds
+      // (`oauth-token-read-ban-refusal.ts`): userinfo answers it as an access
+      // token that does not verify, from the user row the provider hands this
+      // callback. Judged first, so a refused request reads no locale either.
+      customUserInfoClaims: async ({ user, scopes }) => {
+        await refuseUserInfoForBannedUser({ user });
+        return userInfoLocaleClaim(
           {
             getEngine: () => this.getDataEngine(),
             warn: (message, meta) => this.config.logger?.warn?.(message, meta),
           },
           { user, scopes },
-        ),
+        );
+      },
     })];
     });
   }
@@ -718,9 +764,40 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
     // external IdP's email domain be DNS-verified before it may complete a
     // login — preventing an org admin from registering a provider for a domain
     // they don't control. Off by default to preserve the register→login flow.
+    //
+    // Per-provider sign-in options (ruling record 6718355623, `sso-sign-in-options.ts`):
+    // `allowIdpInitiated` and `allowJit` are provider additional fields, both
+    // OFF by default, so the vendor's own register / update-provider doors
+    // write them. `saml` hands the vendor its one IdP-initiated option as a
+    // getter that answers the ACS request's own provider.
+    //
+    // IdP group → permission set (the same ruling, item 3; `sso-group-projection.ts`):
+    // every sign-in's group claim (`userInfo.groups`, filled by the provider's own
+    // `mapping.extraFields.groups`) is matched against the provider's
+    // `sys_idp_group_mapping` rows, the SCIM half's one model, and only ordinary
+    // permission sets inside the organization boundary are granted. On EVERY
+    // sign-in, so the grants follow the IdP's groups; a failure is logged and
+    // never fails the sign-in.
+    const { createSsoGroupProvisioner } = await import('./sso-group-projection.js');
     return sso({
       organizationProvisioning: { defaultRole: 'member' },
       ...(enabled.ssoDomainVerification ? { domainVerification: { enabled: true } } : {}),
+      saml: ssoSamlOptions(),
+      schema: { ssoProvider: { additionalFields: SSO_PROVIDER_SIGN_IN_FIELDS } },
+      provisionUser: createSsoGroupProvisioner({
+        getEngine: () => this.getDataEngine(),
+        boundary: async () => (await this.config.organizationBoundary?.().catch(() => undefined)) ?? undefined,
+        warn: (message) => this.config.logger?.warn?.(message),
+        // The host logger carries `error` though the config type names only
+        // `info`/`warn` (as `logAfterResponseSendFailure` reads it); with none,
+        // the console's error stream, never a lower level.
+        error: (message) => {
+          const sink = this.config.logger as { error?: (msg: string) => void } | undefined;
+          if (typeof sink?.error === 'function') sink.error(message);
+          else console.error(message);
+        },
+      }),
+      provisionUserOnEveryLogin: true,
     });
     });
   }
@@ -749,7 +826,10 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.scim) {
     await this.addOptionalPlugin(plugins, 'scim', async () => {
       const { scim } = await import('@better-auth/scim');
-      const { verifyScimBearerToken } = await import('./scim-connection-service.js');
+      const { verifyScimBearerToken, recordScimRequestConnection } = await import(
+        './scim-connection-service.js'
+      );
+      const { createScimGroupProjection } = await import('./scim-group-projection.js');
       const secret = this.resolveAuthSecret();
       return scim({
         connections: [],
@@ -767,7 +847,15 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
             // POST + PATCH; pinned by `scim-transaction-scope.test.ts`).
             const engine = this.config.dataEngine;
             if (!engine) return null; // no store to verify against — fail closed
-            return verifyScimBearerToken(engine as never, secret, input.token);
+            // The verified connection is WRITTEN INTO the scope
+            // `handleRequest` opened — a field on the store both this frame
+            // and the endpoint handler read — not entered as a new store, so
+            // every provisioning write of the request is attributed to it
+            // (`ScimRequestScope.connectionId` says why that reaches the
+            // writes where an `enterWith` did not).
+            return recordScimRequestConnection(
+              await verifyScimBearerToken(engine as never, secret, input.token),
+            );
           },
         },
         // [#14360] The host half of `active`: stable @better-auth/scim
@@ -780,6 +868,15 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         identity: {
           reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
         },
+        // [ADR-0134 D4, filled for permission sets] A pushed group grants the
+        // permission sets its `sys_idp_group_mapping` rows name, inside the
+        // SCIM transaction; an unmapped group grants nothing, and no mapping
+        // can name an administrator set. See `scim-group-projection.ts`.
+        projection: createScimGroupProjection({
+          getEngine: () => this.getDataEngine(),
+          boundary: async () => (await this.config.organizationBoundary?.().catch(() => undefined)) ?? undefined,
+          warn: (message) => this.config.logger?.warn?.(message),
+        }),
       });
     });
   }
@@ -798,6 +895,26 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       return deviceAuthorization({
         verificationUri: this.getConsolePageUrl('/auth/device'),
         schema: buildDeviceAuthorizationPluginSchema(),
+      });
+    });
+  }
+
+  // One-time token — the mobile sign-in hand-off (maintainer ruling, option
+  // B: better-auth's own plugin, no hand-written exchange endpoint). Mounted
+  // only when the deployment registers at least one app scheme, because the
+  // hand-off has nowhere to send a token otherwise. Generation is refused
+  // over HTTP (`disableClientRequest`): the only minter is the ObjectStack
+  // hand-off route, which binds each token to the shell's PKCE challenge
+  // through `storeToken`'s custom hasher, so an intercepted callback cannot
+  // be redeemed. Lifetime and the binding are argued in
+  // `one-time-token-handoff.ts`.
+  if (registeredAppSchemesOf(this.config).length > 0) {
+    await this.addOptionalPlugin(plugins, 'oneTimeToken', async () => {
+      const { oneTimeToken } = await import('better-auth/plugins/one-time-token');
+      return oneTimeToken({
+        expiresIn: ONE_TIME_TOKEN_EXPIRES_IN_MINUTES,
+        disableClientRequest: true,
+        storeToken: { type: 'custom-hasher', hash: oneTimeTokenStoreHasher },
       });
     });
   }
@@ -829,7 +946,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   const dataEngine = this.config.dataEngine;
   if (dataEngine) {
     const { customSession } = await import('better-auth/plugins/custom-session');
-    plugins.push(customSession(async ({ user, session }) => {
+    plugins.push(customSession(async ({ user, session }, ctx?: any) => {
       if (!user?.id) return { user, session };
 
       // ADR-0068 D1/D2 (renamed ADR-0090 D3) — emit ONE canonical
@@ -922,7 +1039,21 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       // the transport seams to enforce. See computeAuthGate().
       // ADR-0069 D4 — session controls (idle / absolute). Best-effort;
       // revokes the session in place when exceeded (next request → 401).
-      await this.enforceSessionControls((session as any)?.id, (session as any)?.createdAt);
+      // [ADR-0069 TL;DR 6] Against the limits of the organization the session
+      // is scoped to, never below the deployment's.
+      // On a read through a door, the organization's IP list is judged again
+      // with the address that door established: the better-auth-served door
+      // (`handleRequest`, the request in `ctx.request`), or an objectstack
+      // mount under the auth base path reading the session in process
+      // (`gateAdmin` and every raw route that reads it itself), whose address
+      // the mount middleware carries (`runAtMountDoor`). A programmatic read
+      // with neither judges the limits only.
+      await this.enforceSessionControls(
+        (session as any)?.id,
+        (session as any)?.createdAt,
+        (session as any)?.activeOrganizationId ?? undefined,
+        ctx?.request ? { address: await readRequestClientAddress() } : await readMountDoor(),
+      );
 
       // An impersonation session carries the administrator who started it
       // (`impersonatedBy`, written by the admin plugin's impersonation and

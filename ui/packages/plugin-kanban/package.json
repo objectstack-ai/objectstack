@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-kanban",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "type": "module",
   "license": "MIT",
   "description": "Kanban board plugin for ObjectUI, powered by dnd-kit",
@@ -63,7 +63,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "^6.0.5",
-    "postcss": "^8.5.26",
+    "postcss": "^8.5.32",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vite": "^8.2.1",

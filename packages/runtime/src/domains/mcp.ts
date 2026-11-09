@@ -9,11 +9,23 @@
  */
 
 import { isMcpServerEnabled } from '@objectstack/types';
-import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
-import type { MetadataProtocol } from '@objectstack/spec/api';
+import { MCP_OAUTH_SCOPES, deriveAiFaceName } from '@objectstack/spec/ai';
+import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import type { AIActionConfirmation, IExternalDatasourceService } from '@objectstack/spec/contracts';
-import { FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY } from '@objectstack/rest';
+import {
+    FEDERATION_READ_CAPABILITY,
+    FEDERATION_WRITE_CAPABILITY,
+    federationCapabilityRefusal,
+    metaRequestLocale,
+    projectMetaActionForCaller,
+    translateMetaList,
+    type FederationCallKind,
+} from '@objectstack/rest';
+// [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
+// the environment's metadata asks, read through this transport's one posture read.
+import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { buildApiError } from '../error-envelope.js';
 import * as actionExec from '../action-execution.js';
 import { actionInvocationFailure, recordActionInvocation, withActionSurface } from '../action-invocation-audit.js';
@@ -27,6 +39,28 @@ import { declaresOptions } from '@objectstack/formula';
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
 import { classifyResumeResult } from './automation.js';
+// [ADR-0106 D1/D5] The `/meta` door's object-schema masker and projection —
+// imported, never restated, so `describe_object` and `list_objects` answer a
+// caller the same field set the `/meta` object read answers that caller.
+import { maskObjectSchema, resolveObjectMasker } from './meta.js';
+
+/** Typed as the registered vocabulary, so a misspelling fails to compile. */
+const FIELD_VISIBILITY_UNRESOLVED: ErrorCode = 'FIELD_VISIBILITY_UNRESOLVED';
+
+/**
+ * [ADR-0106 D6 tier 3] The refusal an MCP object-schema read answers when the
+ * caller's field visibility could not be evaluated, or the projection would
+ * leave the object with no field: the code, status and sentence the REST
+ * `/meta` object read answers (`sendFieldVisibilityFault`), thrown so the tool
+ * renders it as a coded tool error. Never the unmasked schema, never an
+ * object with no fields.
+ */
+function fieldVisibilityRefusal(objectName: string): Error & { code: ErrorCode; status: number } {
+    return Object.assign(
+        new Error(`Field visibility for object '${objectName}' could not be evaluated; the object schema is not being served.`),
+        { code: FIELD_VISIBILITY_UNRESOLVED, status: 503 },
+    );
+}
 
 /**
  * The legacy branches matched `/mcp/skill` (exact or `?`-suffixed) BEFORE
@@ -121,7 +155,15 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
         return { handled: true, response: deps.error('MCP transport requires a standard HTTP request', 400) };
     }
 
-    const bridge = buildMcpBridge(deps, context);
+    // [#30892] The file seam, resolved once per request so the bridge carries
+    // `read_file` / `create_upload_link` exactly where the storage plugin's
+    // caller-scoped verbs are served.
+    const recordFiles = await resolveMcpRecordFileService(deps, context);
+    // [ADR-0149 D2] The dataset seam, resolved on the same schedule: the bridge
+    // carries `list_datasets` / `query_dataset` exactly where the analytics
+    // service serves its dataset executor.
+    const datasetTools = await resolveMcpDatasetToolsService(deps, context);
+    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools });
     let webRes: Response;
     try {
         webRes = await mcp.handleHttpRequest(webRequest, {
@@ -130,6 +172,11 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
             // undefined = not scope-limited (API key / session); an array
             // narrows the registered tool families inside the MCP runtime.
             ...(grantedScopes ? { toolOptions: { grantedScopes } } : {}),
+            // [#31605] Who this request was admitted as: the resolved
+            // ExecutionContext and the environment it was dispatched for. A
+            // host-installed tool-call interceptor reads every call's
+            // principal from these two and from nothing the request carries.
+            caller: { executionContext: ec, environmentId: context.environmentId },
         });
     } catch (err: any) {
         return { handled: true, response: deps.errorFromThrown(err, 500) };
@@ -222,7 +269,11 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
         } catch { /* leave the documented placeholder in place */ }
     }
 
-    const markdown: string = mcp.renderSkill({ mcpUrl });
+    // [#30892] The file pair is taught where the bridge would carry it.
+    const fileTools = (await resolveMcpRecordFileService(deps, context)) !== undefined;
+    // [ADR-0149 D2] …and the dataset pair, with the D3 selection rule.
+    const datasetTools = (await resolveMcpDatasetToolsService(deps, context)) !== undefined;
+    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools, datasetTools });
     // Raw text must NOT ride the `response` channel — `sendResult` JSON-
     // encodes those bodies unconditionally. The `result` stream channel is
     // the one raw pipe through every adapter (string events are written
@@ -434,7 +485,7 @@ async function readMergedSkillRows(
     protocol: McpMergedMetadataRead | undefined | null,
     getMeta: () => Promise<any>,
 ): Promise<unknown[]> {
-    const items = await readMergedItems(protocol, 'skill');
+    const items = await actionExec.readMergedItems(protocol, 'skill');
     if (items === undefined) {
         const meta: any = await getMeta();
         return (await meta?.list?.('skill')) ?? [];
@@ -444,35 +495,22 @@ async function readMergedSkillRows(
 }
 
 /**
- * [commit e783e163d, #25120] One type's merged listing, as `GET /api/v1/meta/TYPE`
- * reads it — or `undefined` when this host has no merged read to offer.
- *
- * The one place this file unwraps `getMetaItems`, shared by the skill read
- * above and the object and action reads in {@link buildMcpBridge}, so they
- * cannot disagree about which answers they accept. Its three outcomes are the ones
- * {@link readMergedSkillRows} documents: `undefined` is STRUCTURAL absence (no
- * protocol in the slot, or one without the list verb), and the caller answers
- * from the metadata service exactly as before; a throw travels to the caller,
- * ⛔ never a fallback to the un-merged read.
+ * [ADR-0150 D2/D6] The manifest namespace of the package `packageId` names,
+ * from the engine's registry (`getPackage`), or `undefined`: no package id, no
+ * engine, or an id with no package record. A row's face is then its bare name.
  */
-async function readMergedItems(
-    protocol: McpMergedMetadataRead | undefined | null,
-    type: 'skill' | 'object' | 'action',
-): Promise<unknown[] | undefined> {
-    if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
-    const answer = await protocol.getMetaItems({ type });
-    // The declared `GetMetaItemsResponse` is `{ type, items }`, and the two
-    // other `getMetaItems` consumers in this package read `res.items` the same
-    // way. The bare-array arm matches what `packages/mcp` accepts for the stdio
-    // half of this same read: the slot is filled by name from a host-owned
-    // registry, and the two surfaces answering one question must not disagree
-    // about the shape they accept.
-    return Array.isArray(answer)
-        ? (answer as unknown[])
-        : Array.isArray(answer?.items)
-            ? answer.items
-            : [];
+function packageNamespaceOf(engine: any, packageId: string | undefined): string | undefined {
+    if (!packageId) return undefined;
+    let pkg: any;
+    try {
+        pkg = engine?.registry?.getPackage?.(packageId);
+    } catch {
+        return undefined;
+    }
+    const namespace = pkg?.manifest?.namespace;
+    return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
 }
+
 
 /**
  * [commit e783e163d] Report #6504's completeness verdict for the skill prompt surface.
@@ -552,7 +590,11 @@ async function warnIfSkillListIncomplete(
  * Also carries the action seam (`listActions` / `runAction`) and the skill seam
  * (`listSkills`, #3905) the MCP runtime wires by capability.
  */
-export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolContext): any {
+export function buildMcpBridge(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService } = {},
+): any {
     const ec = context.executionContext;
     const envId = context.environmentId;
     const driver = (context as any).dataDriver;
@@ -570,7 +612,7 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
     // unmapped in `ServiceSlotContracts`), so naming {@link McpMergedMetadataRead}
     // here is what keeps any verb, spelt any way, from being reached through
     // this handle. ⛔ Still `| undefined` and still every member optional:
-    // {@link readMergedItems} keeps its own `typeof protocol.getMetaItems !==
+    // `actionExec.readMergedItems` keeps its own `typeof protocol.getMetaItems !==
     // 'function'` probe, because a host may occupy the slot with a partial
     // object.
     const getProtocol = async (): Promise<McpMergedMetadataRead | undefined> =>
@@ -597,11 +639,11 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
      * sync.
      *
      * `undefined` = no merged read on this host (structural absence, see
-     * {@link readMergedItems}): `list_objects` and `describe_object` then read
+     * `actionExec.readMergedItems`): `list_objects` and `describe_object` then read
      * the metadata service, exactly as before.
      */
     const readMergedObjects = async (): Promise<any[] | undefined> =>
-        (await readMergedItems(await getProtocol(), 'object')) as any[] | undefined;
+        (await actionExec.readMergedItems(await getProtocol(), 'object')) as any[] | undefined;
 
     /**
      * The one object `describe_object` describes and `validate_expression`
@@ -640,15 +682,91 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
      * metadata service, exactly as before.
      */
     const readServedActions = async (): Promise<any[] | undefined> =>
-        (await readMergedItems(await getProtocol(), 'action')) as any[] | undefined;
+        (await actionExec.readMergedItems(await getProtocol(), 'action')) as any[] | undefined;
+
+    // [ADR-0150 D6] The engine the skill read last resolved (`listSkills`).
+    let skillEngine: any;
+
+    /**
+     * [ADR-0106 D1/D5] An object definition as THIS caller is served it: the
+     * `/meta` object door's masker ({@link resolveObjectMasker}, this
+     * request's execution context and security service, its D4 exemptions)
+     * and its projection ({@link maskObjectSchema}), so a field the caller
+     * cannot read does not exist in `describe_object` or `list_objects`
+     * either. An unrestricted caller is handed the definition it was handed
+     * before (the projection returns it by reference). A posture that cannot
+     * be evaluated, or a projection that leaves no field, is refused with the
+     * door's code ({@link fieldVisibilityRefusal}). The masker is resolved
+     * once per bridge, i.e. once per MCP request, and asked per object.
+     *
+     * Only the definitions these tools SERVE go through it. The reads that
+     * judge a call (the action collection, the exposure gates) keep the
+     * definition whole: they serve none of it.
+     */
+    let masker: ReturnType<typeof resolveObjectMasker> | undefined;
+    const servedToCaller = async (def: any): Promise<any> => {
+        const name = String(def?.name ?? '');
+        const masked = await maskObjectSchema(await (masker ??= resolveObjectMasker(deps, context, 'object')), name, def);
+        if (!masked.ok) throw fieldVisibilityRefusal(name);
+        return masked.document;
+    };
+
+    /**
+     * [ADR-0106 D1] The object one action is summarised against, as THIS
+     * caller is served it — or `undefined` when the `/meta` object door's
+     * projection withholds the action from this caller. The decision is
+     * `projectMetaActionForCaller` (`@objectstack/rest`), the one the `/meta`
+     * action list and item read ask, over the same masker: the action is
+     * projected as its object's only `actions` entry, the position where that
+     * projection drops an action reading a field the caller cannot read — a
+     * param's `field` (one under `objectOverride` judged on the object it
+     * names), or any other position of the action. An action with no object
+     * definition (an object-less one) carries no field of its own object, and
+     * each of its `objectOverride` params is judged on the object it names.
+     * The object handed back is the projected one where it was projected, so it
+     * carries no field the caller cannot read; a projection that cannot be
+     * evaluated is refused with the door's code ({@link fieldVisibilityRefusal}).
+     */
+    const servedActionObject = async (
+        action: any,
+        objectName: string,
+        obj: any,
+        objects: ReadonlyMap<string, any>,
+    ): Promise<{ obj: any } | undefined> => {
+        const ownerName = obj && typeof obj === 'object'
+            ? objectName
+            : (actionExec.isObjectLessActionKey(objectName) ? undefined : objectName);
+        const projected = await projectMetaActionForCaller({
+            masker: async (name) => (await (masker ??= resolveObjectMasker(deps, context, 'object')))(name),
+            readObject: async (name) => (name === objectName && obj ? obj : objects.get(name)),
+        }, action, ownerName);
+        if (projected.kind === 'fault') throw fieldVisibilityRefusal(projected.object);
+        if (projected.kind === 'withhold') return undefined;
+        return { obj: projected.object ?? obj };
+    };
+
+    /** {@link readServedObject}, as this caller is served it ({@link servedToCaller}). */
+    const readObjectForCaller = async (name: string): Promise<any> => {
+        const def: any = await readServedObject(name);
+        return def ? await servedToCaller(def) : def;
+    };
 
     const listObjectSummaries = async (): Promise<any[]> => {
         const objs = await readServedObjects();
-        return objs.map((o) => ({
-            name: o.name,
-            label: o.label ?? o.name,
-            fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
-        }));
+        const out: any[] = [];
+        // [ADR-0106 D5(2)] Every listed object as this caller is served it,
+        // so `fieldCount` counts the fields that exist for them. One object
+        // that cannot be projected refuses the listing, as the `/meta`
+        // object list does.
+        for (const listed of objs) {
+            const o = await servedToCaller(listed);
+            out.push({
+                name: o.name,
+                label: o.label ?? o.name,
+                fieldCount: o.fields ? Object.keys(o.fields).length : undefined,
+            });
+        }
+        return out;
     };
 
     return {
@@ -697,8 +815,9 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // ({@link readMergedObjects}), so every object an agent is listed it
         // can describe, and a name the listing omits (a disabled package's
         // object among them) is "not found" here too.
+        // [ADR-0106 D1/D5] …as this caller is served it ({@link readObjectForCaller}).
         describeObject: async (name: string) => {
-            const def: any = await readServedObject(name);
+            const def: any = await readObjectForCaller(name);
             if (!def) return null;
             const fields = def.fields ?? {};
             return {
@@ -717,8 +836,9 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // against, from the object `describeObject` reads: the served object,
         // where a picklist-bound field carries its list's resolved `options`,
         // so the served-form predicate is the one that matches.
+        // [ADR-0106 D1] …the same caller's object, so no field it cannot read is named.
         optionFieldsOf: async (name: string): Promise<readonly string[] | null> => {
-            const def: any = await readServedObject(name);
+            const def: any = await readObjectForCaller(name);
             if (!def) return null;
             return Object.entries(def.fields ?? {})
                 .filter(([, f]) => declaresOptions(f))
@@ -805,10 +925,17 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // of #8328, whose own reproduction runs through THIS endpoint. See
         // {@link readMergedSkillRows}.
         listSkills: async () => {
+            // [ADR-0150 D6] The engine whose registry places each row's package
+            // ({@link packageNamespaceOf}), resolved beside the read it serves:
+            // `@objectstack/mcp` asks `packageNamespace` only for rows this
+            // call returned.
+            skillEngine = await deps.getObjectQL(context, envId).catch(() => undefined);
             // Resolved per request through {@link getProtocol}, the typed
             // per-environment handle the object reads above use too.
             return await readMergedSkillRows(deps, await getProtocol(), getMeta);
         },
+        // [ADR-0150 D6] A package-held skill's prompt name is `NS-NAME`.
+        packageNamespace: (packageId: string) => packageNamespaceOf(skillEngine, packageId),
 
         create: async (object: string, data: any) =>
             await callData('create', { object, data }, driver, envId, ec),
@@ -842,15 +969,18 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             // declaration's `target || body`. A declared action nothing bound
             // (measured: an `os package install`ed package) was listed here and
             // refused there with "No handler registered".
-            const hasHandler = actionExec.registeredActionHandlerProbe(
-                deps,
-                await deps.getObjectQL(context, envId).catch(() => undefined),
-            );
+            const listingEngine: any = await deps.getObjectQL(context, envId).catch(() => undefined);
+            const hasHandler = actionExec.registeredActionHandlerProbe(deps, listingEngine);
             const out: any[] = [];
+            const servedObjects = await readServedObjects();
+            // [ADR-0106 D1] The objects an action's `objectOverride` params
+            // name, by name: judged and summarised on the object each names.
+            const objectsByName = new Map<string, any>();
+            for (const o of servedObjects) if (typeof o?.name === 'string') objectsByName.set(o.name, o);
             const declarations = await actionExec.collectActionDeclarations(
-                deps, meta, await readServedObjects(), await readServedActions(),
+                deps, meta, servedObjects, await readServedActions(),
             );
-            for (const { action, objectName, obj } of declarations) {
+            for (const { action, objectName, obj, packageId } of declarations) {
                 if (!objectName) continue;
                 // [#27681] Fail-closed on `sys_*` PER ACTION: the same predicate
                 // `run_action` asks, so an agent that lists sees exactly the
@@ -892,12 +1022,47 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 // that credential (a `sys_api_key` write under an API key),
                 // marked with that gate's own code and sentence.
                 const refusal = actionExec.apiForwardCredentialRefusal(context, action);
+                // [ADR-0106 D1] Summarised against the object as this caller is
+                // served it, and not listed where `/meta` withholds it.
+                const served = await servedActionObject(action, objectName, obj, objectsByName);
+                if (!served) continue;
+                // [ADR-0150 D2/D5/D6] The holder's namespace — what `run_action`
+                // takes as `namespace` to name this one action — and the action's
+                // AI face, derived by spec's one derivation from its address.
+                const namespace = packageNamespaceOf(listingEngine, packageId);
+                const face = deriveAiFaceName({
+                    name: action.name,
+                    namespace,
+                    objectName: actionExec.isObjectLessActionKey(objectName) ? undefined : objectName,
+                });
                 out.push({
-                    ...actionExec.summarizeAction(deps, action, obj, objectName, flow ?? undefined),
+                    ...actionExec.summarizeAction(
+                        deps, action, served.obj, objectName, flow ?? undefined,
+                        (name) => (name === objectName ? served.obj : objectsByName.get(name)),
+                    ),
+                    ...(namespace !== undefined ? { namespace } : {}),
+                    face,
                     ...(refusal ? { unavailable: { code: refusal.code, reason: refusal.message } } : {}),
                 });
             }
             return out;
+        },
+        // [#30771] Why the scoped `run_action` pre-screen (`@objectstack/mcp`)
+        // finds a `sys_*` action missing from this caller's listing when the
+        // reason is the caller's capability: an action its author exposed whose
+        // declared gate refuses this caller answers the gate's own refusal, the
+        // one `runAction` throws by name. Anything else (not declared there, not
+        // exposed) answers `undefined`, so the tool keeps its system-object
+        // sentence. Reads the declarations `listActions` reads, runs nothing.
+        capabilityRefusal: async (name: string, objectName: string) => {
+            const declarations = await actionExec.collectActionDeclarations(
+                deps, await getMeta(), await readServedObjects(), await readServedActions(),
+            );
+            const found = declarations.find((d) => d.objectName === objectName && d.action?.name === name);
+            if (!found) return undefined;
+            if (actionExec.systemObjectActionExposureError(deps, found.action, objectName)) return undefined;
+            if (actionExec.actionAiExposureError(deps, found.action)) return undefined;
+            return actionExec.actionPermissionRefusal(deps, found.action, ec, objectName) ?? undefined;
         },
         // [#15942] `confirm` rides through UNTOUCHED. The bridge forwards the
         // whole request object, so widening the type here is the whole change:
@@ -906,7 +1071,9 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // the second of the two strip layers that made the member unreachable.
         runAction: async (
             name: string,
-            input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
+            // [ADR-0150 D5] `namespace` rides through like `confirm`: the whole
+            // request object is forwarded, never rebuilt without it.
+            input: { objectName?: string; namespace?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
         }),
@@ -936,14 +1103,269 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // administrator too. Read off the SAME envelope the per-call gate
         // reads ({@link heldFederationCapabilities}), so listing and calling
         // cannot disagree; nothing a grant can do changes.
-        ...(heldFederationCapabilities(ec).length > 0
+        //
+        // [2026-11-03 ruling] "Some call of the pair can pass" is asked of the
+        // family's one rule (`federationCapabilityRefusal`), not of "holds
+        // either capability": both calls answer remote structure, so both
+        // need the read capability, and an envelope holding only the write one
+        // can pass neither — it is carried neither, as a `metadata:write`-only
+        // grant is.
+        //
+        // [ADR-0131 D3 · D12 items 7–8 · D11] The import saves an `object` into
+        // the environment's metadata catalog, so it names that type and
+        // {@link federationService} asks the walled refusal for it, as the REST
+        // route does. The listing stays a pure capability decision: the posture
+        // read is per call, and the pair is listed where a call of it can pass.
+        ...(federationPairCallable(ec)
             ? {
                 listRemoteTables: async (datasource: string, opts: { schema?: string }) =>
                     (await federationService(deps, context, ec, 'read')).listRemoteTables(datasource, opts),
                 importObject: async (datasource: string, remoteName: string, opts: { name?: string; writable?: boolean }) =>
-                    (await federationService(deps, context, ec, 'write')).importObject(datasource, remoteName, opts),
+                    (await federationService(deps, context, ec, 'write', { catalogWrite: 'object' })).importObject(datasource, remoteName, opts),
             }
             : {}),
+        // [#30892] The file seam (`read_file` / `create_upload_link`), carried
+        // only where the storage plugin serves its caller-scoped verbs.
+        ...(seams.recordFiles ? recordFileMembers(seams.recordFiles, callData, driver, envId, ec, deps, context) : {}),
+        // [ADR-0149 D2] The dataset seam (`list_datasets` / `query_dataset`),
+        // carried only where the analytics service serves its executor.
+        ...(seams.datasetTools ? datasetToolMembers(seams.datasetTools, getProtocol, ec, deps, context) : {}),
+    };
+}
+
+/**
+ * [ADR-0149 D2] The face of the `analytics` service the MCP dataset tools
+ * call: `datasetTools(deps)` binds the service-analytics executor
+ * (`createDatasetTools`) to the service itself. Named here structurally, as
+ * {@link McpRecordFileService} is, so this package takes no dependency on the
+ * analytics package (it loads opt-in). Every method refuses by throwing an
+ * ADR-0112 coded error.
+ */
+export interface McpDatasetToolsService {
+    datasetTools(deps: {
+        loadDatasets: (context: unknown) => Promise<readonly unknown[]>;
+        diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
+        maxQueryLimit?: number;
+    }): {
+        readonly definitions: ReadonlyArray<{ name: string; description: string }>;
+        listDatasets(input: unknown, context?: unknown): Promise<any>;
+        queryDataset(input: unknown, context?: unknown): Promise<any>;
+    };
+}
+
+/**
+ * [ADR-0149 D2] The `analytics` service when it serves the dataset executor,
+ * else `undefined` (no analytics service — it loads opt-in — or one without
+ * `datasetTools`). A lookup that throws is "not served": the tools are then
+ * not listed, as for {@link resolveMcpRecordFileService}.
+ */
+export async function resolveMcpDatasetToolsService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<McpDatasetToolsService | undefined> {
+    let service: Partial<McpDatasetToolsService> | undefined;
+    try {
+        service = (await deps.resolveService(context, 'analytics', context.environmentId)) as unknown as
+            Partial<McpDatasetToolsService> | undefined;
+    } catch {
+        return undefined;
+    }
+    return service && typeof service.datasetTools === 'function' ? (service as McpDatasetToolsService) : undefined;
+}
+
+/**
+ * [ADR-0149 D2] The bridge's three dataset members over the analytics
+ * service's executor, bound to THIS request's principal.
+ *
+ * - The saved datasets come from the read the REST door resolves
+ *   `datasetName` from (the protocol's merged `getMetaItems({ type: 'dataset' })`),
+ *   localized with the `/meta` list translation for this request's locale, as
+ *   the REST door localizes a saved dataset. A throwing read is left to throw:
+ *   the executor answers it as a degraded read (`partial` / 503), never as an
+ *   empty catalogue.
+ * - The narrowing probe is the bridge's own `diagnoseDelegation` read, asked
+ *   of this request's security service, so `query_dataset` states a narrowing
+ *   exactly where `query_records` does.
+ * - `maxRows` is the tool layer's page cap; the executor holds
+ *   `selection.limit` to it.
+ */
+function datasetToolMembers(
+    service: McpDatasetToolsService,
+    getProtocol: () => Promise<McpMergedMetadataRead | undefined>,
+    ec: unknown,
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+) {
+    const envId = context.environmentId;
+    const loadDatasets = async (): Promise<readonly unknown[]> => {
+        const protocol = await getProtocol();
+        const items = (await actionExec.readMergedItems(protocol, 'dataset')) ?? [];
+        const translated = await translateMetaList(
+            {
+                resolveI18nService: async () => {
+                    try {
+                        return await deps.resolveService(context, 'i18n', envId);
+                    } catch {
+                        return undefined;
+                    }
+                },
+                resolveProtocol: async () => protocol as any,
+                requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
+            },
+            'dataset',
+            items,
+        );
+        return Array.isArray(translated) ? translated : items;
+    };
+    const diagnoseDelegation = async (object: string) => {
+        try {
+            const security = await deps.resolveService(context, 'security', envId) as
+                Partial<ISecurityService> | undefined;
+            if (typeof security?.describeDelegationNarrowing !== 'function') return undefined;
+            return await security.describeDelegationNarrowing(object, ec as any);
+        } catch {
+            return undefined;
+        }
+    };
+    const executor = (maxQueryLimit?: number) =>
+        service.datasetTools({ loadDatasets, diagnoseDelegation, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
+    return {
+        listDatasets: (input: unknown) => executor().listDatasets(input, ec),
+        queryDataset: (input: unknown, opts: { maxRows: number }) => executor(opts.maxRows).queryDataset(input, ec),
+        datasetToolDefinitions: () => executor().definitions,
+    };
+}
+
+/**
+ * [#30892] The caller-scoped face of the storage plugin's `file-attachments`
+ * service the MCP file tools call (`ICallerRecordFileService`,
+ * `@objectstack/service-storage`), named here structurally so this package
+ * takes no dependency on the storage package. Every verb acts as the context's
+ * user and throws ADR-0112 coded refusals.
+ */
+export interface McpRecordFileService {
+    listRecordFilesAs(object: string, recordId: string, context: unknown): Promise<unknown[]>;
+    readRecordFileAs(
+        object: string,
+        recordId: string,
+        target: { field: string; fileId?: string } | { attachmentId: string },
+        context: unknown,
+        options: { maxBytes: number },
+    ): Promise<{ download: { url: string; expiresAt: string } | null } & Record<string, unknown>>;
+    createUploadLinkAs(
+        object: string,
+        recordId: string,
+        target: { field: string } | { attachments: true },
+        context: unknown,
+    ): Promise<{ path: string; expiresAt: string }>;
+}
+
+/**
+ * [#30892] The `file-attachments` service when it serves the caller-scoped
+ * record-file verbs, else `undefined` (no storage plugin, or one that predates
+ * them). A lookup that throws is "not served": the tools are then not listed.
+ */
+async function resolveMcpRecordFileService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<McpRecordFileService | undefined> {
+    let service: Partial<McpRecordFileService> | undefined;
+    try {
+        service = (await deps.resolveService(context, 'file-attachments', context.environmentId)) as unknown as
+            Partial<McpRecordFileService> | undefined;
+    } catch {
+        return undefined;
+    }
+    return service
+        && typeof service.listRecordFilesAs === 'function'
+        && typeof service.readRecordFileAs === 'function'
+        && typeof service.createUploadLinkAs === 'function'
+        ? (service as McpRecordFileService)
+        : undefined;
+}
+
+/**
+ * [#30892] The origin a link this server mints is opened at: the one the auth
+ * service declares for the MCP endpoint (its configured base URL), else the
+ * request's own host — the order the skill route resolves the MCP URL in.
+ * `undefined` when neither is known, and a link stays the path it was minted as.
+ */
+async function publicOrigin(deps: DomainHandlerDeps, context: HttpProtocolContext): Promise<string | undefined> {
+    try {
+        const authService = await deps.resolveService(context, 'auth', context.environmentId);
+        const url = authService?.getMcpResourceUrl?.();
+        if (typeof url === 'string' && url) return new URL(url).origin;
+    } catch { /* fall through to the request host */ }
+    try {
+        const webReq = toMcpWebRequest(deps, context.request, undefined);
+        const host = webReq?.headers.get('host');
+        if (host) {
+            const proto = webReq?.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'http';
+            return `${proto}://${host}`;
+        }
+    } catch { /* no origin */ }
+    return undefined;
+}
+
+/** `url` made absolute against `origin`; an absolute `url` (an S3 presigned link) stays as it is. */
+function absoluteUrl(url: string, origin: string | undefined): string {
+    if (!origin) return url;
+    try {
+        return new URL(url, origin).toString();
+    } catch {
+        return url;
+    }
+}
+
+/**
+ * [#30892] The bridge's file members. Each reads the record through the door
+ * `get_record` reads it through first, so a record the caller cannot read is
+ * refused with exactly `get_record`'s answer before the storage service is
+ * asked anything; the service then reads it again as the caller and judges the
+ * file by the download door's verdict, or the link by the attach rule.
+ */
+function recordFileMembers(
+    service: McpRecordFileService,
+    callData: (action: string, params: any, driver?: any, scopeId?: string, ec?: any) => Promise<any>,
+    driver: unknown,
+    envId: string | undefined,
+    ec: unknown,
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+) {
+    const readRecordFirst = async (object: string, recordId: string): Promise<void> => {
+        const res: any = await callData('get', { object, id: recordId }, driver, envId, ec);
+        if ((res?.record ?? res ?? null) == null) {
+            throw Object.assign(new Error(`Record "${recordId}" not found in "${object}"`), {
+                code: 'RECORD_NOT_FOUND',
+                status: 404,
+            });
+        }
+    };
+    return {
+        listRecordFiles: async (object: string, recordId: string) => {
+            await readRecordFirst(object, recordId);
+            return await service.listRecordFilesAs(object, recordId, ec);
+        },
+        readRecordFile: async (
+            object: string,
+            recordId: string,
+            target: { field: string; fileId?: string } | { attachmentId: string },
+            options: { maxBytes: number },
+        ) => {
+            await readRecordFirst(object, recordId);
+            const read = await service.readRecordFileAs(object, recordId, target, ec, options);
+            const origin = read.download ? await publicOrigin(deps, context) : undefined;
+            return {
+                ...read,
+                download: read.download ? { ...read.download, url: absoluteUrl(read.download.url, origin) } : null,
+            };
+        },
+        createUploadLink: async (object: string, recordId: string, target: { field: string } | { attachments: true }) => {
+            await readRecordFirst(object, recordId);
+            const grant = await service.createUploadLinkAs(object, recordId, target, ec);
+            return { url: absoluteUrl(grant.path, await publicOrigin(deps, context)), expiresAt: grant.expiresAt };
+        },
     };
 }
 
@@ -958,29 +1380,69 @@ function heldFederationCapabilities(ec: any): string[] {
     return [FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY].filter((cap) => held.includes(cap));
 }
 
+/** The kinds of the pair's two calls: `list_remote_tables` reads, `import_object` writes. */
+const FEDERATION_PAIR_KINDS: readonly FederationCallKind[] = ['read', 'write'];
+
+/**
+ * [#28938, 2026-11-03 ruling] Whether some call of the federation pair can
+ * pass for this envelope — judged by the family's one rule
+ * (`federationCapabilityRefusal`, `@objectstack/rest`) over the same held set
+ * {@link federationService} judges each call by, so the pair is listed
+ * exactly where one of its calls is admitted.
+ */
+function federationPairCallable(ec: any): boolean {
+    const held = heldFederationCapabilities(ec);
+    return FEDERATION_PAIR_KINDS.some((kind) => federationCapabilityRefusal(kind, held) === undefined);
+}
+
 /**
  * [#27745] The `external-datasource` service for one federation tool call, or
  * the refusal the REST twin answers: `403 PERMISSION_DENIED` without the
- * capability the call's kind needs (asked first, as the route asks it, so a
- * caller without it cannot learn which services the host wires), `503
+ * capabilities the call's kind needs (asked first, as the route asks it, so a
+ * caller without them cannot learn which services the host wires), `503
  * SERVICE_UNAVAILABLE` on a host with no federation service.
+ *
+ * [2026-11-03 ruling] The capability decision is the REST family's own
+ * `federationCapabilityRefusal`, not a copy of it: seeing a datasource's
+ * remote structure needs the read capability on every route, writes included,
+ * so `import_object` — which answers with the generated definition — needs
+ * the read capability as well as the write one, and its refusal is the
+ * route's sentence.
+ *
+ * [ADR-0131 D3 · D12 items 7–8 · D11] A call that saves an item into the
+ * environment's metadata catalog names its type in `catalogWrite`, and is then
+ * asked the walled refusal after the capability rule and before the service
+ * lookup, as the REST import route asks it: `walledCatalogWriteVerdict`
+ * (`@objectstack/metadata-core`), the verdict the metadata save door asks,
+ * never restated. Under a walled tenancy posture only the platform operator
+ * rung (or `isSystem`) is admitted, whatever the caller holds; inert under
+ * `single` and with no `tenancy` service. The posture is this transport's one
+ * read ({@link readEffectiveTenancyPosture}, which every walled door of the
+ * dispatcher reads), so a `tenancy` service that cannot answer raises the
+ * outage's `503`, never a permit. Refused `403 PERMISSION_DENIED` with the
+ * verdict's sentence, the route's answer.
  */
 async function federationService(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     ec: any,
-    kind: 'read' | 'write',
+    kind: FederationCallKind,
+    catalog: { catalogWrite?: string } = {},
 ): Promise<IExternalDatasourceService> {
-    const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
-    if (!heldFederationCapabilities(ec).includes(required)) {
-        throw Object.assign(
-            new Error(
-                kind === 'write'
-                    ? `Creating metadata from an external datasource requires the \`${required}\` capability.`
-                    : `Introspecting an external datasource requires the \`${required}\` capability.`,
-            ),
-            { code: 'PERMISSION_DENIED', status: 403 },
-        );
+    const refusal = federationCapabilityRefusal(kind, heldFederationCapabilities(ec));
+    if (refusal !== undefined) {
+        throw Object.assign(new Error(refusal), { code: 'PERMISSION_DENIED', status: 403 });
+    }
+    if (catalog.catalogWrite !== undefined) {
+        const walled = walledCatalogWriteVerdict({
+            type: catalog.catalogWrite,
+            tenancyPosture: await readEffectiveTenancyPosture(deps, context),
+            isSystem: ec?.isSystem === true,
+            callerPosture: ec?.posture,
+        });
+        if (!walled.allowed) {
+            throw Object.assign(new Error(walled.message), { code: 'PERMISSION_DENIED', status: 403 });
+        }
     }
     let service: IExternalDatasourceService | undefined;
     try {

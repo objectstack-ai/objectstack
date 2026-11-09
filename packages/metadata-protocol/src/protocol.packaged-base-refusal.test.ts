@@ -26,9 +26,13 @@
  * provenance). `@objectstack/objectql` cannot be imported here: it depends on
  * this package.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch, installedManifestsOf } from '@objectstack/metadata-core';
+import { DEFAULT_METADATA_TYPE_REGISTRY, OVERRIDE_TYPE_CLASSIFICATION } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { judgeOverrideWrite } from './protocol-packaged-base-refusal.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
 const PACKAGE_ID = 'com.example.pkg';
@@ -374,10 +378,14 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
             it(`\`action\` — ${operation} names the activation switch and no clone `
                 + `(${environmentId ? 'environment' : 'host-config'} kernel)`, () => {
                 const message = expectRegimeC(refusalOn(environmentId, 'action', 'pkg_action', operation), 'action', 'pkg_action', operation);
+                // [#30065] The save names the declaration from the base's pair
+                // first (ADR-0146 D9 `action`), then the switch; the removal
+                // keeps the row's prescription.
                 expect(message).toContain(
-                    'Switch it off (POST /api/v1/actions/_activation/:object/:action, body {enabled: false}, '
-                    + `:object = global for an object-less action; ${OPERATOR_ONLY}).`,
+                    `${operation === 'save' ? 'switch' : 'Switch'} it off (POST /api/v1/actions/_activation/:object_or_global/:action, `
+                    + `body {enabled: false}; ${OPERATOR_ONLY}).`,
                 );
+                if (operation === 'save') expect(message).toContain("Declare an override from 'com.example.pkg.custom' or rename it");
                 // No clone is chartered for an action (ADR-0126 §8 item 2): none is advertised.
                 expect(message.toLowerCase()).not.toContain('clone');
                 expect(message).not.toContain('/automation/');
@@ -427,7 +435,7 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
             );
             for (const [type, name, path] of [
                 ['flow', 'pkg_flow', 'POST /api/v1/automation/:name/clone'],
-                ['action', 'pkg_action', 'POST /api/v1/actions/_activation/:object/:action'],
+                ['action', 'pkg_action', 'POST /api/v1/actions/_activation/:object_or_global/:action'],
                 ['permission', 'pkg_perm', 'the "Clone" action on the permission set, or POST /api/v1/'],
             ] as const) {
                 const r: any = p.packagedBaseRefusal({ type, name, operation: 'save', packageId: PACKAGE_ID });
@@ -516,9 +524,12 @@ describe('the override write gate — only the base\'s paired .custom declares a
         { type: 'permission', name: 'crm_perm' },
         { type: 'object', name: 'crm_account' },
     ];
+    // [#30065] The base's action carries the gates that decide who may run
+    // it, which a declared override may keep or tighten and never widen.
+    const BASE_ACTION_GATES = { requiredPermissions: ['crm_admin'], ai: { exposed: false, requiresConfirmation: true } };
     const artifact = (type: string, name: string) =>
         BASE_ITEMS.some((i) => i.type === type && i.name === name)
-            ? { name, label: name, _packageId: BASE, _provenance: 'package' }
+            ? { name, label: name, _packageId: BASE, _provenance: 'package', ...(type === 'action' ? BASE_ACTION_GATES : {}) }
             : undefined;
 
     interface GateRow { type: string; name: string; package_id: string | null; state: string; metadata: string; id?: string }
@@ -764,7 +775,7 @@ describe('the override write gate — only the base\'s paired .custom declares a
     // precedence arms the pair's declaration over the loader's body, version
     // pinning landed in #28405), so the same gate admits the pair's declared
     // flow override — refused until this card as "not yet available" — and
-    // keeps every other refusal. `action` stays closed (the next case).
+    // keeps every other refusal. [#30065] `action` opened after it (below).
     it('the pair\'s declared flow override is admitted at the save door and stored with its declaration (#28412)', async () => {
         const { protocol, rows, stored } = gateProtocol();
         await protocol.saveMetaItem({ type: 'flow', name: 'crm_flow', packageId: PAIR, item: body('flow', 'crm_flow', true) });
@@ -806,12 +817,45 @@ describe('the override write gate — only the base\'s paired .custom declares a
         expect(stored()).toEqual([]);
     });
 
-    it('a declared action override is refused — action customization is not yet available', async () => {
-        const { protocol, stored } = gateProtocol();
-        const e = await thrown(protocol.saveMetaItem({ type: 'action', name: 'crm_action', packageId: PAIR, item: body('action', 'crm_action', true) }));
+    // [#30065, ADR-0146 D9 `action`] `action`'s conditions 1–3 are delivered,
+    // so the pair's declaration is admitted — as long as it keeps every gate
+    // the base's action declares on who may run it (ADR-0066 D4): it may add
+    // a required capability, and never drop one, expose the action to agents
+    // the base keeps off that surface, or drop the base's confirmation gate.
+    const actionBody = (gates: Record<string, unknown>) => ({ ...body('action', 'crm_action', true), ...gates });
+
+    it('the pair\'s declared action override that keeps the base\'s gates is admitted and stored with its declaration (#30065)', async () => {
+        const { protocol, rows, stored } = gateProtocol();
+        await protocol.saveMetaItem({
+            type: 'action', name: 'crm_action', packageId: PAIR,
+            item: actionBody({ requiredPermissions: ['crm_admin', 'crm_auditor'], ai: { requiresConfirmation: true } }),
+        });
+        expect(stored()).toEqual([{ type: 'action', name: 'crm_action', package_id: PAIR, state: 'active' }]);
+        expect(JSON.parse(Array.from(rows.values())[0].metadata).overrides).toEqual(DECLARATION);
+    });
+
+    for (const [what, gates, clause] of [
+        ['drops a required capability', { ai: { requiresConfirmation: true } }, `drops 'crm_admin' from \`requiredPermissions\``],
+        ['exposes the action to agents', { requiredPermissions: ['crm_admin'], ai: { exposed: true, description: 'Closes the account and notifies its owner by email.', requiresConfirmation: true } }, 'sets `ai.exposed: true`'],
+        ['drops the confirmation gate', { requiredPermissions: ['crm_admin'] }, 'drops `ai.requiresConfirmation: true`'],
+    ] as const) {
+        it(`the pair's declared action override that ${what} is refused — it widens who may run the action (#30065)`, async () => {
+            const { protocol, stored } = gateProtocol();
+            const e = await thrown(protocol.saveMetaItem({ type: 'action', name: 'crm_action', packageId: PAIR, item: actionBody(gates) }));
+            expect(shape(e)).toEqual(REFUSED);
+            expect(String(e.message)).toMatch(/^'action\/crm_action' declares an override of '[^']+' that widens who may run the action: /);
+            expect(String(e.message)).toContain(clause);
+            expect(stored()).toEqual([]);
+        });
+    }
+
+    it('publishMetaItem refuses a widening action override draft laid down before the gate (#30065)', async () => {
+        const { protocol, stored, seedDraft } = gateProtocol();
+        seedDraft('action', 'crm_action', PAIR, actionBody({}));
+        const e = await thrown(protocol.publishMetaItem({ type: 'action', name: 'crm_action', packageId: PAIR }));
         expect(shape(e)).toEqual(REFUSED);
-        expect(String(e.message)).toMatch(/action customization is not yet available/);
-        expect(stored()).toEqual([]);
+        expect(String(e.message)).toContain('widens who may run the action');
+        expect(stored()).toEqual([{ type: 'action', name: 'crm_action', package_id: PAIR, state: 'draft' }]);
     });
 
     // ── the sealed write's sentence ─────────────────────────────────────────
@@ -922,5 +966,76 @@ describe('the override write gate — only the base\'s paired .custom declares a
         expect(res.success).toBe(true);
         expect(stored().map((r) => `${r.type}/${r.name}:${r.state}`).sort())
             .toEqual(['dashboard/custom_board:active', 'page/crm_home:active']);
+    });
+});
+
+/**
+ * [#30062] A declared override of a type that takes none is told a remedy that
+ * works for THAT type, and cites the record that excluded it. Before, every
+ * excluded type read "… takes no override (ADR-0146 D6). Remove `overrides` and
+ * create your own TYPE under a new name": a `sharing_rule`'s or a `queue`'s
+ * create then answered 403 NOT_CREATABLE, a code-only type has no create at
+ * all, the D6 citation was the security catalog's for types outside it, and an
+ * `api` read "a api".
+ *
+ * Judged on the pure verdict every door asks (`judgeOverrideWrite`), for every
+ * excluded type of the closed classification, so a type classified later is
+ * held to the rule the day it lands.
+ */
+describe('[#30062] each excluded type\'s refusal names a remedy that works for it', () => {
+    const BASE_ID = 'com.example.base';
+    const PAIR_ID = `${BASE_ID}.custom`;
+    const CITATION: Record<string, string> = {
+        adr_0146_d6_security_catalog: 'ADR-0146 D6',
+        adr_0126_code_only: 'ADR-0146 D6',
+        not_package_shipped: 'ADR-0146 D2',
+        not_runtime_creatable: 'ADR-0146 D2',
+        adr_0126_one_shot: 'ADR-0126 §3',
+        setup_owned_connection: 'ADR-0146 D1',
+        behavioural_switch_first: 'ADR-0146 D9',
+    };
+    const creatable = (type: string) => DEFAULT_METADATA_TYPE_REGISTRY.some((e) => e.type === type && e.allowRuntimeCreate === true);
+    // The extend-only object and its extension keep their own D10 sentences (pinned above).
+    const EXCLUDED = (Object.entries(OVERRIDE_TYPE_CLASSIFICATION) as Array<[string, { disposition: string; basis: string }]>)
+        .filter(([, row]) => row.disposition === 'excluded' && row.basis !== 'adr_0146_d10_extended');
+    const refusalOf = (type: string): string => {
+        const verdict = judgeOverrideWrite(
+            { type, name: 'their_item', packageId: PAIR_ID, item: { name: 'their_item', overrides: { package: BASE_ID, basedOn: '1.0.0' } } },
+            { dependencies: [BASE_ID], shippers: [BASE_ID], installed: installedManifestsOf(undefined) },
+        );
+        expect(verdict, type).toMatchObject({ verdict: 'refuse', rule: 'declared_type_not_overridable' });
+        return (verdict as { message: string }).message;
+    };
+
+    it('enumerates every excluded type of the classification', () => {
+        expect(EXCLUDED.length).toBeGreaterThanOrEqual(17);
+    });
+
+    for (const [type, row] of EXCLUDED) {
+        it(`${type}: cites ${CITATION[row.basis]}, and names a create only where the type has one`, () => {
+            const message = refusalOf(type);
+            expect(message).toContain(`takes no override (${CITATION[row.basis]})`);
+            expect(message).not.toMatch(/\ba [aeiou]/);
+            if (creatable(type) && row.basis !== 'setup_owned_connection') {
+                expect(message).toContain(`create your own ${type} under a new name`);
+            } else {
+                expect(message).not.toContain('create your own');
+            }
+        });
+    }
+
+    it('a sharing rule names its organization rule and its switch, a queue its Setup page, a datasource Setup', () => {
+        expect(refusalOf('sharing_rule')).toContain('POST /api/v1/sharing/rules');
+        expect(refusalOf('sharing_rule')).toContain('/security/_activation/sharing_rule/:name');
+        expect(refusalOf('queue')).toContain('in Setup › Queues');
+        expect(refusalOf('datasource')).toContain('Setup › Datasources');
+        expect(refusalOf('field')).toContain('`object_extension` item saved through');
+    });
+
+    it('a code-only type names a new version of the base that ships it', () => {
+        for (const type of ['job', 'api', 'agent', 'capability', 'picklist', 'assignment_rule']) {
+            expect(refusalOf(type), type).toContain(`changes only with a new version of '${BASE_ID}'`);
+        }
+        expect(refusalOf('api')).toContain('but an api takes no override');
     });
 });

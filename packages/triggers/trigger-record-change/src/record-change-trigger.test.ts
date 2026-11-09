@@ -148,6 +148,23 @@ describe('RecordChangeTrigger', () => {
         expect(hooks[0].packageId).toBe('com.objectstack.trigger.record-change:task_assigned_notify');
     });
 
+    it('hands the run the impersonating administrator off the write\'s provenance, beside the impersonated user', async () => {
+        const { engine, hooks } = fakeEngine();
+        const trigger = new RecordChangeTrigger(engine, silentLogger());
+        const seen: AutomationContext[] = [];
+        trigger.start(binding(), async (ctx) => { seen.push(ctx); });
+
+        await hooks[0].handler(hookCtx({ provenance: { impersonatedBy: 'u_admin' } } as Partial<HookContext>));
+        // Control: the user's own write starts a run that names no administrator.
+        await hooks[0].handler(hookCtx());
+
+        expect(seen).toHaveLength(2);
+        expect(seen[0].userId).toBe('u9');
+        expect(seen[0].impersonatedBy).toBe('u_admin');
+        expect(seen[1].userId).toBe('u9');
+        expect('impersonatedBy' in seen[1]).toBe(false);
+    });
+
     it('does not register a hook for an unsupported trigger event', () => {
         const { engine, hooks } = fakeEngine();
         const trigger = new RecordChangeTrigger(engine, silentLogger());

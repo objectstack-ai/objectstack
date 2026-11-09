@@ -49,8 +49,20 @@ export interface ProtocolHandshakeManifest {
 
 export type ProtocolCompatResult =
   | { status: 'ok'; runtimeMajor: number; requiredRange: string; source: RangeSource }
-  | { status: 'no-range'; runtimeMajor: number }
-  | { status: 'unparsed-range'; runtimeMajor: number; requiredRange: string; source: RangeSource }
+  | {
+      status: 'no-range';
+      runtimeMajor: number;
+      /** The protocol the package is loaded under unchecked -- the version it was judged against. */
+      protocolVersion: string;
+    }
+  | {
+      status: 'unparsed-range';
+      runtimeMajor: number;
+      /** The protocol the package is loaded under unchecked -- the version it was judged against. */
+      protocolVersion: string;
+      requiredRange: string;
+      source: RangeSource;
+    }
   | {
       status: 'incompatible';
       runtimeMajor: number;
@@ -477,11 +489,11 @@ export function checkProtocolCompat(
   const runtimeMajor = leadingMajor(protocolVersion) ?? 0;
   const declared = resolveDeclaredRange(manifest);
 
-  if (!declared) return { status: 'no-range', runtimeMajor };
+  if (!declared) return { status: 'no-range', runtimeMajor, protocolVersion };
 
   const admits = rangeAdmitsMajor(declared.range, runtimeMajor);
   if (admits === null) {
-    return { status: 'unparsed-range', runtimeMajor, requiredRange: declared.range, source: declared.source };
+    return { status: 'unparsed-range', runtimeMajor, protocolVersion, requiredRange: declared.range, source: declared.source };
   }
   if (admits) {
     return { status: 'ok', runtimeMajor, requiredRange: declared.range, source: declared.source };
@@ -530,37 +542,45 @@ export function checkProtocolCompat(
 /** Warn hook — overridable for tests; defaults to `console.warn`. */
 export type WarnFn = (message: string) => void;
 
+/** The verdicts {@link assertProtocolCompat} admits: every one but `incompatible`, which it throws. */
+export type ProtocolCompatAdmitted = Exclude<ProtocolCompatResult, { status: 'incompatible' }>;
+
 /**
- * Enforce the handshake at a load/install boundary.
+ * Enforce the handshake at a load/install boundary, and answer the verdict it
+ * admitted the package under.
  *
  * - `ok` → returns silently.
  * - `no-range` → warns once (grandfathering; `objectstack lint` nudges the
  *   package to declare a range, and scaffolds stamp one going forward).
  * - `unparsed-range` → warns (parser-coverage gap; never a false rejection).
  * - `incompatible` → throws {@link ProtocolIncompatibleError}.
+ *
+ * The returned verdict is {@link checkProtocolCompat}'s own, handed back so a
+ * door that answers a caller can say the check was skipped (`no-range`,
+ * `unparsed-range`) without judging the range a second time.
  */
 export function assertProtocolCompat(
   manifest: ProtocolHandshakeManifest,
   protocolVersion: string = PROTOCOL_VERSION,
   warn: WarnFn = (m) => console.warn(m),
-): void {
+): ProtocolCompatAdmitted {
   const result = checkProtocolCompat(manifest, protocolVersion);
   const pkg = manifest.id ?? '<unknown>';
   switch (result.status) {
     case 'ok':
-      return;
+      return result;
     case 'no-range':
       warn(
         `[protocol] package '${pkg}' declares no engines.protocol range; ` +
           `loading under protocol ${protocolVersion} without a compatibility check (ADR-0087).`,
       );
-      return;
+      return result;
     case 'unparsed-range':
       warn(
         `[protocol] package '${pkg}' declares an unrecognized ${result.source} range ` +
           `'${result.requiredRange}'; skipping the protocol handshake (ADR-0087).`,
       );
-      return;
+      return result;
     case 'incompatible':
       throw new ProtocolIncompatibleError(result.diagnostic);
   }

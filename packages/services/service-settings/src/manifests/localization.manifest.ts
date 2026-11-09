@@ -83,6 +83,13 @@ export const localizationSettingsManifest: SettingsManifest = {
     {
       type: 'select', key: 'locale', label: 'Default language', required: false, default: 'en-US',
       description: 'BCP-47 locale for message catalogs and number/date formatting.',
+      // [#30286] What a running deployment offers and accepts here is NOT this
+      // table: `SettingsServicePlugin` registers an option source for this key
+      // (`localization-locale-options.ts`) that serves the i18n service's
+      // locale list, the one the user's language menu reads, each language
+      // named in its own language. These four are what a composition without
+      // an i18n service gets; the translation bundles name none of them, for
+      // the same reason.
       options: [
         { value: 'en-US', label: 'English (US)' },
         { value: 'zh-CN', label: '简体中文' },

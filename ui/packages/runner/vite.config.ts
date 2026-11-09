@@ -116,8 +116,6 @@ export default defineConfig({
       "@object-ui/fields": path.resolve(__dirname, "../../packages/fields/src"),
       // `@object-ui/plugin-detail` <- plugin-kanban/src/ObjectKanban.tsx
       "@object-ui/plugin-detail": path.resolve(__dirname, "../../packages/plugin-detail/src"),
-      // `@object-ui/providers`     <- fields/src/widgets/{FileField,ImageField}.tsx (2nd layer)
-      "@object-ui/providers": path.resolve(__dirname, "../../packages/providers/src"),
       // `@object-ui/permissions`   <- plugin-detail/src/DetailView.tsx et al. (2nd layer)
       "@object-ui/permissions": path.resolve(__dirname, "../../packages/permissions/src"),
       // `@object-ui/data-objectstack` <- react/src/context/AppShellContext.tsx, `import type`

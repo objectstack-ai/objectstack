@@ -49,6 +49,19 @@
  *   lookup probe take. A grant naming nothing the catalog holds confers
  *   nothing either way.
  *
+ * ## The sentence
+ *
+ * Read by a business administrator, in Create User's dialog and on Setup's
+ * grant form, so it is one line they can act on, said here once for every
+ * grant path ({@link grantSetNotInCatalogMessage}). The mistake it meets most
+ * is a set's LABEL typed where its name belongs — what Setup shows is the
+ * label, the grant stores the name (D4) — so on a refusal, and only then, the
+ * catalog is listed for a set whose label is the refused value, and the
+ * sentence names that set's name as the remedy. The catalog is NOT widened to
+ * accept a label: a label is display text, unconstrained and not unique.
+ * Agent ceiling sets are never suggested (no person's grant may name one), and
+ * a listing that throws leaves the plain sentence, which is still true.
+ *
  * ## The envelope
  *
  * `400 VALIDATION_FAILED` (built by `validationFailure`, the constructor both
@@ -78,7 +91,8 @@
  * D10 (names first, then the id column goes).
  */
 
-import { securityCatalogReaderOf } from '@objectstack/core';
+import { securityCatalogReaderOf, type SecurityCatalogReader } from '@objectstack/core';
+import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 import { isPlainRecord } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
@@ -111,19 +125,27 @@ interface GrantNameFieldError {
   constraint: { target: string; targetField: string };
 }
 
-/** The sentence an author reads: the value, the column's contract, the fix. */
-export function grantSetNotInCatalogMessage(value: string): string {
-  return (
-    `${NAME_LABEL}: no permission set is named '${value}'. ${GRANT_OBJECT}.${GRANT_SET_NAME_FIELD} takes the ` +
-    `machine name of a permission set in the security catalog (a package's set, a built-in, or one saved ` +
-    `through the metadata door), never a record id: write the name of an existing permission set, or ` +
-    `declare the set first.`
-  );
+/**
+ * The one line an administrator reads when a grant names no permission set
+ * (module note, "The sentence"). `labelledAs` is the names of the sets whose
+ * label is `value`: one names the remedy outright, several are listed to
+ * choose from, none says only that no set has that name.
+ */
+export function grantSetNotInCatalogMessage(value: string, labelledAs: readonly string[] = []): string {
+  if (labelledAs.length === 1) {
+    const [name] = labelledAs;
+    return `'${value}' is the label of the permission set named '${name}': choose it from the list, or enter '${name}'.`;
+  }
+  if (labelledAs.length > 1) {
+    const names = labelledAs.map((n) => `'${n}'`).join(', ');
+    return `'${value}' is the label of more than one permission set (${names}): choose the one you mean from the list.`;
+  }
+  return `There is no permission set named '${value}': choose one from the list.`;
 }
 
 /** The refusal: `VALIDATION_FAILED` (400 at both HTTP doors), `reference_not_found` at `permission_set`. */
-export function grantSetNotInCatalogError(value: string): Error {
-  const message = grantSetNotInCatalogMessage(value);
+export function grantSetNotInCatalogError(value: string, labelledAs: readonly string[] = []): Error {
+  const message = grantSetNotInCatalogMessage(value, labelledAs);
   const entry: GrantNameFieldError = {
     field: GRANT_SET_NAME_FIELD,
     code: 'reference_not_found',
@@ -202,7 +224,43 @@ async function assertNameInCatalog(engine: GrantNameEngine, name: string, logger
     );
     return;
   }
-  if (!held) throw grantSetNotInCatalogError(name);
+  if (!held) throw grantSetNotInCatalogError(name, await setsLabelled(catalog, name, logger));
+}
+
+const AGENT_CEILING_SETS: ReadonlySet<string> = new Set(MCP_AGENT_PERMISSION_SETS);
+
+/**
+ * The names of the permission sets whose label is `value` (trimmed, any case),
+ * agent ceiling sets left out — read only on a refusal, to name the remedy
+ * (module note, "The sentence"). A listing that throws is reported at `warn`
+ * and answers none: the refusal stands, and its sentence then says what is
+ * still true, that no set has that name.
+ */
+async function setsLabelled(
+  catalog: SecurityCatalogReader,
+  value: string,
+  logger: GrantNameLogger,
+): Promise<string[]> {
+  const wanted = value.trim().toLowerCase();
+  let entries: Awaited<ReturnType<SecurityCatalogReader['list']>>;
+  try {
+    entries = await catalog.list(PERMISSION_SET_CATALOG_TYPE);
+  } catch (e) {
+    logger?.warn?.(
+      `[security] the security catalog could not be listed, so a refused ${GRANT_OBJECT} write names no ` +
+        'permission set whose label matches the refused value',
+      { object: GRANT_OBJECT, error: (e as Error)?.message ?? String(e) },
+    );
+    return [];
+  }
+  return entries
+    .filter((e) => !AGENT_CEILING_SETS.has(e.name))
+    .filter((e) => {
+      const label = e.definition.label;
+      return typeof label === 'string' && label.trim().toLowerCase() === wanted;
+    })
+    .map((e) => e.name)
+    .sort();
 }
 
 /** `beforeInsert`: one dispatch per row, handed the caller's row as sent. */

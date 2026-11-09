@@ -388,10 +388,18 @@ export function formatMeasure(
       // No `style: 'currency'` here: `formatDisplayNumber` derives that from the
       // presence of `currency` itself, which is also what keeps its "money
       // always groups" policy in one place instead of two.
+      //
+      // With no `format`, the amount shows at the CURRENCY's own width (CNY 2,
+      // JPY 0, KWD 3), the width the list cell shows the same field at: `Intl`
+      // applies it when no fraction bound is passed. A range here (0 to 2) let
+      // `Intl` print the shortest form, so `1293.00` read `¥1,293` and
+      // `1280.50` read `¥1,280.5` beside `¥1,280.50` on the record. An authored
+      // pattern still states its own width.
       return formatNumberInLocale(v, locale, {
         currency,
-        minimumFractionDigits: decimals ?? 0,
-        maximumFractionDigits: decimals ?? 2,
+        ...(decimals === undefined
+          ? {}
+          : { minimumFractionDigits: decimals, maximumFractionDigits: decimals }),
       });
     } catch {
       // Unknown currency code → fall through to plain number formatting.

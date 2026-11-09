@@ -131,6 +131,7 @@ import {
   RevertPackageCommitResponse,
   RollbackToPackageCommitResponse,
   PackageExportManifest,
+  PackageExportBundle,
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
   EnsureCustomizationPackageResponse,
@@ -175,6 +176,7 @@ import type {
   AudienceBindingSuggestionSync,
   AutomationResult,
   DelegableScope,
+  EffectiveAccess,
   FlowRuntimeState,
   ImportObjectResult,
   ObjectDraft,
@@ -218,6 +220,64 @@ import { RealtimeAPI } from './realtime-api';
  * no server surface ever mounted them.
  */
 export type ApiRouteType = keyof ApiRoutes;
+
+/**
+ * [#30205] `security.assignedWork.count`'s answer: per object and user field,
+ * how many records hold the user, as the caller can read them.
+ */
+export interface UserAssignedWorkSummary {
+  userId: string;
+  objects: Array<{ object: string; field: string; count: number; transferable: boolean }>;
+  total: number;
+  truncated: boolean;
+  unreadable: string[];
+}
+
+/** [#30205] `security.assignedWork.transfer`'s answer: what moved, what failed, what remains. */
+export interface UserWorkTransferReport {
+  fromUserId: string;
+  toUserId: string;
+  objects: Array<{
+    object: string;
+    field: string;
+    updated: number;
+    failed: number;
+    failures: Array<{ id: string; code: string; message: string }>;
+  }>;
+  updated: number;
+  failed: number;
+  remaining: number;
+}
+
+/**
+ * [#30237] One page of `recycleBin.list`: an object's recycle-bin entries,
+ * newest first. Each snapshot row carries only the fields the caller may see
+ * on its object.
+ */
+export interface RecycleBinPage {
+  object: string;
+  entries: Array<{
+    id: string;
+    object: string;
+    recordId: string;
+    recordCount: number;
+    deletedBy: string | null;
+    deletedAt: string | null;
+    retentionDays: number | null;
+    purgeAfter: string | null;
+    rows: Array<{ object: string; id: string; values: Record<string, unknown> }>;
+  }>;
+  hasMore: boolean;
+}
+
+/** [#30237] `recycleBin.restore`'s answer: the entry restored and every record written back. */
+export interface RecycleBinRestoreReport {
+  entryId: string;
+  object: string;
+  recordId: string;
+  rows: Array<{ object: string; id: string }>;
+  relinked: number;
+}
 
 export interface ClientConfig {
   baseUrl: string;
@@ -613,6 +673,12 @@ export interface DeleteDataResult {
   object: string;
   id: string;
   success: boolean;
+  /**
+   * [#30237] The recycle-bin entry the delete wrote: pass it to
+   * `recycleBin.restore(object, recycleBinEntryId)` to undo the delete. Absent
+   * when the delete wrote none (a platform object, or no recycle bin).
+   */
+  recycleBinEntryId?: string;
 }
 
 export interface StandardError {
@@ -1199,6 +1265,51 @@ export interface OAuthConsentResult {
     redirect: true;
     /** Absolute URL the caller must navigate the user agent to. */
     url: string;
+}
+
+/**
+ * One AI assistant (OAuth client) a person has authorized: a consent they
+ * granted on the consent page, as `oauth.authorizedClients.list()` and
+ * `oauth.authorizedClients.listForUser()` answer it.
+ *
+ * Exactly these members. Nothing here identifies or reconstructs a token: no
+ * access-token, refresh-token or authorization-code value or id, no client
+ * secret, no session.
+ */
+export interface AuthorizedClient {
+    /** The consent's own id — the key `oauth.authorizedClients.withdraw()` takes to withdraw it. */
+    id: string;
+    /** The OAuth client the grant is for. */
+    clientId: string;
+    /** The client's display name; `null` when it declares none. */
+    name: string | null;
+    /** What the person granted. */
+    scopes: string[];
+    /** The organization the grant is held in; `null` when none was active when it was granted. */
+    organizationId: string | null;
+    /** When the grant was made (ISO 8601); `null` when the row carries no readable time. */
+    authorizedAt: string | null;
+    /**
+     * The START of the most recent clock hour in which the client made a
+     * verified MCP call under this grant (ISO 8601) — the server records it at
+     * hour granularity, so it means "used during the hour starting at", never a
+     * precise moment. `null` when no use has been recorded.
+     */
+    lastUsedAt: string | null;
+}
+
+/** What both `oauth.authorizedClients` reads answer. */
+export interface AuthorizedClientsList {
+    /** Newest grant first. */
+    clients: AuthorizedClient[];
+    /** `true` when the person holds more grants than the server answers in one read (200). */
+    truncated: boolean;
+}
+
+/** What both `oauth.authorizedClients` withdraws answer: the consent that was withdrawn. */
+export interface AuthorizedClientWithdrawal {
+    /** The consent id the request named. */
+    id: string;
 }
 
 /**
@@ -1910,12 +2021,17 @@ export class ObjectStackClient {
     /**
      * Get all items of a specific metadata type
      * @param type - Metadata type name (e.g., 'object', 'plugin')
-     * @param options - Optional filters (e.g., packageId to scope by package)
+     * @param options - Optional filters: `packageId` scopes the list to one
+     *   package; `names` narrows it to the items of those names, in ONE request
+     *   (sent as `?names=a,b,c`). A name that matches no item is simply absent
+     *   from the answer. An empty `names` array is sent as an empty filter,
+     *   which the server refuses with `400`; leave `names` out to list every item.
      */
-    getItems: async (type: string, options?: { packageId?: string }): Promise<GetMetaItemsResponse> => {
+    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
+        if (options?.names !== undefined) params.set('names', options.names.join(','));
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${type}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
@@ -2172,6 +2288,9 @@ export class ObjectStackClient {
      * which is not a dependency of this package, and a second declaration in
      * spec would drift against the CLI that renders the same report. Its two
      * ledger rows carry the same note. ⛔ Do not re-declare it here.
+     * `migrateRecordCurrencyCodes`, added after the ruling, stays unbound for
+     * the same reason (its report type lives in `@objectstack/objectql`) and
+     * answers `unknown`, which the caller narrows.
      */
 
     /**
@@ -2198,11 +2317,14 @@ export class ObjectStackClient {
     /**
      * ADR-0033: pending drafts — metadata authored (e.g. by an AI) but not
      * yet published, which the active-only item lists hide.
+     *
+     * `opts.packageId` goes on the wire as `?package=`, the spelling every
+     * `/meta` read takes; the door refuses the retired `?packageId=`.
      */
     listDrafts: async (opts?: { packageId?: string; type?: string }): Promise<ListDraftsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
-        if (opts?.packageId) params.set('packageId', opts.packageId);
+        if (opts?.packageId) params.set('package', opts.packageId);
         if (opts?.type) params.set('type', opts.type);
         const qs = params.toString();
         const res = await this.fetch(`${this.baseUrl}${route}/_drafts${qs ? `?${qs}` : ''}`);
@@ -2239,6 +2361,50 @@ export class ObjectStackClient {
             }),
         });
         return this.unwrapResponse<any>(res);
+    },
+
+    /**
+     * ADR-0144: write a currency code into the rows of a `record`-mode amount
+     * that hold an amount beside a blank code — the rows stored before the
+     * field was switched to `currencyMode: 'record'`. The server-side form of
+     * `os migrate record-currency-codes`, for an organization admin with no
+     * shell on the deployment's database.
+     *
+     * **Your current organization only.** The server fills the rows of the
+     * caller's current organization and no other; there is no
+     * environment-wide form and no organization parameter (each organization
+     * has its own home currency). `code` is the one you give, never derived.
+     *
+     * **Preview by default.** Without `apply: true` it reports what it would
+     * write and writes nothing; the report is the one the CLI's `--json`
+     * prints (`@objectstack/objectql`'s `RecordCurrencyBackfillReport`:
+     * `scannedRecords` / `codeless` / `written` / the two skip counts,
+     * `sampleRecordIds`, `applied`, `truncated`, `failures`, `organizations`).
+     * `truncated: true` means the walk stopped at its row cap and some rows
+     * were not examined.
+     *
+     * Requires `setup.write` in the current organization (403 otherwise).
+     *
+     * Unbound for the reason `migrateStored` above is (ruling 2C): the
+     * report's named type lives in `@objectstack/objectql`, which this
+     * package does not depend on. ⛔ Do not re-declare it here. Answered as
+     * `unknown`, not `any`: a new `any` return is refused by
+     * `check:exported-any-returns` (`exported-any-returns.json` is
+     * shrink-only), and `unknown` makes the caller narrow, as `getPublished`
+     * does under ruling 1C.
+     */
+    migrateRecordCurrencyCodes: async (opts: { object: string; field: string; code: string; apply?: boolean }) => {
+        const route = this.getRoute('metadata');
+        const res = await this.fetch(`${this.baseUrl}${route}/_migrate-record-currency-codes`, {
+            method: 'POST',
+            body: JSON.stringify({
+                object: opts.object,
+                field: opts.field,
+                code: opts.code,
+                ...(opts.apply === true ? { apply: true } : {}),
+            }),
+        });
+        return this.unwrapResponse<unknown>(res);
     },
 
     /**
@@ -3117,6 +3283,23 @@ export class ObjectStackClient {
     },
 
     /**
+     * [#28914] The deployment's whole ontology as installable packages, in one
+     * read (`GET /packages/export`, `PackageExportBundleSchema`): every
+     * installed package the deployment's own code does not register (registry
+     * `source` other than `code`), enabled or not, each exactly as
+     * {@link export} answers it, dependencies first, so a `.custom` pair
+     * follows its base. Install the entries in the order listed; never
+     * re-sort them. No credential value travels: a `credentialRef` stays the
+     * reference it is. A package whose export cannot be assembled fails the
+     * whole read, naming it.
+     */
+    exportAll: async (): Promise<PackageExportBundle> => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/export`);
+        return this.unwrapResponse<PackageExportBundle>(res);
+    },
+
+    /**
      * [#28411, ADR-0146 D8 item 4] What this deployment changed on an installed
      * base: its `.custom` pair's served overrides, the members the pair adds to
      * the base's objects, and the base's switched-off items, with counts.
@@ -3203,7 +3386,7 @@ export class ObjectStackClient {
    * - GET    /api/v1/cloud/environments/:id        → get one (with database info)
    * - POST   /api/v1/cloud/environments            → provision a new environment
    * - PATCH  /api/v1/cloud/environments/:id        → update (display_name, is_default, metadata)
-   * - POST   /api/v1/cloud/environments/:id/activate → set as session's active environment
+   * - POST   /api/v1/cloud/environments/:id/activate → confirm the caller can use it (writes no server state)
    * - POST   /api/v1/cloud/environments/:id/credentials/rotate → rotate credential
    *
    * That PATCH accept-set is the WHOLE set. `plan`, `status` and `visibility`
@@ -3518,9 +3701,13 @@ export class ObjectStackClient {
     },
 
     /**
-     * Activate this environment for the current session. The server writes
-     * `active_environment_id` on the better-auth session; subsequent requests
-     * are routed to this environment's database.
+     * Confirm the caller can use this environment. The control plane reads
+     * the environment, checks the caller is a member of it, and answers it
+     * back. It writes no server state: the session is not changed (the answer
+     * carries `sessionUpdated: false`), and later requests are not routed by
+     * this call. Which environment a client targets is the caller's own
+     * choice: the CLI keeps it in its local credentials and sends it on each
+     * request.
      */
     activate: async (id: string) => {
       const res = await this.fetch(`${this.baseUrl}/api/v1/cloud/environments/${encodeURIComponent(id)}/activate`, {
@@ -4853,6 +5040,82 @@ export class ObjectStackClient {
       });
       return res.json();
     },
+
+    /**
+     * The AI assistants (OAuth clients) a person has authorized, and when each
+     * was last used. ObjectStack routes under the auth route, answered in the
+     * `{ success, data }` envelope this unwraps.
+     */
+    authorizedClients: {
+      /**
+       * The signed-in person's own authorized assistants.
+       * GET /api/v1/auth/authorized-clients
+       *
+       * Keyed by the session and nothing else: the route takes no parameter,
+       * and refuses one (`400`) rather than ignoring it, so this method sends
+       * none. Withdraw a grant with `withdraw()` and the row's `id`.
+       */
+      list: async (): Promise<AuthorizedClientsList> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/authorized-clients`);
+        return this.unwrapResponse<AuthorizedClientsList>(res);
+      },
+
+      /**
+       * Another person's authorized assistants, in every organization they
+       * granted in (each row names its `organizationId`).
+       * GET /api/v1/auth/admin/authorized-clients?userId=...
+       *
+       * Platform administrators only, gated as the admin session doors are:
+       * anyone else is refused `403` whoever `userId` names. A `userId` that
+       * names no user answers `404`. Read only.
+       */
+      listForUser: async (userId: string): Promise<AuthorizedClientsList> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(
+          `${this.baseUrl}${route}/admin/authorized-clients?userId=${encodeURIComponent(userId)}`,
+        );
+        return this.unwrapResponse<AuthorizedClientsList>(res);
+      },
+
+      /**
+       * Withdraw one of the signed-in person's own authorized assistants, by
+       * the `id` `list()` answers on its row.
+       * POST /api/v1/auth/authorized-clients/withdraw
+       *
+       * The grant is revoked: the assistant's token is refused on its next
+       * call, and it must be authorized again to reconnect. Only the person's
+       * own grant is withdrawn: an id that names another person's grant
+       * answers `404` exactly as one that names none, and changes nothing.
+       */
+      withdraw: async (id: string): Promise<AuthorizedClientWithdrawal> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/authorized-clients/withdraw`, {
+          method: 'POST',
+          body: JSON.stringify({ id }),
+        });
+        return this.unwrapResponse<AuthorizedClientWithdrawal>(res);
+      },
+
+      /**
+       * Withdraw one of another person's authorized assistants, by the `id`
+       * `listForUser()` answers on its row.
+       * POST /api/v1/auth/admin/authorized-clients/withdraw
+       *
+       * Platform administrators only, behind the same gate as
+       * `listForUser()`: anyone else is refused `403` whoever the request
+       * names. A `userId` that names no user, or an `id` that is not that
+       * person's grant, answers `404`.
+       */
+      withdrawForUser: async (userId: string, id: string): Promise<AuthorizedClientWithdrawal> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/admin/authorized-clients/withdraw`, {
+          method: 'POST',
+          body: JSON.stringify({ userId, id }),
+        });
+        return this.unwrapResponse<AuthorizedClientWithdrawal>(res);
+      },
+    },
   };
 
   /**
@@ -5026,6 +5289,10 @@ export class ObjectStackClient {
      *
      * ⚠️ `data.session` is undelivered here for the same measured reason as on
      * `login`: `/sign-up/email` serves no session object. See that method.
+     *
+     * Under the `invite_only` audience posture a sign-up is admitted only by
+     * the invitation it presents: pass its id (the last segment of the accept
+     * link) as `request.invitationId`.
      */
     register: async (request: RegisterRequest): Promise<SessionResponse> => {
       const route = this.getRoute('auth');
@@ -6407,6 +6674,24 @@ export class ObjectStackClient {
           return this.unwrapResponse<DelegableScope>(res);
       },
 
+      /**
+       * ADR-0090 D6/D12 — one user's effective permission sets, each with
+       * every origin it arrives through: a default binding, a held position,
+       * a direct grant, or a name derived from the user's standing. Resolved
+       * in the caller's organization by the resolver enforcement uses.
+       *
+       * Gated as `explain` is: reading someone else needs `manage_users`,
+       * organization administration covering them, or a delegated
+       * `adminScope` covering them. An unknown id is refused with the same
+       * `403` as one the caller may not manage.
+       */
+      describeEffectiveAccess: async (userId: string): Promise<EffectiveAccess> => {
+          const res = await this.fetch(
+              `${this.baseUrl}/api/v1/security/users/${encodeURIComponent(userId)}/effective-access`,
+          );
+          return this.unwrapResponse<EffectiveAccess>(res);
+      },
+
       suggestedBindings: {
           /** List suggestions, optionally by `status` / `packageId` (reconciles first). */
           list: async (opts?: { status?: string; packageId?: string }): Promise<{ suggestions: AudienceBindingSuggestion[]; synced: AudienceBindingSuggestionSync }> => {
@@ -6445,6 +6730,45 @@ export class ObjectStackClient {
                   { method: 'POST' },
               );
               return this.unwrapResponse(res);
+          },
+      },
+
+      /**
+       * [#30205] A user's open work — what an administrator needs when they ban
+       * someone. Both calls run as the CALLER: the counts are what the caller
+       * can read, and each moved record is an ordinary update under the
+       * caller's permissions (sharing, validation and hooks apply). Neither
+       * touches the ban, which stays `POST /api/v1/auth/admin/ban-user`.
+       */
+      assignedWork: {
+          /**
+           * Per object and user field (the owner field and every app user
+           * field), how many records hold `userId`. Objects the caller cannot
+           * read are named in `unreadable`; `truncated` says more fields exist
+           * than were counted.
+           */
+          count: async (userId: string): Promise<UserAssignedWorkSummary> => {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/users/${encodeURIComponent(userId)}/assigned-work`,
+              );
+              return this.unwrapResponse<UserAssignedWorkSummary>(res);
+          },
+
+          /**
+           * Hand up to 500 of `userId`'s records to the active user `toUserId`
+           * (optionally only on `objects`), and answer what moved, what failed
+           * and how many remain; call again until `remaining` is 0. A banned or
+           * unknown `toUserId` is refused before anything moves.
+           */
+          transfer: async (
+              userId: string,
+              request: { toUserId: string; objects?: string[] },
+          ): Promise<UserWorkTransferReport> => {
+              const res = await this.fetch(
+                  `${this.baseUrl}/api/v1/security/users/${encodeURIComponent(userId)}/assigned-work/transfer`,
+                  { method: 'POST', body: JSON.stringify(request) },
+              );
+              return this.unwrapResponse<UserWorkTransferReport>(res);
           },
       },
   };
@@ -6650,6 +6974,62 @@ export class ObjectStackClient {
       const body = await this.unwrapResponse<{ data?: ApprovalActionRow[] } | ApprovalActionRow[]>(res);
       return Array.isArray(body) ? body : (body?.data ?? []);
     }
+  };
+
+  /**
+   * [#30237, ADR-0148] The recycle bin, one object at a time, under the data
+   * surface. A delete of a business record keeps it here until its retention
+   * ends: `restore` writes an entry back, `purge` and `empty` remove entries
+   * for good. Listing, purging and emptying need `manageRecycleBin` on the
+   * object; restoring needs `allowRestoreOwnDeleted`, and `manageRecycleBin`
+   * for an entry someone else deleted.
+   */
+  recycleBin = {
+    /** One page of the object's entries, newest first (`limit` 1 to 200, default 50). */
+    list: async (object: string, opts?: { limit?: number; offset?: number }): Promise<RecycleBinPage> => {
+        const route = this.getRoute('data');
+        const params = new URLSearchParams();
+        if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+        if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
+        const qs = params.toString();
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}/recycle-bin${qs ? `?${qs}` : ''}`);
+        return this.unwrapResponse<RecycleBinPage>(res);
+    },
+
+    /**
+     * Restore one entry: its records come back under their original ids. 409
+     * names why an entry cannot come back (`RESTORE_UNIQUE_VALUE_TAKEN`,
+     * `RESTORE_PARENT_PURGED`, `RESTORE_PARENT_IN_RECYCLE_BIN`,
+     * `RESTORE_PACKAGE_UNINSTALLED`).
+     */
+    restore: async (object: string, entryId: string): Promise<RecycleBinRestoreReport> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/recycle-bin/${encodeURIComponent(entryId)}/restore`,
+            { method: 'POST' },
+        );
+        return this.unwrapResponse<RecycleBinRestoreReport>(res);
+    },
+
+    /** Purge one entry: its records can no longer be restored. */
+    purge: async (object: string, entryId: string): Promise<{ object: string; entryId: string; purged: true }> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/recycle-bin/${encodeURIComponent(entryId)}`,
+            { method: 'DELETE' },
+        );
+        return this.unwrapResponse<{ object: string; entryId: string; purged: true }>(res);
+    },
+
+    /** Empty the object's recycle bin: purge every entry the caller's organization holds. */
+    empty: async (object: string): Promise<{ object: string; removed: number }> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/recycle-bin`,
+            { method: 'DELETE' },
+        );
+        return this.unwrapResponse<{ object: string; removed: number }>(res);
+    },
   };
 
   /**
@@ -8109,9 +8489,11 @@ export class ScopedEnvironmentClient {
       const res = await this.parent._fetch(this.metaUrl(''));
       return this.parent._unwrap<GetMetaTypesResponse>(res);
     },
-    getItems: async (type: string, options?: { packageId?: string }): Promise<GetMetaItemsResponse> => {
+    /** The unscoped surface's `getItems`, `names` included (one `?names=a,b,c` request). */
+    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
+      if (options?.names !== undefined) params.set('names', options.names.join(','));
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);

@@ -165,6 +165,31 @@ describe('resolveAuthzContext — single source of truth', () => {
     expect(ctx.permissions).toContain('ai_seat');
   });
 
+  it('carries the impersonating administrator off the session read, and resolves the impersonated user\'s grants', async () => {
+    const ql = makeQl({
+      sys_member: [{ user_id: 'u1', organization_id: 'o1', role: 'member' }],
+      sys_user_position: [],
+    });
+    const impersonation = async () => ({
+      user: { id: 'u1' },
+      session: { userId: 'u1', activeOrganizationId: 'o1', impersonatedBy: 'u_admin' },
+    });
+    const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: impersonation });
+    expect(ctx.userId).toBe('u1');
+    expect(ctx.credential).toBe('session');
+    expect(ctx.impersonatedBy).toBe('u_admin');
+    expect(ctx.positions).toContain('org_member');
+
+    // Control: the user's own session names no administrator; a null mark is no mark.
+    const own = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(), getSession: session('u1', { org: 'o1' }) });
+    expect('impersonatedBy' in own).toBe(false);
+    const cleared = await resolveAuthzContext({
+      userAuthGates: undefined, apiKeyLifecycle: undefined, ql, headers: H(),
+      getSession: async () => ({ user: { id: 'u1' }, session: { activeOrganizationId: 'o1', impersonatedBy: null } }),
+    });
+    expect('impersonatedBy' in cleared).toBe(false);
+  });
+
   it('anonymous (no session, no api key) → empty context', async () => {
     const ctx = await resolveAuthzContext({ userAuthGates: undefined, apiKeyLifecycle: undefined, ql: makeQl({}), headers: H(), getSession: async () => undefined });
     expect(ctx.userId).toBeUndefined();

@@ -91,12 +91,10 @@
           "evidence": "packages/services/service-automation/src/dag-traversal.ts#seedDeclaredVariables (bound when no param supplies the name, #4697)"
         },
         "objectName": {
-          "status": "planned",
-          "verifiedAt": "2026-11-02",
-          "evidence": "packages/spec/src/automation/flow.zod.ts#FlowVariableSchema (the superRefine that refuses `objectName` on a variable that is not an input — the one place the key is read today)",
-          "authorWarn": true,
-          "authorHint": "Keep it, but nothing reads it yet: no start door loads a declared input from its object until the start doors ship that check, so an id the caller cannot read still starts a run.",
-          "note": "PLANNED RECORD (#29442, the spec half of #29425 ruling A 6580257050): an input's declaration that its value is the id of one record of the named object. Parsed, refused on a non-input (the evidence above) and linted (`flow-input-unknown-object` in packages/lint/src/validate-flow-trigger-readiness.ts). No door reads it: the start doors' third question (packages/runtime/src/flow-start-admission.ts, `flowDeclaredRecordReads` / `refuseUnreadableFlowStartRecords` in action-execution.ts) judges only inputs the definition reads in plain sight. Carrier: the #29425 server half, Blocked-by #29442 (every start door loads a declared input in the caller's scope, 404 RECORD_NOT_FOUND / 400 VALIDATION_FAILED). Flip to `live` on the commit that cites that reader, drop `authorWarn` / `authorHint` and the describe's planned sentence in that same edit."
+          "status": "live",
+          "verifiedAt": "2026-11-05",
+          "evidence": "packages/runtime/src/flow-start-admission.ts#flowDeclaredRecordReads (a declared input is one read of the declared object, asked by `refuseUnreadableFlowStartRecords` in action-execution.ts at every door that starts a flow by name: loaded in the caller's scope before the run exists, 404 RECORD_NOT_FOUND / 400 naming the input)",
+          "note": "#29425 ruling A: an input's declaration that its value is the id of one record of the named object. Added beside every read the definition makes in plain sight, never in place of one, and followed into a callee through subflow / map hand-offs. Also refused on a non-input (packages/spec/src/automation/flow.zod.ts#FlowVariableSchema) and linted (`flow-input-unknown-object` in packages/lint/src/validate-flow-trigger-readiness.ts)."
         }
       }
     },

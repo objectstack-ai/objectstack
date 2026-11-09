@@ -74,6 +74,13 @@ import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-s
 // over the parsed stack the way the load path registers it. The verdict is
 // `@objectstack/objectql`'s; see the module header.
 import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
+// [ADR-0150 D2, child N] Inside one namespace, an item of the twelve uncovered
+// bucket 2/3 types has one package holder: the package door's predicate and
+// sentence, walked over the artifact's packages in boot order.
+import { findNamespaceNameRefusals } from '../utils/namespace-co-owner-names.js';
+// [ADR-0150 D6, child K] A namespace never equals an object name, both directions,
+// and no object is short-named `custom` — the spec's predicate over one artifact.
+import { findNamespaceObjectNameRefusals } from '../utils/namespace-object-names.js';
 // [ADR-0146 D2, #28410] The override write gate's author-time half: the publish
 // door's own judge, walked over the artifact's packages.
 import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
@@ -81,6 +88,9 @@ import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffi
 // [ADR-0146 D10, second rule] The field-patch target check's walk; the verdict
 // is the marketplace install door's own judge.
 import { findFieldPatchTargetRefusals } from '../utils/field-patch-targets.js';
+// [ADR-0146 D10, second rule] An extension re-declaring an owner's field beyond
+// the display-property whitelist; the verdict is the save and install doors' own.
+import { findRedeclaredOwnerFieldRefusals } from '../utils/extension-redeclared-owner-fields.js';
 // [#29051] An undeclared top-level flow cycle (ADR-0044): the automation
 // engine's own judge (`findUndeclaredFlowCycle`, `@objectstack/metadata-core`).
 import { findFlowCycleRefusals } from '../utils/flow-undeclared-cycle.js';
@@ -88,6 +98,15 @@ import { findFlowCycleRefusals } from '../utils/flow-undeclared-cycle.js';
 // reported when the declaring package depends on packages outside the stack.
 // Walked the way the load path registers, like the refusal above.
 import { judgePicklistReferences, picklistRefusalHeading, printPicklistReferenceNotices } from '../utils/picklist-references.js';
+// `--target`: a target environment's restriction profile (`RestrictionProfileSchema`,
+// `@objectstack/spec/system`) — what that environment refuses, and the versions it runs.
+import {
+  loadRestrictionProfile,
+  judgeRestrictionProfile,
+  restrictionProfileVersionDrift,
+  type ParsedRestrictionProfile,
+  type RestrictionVersionDrift,
+} from '../utils/restriction-profile.js';
 
 export default class Validate extends Command {
   static override description =
@@ -100,6 +119,12 @@ export default class Validate extends Command {
   static override flags = {
     strict: Flags.boolean({ description: 'Treat warnings as errors' }),
     json: Flags.boolean({ description: 'Output results as JSON' }),
+    target: Flags.string({
+      description:
+        'Also judge the stack against a target environment\'s restriction profile (a JSON file, or the '
+        + 'environment\'s http(s) URL, fetched from its published route): refuse what '
+        + 'it forbids, warn when the local @objectstack/spec / @objectstack/skills version differs from the target\'s',
+    }),
   };
 
   async run(): Promise<void> {
@@ -203,6 +228,13 @@ export default class Validate extends Command {
     // permission-set lists: reports, never refuses, NOT in `--strict`'s list,
     // and `os compile` computes the identical records.
     let dependencyRangeWarnings: DependencyRangeDiagnostic[] = [];
+    // `--target` only (step 1c): the local `@objectstack/spec` / `@objectstack/skills`
+    // versions that are not the ones the target's restriction profile says it
+    // runs. Same class as the list above — reports, never refuses, and is NOT in
+    // the `warnings` list `--strict` reads: the target's version is the
+    // environment's, not something this stack can fix, the reason the protocol
+    // drift advisory is never gated by `--strict` either. Empty without `--target`.
+    let targetVersionWarnings: RestrictionVersionDrift[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -225,6 +257,8 @@ export default class Validate extends Command {
       ...picklistReferenceNotices,
       // APPENDED for the same reason, one member later again.
       ...dependencyRangeWarnings,
+      // APPENDED for the same reason, one member later again.
+      ...targetVersionWarnings,
     ];
     // [commit 79cf692b0] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
@@ -261,6 +295,20 @@ export default class Validate extends Command {
     const conversionNotices: ConversionNotice[] = [];
 
     try {
+      // 0. `--target`: read the target environment's restriction profile FIRST,
+      //    before the stack — a file, or an environment URL the profile is
+      //    fetched from. An unreadable, unreachable or invalid profile is refused
+      //    (thrown into the catch-all: `--json` gets `error`, exit 1) whatever
+      //    the stack holds, so no run ever judges against half a profile. No
+      //    `--target`, no profile: nothing below that reads it runs, and the
+      //    command is exactly what it was.
+      let targetProfile: ParsedRestrictionProfile | undefined;
+      if (flags.target !== undefined) {
+        const loadedProfile = await loadRestrictionProfile(flags.target);
+        targetProfile = loadedProfile.profile;
+        if (!flags.json) printKV('Target profile', loadedProfile.source);
+      }
+
       // 1. Load configuration
       if (!flags.json) printStep('Loading configuration...');
       const loaded = await loadConfig(args.config);
@@ -286,6 +334,18 @@ export default class Validate extends Command {
       if (!flags.json) {
         printKV('Config', absolutePath);
         printKV('Load time', `${duration}ms`);
+      }
+
+      // 1c. `--target`: the version drift between this project and the target.
+      //     Warns, never refuses (see `targetVersionWarnings` above). Resolved
+      //     from the config's directory — the project being validated.
+      if (targetProfile) {
+        targetVersionWarnings = restrictionProfileVersionDrift(targetProfile, dirname(absolutePath));
+        if (targetVersionWarnings.length > 0 && !flags.json) {
+          console.log('');
+          printWarning(`Version drift from the target environment (${targetVersionWarnings.length})`);
+          printBulletList(targetVersionWarnings.map((w) => w.message), { noun: 'version drift warning' });
+        }
       }
 
       // 2. Normalize map-formatted stack definition and validate against schema.
@@ -450,6 +510,70 @@ export default class Validate extends Command {
         printBulletList(
           containerNameRefusals.map((r) => r.message),
           { noun: 'view-container refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 2c-bis. [ADR-0150 D2, child N] A package of this artifact declaring a
+      //     sharing rule, queue, assignment rule, hook, job, app, page,
+      //     dashboard, report, book, analytics cube or tool under a name
+      //     another package of its namespace already declares is REFUSED,
+      //     naming every holder — the package door
+      //     (`SchemaRegistry.installPackage`) refuses that install at boot.
+      //
+      //     One judge: the predicate and the sentence are
+      //     `@objectstack/objectql`'s; the helper owns only the walk (the
+      //     artifact's packages, in the order the boot installs them). Right
+      //     after the parse, beside 2c and for its reason: the runtime's own
+      //     accept set. `os build` makes the same call.
+      const namespaceNameRefusals = findNamespaceNameRefusals(result.data as Record<string, unknown>);
+      if (namespaceNameRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: namespaceNameRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = namespaceNameRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} package${n > 1 ? 's' : ''} holding a name another package of its namespace holds)`);
+        printBulletList(
+          namespaceNameRefusals.map((r) => r.message),
+          { noun: 'namespace name refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 2c-ter. [ADR-0150 D6, child K] A namespace of this artifact equal to
+      //     one of its object names (either direction), or an object
+      //     short-named `custom` (`NS_custom`, the ADR-0146 pair's namespace),
+      //     is REFUSED, naming both spellings — the install, publish and save
+      //     doors and `defineStack` ask the same predicate
+      //     (`findNamespaceObjectNameClashes`). The packages a deployment
+      //     already holds, and a dependency outside this artifact, are not
+      //     visible here. `os build` makes the same call.
+      const namespaceObjectRefusals = findNamespaceObjectNameRefusals(result.data as Record<string, unknown>);
+      if (namespaceObjectRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: namespaceObjectRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = namespaceObjectRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} namespace${n > 1 ? 's' : ''} or object${n > 1 ? 's' : ''} that would name each other)`);
+        printBulletList(
+          namespaceObjectRefusals.map((r) => r.message),
+          { noun: 'namespace/object name refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }
@@ -754,6 +878,35 @@ export default class Validate extends Command {
         this.exit(1);
       }
 
+      // 3a-v-bis. [ADR-0146 D10, second rule] A base field changes only within
+      //     the display-property whitelist: an `objectExtensions[].fields`
+      //     entry naming a field another package of this artifact declares
+      //     replaces that field whole, so it is refused when it changes
+      //     anything else. The verdict is the save and install doors' own
+      //     (`judgeRedeclaredOwnerFields`); see
+      //     `utils/extension-redeclared-owner-fields.ts` for the walk.
+      const redeclaredRefusals = findRedeclaredOwnerFieldRefusals(result.data as Record<string, unknown>);
+      if (redeclaredRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: redeclaredRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = redeclaredRefusals.length;
+        console.log('');
+        printError(`${n} extension field${n > 1 ? 's re-declare' : ' re-declares'} an owner's field beyond its display properties (ADR-0146 D10)`);
+        printBulletList(
+          redeclaredRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-field refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
       // 3a-vi. [#28893] Flow region shape (ADR-0031) is judged by the rule
       //     table above since #29049 (`flow-region-shape-invalid`,
       //     `@objectstack/lint`'s `validate-flow-region-shape.ts`), so all
@@ -1020,6 +1173,37 @@ export default class Validate extends Command {
             + ' — a package the same artifact delivers is checked for presence only',
         );
         printBulletList(dependencyRangeWarnings.map(formatDependencyRangeDiagnostic), { noun: 'dependency-range diagnostic' });
+      }
+
+      // 3f. `--target`: what the target environment's restriction profile
+      //     forbids. LAST of the refusals on purpose: every gate above asks
+      //     whether ANY runtime accepts the stack, this one asks whether THIS
+      //     target does, and the first question is the one worth answering
+      //     first. One row per refused item, each naming the item and the one
+      //     profile dimension that refuses it (`utils/restriction-profile.ts`
+      //     holds the reader rules).
+      if (targetProfile) {
+        const restrictionRefusals = judgeRestrictionProfile(result.data as Record<string, unknown>, targetProfile);
+        if (restrictionRefusals.length > 0) {
+          if (flags.json) {
+            await emitJson({
+              valid: false,
+              errors: restrictionRefusals,
+              warnings: warningsSoFar(),
+              conversions: conversionNotices,
+              duration: timer.elapsed(),
+            });
+            this.exit(1);
+          }
+          const n = restrictionRefusals.length;
+          console.log('');
+          printError(`The target environment's restriction profile refuses this stack (${n} item${n > 1 ? 's' : ''})`);
+          printBulletList(
+            restrictionRefusals.map((r) => `[${r.rule}] ${r.where}: ${r.message}`),
+            { noun: 'restriction refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+          );
+          this.exit(1);
+        }
       }
 
       // 4. Collect and display stats

@@ -32,7 +32,7 @@
  *   `packages/objectql/src/engine.ts#buildSummaryIndex`, verbatim
  *   `if (d?.type !== 'summary' || !d.summaryOperations) continue;`
  * - `formula` w/o `expression` →
- *   `packages/objectql/src/engine.ts#planFormulaProjection`, verbatim
+ *   `packages/objectql/src/engine-top-level.ts#planFormulaProjection`, verbatim
  *   `def?.type === 'formula' && def.expression`: it builds the formula plan
  *   only from fields WITH an expression, so a bare formula never computes.
  * - `lookup`/`master_detail` w/o `reference` →

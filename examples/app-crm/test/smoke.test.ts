@@ -189,7 +189,7 @@ describe('Pipeline dashboard', () => {
   it('uses `compareTo: { kind: previousPeriod }` for the current-quarter KPI', () => {
     const w: any = byId.get('won_this_quarter');
     // #5011: `compareTo` is the executor's own `{ kind, dimension? }` shape.
-    // `dimension` is omitted deliberately — `opportunity_metrics` dates exactly
+    // `dimension` is omitted deliberately — `crm_opportunity_metrics` dates exactly
     // one dimension, so the executor resolves it (and would error, naming the
     // candidates, if it could not).
     expect(w.compareTo).toEqual({ kind: 'previousPeriod' });
@@ -227,7 +227,7 @@ describe('Pipeline dashboard', () => {
   it('widgets bind to the opportunity dataset', () => {
     // ADR-0021 single-form: widgets reference the semantic dataset, not a raw object.
     for (const w of PipelineDashboard.widgets) {
-      expect((w as any).dataset).toBe('opportunity_metrics');
+      expect((w as any).dataset).toBe('crm_opportunity_metrics');
     }
   });
 
@@ -253,7 +253,51 @@ describe('Pipeline dashboard schema validation', () => {
   it('passes the DashboardSchema zod parser end-to-end', async () => {
     const { DashboardSchema } = await import('@objectstack/spec/ui');
     const parsed = DashboardSchema.parse(PipelineDashboard);
-    expect(parsed.name).toBe('pipeline_dashboard');
+    expect(parsed.name).toBe('crm_pipeline_dashboard');
     expect(parsed.widgets).toHaveLength(6);
+  });
+});
+
+/**
+ * [ADR-0149 D1, D7 card 6] The first authored dataset vocabulary: every member of
+ * `crm_opportunity_metrics` carries a business `description` and the `synonyms` a
+ * person types in a question, the whole dataset passes the spec's own parse (its
+ * dataset-level rule refuses a synonym that answers to two members), and each
+ * member description has its zh-CN translation — a description is display text,
+ * so it is translated like `label`; synonyms are match input and are not.
+ */
+describe('crm_opportunity_metrics business vocabulary (ADR-0149 D1)', () => {
+  const dataset = (stack.datasets ?? []).find((d) => d.name === 'crm_opportunity_metrics');
+  const members = [
+    ...(dataset?.dimensions ?? []).map((m) => ({ group: 'dimensions' as const, member: m })),
+    ...(dataset?.measures ?? []).map((m) => ({ group: 'measures' as const, member: m })),
+  ];
+
+  it('passes the spec dataset parse, vocabulary rules included', async () => {
+    const { DatasetSchema } = await import('@objectstack/spec/ui');
+    const parsed = DatasetSchema.safeParse(dataset);
+    expect(parsed.error?.issues ?? []).toEqual([]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('gives every dimension and measure a description and at least one synonym', () => {
+    expect(members.map(({ member }) => member.name)).toEqual([
+      'stage', 'account', 'close_date', 'opp_count', 'total_amount', 'avg_amount',
+    ]);
+    for (const { member } of members) {
+      expect(typeof member.description === 'string' && member.description.trim().length > 0, member.name).toBe(true);
+      expect((member.synonyms ?? []).length, member.name).toBeGreaterThan(0);
+    }
+  });
+
+  it('translates every member description into zh-CN', () => {
+    const zh = (stack.translations ?? [])[0] as
+      | { 'zh-CN'?: { datasets?: Record<string, Record<string, Record<string, { description?: string }>>> } }
+      | undefined;
+    const bundle = zh?.['zh-CN']?.datasets?.crm_opportunity_metrics;
+    for (const { group, member } of members) {
+      const text = bundle?.[group]?.[member.name]?.description;
+      expect(typeof text === 'string' && text.length > 0 && text !== member.description, member.name).toBe(true);
+    }
   });
 });

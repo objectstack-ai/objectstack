@@ -51,7 +51,7 @@ The other sets each demonstrate one axis:
 - `showcase_guest_portal` — guest-safe capability (read announcements,
   create inquiries) shaped for the built-in **`guest`** position (ADR-0090
   D9). No door binds a set to `guest` today (ADR-0138 D3), so the showcase
-  distributes it through the `client_portal_user` position instead.
+  distributes it through the `showcase_client_portal_user` position instead.
 - `showcase_field_ops_delegate` — **delegated administration**
   (ADR-0090 D12): an `adminScope` bounded to the Field Operations subtree
   with an assignable-set allowlist; no self-escalation.
@@ -98,8 +98,8 @@ wildcard VAMA, high-privilege anchor suggestions, forbidden vocabulary).
 
 Log in as a non-admin member (create one in Setup → Users): the Field Zoo's
 permission-gated fields mask, private notes vanish, and write attempts
-outside your row scope are rejected — while a user assigned the `auditor`
-position reads everything and the Setup app appears for `ops` holders.
+outside your row scope are rejected — while a user assigned the `showcase_auditor`
+position reads everything and the Setup app appears for `showcase_ops` holders.
 Ask "why" with the explain engine — the `security`
 service's `explain({ object, operation, userId })` reports every layer's
 verdict with contributor attribution, walking the same code the middleware

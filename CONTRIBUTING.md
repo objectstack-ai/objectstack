@@ -416,6 +416,7 @@ start when you add a component.
 | [`@objectstack/service-i18n`](packages/services/service-i18n) | Internationalization |
 | [`@objectstack/service-messaging`](packages/services/service-messaging) | Outbound notification dispatch across channels |
 | [`@objectstack/service-sms`](packages/services/service-sms) | SMS delivery (Aliyun, Twilio, log) |
+| [`@objectstack/service-push`](packages/services/service-push) | Mobile push delivery (APNs, FCM) |
 | [`@objectstack/service-knowledge`](packages/services/service-knowledge) | Knowledge / RAG orchestration over pluggable adapters |
 | [`@objectstack/service-package`](packages/services/service-package) | Package registry — publish, install, manage metadata packages |
 | [`@objectstack/cloud-connection`](packages/cloud-connection) | Runtime-side client for an ObjectStack cloud control plane |
@@ -466,7 +467,6 @@ Atoms and fields stay light; heavy widgets live in lazy-loaded plugins.
 | Package | Description |
 | :--- | :--- |
 | [`@object-ui/app-shell`](ui/packages/app-shell) | The Console's shell, views and Studio; a private workspace package, last published to npm as 18.2.0 |
-| [`@object-ui/providers`](ui/packages/providers) | The upload adapter context the file and image fields upload through |
 | [`@object-ui/auth`](ui/packages/auth) | `AuthProvider`, `useAuth`, `AuthGuard`, sign-in forms |
 | [`@object-ui/permissions`](ui/packages/permissions) | Object / field / row-level permission guards and hooks |
 | [`@object-ui/i18n`](ui/packages/i18n) | Language packs, RTL layout, date and currency formatting |

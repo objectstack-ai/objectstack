@@ -156,3 +156,33 @@ export * from './extension-field-patch-targets.js';
 // authoring gate the draft verdict and the publish doors run, so a flow the
 // engine refuses to register no longer reads valid and publishes.
 export * from './flow-cycle.js';
+
+// [epic cloud#3652 Q3] The package upgrade plan — one comparison of an installed
+// package version with the incoming one, read by `os diff`, the marketplace
+// install door's dry run and the `manifest` service's `planUpgrade`, so the
+// preview an installer reads and the comparison a door decides on are one.
+export * from './package-upgrade-plan.js';
+
+// [epic cloud#3652 Q3] The schema upgrade verdict of a plan — which findings
+// stop a managed upgrade until confirmed, and the finding set's token — the
+// ONE rule the install-local door and a host's install door (the hosted
+// control plane) both apply, so a host forwards the platform's verdict.
+export * from './package-upgrade-verdict.js';
+
+// [ADR-0146 D3 · ruling record 6691022506] The customization pair of a package,
+// looked up through the App that carries it — `pairOf(base)` /
+// `isPairOf(pair, base)`. Sunk here because its callers live in
+// `@objectstack/metadata-protocol`, `@objectstack/objectql`,
+// `@objectstack/service-automation` and `@objectstack/service-datasource`, and
+// this is the one package all four declare; the id rule stays in
+// `@objectstack/spec/kernel`.
+export * from './customization-pair-lookup.js';
+
+// [ADR-0141, ADR-0150 D3 · epic #31527 child R2] A package's declared
+// dependency closure — the one walk the save door, the runtime authoring gate,
+// Studio's object pickers and the package-scoped resolution rule all read
+// (`resolvePackageClosure`, `packageDependencyClosure`,
+// `packageResolutionClosure`). Here because the rule's readers sit inside
+// objectql's lean entry, which `@objectstack/metadata-protocol` stays out of,
+// and every one of them already depends on this package.
+export * from './package-closure.js';

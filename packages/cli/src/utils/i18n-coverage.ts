@@ -7,8 +7,8 @@
  * actually attached to it, and reports the ones that are missing or empty.
  *
  * The expected set is **not** computed here. It comes from
- * {@link collectExpectedEntries} in `i18n-extract.ts` — the same walker that
- * scaffolds bundles for `os i18n extract`. That sharing is the point: this
+ * {@link collectExpectedEntries} in `@objectstack/lint` (`packages/lint/src/i18n-walk.ts`)
+ * — the same walker that scaffolds bundles for `os i18n extract`. That sharing is the point: this
  * detector used to keep its own parallel walk, and the two drifted until whole
  * declared surfaces were extractable but ungated — most visibly the action
  * labels declared *inline on an object* (`sys_approval_request`'s
@@ -44,7 +44,8 @@
 
 import { deepMerge } from '@objectstack/core';
 import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
-import { collectExpectedEntries, type ExpectedEntry } from './i18n-extract.js';
+import { resolveI18nLabel } from '@objectstack/spec/ui';
+import { collectExpectedEntries, type ExpectedEntry } from './i18n-bundle-extract.js';
 
 export type CoverageSeverity = 'error' | 'warning';
 
@@ -518,15 +519,16 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
  * as covered the moment a map exists, which is the mirror image of the bug
  * this function was added to fix: one answer standing for two opposite facts.
  *
- * So only the **tag-matching** limbs count as coverage, in the reference's own
- * order and with its own case rules:
- *
- *   1. the exact tag — `zh-CN` reads the key `zh-CN`;
- *   2. the base language — `zh-CN` reads the key `zh`;
- *   3. the first region-qualified sibling sharing that base — `zh` reads
- *      `zh-CN`; `zh-TW` reads `zh-CN` too. Same language, other region: what
- *      the renderer really shows, and a translation into the language asked
- *      for.
+ * So only the **tag-matching** limbs count as coverage: the entries whose
+ * language subtag is the locale's (the exact tag, the bare language, a
+ * region-qualified sibling). Which of them the reader sees is asked of
+ * `resolveI18nLabel` itself, over the map cut down to those entries, so this
+ * function keeps no copy of the resolver's limb order: `zh-CN` reads `zh-CN`,
+ * else `zh`; `zh` reads `zh-CN`; `zh-TW` reads `zh-CN` when the map has no
+ * Traditional entry, and `zh-TW` over `zh-CN` when it has both (the script
+ * preference where the platform table splits a language). Same language,
+ * other region: what the renderer really shows, and a translation into the
+ * language asked for.
  *
  * The fallback limbs are excluded because falling back **is** what an
  * untranslated locale looks like: a `ja-JP` reader shown the `en` entry is
@@ -536,37 +538,35 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
  * `i18n-label-resolver.ts` is the authority on the limb rule and on the case
  * asymmetry mirrored here (region case is irrelevant because limb 3 compares
  * language subtags only; language case is significant, because the reference
- * folds neither side). `inline-locale-coverage-parity.test.ts` pins this
+ * folds neither side). The describe block "coverage reads the map the way the
+ * renderer does" in `test/i18n-inline-locale-map-coverage.test.ts` pins this
  * function against `resolveI18nLabel`: whenever this says "covered", the
  * renderer really shows that entry.
  *
  * Empty values do not count, matching {@link lookupKey}'s rule on the bundle
  * side — an empty translation is not a translation, whichever side it is
- * written on.
+ * written on. They are judged AFTER the resolver has picked, not before: the
+ * renderer shows an empty entry when it is the one its limbs reach, so a blank
+ * `zh-TW` beside `zh-CN` leaves a `zh-Hant` reader looking at nothing, and a
+ * blank exact `zh-CN` beside `zh` leaves a `zh-CN` reader the same. Dropping
+ * empties first would let the other entry stand in and report that reader
+ * covered (#31074).
  */
 export function inlineLocaleText(
   map: Readonly<Record<string, string>> | undefined,
   locale: string,
 ): string | undefined {
   if (!map) return undefined;
-  const read = (tag: string): string | undefined => {
-    if (!Object.prototype.hasOwnProperty.call(map, tag)) return undefined;
-    const value = map[tag];
-    return typeof value === 'string' && value.length > 0 ? value : undefined;
-  };
   const tag = (locale || 'en').trim();
-  const exact = read(tag);
-  if (exact !== undefined) return exact;
   const base = tag.split('-')[0];
-  const baseHit = read(base);
-  if (baseHit !== undefined) return baseHit;
+  const sameLanguage: Record<string, string> = {};
   for (const key of Object.keys(map)) {
-    if (key.split('-')[0] === base) {
-      const sibling = read(key);
-      if (sibling !== undefined) return sibling;
-    }
+    const value = map[key];
+    if (typeof value === 'string' && key.split('-')[0] === base) sameLanguage[key] = value;
   }
-  return undefined;
+  if (Object.keys(sameLanguage).length === 0) return undefined;
+  const shown = resolveI18nLabel(sameLanguage, tag);
+  return shown !== undefined && shown.length > 0 ? shown : undefined;
 }
 
 /**

@@ -31,7 +31,7 @@ import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { createI18n } from '@object-ui/i18n';
-import { UploadProvider } from '@object-ui/providers';
+import { UploadProvider } from '@object-ui/fields';
 import { FormPage } from './FormPage';
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));

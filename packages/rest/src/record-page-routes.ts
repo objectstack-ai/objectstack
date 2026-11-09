@@ -34,6 +34,7 @@
  */
 
 import {
+    RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES,
     RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES,
     RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE,
     RecordPageRequestSchema,
@@ -42,7 +43,7 @@ import {
     type FindDataRequest,
     type RecordPageRequest,
 } from '@objectstack/spec/api';
-import { isMultiValueField, parseFilterAST } from '@objectstack/spec/data';
+import { isMultiValueField, parseFilterAST, referenceTargetOf } from '@objectstack/spec/data';
 import { measureServerTiming } from '@objectstack/observability';
 import { sendError, sendOk } from '@objectstack/types';
 import { recordNotFoundError } from '@objectstack/core';
@@ -53,9 +54,6 @@ import { apiAccessDenialFromEnable, type RestServer } from './rest-server.js';
 
 /** The closed query-parameter set of `POST {basePath}/data/:object/:id/page`: EMPTY. */
 export const RECORD_PAGE_PARAMS: readonly string[] = [];
-
-/** The relationship field types a related list follows back to its parent. */
-const RELATIONSHIP_TYPES = new Set(['lookup', 'master_detail']);
 
 /** [#28470] The objects the record's stream parts read. */
 const COMMENT_OBJECT = 'sys_comment';
@@ -87,6 +85,7 @@ export interface RecordPageRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly approvalsServiceProvider: ((environmentId?: string) => Promise<any | undefined>) | undefined;
     resolveProtocol: RestServer['resolveProtocol'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
     enforceApiAccess: RestServer['enforceApiAccess'];
@@ -120,10 +119,29 @@ function fieldDefOf(item: any, name: string): any | undefined {
     return undefined;
 }
 
-/** The target object a relationship field declares (`reference`, the spec's one spelling). */
-function referenceOf(def: any): string | undefined {
-    const ref = def?.reference;
-    return typeof ref === 'string' && ref ? ref : undefined;
+/**
+ * [#29946] The object a related list's field points back at, by the spec's ONE
+ * arbiter of a field's target ({@link referenceTargetOf}): the reference value
+ * types (`lookup`, `master_detail`, `user`, `tree`), with a `user` field's
+ * target fixed to `sys_user` by its type whatever its carrier spells. It is the
+ * judgement the engine's own reads ask (`$expand`, the referential delete
+ * walk), so the related list's row query (`{ [field]: id }`) and this check
+ * cannot disagree about which fields relate a child to its parent.
+ *
+ * 18.3.0 kept a private `lookup`/`master_detail` list here and read `reference`
+ * raw, so a related list on `sys_user` keyed by a `user` field (an owner, an
+ * assignee) was a 400 `invalid_relationship` the row query would have answered.
+ *
+ * A carrier no reader can read (an object- or array-valued `reference` that
+ * never went through parse) throws in the arbiter; here it is simply not a
+ * relationship to this object, the located 400 it was before.
+ */
+function referenceOf(def: unknown): string | undefined {
+    try {
+        return referenceTargetOf(def);
+    } catch {
+        return undefined;
+    }
 }
 
 /**
@@ -201,11 +219,11 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     const item = childItems[index];
                     if (!item || apiAccessDenialFromEnable(item.enable, entry.object, 'list')) return;
                     const def = fieldDefOf(item, entry.field);
-                    if (!def || !RELATIONSHIP_TYPES.has(String(def.type)) || referenceOf(def) !== object) {
+                    if (!def || referenceOf(def) !== object) {
                         malformed.push({
                             field: `related.${index}.field`,
                             code: 'invalid_relationship',
-                            message: `'${entry.field}' on '${entry.object}' is not a lookup or master-detail field that references '${object}'.`,
+                            message: `'${entry.field}' on '${entry.object}' is not a lookup, master-detail, user or tree field that references '${object}'.`,
                         });
                     }
                 });
@@ -342,7 +360,12 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 // deployment does not serve holds no entry, as the page reads
                 // such a stream as an empty one; a refused comment or activity
                 // count refuses the part, and a refused ledger count is no
-                // field change, as the stream then merges none.
+                // field change, as the stream then merges none. [#30343] The
+                // stream draws one action that wrote both an activity row and
+                // a ledger row as one entry, so with a field change counted
+                // every update steps aside, and a create (a delete) steps
+                // aside as often as both sources hold one: the fewer of the
+                // two counts, as the stream pairs no more than that.
                 const answerTimeline = async (
                     sources: NonNullable<RecordPageRequest['timeline']>,
                 ): Promise<{ total: number } | { error: PartRefusal }> => {
@@ -352,22 +375,37 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                         return answer.error.code === 'OBJECT_NOT_FOUND' ? 0 : answer;
                     };
                     const ofRecord = { object_name: object, record_id: id };
-                    const [comments, fieldChanges, activity, updates] = await Promise.all([
+                    const both = sources.activity && sources.fieldChanges;
+                    /** The record's activity rows and ledger writes of one action, when both sources count. */
+                    const ofAction = (action: 'create' | 'delete') =>
+                        both
+                            ? Promise.all([
+                                count(ACTIVITY_OBJECT, { ...ofRecord, type: RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES[action] }),
+                                count(AUDIT_LOG_OBJECT, { ...ofRecord, action }),
+                            ])
+                            : Promise.resolve([0, 0] as const);
+                    const [comments, fieldChanges, activity, updates, creates, deletes] = await Promise.all([
                         sources.discussion ? count(COMMENT_OBJECT, { thread_id: `${object}:${id}` }) : 0,
                         sources.fieldChanges ? count(AUDIT_LOG_OBJECT, { ...ofRecord, action: { $in: FIELD_CHANGE_ACTIONS } }) : 0,
                         sources.activity
                             ? count(ACTIVITY_OBJECT, { ...ofRecord, type: { $nin: [...RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES] } })
                             : 0,
                         // The updates that step aside once a field change is counted.
-                        sources.activity && sources.fieldChanges
-                            ? count(ACTIVITY_OBJECT, { ...ofRecord, type: RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE })
-                            : 0,
+                        both ? count(ACTIVITY_OBJECT, { ...ofRecord, type: RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE }) : 0,
+                        ofAction('create'),
+                        ofAction('delete'),
                     ]);
                     if (typeof comments !== 'number') return comments;
                     if (typeof activity !== 'number') return activity;
                     if (typeof updates !== 'number') return updates;
+                    let paired = 0;
+                    for (const [rows, writes] of [creates, deletes]) {
+                        if (typeof rows !== 'number') return rows;
+                        // A refused ledger count pairs nothing, as the stream then merges none.
+                        paired += Math.min(rows, typeof writes === 'number' ? writes : 0);
+                    }
                     const changes = typeof fieldChanges === 'number' ? fieldChanges : 0;
-                    return { total: comments + changes + activity - (changes > 0 ? updates : 0) };
+                    return { total: comments + changes + activity - (changes > 0 ? updates + paired : 0) };
                 };
 
                 const answerFieldAccess = async () => {
@@ -389,7 +427,13 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
 
                 const answerExplain = async () => {
                     const out: Record<string, unknown> = {};
-                    const security = await this.resolveSecurityService(environmentId, req);
+                    // Resolved once, inside each operation's own `try`: a
+                    // security service that cannot be resolved is each
+                    // operation's refusal (the `503` `GET /security/explain`
+                    // answers), as the fieldAccess part's is its own, and the
+                    // page still answers. Asked after the caller check, in the
+                    // order that door asks.
+                    let resolvingSecurity: ReturnType<RecordPageRouteHost['resolveSecurityService']> | undefined;
                     for (const operation of new Set(body.explain ?? [])) {
                         try {
                             // `POST /security/explain` answers only an
@@ -398,6 +442,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                                 out[operation] = { error: { code: 'UNAUTHORIZED', status: 401, message: 'The access-explanation endpoint requires an authenticated caller.' } };
                                 continue;
                             }
+                            const security = await (resolvingSecurity ??= this.resolveSecurityService(environmentId, req));
                             if (typeof security?.explain !== 'function') {
                                 out[operation] = { error: { code: 'NOT_IMPLEMENTED', status: 501, message: 'Access explanation is not available on this deployment.' } };
                                 continue;
@@ -413,7 +458,14 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 const answerApprovals = async () => {
                     try {
                         const provider = this.approvalsServiceProvider;
-                        const svc = provider ? await provider(environmentId).catch(() => undefined) : undefined;
+                        // [#30011] The REQUEST's environment, through the shared
+                        // resolver, as the `/approvals` door asks it — the raw
+                        // `undefined` of the unscoped mount read the host's.
+                        const svc = provider
+                            ? await this.resolveRequestEnvironmentId(environmentId, req)
+                                .then((envId) => provider(envId))
+                                .catch(() => undefined)
+                            : undefined;
                         if (!svc) return { requests: [], lock: null };
                         const rows: any[] = (await svc.listRequests({ object, recordId: id }, context ?? {})) ?? [];
                         const pending = rows.find((r) => r?.status === 'pending');

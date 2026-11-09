@@ -110,6 +110,24 @@ export const SysOauthConsent = ObjectSchema.create({
       defaultValue: 'NOW()',
       readonly: true,
     }),
+
+    // [#30918] ObjectStack's own column on this better-auth table: the
+    // oauth-provider neither reads nor writes it (plugin-auth's
+    // `oauth-provider-schema-parity.test.ts` pins that it is not one of the
+    // provider's columns). Its one writer is plugin-auth, server-side, after
+    // it has verified an MCP access token minted under this consent
+    // (`mcp-client-last-use.ts`), and the value is the start of that hour, so
+    // the column moves at most once an hour per consent. Nothing a client
+    // sends reaches it: the object is not on the data API, the provider's
+    // consent doors do not carry it, and the value is the server's clock.
+    // A withdrawn or revoked consent takes its stamp with it.
+    last_used_at: Field.datetime({
+      label: 'Last Used At',
+      required: false,
+      readonly: true,
+      description:
+        'Start of the most recent hour in which the client made a verified MCP call under this consent; empty when none has been recorded',
+    }),
   },
 
   indexes: [

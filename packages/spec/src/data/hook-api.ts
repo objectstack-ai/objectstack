@@ -78,6 +78,13 @@
  *     the schemas to carry their migration text; the engine rejects them by
  *     quoting that text. They are not part of an authoring surface published
  *     after their retirement.
+ *   - `permanent` (on the delete bag) — app-authored code cannot erase a record
+ *     past the recycle bin; its deletes always enter the bin, and the permanent
+ *     delete stays with a principal holding `manageRecycleBin` (ADR-0148 D3;
+ *     maintainer ruling A, recorded in 6691358077). A hook's elevated `api`
+ *     (`Hook.runAs: 'system'`) would otherwise pass the system's purge through,
+ *     so the key is off the published face, and the sandbox refuses a body's
+ *     `permanent` at runtime rather than dropping it.
  *   - `sudo()` — the #5945 exclusion STANDS. It is privilege escalation, no
  *     document teaches it as first-hook vocabulary, and since #14010 the
  *     declared way for a hook to run elevated is `Hook.runAs: 'system'`, which
@@ -202,8 +209,14 @@ export type HookUpdateOptions = Omit<EngineUpdateOptions, 'context' | 'upsert'> 
   WriteObservabilityOptions &
   HookDriverPassthroughOptions;
 
-/** The options bag `ctx.api.object(n).delete()` accepts. */
-export type HookDeleteOptions = Omit<EngineDeleteOptions, 'context'> &
+/**
+ * The options bag `ctx.api.object(n).delete()` accepts.
+ *
+ * `EngineDeleteOptions` minus the injected `context` and minus `permanent`:
+ * a hook's delete always enters the recycle bin (ADR-0148 D3, ruling A in
+ * 6691358077), so the purge door is not on this face.
+ */
+export type HookDeleteOptions = Omit<EngineDeleteOptions, 'context' | 'permanent'> &
   HookDriverPassthroughOptions;
 
 /**

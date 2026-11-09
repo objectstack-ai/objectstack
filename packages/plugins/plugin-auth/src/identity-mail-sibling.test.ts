@@ -79,6 +79,8 @@ async function driveAuthMail(tenancy: Tenancy) {
     { user: USER, url: 'http://x/reset', token: 't' },
     new Request('http://x/api/v1/auth/request-password-reset'),
   );
+  // The public door sends the reset mail after the response.
+  await vi.waitFor(() => expect(sent.some((s) => s.template === 'auth.password_reset')).toBe(true));
   await config.emailVerification.sendVerificationEmail({ user: USER, url: 'http://x/verify', token: 't' });
   await config.plugins.find((p: any) => p.id === 'magic-link')._opts.sendMagicLink({
     email: USER.email, url: 'http://x/magic', token: 't',
@@ -86,7 +88,7 @@ async function driveAuthMail(tenancy: Tenancy) {
   await config.hooks.after({
     path: '/change-email',
     body: { newEmail: 'new@example.com' },
-    context: { __osChangeEmailFrom: { email: USER.email, name: USER.name, id: USER.id }, returned: { status: true } },
+    context: { session: { user: { email: USER.email, name: USER.name, id: USER.id } }, returned: { status: true } },
   });
   await config.plugins.find((p: any) => p.id === 'organization')._opts.sendInvitationEmail({
     email: 'invitee@example.com',

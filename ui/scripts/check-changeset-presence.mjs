@@ -1100,8 +1100,10 @@ if (invokedDirectly) {
             '    confidently. Name a commit that exists in this clone, or pass none and let the\n' +
             '    merge base with the target branch be found.\n'
           : base.shallow
-            ? '    This clone is SHALLOW. In CI, give the checkout `fetch-depth: 0`; locally,\n' +
-              '    run `git fetch --no-tags origin main` (or `git fetch --unshallow`).\n'
+            ? '    This clone is SHALLOW. In CI, run the step\n' +
+              "    `Fetch this commit's history and the base branch` before this gate (ci.yml), or give the\n" +
+              '    checkout `fetch-depth: 0` (lint.yml); locally, run `git fetch --no-tags origin main`\n' +
+              '    (or `git fetch --unshallow`).\n'
             : '    Fetch the base branch (`git fetch --no-tags origin main`) and re-run.\n') +
         '    This is a failure, not a skip: a diff gate with no diff would report a\n' +
         '    declaration present while having looked at nothing (objectstack#4928).',

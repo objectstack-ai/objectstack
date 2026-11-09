@@ -16,6 +16,7 @@ export {
   SysQueue,
   SysQueueMember,
   SysAssignmentCursor,
+  SysAssignmentRule,
 } from './objects/index.js';
 export { SysBusinessUnit, SysBusinessUnitMember } from '@objectstack/platform-objects/identity';
 export {
@@ -137,6 +138,15 @@ export {
   QUEUE_GUARD_PACKAGE,
   QUEUE_RECIPIENT_RECOMPUTE_PACKAGE,
 } from './queue-hooks.js';
+// [ADR-0142 D5, ruling A on organization-authored routing] The save guard of
+// an organization's own `sys_assignment_rule` rows.
+export {
+  bindAssignmentRuleGuards,
+  reportShadowedAuthoredAssignmentRules,
+  assignmentRuleRowIssues,
+  AssignmentRuleValidationError,
+  ASSIGNMENT_RULE_GUARD_PACKAGE,
+} from './assignment-rule-hooks.js';
 export {
   SharingServicePlugin,
   buildSharingMiddleware,

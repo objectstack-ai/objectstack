@@ -183,10 +183,13 @@ async function boot() {
       },
       rowLevelSecurity: [{ name: 'qa_cbp_wsme_master_updates', object: M.rls, operation: 'update', using: "name != 'held'" }],
     }),
-    PermissionSetSchema.parse({
+    // Edit or delete without read: the authoring schema refuses this shape (an
+    // object permission that edits or deletes a record also reads it), so it is
+    // built raw — the shape a row stored before that refusal still carries.
+    {
       name: UNREAD_WRITER,
       objects: { [M.rls]: { allowRead: true, allowEdit: true }, [D.rls]: { allowEdit: true, allowDelete: true } },
-    }),
+    } as unknown as ReturnType<typeof PermissionSetSchema.parse>,
   ];
   for (const name of [WRITER, UNREAD_WRITER]) {
     await e.getDriver('sys_permission_set').create('sys_permission_set', {

@@ -215,6 +215,7 @@ async function restartWith(
         reseed: door('reseed-sample-data'),
         purge: door('purge-sample-data'),
         uninstall: (manifestId: string) => routes.get(`DELETE ${ROUTE}/:manifestId`)!(makeC(undefined, { manifestId })),
+        count: (manifestId: string) => routes.get(`GET ${ROUTE}/:manifestId/sample-data`)!(makeC(undefined, { manifestId })),
         install: (body: unknown) => routes.get(`POST ${ROUTE}`)!(makeC(body)),
     };
 }
@@ -347,6 +348,21 @@ describe('reseed and purge on an entry the rehydrate refused to load', () => {
         expect(purge.status, JSON.stringify(purge.payload)).toBe(200);
         expect(purge.payload.data).toEqual({ manifestId: REFUSED.id, deleted: 1, skipped: 0, errors: 0, withSampleData: false });
         expect(h.tables.qa_old_account).toEqual([]);
+    });
+});
+
+describe('GET …/sample-data on an entry the rehydrate refused to load (#30323)', () => {
+    it('answers the purge\'s 422 OS_PROTOCOL_INCOMPATIBLE, reads and writes nothing; the loadable entry beside it is counted', async () => {
+        const h = await restartWith([REFUSED, LOADED], dir);
+        const before = h.state();
+        const res = await h.count(REFUSED.id);
+        expect(res.status, JSON.stringify(res.payload)).toBe(422);
+        expect(res.payload.error.code).toBe('OS_PROTOCOL_INCOMPATIBLE');
+        expect(JSON.stringify(res.payload)).toBe(JSON.stringify((await h.purge(REFUSED.id)).payload));
+        expect(h.state()).toEqual(before);
+
+        const loaded = await h.count(LOADED.id);
+        expect([loaded.status, loaded.payload.data]).toEqual([200, { manifestId: LOADED.id, count: 1, unidentified: 0 }]);
     });
 });
 

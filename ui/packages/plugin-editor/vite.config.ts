@@ -70,7 +70,6 @@ export default defineConfig({
       '@object-ui/types': resolve(__dirname, '../types/src'),
       '@object-ui/react': resolve(__dirname, '../react/src'),
       '@object-ui/components': resolve(__dirname, '../components/src'),
-      '@object-ui/providers': resolve(__dirname, '../providers/src'),
       '@object-ui/fields': resolve(__dirname, '../fields/src'),
       '@object-ui/plugin-dashboard': resolve(__dirname, '../plugin-dashboard/src'),
       '@object-ui/plugin-grid': resolve(__dirname, '../plugin-grid/src'),

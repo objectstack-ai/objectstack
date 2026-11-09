@@ -27,7 +27,8 @@
  *     opens and the click raises nothing.
  *
  * That the renderer forwards no host `data` beside the handler stays pinned
- * where it was, in `ObjectGantt.hostDataProp-7210`.
+ * where it was, in the `ObjectGantt.hostDataProp-7210` block of
+ * `ObjectGantt.harness.test.tsx`.
  *
  * REVERSE VERIFICATION, direction predicted before running: drop
  * `onRowClick={hostRowClick(onRowClick)}` from the renderer and the two host

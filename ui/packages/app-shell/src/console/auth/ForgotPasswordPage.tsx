@@ -28,6 +28,8 @@ export function ForgotPasswordPage() {
           submittingButton: t('auth.forgotPassword.submittingButton'),
           successTitle: t('auth.forgotPassword.successTitle'),
           successDescription: t('auth.forgotPassword.successDescription'),
+          noDeliveryTitle: t('auth.forgotPassword.noDeliveryTitle'),
+          noDeliveryDescription: t('auth.forgotPassword.noDeliveryDescription'),
           backToSignInText: t('auth.forgotPassword.backToSignInText'),
           rememberPasswordText: t('auth.forgotPassword.rememberPasswordText'),
           signInText: t('auth.forgotPassword.signInText'),

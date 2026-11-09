@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 // Paid at module load, before vitest's clocked windows: both reach the whole
 // runtime through their `dist/` builds.
@@ -26,18 +27,17 @@ const APP_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const REF = 'GITHUB_MCP_TOKEN';
 const FIXTURE_TOKEN = 'github_pat_fixture_not_a_real_token';
 
-/** The tools the fake server lists: the two the app includes, and one it must not expose. */
+/**
+ * The tools the fake server lists: the two the app includes, served exactly as
+ * GitHub's server listed them when the app's `toolsSnapshot` was measured (the
+ * fixture the README's Provenance names), so the pin check passes the way it
+ * does against the real server; and one tool the app must not expose.
+ */
+const MEASURED = JSON.parse(
+  readFileSync(new URL('./fixtures/github-mcp-tools.json', import.meta.url), 'utf8'),
+) as { tools: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }> };
 const TOOLS = [
-  { name: 'search_issues', description: 'Search issues', inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
-  {
-    name: 'issue_read',
-    description: 'Get issue details',
-    inputSchema: {
-      type: 'object',
-      properties: { method: { type: 'string' }, owner: { type: 'string' }, repo: { type: 'string' }, issue_number: { type: 'number' } },
-      required: ['method', 'owner', 'repo', 'issue_number'],
-    },
-  },
+  ...MEASURED.tools,
   { name: 'issue_write', description: 'Create or update issue', inputSchema: { type: 'object', properties: {} } },
 ];
 

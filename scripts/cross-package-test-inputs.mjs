@@ -283,6 +283,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
         'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
+        // The template-manifest retirement's absence walk: every
+        // `objectstack.manifest.json` under `packages/` and `examples/`.
+        'packages/spec/src/marketplace/template-manifest-inert-keys-retirement.test.ts',
       ],
       'packages/**/*.md': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
@@ -308,6 +311,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
         'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
+        // The template-manifest retirement's absence walk: every
+        // `objectstack.manifest.json` under `packages/` and `examples/`.
+        'packages/spec/src/marketplace/template-manifest-inert-keys-retirement.test.ts',
       ],
       'examples/**/*.md': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
@@ -349,7 +355,32 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // hints: the case flipped from true to false with the added glob itself as
     // the covering hint. ⇒ Extensions and glob widen together or not at all,
     // and that pin's header carries the measurement of what the boundary costs.
-    globs: ['packages/**/*.ts'],
+    //
+    // src/security/vouched-reference-callers.pin.test.ts runs the census gate
+    // of the vouched-reference mark, a root script, with `--ts-only`: the same
+    // `packages/` `.ts` surface as this glob. The census's other extensions,
+    // and its `examples/` and `apps/` roots, are judged by its bare run in the
+    // lint step, never by this pin. The census imports `js-comment-mask.mjs`
+    // (which code is prose) and `invoked-as.mjs` (whether its dispatch runs),
+    // so an edit to either moves the pin's verdict and re-runs it.
+    globs: [
+      'packages/**/*.ts',
+      'scripts/check-vouch-for-reference-callers.mjs',
+      'scripts/js-comment-mask.mjs',
+      'scripts/invoked-as.mjs',
+    ],
+    heldBy: {
+      // The pin names only the census; these two are the census's own relative
+      // imports, loaded by the spawned child, so no path the pin quotes lands
+      // in them and the pin itself is what holds them.
+      'scripts/js-comment-mask.mjs': [
+        'packages/core/src/security/vouched-reference-callers.pin.test.ts',
+        // [#31898] The API-key client-facts census imports the separator
+        // itself to tell a seam call from prose and quoted text.
+        'packages/core/src/security/credential-use-client-doors.pin.test.ts',
+      ],
+      'scripts/invoked-as.mjs': ['packages/core/src/security/vouched-reference-callers.pin.test.ts'],
+    },
   },
   '@objectstack/types': {
     // src/driver-error-classification.callers.test.ts is the #13440 gate: it
@@ -542,6 +573,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/data/objects/semantic-zoo.object.ts',
       'examples/app-showcase/src/ui/pages/task-triage.page.ts',
       'content/docs/deployment/cli.mdx',
+      // src/commands/serve-auth-trusted-app-schemes.contract.test.ts holds the
+      // OS_TRUSTED_APP_SCHEMES row beside OS_TRUSTED_ORIGINS on this page (#29972).
+      'content/docs/deployment/environment-variables.mdx',
       'content/docs/deployment/index.mdx',
       'content/docs/deployment/troubleshooting.mdx',
       'content/docs/getting-started/index.mdx',
@@ -685,6 +719,27 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // cli's whole suite on every driver commit.
       'packages/drivers/driver-sql/src/sql-driver.ts',
       'packages/drivers/driver-sql/src/schema-drift.ts',
+      // The facade form of that first file (#30147). The codemod
+      // (`scripts/codemod-split-sql-driver.mjs`) left `createColumn` and the
+      // other members those pins slice on the class as one-call stubs and moved
+      // their bodies into `sql-driver-*.ts` facet modules, and the top-level
+      // declarations into the leaf. The five generate-* pins read `SqlDriver`
+      // through `sql-driver-split-source.mjs`, which follows each stub to the
+      // module it names, so every one of those modules is now read, by a path
+      // built out of the stub's own text -- the shape this scan cannot name,
+      // hence the witnesses below. A glob rather than the modules by name: the
+      // set is the codemod's section table, and a module it adds is read on the
+      // day it is written. It also covers the package's `sql-driver-*.test.ts`
+      // files, and that costs no re-run the suite does not already make:
+      // `@objectstack/cli#test` depends on `build`, which depends on `^build`,
+      // and driver-sql's `build` hashes `$TURBO_DEFAULT$` (every tracked file in
+      // the package, tests included).
+      'packages/drivers/driver-sql/src/sql-driver-*.ts',
+      // The reader itself and its types, the import-shaped coupling the
+      // `cli-unbuilt-workspace-lead` trio above has: what it returns IS the text
+      // those pins judge, and the `.d.mts` is an input to the typecheck verdict.
+      'scripts/sql-driver-split-source.mjs',
+      'scripts/sql-driver-split-source.d.mts',
       // `field.zod.ts` is the third entry no test READS -- named in the header
       // of src/commands/generate-field-type-vocabulary.pin.test.ts, which cites
       // it as the file `git log -S` was run over to establish that the ghost
@@ -742,6 +797,31 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the witness keeps it attributed to the read that needs it.
       'packages/create-objectstack/src/templates/blank/src/**': [
         'packages/cli/test/create-objectstack-wiring-parity.test.ts',
+      ],
+      // `readSqlDriverSource` builds both from its argument and from the stubs'
+      // text (#30147), so no literal names them; these pins read through it.
+      'packages/drivers/driver-sql/src/sql-driver.ts': [
+        'packages/cli/src/commands/generate-builtin-id-column.pin.test.ts',
+        'packages/cli/src/commands/generate-field-type-vocabulary.pin.test.ts',
+        'packages/cli/src/commands/generate-file-reference-width.pin.test.ts',
+        'packages/cli/src/commands/generate-multiple-json-column.pin.test.ts',
+        'packages/cli/src/commands/generate-string-family-width.pin.test.ts',
+      ],
+      // The `.d.mts` is resolved by the typecheck from the `.mjs` specifier,
+      // never named.
+      'scripts/sql-driver-split-source.d.mts': [
+        'packages/cli/src/commands/generate-builtin-id-column.pin.test.ts',
+        'packages/cli/src/commands/generate-field-type-vocabulary.pin.test.ts',
+        'packages/cli/src/commands/generate-file-reference-width.pin.test.ts',
+        'packages/cli/src/commands/generate-multiple-json-column.pin.test.ts',
+        'packages/cli/src/commands/generate-string-family-width.pin.test.ts',
+      ],
+      'packages/drivers/driver-sql/src/sql-driver-*.ts': [
+        'packages/cli/src/commands/generate-builtin-id-column.pin.test.ts',
+        'packages/cli/src/commands/generate-field-type-vocabulary.pin.test.ts',
+        'packages/cli/src/commands/generate-file-reference-width.pin.test.ts',
+        'packages/cli/src/commands/generate-multiple-json-column.pin.test.ts',
+        'packages/cli/src/commands/generate-string-family-width.pin.test.ts',
       ],
     },
   },
@@ -1023,9 +1103,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // re-run this package's suite. The `.d.mts` sibling is what gives
     // `maskComments` its type, so this package's typecheck verdict is a
     // function of it too.
+    //
+    // src/skill-md.test.ts imports the Console's "Download skill" mirror from
+    // source and pins it byte-identical to `renderSkillMarkdown`, the server's
+    // half of the drift pin ui/apps/console/src/pages/developer/
+    // objectstack-skill.test.ts carries (#31017). The Console's half runs only
+    // when Test UI does, which a diff confined to this package never starts;
+    // this half runs on every change to the render's inputs, and a change to
+    // the mirror has to re-run it too.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      'ui/apps/console/src/pages/developer/objectstack-skill.ts',
     ],
   },
   '@objectstack/metadata': {
@@ -1230,8 +1319,11 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/services/service-storage/src/storage-route-ledger.ts',
       'packages/services/service-i18n/src/i18n-route-ledger.ts',
       'packages/services/service-settings/src/settings-route-ledger.ts',
+      'packages/services/service-messaging/src/messaging-route-ledger.ts',
       // [#29443] The personal-view door's ledger, imported the same way.
       'packages/plugins/plugin-auth/src/personal-view-route-ledger.ts',
+      // [#30209] The shareable-objects door's ledger, imported the same way.
+      'packages/plugins/plugin-sharing/src/sharing-route-ledger.ts',
       // flow-trigger / validation conformance pin spec's zod schemas.
       'packages/spec/src/automation/**',
       'packages/spec/src/data/**',
@@ -1307,6 +1399,36 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       ],
       'packages/**/package.json': [
         'packages/qa/vitest-filter-preflight/test/config-wiring-sweep.test.ts',
+      ],
+    },
+  },
+  '@objectstack/scenarios': {
+    // test/library.test.ts loads every scenario card under docs/qa/scenarios/
+    // and pins each question's computed truth, so a card edit changes this
+    // suite's verdict while touching nothing in the package. The capability
+    // area closed set is the basenames of the checklist's area files, read from
+    // the tree by every suite here, so adding or renaming an area does too.
+    //
+    // `corpus.ts` is the CLI's golden `os lint --eval` corpus, imported by the
+    // scorer's suites under test/score/ (#30291): the golden builds the
+    // discrimination tests degrade are its fixtures, and scenario-cards.test.ts
+    // holds each control card's `expect` equal to what that corpus derives, so
+    // a corpus edit moves this suite's verdict.
+    //
+    // test/score/entry.test.ts reads ADR-0150 D1's bucket-1 and position rows,
+    // the table the bare-name check restates, so an edit to that table does too.
+    globs: [
+      'docs/qa/scenarios/*.json',
+      'docs/qa/platform-checklist/areas/*.json',
+      'packages/cli/src/lint/corpus.ts',
+      'docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md',
+    ],
+    heldBy: {
+      // The areas directory is listed (`readdirSync`) and its basenames taken,
+      // so the roster holds the directory and no `*.json` name under it.
+      'docs/qa/platform-checklist/areas/*.json': [
+        'packages/qa/scenarios/test/library.test.ts',
+        'packages/qa/scenarios/test/refusals.test.ts',
       ],
     },
   },

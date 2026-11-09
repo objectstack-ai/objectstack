@@ -145,3 +145,62 @@ describe('objectui#11681 — non-integer measures are unchanged (controls)', () 
     expectDecimals(valueTicks(c, 'left'), 'a shared axis with a sum on it');
   });
 });
+
+/**
+ * objectstack#30126 row 11 — a count axis tops out at the largest count.
+ *
+ * The sighting: a chart with one bar of value 1 drew its axis to 4, so the bar
+ * reached a quarter of the plot. A whole-number axis whose counts stay below
+ * recharts' five default ticks now takes one tick per whole number up to its
+ * largest count. Controls: a larger count keeps the default ticks, a sum over
+ * the same row keeps its decimals, and an author's `max` keeps its domain.
+ */
+describe('objectstack#30126 — a count axis fits a small count', () => {
+  const ONE = [{ status: 'Paused', a: 1 }];
+
+  async function drawRows(rows: Record<string, unknown>[], schema: Record<string, unknown>) {
+    const { container } = render(
+      <ChartRenderer
+        schema={{ type: 'chart', data: rows, xAxisKey: 'status', isAnimationActive: false, ...schema } as never}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('.recharts-surface')).toBeTruthy());
+    return container;
+  }
+
+  const ticksOf = (c: HTMLElement, side: Side, categories: Set<string>) =>
+    [...c.querySelectorAll('text.recharts-cartesian-axis-tick-value')]
+      .filter((t) => !categories.has((t.textContent ?? '').trim()) && t.getAttribute('orientation') === side)
+      .map((t) => (t.textContent ?? '').trim());
+
+  it.each([
+    ['bar', 'left'],
+    ['horizontal-bar', 'bottom'],
+  ] as const)('%s: a single count of 1 draws the axis 0 to 1', async (chartType, side) => {
+    const c = await drawRows(ONE, { chartType, series: [series('count')] });
+    expect(ticksOf(c, side, new Set(['Paused']))).toEqual(['0', '1']);
+  });
+
+  it('bar: counts topping out at 2 draw 0, 1, 2', async () => {
+    const rows = [{ status: 'Open', a: 2 }, { status: 'Done', a: 1 }];
+    const c = await drawRows(rows, { chartType: 'bar', series: [series('count')] });
+    expect(ticksOf(c, 'left', new Set(['Open', 'Done']))).toEqual(['0', '1', '2']);
+  });
+
+  it('control: a count of 8 keeps recharts\' default five ticks', async () => {
+    const c = await drawRows([{ status: 'Paused', a: 8 }], { chartType: 'bar', series: [series('count')] });
+    expect(ticksOf(c, 'left', new Set(['Paused']))).toHaveLength(5);
+  });
+
+  it('control: a sum over the same row keeps the default ticks', async () => {
+    const c = await drawRows(ONE, { chartType: 'bar', series: [series('sum')] });
+    expect(ticksOf(c, 'left', new Set(['Paused'])).length).toBeGreaterThan(2);
+  });
+
+  it('control: an author\'s max is not fitted to the data', async () => {
+    const c = await drawRows(ONE, { chartType: 'bar', yAxis: [{ field: 'a', max: 4 }], series: [series('count')] });
+    const ticks = ticksOf(c, 'left', new Set(['Paused']));
+    expect(ticks).toContain('4');
+    expect(ticks.length).toBeGreaterThan(2);
+  });
+});

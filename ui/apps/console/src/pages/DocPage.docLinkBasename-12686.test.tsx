@@ -133,3 +133,66 @@ describe('a doc-to-doc link carries the router basename (objectui#12686)', () =>
     expect(screen.getByTestId('where').textContent).toBe('/docs/crm_manual/crm_lead_guide');
   });
 });
+
+/**
+ * objectstack#30554 — a doc read inside an app (`/apps/APP/docs/BOOK/DOC`,
+ * ADR-0048) resolves its body cross-references under that app's docs tree, so
+ * following one keeps the app shell. Before, the href was the portal's
+ * `/docs/NAME`, and a click left the app (no top bar, no app nav).
+ */
+const APP = 'app.example.crm';
+
+function renderAppDoc(basename: string) {
+  const prefix = basename === '/' ? '' : basename;
+  return render(
+    <MemoryRouter basename={basename} initialEntries={[`${prefix}/apps/${APP}/docs/crm_manual/crm_lead_guide`]}>
+      <Routes>
+        <Route path="/apps/:appName/docs/:slug/:name" element={<DocPage />} />
+        <Route path="/apps/:appName/docs/:slug" element={<div>landed in app</div>} />
+        <Route path="/docs/:name" element={<div>left the app</div>} />
+      </Routes>
+      <Link to={`/apps/${APP}/docs/crm_index`} data-testid="oracle">oracle</Link>
+      <Link to={`/docs/crm_index`} data-testid="portal">portal</Link>
+      <Where />
+    </MemoryRouter>,
+  );
+}
+
+describe("a doc-to-doc link in an app's doc stays in that app's docs route (objectstack#30554)", () => {
+  it("under `/_console`, the href is the app's docs route, basename included", async () => {
+    renderAppDoc('/_console');
+    const link = await screen.findByRole('link', { name: 'index' });
+    const oracle = screen.getByTestId('oracle').getAttribute('href');
+    expect(oracle).toBe(`/_console/apps/${APP}/docs/crm_index`);
+    expect(link.getAttribute('href')).toBe(oracle);
+    expect(link.getAttribute('href')).not.toBe(screen.getByTestId('portal').getAttribute('href'));
+    expect(screen.getByRole('link', { name: 'setup' }).getAttribute('href')).toBe(`${oracle}#setup`);
+  });
+
+  it('a plain left click navigates inside the app, never to the portal', async () => {
+    renderAppDoc('/_console');
+    const link = await screen.findByRole('link', { name: 'index' });
+    expect(fireEvent.click(link, { button: 0 })).toBe(false);
+    expect(await screen.findByText('landed in app')).toBeTruthy();
+    expect(screen.queryByText('left the app')).toBeNull();
+    expect(screen.getByTestId('where').textContent).toBe(`/apps/${APP}/docs/crm_index`);
+  });
+
+  it('on a root mount the href is `/apps/APP/docs/NAME`', async () => {
+    renderAppDoc('/');
+    const link = await screen.findByRole('link', { name: 'index' });
+    expect(link.getAttribute('href')).toBe(`/apps/${APP}/docs/crm_index`);
+  });
+
+  it("the header's home link is the app's docs index", async () => {
+    renderAppDoc('/_console');
+    await screen.findByRole('link', { name: 'index' });
+    expect(screen.getByRole('link', { name: 'Documentation' }).getAttribute('href')).toBe(`/_console/apps/${APP}/docs`);
+  });
+
+  it('CONTROL: outside an app the header home link is still the portal', async () => {
+    renderDoc('/_console');
+    await screen.findByRole('link', { name: 'index' });
+    expect(screen.getByRole('link', { name: 'Documentation' }).getAttribute('href')).toBe('/_console/docs');
+  });
+});

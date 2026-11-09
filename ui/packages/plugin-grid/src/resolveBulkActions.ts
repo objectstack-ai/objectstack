@@ -75,11 +75,20 @@
  * historical no-op-per-row meaning (callout handled by the consumer's
  * `onComplete`).
  *
- * Names that resolve to nothing stay in `unresolved` and are still dispatched
- * by name: consumers may have registered a runner handler under exactly that
- * name (`runner.registerHandler('my_action', …)`), and that path must keep
- * working. When no such handler exists the runner reports the dead end rather
- * than toasting success (#2996).
+ * ## A name the object does not declare draws nothing
+ *
+ * `bulkActions: ['<action_name>']` "names an action the object declares"
+ * (`packages/spec/src/ui/bulk-action.zod.ts`), and lint `action-name-undefined`
+ * (ADR-0049) refuses any other name at authoring. The selection bar holds the
+ * same line at render: a name with no match in `objectDef.actions` gets no
+ * button. That covers a misspelling and an action a disabled package withholds
+ * (the server leaves it out of the served object, so it reads exactly like a
+ * name that never existed). The name comes back in `undeclared` only so the
+ * grid can say, once and in development, which names it did not draw
+ * (`describeUndeclaredActionNames`). A runner handler registered under a bare
+ * name is not a declaration and does not bring the button back. The canonical
+ * `'delete'` is not a name this fold sees: the grid routes it to
+ * `onBulkDelete` before the call.
  */
 
 import type { BulkActionDef, BulkActionParam } from '@object-ui/types';
@@ -417,8 +426,11 @@ export function resolveBulkActions(opts: {
    * its identity across renders.
    */
   defs: readonly BulkActionDef[];
-  /** Names that matched no declared action; dispatched by name. */
-  unresolved: string[];
+  /**
+   * Names that matched no declared action. NOT drawn and NOT dispatched: they
+   * exist for the development warning only.
+   */
+  undeclared: string[];
 } {
   // [objectui#8730] THE GUARD SITE. This is the one place where the authored
   // `bulkActionDefs` array becomes the list the selection bar maps over, so the
@@ -473,25 +485,25 @@ export function resolveBulkActions(opts: {
   );
 
   const promoted: BulkActionDef[] = [];
-  const unresolved: string[] = [];
+  const undeclared: string[] = [];
   for (const name of names) {
     if (typeof name !== 'string' || name === '') continue;
     // Already surfaced (an authored def of the same name, or an earlier pass
     // over a repeated entry) — drop the duplicate rather than render a twin.
-    // Both outcomes claim the name: the bar keys its buttons on it, so even
-    // two dead-name entries would collide.
+    // Both outcomes claim the name, so a repeated undeclared name is reported
+    // once.
     if (claimed.has(name)) continue;
     claimed.add(name);
     const match = objectActions.find(a => a?.name === name);
     if (match) {
       promoted.push(toBulkActionDef(match, opts.localizeLabel));
     } else {
-      unresolved.push(name);
+      undeclared.push(name);
     }
   }
 
   return {
     defs: promoted.length > 0 ? [...authored, ...promoted] : authored,
-    unresolved,
+    undeclared,
   };
 }

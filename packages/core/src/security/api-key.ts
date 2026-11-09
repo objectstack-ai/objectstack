@@ -18,7 +18,8 @@
  *  - The raw key and its hash must never enter logs, HTTP responses, error
  *    messages, commit messages or comments.
  *  - Validation is fail-closed: anything ambiguous (missing, revoked, expired,
- *    malformed) resolves to "no principal", never to an elevated one.
+ *    malformed) resolves to "no principal", never to an elevated one, and a
+ *    key authenticates only as an owner who exists.
  */
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -30,6 +31,13 @@ import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 import { accountScopeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
 import { isMissingTableError } from '@objectstack/types';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
+import { isUserBanInForce, USER_BAN_FIELDS } from './user-ban.js';
+import {
+  credentialUseClientOf,
+  runWithCredentialUseClient,
+  type CredentialUseClient,
+  type CredentialUseClientInput,
+} from './credential-use-client.js';
 
 /** Default visible prefix for generated keys (helps users identify a key). */
 export const API_KEY_PREFIX = 'osk_';
@@ -205,6 +213,104 @@ export function apiKeyLifecyclePolicySourceOf(
   return () => service.resolveApiKeyLifecyclePolicy!();
 }
 
+// ── [#23367, ADR-0151 D4] The life a key is signed with ──────────────────────
+//
+// The one rule every door that mints a key applies — `POST /keys` for the
+// caller's own key, and the AI service account key door — so a person's key
+// and an account's key are bound by the same default life and the same
+// ceiling. Two steps, because the doors read the request before they read the
+// policy (a body that does not parse is refused without asking the auth
+// service, whose outage answers 503).
+
+/**
+ * [#23367] The clock skew the ceiling forgives. A client that computes "one
+ * year from now" on its own clock and sends it is asking for exactly the
+ * ceiling; a client clock a few seconds ahead of the server's must not turn
+ * that into a refusal.
+ */
+const API_KEY_EXPIRY_CEILING_SKEW_MS = 60_000;
+
+/** A request `expires_at` that is no date, or not in the future: always `400 VALIDATION_ERROR`. */
+export interface ApiKeyExpiryRefusal {
+  ok: false;
+  status: 400;
+  code: 'VALIDATION_ERROR';
+  message: string;
+}
+
+/**
+ * A date further away than the policy's ceiling. It carries no wire code: each
+ * door answers it with its own ledgered code (`POST /keys` with
+ * `API_KEY_EXPIRY_TOO_LONG`, under `@objectstack/runtime`), and `latest` is the
+ * latest expiry a key signed now may have.
+ */
+export interface ApiKeyExpiryCeilingRefusal {
+  ok: false;
+  status: 400;
+  ceiling: true;
+  latest: string;
+  message: string;
+}
+
+/**
+ * Step 1, the request: the `expires_at` a caller asked for, as epoch
+ * milliseconds, or `undefined` when it asked for none (absent or empty). A
+ * number below 1e12 is read as seconds, a larger one as milliseconds. A value
+ * that does not parse as a date, or is not in the future, is refused `400
+ * VALIDATION_ERROR`.
+ */
+export function readRequestedApiKeyExpiry(
+  requested: unknown,
+  nowMs: number,
+): { ok: true; requestedMs?: number } | ApiKeyExpiryRefusal {
+  if (requested == null || requested === '') return { ok: true };
+  const ms = typeof requested === 'number'
+    ? (requested < 1e12 ? requested * 1000 : requested)
+    : Date.parse(String(requested));
+  if (Number.isNaN(ms)) {
+    return { ok: false, status: 400, code: 'VALIDATION_ERROR', message: 'Invalid expires_at: must be a parseable date' };
+  }
+  if (ms <= nowMs) {
+    return { ok: false, status: 400, code: 'VALIDATION_ERROR', message: 'Invalid expires_at: must be in the future' };
+  }
+  return { ok: true, requestedMs: ms };
+}
+
+/**
+ * Step 2, the policy: the `expires_at` the key is signed with. No date asked
+ * for gets the policy's default life (never a permanent key), or no expiry
+ * when no policy is configured (a kernel with no `auth` service has no auth
+ * configuration). A date further away than the policy's ceiling is refused
+ * with a message naming the latest date that would be accepted (each door
+ * picks the wire code); exactly the ceiling is accepted.
+ */
+export function signApiKeyExpiry(
+  policy: ApiKeyLifecyclePolicy | undefined,
+  requestedMs: number | undefined,
+  nowMs: number,
+): { ok: true; expiresAt?: string } | ApiKeyExpiryCeilingRefusal {
+  if (requestedMs === undefined) {
+    return policy
+      ? { ok: true, expiresAt: new Date(nowMs + policy.defaultExpiryDays * DAY_MS).toISOString() }
+      : { ok: true };
+  }
+  if (policy && requestedMs > nowMs + policy.maxExpiryDays * DAY_MS + API_KEY_EXPIRY_CEILING_SKEW_MS) {
+    const latest = new Date(nowMs + policy.maxExpiryDays * DAY_MS).toISOString();
+    return {
+      ok: false,
+      status: 400,
+      ceiling: true,
+      latest,
+      message:
+        `expires_at ${new Date(requestedMs).toISOString()} is further away than this deployment allows: the `
+        + `Authentication API key policy's Maximum key lifetime is ${policy.maxExpiryDays} days, so the `
+        + `latest expiry a key signed now may have is ${latest}. Ask for that date or an earlier one, and `
+        + 'rotate the key before it expires.',
+    };
+  }
+  return { ok: true, expiresAt: new Date(requestedMs).toISOString() };
+}
+
 /**
  * [#23367] The three lifecycle refusals, each declared as its wire pair — the
  * ADR-0112 code (registered under `@objectstack/core`) beside the status it
@@ -311,19 +417,32 @@ function lifecycleRefusalOf(
       // (`sys_api_key`'s own row action): the key works at once, no re-issue.
       // Who may clear it depends on why it was set, read off the row's
       // `revoked_reason`: a key an administrator's forced password reset
-      // revoked (`admin_password_reset`) is restored by a platform
-      // administrator only (plugin-auth `api-key-restore-guard.ts` refuses its
-      // owner); any other revoked key by its owner or a platform administrator.
-      // The text names exactly those restorers and never claims the key is
-      // gone for good. Rotation stays the other road, for a key that should
-      // not come back.
+      // revoked (`admin_password_reset`), and a key a platform administrator
+      // revoked although it is not theirs (`administrator_suspended`), is
+      // restored by a platform administrator only (plugin-auth
+      // `api-key-restore-guard.ts` refuses its owner); a key revoked because
+      // its owner's membership in the
+      // organization ended (`organization_membership_ended`, written by the
+      // host that removed them) by no one, the same guard refusing every
+      // user-context restore of it; any other revoked key by its owner or a
+      // platform administrator. The text names exactly those restorers, and
+      // says the key cannot come back only where no restorer exists. Rotation
+      // stays the other road, for a key that should not come back.
       message: row.revoked_reason === 'admin_password_reset'
         ? `${label} was revoked by an administrator's forced password reset. Only a platform administrator can `
           + 'restore it (the Restore API Key action on the API Keys list); otherwise create a new key '
           + '(POST /api/v1/keys, or the API Keys page) and replace this one wherever it is configured.'
-        : `${label} was revoked. Its owner or a platform administrator can restore it (the Restore API Key action `
-          + 'on the API Keys list); otherwise create a new key (POST /api/v1/keys, or the API Keys page) and replace '
-          + 'this one wherever it is configured.',
+        : row.revoked_reason === 'administrator_suspended'
+          ? `${label} was suspended by a platform administrator. Only a platform administrator can restore it `
+            + '(the Restore API Key action on the API Keys list); otherwise create a new key (POST /api/v1/keys, or '
+            + 'the API Keys page) and replace this one wherever it is configured.'
+        : row.revoked_reason === 'organization_membership_ended'
+          ? `${label} was revoked because its owner's membership in the organization ended, and it cannot be `
+            + 'restored. A member of the organization creates a new key (POST /api/v1/keys, or the API Keys page) '
+            + 'and replaces this one wherever it is configured.'
+          : `${label} was revoked. Its owner or a platform administrator can restore it (the Restore API Key action `
+            + 'on the API Keys list); otherwise create a new key (POST /api/v1/keys, or the API Keys page) and replace '
+            + 'this one wherever it is configured.',
       ...ids,
     };
   }
@@ -423,6 +542,11 @@ const STAMP_FAILURE_REPORTED = new WeakSet<object>();
  * found. It is a durability degradation all the same — the field claims each
  * use, and an unstamped use lets a key in daily use read as idle — so it is
  * said at `error`, once per engine, with the consequence and the remedy.
+ *
+ * [#31821] The write runs inside the use's client-facts scope
+ * (`credential-use-client.ts`), so the `credential_use` ledger row the stamp
+ * produces records where the use came from. The facts change nothing about
+ * when the stamp is written.
  */
 async function stampAdmittedKey(
   ql: any,
@@ -430,6 +554,7 @@ async function stampAdmittedKey(
   keyId: string | undefined,
   nowMs: number,
   policy: ApiKeyLifecyclePolicy | undefined,
+  client: CredentialUseClient,
 ): Promise<void> {
   if (!keyId || !ql || typeof ql.update !== 'function') return;
   const patch: Record<string, string> = {};
@@ -443,7 +568,9 @@ async function stampAdmittedKey(
   }
   if (Object.keys(patch).length === 0) return;
   try {
-    await ql.update('sys_api_key', { id: keyId, ...patch }, { context: { isSystem: true } });
+    await runWithCredentialUseClient(client, () =>
+      ql.update('sys_api_key', { id: keyId, ...patch }, { context: { isSystem: true } }),
+    );
   } catch (err) {
     if (typeof ql === 'object' && STAMP_FAILURE_REPORTED.has(ql)) return;
     if (typeof ql === 'object') STAMP_FAILURE_REPORTED.add(ql);
@@ -492,13 +619,18 @@ export interface ApiKeyPrincipal {
  * key is unknown/revoked/expired": a refusal means the credential is real and
  * intact but cannot be admitted under this deployment's tenancy posture.
  */
-export type ApiKeyRefusalReason = 'organization_required' | 'organization_membership_ended';
+export type ApiKeyRefusalReason =
+  | 'organization_required'
+  | 'organization_membership_ended'
+  | 'owner_banned'
+  | 'owner_absent';
 
 /**
  * The verdict on an inbound API key. Five outcomes, deliberately distinct:
  *
- *  - `none` — no key header, or a key that is unknown / owner-less.
- *    Indistinguishable by design (never tell a prober which), and the caller
+ *  - `none` — no key header, or a key that is unknown / owner-less (a row
+ *    that names no owner at all; a row naming an owner who does not exist is
+ *    `refused`, below). Indistinguishable by design (never tell a prober which), and the caller
  *    MAY fall through to the session path exactly as before.
  *  - `lifecycle` — [#23367, ruling A] a REAL key whose own state refuses it:
  *    revoked, expired (its `expires_at`, or the grace of a key signed with
@@ -518,7 +650,10 @@ export type ApiKeyRefusalReason = 'organization_required' | 'organization_member
  *    caller must NOT fall through to the session path, for the reason the
  *    `refused` arm gives. ⛔ Not a revocation: nothing is written, and the same
  *    key is admitted again the moment the owner remediates.
- *  - `refused` — a real, intact key the posture cannot admit. The caller must
+ *  - `refused` — a real, intact key the posture cannot admit, whose owner does
+ *    not exist (`owner_absent`: a key authenticates only as an owner who
+ *    exists), or whose owner's ban holds (`owner_banned`,
+ *    {@link isUserBanInForce}). The caller must
  *    NOT fall through to the session path: falling through would be more
  *    permissive than today's behaviour (an API key already outranks a session),
  *    and the whole point of the refusal is that it is LOUD at call time.
@@ -588,7 +723,7 @@ export function effectiveTenancyPosture(
  * the verdict of {@link resolveApiKeyAdmission}, collapsed to a principal.
  *
  * Fail-closed: returns `undefined` for a missing key, an unusable data engine,
- * a key that is unknown / owner-less, a key its own lifecycle
+ * a key that is unknown / owner-less, a key whose owner does not exist, a key its own lifecycle
  * refuses (revoked / expired / inactive — `lifecycle`), a key the tenancy
  * posture refuses, and a key whose OWNER holds an `account`-scope ADR-0069
  * posture (`held`). A `sys_api_key` read that THROWS is no answer at all: it
@@ -639,10 +774,11 @@ export async function resolveApiKeyPrincipal(
  * a caller of it fails closed; a caller that can report WHY (the shared
  * `resolveAuthzContext`) uses this instead.
  *
- * The only refusal decided here is the org-less one, because it needs nothing
- * but the row and the posture. The ex-member refusal needs the caller's
- * membership set and is decided in `resolveAuthzContext`, where that set is
- * already resolved.
+ * The refusals decided here need nothing but the key row, its owner's row and
+ * the posture: an owner who does not exist (`owner_absent`), a banned owner
+ * (`owner_banned`) and the org-less key (`organization_required`). The
+ * ex-member refusal needs the caller's membership set and is decided in
+ * `resolveAuthzContext`, where that set is already resolved.
  *
  * [#23455] Every parameter after `nowMs` is REQUIRED, and `undefined` is a
  * value passed on purpose — see `userAuthGates` below.
@@ -683,6 +819,14 @@ export async function resolveApiKeyAdmission(
    * service passes to quiet the compiler.
    */
   apiKeyLifecycle: ApiKeyLifecyclePolicySource | undefined,
+  /**
+   * [#31821] What the door holds about where the request came from
+   * (`CredentialUseClientInput`), recorded on the `credential_use` row the
+   * key's use stamp produces. Never read for the verdict. Omitted: the row
+   * records the address as `not_supplied`; the user agent is still read from
+   * `headers`.
+   */
+  client?: CredentialUseClientInput,
 ): Promise<ApiKeyAdmission> {
   const apiKey = extractApiKey(headers);
   if (!apiKey) return { outcome: 'none' };
@@ -747,6 +891,65 @@ export async function resolveApiKeyAdmission(
   }
   const lifecycle = lifecycleRefusalOf(row, nowMs, policy, { keyId, userId });
   if (lifecycle) return { outcome: 'lifecycle', refusal: lifecycle };
+
+  // A banned user's credentials are refused while the ban holds. The key is a
+  // credential of its owner, so the owner's ban is read HERE, where the key
+  // becomes that owner, with the one ban predicate (`isUserBanInForce`) the
+  // session refusal shares: the ban flag, lifted once its expiry has passed.
+  //
+  // The answer is the `refused` arm: no principal, no fall-through to the
+  // session path, and on the wire the generic 401 a key that does not exist
+  // gets — nothing tells the holder whether the key, or its owner, is the
+  // reason. ⛔ Not a revocation: nothing is written (the key row is not
+  // revoked and the use is not stamped), so lifting the ban admits the same
+  // key again. Asked after the key's own lifecycle, as every owner question
+  // is: a dead key answers for its own state first.
+  //
+  // One read of the owner's row per key resolution: nothing earlier on this
+  // path has the row (the grants read comes after admission and may be served
+  // from a cache that would not see a fresh ban). A read that THROWS is the
+  // branded store outage, as for `sys_api_key`.
+  //
+  // [maintainer ruling 2026-11-05, option B] An API key authenticates only as
+  // an owner who exists. The key is a credential of its owner (ADR-0090), so a
+  // key whose owner the read does not find is no credential of anyone: it is
+  // `refused` (`owner_absent`), answered on the wire exactly as a key that
+  // does not exist, never falling through to the session path, and named in
+  // the operator's refusal line by its row id and owner id. A store with no
+  // `sys_user` table answers as a store with no row: no owner exists there,
+  // so it refuses every key. Asked here, after the key's own lifecycle and
+  // before the ban, on the same read the ban takes — no read is added.
+  let owner: Record<string, unknown> | undefined;
+  try {
+    let users: any = await ql.find('sys_user', {
+      where: { id: userId },
+      fields: [...USER_BAN_FIELDS],
+      limit: 1,
+      context: { isSystem: true },
+    });
+    if (users && (users as any).value) users = (users as any).value;
+    owner = Array.isArray(users) ? users[0] : undefined;
+  } catch (err) {
+    if (!isMissingTableError(err, 'sys_user')) throw new AuthzStoreUnavailableError('sys_user', err);
+  }
+  if (!owner || typeof owner !== 'object') {
+    return {
+      outcome: 'refused',
+      reason: 'owner_absent',
+      keyId,
+      userId,
+      message: 'The owner of this API key does not exist; a key authenticates only as an owner who exists.',
+    };
+  }
+  if (isUserBanInForce(owner, nowMs)) {
+    return {
+      outcome: 'refused',
+      reason: 'owner_banned',
+      keyId,
+      userId,
+      message: 'The owner of this API key is banned; the key is refused while the ban holds.',
+    };
+  }
 
   // [#8287 / PD #12] ONE spelling. The producer (`runtime` `/keys`) writes
   // `active_organization_id` and nothing else, so this reads that column and
@@ -867,7 +1070,7 @@ export async function resolveApiKeyAdmission(
   // integration is using it, and ruling C′ item 4 serves it again the moment
   // the owner remediates, which an idle clock run out during the hold would
   // defeat. A key the tenancy posture refused (above) is not.
-  await stampAdmittedKey(ql, row, keyId, nowMs, policy);
+  await stampAdmittedKey(ql, row, keyId, nowMs, policy, credentialUseClientOf(client, headers));
 
   if (gate) return { outcome: 'held', principal, gate };
   return { outcome: 'admitted', principal };

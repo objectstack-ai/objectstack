@@ -41,7 +41,7 @@ derived from your own metadata:
   per bound widget and measure (a count, a sum, or a derived measure over
   those), fixture rows are written on known days
   around every preset's edges, and the widget is asked through the dataset door
-  with no window and under each of the 13 presets, before and after the
+  with no window and under each preset, before and after the
   fixtures. Each difference must equal the fixture rows the window selects; a
   window that answers nothing is `blank`, and one that never narrows is inert.
 
@@ -165,7 +165,8 @@ server resolves the tokens, and the ground truth resolves the same window with
 `@objectstack/core`'s `resolveFilterTokens` on the caller's reference timezone
 (UTC unless the `ExecutionContext` carries one). Fixture rows are written
 through the seed door on each preset's first and last day and the day either
-side (never after today), each stamped at UTC noon (a `date` field takes the
+side (never after today, except a forward preset's own edges, which are
+future days), each stamped at UTC noon (a `date` field takes the
 day), owned by the caller, with every column the widget's filter, the
 dataset's filter and the measure's filter compare held to a value they select,
 and read back before anything is judged. A row is the smallest record the CRUD
@@ -511,7 +512,7 @@ compute one, so it is not read as "no grant anywhere". `summary.hardFailures` is
 **Dashboard date windows** (`runDashboardWindowProofs`), per widget a
 dashboard's `dateRange` binds. Probes per measure that is a count, a sum or
 derived over those: the widget with no
-window, then each of the 13 presets, each counted before and after the
+window, then each preset, each counted before and after the
 fixture rows:
 
 | status | meaning |

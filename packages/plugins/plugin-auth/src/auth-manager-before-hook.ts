@@ -12,7 +12,7 @@
  * it stood, re-indented four levels and otherwise unedited: the same actor
  * resolver handed to the attribution scope, the same refresh skip for a minted
  * principal session, the same per-number OTP send guard, the same password
- * complexity and reuse checks, the same change-email capture, the same
+ * complexity and reuse checks, the same
  * remove-member, organization-delete and no-record revoke refusals, the same
  * held-caller refusal on the admin plugin's role-scalar actions, the same
  * no-record admin revoke refusal, the same held-caller refusal on rewriting or
@@ -69,9 +69,12 @@ import {
   LAST_LOCAL_CREDENTIAL_CODE,
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
+import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.js';
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
+import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
 import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change-granted-set.js';
+import { refuseVisitorResendWithoutLiveTransport } from './visitor-verification-resend.js';
 
 /**
  * The `AuthManager` members the function below reads — every one of them, and
@@ -81,7 +84,7 @@ import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change
  * `config` is read-only here: the host hands it out through a getter.
  */
 export interface BeforeHookHost {
-  assertAccountNotLocked: AuthManager['assertAccountNotLocked'];
+  admitSignInAttempt: AuthManager['admitSignInAttempt'];
   assertActorNotHeld: AuthManager['assertActorNotHeld'];
   assertAdminRevokeUserSessionIdentifiesRecord: AuthManager['assertAdminRevokeUserSessionIdentifiesRecord'];
   assertOrganizationDeletable: AuthManager['assertOrganizationDeletable'];
@@ -90,11 +93,13 @@ export interface BeforeHookHost {
   assertPhoneOtpSendAllowed: AuthManager['assertPhoneOtpSendAllowed'];
   assertRemoveMemberPermitted: AuthManager['assertRemoveMemberPermitted'];
   assertRevokeSessionIdentifiesRecord: AuthManager['assertRevokeSessionIdentifiesRecord'];
+  assertSsoProviderDeletable: AuthManager['assertSsoProviderDeletable'];
   readonly config: AuthManager['config'];
   existingAddressSignUpAnswersSuccess: AuthManager['existingAddressSignUpAnswersSuccess'];
   hasExistingUserFor: AuthManager['hasExistingUserFor'];
   isAuthGateActive: AuthManager['isAuthGateActive'];
   isBootstrapCreation: AuthManager['isBootstrapCreation'];
+  isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   isOperatorProvisioning: AuthManager['isOperatorProvisioning'];
   isPlatformAdminUserId: AuthManager['isPlatformAdminUserId'];
   resolveActor: AuthManager['resolveActor'];
@@ -126,9 +131,13 @@ export async function globalBeforeHook(
   // `withSystemContext`): better-auth already authorized them under
   // its own ACL, and re-authorizing as the human would open the
   // second adjudication track ADR-0095 D3 closed.
+  //
+  // An impersonation session also names the administrator at the
+  // keyboard: it travels beside the user as the attribution-only
+  // `impersonatedBy`, read off that same session, never off the body.
   setAuthActorResolver(async () => {
     const actor = await this.resolveActor(ctx);
-    return actor?.userId ?? null;
+    return actor ? { userId: actor.userId, impersonatedBy: actor.impersonatedBy } : null;
   });
 
   // ── #23813: a minted principal session is never refreshed ───────
@@ -141,6 +150,17 @@ export async function globalBeforeHook(
   // of every endpoint on both lanes and in-process — see
   // `principal-session-mint.ts` (3b).
   if (carriesPrincipalSession(ctx)) await setShouldSkipSessionRefresh(true);
+
+  // ── An auth request is judged and executed as one account ────────
+  // AHEAD OF EVERY GATE BELOW, and of the endpoint: a request whose
+  // session cookie and bearer token name two different signed-in
+  // accounts is refused here (401 CREDENTIALS_NAME_DIFFERENT_ACCOUNTS),
+  // so every gate that follows, every after-effect and the endpoint
+  // itself see one account or none. One credential, one account, or a
+  // credential that names nobody passes untouched. The two steps above
+  // read nothing, so they keep their place. `one-account-per-request.ts`
+  // states the rule and how each credential is read.
+  await refuseRequestNamingDifferentAccounts(ctx);
 
   // ── #2780: per-number OTP send guard (admission control) ─────
   // MUST run BEFORE the phone-number endpoints: better-auth's
@@ -204,38 +224,6 @@ export async function globalBeforeHook(
       }
     }
     // fall through to the path's own handling below
-  }
-
-  // ── #8019: capture the address a change-email would move AWAY from ──
-  // The notice goes out from the after-hook, but the OLD address only
-  // exists BEFORE the endpoint runs — and `ctx.context.session` is not
-  // it: better-auth's own `sensitiveSessionMiddleware` populates that,
-  // and endpoint middleware runs AFTER this global before-hook, so the
-  // field is still empty here. Resolve the session explicitly, the same
-  // hook-order-independent way `/oauth2/authorize` below has to.
-  //
-  // Stashed, never sent from here: at this point the request has not
-  // been accepted yet (it can still fail on `newEmail` equal to the
-  // current address, on rate limiting, or on a missing transport), and
-  // a notice for a request better-auth then refuses would be a false
-  // alarm about an identity move that never happened.
-  if (ctx?.path === '/change-email') {
-    try {
-      const { getSessionFromCtx } = await import('better-auth/api');
-      const s: any = await getSessionFromCtx(ctx as any).catch(() => null);
-      const from = s?.user?.email;
-      if (typeof from === 'string' && from) {
-        ctx.context.__osChangeEmailFrom = {
-          email: from,
-          ...(typeof s?.user?.name === 'string' && s.user.name ? { name: s.user.name } : {}),
-          ...(typeof s?.user?.id === 'string' && s.user.id ? { id: s.user.id } : {}),
-        };
-      }
-    } catch {
-      // Unresolvable session → no stash → no notice. better-auth's own
-      // session middleware still rejects the request with 401, so this
-      // never silently drops a notice for a change that proceeds.
-    }
   }
 
   // ── #8289: remove-member answers its PERMISSION denial itself ──
@@ -335,6 +323,17 @@ export async function globalBeforeHook(
   ) {
     const actor = await this.resolveActor(ctx);
     if (actor?.userId) await this.assertActorNotHeld(actor);
+    // fall through — the vendor's own provider-access check still runs
+  }
+
+  // ── [#30300] nor delete the last way to sign in ───────────────────
+  // With email and password off and one identity provider as the only
+  // other way in, Setup's "Delete SSO Provider" answered 200 and nobody
+  // could sign in again (measured on a real boot). Asked after the
+  // held-caller refusal above and before the vendor's first write; the
+  // sign-in method floor decides (`sign-in-method-floor.ts`).
+  if (ctx?.path === SSO_PROVIDER_DELETE_PATH) {
+    await this.assertSsoProviderDeletable(ctx);
     // fall through — the vendor's own provider-access check still runs
   }
 
@@ -671,14 +670,31 @@ export async function globalBeforeHook(
     if (roleChangeDeps) await snapshotRoleChangeGrants(ctx, roleChangeDeps);
   }
 
+  // ── The verification-email resend of a visitor who is not signed in ──
+  // While no email transport is live, every such resend is refused here,
+  // before the endpoint runs, with one coded answer whatever the address
+  // (400 `EMAIL_SERVICE_REQUIRED`). While one is live the resend answers
+  // the same whatever the send does: its send runs after the response
+  // (`sendAfterResponseOnSignUpAndVisitorResend`). A signed-in caller's
+  // resend passes through untouched. `visitor-verification-resend.ts`
+  // states the rule and how a visitor is told apart.
+  await refuseVisitorResendWithoutLiveTransport(ctx, {
+    isEmailDeliveryLive: () => this.isEmailDeliveryLive(),
+    resolveActor: (c) => this.resolveActor(c),
+  });
+
   // ── ADR-0069 D2: account lockout (gate) ─────────────────────
-  // Reject a sign-in for a locked identity BEFORE better-auth checks
-  // the password — a lock must hold even against the correct password.
-  // The refusal is a refused sign-in, so it writes its `login_failed`
-  // row (`auth-session-audit.ts`, account events) before it throws.
+  // BEFORE better-auth checks the password: the attempt is stamped as a
+  // failure (settled by the after-hook once the check answers), and a
+  // locked identity is refused — a lock must hold even against the
+  // correct password. The refusal is the one a wrong password gets, made
+  // by better-auth's own credential check (`sign-in-lockout-refusal.ts`),
+  // unless the deployment opted into `403 ACCOUNT_LOCKED`. It is a
+  // refused sign-in, so it writes its `login_failed` row
+  // (`auth-session-audit.ts`, account events).
   if (ctx?.path === SIGN_IN_EMAIL_PATH) {
     const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-    if (email) await this.assertAccountNotLocked(email, ctx);
+    if (email) await this.admitSignInAttempt(email, ctx);
     return;
   }
 

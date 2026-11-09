@@ -88,7 +88,20 @@ const ROWS = Array.from({ length: 12 }, (_, i) => ({
   status: 'open',
 }));
 
-function renderGrid(opts: Record<string, unknown>) {
+/**
+ * A data source that serves only the object's schema, with `approve` declared:
+ * a bare `bulkActions` name auto-enables selection only once it resolves to an
+ * action the object declares (objectstack#30169). The rows stay inline.
+ */
+const DECLARES_APPROVE: any = {
+  getObjectSchema: async (name: string) => ({
+    name,
+    fields: { id: { type: 'text' }, name: { type: 'text' }, status: { type: 'text' } },
+    actions: [{ name: 'approve', label: 'Approve' }],
+  }),
+};
+
+function renderGrid(opts: Record<string, unknown>, dataSource?: any) {
   const schema: any = {
     type: 'object-grid',
     objectName: 'task',
@@ -101,7 +114,7 @@ function renderGrid(opts: Record<string, unknown>) {
   };
   return render(
     <ActionProvider>
-      <ObjectGrid schema={schema} />
+      <ObjectGrid schema={schema} {...(dataSource ? { dataSource } : {})} />
     </ActionProvider>,
   );
 }
@@ -236,15 +249,15 @@ describe('object-grid `selection`: presence enables, an explicit off wins (objec
     // `bulkActions` alone auto-enables multi-select (the row below proves it),
     // so this is the member deciding against a declaration that asks for the
     // opposite — and the author is told nothing.
-    renderGrid({ ...paged, selection: { type: 'none' }, bulkActions: ['approve'] });
+    renderGrid({ ...paged, selection: { type: 'none' }, bulkActions: ['approve'] }, DECLARES_APPROVE);
     await waitFor(() => expect(screen.getByText('Row 01')).toBeInTheDocument());
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 
   it('CONTROL — the same schema WITHOUT the member auto-enables multi-select', async () => {
-    renderGrid({ ...paged, bulkActions: ['approve'] });
+    renderGrid({ ...paged, bulkActions: ['approve'] }, DECLARES_APPROVE);
     await waitFor(() => expect(screen.getByText('Row 01')).toBeInTheDocument());
-    expect(screen.getAllByRole('checkbox')).toHaveLength(6);
+    await waitFor(() => expect(screen.getAllByRole('checkbox')).toHaveLength(6));
   });
 
   it('`none` also beats the deprecated `selectable: true`', async () => {

@@ -47,16 +47,26 @@
  *    the contract publishes WHICH fields are masked, not the masked value.
  *  - A record-write row's snapshot that is not a JSON object cannot be judged
  *    key by key, so it is dropped whole (fail closed).
+ *  - [#30923] A `config_change` row about a settings store
+ *    ({@link AUDIT_LOG_SETTINGS_STORE_OBJECTS}) carries, on each side, ONE
+ *    field of that store: the setting's `value` — readable for a key that is
+ *    not secret-valued — with its `digest` (`service-settings`'
+ *    `config-change-audit.ts`). A reader not served the store's `value` field
+ *    has both dropped, the fingerprint with the value it fingerprints (an
+ *    unkeyed digest of a short value answers "is it X?"), as the CRUD
+ *    mirror's row about the same write drops `value`; `namespace`, `key` and
+ *    `scope` stay. A snapshot that is not a JSON object is dropped whole.
  *  - A row of any other action is served as written. Measured per writer on
  *    the tree this landed on: `read`, `login`, `logout`, `login_failed`,
- *    `account_locked`, `import` and `action_invocation` rows write no snapshot; a `config_change` row's snapshot is a DIGEST of the
- *    setting, never its value (`service-settings`' `config-change-audit.ts`);
- *    a `platform_admin_standing_change` row's is the deployment's
+ *    `account_locked`, `import` and `action_invocation` rows write no
+ *    snapshot; a `config_change` row naming no settings store (the deployment
+ *    notice's hide) describes no field of one; a
+ *    `platform_admin_standing_change` row's is the deployment's
  *    administrator roster (`plugin-security`). None is a parent record's field
  *    map, and narrowing them by a parent's field set would only delete their
  *    own vocabulary.
- *  - `metadata` is not narrowed: the mirror records only the delegated-write
- *    attribution there.
+ *  - `metadata` is not narrowed: the mirror records only attribution there —
+ *    the delegated-write pair and the impersonating administrator.
  *
  * ## Fail closed
  *
@@ -87,8 +97,19 @@ import {
   type FieldVisibilitySource,
 } from './served-fields.js';
 import type { ActivityMiddlewareEngine } from './activity-read-visibility.js';
+import { AUDIT_LOG_SETTINGS_STORE_OBJECTS } from './objects/sys-audit-log.object.js';
 
 const LEDGER_OBJECT = 'sys_audit_log';
+
+/**
+ * [#30923] The settings service's ledger action, and the one field of a
+ * settings store its snapshot describes: the `value` both stores declare.
+ * `digest` is that value's fingerprint, so it is judged with it.
+ */
+const CONFIG_CHANGE_ACTION = 'config_change';
+const SETTINGS_STORES = new Set<string>(AUDIT_LOG_SETTINGS_STORE_OBJECTS);
+const SETTINGS_VALUE_FIELD = 'value';
+const CONFIG_CHANGE_VALUE_KEYS = [SETTINGS_VALUE_FIELD, 'digest'] as const;
 const SEAM = 'audit log field redaction';
 
 /**
@@ -110,6 +131,23 @@ const JUDGED_BY = ['object_name', 'action'] as const;
 const OBJECT_NAME_RE = /^[a-z_][a-z0-9_]*$/;
 
 const RECORD_WRITE = new Set<string>(LEDGER_RECORD_WRITE_ACTIONS);
+
+/**
+ * [#30923] A `config_change` snapshot for a reader not served the settings
+ * store's `value`: drop the value and its fingerprint, keep which setting
+ * changed. Mutates `snapshot`; answers whether it changed.
+ */
+function dropUnservedSettingValue(snapshot: Record<string, unknown>, served: ReadonlySet<string>): boolean {
+  if (served.has(SETTINGS_VALUE_FIELD)) return false;
+  let changed = false;
+  for (const key of CONFIG_CHANGE_VALUE_KEYS) {
+    if (key in snapshot) {
+      delete snapshot[key];
+      changed = true;
+    }
+  }
+  return changed;
+}
 
 /** Drop both snapshot columns — the fail-closed answer for one row. */
 function stripSnapshots(row: Record<string, unknown>): void {
@@ -141,7 +179,10 @@ export async function redactAuditLogRows(
       stripSnapshots(row);
       continue;
     }
-    if (!RECORD_WRITE.has(action)) continue;
+    // [#30923] A settings write's row describes one field of its store.
+    const settingsChange =
+      action === CONFIG_CHANGE_ACTION && typeof row.object_name === 'string' && SETTINGS_STORES.has(row.object_name);
+    if (!RECORD_WRITE.has(action) && !settingsChange) continue;
 
     const object = row.object_name;
     if (typeof object !== 'string' || !OBJECT_NAME_RE.test(object)) {
@@ -166,7 +207,10 @@ export async function redactAuditLogRows(
         continue;
       }
       // Untouched bytes for a reader served every key.
-      if (dropUnservedKeys(snapshot, served)) row[col] = JSON.stringify(snapshot);
+      const changed = settingsChange
+        ? dropUnservedSettingValue(snapshot, served)
+        : dropUnservedKeys(snapshot, served);
+      if (changed) row[col] = JSON.stringify(snapshot);
     }
   }
 }

@@ -7,9 +7,10 @@
  */
 
 /**
- * objectstack-ai/objectstack#27823 — a record delete is permanent (the platform
- * has no recycle bin), so every one-record delete question says so, and the
- * success toast can name the record.
+ * objectstack-ai/objectstack#27823 — a platform object's delete is permanent
+ * (it never enters the recycle bin, ADR-0148 D4), so its one-record delete
+ * questions say so, and the success toast can name the record. A business
+ * object's question-only copy is pinned in `recycle-bin-delete-copy-30239`.
  *
  * The batch question (`console.objectView.bulkDeleteConfirm`) already carried
  * the pack's "this cannot be undone" sentence. The pin is that both one-record
@@ -21,6 +22,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { builtInLocales } from '../locales/index';
 
 type LocaleCode = keyof typeof builtInLocales;
@@ -39,7 +41,7 @@ function permanenceSentence(lang: LocaleCode): string {
 
 describe('record delete says it is permanent and the toast can name the record (objectstack#27823)', () => {
   it('reads ten packs, and the en permanence sentence is the house wording', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     // Positive control for the extraction: it lands on a real sentence, not ''.
     expect(permanenceSentence('en')).toBe('This cannot be undone.');
   });

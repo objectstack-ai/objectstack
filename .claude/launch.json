@@ -18,6 +18,52 @@
         "file:/tmp/showcase-dogfood-3777/data.db"
       ],
       "port": 3777
+    },
+    {
+      "name": "showcase-scheduled-work-3778",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "OS_PORT=3778",
+        "OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1",
+        "pnpm",
+        "-C",
+        "examples/app-showcase",
+        "exec",
+        "objectstack",
+        "dev",
+        "--ui",
+        "--seed-admin",
+        "--no-compile",
+        "--no-watch",
+        "-p",
+        "3778",
+        "-d",
+        "file:/tmp/showcase-scheduled-work-3778/data.db"
+      ],
+      "port": 3778
+    },
+    {
+      "name": "showcase-react-pages-off-3779",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "OS_PORT=3779",
+        "OS_PAGE_REACT_ENABLED=false",
+        "pnpm",
+        "-C",
+        "examples/app-showcase",
+        "exec",
+        "objectstack",
+        "dev",
+        "--ui",
+        "--seed-admin",
+        "--no-compile",
+        "--no-watch",
+        "-p",
+        "3779",
+        "-d",
+        "file:/tmp/showcase-react-pages-off-3779/data.db"
+      ],
+      "port": 3779
     }
   ]
 }

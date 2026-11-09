@@ -173,18 +173,23 @@ function makeProtocol(opts: { unreadableCommits?: readonly string[] } = {}) {
     return { protocol, rows, commits };
 }
 
-/** Write a row through the repository, which stores `type` exactly as given. */
+/**
+ * Write a row through the repository, which stores `type` exactly as given,
+ * bound to the package the commits are recorded for: [#29414] a commit's
+ * revert addresses the committing package's own rows, as its publish wrote them.
+ */
 async function seed(protocol: any, type: string, name: string, label: string): Promise<void> {
     await protocol.ensureOverlayIndex();
     const repo = protocol.getOverlayRepo(null);
     const ref = { type, name, org: 'env' };
-    const existing = await repo.get(ref, { state: 'active' });
+    const existing = await repo.get(ref, { state: 'active', packageId: PKG });
     await repo.put(ref, { name, label }, {
         parentVersion: existing?.hash ?? null,
         actor: null,
         source: 'test.rollback-item-failures',
         intent: 'runtime-only',
         state: 'active',
+        packageId: PKG,
     });
 }
 

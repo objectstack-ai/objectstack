@@ -343,7 +343,7 @@ describe('SettingsView — the branches this refusal must not disturb', () => {
 
     await typeSecretAndSave(container);
 
-    const msg = await screen.findByText(/does not match the expected format/i);
+    const msg = await screen.findByText(/is not in a valid format/i);
     expect(msg.getAttribute('role')).toBe('alert');
     await waitFor(() => {
       expect(inputFor('Account ID')!.getAttribute('aria-invalid')).toBe('true');

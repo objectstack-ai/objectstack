@@ -80,8 +80,10 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
     kind: 'off',
     why: 'read when a label is resolved for a nav entry without its own label, or a view entry; with { byName: true } (Home, recent rows) the object is read by name',
   },
+  'packages/app-shell/src/hooks/useNavTargetIcon.ts': { kind: 'byName', why: "an object nav entry with no icon, its object's icon by name, as the sidebar reads that entry's label (objectstack#30126)" },
   'packages/app-shell/src/hooks/useRecentItemLabel.ts': { kind: 'byName', why: "a recent object or view entry's object, by name (objectstack#29121)" },
   'packages/app-shell/src/layout/ActivityObjectLabel.tsx': { kind: 'byName', why: "the inbox's and the home rail's activity rows, each row's object by name (objectstack#29121)" },
+  'packages/app-shell/src/views/UserAssignedWorkPanel.tsx': { kind: 'byName', why: "the ban dialog's assigned-work panel, each counted object by name (objectstack#30205)" },
   'packages/app-shell/src/chrome/CommandPalette.tsx': { kind: 'off', why: "the Studio scope's object list, read while the palette lists Studio entries" },
   'packages/app-shell/src/console/home/HomeLayout.tsx': {
     kind: 'scope',
@@ -113,9 +115,18 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   },
   'packages/app-shell/src/views/metadata-admin/PositionHoldersSection.tsx': { kind: 'off', why: 'the metadata admin' },
   'packages/app-shell/src/views/metadata-admin/AssignedUsersSection.tsx': { kind: 'off', why: 'the metadata admin' },
+  'packages/app-shell/src/views/setup/RecycleBinPage.tsx': { kind: 'off', why: 'Setup → Recycle Bin, not mounted on an app object-list open' },
   'packages/app-shell/src/views/metadata-admin/previews/ScreenPreview.tsx': { kind: 'off', why: "the metadata admin's form-screen preview" },
   'packages/app-shell/src/views/studio-design/ObjectListViewInspector.tsx': { kind: 'off', why: 'Studio' },
+  'packages/app-shell/src/views/studio-design/ObjectListViewTitle.tsx': {
+    kind: 'off',
+    why: "Studio: the object's view labels New view refuses to reuse, the read the list-view panel made before the switcher moved into the header (objectstack#30046)",
+  },
   'packages/app-shell/src/views/studio-design/studio-canvas-preview.tsx': { kind: 'off', why: 'Studio' },
+  'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx': {
+    kind: 'off',
+    why: "Studio: the Data pillar's Form tab asks selectRecordFormView which form view the app opens, over the served objects (objectstack#30057)",
+  },
   'packages/app-shell/src/views/studio-design/relatedListVocabulary.ts': {
     kind: 'off',
     why: "Studio: an object's inbound relationships, read while its Settings relatedLists editor or a field group's related-table picker is mounted",

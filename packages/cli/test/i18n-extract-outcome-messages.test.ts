@@ -15,7 +15,7 @@
  * but never seeded, the rule every other action copy key follows.
  */
 import { describe, it, expect } from 'vitest';
-import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract.js';
+import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-bundle-extract.js';
 
 const config: any = {
   objects: [

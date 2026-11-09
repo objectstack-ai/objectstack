@@ -78,8 +78,46 @@
  * names the RESOLVED account's id, and an identifier that resolves to no
  * account produces no row (an auth row without a subject is the shape this
  * module already refuses to write, above).
+ *
+ * ## A sign-in an authentication policy holds (#30924)
+ *
+ * An ADR-0069 D3 enforced-MFA hold is NOT a refused sign-in: the credential
+ * check passes, better-auth mints the session, and the hold is a posture of
+ * that session, computed per session read (`customSession` → `user.authGate`)
+ * and enforced at the transport seams, so a held user still reaches
+ * `/two-factor/*` to enroll. The sign-in therefore already has its row, the
+ * `login` above, and that row is where the hold is recorded:
+ * `context.reason` names the posture's machine code (`MFA_REQUIRED`, the same
+ * vocabulary a refused sign-in's `reason` uses) and `context.rule` the policy
+ * that holds it (`mfa_required`), from `AUDITED_SESSION_HOLD_RULES` in
+ * `session-policy-hold.ts`, a package-internal module so the published surface
+ * of this one does not move.
+ *
+ * Why the `login` row and not a `login_failed` beside it: the session exists,
+ * so a `login_failed` would contradict the `login` the same sign-in wrote, and
+ * anyone counting `login_failed` rows for brute-force detection would count
+ * users who are signed in. Why at session creation and not where the gate is
+ * computed: that computation runs on every session read, so a row written
+ * there would be one row per request instead of one per sign-in. The hook
+ * asks the same one posture computation the gate asks
+ * (`AuthManager.resolveUserAuthGates`), so the row records a posture the
+ * session is really held by, and fails open exactly where the gate does: no
+ * posture read, no hold recorded.
+ *
+ * ## A sign-in the IP allow-list refuses (#30924)
+ *
+ * The ADR-0069 D5 allow-list refuses a sign-in at two doors — the deployment's
+ * list, before any account is resolved, and an organization's own list, when
+ * the session is created — and each refusal is a `login_failed` row with
+ * `context.reason: 'IP_NOT_ALLOWED'` and `context.rule: 'ip_allow_list'`,
+ * bounded per client address (`ip-allow-list-refusal-audit.ts`). It is the one
+ * account event that may name no subject: refused before better-auth runs, the
+ * identifier the request carried may name no account, and the address and the
+ * rule are still the record an enforcement report reads. The identifier is
+ * still never recorded, and the password never read.
  */
 
+import type { CredentialUseClient } from '@objectstack/core';
 import { getIP } from '@better-auth/core/utils/ip';
 import { canonicalClientAddress } from './client-address-canonical.js';
 
@@ -100,7 +138,12 @@ import { canonicalClientAddress } from './client-address-canonical.js';
 export interface AuthEventAuditSurface {
   recordAuthEvent(event: {
     action: 'login' | 'logout' | 'login_failed' | 'account_locked';
-    userId: string;
+    /**
+     * The event's subject. Every event names one, except a `login_failed` for
+     * a sign-in refused before any account could be resolved (the IP
+     * allow-list, #30924), which may name none.
+     */
+    userId?: string;
     sessionId?: string;
     organizationId?: string;
     ipAddress?: string;
@@ -108,6 +151,68 @@ export interface AuthEventAuditSurface {
     actor?: string;
     context?: Record<string, unknown>;
   }): Promise<unknown>;
+  /**
+   * [#31796] plugin-audit's credential-use writer (`credential-use-audit.ts`
+   * there), called by the MCP last-use stamper for a `skip_consent` OAuth
+   * client's use, the one OAuth use with no consent row whose stamp the ledger
+   * could recognise. Optional: a sink without it records no such row.
+   * `kind` and `objectName` are closed literals for the reason `action` is.
+   */
+  recordCredentialUse?(event: {
+    kind: 'oauth_access_token';
+    objectName: 'sys_oauth_application';
+    /** The client's `sys_oauth_application` row id. */
+    credentialId: string;
+    userId: string;
+    organizationId?: string;
+    clientId?: string;
+    /** The start of the use window, as an ISO instant. */
+    usedAt?: string;
+    /** [#31821] Where the use came from (`@objectstack/core` `CredentialUseClient`). */
+    client?: CredentialUseClient;
+  }): Promise<unknown>;
+  /**
+   * [#31829] A SCIM protocol request the door refused (`scim-refusal-audit.ts`).
+   * OPTIONAL: an `audit` service without the member writes no such row, and
+   * the SCIM answer is the same either way.
+   */
+  recordScimRefusal?(event: ScimRefusalAuditEventInput): Promise<unknown>;
+}
+
+/**
+ * [#31829] One refused SCIM request, as plugin-auth hands it to the `audit`
+ * slot: what was asked and how it was answered, never what was sent. No
+ * request body, no bearer, no digest and no attribute value has a field here.
+ */
+export interface ScimRefusalAuditEventInput {
+  /** The connection the bearer verified as; absent when it verified as none (a 401). */
+  connectionId?: string;
+  /**
+   * The organization the verified connection's credential belongs to; absent
+   * when the bearer verified as none or the credential names no organization.
+   * The row's `tenant_id`.
+   */
+  organizationId?: string;
+  /**
+   * On a request whose bearer verified as no connection: which kind of
+   * credential it presented — `scim_bearer` (one carrying the minted SCIM
+   * prefix), `other`, or `none`. Nothing of the credential itself is kept.
+   */
+  presentedCredential?: 'scim_bearer' | 'other' | 'none';
+  /** The SCIM resource type the request addressed (`Users`, `Groups`, …), or `?`. */
+  resource: string;
+  /** The HTTP method, or `?` for one outside the SCIM verbs. */
+  method: string;
+  /** The status the door answered. */
+  status: number;
+  /** The SCIM error's `scimType` (`uniqueness`, `invalidSyntax`, …), when it carried one. */
+  scimType?: string;
+  /** The refusal's machine code, when the answer carried one. */
+  errorCode?: string;
+  /** The client address, by the rule every auth row's address is established by. */
+  ipAddress?: string;
+  /** Refusals of the same key the bound dropped since the last row written for it. */
+  suppressed?: number;
 }
 
 /** The event this module hands the sink, before it becomes a ledger row. */
@@ -255,8 +360,19 @@ export function refusalCodeOf(returned: unknown): string | undefined {
 }
 
 /**
+ * [#30924] The refusals whose refusing door writes the sign-in's
+ * `login_failed` row itself: an organization's IP list refuses the session at
+ * its creation (`IP_NOT_ALLOWED`, `auth-manager-database-hooks.ts`) and records
+ * the account, the organization, the rule and the per-address count there,
+ * which the password sign-in's outcome cannot see. The outcome writes no
+ * second row for one.
+ */
+const REFUSALS_RECORDED_AT_THEIR_DOOR: ReadonlySet<string> = new Set(['IP_NOT_ALLOWED']);
+
+/**
  * The `login_failed` event for a refused password sign-in, or `null` when no
- * account was resolved (no subject ⇒ no row; see the module note).
+ * account was resolved (no subject ⇒ no row; see the module note) or the
+ * refusing door wrote the row itself ({@link REFUSALS_RECORDED_AT_THEIR_DOOR}).
  */
 export function signInFailureEventFor(
   userId: string | null | undefined,
@@ -264,6 +380,7 @@ export function signInFailureEventFor(
 ): AuthSessionAuditEventInput | null {
   const subject = str(userId);
   if (!subject) return null;
+  if (outcome.reason && REFUSALS_RECORDED_AT_THEIR_DOOR.has(outcome.reason)) return null;
   const context: Record<string, unknown> = { endpoint: outcome.path };
   if (outcome.reason) context.reason = outcome.reason;
   return {

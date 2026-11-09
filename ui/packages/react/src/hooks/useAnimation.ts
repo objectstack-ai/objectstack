@@ -8,9 +8,6 @@
 
 import { useMemo } from 'react';
 
-/** Animation trigger type */
-export type AnimationTriggerType = 'enter' | 'exit' | 'hover' | 'focus' | 'click';
-
 /**
  * Easing presets aligned with the spec `EasingFunctionSchema`
  * (`ui/animation.zod.ts` — underscore spellings). The hyphen spellings are

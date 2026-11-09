@@ -44,6 +44,7 @@ import { redactDatasourceConfig, restoreRedactedConfig } from './datasource-conf
 import { planCredentialMigration } from './datasource-credential-migration.js';
 import { borrowedConnectorOf } from './datasource-connector-credential.js';
 import { ROUTE_SHADOWED_DATASOURCE_NAMES } from './datasource-route-reserved-names.js';
+import { sqliteDatabaseFilenameIssue } from './sqlite-database-filename.js';
 import type {
   IDatasourceAdminService,
   DatasourceDraft,
@@ -270,6 +271,16 @@ export interface ProbeInput {
 }
 
 /**
+ * [#29879] What a {@link DatasourceAdminServiceConfig.reregisterPool} seam
+ * reports about the rebuild it ran. `previousPoolKept: true` = the new
+ * configuration failed to come up and the pool built from the previous one is
+ * still the one serving, so the update must store none of the new one.
+ */
+export interface ReregisterPoolOutcome {
+  previousPoolKept: boolean;
+}
+
+/**
  * Injected dependencies. The plugin supplies real implementations backed by the
  * driver registry, `IMetadataService` (runtime store), and the secret store;
  * tests supply fakes.
@@ -322,10 +333,15 @@ export interface DatasourceAdminServiceConfig {
    * whose metadata service predates the verdict cannot report the distinction,
    * so its absence means "unchanged behaviour", never "complete". A host that
    * supplies it gets a removal that refuses rather than guesses.
+   *
+   * `objects` names the bound objects the count was taken over, from the SAME
+   * read, so the refusal's message and its `details` cannot disagree. Optional,
+   * so a host that reports only the number keeps working: its refusal then
+   * carries the count without the names.
    */
   countBoundObjectsDiagnosed?: (
     datasource: string,
-  ) => Promise<{ count: number; degraded: boolean; errors: string[] }>;
+  ) => Promise<{ count: number; degraded: boolean; errors: string[]; objects?: string[] }>;
   /**
    * [ADR-0015 §4.2 · #25277] The objects that name `datasource` as theirs, each
    * with its `external` binding as declared (absent when it has none) — the
@@ -370,8 +386,17 @@ export interface DatasourceAdminServiceConfig {
    * Optional: a host that wired only `registerPool` falls back to it, whose
    * idempotency guard retains the old pool — the pre-#13804 behaviour, and
    * the safe direction for a host that cannot express a swap.
+   *
+   * [#29879] Answer `{ previousPoolKept: true }` when the rebuild failed and
+   * the previous pool is the one still serving: the update then stores
+   * nothing of the new configuration and takes back the secret it sealed for
+   * it. Answering nothing (a host written before this) keeps the old reading:
+   * the new record is stored whatever the rebuild did.
    */
-  reregisterPool?: (previous: StoredDatasource, next: StoredDatasource) => Promise<void> | void;
+  reregisterPool?: (
+    previous: StoredDatasource,
+    next: StoredDatasource,
+  ) => Promise<ReregisterPoolOutcome | void> | ReregisterPoolOutcome | void;
   /**
    * [#13805] Converge THIS replica's live pool for `name` after a PEER wrote
    * the shared datasource record — the receive half of
@@ -389,6 +414,15 @@ export interface DatasourceAdminServiceConfig {
    * `debug` when the transport attaches.
    */
   convergePool?: (name: string) => Promise<void> | void;
+  /**
+   * The names a `cluster.resync` must converge — see
+   * {@link DatasourceAdminService.resyncDatasourceMutationPubSub}: every
+   * datasource the SHARED store holds (the read `convergePool` performs, never
+   * the per-replica metadata registry) and every pool this replica built.
+   * Optional: without it a resync converges only the pools the connection
+   * service reports.
+   */
+  listConvergeNames?: () => Promise<readonly string[]>;
   /**
    * Last connect verdict per datasource, from `DatasourceConnectionService`
    * (framework#3827). Absent (a host without the connection service) means the
@@ -490,15 +524,56 @@ export function datasourceNotFoundError(name: string): Error {
  * a script or an SDK call that clears the field is what reached it.
  *
  * `null` and an absent `secret` are unchanged: they keep the stored
- * credential. A whitespace-only value is a value, sealed and used as sent.
- * Only the empty string is judged, so the answer cannot echo a credential.
+ * credential.
+ *
+ * [#29879] A whitespace-only value (`"   "`, a tab and a newline) is refused
+ * by this same guard: it seals nothing usable, and a rotation to it broke
+ * the datasource at its next connect exactly as the empty string did. A
+ * value with whitespace around other characters is a value, sealed as sent.
+ * Only blank values are judged, so the answer cannot echo a credential.
  */
 function assertSecretNotEmpty(heading: string, secret: SecretInput | undefined): void {
-  if (secret == null || (secret as { value?: unknown }).value !== '') return;
+  const value = (secret as { value?: unknown } | null | undefined)?.value;
+  if (secret == null || typeof value !== 'string' || value.trim() !== '') return;
   throw new Error(
     `${heading}\nThe \`secret\` is empty. Send the credential to store, or leave \`secret\` out (or null) `
       + 'to keep the stored one. Nothing was written.',
   );
+}
+
+/**
+ * The refusal {@link DatasourceAdminService.removeDatasource} answers while
+ * objects are still bound to the datasource.
+ *
+ * The answer stays `400` `DATASOURCE_ADMIN_ERROR` with its English sentence;
+ * what this adds is `details`, so a client can tell this refusal from every
+ * other 400 of the family and name the objects in its own language without
+ * re-reading object metadata:
+ *
+ *     { reason: 'objects_bound', count: 2, objects: ['bin', 'part'] }
+ *
+ * `reason` is the discriminator, snake_case like the other `details.reason`
+ * values of the ADR-0112 envelope. `count` is the number in the message.
+ * `objects` is the full list, sorted, present when the host's read names them
+ * (`countBoundObjectsDiagnosed` with `objects`); a host that reports only a
+ * number gets `count` alone.
+ *
+ * `code` and `status` are set so the admin routes' `badRequest` can recognise a
+ * refusal that declared its own envelope and relay its `details`, the same way
+ * it relays the `503` and `404` ones; both are required there.
+ */
+function boundObjectsError(name: string, count: number, objects: string[] | undefined): Error {
+  const err = new Error(
+    `Cannot remove datasource '${name}': ${count} object(s) are still bound to it.`,
+  ) as Error & { code?: string; status?: number; details?: Record<string, unknown> };
+  err.code = 'DATASOURCE_ADMIN_ERROR';
+  err.status = 400;
+  err.details = {
+    reason: 'objects_bound',
+    count,
+    ...(objects ? { objects: [...objects].sort() } : {}),
+  };
+  return err;
 }
 
 function metadataIncompleteError(message: string, errors: string[]): Error {
@@ -595,6 +670,40 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       `datasource admin: attached to the ${DATASOURCE_MUTATION_CLUSTER_CHANNEL} cluster channel (node=${nodeId})`,
     );
     return () => this.detachDatasourceMutationPubSub();
+  }
+
+  /**
+   * The `cluster.resync` answer for this lane: the cluster driver's connection
+   * came back after an outage, during which any `datasource.mutated` a peer
+   * published was lost (the bus is at-most-once). Called by
+   * `MetadataClusterBridgePlugin` in `@objectstack/service-cluster` on the
+   * driver's local `cluster.resync` event; a no-op until a transport is
+   * attached, or when the host wired no `convergePool`.
+   *
+   * Converges every name a lost signal could have carried — each record in
+   * the SHARED store (created or edited during the outage) and each pool this
+   * replica holds (deleted during it), from the host's `listConvergeNames` —
+   * through the same per-name convergence a
+   * received signal runs, so it re-reads the shared record and builds,
+   * rebuilds or evicts exactly as a delivered hint would have. Resolves once
+   * every convergence settled; one name failing is logged and does not stop
+   * the others.
+   */
+  async resyncDatasourceMutationPubSub(): Promise<void> {
+    const converge = this.config.convergePool;
+    if (!this.clusterPubSub || !converge) return;
+    const names = new Set<string>();
+    for (const name of (await this.config.listConvergeNames?.()) ?? []) {
+      if (typeof name === 'string' && name.length > 0) names.add(name);
+    }
+    for (const state of this.config.connectionStates?.() ?? []) {
+      if (typeof state?.name === 'string' && state.name.length > 0) names.add(state.name);
+    }
+    for (const name of names) this.enqueueConvergence(name, converge);
+    await Promise.all([...names].map((name) => this.convergeChains.get(name)));
+    this.logger?.info?.(
+      `datasource admin: re-converged ${names.size} datasource(s) after a cluster outage (node=${this.clusterNodeId})`,
+    );
   }
 
   /** Tear down the cluster wiring. Safe to call multiple times. [#13805] */
@@ -779,7 +888,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // report a green "Connection successful" for a datasource that points
     // somewhere else entirely — the wizard's version of #4410's core bug.
     try {
-      this.assertValidConfig(input.driver, input.config);
+      await this.assertValidConfig(input.driver, input.config);
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
@@ -826,7 +935,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${input.name}'.`, input);
     assertNoInlineSslKey(`Invalid datasource '${input.name}'.`, input);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
-    this.assertValidConfig(input.driver, input.config);
+    await this.assertValidConfig(input.driver, input.config);
     // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
     // record is persisted: `tryRegisterPool` swallows its failures into a
     // warning, so a datasource saved with an unhonourable pool would sit in the
@@ -916,7 +1025,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // #4410 would otherwise become uneditable, including the `active: false`
     // that takes a misconfigured datasource out of service.
     if (patch.config !== undefined || patch.driver !== undefined) {
-      this.assertValidConfig(merged.driver, merged.config);
+      await this.assertValidConfig(merged.driver, merged.config);
     }
     // Same judgement, same "only when this write touches the pairing" rule
     // (#5714): a new `pool`, or a new `driver` that reinterprets the stored
@@ -952,11 +1061,16 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // `active: false` unreachable.
     if (patch.external !== undefined) await this.assertConnectorLendable(merged);
 
+    // [#29879] The new secret is sealed BEFORE the rebuild (the rebuild
+    // dereferences the merged record's `credentialsRef`), but the working one
+    // is retired only once the merged record is stored, below: a rebuild that
+    // keeps the previous pool stores nothing, and the binding it keeps must
+    // still resolve.
+    const prevRef = existing.external?.credentialsRef;
+    let newRef: string | undefined;
     if (secret) {
-      const prevRef = existing.external?.credentialsRef;
-      const credentialsRef = await this.config.writeSecret(secret, { name });
-      merged.external = { ...(merged.external ?? {}), credentialsRef };
-      if (prevRef && prevRef !== credentialsRef) await this.tryRemoveSecret(prevRef);
+      newRef = await this.config.writeSecret(secret, { name });
+      merged.external = { ...(merged.external ?? {}), credentialsRef: newRef };
     }
 
     // Carry forward the credential material `getDatasource()` redacts (#8081)
@@ -995,8 +1109,6 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       merged.ssl = { ...merged.ssl, [SSL_PRIVATE_KEY]: storedKey };
     }
 
-    await this.config.putDatasourceRecord(merged);
-
     // [#13804] What "Save" means for the LIVE pool, decided by what actually
     // changed — never unconditionally. The old tail called `registerPool` on
     // every update, and the connect path's idempotency guard turned that into
@@ -1023,12 +1135,38 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // cannot see: a rewrap-in-place keeps the `credentialsRef` string while
     // changing the credential it dereferences to, and the pool reads the
     // credential only at build time.
+    //
+    // [#29879] The rebuild runs BEFORE the record is stored, and a rebuild
+    // that keeps the previous pool stores nothing: not the record, not the
+    // new `credentialsRef`, not any other key of this patch. The answer says
+    // the new configuration is NOT in force, so the stored record has to be
+    // the one still serving, or the next restart connects the configuration
+    // that just failed — with the working credential already removed. One
+    // write path: the record is stored once, after the pool settles, and the
+    // working secret is retired only after that write.
     const rebuildNeeded = secret !== undefined || datasourceConnectivityChanged(existing, merged);
+    if (merged.active !== false && rebuildNeeded) {
+      const { previousPoolKept } = await this.tryReregisterPool(existing, merged);
+      if (previousPoolKept) {
+        await this.discardUnstoredSecret(name, newRef, prevRef);
+        // Nothing was stored, so there is nothing for a peer to converge on.
+        return this.toSummary(existing);
+      }
+    }
+
+    try {
+      await this.config.putDatasourceRecord(merged);
+    } catch (err) {
+      // The stored record still names the working secret; the one sealed for
+      // this write has no referrer, so take it back out rather than orphan it.
+      if (newRef && newRef !== prevRef) await this.tryRemoveSecret(newRef);
+      throw err;
+    }
+    if (newRef && prevRef && prevRef !== newRef) await this.tryRemoveSecret(prevRef);
+
     if (merged.active === false) {
       if (rebuildNeeded) await this.tryUnregisterPool(name);
-    } else if (rebuildNeeded) {
-      await this.tryReregisterPool(existing, merged);
-    } else {
+    } else if (!rebuildNeeded) {
       await this.tryRegisterPool(merged);
     }
     // [#13805] Unconditionally — a label-only edit included. The peer, not the
@@ -1036,6 +1174,29 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // same `datasourceConnectivityChanged` reading this door just applied.
     this.publishDatasourceMutation(name);
     return this.toSummary(merged);
+  }
+
+  /**
+   * [#29879] Take back the secret an update sealed for a configuration that
+   * never came into force. A binder that mints a fresh reference per write
+   * (the shipped `sys_secret` binder) leaves the working row untouched, so
+   * removing the new one restores the stored binding exactly. A binder that
+   * rewrites in place under the SAME reference has already overwritten the
+   * working credential: that row is the binding the stored record still
+   * names, so it is never removed, and the loss is said once, at `error`.
+   */
+  private async discardUnstoredSecret(name: string, newRef: string | undefined, prevRef: string | undefined): Promise<void> {
+    if (!newRef) return;
+    if (newRef !== prevRef) {
+      await this.tryRemoveSecret(newRef);
+      return;
+    }
+    this.logger?.error?.(
+      `datasource '${name}': the new secret did not connect and the previous pool was kept, but the `
+        + `secret store rewrote credential '${newRef}' in place, so the stored record now names the `
+        + 'credential that failed and the datasource will not connect after a restart. Send the working '
+        + 'credential again as `secret` to restore it.',
+    );
   }
 
   /**
@@ -1076,9 +1237,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       throw new Error(`Datasource '${name}' is code-defined and cannot be removed at runtime.`);
     }
 
-    const bound = this.config.countBoundObjectsDiagnosed
-      ? await this.config.countBoundObjectsDiagnosed(name)
-      : { count: await this.config.countBoundObjects(name), degraded: false, errors: [] };
+    const bound: { count: number; degraded: boolean; errors: string[]; objects?: string[] } =
+      this.config.countBoundObjectsDiagnosed
+        ? await this.config.countBoundObjectsDiagnosed(name)
+        : { count: await this.config.countBoundObjects(name), degraded: false, errors: [] };
 
     if (bound.degraded) {
       throw metadataIncompleteError(
@@ -1090,11 +1252,9 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       );
     }
 
-    if (bound.count > 0) {
-      throw new Error(
-        `Cannot remove datasource '${name}': ${bound.count} object(s) are still bound to it.`,
-      );
-    }
+    // [#30444] One read: the count in the message and the names in `details`
+    // both come from `bound`, so they cannot disagree.
+    if (bound.count > 0) throw boundObjectsError(name, bound.count, bound.objects);
 
     await this.config.deleteDatasourceRecord(name);
     if (existing.external?.credentialsRef) await this.tryRemoveSecret(existing.external.credentialsRef);
@@ -1289,14 +1449,23 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    *
    * A driver the platform ships no contract for passes untouched, matching the
    * spec gate's boundary rather than inventing a stricter one for the UI.
+   *
+   * [#30331] A SQLite `config.filename` that is neither `:memory:` nor a
+   * usable file path is refused here too, in the same envelope: the contract
+   * types it as a string, and this is the one judgement the test, the create
+   * and the update doors share (see {@link sqliteDatabaseFilenameIssue}).
    */
-  private assertValidConfig(driver: string, config: unknown): void {
+  private async assertValidConfig(driver: string, config: unknown): Promise<void> {
     const result = validateDriverConfig(driver, config);
-    if (!result.known || result.issues.length === 0) return;
-    const detail = result.issues
-      .map((issue) => (issue.path.length ? `config.${issue.path.join('.')}: ${issue.message}` : issue.message))
-      .join('\n');
-    throw new Error(`Invalid configuration for driver '${driver}'.\n${detail}`);
+    const issues = result.known
+      ? result.issues.map((issue) => (issue.path.length ? `config.${issue.path.join('.')}: ${issue.message}` : issue.message))
+      : [];
+    if (issues.length === 0) {
+      const filenameIssue = await sqliteDatabaseFilenameIssue(driver, config);
+      if (filenameIssue) issues.push(filenameIssue);
+    }
+    if (issues.length === 0) return;
+    throw new Error(`Invalid configuration for driver '${driver}'.\n${issues.join('\n')}`);
   }
 
   /**
@@ -1523,15 +1692,20 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    * re-registered would honour the rebuild but lose the "keep the old pool on
    * failure" half of the ruling.
    */
-  private async tryReregisterPool(previous: StoredDatasource, next: StoredDatasource): Promise<void> {
+  private async tryReregisterPool(
+    previous: StoredDatasource,
+    next: StoredDatasource,
+  ): Promise<{ previousPoolKept: boolean }> {
     if (!this.config.reregisterPool) {
       await this.tryRegisterPool(next);
-      return;
+      return { previousPoolKept: false };
     }
     try {
-      await this.config.reregisterPool(previous, next);
+      const outcome = await this.config.reregisterPool(previous, next);
+      return { previousPoolKept: outcome?.previousPoolKept === true };
     } catch (err) {
       this.logger?.warn(`reregisterPool('${next.name}') failed`, err);
+      return { previousPoolKept: false };
     }
   }
 

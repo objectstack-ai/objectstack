@@ -69,6 +69,8 @@ async function bootPlugin(keyRead: KeyRead) {
       find: async (object: string, q: any) => {
         if (object === 'sys_api_key' && keyRead === 'rejects') throw new Error('connection terminated unexpectedly');
         if (object === 'sys_api_key' && keyRead === 'unprovisioned') throw new Error('no such table: sys_api_key');
+        // The key's owner exists: an API key authenticates only as an owner who exists.
+        if (object === 'sys_user') return q?.where?.id === OWNER ? [{ id: OWNER }] : [];
         return object === 'sys_api_key' && q?.where?.key === keyHash
           ? [{ id: 'key_1', key: keyHash, user_id: OWNER, revoked: false, scopes: '[]' }]
           : [];

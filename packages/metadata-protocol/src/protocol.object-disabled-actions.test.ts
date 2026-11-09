@@ -23,6 +23,8 @@
  * (pinned on the real engine, with the real protocol, in
  * `@objectstack/objectql`'s `protocol-meta-disabled-actions.test.ts`).
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it, vi } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';

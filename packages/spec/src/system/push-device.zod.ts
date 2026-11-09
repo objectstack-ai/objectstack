@@ -5,6 +5,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { PushVendorSchema } from './push-config.zod';
 import { LocaleSchema } from './translation.zod';
 import { PUSH_DEVICE_PLATFORMS } from './push-device-platform';
+import { PUSH_SERVER_ORIGIN_MESSAGE, PUSH_SERVER_ORIGIN_PATTERN } from './push-server-origin';
 
 /**
  * Push Device Protocol — the stored device shape of the push device registry
@@ -16,9 +17,12 @@ import { PUSH_DEVICE_PLATFORMS } from './push-device-platform';
  * answers (`INotificationService.listDevices`).
  *
  * Stored in `sys_user_device`, the device registry's table (ADR-0012 §11),
- * which `@objectstack/service-messaging` owns while no push channel plugin
- * exists: its `INotificationService` device members write it, and the device
- * routes under `/api/v1/notifications/devices` are the only door to it.
+ * which `@objectstack/service-messaging` owns: its `INotificationService`
+ * device members write it, the device routes under
+ * `/api/v1/notifications/devices` are the only door to it from outside, and
+ * its `push` channel reads it to address a phone and retires dead tokens in
+ * it. `@objectstack/service-push` holds only the vendor transports and never
+ * touches the table.
  *
  * Three rules the registry owes, stated here because they decide the shape:
  *
@@ -42,8 +46,11 @@ import { PUSH_DEVICE_PLATFORMS } from './push-device-platform';
  *   row, and a later registration of the same device re-enables it and clears
  *   `invalidatedAt`.
  *
- * Narrowed from ADR-0012 §6: `vendor` is the core pair (`apns` | `fcm`; the
- * domestic Android vendors plug in as alternate channel implementations) and
+ * Narrowed from the ADR-0012 §6 sketch: `vendor` is the core pair (`apns` |
+ * `fcm`; it is the token type the sender routes on: the direct transport
+ * today, the hosted relay (the default) once served, and the domestic Android
+ * vendors (HMS / Honor / Xiaomi / OPPO / vivo) join it in phase 2 behind the
+ * relay, ADR-0012 §6.1) and
  * `platform` is the registration's own three (`ios` | `android` | `web`).
  */
 export const UserDeviceSchema = lazySchema(() => z.object({
@@ -55,8 +62,16 @@ export const UserDeviceSchema = lazySchema(() => z.object({
   token: z.string().min(1).describe('Vendor push token. Held by one live device at a time: a second user\'s registration moves it'),
   platform: z.enum(PUSH_DEVICE_PLATFORMS).describe('Device platform, as the registration named it'),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
-  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  locale: LocaleSchema.optional().describe(
+    'Device locale (BCP 47, for example zh-CN), as the registration named it. Stored for the device; no push renders by it: '
+    + 'a push arrives in the recipient\'s language (sys_user.locale, then the deployment default)',
+  ),
   name: z.string().optional().describe('Device friendly name, as the registration named it'),
+  origin: z.string().regex(PUSH_SERVER_ORIGIN_PATTERN, { message: PUSH_SERVER_ORIGIN_MESSAGE }).optional().describe(
+    'The origin the Console was loaded from, as the registration named it (for example '
+    + 'https://crm.example.com). The device registry keeps it on the row and the push channel copies it into every push '
+    + 'to this device, where the mobile shell picks the saved server by it. Absent on a device registered without one',
+  ),
   enabled: z.boolean().describe('False once the vendor reported the token dead; nothing is delivered to a disabled device'),
   invalidatedAt: z.string().datetime().optional().describe(
     'When the vendor reported the token dead. Present exactly while enabled is false: absent on an enabled device, '

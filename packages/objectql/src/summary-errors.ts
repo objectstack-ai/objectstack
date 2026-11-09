@@ -108,11 +108,13 @@ export class SummaryRecomputeError extends Error {
  * converts naming the child, then the parent's walk receives that) or a hook
  * whose own write was such a delete. The caller of the outer write is told
  * about the outer write, and `cause` stays the original refusal, so the
- * summaries named are the same at every level. A transaction does not re-lead:
- * a conversion that escapes it already names the write that did not complete.
+ * summaries named are the same at every level. A transaction whose rollback
+ * ran does not re-lead: a conversion that escapes it already names the write
+ * that did not complete, and its "under a transaction that rolls back" clause
+ * holds. [#29527] One whose rollback threw does ({@link rollbackFailedRefusal}).
  */
 function unlandedWriteRefusal(e: unknown, lead: string, relead = false): unknown {
-  const original = relead && e instanceof UnlandedWriteRefusal ? e.cause : e;
+  const original = relead && isUnlandedWriteRefusal(e) ? (e as UnlandedWriteRefusal).cause : e;
   if (!(original instanceof Error) || (original as { code?: unknown }).code !== SUMMARY_RECOMPUTE_CODE) return e;
   const failures = (original as { failures?: unknown }).failures;
   const named = Array.isArray(failures)
@@ -142,8 +144,8 @@ function unlandedWriteRefusal(e: unknown, lead: string, relead = false): unknown
  * declared 5xx with no code drops `code` from the data door's body.
  *
  * A class so a later conversion can tell an earlier one apart (the re-lead
- * above). Module-private and never exported: no reader outside this file
- * matches it, so the published surface does not move. `name` stays `'Error'`.
+ * above). The class itself stays module-private, and `name` stays `'Error'`;
+ * a reader outside this file asks {@link isUnlandedWriteRefusal}.
  */
 class UnlandedWriteRefusal extends Error {
   readonly status = 500;
@@ -152,7 +154,31 @@ class UnlandedWriteRefusal extends Error {
   constructor(message: string, original: Error) {
     super(message);
     (this as { cause?: unknown }).cause = original;
+    Object.defineProperty(this, UNLANDED_WRITE_REFUSAL_BRAND, { value: true });
   }
+}
+
+/**
+ * [#29527] The brand {@link isUnlandedWriteRefusal} reads. A registered symbol,
+ * not `instanceof`: this package ships two realms (ESM and CJS) and a reader
+ * holding the other realm's copy of the class would get `false`, silently.
+ * Not enumerable, so no serialiser and no `{ ...err }` spread carries it.
+ */
+const UNLANDED_WRITE_REFUSAL_BRAND = Symbol.for('@objectstack/objectql.unlanded-write-refusal');
+
+/**
+ * [#29527] Is `e` the refusal {@link unlandedWriteRefusal} built: a write that
+ * did not land because a nested write's stale-roll-up refusal stopped it?
+ *
+ * Exported for the one host-side reader that has to tell it apart: the QuickJS
+ * runner, which hands this refusal back out of a sandboxed body unchanged when
+ * the body let it leave (as it does the engine's duplicate-record refusal), so
+ * the hook-dispatch seam that converts next still re-leads it and keeps its
+ * `cause`. Matched on the HOST-side error a host call rejected with, never on
+ * anything a body wrote.
+ */
+export function isUnlandedWriteRefusal(e: unknown): boolean {
+  return e instanceof Error && (e as unknown as Record<symbol, unknown>)[UNLANDED_WRITE_REFUSAL_BRAND] === true;
 }
 
 /** {@link unlandedWriteRefusal} for a delete whose cascade walk the refusal stopped. */
@@ -212,5 +238,9 @@ export function rollbackFailedRefusal(e: unknown): unknown {
     e,
     'The transaction did not complete, and its rollback failed too, so what was written inside it may or may ' +
       'not be stored.',
+    // [#29527] Re-lead an earlier conversion too. A cascade- or hook-stopped
+    // refusal that escapes this transaction says "under a transaction that
+    // rolls back nothing was written", which the failed rollback made unknown.
+    true,
   );
 }

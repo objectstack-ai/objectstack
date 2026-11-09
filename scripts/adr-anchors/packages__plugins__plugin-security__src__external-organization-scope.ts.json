@@ -1,0 +1,8 @@
+{
+  "file": "packages/plugins/plugin-security/src/external-organization-scope.ts",
+  "adrs": [
+    "ADR-0015",
+    "ADR-0095"
+  ],
+  "invariant": "Under a walled tenancy posture every external object states its organization scope — its own `organization_id`, `tenancy: { enabled: false }`, or `systemFields.tenant: false` (ADR-0015 §10 as amended). One stating none is refused by name when the boot completes, and one registered after the boot is DENIED by Layer 0 (ADR-0095 D1), never read as shared: the undeclared state is a configuration defect and fails toward isolation. `tenancy.tenantField` on an external object is refused the same way, because the wall keys on `organization_id` alone."
+}

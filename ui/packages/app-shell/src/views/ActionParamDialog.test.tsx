@@ -30,6 +30,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ActionParamDef } from '@object-ui/core';
 import { validateActionParams } from '@objectstack/spec/ui';
+import { SchemaRendererProvider } from '@object-ui/react';
 import { ActionParamDialog, filterVisibleParams, serializeParamValues } from './ActionParamDialog';
 import { expectedParamShape, classifyValueShape } from '../utils/paramValueShape';
 
@@ -813,5 +814,70 @@ describe('serializeParamValues', () => {
       expect(issues[0]).toMatchObject({ param: 'when', code: 'invalid_shape' });
       expect(issues[0].message).toMatch(/explicit zone/);
     });
+  });
+});
+
+describe('ActionParamDialog — a param `widget` draws the named widget (#30260)', () => {
+  // The Create User shape once its `permissionSet` param declares the picker
+  // (`ActionParamSchema.widget`, ADR-0131 D4): a `text` param whose value is a
+  // permission-set NAME. The registry pickers read their catalog through the
+  // data source of `SchemaRendererContext`, so the dialog is mounted inside the
+  // provider, as the console mounts it.
+  function openWithCatalog(params: ActionParamDef[]) {
+    const resolve = vi.fn();
+    const ds = {
+      listMetadataItems: vi.fn(async (_type: string) => [
+        { name: 'sales_user', label: 'Sales User' },
+        { name: 'support_agent', label: 'Support Agent' },
+      ]),
+    };
+    const view = render(
+      <SchemaRendererProvider dataSource={ds as any}>
+        <ActionParamDialog state={{ open: true, params, resolve }} onOpenChange={() => {}} />
+      </SchemaRendererProvider>,
+    );
+    return { resolve, ds, ...view };
+  }
+
+  it('draws the permission-set picker: labels listed, the machine name submitted', async () => {
+    const param = def({ name: 'permissionSet', label: 'Permission set', type: 'text', widget: 'permission-ref' });
+    const { resolve, ds } = openWithCatalog([param]);
+
+    const trigger = await screen.findByRole('combobox');
+    await waitFor(() => expect(ds.listMetadataItems).toHaveBeenCalledWith('permission'));
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByText('Support Agent (support_agent)'));
+    await waitFor(() => expect(trigger).toHaveTextContent('Support Agent (support_agent)'));
+
+    confirm();
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith({ permissionSet: 'support_agent' }));
+    // The emitted value matches the declared shape contract for the widget.
+    expect(expectedParamShape(param)).toBe('string');
+    expect(classifyValueShape(resolve.mock.calls[0][0].permissionSet)).toBe('string');
+  });
+
+  it('CONTROL: the same param without a widget is a text box, and lists nothing', async () => {
+    const { resolve, ds } = openWithCatalog([
+      def({ name: 'permissionSet', label: 'Permission set', type: 'text' }),
+    ]);
+    const input = await screen.findByLabelText('Permission set');
+    expect(input.tagName).toBe('INPUT');
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(ds.listMetadataItems).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'typed_name' } });
+    confirm();
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith({ permissionSet: 'typed_name' }));
+  });
+
+  it('an unregistered widget name falls back to the `type` control', async () => {
+    const { resolve, ds } = openWithCatalog([
+      def({ name: 'reason', label: 'Reason', type: 'textarea', widget: 'no_such_widget' }),
+    ]);
+    const box = await screen.findByLabelText('Reason');
+    expect(box.tagName).toBe('TEXTAREA');
+    expect(ds.listMetadataItems).not.toHaveBeenCalled();
+    fireEvent.change(box, { target: { value: 'because' } });
+    confirm();
+    await waitFor(() => expect(resolve).toHaveBeenCalledWith({ reason: 'because' }));
   });
 });

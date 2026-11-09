@@ -120,6 +120,20 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/**
+ * objectstack#30786 — a save reads the object as authored off the layered read
+ * (`GET …/layers`, `overlay ?? code`), so this double answers that read with the
+ * listed item as its `code` layer (and `effective`).
+ */
+function layersAnswer(url: string, items: ReadonlyArray<{ name?: unknown }>): Response | null {
+  const match = /\/meta\/object\/([^/?]+)\/layers(\?|$)/.exec(url);
+  if (!match) return null;
+  const item = items.find((o) => o.name === decodeURIComponent(match[1]));
+  return item
+    ? json({ type: 'object', name: item.name, code: item, overlay: null, effective: item })
+    : json({ error: 'not found' }, 404);
+}
+
 const nameFromUrl = (url: string): string =>
   decodeURIComponent(url.split('/api/v1/meta/object/')[1]?.split('?')[0] ?? '');
 
@@ -145,6 +159,8 @@ function realClient(): MetadataClient {
         ];
         return json({ success: true });
       }
+      const layers = layersAnswer(url, serverObjects);
+      if (layers) return layers;
       return json({ items: serverObjects });
     }) as unknown as typeof fetch,
   });

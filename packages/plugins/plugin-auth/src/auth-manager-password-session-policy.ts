@@ -45,7 +45,9 @@
 
 import type { AuthManager } from './auth-manager.js';
 import type { AuthGate } from '@objectstack/core';
+import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
+import { effectiveMfaLevel, effectiveSessionLimits } from './organization-access-policy.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -61,12 +63,29 @@ export interface PasswordSessionPolicyHost {
   _mustChangeRefreshing: AuthManager['_mustChangeRefreshing'];
   _orgMfaCache: AuthManager['_orgMfaCache'];
   _orgMfaRefreshing: AuthManager['_orgMfaRefreshing'];
+  anyOrganizationRequiresMfa: AuthManager['anyOrganizationRequiresMfa'];
   getDataEngine: AuthManager['getDataEngine'];
+  getOrganizationAccessPolicy: AuthManager['getOrganizationAccessPolicy'];
+  isOrganizationAdministrator: AuthManager['isOrganizationAdministrator'];
+  judgeSessionScoping: AuthManager['judgeSessionScoping'];
+  isTwoFactorEnabled: AuthManager['isTwoFactorEnabled'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
+  noteMfaRequirementWithoutEnrollment: AuthManager['noteMfaRequirementWithoutEnrollment'];
   parseHashes: AuthManager['parseHashes'];
   refreshMustChangeCacheIfStale: AuthManager['refreshMustChangeCacheIfStale'];
   refreshOrgMfaCacheIfStale: AuthManager['refreshOrgMfaCacheIfStale'];
   resolveActor: AuthManager['resolveActor'];
+}
+
+/**
+ * The MFA grace period in force, in whole days (ADR-0069 D3): the configured
+ * `mfaGracePeriodDays` (the `auth.mfa_grace_period_days` setting), 7 when
+ * unset, never below 0. The one reading of it: the gate's clock below and the
+ * organization MFA guard's save notice (`AuthManager#getMfaGracePeriodDays`)
+ * both ask here, so the number a saver is told is the number the gate holds to.
+ */
+export function resolveMfaGracePeriodDays(config: { mfaGracePeriodDays?: number }): number {
+  return Math.max(0, Math.floor(Number(config.mfaGracePeriodDays ?? 7)));
 }
 
 /** The body of `AuthManager#assertPasswordComplexity`; the method's docblock there is its contract. */
@@ -112,20 +131,17 @@ export function refreshMustChangeCacheIfStale(this: Pick<PasswordSessionPolicyHo
 }
 
 /** The body of `AuthManager#refreshOrgMfaCacheIfStale`; the method's docblock there is its contract. */
-export function refreshOrgMfaCacheIfStale(this: Pick<PasswordSessionPolicyHost, '_orgMfaCache' | '_orgMfaRefreshing' | 'config' | 'getDataEngine'>): void {
-  if (this.config.mfaRequired === true) return;
+export function refreshOrgMfaCacheIfStale(this: Pick<PasswordSessionPolicyHost, '_orgMfaCache' | '_orgMfaRefreshing' | 'anyOrganizationRequiresMfa' | 'config'>): void {
+  // [ADR-0069 TL;DR 6] An organization can only strengthen the deployment's
+  // level, so at `everyone` there is nothing an organization adds.
+  if ((this.config.mfaRequirement ?? 'off') === 'everyone') return;
   if (this._orgMfaRefreshing) return;
   if (Date.now() - this._orgMfaCache.at < 60_000) return;
-  const engine = this.getDataEngine();
-  if (!engine) return;
   this._orgMfaRefreshing = true;
   void (async () => {
     try {
-      const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
-      const n = await engine.count('sys_organization', {
-        where: { require_mfa: true }, context: SYSTEM_CTX,
-      });
-      this._orgMfaCache = { value: typeof n === 'number' && n > 0, at: Date.now() };
+      const value = await this.anyOrganizationRequiresMfa();
+      this._orgMfaCache = { value: value === true, at: Date.now() };
     } catch {
       // leave the prior value; try again after the TTL
     } finally {
@@ -136,7 +152,7 @@ export function refreshOrgMfaCacheIfStale(this: Pick<PasswordSessionPolicyHost, 
 
 /** The body of `AuthManager#resolveUserAuthGates`; the method's docblock there is its contract. */
 export async function resolveUserAuthGates(
-  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
+  this: Pick<PasswordSessionPolicyHost, '_mustChangeCache' | '_orgMfaCache' | 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'isOrganizationAdministrator' | 'isTwoFactorEnabled' | 'noteMfaRequirementWithoutEnrollment' | 'refreshMustChangeCacheIfStale' | 'refreshOrgMfaCacheIfStale'>,
   userId: string,
   options: { organizationId?: string } = {},
 ): Promise<AuthGate[]> {
@@ -147,13 +163,14 @@ export async function resolveUserAuthGates(
   this.refreshMustChangeCacheIfStale();
   const activeOrgId = options.organizationId;
   const expiryDays = Math.floor(Number(this.config.passwordExpiryDays) || 0);
-  const mfaGlobal = this.config.mfaRequired === true;
-  // Per-org tightening: an org may require MFA above the global floor.
-  const orgMaybeRequires = !mfaGlobal && !!activeOrgId && this._orgMfaCache.value;
+  // [ADR-0069 D3, ruling 「可以，按三档做（推荐）」] The deployment's level is
+  // the floor; the session's organization may only strengthen it.
+  const deploymentLevel = this.config.mfaRequirement ?? 'off';
+  const orgMaybeRequires = deploymentLevel !== 'everyone' && !!activeOrgId && this._orgMfaCache.value;
   // #2766 V1 — an admin-issued must-change-password flag activates the gate
   // even with every config feature off (per-user state, cached like org MFA).
   const mustChangeMaybe = this._mustChangeCache.value;
-  if (expiryDays <= 0 && !mfaGlobal && !orgMaybeRequires && !mustChangeMaybe) {
+  if (expiryDays <= 0 && deploymentLevel === 'off' && !orgMaybeRequires && !mustChangeMaybe) {
     return []; // no gate feature active
   }
   const engine = this.getDataEngine();
@@ -167,14 +184,11 @@ export async function resolveUserAuthGates(
       context: SYSTEM_CTX,
     });
 
-    // Effective MFA requirement: global floor OR the active org's require_mfa.
-    let mfaRequired = mfaGlobal;
-    if (!mfaRequired && orgMaybeRequires) {
-      const org = await engine.findOne('sys_organization', {
-        where: { id: activeOrgId }, fields: ['require_mfa'], context: SYSTEM_CTX,
-      });
-      mfaRequired = org?.require_mfa === true || org?.require_mfa === 1;
-    }
+    // The level in force: the stronger of the deployment's and the active
+    // organization's own (`organization-access-policy.ts`).
+    const level = orgMaybeRequires
+      ? effectiveMfaLevel({ mfaRequirement: deploymentLevel }, await this.getOrganizationAccessPolicy(activeOrgId))
+      : deploymentLevel;
 
     // ── Admin-issued force change (#2766 V1) ──────────────────────────
     // [#23287, ruling C′ item 2] Its OWN code now, scope `credential`: it
@@ -205,8 +219,26 @@ export async function resolveUserAuthGates(
     // A user without TOTP enrolled is blocked once their grace window
     // elapses. The clock (`mfa_required_at`) starts the first time we see
     // them required-but-unenrolled (stamped lazily, best-effort).
-    if (mfaRequired && !(u?.two_factor_enabled === true || u?.two_factor_enabled === 1)) {
-      const graceDays = Math.max(0, Math.floor(Number(this.config.mfaGracePeriodDays ?? 7)));
+    //
+    // [#30201] Only while they CAN enroll. The twoFactor plugin's
+    // `/two-factor/*` endpoints are the one enrollment path; with the plugin
+    // off, a hold here answers `MFA_REQUIRED` to a user whose remediation
+    // endpoint does not exist, which locks every member of the organization
+    // out, the owner included, behind the very gate that guards Setup. So an
+    // unenrollable requirement is not enforced (no hold, and no grace clock
+    // started: the window opens when enrollment does) and is reported once.
+    // The `require_mfa` write guard refuses a new requirement in that state
+    // (`organization-mfa-enrollment-guard.ts`); this covers rows stored before
+    // it, and an `OS_AUTH_TWO_FACTOR=false` pin under the global setting.
+    const unenrolled = !(u?.two_factor_enabled === true || u?.two_factor_enabled === 1);
+    // `administrators` holds ADR-0090 D12's three kinds and lets everyone else
+    // through; asked only for an unenrolled user, the one it can hold.
+    const mfaRequired =
+      level === 'everyone' || (level === 'administrators' && unenrolled && (await this.isOrganizationAdministrator(userId, activeOrgId)));
+    if (mfaRequired && unenrolled && !this.isTwoFactorEnabled()) {
+      this.noteMfaRequirementWithoutEnrollment();
+    } else if (mfaRequired && unenrolled) {
+      const graceDays = resolveMfaGracePeriodDays(this.config);
       let requiredAt = u?.mfa_required_at;
       if (!requiredAt) {
         requiredAt = new Date();
@@ -236,12 +268,21 @@ export async function stampPasswordChangedAt(this: Pick<PasswordSessionPolicyHos
   if (!engine || !userId) return;
   try {
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
+    // The stamp is credited to the account's own holder when this request's
+    // session names them (a `/change-password`, impersonation included):
+    // the attribution seam's answer, attribution only, so the write still
+    // authorizes as the system. A request whose session names nobody, or
+    // somebody else (a token-carrying `/reset-password` sent beside another
+    // account's cookie), stays the system's: the holder of that session did
+    // not change this account's password.
+    const attribution = await authSystemWriteContext();
+    const context = attribution.attributedUserId === userId ? { ...SYSTEM_CTX, ...attribution } : SYSTEM_CTX;
     // #2766 V1 — a completed password change also satisfies any pending
     // admin-issued force-change flag, so clear it in the same write.
     await engine.update(
       'sys_user',
       { id: userId, password_changed_at: new Date(), must_change_password: false },
-      { context: SYSTEM_CTX } as any,
+      { context } as any,
     );
   } catch (e) {
     // Never break a valid password change — the new password IS set.
@@ -585,14 +626,31 @@ function sessionHeartbeatMemoFor(engine: object): SessionHeartbeatMemo {
 }
 
 /** The body of `AuthManager#enforceSessionControls`; the method's docblock there is its contract. */
-export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation'>, sessionId: string | undefined, createdAtHint: unknown): Promise<void> {
-  const idleMin = Math.floor(Number(this.config.sessionIdleTimeoutMinutes) || 0);
-  const absHrs = Math.floor(Number(this.config.sessionAbsoluteMaxHours) || 0);
+export async function enforceSessionControls(
+  this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'judgeSessionScoping' | 'logDurabilityDegradation'>,
+  sessionId: string | undefined,
+  createdAtHint: unknown,
+  organizationId?: string,
+  door?: { address: string | undefined },
+): Promise<void> {
+  // [ADR-0069 TL;DR 6] The limits in force for this session: the shorter of
+  // the deployment's and those of the organization it is scoped to.
+  const organization = await this.getOrganizationAccessPolicy(organizationId);
+  const limits = effectiveSessionLimits(this.config, organization);
+  const idleMin = limits.idleMinutes;
+  const absHrs = limits.absoluteHours;
+  // [ADR-0069 TL;DR 6, D5] On a request through the HTTP auth door (`door`,
+  // carrying the address that door established), the organization's own IP
+  // list is judged again, so a session that roams outside a list — or that a
+  // tightened list no longer admits — is ended in place like one past its
+  // idle limit; the next request is anonymous, and a new sign-in from there
+  // is refused at the scoping (`judgeSessionScoping`).
+  const judgesAddress = !!door && !!organizationId && organization.allowedIpRanges.length > 0;
   // [#25343] Both limits off no longer returns here: `last_activity_at` is
   // "the last request on this session" on every deployment, not only where an
   // idle timeout reads it (ruling 6358844136, letter A). What both-off buys
   // instead is the memo below, so the added read is throttled like the write.
-  const limitsOff = idleMin <= 0 && absHrs <= 0;
+  const limitsOff = idleMin <= 0 && absHrs <= 0 && !judgesAddress;
   const engine = this.getDataEngine();
   if (!engine || !sessionId) return;
   const memo = limitsOff ? sessionHeartbeatMemoFor(engine) : undefined;
@@ -601,14 +659,18 @@ export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHos
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
     const srow = await engine.findOne('sys_session', {
       where: { id: sessionId },
-      fields: ['id', 'created_at', 'last_activity_at', 'revoked_at'],
+      fields: ['id', 'user_id', 'created_at', 'last_activity_at', 'revoked_at'],
       context: SYSTEM_CTX,
     });
     const now = Date.now();
     memo?.note(sessionId, now);
     if (!srow?.id || srow.revoked_at) return;
     let reason: string | undefined;
-    if (absHrs > 0) {
+    if (judgesAddress && typeof srow.user_id === 'string'
+      && (await this.judgeSessionScoping(srow.user_id, organizationId!, door!.address)) === 'refused') {
+      reason = 'ip_not_allowed';
+    }
+    if (!reason && absHrs > 0) {
       const created = srow.created_at ?? createdAtHint;
       if (created && now - new Date(created as any).getTime() > absHrs * 3_600_000) reason = 'absolute_max';
     }
@@ -682,24 +744,54 @@ export async function enforceSessionControls(this: Pick<PasswordSessionPolicyHos
 }
 
 /** The body of `AuthManager#enforceConcurrentCap`; the method's docblock there is its contract. */
-export async function enforceConcurrentCap(this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'logDurabilityDegradation'>, userId: string): Promise<void> {
-  const cap = Math.floor(Number(this.config.maxConcurrentSessions) || 0);
-  if (cap <= 0 || !userId) return;
+export async function enforceConcurrentCap(
+  this: Pick<PasswordSessionPolicyHost, 'config' | 'getDataEngine' | 'getOrganizationAccessPolicy' | 'logDurabilityDegradation'>,
+  userId: string,
+  organizationId?: string,
+  keepSessionId?: string,
+): Promise<void> {
+  // [ADR-0069 TL;DR 6] Two caps, each counting its own population
+  // (`organization-access-policy.ts`, "The concurrent cap"):
+  //  - the deployment's counts EVERY live session of the user, whatever
+  //    organization each is scoped to — its meaning before organizations had
+  //    caps, so the floor never loosens;
+  //  - the organization's own counts only the user's sessions scoped to that
+  //    organization, and ends only those — a strict organization never evicts
+  //    another organization's sessions.
+  // `keepSessionId` is the session this sweep runs for (the new one at sign-in,
+  // the switching one at an active-organization switch): it counts as scoped
+  // to `organizationId` and is kept, the oldest others are ended first.
+  const deploymentCap = Math.max(0, Math.floor(Number(this.config.maxConcurrentSessions) || 0));
+  const organizationCap = organizationId
+    ? (await this.getOrganizationAccessPolicy(organizationId)).maxConcurrentSessions
+    : 0;
+  if ((deploymentCap <= 0 && organizationCap <= 0) || !userId) return;
   const engine = this.getDataEngine();
   if (!engine) return;
   try {
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
     const rows = await engine.find('sys_session', {
       where: { user_id: userId },
-      fields: ['id', 'created_at', 'expires_at', 'revoked_at'],
+      fields: ['id', 'created_at', 'expires_at', 'revoked_at', 'active_organization_id'],
       limit: 200,
       context: SYSTEM_CTX,
     });
     const now = Date.now();
+    const keptFirst = (a: any, b: any) =>
+      (b.id === keepSessionId ? 1 : 0) - (a.id === keepSessionId ? 1 : 0)
+      || new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime();
     const live = (Array.isArray(rows) ? rows : [])
       .filter((sn: any) => !sn.revoked_at && (!sn.expires_at || new Date(sn.expires_at).getTime() > now))
-      .sort((a: any, b: any) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime());
-    for (const sn of live.slice(cap)) {
+      .sort(keptFirst);
+    const over: any[] = deploymentCap > 0 ? live.slice(deploymentCap) : [];
+    if (organizationCap > 0) {
+      const ended = new Set(over.map((sn: any) => sn.id));
+      const scoped = live.filter(
+        (sn: any) => !ended.has(sn.id) && (sn.id === keepSessionId || sn.active_organization_id === organizationId),
+      );
+      over.push(...scoped.slice(organizationCap));
+    }
+    for (const sn of over) {
       // [#12981] Per-session `.catch` so one refused revocation does not
       // abandon the rest of the sweep — but it reports instead of swallowing.
       await engine.update(
@@ -714,7 +806,7 @@ export async function enforceConcurrentCap(this: Pick<PasswordSessionPolicyHost,
           + 'session, not enforced. Remedy: make the sys_session update land; the sweep re-runs '
           + 'on this user\'s next sign-in and will try this row again.',
         e,
-        { object: 'sys_session', sessionId: sn.id, cap, userId },
+        { object: 'sys_session', sessionId: sn.id, cap: deploymentCap, organizationCap, organizationId, userId },
       ));
     }
   } catch (e) {
@@ -728,7 +820,7 @@ export async function enforceConcurrentCap(this: Pick<PasswordSessionPolicyHost,
         + 'so check driver connectivity and read permission on sys_session; the sweep re-runs '
         + 'on the next sign-in.',
       e,
-      { object: 'sys_session', userId, cap },
+      { object: 'sys_session', userId, cap: deploymentCap, organizationCap, organizationId },
     );
   }
 }

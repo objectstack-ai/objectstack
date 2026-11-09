@@ -22,6 +22,7 @@
  * | security-cbp-ambiguous-relation(error)  | #14747 order-dependent master; runtime refusal since #23100 |
  * | security-modify-all-delete-withheld(error) | #25575 Modify All includes delete — UNPARSED intakes only, see the arm |
  * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): a caller-keyed update policy on a detail admits nobody the master gate refuses — unless it keys `owner_id` and the detail opted in (#26591: the opt-in is prescribed only there) |
+ * | security-superuser-field-mask-inert (warning) | ADR-0066 D2 ⑧ as amended (ruling 6573563853, letter A): a set's View All / Modify All on an object votes on every field of it, so its own `readable: false` (or, under Modify All, its edit lock) on that object binds none of its holders |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
@@ -121,9 +122,23 @@
  */
 
 import { parseCelToAst, sqlPredicateToCel, type CelAstNode } from '@objectstack/formula';
-import { controlledByParentOwnerMayEdit, isControlledByParentMasterField, referenceCarrierOf } from '@objectstack/spec/data';
+import {
+  controlledByParentMasterOf,
+  controlledByParentOwnerMayEdit,
+  isControlledByParentMasterField,
+  referenceCarrierOf,
+} from '@objectstack/spec/data';
 import { describeAnchorForbiddenBits, type AnchorBindingContext } from '@objectstack/spec/security';
-import { indexObjectGraph, nearestName, packagesOf, recordsOf, type ObjectGraph } from './object-graph.js';
+import {
+  indexObjectGraph,
+  nearestName,
+  objectExtensionsByTarget,
+  objectsAsServed,
+  packagesOf,
+  recordsOf,
+  type ObjectGraph,
+  type VisibleObjectExtension,
+} from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
 import {
   PUBLIC_READ_WRITE_WAY_OUT,
@@ -150,6 +165,7 @@ export const SECURITY_CBP_NO_RELATION = 'security-controlled-by-parent-no-relati
 export const SECURITY_CBP_AMBIGUOUS_RELATION = 'security-controlled-by-parent-ambiguous-relation';
 export const SECURITY_MODIFY_ALL_DELETE_WITHHELD = 'security-modify-all-delete-withheld';
 export const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN = 'security-controlled-by-parent-owner-policy-without-opt-in';
+export const SECURITY_SUPERUSER_FIELD_MASK_INERT = 'security-superuser-field-mask-inert';
 
 export type SecuritySeverity = 'error' | 'warning' | 'info';
 
@@ -265,6 +281,36 @@ export function isSystemObject(obj: AnyRec): boolean {
   return obj.isSystem === true || String(obj.name ?? '').startsWith('sys_');
 }
 
+/**
+ * [ADR-0066 D2 / ①] Does `set` hold the super-user ("View/Modify All Data")
+ * bypass on `objectName`? A verbatim copy of `holdsSuperuserBypass` in
+ * `@objectstack/core` (`security/effective-object-permissions.ts`), the ONE
+ * reading the runtime's row bypass and both field merges ask. Copied, not
+ * imported, because this package depends on `@objectstack/spec` alone;
+ * `packages/cli/test/superuser-bypass-mirror-parity.test.ts` runs both over
+ * one case matrix, so a change to either reds it until the other follows.
+ *
+ * The set's own entry for the object answers when it has one; otherwise its
+ * `'*'` wildcard does (a lookup, never a merge).
+ *
+ *  - `view`   — `viewAllRecords` OR `modifyAllRecords` (Modify All implies View All);
+ *  - `modify` — `modifyAllRecords` only: View All never widens a write.
+ */
+export function holdsSuperuserBypass(
+  set: { objects?: Record<string, unknown> | null } | null | undefined,
+  objectName: string,
+  bit: 'view' | 'modify',
+): boolean {
+  const objects = set?.objects;
+  if (!objects || typeof objects !== 'object') return false;
+  const op = (objects[objectName] || objects['*']) as
+    | { viewAllRecords?: unknown; modifyAllRecords?: unknown }
+    | null
+    | undefined;
+  if (!op || typeof op !== 'object') return false;
+  return bit === 'modify' ? Boolean(op.modifyAllRecords) : Boolean(op.viewAllRecords || op.modifyAllRecords);
+}
+
 /** snake_case identifier contains the reserved token `role`/`roles`. */
 function identifierHasRoleToken(name: unknown): boolean {
   if (typeof name !== 'string') return false;
@@ -334,6 +380,12 @@ interface CbpRelation {
  * `security-controlled-by-parent-no-relation`, two or more is
  * `security-controlled-by-parent-ambiguous-relation`.
  *
+ * ⚠️ Amended by ruling A of #30905 (ADR-0055 §1 as amended): with none
+ * declared `required: true`, the object's ONLY `master_detail`, declared
+ * `required: false` (read `=== false`, so an omitted `required` is not it), is
+ * the one candidate, an optional master. The spec's `controlledByParentMasterOf`
+ * picks it, as the parse does.
+ *
  * This used to be a three-tier table (`CBP_TIERS`, #7503 / #14747) mirroring a
  * three-tier fallback in the runtime: a required `master_detail`, else ANY
  * `master_detail`, else a required `lookup`. ADR-0055 §1 never recorded the
@@ -359,9 +411,21 @@ interface CbpRelation {
  * names the real defect (the alias key) rather than this rule guessing past it.
  */
 function cbpMasterCandidates(obj: AnyRec): CbpRelation[] {
-  return recordsOf(obj.fields)
-    .filter((f) => isControlledByParentMasterField(f) && refOf(f))
-    .map((f) => ({ field: String(f.name ?? '?'), type: 'master_detail', master: refOf(f) as string }));
+  const fields = recordsOf(obj.fields);
+  const relationOf = (f: AnyRec): CbpRelation => ({
+    field: String(f.name ?? '?'),
+    type: 'master_detail',
+    master: refOf(f) as string,
+  });
+  const requiredMasters = fields.filter((f) => isControlledByParentMasterField(f) && refOf(f)).map(relationOf);
+  if (requiredMasters.length > 0) return requiredMasters;
+  // [ADR-0055 §1 as amended · #30905 ruling A] With no required one, the
+  // object's only `master_detail` declared `required: false` is its optional
+  // master — the spec's resolver says which, so the parse and this linter
+  // still read one sentence.
+  const master = controlledByParentMasterOf(Object.fromEntries(fields.map((f) => [String(f.name ?? '?'), f])));
+  const optional = master?.optional ? fields.find((f) => String(f.name ?? '?') === master.field) : undefined;
+  return optional && refOf(optional) ? [relationOf(optional)] : [];
 }
 
 /**
@@ -595,7 +659,7 @@ function pushCbpNoRelation(findings: SecurityFinding[], objName: string, path: s
     // the object is unusable rather than locked down are this id's
     // `os explain` entry.
     message:
-      `declares sharingModel 'controlled_by_parent' but no required master_detail field to derive access ` +
+      `declares sharingModel 'controlled_by_parent' but no master_detail field it can derive access ` +
       `from, so every read is denied and every write refused (422 INVALID_METADATA)`,
     // [#22161] One remedy line; that an object with no master decides its
     // own baseline, and what each value means, is this id's `os explain`
@@ -632,18 +696,6 @@ function pushCbpAmbiguousRelation(
       `Keep master_detail on the ONE master this object's rows belong to, and declare every other parent ` +
       `as a lookup field`,
   });
-}
-
-/** One `objectExtensions` entry as the registry registers it — see {@link pushExtensionMergedCbpFindings}. */
-interface VisibleExtension {
-  /** The position of the package that ships it: registration order across packages. */
-  carrier: number;
-  /** The entry's path, e.g. `objectExtensions[0]`. */
-  path: string;
-  /** `ext.priority ?? 200`, the registry's default. */
-  priority: number;
-  /** Its field records, name folded in (`recordsOf`). */
-  fields: AnyRec[];
 }
 
 /**
@@ -714,38 +766,16 @@ function pushExtensionMergedCbpFindings(findings: SecurityFinding[], stack: AnyR
     declare(recordsOf(stack.objects).filter((obj) => typeof obj.name === 'string' && !owners.has(obj.name)), bodies.length);
   }
 
-  // Target name → its extensions, one per package.
-  const extensions = new Map<string, Map<number, VisibleExtension>>();
-  const collect = (entries: unknown, carrier: number, at: string) => {
-    if (!Array.isArray(entries)) return;
-    entries.forEach((entry: unknown, i: number) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
-      const ext = entry as AnyRec;
-      if (typeof ext.extend !== 'string' || !targets.get(ext.extend)) return;
-      const byCarrier = extensions.get(ext.extend) ?? new Map<number, VisibleExtension>();
-      byCarrier.set(carrier, {
-        carrier,
-        path: `${at}objectExtensions[${i}]`,
-        priority: typeof ext.priority === 'number' ? ext.priority : 200,
-        fields: recordsOf(ext.fields),
-      });
-      extensions.set(ext.extend, byCarrier);
-    });
-  };
-  if (!multi) collect(stack.objectExtensions, 0, '');
-  else bodies.forEach((body, j) => collect(body.objectExtensions, j, `packages[${j}].manifest.`));
-
-  for (const [target, byCarrier] of extensions) {
+  // Target name → its extensions, one per package, in fold order: the shared
+  // fold (#30303), which the FLS-key check below reads too.
+  for (const [target, ordered] of objectExtensionsByTarget(stack)) {
     const obj = targets.get(target);
     if (!obj || owdOf(obj) !== 'controlled_by_parent') continue;
     if (cbpMasterCandidates(obj).length !== 1) continue;
 
     const baseFields = new Map(recordsOf(obj.fields).map((f) => [String(f.name ?? '?'), f] as const));
     const merged = new Map(baseFields);
-    const ordered = [...byCarrier.values()].sort(
-      (left, right) => left.priority - right.priority || left.carrier - right.carrier,
-    );
-    const writers = new Map<string, VisibleExtension>();
+    const writers = new Map<string, VisibleObjectExtension>();
     // Per key, how many packages wrote it at the priority of its last writer.
     const tiedWriters = new Map<string, number>();
     for (const visible of ordered) {
@@ -761,7 +791,7 @@ function pushExtensionMergedCbpFindings(findings: SecurityFinding[], stack: AnyR
 
     const candidates = cbpMasterCandidates({ ...obj, fields: [...merged.values()] });
     if (candidates.length === 1) continue;
-    const blamed = new Set<VisibleExtension>();
+    const blamed = new Set<VisibleObjectExtension>();
     for (const [key, visible] of writers) {
       if (merged.get(key)?.type === 'master_detail' || baseFields.get(key)?.type === 'master_detail') blamed.add(visible);
     }
@@ -999,7 +1029,17 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // define, an object with no readable field map, registry-injected system
   // columns) are exactly the three this rule must take, and re-deriving them
   // here would be the drift that module exists to prevent.
-  const flsGraph: ObjectGraph = indexObjectGraph(stack);
+  //
+  // [#30303] …indexed over the objects as the registry SERVES them
+  // (`objectsAsServed`): with every `objectExtensions` entry that extends one
+  // folded in, a sibling body's included, through the same fold the
+  // controlled-by-parent merge above reads. The runtime evaluator matches a
+  // key against the served object's columns, so a key naming a field an
+  // extension adds is a key that enforces; read against the declaration
+  // alone, it was refused, and an app package could grant no access to a
+  // field its module package adds. A field no body declares or extends is
+  // still unknown, and the three skips are unchanged.
+  const flsGraph: ObjectGraph = indexObjectGraph({ objects: objectsAsServed(stack).objects });
 
   // ── ADR-0066 / D5/D9: permission-set posture ─────────────────────────
   for (let i = 0; i < permissionSets.length; i++) {
@@ -1174,6 +1214,56 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       });
     }
 
+    // [ADR-0066 D2 ⑧ as amended — ruling of record 6573563853, letter A] A
+    // field mask this set's OWN super-user bit unbinds. A set holding View All
+    // or Modify All on an object votes on every field of it in both field
+    // merges (`superuserFieldVote`, `@objectstack/core`): View All votes
+    // `readable: true`, Modify All votes `readable: true` and `editable: true`.
+    // So beside View All a `readable: false` hides nothing from the set's
+    // holders, and beside Modify All neither does it nor an edit lock; View
+    // All beside an edit lock is NOT reported, because View All never widens a
+    // write and the lock still binds.
+    //
+    // `warning`, never `error`: the ruling made the pair legal, it only does
+    // not do what it reads as. The bypass is read by `holdsSuperuserBypass`
+    // below, the runtime's one reading copied verbatim (this package depends
+    // on spec alone); `packages/cli/test/superuser-bypass-mirror-parity.test.ts`
+    // holds the copy equal to core's. The entry's bits are read as parsing
+    // writes them (an omitted `readable` is `true`, an omitted `editable` is
+    // `false`), which is what both merges then read, so a raw set and its
+    // parse answer the same. One set at a
+    // time: another set's bypass unmasks a holder of both, but no author wrote
+    // an inert entry there.
+    for (const [flsKey, flsEntry] of Object.entries(flsMap)) {
+      if (!flsEntry || typeof flsEntry !== 'object') continue;
+      const dot = flsKey.indexOf('.');
+      if (dot <= 0) continue; // unqualified, judged above; both merges skip it too
+      const flsObject = flsKey.slice(0, dot);
+      const mask = flsEntry as AnyRec;
+      const readMasked = mask.readable === false;
+      const editLocked = mask.editable !== true;
+      const modifyAll = holdsSuperuserBypass(ps, flsObject, 'modify');
+      const viewAll = modifyAll || holdsSuperuserBypass(ps, flsObject, 'view');
+      const inertBits = [readMasked && viewAll ? 'readable: false' : '', editLocked && modifyAll ? 'the edit lock' : '']
+        .filter(Boolean);
+      if (inertBits.length === 0) continue;
+      const binds = inertBits.length > 1 ? 'bind' : 'binds';
+      const bit = modifyAll ? 'modifyAllRecords' : 'viewAllRecords';
+      const via = objectsMap[flsObject] ? `objects.${flsObject}` : `objects['*']`;
+      findings.push({
+        severity: 'warning',
+        rule: SECURITY_SUPERUSER_FIELD_MASK_INERT,
+        where: `permission set "${psName}"`,
+        path: `${psPath}.fields["${flsKey}"]`,
+        message:
+          `${bit} on ${via} votes on every field of "${flsObject}", so ${inertBits.join(' and ')} ` +
+          `on '${flsKey}' ${binds} none of this set's holders`,
+        hint:
+          `Remove ${bit} from ${via} and reach the rows with readScope/writeScope or a row-level policy, ` +
+          `or delete the entry if the bypass is meant`,
+      });
+    }
+
     // [#25575] `allowDelete: false` beside `modifyAllRecords: true`. Modify All
     // is the write bypass for edit, delete and transfer, so the evaluator
     // grants delete and never reads the false. The schema refuses the pair, so
@@ -1305,6 +1395,15 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       })
       .map((o) => String(o.name ?? '')),
   );
+  // The hint offers only the scopes this stack can compile. `defineStack`
+  // refuses a hierarchy scope (`own_and_reports` / `unit` / `unit_and_below`,
+  // `findHierarchyScopeGrants`) unless `requires` names `hierarchy-security`
+  // (ADR-0057), the enterprise capability — so read the same declaration here
+  // and, without it, name the requirement beside those scopes instead of
+  // offering them bare. A stack with no `requires` (the runtime metadata
+  // door hands none) gets the requirement named too.
+  const hierarchyScopesCompile =
+    Array.isArray(stack.requires) && (stack.requires as unknown[]).includes('hierarchy-security');
   if (privateObjects.size > 0) {
     for (let i = 0; i < permissionSets.length; i++) {
       const ps = permissionSets[i];
@@ -1323,9 +1422,12 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
             message:
               `"${objName}" is private (OWD) and this set grants allowRead without a readScope — ` +
               `holders see ONLY records they own (plus explicit shares).`,
-            hint:
-              `If that is intended (personal data), ignore this. Otherwise add readScope: ` +
-              `'own_and_reports' | 'unit' | 'unit_and_below' | 'org', or widen the object's sharingModel.`,
+            hint: hierarchyScopesCompile
+              ? `If that is intended (personal data), ignore this. Otherwise add readScope: ` +
+                `'own_and_reports' | 'unit' | 'unit_and_below' | 'org', or widen the object's sharingModel.`
+              : `If that is intended (personal data), ignore this. Otherwise add readScope: 'org', ` +
+                `or widen the object's sharingModel. Scopes 'own_and_reports', 'unit' and 'unit_and_below' ` +
+                `need requires: ['hierarchy-security'], which @objectstack/security-enterprise provides.`,
           });
         }
       }

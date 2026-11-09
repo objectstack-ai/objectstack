@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---
@@ -22,9 +22,8 @@ metadata:
 
 ## When to Use This Skill
 
-Flows (auto-launched, screen, scheduled), state machines and approvals,
-record-change triggers, scheduled automation, vendor integrations and their
-callbacks, and **assignment rules** that route a new record to a queue or a person.
+Flows, state machines and approvals, triggers, vendor integrations and
+their callbacks, and **assignment rules**.
 
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL
@@ -35,8 +34,6 @@ callbacks, and **assignment rules** that route a new record to a queue or a pers
 
 ## Flows — Visual Logic Orchestration
 
-A **Flow** is a directed graph of nodes — the primary automation building block.
-
 ### Flow Types
 
 | Type | When to Use |
@@ -45,7 +42,7 @@ A **Flow** is a directed graph of nodes — the primary automation building bloc
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
-| `api` | Inbound **webhook** — needs a start-node `secretRef` (or a literal `secret`; see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
+| `api` | Inbound **webhook** (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
 
 **A flow an installed package ships** is read-only. To change what it does, save
 a same-named flow in the base's paired `.custom` package declaring
@@ -71,12 +68,12 @@ Flows are built from **built-in node types** (plugins register more):
 | `start` | Entry point — every flow has exactly one |
 | `end` | Exit point — can have multiple (early exit, error exit) |
 | `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config |
-| `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope (`{ dialect: 'cel', source: 'rows' }`) or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
+| `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
 | `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end — no split/join pair to mis-wire |
 | `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first. **No `finally`** — the container's ordinary out-edges are the continuation |
-| `map` | Sequential multi-instance — invoke a subflow once per item of `config.collection` (shaped as `loop`'s); each iteration may pause (batch approvals) |
+| `map` | Sequential multi-instance — invoke the `config.flowName` flow (named as `subflow`'s) per item of `config.collection` (shaped as `loop`'s); each may pause (batch approvals); a refused name fails it at the first item |
 | `wait` | Pause execution until a timer elapses or a named signal arrives |
-| `subflow` | Invoke another flow (reusable composition) |
+| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` passes and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller; an older clash, never armed) |
 | `parallel_gateway` / `join_gateway` / `boundary_event` | **Not author-facing** — BPMN-interop forms a `parallel` / `try_catch` container lowers into; author the container |
 
 #### Data Operations
@@ -88,22 +85,23 @@ Flows are built from **built-in node types** (plugins register more):
 | `update_record` | Modify existing records |
 | `delete_record` | Remove records |
 | `get_record` | Fetch records with filters — there is **no `query_record`** node (that name has no executor and throws) |
+| `save_notice` | Tell the saver what this create/update started — record create/update trigger only, not after a pause: **objectstack-data** `rules/lifecycle.md` § Save Notice |
 
 #### External Integration
 
 | Node | Purpose |
 |:-----|:--------|
 | `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: a credential means a declared connector called via `connector_action` |
-| `notify` | Send a notification through the messaging service (inbox by default) |
-| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`: `registerFlow` and `os validate` refuse a `{…}` token at `connectorConfig.input.<key>`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable), nothing sent; `os validate` does not judge the `inputSchema` fit yet |
+| `notify` | Send a notification through the messaging service |
+| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable), nothing sent; `os validate` does not judge the `inputSchema` fit yet |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
-| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused; never hand-roll a button label or step counter into `fields` |
+| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused |
 
 #### Human Decision
 
 | Node | Purpose |
 |:-----|:--------|
-| `approval` | Route a record for human sign-off — **suspends** the run until a decision, then continues down the `approve` / `reject` branch |
+| `approval` | Route a record for human sign-off |
 
 ### `notify` — the most-used node type
 
@@ -111,8 +109,10 @@ Flows are built from **built-in node types** (plugins register more):
 error. **RAW** keys are read as written: a
 `{token}` in one is refused.
 
+<!-- os:check -->
 ```ts
-{ id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
+import type { FlowNode } from '@objectstack/spec/automation';
+const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
     recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
     // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
     // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
@@ -121,11 +121,16 @@ error. **RAW** keys are read as written: a
     topic: 'task',                     // RAW; default 'notify'
     severity: 'warning',               // RAW; CLOSED enum info|warning|critical
     channels: ['inbox'],               // RAW; default inbox
-    sourceObject: 'task',              // click-through: a PAIR, else dropped
-    sourceId: { dialect: 'cel', source: 'record.id' }, // (a value slot)
-    actionUrl: '/tasks/{{ record.id }}', // text slot; overrides the synthesized link
-} }
+    sourceObject: 'task',              // link: PAIR, else dropped; none of the 3 ⇒ the
+    sourceId: { dialect: 'cel', source: 'record.id' }, // trigger record (not on delete/before-create), if any
+    actionUrl: '/tasks/{{ record.id }}', // overrides the pair
+} };
 ```
+
+An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
+`template` (each recipient's language; mail-only, refused in inline `title` /
+`message`) — never `label()` in `templateData`, evaluated once per run, before
+fan-out.
 
 ### Flow Variables
 
@@ -148,15 +153,14 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 | ROUTES (runtime failure) | Does NOT route (fatal either way) |
 |:--|:--|
-| 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter operand that evaluated to `null`; graph past the nesting ceiling; unscoped run |
+| 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter operand that evaluated to `null` or a non-value; graph past the nesting ceiling; unscoped run |
 
 > **Writing a `readonly` field? Set `runAs: 'system'`.** Under the default
 > `runAs: 'user'` the engine **strips** it from `create_record` / `update_record`
 > — the step succeeds, the value never lands, the drop is named in the step's
 > warnings — so a flow maintaining one (approval stamps, SLA markers, rollups)
 > runs `runAs: 'system'`; `os validate` / `os build` fail a `runAs:'user'`
-> `update_record` writing one (`readonlyWhen`: a warning). Do **not** remove
-> `readonly` instead.
+> `update_record` writing one (`readonlyWhen`: a warning).
 
 > **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`; a
 > step that must write a `readonly` field moves into a dedicated `runAs: 'system'`
@@ -195,7 +199,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 ### Filter operands (`config.filter`)
 
 - **Each operand is a value slot** — a literal or a CEL envelope evaluated
-  before the query (`filter: { id: { dialect: 'cel', source: 'record.id' } }`).
+  before the query.
   A whole-string **query placeholder** (`{current_user_id}`, `{today}`,
   `{current_year_start}`) passes through verbatim for the query engine; a flow
   variable never shadows it, and only `filter` gets this hand-off.
@@ -206,13 +210,17 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
   literal `null`. A relation hop (`record.owner.email`) needs the start node's
   `config.expand` to list the field — else the fault names the missing hop, not
   the remedy.
+- **A computed operand is a value, never a query operator**: a string, number,
+  bigint, boolean or date, or at an `$in` / `$nin` / `$between` comparand a list
+  of them with no empty entry. Anything else fails the node as a guard before the
+  query runs. Make the expression evaluate to the compared value (for a record,
+  its `id`), and write conditions in the filter itself.
 
 ---
 
 ## Valid-but-silently-wrong (passes build, fails at runtime)
 
-Legal metadata authors get wrong; most are caught by `objectstack build` —
-write them right the first time:
+Legal metadata authors get wrong; most are caught by `objectstack build`:
 
 1. **A value slot takes a literal or a CEL envelope — never a `{…}` token.**
    In `assignments.*`, `fields.*`, `subflow` / `map` `input.*`, `script`
@@ -226,7 +234,6 @@ write them right the first time:
      CEL refuses an absent key where the template wrote nothing, so nothing /
      `null` / a default is now YOUR call; `'{record.tags.0}'` → `'record.tags[0]'`;
      a deep path guards each step: `has(vars.source) && has(vars.source.id) ? vars.source.id : null`
-   - dates and money: the legacy → CEL table in **objectstack-formula**
    - run user: `{$User.Id}` → `current_user.id`; a flow that can run without a
      user guards it, `current_user != null ? current_user.id : null`.
      `current_user` holds `id`, `positions`, `organizationId`, `isPlatformAdmin`
@@ -240,7 +247,6 @@ write them right the first time:
    'current_user.id' } }`), then write `{{ v }}`.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
-   Reference a field explicitly.
    ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }` → writes the whole record object
    ✅ `source: 'newRec.id'`
 
@@ -254,10 +260,9 @@ write them right the first time:
    it. Keep data effects on the flow graph (visible, governed, build-checkable):
 
    ```ts
-   // ✅ function returns values → outputVariable → update_record persists
    { id: 'ai', type: 'script', config: {
        function: 'helpdesk.aiTriageStub',     // returns { ai_category, ai_sentiment, … }
-       inputs: { ticketId: { dialect: 'cel', source: 'record.id' } }, // CEL values or literals
+       inputs: { ticketId: { dialect: 'cel', source: 'record.id' } },
        outputVariable: 'ai',
    } },
    { id: 'apply', type: 'update_record', config: {
@@ -268,7 +273,7 @@ write them right the first time:
    ```
 
    Data-lifecycle **side effects** (read/write other records) are an L2 **hook**
-   (objectstack-data) — hooks get `ctx.api`.
+   (objectstack-data).
 
    A function that writes where the platform cannot see **declares** it, so the
    run reports "cannot say" rather than `acted: 0`:
@@ -280,9 +285,12 @@ write them right the first time:
    } });
    ```
 
-4. **Conditions are bare CEL; only the stdlib (`CEL_STDLIB_FUNCTIONS`,
-   **objectstack-formula**) is callable bare.** An unknown function (`PRIOR()`, a
-   typo) and a `{…}`-wrapped field ref both **fail the build** — write `record.x`.
+4. **A `select` is compared and written by its option `value`, never its label.**
+   The request speaks the label ("Lost"); the row stores the `value` (`lost`).
+   `condition: "record.status == 'Lost'"` parses, matches no row: the flow
+   stages clean and never fires; `fields: { status: 'Lost' }` / a `filter`
+   fails the run (`invalid_option`). Read the field's `options`; write the
+   `value` in the `condition` AND every `fields` / `filter` entry.
 
 ---
 
@@ -292,7 +300,7 @@ write them right the first time:
 
 ## Assignment rules — route a new record to a queue or a person
 
-The third automation family: `assignmentRules` on the stack routes each inserted
+`assignmentRules` on the stack routes each inserted
 row of an `ownership: 'user'` object whose `owner_id` and `queue` are both still
 empty — once, after every `beforeInsert` hook, never on update, never refusing the
 insert (ADR-0142 D5). Entries are ordered; the first whose `criteria` (CEL over
@@ -303,30 +311,39 @@ insert (ADR-0142 D5). Entries are ordered; the first whose `criteria` (CEL over
 import { defineAssignmentRule } from '@objectstack/spec/automation';
 
 export const caseIntake = defineAssignmentRule({
-  name: 'case_intake',
+  name: 'crm_case_intake',
   object: 'crm_case',
   entries: [
     { name: 'urgent', criteria: 'record.priority == "urgent"',
-      assignTo: { type: 'queue', value: 'escalations' } },           // no strategy: parked for a claim
-    { name: 'rest', assignTo: { type: 'queue', value: 'support_intake' },
+      assignTo: { type: 'queue', value: 'crm_escalations' } },       // no strategy: parked for a claim
+    { name: 'rest', assignTo: { type: 'queue', value: 'crm_support_intake' },
       strategy: 'least_loaded', load: 'record.status != "closed"' }, // or 'round_robin'; `load` only with least_loaded
   ],
 });
 ```
 
 `strategy` is for a queue target only; `assignTo: { type: 'user', value: '<id>' }`
-names one owner. Queues are declared in `queues` (objectstack-data); an approval
-for the same people is `approvers: [{ type: 'queue', value: 'support_intake' }]`
-([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
+names one owner, who holds the row only while an active member of its organization
+(else ownerless). Queues are declared in `queues` (objectstack-data); an approval
+for the same people is a `queue` approver ([Approver Types](./references/state-machines-and-approvals.md#approver-types)).
 ⛔ Never a `beforeInsert` hook that picks an owner, nor a round-robin counter field.
+
+**A packaged rule's queue** (ADR-0150 D3) is its package's own, else the one holder
+in its `dependencies` closure plus `sys`: `acme.helpdesk` naming `acme.crm`'s queue
+declares `dependencies: { 'acme.crm': '^1.0.0' }`. Else refused — `outside-closure`
+(an undeclared package's or environment-only queue), `ambiguous-in-closure` (two
+in it) — the row is written ownerless, in no queue, and the server log warns once
+(`… does not resolve … from the rule's package`). An organization's
+`sys_assignment_rule` row and a rule no package ships read environment-wide (two
+package holders: `ambiguous-in-environment`). A name no `queues` entry declares
+reads the organization's `sys_queue` row.
 
 ---
 
 ## Triggers — Event-Driven Automation
 
-A `record_change` flow fires on a data event; there is **no standalone trigger
-object and no top-level `trigger` / `event` key** — the binding is the `start`
-node's `config`.
+There is **no standalone trigger
+object and no top-level `trigger` / `event` key**.
 
 ### Prerequisite — declare the capabilities your nodes need
 
@@ -338,11 +355,13 @@ token implies the other:
 |:--|:--|:--|
 | `automation` | the flow engine + node executors | flows never execute |
 | `triggers` + `automation` | `record-*` / schedule / `api` start bindings | auto-launched flow refused: `STACK_TRIGGER_CAPABILITY_REQUIRED` |
-| `job` | cron cadence + the `timeRelative` sweep | scheduled flows never launch |
-| `queue` | the inbound-webhook consumer | inbound POST answers **503** |
+| `job`° | cron cadence + the `timeRelative` sweep | scheduled flows never launch |
+| `queue`° | the inbound-webhook consumer | inbound POST answers **503** |
 | `approvals` | `approval` / `approval_revise` (`plugin-approvals`) | no executor for the node type |
-| `messaging` | `notify` delivery to inbox (`sys_inbox_message`) | **silent:** success with `skipped: true` |
+| `messaging`° | `notify` delivery to inbox (`sys_inbox_message`) | **silent:** success with `skipped: true` |
 | `webhooks` + `realtime` | `defineStack({ webhooks })` outbound dispatch | declared webhook refused: `STACK_WEBHOOK_CAPABILITY_REQUIRED` |
+
+° Always-on, so list it only under `--preset minimal` (**objectstack-platform** § `requires:`).
 
 ### Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
 
@@ -355,7 +374,7 @@ node `config`**:
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
 | `secretRef` / `secret` | HMAC-SHA256 secret, **one required** (else refused at registration and `os validate`). Ship `secretRef: 'NAME'`: an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`. Never a literal |
 
-- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — `v1` = HMAC-SHA256 of `<t>.<raw body>` under the secret; refused when `t` is over 300 s from the server clock.
+- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
 - **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
 - The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
@@ -374,8 +393,8 @@ node `config`**:
 
 ### Trigger Configuration — on the `start` node
 
-This is the start node alone, not a whole flow (a flow also
-owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
+A flow around it also owns `label`, `type`, `nodes` and the `edges`
+`FlowSchema` requires:
 
 ```typescript
 {
@@ -396,10 +415,7 @@ owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 > `record-before-*` flow that throws silently blocks the write — give it a
 > user-facing message.
 
-> `previous` (before the change) vs `record` (after) in an update trigger's
-> condition: see [objectstack-formula](../objectstack-formula/SKILL.md) §5.
-
-→ [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
+→ [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers.
 
 ---
 
@@ -414,18 +430,9 @@ credential hand-off, loader limits: [references/integration-recipes.md](./refere
 Platform code only when one holds — and then it is the platform's, filed as a
 card, the app still writing none: the protocol is not HTTP; the work writes
 identity objects (users, units, positions); it processes files locally; one fixed
-action contract spans several vendors; the callback's signature is outside the
-`api` door's HMAC. A document the loader cannot take yet (YAML, Swagger 2.0,
-`$ref`) is a gap named against its platform card, never a
-reason to write code.
-
----
-
-## CRM Automation Blueprint
-
-Lifecycle first, as Flow / Approval metadata: `src/flows/*.flow.ts` with explicit
-`variables`, `nodes` + `edges`, exported from `src/flows/index.ts` into
-`defineStack({ flows })`.
+action contract spans several vendors; the callback is signed in no form
+`config.signature` declares. A document the loader cannot take yet (YAML, Swagger 2.0,
+`$ref`) is a gap named against its platform card.
 
 ---
 
@@ -440,13 +447,10 @@ os validate     # CEL/predicate validation + schema
 # or: os build  # the same gates, plus emits dist/
 ```
 
-In a scaffolded project: `npm run validate`.
-
 ---
 
 ## References
 
 See [references/_index.md](./references/_index.md) for pointers to the Zod
-schemas in `node_modules/@objectstack/spec/src/` — `Read` the source for exact
-field shapes; never rely on memory.
+schemas in `node_modules/@objectstack/spec/src/`.
 

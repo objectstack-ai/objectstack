@@ -305,14 +305,17 @@ async function seedRowVerbatim(
     const repo = protocol.getOverlayRepo(null);
     const ref = { type: args.type, name: args.name, org: 'env' };
     // Successive writes to one identity build the lineage a revert restores
-    // from, so each must present the CURRENT head as its parent.
-    const existing = await repo.get(ref, { state: 'active' });
+    // from, so each must present the CURRENT head as its parent. [#29414]
+    // Bound to the package the commit under revert is recorded for
+    // (`commitRow`): a commit's revert addresses that package's own rows.
+    const existing = await repo.get(ref, { state: 'active', packageId: 'app.demo' });
     await repo.put(ref, args.body, {
         parentVersion: existing?.hash ?? null,
         actor: null,
         source: 'test.at-rest-residue',
         intent: 'runtime-only',
         state: 'active',
+        packageId: 'app.demo',
     });
 }
 

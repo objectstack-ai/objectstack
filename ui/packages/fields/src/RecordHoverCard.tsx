@@ -339,10 +339,11 @@ function RecordHoverCardBody({
     (record && (objectSchema ? getRecordDisplayName(objectSchema, record) : pickRecordDisplayName(record))) ||
     label ||
     recordId;
-  const typeLabel = objectLabel({
-    name: objectName,
-    label: pickLocalized(objectSchema?.label, language) || humanizeLabel(objectName),
-  });
+  // The served label as given — the server already translated it — and the
+  // bundle only when none is served (objectstack#30390).
+  const typeLabel =
+    pickLocalized(objectSchema?.label, language) ||
+    objectLabel({ name: objectName, label: humanizeLabel(objectName) });
 
   const rows = record
     ? highlights

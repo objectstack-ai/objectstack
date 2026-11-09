@@ -1566,6 +1566,11 @@ const UNPUBLISHED_EXEMPTIONS: Record<string, string> = {
   // (`ParentRecordBinding`) and declared the key on the registration, with its member pin in
   // `MEMBER_PINS`, so the entry went stale and `carries no stale unpublished-key exemption` would
   // refuse it.
+  // `page:header.placedActions` — booked here by objectstack#30018 (ruling record 6624172200,
+  // letter A) while no renderer read it — is STRUCK: objectstack#29951's ui half wired the read
+  // (`PageHeaderActions` draws `placedHeaderActions` from `@object-ui/types`) and declared the
+  // key on the page:header registration, so the entry went stale and `carries no stale
+  // unpublished-key exemption` would refuse it.
 
   /*
    * ⚠️ THE 17.5.0 BOOKINGS — objectui#11111 decision 3 = B (record 5902351047).
@@ -3413,7 +3418,7 @@ const MEMBER_PINS: Record<string, MemberPin> = {
   // files, each read end to end first.
   'object-gantt.gantt': {
     file: 'packages/plugin-gantt/src/__tests__/objectGanttInputs-11168.test.tsx',
-    pins: 'Members are FIELD NAMES, each on the observable only it moves: `titleField` titles a task\'s row and `startDateField` / `endDateField` give its start and end, with a block naming other fields moving all three (the control). The block is taken WHOLE: flat `startDateField` / `endDateField` / `titleField` composed on the node beside it are ignored. The spec side is pinned with it: a block missing `titleField` is refused at `gantt.titleField`, and `percentageField` — which this key\'s description used to name, and nothing reads — is refused by name, while the description no longer names it. `exportFileName` is pinned with `object-gantt.label`; `colorField`, `dependenciesField` and `viewMode` keep their narrow pins (`ObjectGantt.colorFieldLadder-7243.test.tsx`, `ObjectGantt.dependencyAlias.test.tsx`, `ObjectGantt.viewmode.test.tsx`) and are not re-asserted (objectui#11168 slice 4).',
+    pins: 'Members are FIELD NAMES, each on the observable only it moves: `titleField` titles a task\'s row and `startDateField` / `endDateField` give its start and end, with a block naming other fields moving all three (the control). The block is taken WHOLE: flat `startDateField` / `endDateField` / `titleField` composed on the node beside it are ignored. The spec side is pinned with it: a block missing `titleField` is refused at `gantt.titleField`, and `percentageField` — which this key\'s description used to name, and nothing reads — is refused by name, while the description no longer names it. `exportFileName` is pinned with `object-gantt.label`; `colorField`, `dependenciesField` and `viewMode` keep their narrow pins (the `ObjectGantt.colorFieldLadder-7243` block of `ObjectGantt.harness.test.tsx`, `ObjectGantt.dependencyAlias.test.tsx`, `ObjectGantt.viewmode.test.tsx`) and are not re-asserted (objectui#11168 slice 4).',
   },
   'object-gantt.data': {
     file: 'packages/plugin-gantt/src/__tests__/recordSourceInputs-10394.test.tsx',

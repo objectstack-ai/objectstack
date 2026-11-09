@@ -107,8 +107,13 @@ const transport = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
         return json(403, { error: `Permission denied: read on ${OBJECT}`, code: 'PERMISSION_DENIED', object: OBJECT });
       case 'notFound':
         return json(404, { error: 'Record not found', code: 'RECORD_NOT_FOUND' });
+      // objectstack#29704 — the runtime dispatcher's wrapped envelope: a code
+      // and a sentence the page now shows.
       case 'serverError':
-        return json(500, { error: 'Internal server error', code: 'INTERNAL_ERROR' });
+        return json(500, {
+          success: false,
+          error: { code: 'INTERNAL_ERROR', message: 'The invoice store is restarting', httpStatus: 500 },
+        });
       case 'network':
         throw new TypeError('Failed to fetch');
       default:
@@ -136,14 +141,17 @@ const NOT_FOUND_ZH = '未找到记录';
 
 /** Open the record page; returns the adapter's two record reads, spied, to count the page's reads. */
 async function openRecordPage(config: I18nConfig = EN) {
+  // The definition as the server serves it in the session's language: a `zh`
+  // session holds the `zh` label (objectstack#30390).
+  const def = config === ZH ? { ...objectDef, label: '发票' } : objectDef;
   const ds = new ObjectStackAdapter({ baseUrl: BASE, fetch: transport, autoReconnect: false });
   await ds.connect();
   // Object metadata is the metadata service's business, not this file's.
-  (ds as unknown as { getObjectSchema: () => Promise<unknown> }).getObjectSchema = async () => objectDef;
+  (ds as unknown as { getObjectSchema: () => Promise<unknown> }).getObjectSchema = async () => def;
   const findOne = vi.spyOn(ds, 'findOne');
   const getRecordPage = vi.spyOn(ds, 'getRecordPage');
   const metadata = {
-    objects: [objectDef], pages: [], loading: false, error: null,
+    objects: [def], pages: [], loading: false, error: null,
     refresh: async () => {}, invalidate: () => {},
     ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
   } as never;
@@ -153,7 +161,7 @@ async function openRecordPage(config: I18nConfig = EN) {
         <MetadataCtx.Provider value={metadata}>
           <RecordDetailView
             dataSource={ds as never}
-            objects={[objectDef] as never}
+            objects={[def] as never}
             onEdit={() => {}}
             objectNameOverride={OBJECT}
             recordIdOverride={REC}
@@ -213,7 +221,10 @@ describe('a failed load renders a retryable load error, not not-found (objectui#
 
     const state = await screen.findByTestId('record-load-failed', undefined, { timeout: 5000 });
     expect(state).toHaveTextContent('Couldn’t load this record');
-    expect(state).toHaveTextContent('Something went wrong while loading it. Check your connection and try again.');
+    // objectstack#29704 — the server answered: its sentence and code, not the network advice.
+    expect(state).toHaveTextContent('The invoice store is restarting');
+    expect(screen.getByTestId('record-load-failed-code')).toHaveTextContent('INTERNAL_ERROR');
+    expect(state).not.toHaveTextContent(/connection/);
     absent(NOT_FOUND_EN);
     absent(/may have been deleted/);
     expect(pageReads(reads)).toBe(1);
@@ -239,6 +250,9 @@ describe('a failed load renders a retryable load error, not not-found (objectui#
 
     const state = await screen.findByTestId('record-load-failed', undefined, { timeout: 5000 });
     expect(state).toHaveTextContent('Couldn’t load this record');
+    // No answer came back: the network sentence, and no code (objectstack#29704).
+    expect(state).toHaveTextContent('Something went wrong while loading it. Check your connection and try again.');
+    expect(screen.queryByTestId('record-load-failed-code')).toBeNull();
     expect(screen.getByRole('button', { name: /Retry/ })).toBeInTheDocument();
     absent(NOT_FOUND_EN);
   });
@@ -248,9 +262,21 @@ describe('a failed load renders a retryable load error, not not-found (objectui#
     await openRecordPage(ZH);
 
     expect(await screen.findByText('无法加载此记录', undefined, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.getByText('加载时出错。请检查网络连接后重试。')).toBeInTheDocument();
+    // objectstack#29704 — the server's sentence and code, never 请检查网络连接后重试.
+    expect(screen.getByText('The invoice store is restarting')).toBeInTheDocument();
+    expect(screen.getByTestId('record-load-failed-code')).toHaveTextContent('INTERNAL_ERROR');
+    absent(/请检查网络连接/);
     expect(screen.getByRole('button', { name: /重试/ })).toBeInTheDocument();
     absent(NOT_FOUND_ZH);
+  });
+
+  it('zh: a transport failure keeps 「请检查网络连接后重试」, the sentence for a request with no answer', async () => {
+    answer = 'network';
+    await openRecordPage(ZH);
+
+    expect(await screen.findByText('无法加载此记录', undefined, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByText('加载时出错。请检查网络连接后重试。')).toBeInTheDocument();
+    expect(screen.queryByTestId('record-load-failed-code')).toBeNull();
   });
 });
 

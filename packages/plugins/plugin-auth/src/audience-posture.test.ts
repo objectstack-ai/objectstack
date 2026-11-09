@@ -22,6 +22,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { ERROR_CODE_LEDGER } from '@objectstack/spec/api';
+import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import { AuthManager } from './auth-manager';
 import { bindTestSecurityCatalog, catalogFromTables } from './__tests__/security-catalog.testkit.js';
 import {
@@ -30,6 +31,7 @@ import {
   decideAudienceAdmission,
   emailDomainAllowed,
   extractEmailDomain,
+  invitationProofFor,
   resolveAudience,
   resolveEmailVerificationRequirement,
   SELF_REGISTRATION_CLOSED,
@@ -140,14 +142,25 @@ const makeManager = (engine: any, config: Record<string, unknown> = {}) =>
     ...config,
   } as any);
 
-const signUp = (manager: AuthManager, email: string) =>
+const signUp = (manager: AuthManager, email: string, invitationId?: string) =>
   manager.handleRequest(
     new Request('http://localhost:3000/api/v1/auth/sign-up/email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: PASSWORD, name: 'Audience Test' }),
+      body: JSON.stringify({ email, password: PASSWORD, name: 'Audience Test', invitationId }),
     }),
   );
+
+/**
+ * A magic-link creation asked of the real admission gate: a door that keeps
+ * the address match under `invite_only` (`invitationProofFor`), so it is the
+ * door the address probe's own pins drive. `undefined` admits.
+ */
+const magicLinkCreation = (manager: AuthManager, email: string) =>
+  (manager as any).validateAudienceAdmission({
+    user: { email },
+    source: { action: 'create-user', method: 'magic-link' },
+  });
 
 /** Seed one existing user so the zero-user bootstrap bypass is OFF. */
 const seedExistingUser = (engine: any) => {
@@ -170,11 +183,13 @@ const seedPermissionSet = (engine: any, name: string, extra: Record<string, unkn
   ]);
 };
 
-const seedPendingInvitation = (engine: any, email: string, extra: Record<string, unknown> = {}) => {
+/** Seed a pending invitation and answer its id, which a sign-up presents. */
+const seedPendingInvitation = (engine: any, email: string, extra: Record<string, unknown> = {}): string => {
+  const id = `inv_${Math.random().toString(36).slice(2, 8)}`;
   engine.tables.set('sys_invitation', [
     ...(engine.tables.get('sys_invitation') ?? []),
     {
-      id: `inv_${Math.random().toString(36).slice(2, 8)}`,
+      id,
       email,
       status: 'pending',
       organization_id: 'org_1',
@@ -182,6 +197,7 @@ const seedPendingInvitation = (engine: any, email: string, extra: Record<string,
       ...extra,
     },
   ]);
+  return id;
 };
 
 const audience = (over: Partial<ResolvedAudience> = {}): ResolvedAudience => ({
@@ -362,6 +378,52 @@ describe('admission decision matrix (#11739): posture × creation class', () => 
     }
   });
 
+  // Ruling record 6718355623: an SSO provider (`ssoProvider` present) under
+  // invite_only admits an unknown user only by its allowJit toggle, an
+  // invitation or the bootstrap carve-out.
+  it('invite_only refuses an SSO-provider creation with allowJit off: SELF_REGISTRATION_CLOSED', () => {
+    const verdict = decideAudienceAdmission({ ...base, audience: audience(), creationClass: 'provider', ssoProvider: { allowJit: false } });
+    expect(verdict.admit).toBe(false);
+    if (!verdict.admit) expect(verdict.code).toBe(SELF_REGISTRATION_CLOSED);
+  });
+
+  it('invite_only admits an SSO-provider creation with allowJit on, an invitation, or at bootstrap, never with the grant', () => {
+    const aud = audience();
+    for (const input of [
+      { ssoProvider: { allowJit: true } },
+      { ssoProvider: { allowJit: false }, hasPendingInvitation: true },
+      { ssoProvider: { allowJit: false }, isBootstrap: true },
+    ]) {
+      expect(decideAudienceAdmission({ ...base, audience: aud, creationClass: 'provider', ...input })).toEqual({
+        admit: true,
+        grantPermissionSet: false,
+      });
+    }
+  });
+
+  it('CONTROL: email_domain and open admit an SSO-provider creation with allowJit off, as before', () => {
+    for (const posture of ['email_domain', 'open'] as const) {
+      const verdict = decideAudienceAdmission({
+        ...base,
+        email: 'someone@elsewhere.com',
+        audience: audience({ posture, allowedEmailDomains: posture === 'email_domain' ? ['acme.com'] : [], selfRegistrationPermissionSet: 'portal_user' }),
+        creationClass: 'provider',
+        ssoProvider: { allowJit: false },
+      });
+      expect(verdict).toEqual({ admit: true, grantPermissionSet: false });
+    }
+  });
+
+  it('CONTROL: an off-vocabulary posture admits an SSO-provider creation as before (it is judged only under a valid invite_only)', () => {
+    const verdict = decideAudienceAdmission({
+      ...base,
+      audience: audience({ invalid: { raw: "'inviteOnly'" } }),
+      creationClass: 'provider',
+      ssoProvider: { allowJit: false },
+    });
+    expect(verdict).toEqual({ admit: true, grantPermissionSet: false });
+  });
+
   it('the three refusal codes are DISTINCT and the two new ones are registered in the ADR-0112 ledger', () => {
     expect(SELF_REGISTRATION_CLOSED).not.toBe(EMAIL_DOMAIN_NOT_ALLOWED);
     expect(SELF_REGISTRATION_CLOSED).not.toBe(AUDIENCE_CONFIG_ERROR);
@@ -450,6 +512,24 @@ describe('entry validation: assertAudienceConfig (#11739)', () => {
     expect(() =>
       assertAudienceConfig({ posture: 'open', selfRegistrationPermissionSet: 'admin_full_access' }, undefined),
     ).toThrow(/admin_full_access/);
+  });
+
+  it.each(MCP_AGENT_PERMISSION_SETS)('refuses the agent ceiling set %s as the self-registration permission set, under each self-registration posture', (name) => {
+    const domains = { allowedEmailDomains: ['acme.com'] };
+    for (const audience of [{ posture: 'open' as const }, { posture: 'email_domain' as const, ...domains }]) {
+      expect(
+        () => assertAudienceConfig({ ...audience, selfRegistrationPermissionSet: name }, undefined),
+        audience.posture,
+      ).toThrow(
+        new RegExp(`^\\[audience\\] invalid audience configuration: selfRegistrationPermissionSet must not be '${name}' — it is the permission ceiling of an AI assistant connected over MCP`),
+      );
+    }
+  });
+
+  it('control: a permission set meant for people stays a declarable self-registration set', () => {
+    for (const set of ['member_default', 'portal_user']) {
+      expect(() => assertAudienceConfig({ posture: 'open', selfRegistrationPermissionSet: set }, undefined), set).not.toThrow();
+    }
   });
 
   it('email_domain: an explicit verification-off stays refused, from ANY declarant (the domain list is the only gate there)', () => {
@@ -618,7 +698,7 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     expect(engine.tables.get('sys_user')?.length).toBe(1);
   });
 
-  it('invite_only: a pending invitation admits the invitee (case-insensitively), an expired one does not', async () => {
+  it('invite_only: the pending invitation a sign-up presents admits it (address in any case), an expired one does not', async () => {
     const engine = createMemoryEngine();
     seedExistingUser(engine);
     const manager = makeManager(engine);
@@ -628,12 +708,12 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     // `validateUserInfo`. So the row holds the normalized form, and the
     // case-insensitivity the invitee experiences is that the address THEY type
     // may carry any case at all.
-    seedPendingInvitation(engine, 'bob@acme.com');
-    const admitted = await signUp(manager, 'Bob@Acme.com');
+    const bob = seedPendingInvitation(engine, 'bob@acme.com');
+    const admitted = await signUp(manager, 'Bob@Acme.com', bob);
     expect(admitted.status).toBeLessThan(300);
 
-    seedPendingInvitation(engine, 'late@acme.com', { expires_at: new Date(Date.now() - 60_000) });
-    const refused = await signUp(manager, 'late@acme.com');
+    const late = seedPendingInvitation(engine, 'late@acme.com', { expires_at: new Date(Date.now() - 60_000) });
+    const refused = await signUp(manager, 'late@acme.com', late);
     expect(refused.status).toBe(403);
     expect((await refused.json()).code).toBe(SELF_REGISTRATION_CLOSED);
   });
@@ -663,9 +743,7 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     // rather than trusting the loop above to have produced it.
     expect(pending.findIndex((r: any) => r.email === 'last.hire@acme.com')).toBeGreaterThan(200);
 
-    const admitted = await signUp(manager, 'last.hire@acme.com');
-    expect(admitted.status).toBeLessThan(300);
-    expect((engine.tables.get('sys_user') ?? []).some((u: any) => u.email === 'last.hire@acme.com')).toBe(true);
+    expect(await magicLinkCreation(manager, 'last.hire@acme.com')).toBeUndefined();
   });
 
   it('the probe reads sys_invitation NARROWED by email — the work never depends on how many invitations exist (#11770)', async () => {
@@ -683,8 +761,7 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
         return find(name, q);
       };
 
-      const admitted = await signUp(manager, 'targeted@acme.com');
-      expect(admitted.status).toBeLessThan(300);
+      expect(await magicLinkCreation(manager, 'targeted@acme.com')).toBeUndefined();
       return reads;
     };
 
@@ -700,9 +777,7 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
       expect(q.where?.email).toBe('targeted@acme.com');
       expect(q.offset ?? 0).toBe(0); // one page settled it, either way
     }
-    // 2 pending rows or 401 — identical work. (The read count is >1 because
-    // the email sign-up route pre-checks the very decision the
-    // `validateUserInfo` gate then makes; see `validateAudienceAdmission`.)
+    // 2 pending rows or 401 — identical work.
     expect(large.length).toBe(small.length);
   });
 
@@ -728,12 +803,11 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
     };
 
     const cased = foldingEngine('Bob@Acme.com');
-    expect((await signUp(makeManager(cased), 'bob@acme.com')).status).toBeLessThan(300);
+    expect(await magicLinkCreation(makeManager(cased), 'bob@acme.com')).toBeUndefined();
 
     const accented = foldingEngine('bób@acme.com');
-    const refused = await signUp(makeManager(accented), 'bob@acme.com');
-    expect(refused.status).toBe(403);
-    expect((await refused.json()).code).toBe(SELF_REGISTRATION_CLOSED);
+    const refused = await magicLinkCreation(makeManager(accented), 'bob@acme.com');
+    expect(refused?.error).toBe(SELF_REGISTRATION_CLOSED);
   });
 
   it('email_domain: on-list admitted AND the declared permission set really lands; off-list refused with EMAIL_DOMAIN_NOT_ALLOWED', async () => {
@@ -949,13 +1023,23 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
       nonBootstrapCtx,
     );
     expect(social?.error).toBe(SELF_REGISTRATION_CLOSED);
-    // SSO JIT and SCIM ride their own methods — admitted under invite_only.
-    for (const method of ['sso-oidc', 'sso-saml', 'scim', 'admin']) {
+    // SCIM and admin creation ride their own methods — admitted under invite_only.
+    for (const method of ['scim', 'admin']) {
       const verdict = await (manager as any).validateAudienceAdmission(
         { user: { email: 'x@corp.com' }, source: { action: 'create-user', method } },
         nonBootstrapCtx,
       );
       expect(verdict).toBeUndefined();
+    }
+    // An @better-auth/sso provider is admitted under invite_only only by its own
+    // allowJit toggle (ruling record 6718355623): no provider row here, so it
+    // reads OFF and the posture refuses.
+    for (const method of ['sso-oidc', 'sso-saml']) {
+      const verdict = await (manager as any).validateAudienceAdmission(
+        { user: { email: 'x@corp.com' }, source: { action: 'create-user', method, sso: { providerId: 'acme' } } },
+        nonBootstrapCtx,
+      );
+      expect(verdict?.error).toBe(SELF_REGISTRATION_CLOSED);
     }
     // link-account / sign-in actions are not audience admission.
     const linking = await (manager as any).validateAudienceAdmission(
@@ -963,5 +1047,42 @@ describe('end of the chain: better-auth pipeline over the memory engine (#11739)
       nonBootstrapCtx,
     );
     expect(linking).toBeUndefined();
+  });
+});
+
+describe('the invitation a creation must show (invitationProofFor)', () => {
+  const proof = (over: Partial<Parameters<typeof invitationProofFor>[0]> = {}) =>
+    invitationProofFor({
+      audience: audience(),
+      creationClass: 'self-serve',
+      method: 'email-password',
+      emailVerified: false,
+      ...over,
+    });
+
+  it('under invite_only, an email-and-password sign-up is admitted only by the invitation it presents', () => {
+    expect(proof()).toBe('presented');
+    expect(proof({ emailVerified: true })).toBe('presented');
+  });
+
+  it('under invite_only, an OAuth creation is matched by address only when its identity provider verified the address', () => {
+    expect(proof({ method: 'oauth', emailVerified: true })).toBe('address');
+    expect(proof({ method: 'oauth', emailVerified: false })).toBe('none');
+    expect(proof({ method: 'oauth', emailVerified: undefined })).toBe('none');
+    expect(proof({ method: 'oauth', emailVerified: 'true' })).toBe('none');
+  });
+
+  it('under invite_only, magic link, email OTP and every other self-serve method keep the address match', () => {
+    for (const method of ['magic-link', 'email-otp', 'phone-number', 'anonymous', 'siwe', 'some-future-plugin', undefined]) {
+      expect(proof({ method }), String(method)).toBe('address');
+    }
+  });
+
+  it('open, email_domain, an off-vocabulary posture and the provider class keep the address match', () => {
+    expect(proof({ audience: audience({ posture: 'open' }) })).toBe('address');
+    expect(proof({ audience: audience({ posture: 'email_domain', allowedEmailDomains: ['acme.com'] }) })).toBe('address');
+    expect(proof({ audience: audience({ invalid: { raw: "'bogus'" } }) })).toBe('address');
+    expect(proof({ creationClass: 'provider', method: 'sso-oidc' })).toBe('address');
+    expect(proof({ audience: audience({ posture: 'open' }), method: 'oauth', emailVerified: false })).toBe('address');
   });
 });

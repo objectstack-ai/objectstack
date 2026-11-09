@@ -27,7 +27,7 @@
  *  2. an app-declared name is refused AT BETTER-AUTH'S DOOR, leaving no row —
  *     it fails early and loudly, not at the insert (the #3747 symptom) and not
  *     silently (the pre-#3747 symptom);
- *  3. the same intent — "this person arrives as a `contributor`" — succeeds
+ *  3. the same intent — "this person arrives as a `showcase_contributor`" — succeeds
  *     through invitation placement (ADR-0105 D8), which writes a real
  *     `sys_user_position` row with a `granted_by` stamp.
  *
@@ -53,7 +53,7 @@ const CLOSED_VOCABULARY = ['owner', 'admin', 'delegated_admin', 'member', 'exter
 
 /** A `position` the showcase stack declares. Under the retired channel this was
  *  a storable membership role; it must now be reachable only as a position. */
-const APP_POSITION = 'contributor';
+const APP_POSITION = 'showcase_contributor';
 /** A `permission` (PermissionSet) the showcase declares — the other route in. */
 const APP_PERMISSION_SET = 'showcase_manager';
 
@@ -127,7 +127,7 @@ describe('ADR-0108: the membership-role vocabulary is closed; capability goes th
   }, 30_000);
 
   it('a stack-declared position is NOT an organization role — refused at the door', async () => {
-    // The showcase declares `contributor` as a `position`. Under the retired
+    // The showcase declares `showcase_contributor` as a `position`. Under the retired
     // channel this returned 200 and stored the name. It must now fail at
     // better-auth's role check (ROLE_NOT_FOUND), before any insert.
     const email = 'invitee.contributor.3723@example.com';

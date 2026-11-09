@@ -489,7 +489,7 @@ export const AUTH_ACCOUNT_INVITATION_TEMPLATE: EmailTemplate = {
 <p>Set your password to start using it. This link expires in {{expiresInMinutes}} minutes.</p>
 <p style="margin:24px 0"><a href="{{{setPasswordUrl}}}" style="${buttonStyles}">Set your password</a></p>
 <p style="font-size:13px;color:#6b7280">Or copy and paste this URL into your browser:<br><span style="word-break:break-all">{{setPasswordUrl}}</span></p>
-<p>If the link has expired, contact {{inviter.name}}.</p>
+<p>If the link has expired, get a new one from the sign-in page: choose "Forgot password?" and enter {{user.email}}. If that does not work, contact {{inviter.name}}.</p>
 `, 'You received this email because {{inviter.name}} created an account on {{appName}} for this address.'),
   bodyText: `Hi {{user.name}},
 
@@ -498,7 +498,7 @@ export const AUTH_ACCOUNT_INVITATION_TEMPLATE: EmailTemplate = {
 Set your password (link expires in {{expiresInMinutes}} minutes):
 {{setPasswordUrl}}
 
-If the link has expired, contact {{inviter.name}}.`,
+If the link has expired, get a new one from the sign-in page: choose "Forgot password?" and enter {{user.email}}. If that does not work, contact {{inviter.name}}.`,
   variables: ACCOUNT_INVITATION_VARIABLES,
   active: true,
   description: 'Sent when an administrator creates an account for someone (the identity import), with the link that sets its first password.',
@@ -515,7 +515,7 @@ export const AUTH_ACCOUNT_INVITATION_TEMPLATE_ZH_CN: EmailTemplate = {
 <p>请设置密码后开始使用。该链接将在 {{expiresInMinutes}} 分钟后失效。</p>
 <p style="margin:24px 0"><a href="{{{setPasswordUrl}}}" style="${buttonStyles}">设置密码</a></p>
 <p style="font-size:13px;color:#6b7280">或将以下链接复制到浏览器中打开：<br><span style="word-break:break-all">{{setPasswordUrl}}</span></p>
-<p>如果链接已失效，请联系 {{inviter.name}}。</p>
+<p>如果链接已失效，请在登录页点击「忘记密码？」并输入 {{user.email}}，获取新的链接；如仍无法设置，请联系 {{inviter.name}}。</p>
 `, '您收到本邮件，是因为 {{inviter.name}} 为此邮箱地址创建了 {{appName}} 账号。'),
   bodyText: `{{user.name}} 您好：
 
@@ -524,7 +524,7 @@ export const AUTH_ACCOUNT_INVITATION_TEMPLATE_ZH_CN: EmailTemplate = {
 请通过以下链接设置密码（{{expiresInMinutes}} 分钟内有效）：
 {{setPasswordUrl}}
 
-如果链接已失效，请联系 {{inviter.name}}。`,
+如果链接已失效，请在登录页点击「忘记密码？」并输入 {{user.email}}，获取新的链接；如仍无法设置，请联系 {{inviter.name}}。`,
   description: '当管理员为他人创建账号（身份导入）时发送，附带设置初始密码的链接。',
 };
 
@@ -539,7 +539,7 @@ export const AUTH_ACCOUNT_INVITATION_TEMPLATE_JA_JP: EmailTemplate = {
 <p>パスワードを設定して、ご利用を開始してください。このリンクは {{expiresInMinutes}} 分後に無効になります。</p>
 <p style="margin:24px 0"><a href="{{{setPasswordUrl}}}" style="${buttonStyles}">パスワードを設定</a></p>
 <p style="font-size:13px;color:#6b7280">または、次の URL をブラウザーに貼り付けてください：<br><span style="word-break:break-all">{{setPasswordUrl}}</span></p>
-<p>リンクの有効期限が切れた場合は、{{inviter.name}} さんにお問い合わせください。</p>
+<p>リンクの有効期限が切れた場合は、サインイン画面の「パスワードをお忘れですか？」から {{user.email}} を入力して、新しいリンクを受け取ってください。それでも設定できない場合は、{{inviter.name}} さんにお問い合わせください。</p>
 `, '{{inviter.name}} さんがこのメールアドレスで {{appName}} のアカウントを作成したため、本メールをお送りしています。'),
   bodyText: `{{user.name}} 様
 
@@ -548,7 +548,7 @@ export const AUTH_ACCOUNT_INVITATION_TEMPLATE_JA_JP: EmailTemplate = {
 次のリンクからパスワードを設定してください（有効期限 {{expiresInMinutes}} 分）:
 {{setPasswordUrl}}
 
-リンクの有効期限が切れた場合は、{{inviter.name}} さんにお問い合わせください。`,
+リンクの有効期限が切れた場合は、サインイン画面の「パスワードをお忘れですか？」から {{user.email}} を入力して、新しいリンクを受け取ってください。それでも設定できない場合は、{{inviter.name}} さんにお問い合わせください。`,
   description: '管理者が他のユーザーのアカウントを作成したとき（ID インポート）に、初回パスワードを設定するリンクとともに送信されます。',
 };
 
@@ -563,7 +563,7 @@ export const AUTH_ACCOUNT_INVITATION_TEMPLATE_ES_ES: EmailTemplate = {
 <p>Establece tu contraseña para empezar a usarla. Este enlace caduca en {{expiresInMinutes}} minutos.</p>
 <p style="margin:24px 0"><a href="{{{setPasswordUrl}}}" style="${buttonStyles}">Establecer contraseña</a></p>
 <p style="font-size:13px;color:#6b7280">O copia y pega esta URL en tu navegador:<br><span style="word-break:break-all">{{setPasswordUrl}}</span></p>
-<p>Si el enlace ha caducado, ponte en contacto con {{inviter.name}}.</p>
+<p>Si el enlace ha caducado, solicita uno nuevo desde la página de inicio de sesión: elige «¿Olvidaste tu contraseña?» e introduce {{user.email}}. Si así no puedes, ponte en contacto con {{inviter.name}}.</p>
 `, 'Recibes este correo porque {{inviter.name}} ha creado una cuenta de {{appName}} para esta dirección.'),
   bodyText: `Hola {{user.name}}:
 
@@ -572,7 +572,7 @@ export const AUTH_ACCOUNT_INVITATION_TEMPLATE_ES_ES: EmailTemplate = {
 Establece tu contraseña con este enlace (caduca en {{expiresInMinutes}} minutos):
 {{setPasswordUrl}}
 
-Si el enlace ha caducado, ponte en contacto con {{inviter.name}}.`,
+Si el enlace ha caducado, solicita uno nuevo desde la página de inicio de sesión: elige «¿Olvidaste tu contraseña?» e introduce {{user.email}}. Si así no puedes, ponte en contacto con {{inviter.name}}.`,
   description: 'Se envía cuando un administrador crea una cuenta para otra persona (la importación de identidades), con el enlace para establecer su primera contraseña.',
 };
 

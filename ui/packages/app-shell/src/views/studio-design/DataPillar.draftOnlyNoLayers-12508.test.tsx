@@ -1,22 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#12508 — the Data pillar does not ask `GET /meta/object/NAME/layers`
- * for a draft-only object.
+ * objectui#12508 — the Data pillar logs no failed read for a draft-only object.
  *
  * Measured on the card's session: the object load read `/layers` beside the
  * draft for every selected object, so right after "New object" saved a draft
- * the console logged a 404 for it. A draft-only object (a pending draft, no
- * row in the package's published list) has no layer. The load now reads the
- * draft first for a name the published list does not hold, and the layers
- * only when no draft is served.
+ * the console logged a 404 for it: a draft-only object (a pending draft, no
+ * row in the package's published list) had no layer. objectstack#29814 made
+ * the pending draft a layer (`draft`), served for a draft-only name too, and
+ * objectstack#29793 made that layer the object's buffer: the load reads
+ * `/layers` for every object, and a draft-only one answers 200 with its draft.
  *
  * The client is a real `MetadataClient` over an in-memory server answering as
- * the framework does: 404 for `/layers` with no layer and for `?state=draft`
- * with no draft, 500 for a broken store.
+ * the framework does: `/layers` with the stored draft as `draft` (200 for a
+ * draft-only name), 404 for `/layers` with no layer and no draft and for
+ * `?state=draft` with no draft, 500 for a broken store.
  *
  * Pinned:
- *  - a draft-only object: no `/layers`, and the editor holds its draft;
+ *  - a draft-only object: `/layers` answers its draft layer, nothing fails, and
+ *    the editor holds its draft;
  *  - CONTROL: the drafts list names an object whose draft is no longer served
  *    (published since): its `/layers` is still read;
  *  - CONTROL: a published object still reads its layers;
@@ -60,8 +62,9 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
       body = { type: seg[0], items: q.get('preview') === 'draft' ? [] : server.published };
     } else if (seg.length === 3 && seg[2] === 'layers') {
       const row = server.published.find((o) => o.name === seg[1]);
+      const draft = server.drafts.get(seg[1]) ?? null;
       if (server.failLayers.has(seg[1])) [status, body] = [500, { error: { code: 'INTERNAL_ERROR', message: 'metadata store unavailable' } }];
-      else if (row) body = { code: row, overlay: null, effective: row };
+      else if (row || draft) body = { code: row ?? null, overlay: null, effective: row ?? null, draft };
       else [status, body] = [404, { error: { code: 'NOT_FOUND', message: 'absent' } }];
     } else if (seg.length === 2 && q.get('state') === 'draft') {
       const row = server.drafts.get(seg[1]);
@@ -127,14 +130,14 @@ const reads = (name: string, suffix: '/layers' | '') =>
     .filter((r) => r.method === 'GET' && r.path === `/api/v1/meta/object/${name}${suffix}`)
     .map((r) => r.status);
 
-describe('DataPillar — a draft-only object is not asked for /layers (objectui#12508)', () => {
-  it('a draft-only object: no /layers, and the editor holds its draft', async () => {
+describe('DataPillar — a draft-only object logs no failed read (objectui#12508)', () => {
+  it('a draft-only object: /layers answers its draft layer, nothing fails, and the editor holds its draft', async () => {
     server.drafts.set('st_ticket', ticket);
     server.draftHeaders = ['st_ticket'];
     await openPillar();
 
     expect(reads('st_ticket', ''), 'the draft read never ran: the harness is dead').toEqual([200]);
-    expect(reads('st_ticket', '/layers')).toEqual([]);
+    expect(reads('st_ticket', '/layers')).toEqual([200]);
     expect(server.requests.filter((r) => r.status >= 400)).toEqual([]);
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
     expect(await screen.findByText('Subject')).toBeInTheDocument();

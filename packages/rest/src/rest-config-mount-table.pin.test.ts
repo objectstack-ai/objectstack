@@ -43,13 +43,14 @@
  *     `POST {dataPrefix}/:object/query`. The query door has no switch of its
  *     own, so a pin asserting "the list route disappeared" passes while half
  *     the intent is broken.
- *   - `metadata.endpoints.item` gates THIRTEEN — the per-item reads, `PUT`,
- *     `DELETE`, the whole history family and the app metadata bundle
- *     (#27627). A pin that only watched
- *     `GET {prefix}/:type/:name` would sit green through twelve of them
- *     moving, which is the state #15854 measured.
- *   - `metadata.endpoints.maintenance` gates THREE, one of them the write
- *     door `POST {prefix}/_migrate-stored`.
+ *   - `metadata.endpoints.item` gates FOURTEEN — the per-item reads, `PUT`,
+ *     `DELETE`, the whole history family, the app metadata bundle
+ *     (#27627) and the qualified by-name read (ADR-0150 D5, #31691). A pin
+ *     that only watched `GET {prefix}/:type/:name` would sit green through
+ *     the others moving, which is the state #15854 measured.
+ *   - `metadata.endpoints.maintenance` gates FOUR, two of them write doors:
+ *     `POST {prefix}/_migrate-stored` and the record-currency code backfill
+ *     `POST {prefix}/_migrate-record-currency-codes`.
  *
  * Asserting the difference is EXACTLY a named set catches a gate that grows a
  * route as loudly as one that loses a route.
@@ -89,6 +90,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 import { RestServer } from './rest-server';
 
 function createMockServer() {
@@ -192,9 +196,17 @@ const CASES: Array<{ path: string; removes: string[] }> = [
     // [#15542] THREE whole-store operations, one of them a WRITE door. The key
     // the ruling created so that closing a listing read stops disarming a
     // migration door.
+    //
+    // [ADR-0144, ruling 6670707546 item B] FOUR: the record-currency code
+    // backfill door joined it, behind this switch as `_migrate-stored` is.
     {
         path: 'metadata.endpoints.maintenance',
-        removes: [`GET ${META}/_drafts`, `GET ${META}/diagnostics`, `POST ${META}/_migrate-stored`],
+        removes: [
+            `GET ${META}/_drafts`,
+            `GET ${META}/diagnostics`,
+            `POST ${META}/_migrate-record-currency-codes`,
+            `POST ${META}/_migrate-stored`,
+        ],
     },
     // [#15854] TWELVE routes (thirteen since #27627, below) — the WHOLE per-item face, which is what the
     // switch's name has always promised: the reads, the per-item WRITES
@@ -221,6 +233,8 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `GET ${META}/:type/:name/layers`,
             `GET ${META}/:type/:name/published`,
             `GET ${META}/:type/:name/references`,
+            // [ADR-0150 D5, #31691 G1] The qualified by-name read rides the item read's own handler.
+            `GET ${META}/:type/:ns/:name`,
             `GET ${META}/app/:appId/bundle`,
             `GET ${META}/book/:name/tree`,
             `POST ${META}/:type/:name/publish`,
@@ -235,6 +249,9 @@ const CASES: Array<{ path: string; removes: string[] }> = [
         removes: [
             `DELETE ${DATA}/:id`, `GET ${DATA}`, `GET ${DATA}/:id`,
             `PATCH ${DATA}/:id`, `POST ${DATA}`, `POST ${DATA}/query`,
+            // [#30237] The recycle-bin doors register inside the same switch.
+            `DELETE ${DATA}/recycle-bin`, `DELETE ${DATA}/recycle-bin/:entryId`,
+            `GET ${DATA}/recycle-bin`, `POST ${DATA}/recycle-bin/:entryId/restore`,
         ],
     },
     {
@@ -258,6 +275,8 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `GET ${META}/:type/:name/layers`,
             `GET ${META}/:type/:name/published`,
             `GET ${META}/:type/:name/references`,
+            // [ADR-0150 D5, #31691 G1] The qualified by-name read rides the item read's own handler.
+            `GET ${META}/:type/:ns/:name`,
             `GET ${META}/_drafts`,
             `GET ${META}/app/:appId/bundle`,
             `GET ${META}/book/:name/tree`,
@@ -266,6 +285,7 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `GET ${META}/types`,
             `POST ${META}/:type/:name/publish`,
             `POST ${META}/:type/:name/rollback`,
+            `POST ${META}/_migrate-record-currency-codes`,
             `POST ${META}/_migrate-stored`,
             `PUT ${META}/:type/:name`,
         ],

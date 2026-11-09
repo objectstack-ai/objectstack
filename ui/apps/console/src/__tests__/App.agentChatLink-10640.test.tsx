@@ -107,7 +107,11 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 // ── Everything else App.tsx imports but this card does not touch ─────────
 vi.mock('../components/ProtectedRoute', () => ({ ProtectedRoute: passthrough }));
-vi.mock('../components/RootLandingRedirect', () => ({ RootLandingRedirect: stub('root-landing') }));
+// objectstack#29750: the catch-all reads `isAppListConclusive` from here.
+vi.mock('../components/RootLandingRedirect', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  RootLandingRedirect: stub('root-landing'),
+}));
 vi.mock('../components/SetupRoute', () => ({ SetupRoute: stub('setup-route') }));
 vi.mock('../components/MetadataHmrReloader', () => ({ MetadataHmrReloader: () => null }));
 vi.mock('../AppContent', () => ({

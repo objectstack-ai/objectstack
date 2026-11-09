@@ -1,0 +1,7 @@
+{
+  "file": "packages/objectql/src/home-amount-recompute.ts",
+  "adrs": [
+    "ADR-0144"
+  ],
+  "invariant": "ADR-0144 D5 and D7 parameter 1 — the explicit recompute of stored home amounts (`recomputeHomeAmounts`, `os migrate recompute-home-amounts`) computes NOTHING itself: its preview projects each stored row with the write's own `projectHomeAmounts` over the engine's own reads (`ObjectQL.homeAmountReadsFor`: the rate row in force on the document date in the row's organization, that organization's home currency and timezone), and its apply writes through `engine.update` with the home field in the payload, so the write projects the row again and the value stored is the write's. Do NOT add a second copy of the division, the rounding, the rate-row rule, the same-currency rule or the timezone day here, and do NOT write the preview's value at the driver: a recomputed row must hold what a fresh write of it stores. Parameter 1: a row whose rate is missing is listed and skipped and never written (no rate of 1, no later rate, no zero), and a row with an amount beside a blank currency code is its own class (`code_blank`, remedy `os migrate record-currency-codes`), never folded into `rate_missing`. Open item 8: a skipped row keeps the run incomplete (`homeAmountRecomputeComplete`, the command's exit 1) and is recorded in the applied run's audit entry, because `sum` over the home field silently leaves an empty home amount out."
+}

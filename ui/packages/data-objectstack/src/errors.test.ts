@@ -149,7 +149,9 @@ describe('Error Classes', () => {
 
       expect(error.message).toBe('Connection error: Network timeout');
       expect(error.code).toBe('CONNECTION_ERROR');
-      expect(error.statusCode).toBe(503);
+      // Built without a status, nothing answered: no invented 503
+      // (objectstack#29916).
+      expect(error.statusCode).toBeUndefined();
       expect(error.name).toBe('ConnectionError');
       expect(error.url).toBe('https://api.example.com');
       expect(error).toBeInstanceOf(ObjectStackError);
@@ -161,6 +163,11 @@ describe('Error Classes', () => {
 
       expect(error.url).toBeUndefined();
       expect(error.message).toBe('Connection error: Network timeout');
+    });
+
+    it('CONTROL: a status the caller passes is kept', () => {
+      expect(new ConnectionError('down', undefined, undefined, 503).statusCode).toBe(503);
+      expect(new ConnectionError('timeout', undefined, undefined, 504).statusCode).toBe(504);
     });
   });
 
@@ -353,7 +360,57 @@ describe('Error Helpers', () => {
       const error = createErrorFromResponse(response);
 
       expect(error).toBeInstanceOf(ObjectStackError);
-      expect(error.statusCode).toBe(500);
+      expect(error.code).toBe('UNKNOWN_ERROR');
+      // objectstack#29885 — no status in, no status out: an invented 500
+      // reads as an answer from the server.
+      expect(error.statusCode).toBeUndefined();
+      expect((error.details as any).response.status).toBeUndefined();
+    });
+
+    // objectstack#29885 — a request that got no answer (fetch rejects with a
+    // bare TypeError) is not an answered server error.
+    describe('an error that got no answer (objectstack#29885)', () => {
+      it('a fetch TypeError keeps no status, and is kept as the cause', () => {
+        const drop = new TypeError('Failed to fetch');
+
+        const error = createErrorFromResponse(drop as unknown as Record<string, unknown>, 'getObjectSchema(account)');
+
+        expect(error).toBeInstanceOf(ObjectStackError);
+        expect(error).not.toBeInstanceOf(ConnectionError);
+        expect(error.code).toBe('UNKNOWN_ERROR');
+        expect(error.statusCode).toBeUndefined();
+        expect(error.message).toBe('Failed to fetch');
+        expect(error.details?.originalError).toBe(drop);
+        expect(error.toJSON().statusCode).toBeUndefined();
+      });
+
+      it('CONTROL: an answered 500 keeps its status, and its cause', () => {
+        const answered = Object.assign(new Error('Database connection refused.'), { status: 500, code: 'INTERNAL_ERROR' });
+
+        const error = createErrorFromResponse(answered as unknown as Record<string, unknown>);
+
+        expect(error.code).toBe('UNKNOWN_ERROR');
+        expect(error.statusCode).toBe(500);
+        expect(error.details?.originalError).toBe(answered);
+      });
+
+      it('CONTROL: an answered 503 is the ConnectionError it was, with its status', () => {
+        const answered = Object.assign(new Error('The metadata store is down.'), { status: 503 });
+
+        const error = createErrorFromResponse(answered as unknown as Record<string, unknown>);
+
+        expect(error).toBeInstanceOf(ConnectionError);
+        expect(error.code).toBe('CONNECTION_ERROR');
+        expect(error.statusCode).toBe(503);
+        expect(error.details?.originalError).toBe(answered);
+      });
+
+      it('CONTROL: a plain response object (not an Error) carries no cause', () => {
+        const error = createErrorFromResponse({ status: 500, message: 'Server error' });
+
+        expect(error.statusCode).toBe(500);
+        expect(error.details).not.toHaveProperty('originalError');
+      });
     });
 
     it('should include context in error details', () => {

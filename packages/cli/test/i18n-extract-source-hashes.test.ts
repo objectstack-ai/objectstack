@@ -18,7 +18,7 @@ import {
   narrowToCommittedSections,
   translationModulePayload,
   translationModuleSections,
-} from '../src/utils/i18n-extract.js';
+} from '../src/utils/i18n-bundle-extract.js';
 
 const stack = (help: string) => ({
   objects: [

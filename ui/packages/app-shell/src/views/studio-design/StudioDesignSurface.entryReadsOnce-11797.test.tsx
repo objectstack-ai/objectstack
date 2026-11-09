@@ -25,7 +25,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.b2r4';
 const PACKAGES_URL = '/api/v1/packages';
-const DRAFTS_URL = `/api/v1/meta/_drafts?packageId=${PACKAGE_ID}`;
+const DRAFTS_URL = `/api/v1/meta/_drafts?package=${PACKAGE_ID}`;
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
@@ -60,6 +60,9 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 
 window.matchMedia = ((query: string) => ({

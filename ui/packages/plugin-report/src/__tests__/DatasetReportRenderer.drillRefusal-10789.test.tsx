@@ -45,6 +45,7 @@ function makeSource(rows: Array<Record<string, unknown>>, rawRows: Array<Record<
       object: 'task',
       dimensionFields: { status: 'status', priority: 'priority' },
       drillRawRows: rawRows,
+      drillScopes: { est_hours: {} },
     })),
   };
 }

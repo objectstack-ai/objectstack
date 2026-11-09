@@ -140,10 +140,13 @@ describe('ObjectStackDataSource.find — enable-block denials are surfaced, not 
   });
 
   it('CONTROL: a 404 RECORD_NOT_FOUND is not an enable-block denial', async () => {
+    // On a platform collection, so the 404 takes the optional-collection
+    // branch. A non-registry object's 404 is rethrown instead
+    // (findMissingObject-29782.test.ts).
     const find = vi.fn().mockRejectedValue(clientError('No such record', 404, 'RECORD_NOT_FOUND'));
     const ds = makeDS(find);
 
-    await expect(ds.find('account')).resolves.toMatchObject({ data: [], total: 0 });
+    await expect(ds.find('sys_comment')).resolves.toMatchObject({ data: [], total: 0 });
   });
 
   it('CONTROL: a 2xx with zero rows resolves as an ordinary empty result', async () => {
@@ -217,6 +220,50 @@ describe('ObjectStackDataSource.find — the raw $expand/$search branch carries 
       code: 'OBJECT_API_METHOD_NOT_ALLOWED',
       httpStatus: 405,
     });
+  });
+
+  it('the client path hands a refused field through on `details` too (objectstack#31893)', async () => {
+    const body = { error: "Unknown field 'cost_total'", code: 'INVALID_FIELD', field: 'cost_total', object: 'ai_traces' };
+    // `@objectstack/client`'s throw for a flat body: `details` is the whole body.
+    const thrown = Object.assign(clientError(body.error, 400, 'INVALID_FIELD'), { details: body });
+    const ds = makeDS(vi.fn().mockRejectedValue(thrown));
+
+    await expect(ds.find('ai_traces')).rejects.toMatchObject({
+      code: 'INVALID_FIELD',
+      httpStatus: 400,
+      details: { field: 'cost_total' },
+    });
+  });
+
+  // objectstack#31893 — the list names the column a `400 INVALID_FIELD` refused
+  // from `details.field`. The client path keeps the whole flat body there; this
+  // branch has to as well, or a view with a lookup column loses the field.
+  it('keeps the answer body on `details`, so a refused field reaches the list (objectstack#31893)', async () => {
+    const body = {
+      error: "Unknown field 'cost_total' on object 'ai_traces'",
+      code: 'INVALID_FIELD',
+      field: 'cost_total',
+      object: 'ai_traces',
+    };
+    const ds = makeRawDS(400, body);
+
+    await expect(ds.find('ai_traces', { $expand: ['agent'] })).rejects.toMatchObject({
+      code: 'INVALID_FIELD',
+      httpStatus: 400,
+      details: { field: 'cost_total', object: 'ai_traces' },
+    });
+  });
+
+  it('prefers the wrapped envelope\'s own `details`, as the client wrapper does', async () => {
+    const ds = makeRawDS(400, {
+      success: false,
+      error: { code: 'INVALID_FIELD', message: 'Unknown field', details: { field: 'cost_total' } },
+    });
+
+    await ds.find('ai_traces', { $expand: ['agent'] }).catch((e: any) => {
+      expect(e.details).toEqual({ field: 'cost_total' });
+    });
+    expect.assertions(1);
   });
 
   it('CONTROL: a body with no code leaves `code` undefined rather than inventing one', async () => {

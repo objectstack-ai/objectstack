@@ -21,7 +21,11 @@
 //     there; a given target is judged by the shared new-similar check; an
 //     environment-authored source is unchanged.
 
-import { describe, it, expect } from 'vitest';
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
+import { installedManifestsOf, pairOf } from '@objectstack/metadata-core';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -31,7 +35,9 @@ import {
     PERMISSION_SET_CLONE_MUTATED_FIELDS,
     PERMISSION_SET_CLONE_NOTICE,
     clonePermissionSetDefinition,
+    PERMISSION_SET_CLONE_NOTICE_CODES,
     permissionSetCloneNotice,
+    permissionSetCloneNoticeCode,
     permissionSetObjectNames,
 } from './permission-set-clone.js';
 
@@ -65,7 +71,10 @@ const SYS_ONLY_SET = { name: 'sys_only', label: 'Sys Only', objects: { sys_user:
 /** A set `crm` ships that grants on a platform object only: its package is the one thing out of an island's reach. */
 const CRM_SYS_SET = { name: 'crm_user_reader', label: 'CRM User Reader', objects: { sys_user: { allowRead: true } }, _packageId: 'crm' };
 
-const CATALOG: TestSecurityCatalog = { permissions: [PACKAGED, ENV_SET, OWNED_SET, SYS_ONLY_SET, CRM_SYS_SET] };
+/** [#29594] A set the platform's kernel ships (scope `system`): the commonest lock-and-clone source. */
+const KERNEL = 'com.objectstack.plugin-security';
+const KERNEL_SET = { name: 'member_default', label: 'Member', objects: { account: { allowRead: true } }, _packageId: KERNEL, _lock: 'full' };
+const CATALOG: TestSecurityCatalog = { permissions: [PACKAGED, ENV_SET, OWNED_SET, SYS_ONLY_SET, CRM_SYS_SET, KERNEL_SET] };
 
 /**
  * The package registry the door reads: `crm` is a booted CODE package
@@ -80,9 +89,10 @@ const PACKAGES: Record<string, { manifest: Record<string, unknown> }> = {
     'com.acme.ext': { manifest: { id: 'com.acme.ext', dependencies: { crm: '^1' } } },
     'com.acme.island': { manifest: { id: 'com.acme.island' } },
     'com.vendor.app': { manifest: { id: 'com.vendor.app', scope: 'cloud' } },
+    [KERNEL]: { manifest: { id: KERNEL, namespace: 'sys', version: '18.3.0', scope: 'system' } },
 };
 
-interface Saved { type: string; name: string; item: Record<string, unknown>; parentVersion?: string | null; packageId?: string }
+interface Saved { type: string; name: string; item: Record<string, unknown>; parentVersion?: string | null; packageId?: string; inheritedGrantObjects?: readonly string[] }
 
 interface BootOptions {
     unbound?: boolean;
@@ -95,25 +105,56 @@ interface BootOptions {
     ensureError?: Error;
     /** The protocol has no `ensureCustomizationPackage`. */
     noEnsure?: boolean;
+    /** The composed `cluster` service's driver; absent ⇒ no `cluster` service. */
+    clusterDriver?: string;
+    /**
+     * [cloud#3814 D1] Adds an installed App (`com.acme.suite`) and a read-only
+     * member of it (`com.acme.suite-crm`) shipping {@link SUITE_SET}: the
+     * member's pair is its App's, `com.acme.suite.custom` (ruling 6691022506).
+     * `legacyMemberPair` also installs the per-package pair an earlier version
+     * created for the member, `com.acme.suite-crm.custom`.
+     */
+    appMember?: boolean;
+    legacyMemberPair?: boolean;
 }
+
+/** [cloud#3814 D1] A set a read-only member of an installed App ships. */
+const SUITE_APP = 'com.acme.suite';
+const SUITE_MEMBER = 'com.acme.suite-crm';
+const SUITE_SET = { name: 'suite_reader', label: 'Suite Reader', objects: { sys_user: { allowRead: true } }, _packageId: SUITE_MEMBER };
+/** A set the member ships that grants on an object the MEMBER owns (`suite_lead`), not the App. */
+const SUITE_LEAD_SET = { name: 'suite_lead_reader', label: 'Suite Lead Reader', objects: { suite_lead: { allowRead: true } }, _packageId: SUITE_MEMBER };
+/** A writable package that declares the App but not the member: not the member's pair, outside its closure. */
+const SUITE_EXT = 'com.acme.suite-ext';
 
 function boot(opts: BootOptions = {}) {
     // ZERO `sys_permission_set` rows: every data read throws, so the door
     // passing proves it reads no row.
     const packages: Record<string, { manifest: Record<string, unknown> }> = structuredClone(PACKAGES);
+    if (opts.appMember) {
+        packages[SUITE_APP] = { manifest: { id: SUITE_APP, type: 'app', namespace: 'suite', version: '2.0.0' } };
+        packages[SUITE_MEMBER] = { manifest: { id: SUITE_MEMBER, type: 'module', namespace: 'suitecrm', version: '2.0.0', dependencies: { [SUITE_APP]: '^2' } } };
+        packages[SUITE_EXT] = { manifest: { id: SUITE_EXT, type: 'module', namespace: 'suiteext', version: '1.0.0', dependencies: { [SUITE_APP]: '^2' } } };
+        if (opts.legacyMemberPair) {
+            packages[`${SUITE_MEMBER}.custom`] = { manifest: { id: `${SUITE_MEMBER}.custom`, namespace: 'suitecrm_custom', dependencies: { [SUITE_MEMBER]: '^2' } } };
+        }
+    }
     const engine: any = {
-        manifests: new Set(['crm']),
+        manifests: new Set(opts.appMember ? ['crm', SUITE_APP, SUITE_MEMBER] : ['crm']),
         registry: {
             getPackage: (id: string) => packages[id],
-            getObject: (name: string) => (name === 'account' ? { name: 'account' } : name === 'sys_user' ? { name: 'sys_user' } : undefined),
-            getObjectOwner: (name: string) => (name === 'account' ? { packageId: 'crm' } : name === 'sys_user' ? { packageId: 'com.objectstack.platform' } : undefined),
+            // Read by the save gate's closure (`packageDependencyClosure`),
+            // which widens an App's pair by the App's members.
+            getAllPackages: () => Object.values(packages),
+            getObject: (name: string) => (name === 'account' ? { name: 'account' } : name === 'sys_user' ? { name: 'sys_user' } : name === 'suite_lead' && opts.appMember ? { name: 'suite_lead' } : undefined),
+            getObjectOwner: (name: string) => (name === 'account' ? { packageId: 'crm' } : name === 'sys_user' ? { packageId: 'com.objectstack.platform' } : name === 'suite_lead' && opts.appMember ? { packageId: SUITE_MEMBER } : undefined),
         },
         find: async (object: string) => { throw new Error(`the clone door read a ${object} row`); },
     };
     if (opts.catalogError) {
         bindTestSecurityCatalog(engine, () => { throw opts.catalogError; });
     } else if (!opts.unbound) {
-        bindTestSecurityCatalog(engine, CATALOG);
+        bindTestSecurityCatalog(engine, opts.appMember ? { permissions: [...(CATALOG.permissions ?? []), SUITE_SET, SUITE_LEAD_SET] } : CATALOG);
     }
     const saves: Saved[] = [];
     const ensures: string[] = [];
@@ -131,15 +172,21 @@ function boot(opts: BootOptions = {}) {
         protocol.ensureCustomizationPackage = async ({ basePackageId }: { basePackageId: string }) => {
             ensures.push(basePackageId);
             if (opts.ensureError) throw opts.ensureError;
-            const pairId = `${basePackageId}.custom`;
+            // The pair is the base's App's, as the real door derives it.
+            const derived = pairOf(basePackageId, installedManifestsOf(engine.registry));
+            const pairId = derived.ok ? derived.value : `${basePackageId}.custom`;
             const created = packages[pairId] === undefined;
-            if (created) packages[pairId] = { manifest: { id: pairId, dependencies: { [basePackageId]: '^1' } } };
+            // The pair declares the base's App — the base itself unless it is
+            // a member of one — as the real door writes it.
+            const app = pairId.slice(0, -'.custom'.length);
+            if (created) packages[pairId] = { manifest: { id: pairId, dependencies: { [app]: '^1' } } };
             return { basePackageId, packageId: pairId, namespace: 'crm_custom', dependencyRange: '^1', created, writable: true };
         };
     }
     const services: Record<string, unknown> = { objectql: engine, data: engine };
     if (!opts.noProtocol) services.protocol = protocol;
     if (opts.posture) services.tenancy = { posture: opts.posture };
+    if (opts.clusterDriver !== undefined) services.cluster = { driver: opts.clusterDriver };
     const resolve = (name: string): unknown => services[name] ?? null;
     const kernel = {
         getService: resolve,
@@ -176,8 +223,11 @@ describe('the permission-set clone door — success', () => {
         expect(save.parentVersion).toBeNull();
         // [ADR-0146 D3/D6] No organization; the package is the SAVE's — the
         // read-only source's pair, ensured through the ensure door.
-        expect(Object.keys(save).sort()).toEqual(['item', 'name', 'packageId', 'parentVersion', 'type']);
+        expect(Object.keys(save).sort()).toEqual(['inheritedGrantObjects', 'item', 'name', 'packageId', 'parentVersion', 'type']);
         expect(save.packageId).toBe('crm.custom');
+        // [#30255] The copy's grant keys are the source's, and the save is told
+        // so: its unknown-grant refusal does not judge them as this write's.
+        expect(save.inheritedGrantObjects).toEqual(Object.keys(PACKAGED.objects));
         expect(h.ensures).toEqual(['crm']);
 
         // Whole-definition copy: the source minus the declared keys, the two
@@ -197,6 +247,7 @@ describe('the permission-set clone door — success', () => {
             permissionSet: save.item,
             package: 'crm.custom',
             notice: permissionSetCloneNotice({ packageId: 'crm.custom', created: true }),
+            noticeCode: 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE',
         });
         expect(data.notice).toContain("'crm.custom'");
         expect(data.notice.endsWith(PERMISSION_SET_CLONE_NOTICE)).toBe(true);
@@ -212,6 +263,8 @@ describe('the permission-set clone door — success', () => {
         expect(statusOf(second)).toBe(200);
         expect(h.saves.map((s) => s.packageId)).toEqual(['crm.custom', 'crm.custom']);
         expect((second as any).response.body.data.notice).toBe(permissionSetCloneNotice({ packageId: 'crm.custom', created: false }));
+        // [#29727] Reused, not created: the in-package code, not the created one.
+        expect((second as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
     });
 
     it('CONTROL — an environment-authored set copies environment-wide, as before: no package, no ensure', async () => {
@@ -221,9 +274,29 @@ describe('the permission-set clone door — success', () => {
 
         expect(statusOf(res)).toBe(200);
         expect(h.saves[0].item).toEqual({ ...ENV_SET, name: 'env_reader_copy', label: 'Env Reader Copy' });
-        expect(Object.keys(h.saves[0]).sort()).toEqual(['item', 'name', 'parentVersion', 'type']);
+        expect(Object.keys(h.saves[0]).sort()).toEqual(['inheritedGrantObjects', 'item', 'name', 'parentVersion', 'type']);
+        expect(h.saves[0].inheritedGrantObjects).toEqual(Object.keys(ENV_SET.objects));
         expect(h.ensures).toEqual([]);
         expect((res as any).response.body.data.package).toBeNull();
+        // [#29727] The environment-wide variant's code.
+        expect((res as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_ENVIRONMENT_WIDE');
+        expect((res as any).response.body.data.notice).toBe(permissionSetCloneNotice({ packageId: null, created: false }));
+    });
+
+    it('[#29594] a set a kernel package ships copies environment-wide, with no ensure: the kernel has no pair', async () => {
+        const h = boot();
+
+        const res = await clone(h, HOLDER(), KERNEL_SET.name, { name: 'my_member', label: 'My Member' });
+
+        expect(statusOf(res)).toBe(200);
+        expect(h.ensures).toEqual([]);
+        expect(h.saves[0]).not.toHaveProperty('packageId');
+        expect(h.saves[0].item).toEqual({ name: 'my_member', label: 'My Member', objects: KERNEL_SET.objects });
+        const data = (res as any).response.body.data;
+        expect(data.package).toBeNull();
+        expect(data.noticeCode).toBe('PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE');
+        expect(data.notice).toBe(permissionSetCloneNotice({ packageId: null, created: false, kernelSource: KERNEL }));
+        expect(data.notice).toContain(`kernel package '${KERNEL}'`);
     });
 
     it('a set already in a writable package copies into that package, with no ensure', async () => {
@@ -235,6 +308,8 @@ describe('the permission-set clone door — success', () => {
         expect(h.saves[0].packageId).toBe('com.acme.base');
         expect(h.saves[0].item).not.toHaveProperty('_packageId');
         expect(h.ensures).toEqual([]);
+        // [#29727] The in-package variant's code.
+        expect((res as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
     });
 
     it('a given writable target that reaches the set lands there, with no ensure', async () => {
@@ -313,6 +388,52 @@ describe('the permission-set clone door — authority', () => {
         const res = await clone(h, ctx({ isSystem: true, positions: [], systemPermissions: [] }), PACKAGED.name, { name: 'sys_copy', label: 'S' });
 
         expect(statusOf(res)).toBe(200);
+    });
+});
+
+describe('[#29727] the clone notice is named by one stable code per landing', () => {
+    // CONTROL: the sentences (the fourth since #29594), spelled out as they were served before the
+    // codes arrived, so a change to `notice` while adding a code reds here.
+    const TAIL =
+        'The copy is a new permission set authored in this system, with no link to the set it was copied '
+        + 'from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the '
+        + 'everyone-baseline suggestion (`isDefault`) \u2014 grant either deliberately on the copy if it needs one. '
+        + 'The copy is held by nobody yet: add it to a position, or assign it to users.';
+    const VARIANTS = [
+        {
+            landing: { packageId: null, created: false },
+            code: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE',
+            notice: 'The copy was saved environment-wide, in no package, as the set it was copied from is. ' + TAIL,
+        },
+        {
+            landing: { packageId: null, created: false, kernelSource: 'com.objectstack.plugin-security' },
+            code: 'PERMISSION_SET_CLONE_ENVIRONMENT_WIDE_KERNEL_SOURCE',
+            notice: "The copy was saved environment-wide, in no package: the set it was copied from is shipped by kernel "
+                + "package 'com.objectstack.plugin-security', which has no paired customization package in this version. "
+                + 'Name a writable package with `package` to keep the copy in it instead. ' + TAIL,
+        },
+        {
+            landing: { packageId: 'com.acme.base', created: false },
+            code: 'PERMISSION_SET_CLONE_IN_PACKAGE',
+            notice: "The copy was saved in package 'com.acme.base', beside the original rather than in place of it, "
+                + 'and travels with that package. ' + TAIL,
+        },
+        {
+            landing: { packageId: 'crm.custom', created: true },
+            code: 'PERMISSION_SET_CLONE_IN_CREATED_PACKAGE',
+            notice: "The copy was saved in package 'crm.custom', created for it to hold your changes to the package "
+                + 'the set came from, beside the original rather than in place of it, and travels with that package. ' + TAIL,
+        },
+    ] as const;
+
+    it.each(VARIANTS)('$code names its sentence, and the sentence is byte-identical', ({ landing, code, notice }) => {
+        expect(permissionSetCloneNoticeCode(landing)).toBe(code);
+        expect(permissionSetCloneNotice(landing)).toBe(notice);
+    });
+
+    it('the four codes are distinct and the table holds exactly them', () => {
+        expect(Object.values(PERMISSION_SET_CLONE_NOTICE_CODES).sort()).toEqual(VARIANTS.map((v) => v.code).sort());
+        expect(new Set(VARIANTS.map((v) => permissionSetCloneNotice(v.landing))).size).toBe(4);
     });
 });
 
@@ -492,6 +613,149 @@ describe('the permission-set clone door — the walled catalog refusal (ADR-0131
         const res = await clone(h, NON_HOLDER(), PACKAGED.name, { name: 'my_sales_rep', label: 'My Sales Rep' });
         expect(statusOf(res)).toBe(403);
         expect(String((res as any)?.response?.body?.error?.message)).toContain('`manage_metadata`');
+        expect(h.saves).toHaveLength(0);
+    });
+});
+
+describe('[cloud#3814 D1] declared replicas on the Redis driver: a copy that would create the pair is refused', () => {
+    const ENV = ['OS_CLUSTER_REPLICAS', 'OS_EXPECT_MULTI_NODE'] as const;
+    const prior: Partial<Record<(typeof ENV)[number], string | undefined>> = {};
+    beforeEach(() => { for (const k of ENV) { prior[k] = process.env[k]; delete process.env[k]; } });
+    afterEach(() => {
+        for (const k of ENV) {
+            if (prior[k] === undefined) delete process.env[k];
+            else process.env[k] = prior[k];
+        }
+    });
+
+    for (const [label, key, value] of [['OS_CLUSTER_REPLICAS=3', 'OS_CLUSTER_REPLICAS', '3'], ['OS_EXPECT_MULTI_NODE=true', 'OS_EXPECT_MULTI_NODE', 'true']] as const) {
+        it(`${label}: the default landing needs 'crm.custom', which this replica lacks — 409 ${MULTI_REPLICA_PACKAGE_CHANGE_REFUSED}, no ensure, no save`, async () => {
+            process.env[key] = value;
+            const h = boot({ clusterDriver: 'redis' });
+
+            const res = await clone(h, HOLDER(), PACKAGED.name, { name: 'my_sales_rep', label: 'My Sales Rep' });
+
+            expect(statusOf(res)).toBe(409);
+            expect(codeOf(res)).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+            const message = String((res as any)?.response?.body?.error?.message);
+            expect(message).toContain("'crm.custom'");
+            expect(message).toContain('restart every replica');
+            expect(h.ensures).toEqual([]);
+            expect(h.saves).toHaveLength(0);
+        });
+    }
+
+    it('a pair this replica already serves is reused: 200, saved there', async () => {
+        const h = boot({ clusterDriver: 'redis' });
+        expect(statusOf(await clone(h, HOLDER(), PACKAGED.name, { name: 'first_copy', label: 'First' }))).toBe(200);
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const second = await clone(h, HOLDER(), PACKAGED.name, { name: 'second_copy', label: 'Second' });
+
+        expect(statusOf(second)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual(['crm.custom', 'crm.custom']);
+        expect((second as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
+    });
+
+    it('an environment-authored set and an explicit writable target create no package and are not refused', async () => {
+        process.env.OS_CLUSTER_REPLICAS = '3';
+        const h = boot({ clusterDriver: 'redis' });
+
+        expect(statusOf(await clone(h, HOLDER(), ENV_SET.name, { name: 'env_reader_copy', label: 'Env Reader Copy' }))).toBe(200);
+        expect(statusOf(await clone(h, HOLDER(), PACKAGED.name, { name: 'ext_copy', label: 'Ext Copy', package: 'com.acme.ext' }))).toBe(200);
+        expect(h.ensures).toEqual([]);
+        expect(h.saves).toHaveLength(2);
+    });
+
+    for (const [label, env, driver] of [
+        ['a single node on redis', {}, 'redis'],
+        ['declared replicas on the in-process driver', { OS_CLUSTER_REPLICAS: '3' }, 'memory'],
+        ['declared replicas with no cluster service composed', { OS_CLUSTER_REPLICAS: '3' }, undefined],
+    ] as const) {
+        it(`CONTROL — ${label}: the default landing ensures the pair, as before`, async () => {
+            Object.assign(process.env, env);
+            const h = boot({ clusterDriver: driver });
+
+            const res = await clone(h, HOLDER(), PACKAGED.name, { name: 'my_sales_rep', label: 'My Sales Rep' });
+
+            expect(statusOf(res)).toBe(200);
+            expect(h.ensures).toEqual(['crm']);
+            expect(h.saves.map((s) => s.packageId)).toEqual(['crm.custom']);
+        });
+    }
+});
+
+describe('[cloud#3814 D1] declared replicas on the Redis driver: the pair probed is the App\'s pair (pairOf), as the ensure derives it', () => {
+    const prior = process.env.OS_CLUSTER_REPLICAS;
+    afterEach(() => {
+        if (prior === undefined) delete process.env.OS_CLUSTER_REPLICAS;
+        else process.env.OS_CLUSTER_REPLICAS = prior;
+    });
+
+    it('a member of an installed App whose pair is absent: 409 naming the App\'s pair, no ensure, no save', async () => {
+        const h = boot({ clusterDriver: 'redis', appMember: true });
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const res = await clone(h, HOLDER(), SUITE_SET.name, { name: 'my_suite_reader', label: 'My Suite Reader' });
+
+        expect(statusOf(res)).toBe(409);
+        expect(codeOf(res)).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+        expect(String((res as any)?.response?.body?.error?.message)).toContain(`'${SUITE_APP}.custom'`);
+        expect(h.ensures).toEqual([]);
+        expect(h.saves).toHaveLength(0);
+    });
+
+    it('…refused too while only the member\'s legacy per-package pair is installed: the ensure would still create the App\'s', async () => {
+        const h = boot({ clusterDriver: 'redis', appMember: true, legacyMemberPair: true });
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const res = await clone(h, HOLDER(), SUITE_SET.name, { name: 'my_suite_reader', label: 'My Suite Reader' });
+
+        expect(statusOf(res)).toBe(409);
+        expect(codeOf(res)).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+        expect(h.ensures).toEqual([]);
+        expect(h.saves).toHaveLength(0);
+    });
+
+    it('a member whose App\'s pair this replica already serves: 200, saved in the App\'s pair, nothing created', async () => {
+        const h = boot({ clusterDriver: 'redis', appMember: true });
+        const first = await clone(h, HOLDER(), SUITE_SET.name, { name: 'first_suite_reader', label: 'First' });
+        expect(statusOf(first)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual([`${SUITE_APP}.custom`]);
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const second = await clone(h, HOLDER(), SUITE_SET.name, { name: 'second_suite_reader', label: 'Second' });
+
+        expect(statusOf(second)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual([`${SUITE_APP}.custom`, `${SUITE_APP}.custom`]);
+        expect((second as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
+    });
+});
+
+describe('an explicit `package` naming an App member\'s pair — the target rule reads the save gate\'s closure', () => {
+    it('a set the member ships, granting on an object the member owns, lands in the App\'s pair when the caller names it', async () => {
+        const h = boot({ appMember: true });
+        // The App's pair, made the way a default landing makes it.
+        const first = await clone(h, HOLDER(), SUITE_LEAD_SET.name, { name: 'first_lead_reader', label: 'First' });
+        expect(statusOf(first)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual([`${SUITE_APP}.custom`]);
+
+        const res = await clone(h, HOLDER(), SUITE_LEAD_SET.name, { name: 'my_lead_reader', label: 'My Lead Reader', package: `${SUITE_APP}.custom` });
+
+        expect(statusOf(res), JSON.stringify((res as any)?.response?.body)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual([`${SUITE_APP}.custom`, `${SUITE_APP}.custom`]);
+        expect(h.ensures).toEqual([SUITE_MEMBER]);
+    });
+
+    it('CONTROL — a writable package that declares the App but is not the member\'s pair stays refused 409 outside the closure: no ensure, no save', async () => {
+        const h = boot({ appMember: true });
+
+        const res = await clone(h, HOLDER(), SUITE_LEAD_SET.name, { name: 'ext_lead_reader', label: 'Ext Lead Reader', package: SUITE_EXT });
+
+        expect(statusOf(res)).toBe(409);
+        expect(codeOf(res)).toBe('RESOURCE_CONFLICT');
+        expect(String((res as any)?.response?.body?.error?.message)).toContain('[new_similar_target_outside_closure]');
+        expect(h.ensures).toEqual([]);
         expect(h.saves).toHaveLength(0);
     });
 });

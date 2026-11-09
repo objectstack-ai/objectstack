@@ -61,11 +61,18 @@ import {
 } from '@objectstack/spec/api';
 import { resolveItemLock, withItemLockFamily } from './item-lock.js';
 import type { ItemAddress } from './item-lock.js';
+import { isFederatedObject } from '@objectstack/core';
 import { itemDiscriminator } from '@objectstack/metadata-core';
-import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns } from '@objectstack/spec/data';
+import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns, SeedSchema } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
-import { MetadataProtectionFields, validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
+import { MetadataProtectionFields, findNamespaceObjectNameClashes, validateObjectNamespacePrefix, type NamespaceHolder } from '@objectstack/spec/kernel';
+// [#29898] The one walk of which picklists an object body's fields name — the
+// boot audit's. (The `os validate` door reads the parsed artifact with its own
+// walk and agrees with this door by pin, not by sharing it.) ⛔ Never a second
+// walk here.
+import { collectPicklistReferences } from '@objectstack/metadata/picklist-references';
+import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 
 /** The lock family `body` carries: each member with a value, and nothing else. */
 function lockFamilyOf(body: unknown): Record<string, unknown> {
@@ -573,6 +580,7 @@ export async function unknownGrantObjectSaveRefusal(
     pending?: 'drafts' | ReadonlySet<string>,
     writeFace?: MetadataWriteFace,
     door: 'save' | 'publish' = 'save',
+    inherited?: readonly string[],
 ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
     if (singularType !== 'permission') return undefined;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
@@ -619,6 +627,14 @@ export async function unknownGrantObjectSaveRefusal(
         : new Set<string>();
     unknown = unknown.filter((key) => !held.has(key));
     if (unknown.length === 0) return undefined;
+    // [#30255] A grant this save copies from a set that already holds it (the
+    // clone door's copy) is the source's, not this save's — the rule above,
+    // for a copy: judged where the source introduced it.
+    if (inherited && inherited.length > 0) {
+        const copied = new Set(inherited);
+        unknown = unknown.filter((key) => !copied.has(key));
+        if (unknown.length === 0) return undefined;
+    }
     // [#29279] What was looked for, as this door looked: a save also counts an
     // object saved here; a draft's publish counts only what goes live with it.
     const looked = door === 'publish'
@@ -629,6 +645,65 @@ export async function unknownGrantObjectSaveRefusal(
         message: `Permission '${name}' grants on object '${key}' which is not defined in objects: ${looked}, `
             + 'so the grant applies to nothing. Correct the name to the '
             + `object's full name (e.g. 'crm_lead', not 'lead'), create the object first, or remove the grant.`,
+        code: 'custom',
+    }));
+    const err = new Error(
+        `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
+}
+
+/**
+ * The body of `ObjectStackProtocolImplementation#unknownPicklistBindingSaveRefusal`;
+ * the method's docblock there is its contract. Written here beside
+ * {@link unknownGrantObjectSaveRefusal}, whose shape it follows: the engine's
+ * registry, then the definition the object already holds.
+ */
+export async function unknownPicklistBindingSaveRefusal(
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'readMetaItem'>,
+    singularType: string,
+    item: unknown,
+    name: string,
+    writeFace?: MetadataWriteFace,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (singularType !== 'object' && singularType !== OBJECT_EXTENSION_TYPE) return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    // An extension's fields join the object it extends; its row is stored
+    // under that object's name.
+    const extend = (item as { extend?: unknown }).extend;
+    const object = singularType === OBJECT_EXTENSION_TYPE && typeof extend === 'string' && extend !== '' ? extend : name;
+    let unknown = collectPicklistReferences(object, item, undefined);
+    if (unknown.length === 0) return undefined;
+    // The registry is the authority that SERVES a bound field's options
+    // (`resolvePicklistOptions`): a list it resolves is one a loaded package
+    // declares — the package's own, a dependency's, the base package's of a
+    // `.custom` pair, or any other package installed here. A registry that
+    // cannot resolve a list cannot say a name is unknown, so nothing is
+    // refused on it.
+    const registry = this.engine?.registry as { resolvePicklistOptions?: unknown } | undefined;
+    const resolvePicklistOptions = registry?.resolvePicklistOptions;
+    if (typeof resolvePicklistOptions !== 'function') return undefined;
+    unknown = unknown.filter((ref) => resolvePicklistOptions.call(registry, ref.picklist) === undefined);
+    if (unknown.length === 0) return undefined;
+    // A binding the object already holds is not this save's: a re-save, a
+    // stored-row migration or a restore that keeps it is judged at the save
+    // that introduced it, and a list that has gone since is not the
+    // re-saving author's to answer for.
+    const current = (await this.readMetaItem({ type: 'object', name: object }))?.item;
+    const bindingOf = (ref: { field: string; picklist: string }) => JSON.stringify([ref.field, ref.picklist]);
+    const held = new Set(collectPicklistReferences(object, current, undefined).map(bindingOf));
+    unknown = unknown.filter((ref) => !held.has(bindingOf(ref)));
+    if (unknown.length === 0) return undefined;
+    const issues: MetadataIssueEntry[] = unknown.map((ref) => ({
+        path: `fields.${ref.field}.picklist`,
+        message: `Field '${ref.object}.${ref.field}' is bound to picklist '${ref.picklist}', which no loaded package `
+            + 'declares, so the field would be served with no options and every write that sets it would be refused. '
+            + 'A field bound to a picklist takes its options from that list and has none of its own. Correct the name '
+            + 'to a picklist a package installed here declares, declare the picklist (a `*.picklist.ts` file, or '
+            + '`defineStack({ picklists })`) in a package installed here, or give the field its own `options` instead.',
         code: 'custom',
     }));
     const err = new Error(
@@ -655,7 +730,7 @@ export async function objectsBoundExternallyTo(
     const storedNames = new Set(stored.map((entry) => entry.name));
     const take = (name: string, obj: unknown) => {
         const o = obj as { datasource?: unknown; external?: unknown } | null | undefined;
-        if (o?.datasource === datasource && o.external !== undefined && o.external !== null) bound.set(name, o.external);
+        if (o?.datasource === datasource && isFederatedObject(o)) bound.set(name, o.external);
     };
     for (const entry of stored) take(entry.name, entry.data);
     const registry = this.engine.registry;
@@ -791,6 +866,71 @@ export function objectNamespacePrefixViolation(
     return validateObjectNamespacePrefix(name, this.engine?.registry?.getPackage?.(packageId)?.manifest?.namespace);
 }
 
+/**
+ * The body of `ObjectStackProtocolImplementation#objectNamespaceObjectNameClash`;
+ * the method's docblock there is its contract.
+ *
+ * [ADR-0150 D6, child K] The spec's predicate (`findNamespaceObjectNameClashes`)
+ * for one object this door is about to make live: its name against every
+ * namespace an installed package declares (a namespace never equals an object
+ * name), and against its own package's namespace + `_custom` (no object is
+ * short-named `custom`). The other direction — a new namespace equal to an
+ * object name — is the install door's: an authored package's namespace lands
+ * through `SchemaRegistry.installPackage`, which asks the same predicate.
+ * The object's own package never counts as a second holder of its namespace.
+ */
+export function objectNamespaceObjectNameClash(
+    this: Pick<SaveDoorRefusalHost, 'engine'>,
+    name: string, packageId: string | null | undefined): string | null {
+    return namespaceObjectNameClashOf(this.engine, name, packageId);
+}
+
+/**
+ * [ADR-0150 D6, child K] {@link objectNamespaceObjectNameClash} for a caller
+ * that holds the engine but no protocol — the `POST /packages/:id/publish`
+ * door (`@objectstack/runtime`), which judges a package's objects before
+ * `MetadataManager.publishPackage` makes them live (that class has no
+ * manifest, so it cannot name an installed namespace). One judge, one
+ * sentence, at every publish door: throws `NAMESPACE_CONFLICT` / 422 (the
+ * save door's envelope) naming every clash among `names`.
+ */
+export function refuseNamespaceObjectNameClashes(
+    engine: unknown, names: Iterable<string>, packageId: string | null | undefined): void {
+    const sentences: string[] = [];
+    for (const name of new Set(names)) {
+        const clash = namespaceObjectNameClashOf(engine, name, packageId);
+        if (clash) sentences.push(clash);
+    }
+    if (sentences.length === 0) return;
+    const err: any = new Error(sentences.join(' '));
+    err.code = 'NAMESPACE_CONFLICT';
+    err.status = 422;
+    throw err;
+}
+
+/** The verdict {@link refuseNamespaceObjectNameClashes} throws on, for one object name. */
+export function namespaceObjectNameClashOf(
+    engine: unknown, name: string, packageId: string | null | undefined): string | null {
+    const registry = (engine as { registry?: unknown } | null | undefined)?.registry as {
+        getPackage?: (id: string) => { manifest?: { namespace?: unknown } } | undefined;
+        getAllPackages?: () => Array<{ manifest?: { id?: unknown; namespace?: unknown } }>;
+    } | undefined;
+    const ownPackage = typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
+    const ownNamespace = ownPackage ? registry?.getPackage?.(ownPackage)?.manifest?.namespace : undefined;
+    const installedNamespaces: NamespaceHolder[] = [];
+    for (const record of registry?.getAllPackages?.() ?? []) {
+        const id = record?.manifest?.id;
+        const namespace = record?.manifest?.namespace;
+        if (typeof namespace !== 'string' || namespace === '' || id === ownPackage) continue;
+        installedNamespaces.push({ namespace, ...(typeof id === 'string' ? { packageId: id } : {}) });
+    }
+    const clashes = findNamespaceObjectNameClashes(
+        { objects: [{ name, ...(typeof ownNamespace === 'string' && ownNamespace !== '' ? { namespace: ownNamespace } : {}), ...(ownPackage ? { packageId: ownPackage } : {}) }] },
+        { namespaces: installedNamespaces },
+    );
+    return clashes.length > 0 ? clashes.map((c) => c.message).join(' ') : null;
+}
+
 /** The seed modes whose load matches incoming records to existing rows by the dataset's `externalId`. */
 const KEYED_SEED_MODES: ReadonlySet<string> = new Set(['upsert', 'update', 'ignore']);
 
@@ -814,10 +954,11 @@ export async function seedExternalIdSaveRefusal(
     const seed = item as { object?: unknown; mode?: unknown; externalId?: unknown };
     if (typeof seed.object !== 'string' || seed.object === '') return undefined;
     const objectName = seed.object;
-    // `SeedSchema`'s defaults, as the loader applies them (`mode: 'upsert'`,
+    // `SeedSchema`'s defaults, as the loader applies them (the `mode` default,
+    // read from the schema rather than restated here [#30081], and
     // `externalId: 'name'`): a body read before the parse filled them keys the
     // same way a parsed one does.
-    const mode = typeof seed.mode === 'string' ? seed.mode : 'upsert';
+    const mode = typeof seed.mode === 'string' ? seed.mode : SeedSchema.shape.mode.parse(undefined);
     if (!KEYED_SEED_MODES.has(mode)) return undefined;
     const declared = seed.externalId !== undefined;
     const externalId = declared ? seed.externalId : 'name';

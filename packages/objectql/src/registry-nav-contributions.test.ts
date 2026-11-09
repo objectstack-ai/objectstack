@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SchemaRegistry } from './registry';
+import { ObjectQL } from './engine';
 
 /**
  * ADR-0029 D7 — app navigation contributions.
@@ -102,5 +103,133 @@ describe('SchemaRegistry navigation contributions (ADR-0029 D7)', () => {
     const setup = apps.find((a: any) => a.name === 'setup');
     const group = setup.navigation.find((n: any) => n.id === 'group_integrations');
     expect(group.children).toHaveLength(1);
+  });
+});
+
+/**
+ * [#30581] A package BODY's contributions are derived from its manifest, never
+ * appended to: registering the same body again folds each entry once.
+ *
+ * An artifact reload (`metadata:reloaded`) re-registers every package of the
+ * artifact through `ObjectQL.registerApp`, and the manifest step used to push
+ * each contribution once more per registration, so a single reload listed
+ * every module's entries twice until a restart. Each pin below compares the
+ * served app against the snapshot a fresh registration of the same bodies
+ * gives, in the same test.
+ */
+describe('[#30581] a package body re-registered folds its contributions once', () => {
+  const APP = 'com.qa.nav.app';
+  const ORDERS = 'com.qa.nav.orders';
+  const SERVICE = 'com.qa.nav.service';
+  const LOOSE = 'com.qa.nav.loose';
+
+  const appBody = () => ({
+    id: APP, name: APP, version: '1.0.0', type: 'app', namespace: 'qn',
+    apps: [{
+      name: 'qn_app', label: 'Suite',
+      navigation: [
+        { id: 'g_sales', type: 'group', label: 'Sales', children: [{ id: 'nav_accounts', type: 'object', label: 'Accounts', objectName: 'qn_account' }] },
+        { id: 'g_service', type: 'group', label: 'Service', children: [] },
+      ],
+    }],
+  });
+  // Equal priorities on purpose: the default 200 makes ties the common case,
+  // so the order a re-registration leaves is a real question.
+  const ordersBody = (items = [{ id: 'nav_orders', type: 'object', label: 'Orders', objectName: 'qn_order' }]) => ({
+    id: ORDERS, name: ORDERS, version: '1.0.0', type: 'module', namespace: 'qn', dependencies: { [APP]: '^1.0.0' },
+    navigationContributions: [
+      { app: 'qn_app', group: 'g_sales', items },
+      { app: 'qn_app', group: 'g_service', items: [{ id: 'nav_returns', type: 'object', label: 'Returns', objectName: 'qn_return' }] },
+    ],
+  });
+  const serviceBody = () => ({
+    id: SERVICE, name: SERVICE, version: '1.0.0', type: 'module', namespace: 'qn', dependencies: { [APP]: '^1.0.0' },
+    navigationContributions: [
+      { app: 'qn_app', group: 'g_service', items: [{ id: 'nav_cases', type: 'object', label: 'Cases', objectName: 'qn_case' }] },
+      { app: 'qn_app', group: 'g_sales', items: [{ id: 'nav_quotes', type: 'object', label: 'Quotes', objectName: 'qn_quote' }] },
+    ],
+  });
+  // A module that contributes nothing: toggling or re-registering it moves nothing.
+  const looseBody = () => ({ id: LOOSE, name: LOOSE, version: '1.0.0', type: 'module', namespace: 'qn', dependencies: { [APP]: '^1.0.0' } });
+
+  /** Every navigation entry of the served app, `group/id`, in served order. */
+  const served = (engine: ObjectQL): string[] =>
+    (engine.registry.getApp('qn_app')?.navigation ?? []).flatMap((n: any) =>
+      n.type === 'group' ? (n.children ?? []).map((c: any) => `${n.id}/${c.id}`) : [n.id]);
+
+  const boot = (): ObjectQL => {
+    const engine = new ObjectQL();
+    (engine.registry as any).logLevel = 'silent';
+    for (const body of [appBody(), ordersBody(), serviceBody(), looseBody()]) engine.registerApp(body as any);
+    return engine;
+  };
+
+  let engine: ObjectQL;
+  let fresh: string[];
+  beforeEach(() => {
+    engine = boot();
+    fresh = served(boot());
+  });
+
+  it('serves each entry once on a fresh registration (the control)', () => {
+    expect(fresh).toEqual([
+      'g_sales/nav_accounts', 'g_sales/nav_orders', 'g_sales/nav_quotes',
+      'g_service/nav_returns', 'g_service/nav_cases',
+    ]);
+    expect(served(engine)).toEqual(fresh);
+  });
+
+  it('re-registering every body twice (two artifact reloads) serves the fresh registration, in its order', () => {
+    for (let reload = 0; reload < 2; reload++) {
+      for (const body of [appBody(), ordersBody(), serviceBody(), looseBody()]) engine.registerApp(body as any);
+    }
+    expect(served(engine)).toEqual(fresh);
+    expect(engine.registry.getAppNavContributions('qn_app')).toHaveLength(4);
+  });
+
+  it('re-registering ONE module keeps its entries where a fresh registration puts them', () => {
+    engine.registerApp(ordersBody() as any);
+    engine.registerApp(ordersBody() as any);
+    expect(served(engine)).toEqual(fresh);
+  });
+
+  it('two disable/enable cycles of a module, each followed by a reload, serve the fresh registration', () => {
+    // The enable announcement the roll-up recompute rides on (#30377) still
+    // fires once per enable of a disabled package: a reload is no enable.
+    const heard: string[] = [];
+    const stop = engine.registry.onPackageEnabled((id) => { heard.push(id); });
+    for (let cycle = 0; cycle < 2; cycle++) {
+      engine.registry.disablePackage(ORDERS);
+      expect(served(engine)).toEqual(['g_sales/nav_accounts', 'g_sales/nav_quotes', 'g_service/nav_cases']);
+      for (const body of [appBody(), ordersBody(), serviceBody(), looseBody()]) engine.registerApp(body as any);
+      engine.registry.enablePackage(ORDERS);
+      expect(served(engine)).toEqual(fresh);
+    }
+    stop();
+    expect(heard).toEqual([ORDERS, ORDERS]);
+  });
+
+  it('toggling and re-registering a module with no contributions leaves the navigation unchanged', () => {
+    engine.registry.disablePackage(LOOSE);
+    engine.registerApp(looseBody() as any);
+    engine.registry.enablePackage(LOOSE);
+    expect(served(engine)).toEqual(fresh);
+  });
+
+  it('a re-registered body replaces its contributions: an entry it dropped leaves, one it added appears once', () => {
+    engine.registerApp(ordersBody([{ id: 'nav_invoices', type: 'object', label: 'Invoices', objectName: 'qn_invoice' }]) as any);
+    expect(served(engine)).toEqual([
+      'g_sales/nav_accounts', 'g_sales/nav_invoices', 'g_sales/nav_quotes',
+      'g_service/nav_returns', 'g_service/nav_cases',
+    ]);
+    const { navigationContributions: _dropped, ...withNone } = ordersBody();
+    engine.registerApp(withNone as any);
+    expect(served(engine)).toEqual(['g_sales/nav_accounts', 'g_sales/nav_quotes', 'g_service/nav_cases']);
+  });
+
+  it('uninstalling a module (not disabling it) drops its contributions from the app', () => {
+    expect(engine.registry.uninstallPackage(ORDERS), 'precondition: uninstalled').toBe(true);
+    expect(served(engine)).toEqual(['g_sales/nav_accounts', 'g_sales/nav_quotes', 'g_service/nav_cases']);
+    expect(engine.registry.getAppNavContributions('qn_app').map((c) => c.packageId)).toEqual([SERVICE, SERVICE]);
   });
 });

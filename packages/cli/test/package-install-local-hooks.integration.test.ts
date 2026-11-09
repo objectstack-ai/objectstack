@@ -314,7 +314,7 @@ async function authenticate(live: LiveStart): Promise<string> {
  */
 function packageInstall(appDir: string, live: LiveStart): Promise<{ exit: number | null; output: string }> {
   return new Promise((done) => {
-    const child = spawn(process.execPath, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
+    const child = spawn(process.execPath, [CLI, 'package', 'install', './dist/objectstack.json', '--url', live.base, '--email', EMAIL, '--password', PASSWORD], {
       cwd: appDir,
       env: childEnv({ NO_COLOR: '1' }),
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -412,8 +412,10 @@ beforeAll(async () => {
   readings.output.install = first.output();
   await stopGroup(first.child);
 
-  // ── boot 2: same host, home and cwd, plus a ledger entry an earlier build wrote ──
-  const ledger = join(runtimeDir, '.objectstack', 'installed-packages');
+  // ── boot 2: same host, home and cwd, plus an entry an earlier build wrote into this home's ledger ──
+  // The ledger follows OS_HOME (#30217): `--home` names it, so the entry goes
+  // under that home, not under the working directory.
+  const ledger = join(home, 'installed-packages');
   mkdirSync(ledger, { recursive: true });
   writeFileSync(join(ledger, `${LEGACY_APP_ID}.json`), JSON.stringify(LEGACY_ENTRY, null, 2), 'utf8');
   const second = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);

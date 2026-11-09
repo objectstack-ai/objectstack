@@ -44,13 +44,14 @@
  * not move.
  */
 
-import { customizationPackageId } from '@objectstack/spec/kernel';
+import { isPairOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { StoredOverlayRow } from './item-lock.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { rowMatchesOverlayWhere, servedOverlayRowCandidates } from './protocol.js';
-import { isServedOverrideRowOf } from './served-override.js';
+import { holdsServedOverlayCandidate } from './protocol-overlay-merge.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -63,6 +64,7 @@ export interface EnvironmentRowsHost {
     readonly engine: ObjectStackProtocolImplementation['engine'];
     readonly findEnvironmentRow: ObjectStackProtocolImplementation['findEnvironmentRow'];
     readonly findEnvironmentRows: ObjectStackProtocolImplementation['findEnvironmentRows'];
+    readonly shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
     readonly legacyOrganizationRowsOf: ObjectStackProtocolImplementation['legacyOrganizationRowsOf'];
     readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
     readonly withoutLegacyOrganizationRows: ObjectStackProtocolImplementation['withoutLegacyOrganizationRows'];
@@ -96,7 +98,7 @@ export async function findEnvironmentRow(this: Pick<EnvironmentRowsHost, 'engine
 
 /** The body of `ObjectStackProtocolImplementation#findServedOverlayRow`; the method's docblock there is its contract. */
 export async function findServedOverlayRow(
-    this: Pick<EnvironmentRowsHost, 'findEnvironmentRow'>,
+    this: Pick<EnvironmentRowsHost, 'engine' | 'findEnvironmentRow' | 'findEnvironmentRows' | 'shippedArtifactsOf'>,
     args: {
     type: string;
     name: string;
@@ -117,7 +119,15 @@ export async function findServedOverlayRow(
     // collision would serve package B's customization for a package A
     // read); with no package context (legacy/runtime reader), any row.
     const other = PLURAL_TO_SINGULAR[args.type] ?? SINGULAR_TO_PLURAL[args.type];
-    for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId, servedOverride: args.servedOverride })) {
+    const installed = installedManifestsOfEngine(this.engine);
+    // [#31593] The code packages that ship the item, read once, when a
+    // moved edit of it can be a candidate (`suite-moved-overlay.ts`).
+    let shippers: ReadonlySet<string> | undefined;
+    const ships = (packageId: string): boolean => {
+        shippers ??= shippingPackageIds(this.shippedArtifactsOf(args.type, args.name, undefined, args.member));
+        return shippers.has(packageId);
+    };
+    for (const candidate of servedOverlayRowCandidates({ packageId: args.packageId, servedOverride: args.servedOverride, installed, ships })) {
         const type = candidate.spelling === 'canonical' ? args.type : other;
         if (type === undefined) continue;
         const where: Record<string, unknown> = {
@@ -128,6 +138,17 @@ export async function findServedOverlayRow(
             ...overlayMemberWhere(type, args.member),
         };
         if (candidate.packageId !== undefined) where.package_id = candidate.packageId;
+        if (candidate.moved === 'base') {
+            // [#31593] A row bound to a former owner of the item, at any
+            // binding: every row of the item is read and the predicate
+            // picks; two former owners' rows are never guessed between.
+            const rows = activeRows !== undefined && args.state === 'active'
+                ? activeRows.filter((stored) => rowMatchesOverlayWhere(stored, where))
+                : await this.findEnvironmentRows('sys_metadata', { where, context: { isSystem: true } });
+            const moved = (rows ?? []).filter((row) => holdsServedOverlayCandidate(candidate, row, installed, ships));
+            if (moved.length === 1) return { row: moved[0], overrideOf: candidate.overrideOf };
+            continue;
+        }
         // [#21911, ADR-0096] The explicit system opt-in: a platform store
         // read, which no caller's grants scope — the door that asked
         // already authorized the caller, and the protocol scopes the row
@@ -141,8 +162,10 @@ export async function findServedOverlayRow(
         // candidate only when it declares the override of the address's
         // package ({@link isServedOverrideRowOf}, on the row's own binding and
         // body): an undeclared row of the pair is the pair's own item.
+        // [#31593] …and the moved-override candidate only when its body
+        // declares a former owner of the item ({@link isMovedOverrideRowOf}).
         if (candidate.overrideOf !== undefined) {
-            if (isServedOverrideRowOf(row, candidate.overrideOf)) return { row, overrideOf: candidate.overrideOf };
+            if (holdsServedOverlayCandidate(candidate, row, installed, ships)) return { row, overrideOf: candidate.overrideOf };
             continue;
         }
         return { row };
@@ -290,9 +313,13 @@ export function soleShippingPackage(shipped: readonly unknown[]): string | undef
  * PR #28777). A declared override is served as the base's item by the
  * served-row resolution and is never asked about here.
  */
-export function baseAddressServesMember(base: string, bound: string | undefined, baseShipsMember: boolean): boolean {
+export function baseAddressServesMember(
+    base: string,
+    bound: string | undefined,
+    baseShipsMember: boolean,
+    installed: InstalledManifestLookup,
+): boolean {
     if (bound === undefined || bound === base) return true;
     if (baseShipsMember) return false;
-    const pair = customizationPackageId(base);
-    return pair.ok && pair.value === bound;
+    return isPairOf(bound, base, installed);
 }

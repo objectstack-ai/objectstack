@@ -49,7 +49,9 @@ describe('objectui#12613 — the declared widget picks the cell key', () => {
     // Controls: no widget, a widget with no read cell of its own, and a
     // non-textual base type keep the answer they had.
     expect(resolveCellRendererType({ type: 'text' })).toBe('text');
-    expect(resolveCellRendererType({ type: 'textarea', widget: 'filter-condition' })).toBe('textarea');
+    // (`code`: since objectstack#30209 `filter-condition` has a read cell.)
+    expect(resolveCellRendererType({ type: 'textarea', widget: 'code' })).toBe('textarea');
+    expect(resolveCellRendererType({ type: 'textarea', widget: 'filter-condition' })).toBe('filter-condition');
     expect(resolveCellRendererType({ type: 'select', widget: 'object-ref' })).toBe('select');
     // The widget wins over a `format` hint on the same text field: it names
     // what the value IS, the hint only how plain text is drawn.

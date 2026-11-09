@@ -52,13 +52,14 @@ function activities(): ActivityItem[] {
 /** How many times the popover tree read `objects` — reading it is what loads the type. */
 let objectReads = 0;
 
-function metadata() {
+/** The definitions as the server serves them in `lang`: a `zh-CN` session holds the `zh-CN` label. */
+function metadata(lang: Lang) {
   return {
     apps: [],
     get objects() {
       objectReads += 1;
       return [
-        { name: 'crm_lead', label: 'Lead' },
+        { name: 'crm_lead', label: lang === 'zh-CN' ? '线索' : 'Lead' },
         { name: 'sys_user_preference', label: 'User Preference' },
       ];
     },
@@ -87,7 +88,7 @@ function renderBell(lang: Lang) {
   render(
     <MemoryRouter>
       <I18nProvider instance={i18n} persistLanguage={false}>
-        <MetadataCtx.Provider value={metadata() as never}>
+        <MetadataCtx.Provider value={metadata(lang) as never}>
           <InboxPopover
             notifications={[]}
             unreadCount={0}
@@ -141,7 +142,7 @@ describe('InboxPopover — an Activity row names its object by its label (object
     expect(objectShownFor(PREF_SUMMARY)).toBe('User Preference');
   });
 
-  it('zh-CN: the label comes from the object translation bundle', () => {
+  it('zh-CN: the label is the one served in the session language (objectstack#30390)', () => {
     renderBell('zh-CN');
     openActivity();
     expect(objectShownFor(LEAD_SUMMARY)).toBe('线索');

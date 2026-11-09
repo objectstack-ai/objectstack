@@ -5,6 +5,7 @@ import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { SysJob, SysJobRun, SysJobQueue } from './audit/index.js';
 import {
+  SysLifecycleState,
   SysMigration,
   SysMigrationJournal,
   SysPlatformSettingAudit,
@@ -48,6 +49,8 @@ const DEPLOYMENT_LEVEL = [
   ['sys_platform_setting_audit', SysPlatformSettingAudit],
   // [ADR-0025 §3.5 M1] The environment's trusted plugin-publisher keys.
   ['sys_trusted_key', SysTrustedKey],
+  // [ADR-0057] The lifecycle sweeper's clock state: one row per datastore.
+  ['sys_lifecycle_state', SysLifecycleState],
 ] as const;
 
 describe('[ADR-0131 D7] deployment-level plumbing: no tenant column, platform-only reads', () => {

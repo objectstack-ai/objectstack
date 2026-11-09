@@ -493,6 +493,10 @@ export type {
   ExportDownloadRequest,
 } from './data.js';
 
+// The upload adapter contract: `UploadProvider` (`@object-ui/fields`) reads it,
+// `createObjectStackUploadAdapter` (`@object-ui/data-objectstack`) implements it.
+export type { UploadResult, UploadOptions, UploadAdapter } from './upload.js';
+
 // ============================================================================
 // CRUD Components - Create, Read, Update, Delete Operations
 // ============================================================================
@@ -572,7 +576,6 @@ export type {
 export type {
   BaseFieldMetadata,
   FieldDependsOn,
-  VisibilityCondition,
   FieldValidationFunction,
   TextFieldMetadata,
   TextareaFieldMetadata,
@@ -612,7 +615,6 @@ export type {
   SignatureFieldMetadata,
   QRCodeFieldMetadata,
   AddressFieldMetadata,
-  GeolocationFieldMetadata,
   SliderFieldMetadata,
   RatingFieldMetadata,
   MasterDetailFieldMetadata,
@@ -622,6 +624,8 @@ export type {
   ObjectIndex,
   GridFieldRetiredKey,
 } from './field-types.js';
+// `VisibilityCondition` and `GeolocationFieldMetadata` were retired from this
+// list (objectstack#25921, batch 13) — see the notes in `field-types.ts`.
 // objectui#11610 — the `grid` field's retired snake_case field-level keys, each
 // mapped to its camelCase replacement: the one list the form-field zod mirror's
 // alias refusals and the `grid` widget's named refusal both read.
@@ -656,7 +660,7 @@ export type {
   OrderByNode,
   LimitNode,
   OffsetNode,
-  SubqueryNode,
+  // `SubqueryNode` was retired here (objectstack#25921, batch 12).
   AggregateNode,
   WindowNode,
   WindowFunction,
@@ -683,8 +687,8 @@ export type {
   // Renamed from `DateRangePreset` in objectui#4167 — the spec owns that name
   // for the narrower dashboard filter-bar vocabulary (objectstack#4115).
   FilterBuilderDateRangePreset,
-  FilterBuilderConfig,
-  FilterFieldConfig,
+  // `FilterBuilderConfig` / `FilterFieldConfig` were retired here
+  // (objectstack#25921, batch 12) — see the notes in `data-protocol.ts`.
   // Object-level validation rules. The five spec-named variants are derived from
   // `@objectstack/spec/data`; the other three are @deprecated objectui-local
   // variants the spec's union rejects. See data-protocol.ts.
@@ -698,23 +702,6 @@ export type {
   FormatValidation,
   RangeValidation,
   ObjectValidationRule,
-  // Driver Interface (Phase 3.6)
-  SqlDriverInterface,
-  ConnectionConfig,
-  DriverQueryResult,
-  BatchOperation,
-  BatchResult,
-  TransactionContext,
-  CacheManager,
-  ConnectionPool,
-  // Datasource Schema (Phase 3.7)
-  DatasourceRegistration,
-  DatasourceType,
-  DatasourceMetric,
-  DatasourceAlert,
-  DatasourceManager,
-  HealthCheckResult,
-  DatasourceMetrics,
 } from './data-protocol.js';
 
 // ============================================================================
@@ -833,25 +820,48 @@ export {
 // See `packages/types/src/internal/retired-field-keys.ts` for the registry.
 
 // ============================================================================
-// API and Events - API Integration and Event Handling
+// API and Events — RETIRED (no block stands here any more)
 // ============================================================================
-export type {
-  HTTPMethod,
-  APIRequest,
-  APIConfig,
-  // `UIEventHandler` and `EventableSchema` are GONE from this block, not
-  // emptied out of it: both were RETIRED in objectui#6497 (ADR-0049
-  // enforce-or-remove, director ruling of 2026-09-24, maintainer verbatim
-  // 「同意」). Declared, unmirrored, unextended and unread, they only invited a
-  // handler dialect no runtime dispatches. The supported form is the
-  // declarative `ActionDef` object from `@object-ui/core`; the reasoning is the
-  // tombstone in `./api-types.ts`.
-  DataFetchConfig,
-  DataFetchableSchema,
-  ExpressionContext,
-  ExpressionNodeSchema,
-  APISchema,
-} from './api-types.js';
+// #25921 (batch 9): the whole `./api-types.ts` module is DELETED, with its eight
+// names `HTTPMethod`, `APIRequest`, `APIConfig`, `DataFetchConfig`,
+// `DataFetchableSchema`, `ExpressionContext`, `ExpressionNodeSchema` and
+// `APISchema`: TypeScript-only shapes no renderer, adapter or host read, in this
+// workspace or in hotcrm. No replacement type; the changeset carries the FROM/TO.
+// The `ExpressionContext` an expression runs against is `@object-ui/core`'s class.
+//
+// `UIEventHandler` and `EventableSchema` — RETIRED. This comment is the
+// tombstone (it moved here from the deleted `./api-types.ts`): both were
+// TypeScript interfaces, which erase and leave no runtime residue that could
+// carry a marker of their own.
+//
+// RETIRED under ADR-0049 enforce-or-remove by the director-seat ruling recorded
+// on objectui#6497 (2026-09-24, maintainer verbatim 「同意」): the re-priced
+// option 2 of the three that card offered. ⛔ Not option 1 (mirror the dialect in
+// zod, have component schemas extend it, build a dispatcher for it) and ⛔ not
+// option 3 (leave it on the published surface). The ruling follows objectui#6182
+// (ruled A, 2026-08-25): an authored handler EXPRESSION is not a supported
+// authoring form.
+//
+// What went: both exported interfaces and their barrel re-exports.
+// `UIEventHandler` was an event-handler object: `event`, a `type` of
+// `action | api | script | navigation | dialog | toast | custom`, one config
+// member per type, then `condition`, `preventDefault`, `stopPropagation`,
+// `debounce` and `throttle`. The action entries of its `dialog` member carried a
+// recursive `handler?: UIEventHandler`, which went with it. `EventableSchema` extended
+// `BaseSchema` with an `events` array and nine `on*` keys, each typed
+// `UIEventHandler | string`. Its arm of the (since deleted) `APISchema` union
+// went too. There is no replacement type and no replacement key.
+//
+// Why: declared and inert, an island: no component schema extended
+// `EventableSchema`, neither type had a zod mirror (so `objectui validate` had no
+// path to the dialect), and nothing outside its module and this barrel read
+// either one. Only `tsc` said yes, which invited authors to write a handler
+// dialect that no runtime dispatches.
+//
+// The supported form: an action is the declarative `ActionDef` object that
+// `@object-ui/core`'s `ActionRunner` executes, and a control that runs something
+// is the `action:button` node type (AGENTS.md, commandment #4). Runtime
+// callbacks stay the programmatic face.
 
 // ============================================================================
 // Union Types - Discriminated Unions for All Schemas
@@ -874,12 +884,15 @@ import type { CRUDComponentSchema } from './crud.js';
 import type { ObjectQLComponentSchema, ListViewSchema } from './objectql.js';
 import type { AppComponentSchema, AppSchemaRendererNodeSchema } from './app.js';
 import type { CloudWorkspaceTimezoneNoticeSchema } from './cloud.js';
+import type { McpAuthorizedAssistantsSchema } from './mcp-authorized-assistants.js';
+import type { SecurityEffectiveAccessSchema } from './security-effective-access.js';
 import type {
   HeroBlockSchema,
   StatBlockSchema,
   UsageBarBlockSchema,
   ChecklistBlockSchema,
   TileGridBlockSchema,
+  RowTableBlockSchema,
 } from './product-blocks.js';
 import type { RecordApprovalDecisionBlockSchema } from './record-approval-decision.js';
 import type { RecordApprovalsBlockSchema, RecordAttachmentsBlockSchema } from './record-panels.js';
@@ -950,29 +963,28 @@ export type {
 // Authoritative report protocol from @objectstack/spec, re-exported under
 // `Spec*` names so they coexist with the legacy presentation `ReportComponentSchema`.
 // See `./spec-report.ts` for the layering rationale.
+//
+// #25921 (batch 10): nine names of this block are DELETED, nothing in this
+// workspace or in hotcrm read them: `SpecReportChart`, `SpecReportChartInput`,
+// `SpecReportChartSchema` and `SpecReportTypeEnum` (import `ReportChartParsed`,
+// `ReportChart`, `ReportChartSchema` and `ReportType` from `@objectstack/spec/ui`),
+// and `SpecReportAggregate`, `QLAggregationFunction`, `mapAggregateToQL`,
+// `JoinedSpecReport` and `isJoinedSpecReport` (no replacement). The changeset
+// carries the FROM/TO.
 // ---------------------------------------------------------------------------
 export type {
   SpecReportInput,
-  SpecReportChart,
-  SpecReportChartInput,
   SpecReportTypeName,
-  SpecReportAggregate,
   SpecReportDateGranularity,
-  QLAggregationFunction,
   LegacyReportPresentationLike,
   JoinedReportBlock,
-  JoinedSpecReport,
 } from './spec-report.js';
 
 export {
   SpecReportSchema,
-  SpecReportChartSchema,
-  SpecReportTypeEnum,
   SpecReport,
-  mapAggregateToQL,
   specReportToPresentation,
   isSpecReport,
-  isJoinedSpecReport,
 } from './spec-report.js';
 
 // Workflow / Flow Designer schemas removed in 9.0 — they backed the retired
@@ -1011,6 +1023,16 @@ export type {
 } from './cloud.js';
 
 export type {
+  // The `mcp:authorized-assistants` node's TS twin, landed with its zod arm.
+  McpAuthorizedAssistantsSchema,
+} from './mcp-authorized-assistants.js';
+
+export type {
+  // The `security:effective-access` node's TS twin, landed with its zod arm.
+  SecurityEffectiveAccessSchema,
+} from './security-effective-access.js';
+
+export type {
   // The product-page blocks' TS twins, landed with their zod arms and their
   // `@object-ui/app-shell` registrations (objectui#12197).
   ProductBlockExpressionHole,
@@ -1027,6 +1049,10 @@ export type {
   TileGridBlockAddTile,
   TileGridBlockProps,
   TileGridBlockSchema,
+  // `row-table` (#31856), the sixth product block.
+  RowTableColumn,
+  RowTableBlockProps,
+  RowTableBlockSchema,
 } from './product-blocks.js';
 
 export type {
@@ -1070,7 +1096,6 @@ export type {
   DetailSectionNodeSchema,
   ViewComponentSchema,
   CommentEntry,
-  MentionNotification,
   ActivityEntry,
   // Feed / Chatter Protocol Types
   FeedItemType,
@@ -1140,6 +1165,10 @@ export type AnySchema =
   | AppSchemaRendererNodeSchema
   // objectui#11930 — landed with its zod arm.
   | CloudWorkspaceTimezoneNoticeSchema
+  // Landed with its zod arm and its `@object-ui/app-shell` registration.
+  | McpAuthorizedAssistantsSchema
+  // Landed with its zod arm and its `@object-ui/app-shell` registration.
+  | SecurityEffectiveAccessSchema
   // objectui#12342 — landed with its zod arm.
   | RecordApprovalDecisionBlockSchema
   // objectui#12363 — landed with their zod arms.
@@ -1150,7 +1179,9 @@ export type AnySchema =
   | StatBlockSchema
   | UsageBarBlockSchema
   | ChecklistBlockSchema
-  | TileGridBlockSchema;
+  | TileGridBlockSchema
+  // #31856 — landed with its zod arm.
+  | RowTableBlockSchema;
 
 /**
  * Utility type to extract the schema type from a type string.
@@ -1244,9 +1275,9 @@ export type {
   // The `undo` payload of `ActionResult`, moved down from `@object-ui/core`'s
   // `UndoManager` with it (objectui#6349, batch 4); core re-exports it.
   UndoableOperation,
-  ActionExecutor,
-  BatchOperationConfig,
-  BatchOperationSummary,
+  // `ActionExecutor` / `BatchOperationConfig` / `BatchOperationSummary` were
+  // retired here (objectstack#25921, batch 11) — see the note at the end of
+  // `ui-action.ts`.
   TransactionIsolationLevel,
   TransactionConfig,
   TransactionResult,
@@ -1261,6 +1292,7 @@ export {
   OBJECTUI_LOCAL_PARAM_FIELD_TYPES,
   ACTION_PARAM_FIELD_TYPES,
   actionRendersAt,
+  placedHeaderActions,
   resolveDeclaredActionIds,
 } from './ui-action.js';
 

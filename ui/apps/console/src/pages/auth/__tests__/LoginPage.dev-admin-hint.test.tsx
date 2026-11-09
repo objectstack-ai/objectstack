@@ -17,7 +17,8 @@
  * through the same `signIn` the form submits with.
  *
  * Pinned here:
- *  - the row renders only when the server reports `devSeedAdmin`;
+ *  - the row renders only when the server reports `devSeedAdmin`, and not when
+ *    it reports `emailPassword.enabled: false` (the chip's sign-in is refused);
  *  - ⛔ the password never reaches the DOM — not as text, not in an attribute,
  *    not in a hidden element — read off the whole document's markup;
  *  - the chip hands the reported email and password to `signIn`, and a signed-in
@@ -147,6 +148,28 @@ describe('LoginPage — the dev-seeded admin row (objectui#12600)', () => {
     expect(alert.textContent).not.toBe('');
     expect((screen.getByTestId('dev-admin-signin') as HTMLButtonElement).disabled).toBe(false);
     expect(document.documentElement.outerHTML).not.toContain(SEED_PASSWORD);
+  });
+
+  it('renders no row when the server turned email and password sign-in off', async () => {
+    renderLogin(
+      createMockClient({
+        ...DEV_SEED,
+        emailPassword: { enabled: false },
+        socialProviders: [{ id: 'google', name: 'Google', enabled: true }],
+      }),
+    );
+
+    // The provider button appears once the config read has settled; the row must not.
+    await screen.findByText(/Google/);
+    expect(screen.queryByTestId('dev-admin-hint')).toBeNull();
+    expect(screen.queryByTestId('dev-admin-signin')).toBeNull();
+  });
+
+  it('renders the row and its chip when email and password sign-in is on', async () => {
+    renderLogin(createMockClient({ ...DEV_SEED, emailPassword: { enabled: true } }));
+
+    await screen.findByTestId('dev-admin-hint');
+    expect(screen.getByTestId('dev-admin-signin')).toBeTruthy();
   });
 
   it('shows the email and no chip for a seed reported without a password', async () => {

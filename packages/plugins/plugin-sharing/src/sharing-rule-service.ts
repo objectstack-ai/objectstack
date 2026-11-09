@@ -42,11 +42,24 @@ import type { SharingEngine } from './sharing-service.js';
 import type { SharingService } from './sharing-service.js';
 import { isInternalRecipientRefusal } from './sharing-service.js';
 import { normalizeAccessLevel, normalizeStoredAccessLevel } from './access-level.js';
-import { parseCriteria, isMatchAllCriteria, MATCH_ALL_CRITERIA_MESSAGE } from './rule-criteria.js';
+import {
+  parseCriteria,
+  isMatchAllCriteria,
+  MATCH_ALL_CRITERIA_MESSAGE,
+  SharingRuleObjectNotEnforcedError,
+} from './rule-criteria.js';
 import { TeamGraphService, teamHasMember } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-sharing-rules.js';
+import { resolvePackageScopedName, type PackageScopedRefusal } from '@objectstack/objectql';
+import {
+  PackageScopedNameRefusedError,
+  isPackageScopedRegistry,
+  listedHoldersView,
+  reportRefusedDeclaration,
+} from './package-scoped-declarations.js';
+import { listShareableObjects, type ShareableObject, type ShareableObjectsEngine } from './shareable-objects.js';
 
 /**
  * System-elevated context for the rule evaluator's own reconcile writes.
@@ -546,6 +559,10 @@ export class SharingRuleService implements ISharingRuleService {
   private unknownScopesSweepWarned = false;
   /** [ADR-0131 D6 regime C] The declaration-over-row conflicts already reported, `name::scope`. */
   private readonly declarationOverRowReported = new Set<string>();
+  /** [ADR-0150, child E4] Declared rules' queue recipients already reported as refused from their package. */
+  /** [ADR-0150, child E4] Refused declared names whose grants the orphan sweep already reported revoking. */
+  private readonly sweptRefusalsReported = new Set<string>();
+  private readonly queueRecipientRefusalsReported = new Set<string>();
   /** [ADR-0131 D1/D8] Stored rules refused for carrying no organization, reported once each. */
   private readonly organizationlessRuleReported = new Set<string>();
 
@@ -833,6 +850,20 @@ export class SharingRuleService implements ISharingRuleService {
     // `active: false` on an over-sharing rule must survive redeploys.
     const seedMode = input.managedBy === 'package' || input.managedBy === 'platform';
 
+    // [#30621] A rule on an object no sharing gate consults would save and then
+    // share nothing: refuse it here, with the reconcile's own verdict. The
+    // `sys_sharing_rule` hook guard makes the same check on the `/data` door;
+    // this write runs under the system context, which that guard lets pass.
+    // An upsert that keeps a stored rule on its object is not a move, so a
+    // rule saved before this check can still be switched off.
+    if (!context?.isSystem) {
+      const stored: any = Array.isArray(existing) ? existing[0] : undefined;
+      if (!stored || stored.object_name !== input.object) {
+        const refusal = this.sharing.sharingRuleObjectRefusal(input.object);
+        if (refusal) throw new SharingRuleObjectNotEnforcedError(input.object, refusal);
+      }
+    }
+
     if (Array.isArray(existing) && existing[0]) {
       const row: any = existing[0];
       if (seedMode) {
@@ -929,6 +960,27 @@ export class SharingRuleService implements ISharingRuleService {
     const orgId = this.callerOrgId(context);
     if (!orgId) return where; // system context / platform operator — asserted upstream
     return { ...where, organization_id: orgId };
+  }
+
+  /**
+   * [#30209 row 5 B] The objects a sharing rule can take effect on, for
+   * Setup's object picker (`GET /api/v1/sharing/shareable-objects`).
+   *
+   * Admitted as every other verb of this surface admits
+   * ({@link assertCanManageRules}: `manage_sharing`, or the legacy
+   * `manage_platform_settings`, with a resolvable organization), so the list
+   * names nothing the caller could not author a rule on. Listed by the save
+   * doors' own verdict ({@link SharingService.sharingRuleObjectRefusal}) —
+   * handed to {@link listShareableObjects}, never restated — so an object
+   * listed here is one `defineRule` and the `/data` door admit, and one left
+   * out is one they refuse with `SHARING_NOT_ENABLED`.
+   */
+  listShareableObjects(context: ExecutionContext): ShareableObject[] {
+    this.assertCanManageRules(context); // [ADR-0111 D6]
+    return listShareableObjects(
+      this.engine as SharingEngine & ShareableObjectsEngine,
+      (object) => this.sharing.sharingRuleObjectRefusal(object),
+    );
   }
 
   async listRules(
@@ -1087,6 +1139,14 @@ export class SharingRuleService implements ISharingRuleService {
    */
   async declaredRuleNamed(name: string): Promise<DeclaredSharingRule | null> {
     if (!this.declaredSource || !name) return null;
+    // [ADR-0150 D3/D4, child E4] Through the resolver: a name two packages
+    // declare is refused (409, every holder named) — never answered as the
+    // first one listed, and never as free (no row may take it either).
+    if (this.declaredSource.lookup) {
+      const answer = await this.declaredSource.lookup(name);
+      if (answer.status === 'refused') throw new PackageScopedNameRefusedError(answer.refusal);
+      return answer.status === 'resolved' ? answer.item : null;
+    }
     return (await this.declaredSource.list()).find((r) => r.name === name) ?? null;
   }
 
@@ -1134,7 +1194,10 @@ export class SharingRuleService implements ISharingRuleService {
     if (!idOrName) return null;
     const row = await this.findRuleRow(idOrName, context);
     if (row) return row;
-    // [ADR-0131 D2] A declared rule: its id is its name.
+    // [ADR-0131 D2] A declared rule: its id is its name. [ADR-0150, child E4]
+    // A name two packages declare refuses here, naming both, rather than
+    // reading as no rule at all.
+    await this.declaredRuleNamed(idOrName);
     return (await this.declaredRules(context, { name: idOrName }))[0] ?? null;
   }
 
@@ -1148,6 +1211,7 @@ export class SharingRuleService implements ISharingRuleService {
     if (!idOrName) return [];
     const row = await this.findRuleRow(idOrName, context);
     if (row) return [row];
+    await this.declaredRuleNamed(idOrName); // [ADR-0150, child E4] refuses a name two packages declare
     return this.declaredRules(context, { name: idOrName });
   }
 
@@ -1358,6 +1422,15 @@ export class SharingRuleService implements ISharingRuleService {
       }
     }
 
+    // [ADR-0150 D3, child E4; #31677 Q1 ruling A] A declared name two packages
+    // hold is refused and served to nobody, so its standing grants must not
+    // keep answering: they are revoked here like any grant no served rule
+    // claims. They are revoked as a REFUSAL, though, not as an orphan — the
+    // rule still exists, twice — so the sweep says which name, which packages,
+    // and that the grants come back once the rule is addressed by package.
+    const refusedNames = new Map<string, PackageScopedRefusal>();
+    for (const refusal of (await this.declaredSource?.refused?.()) ?? []) refusedNames.set(refusal.name, refusal);
+
     const grants = await this.engine.find('sys_record_share', {
       where: { source: 'rule' },
       fields: ['id', 'source_id', 'organization_id'],
@@ -1365,22 +1438,48 @@ export class SharingRuleService implements ISharingRuleService {
       context: SYSTEM_CTX,
     });
     let revoked = 0;
+    let revokedRefused = 0;
     for (const g of (grants ?? [])) {
       const sourceId = (g as any).source_id;
       // A `source: 'rule'` row with no `source_id` names no rule that could
       // ever re-grant it — equally unreachable, equally void.
       if (sourceId != null && live.has(String(sourceId))) continue;
       if (sourceId != null && liveDeclared.has(`${String(sourceId)}::${String((g as any).organization_id)}`)) continue;
+      const refusal = sourceId != null ? refusedNames.get(String(sourceId)) : undefined;
       await this.sharing.revoke(String((g as any).id), SYSTEM_CTX);
       revoked += 1;
+      if (refusal) {
+        this.reportSweptRefusal(refusal);
+        revokedRefused += 1;
+      }
     }
-    if (revoked > 0) {
+    const orphaned = revoked - revokedRefused;
+    if (orphaned > 0) {
       this.logger?.warn?.(
         '[sharing-rule] revoked rule grants whose rule row no longer exists',
-        { grants: revoked },
+        { grants: orphaned },
       );
     }
     return revoked;
+  }
+
+  /**
+   * [ADR-0150, child E4] The orphaned-grant sweep revoked a grant of a declared
+   * rule name the resolver refuses: warned once per name, naming every
+   * candidate, as a refusal — never as a vanished rule.
+   */
+  private reportSweptRefusal(refusal: PackageScopedRefusal): void {
+    if (this.sweptRefusalsReported.has(refusal.name)) return;
+    this.sweptRefusalsReported.add(refusal.name);
+    this.logger?.warn?.(
+      `[sharing-rule] ${refusal.message} The rule is served to nobody, so the orphaned-grant sweep revoked ` +
+        "its standing grants; they come back once the rule is addressed by package.",
+      {
+        name: refusal.name,
+        reason: refusal.reason,
+        candidates: refusal.candidates.map((c) => (c.kind === 'package' ? c.packageId : 'environment')),
+      },
+    );
   }
 
   /**
@@ -1741,10 +1840,19 @@ export class SharingRuleService implements ISharingRuleService {
     }
     if (rule.recipient_type === 'team') return teamHasMember(this.engine, rule.recipient_id, userId);
     // [ADR-0142 D7] A queue reaches the user its specifications reach — the
-    // queue service's holder check, not a full expansion.
+    // queue service's holder check, not a full expansion. Under
+    // `onFailedRead: 'refuse'` (D2 as amended, #29604): a failed member read
+    // rejects rather than answering "not a member", which would revoke the
+    // user's grants; the per-user pass's caller catches it per rule and the
+    // grants stay, as they do for a team or position recipient (#29503).
     if (rule.recipient_type === 'queue') {
       const queues = this.ownershipQueues?.();
-      return queues ? queues.isMember(userId, rule.recipient_id, rule.organization_id ?? null) : false;
+      if (!queues) return false;
+      const callerPackageId = await this.queueRecipientCaller(rule);
+      return queues.isMember(userId, rule.recipient_id, rule.organization_id ?? null, {
+        onFailedRead: 'refuse',
+        ...(callerPackageId ? { callerPackageId } : {}),
+      });
     }
     return (await this.expandRecipient(rule, pass)).includes(userId);
   }
@@ -2181,11 +2289,84 @@ export class SharingRuleService implements ISharingRuleService {
       // the two recompute modules' look-through). ⛔ This grants the rule's
       // matched records to the queue's people; it confers no sitting-record
       // access, which is the access path's (`SharingService`).
+      //
+      // [#29604] `onFailedRead: 'refuse'` (D2 as amended): this set is diffed
+      // against the grants the rule holds, so a failed member read answering
+      // "nobody" would revoke every member's grant on an outage. The refusal
+      // throws before any diff, and each recompute's caller keeps the rule's
+      // grants and warns (#29362), as for a team or position recipient.
       const queues = this.ownershipQueues?.();
       if (!queues) return [];
-      return queues.expandMembers(rule.recipient_id, rule.organization_id ?? null);
+      const callerPackageId = await this.queueRecipientCaller(rule);
+      return queues.expandMembers(rule.recipient_id, rule.organization_id ?? null, {
+        onFailedRead: 'refuse',
+        ...(callerPackageId ? { callerPackageId } : {}),
+      });
     }
     return [];
+  }
+
+  /**
+   * [ADR-0150 D3, child E4] A DECLARED rule's queue recipient is a reference
+   * written inside the rule's package P, so it resolves from P through the
+   * shared resolver: P's own queue, else the unique holder in P's declared
+   * dependency closure (plus `sys`), else a refusal naming every holder —
+   * never a holder outside the closure, and never an environment-authored
+   * registry item (D3 (a)). A name no registry item holds passes on: the
+   * queue service then answers an organization's own `sys_queue` row, as
+   * before.
+   *
+   * A refusal throws, like the queue service's own refusals under
+   * `onFailedRead: 'refuse'`: each recompute's caller keeps the rule's grants
+   * and says so, rather than revoking them on an answer nobody could pick.
+   *
+   * Otherwise it answers P, the caller package the queue read passes on
+   * (`callerPackageId`, the contract's `OwnershipQueueCallerPackage`), so the
+   * queue service resolves the name from P too: a name P's closure reaches
+   * once resolves to that holder even when an unrelated package also declares
+   * it. `null` for an organization-authored rule, or where no registry can
+   * answer `(package, name)`: the read is environment-wide, as before. The
+   * check stays ahead of the read on purpose: a queue service written before
+   * the key reads environment-wide and would otherwise serve a holder outside
+   * P's reach — stricter after the check, never looser.
+   */
+  private async queueRecipientCaller(rule: SharingRuleRow): Promise<string | null> {
+    if (!isDeclaredSharingRule(rule)) return null;
+    const registry = (this.engine as { registry?: unknown }).registry;
+    if (!isPackageScopedRegistry(registry)) return null;
+    const declared = await this.declaredRuleNamed(rule.name);
+    if (!declared?.packageId) return null;
+    // Over the holders the listing serves: a disabled package holds nothing
+    // here, so P whose one reachable holder is disabled is refused, naming
+    // every holder still served as outside its closure (never served the
+    // disabled one, never an unrelated one).
+    const resolution = resolvePackageScopedName(listedHoldersView(registry), {
+      type: 'queue',
+      name: rule.recipient_id,
+      callerPackageId: declared.packageId,
+    });
+    if (resolution.status !== 'refused') return declared.packageId;
+    reportRefusedDeclaration(this.logger, this.queueRecipientRefusalsReported, resolution);
+    throw new PackageScopedNameRefusedError(resolution);
+  }
+
+  /**
+   * [ADR-0150 D3] The package a rule's queue recipient is read from: the
+   * declared rule's package, or `null` (an organization-authored rule, a name
+   * no declaration answers, or a registry that cannot answer `(package,
+   * name)`). For a look-through that only asks what the queue holds — never a
+   * read that grants: those go through {@link queueRecipientCaller}, which
+   * also refuses a recipient outside the package's reach.
+   */
+  async queueRecipientPackageOf(rule: SharingRuleRow): Promise<string | null> {
+    if (rule.recipient_type !== 'queue' || !isDeclaredSharingRule(rule)) return null;
+    if (!isPackageScopedRegistry((this.engine as { registry?: unknown }).registry)) return null;
+    try {
+      return (await this.declaredRuleNamed(rule.name))?.packageId ?? null;
+    } catch (err) {
+      if (err instanceof PackageScopedNameRefusedError) return null; // a rule name two packages declare is served to nobody
+      throw err;
+    }
   }
 
   /**

@@ -172,3 +172,46 @@ describe('collectRequiredWhenPromptFields (#4254)', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * objectstack#30220 — the drop is judged as the engine judges the write: a
+ * TRANSITION gate. objectql refuses an update only when the merged record
+ * violates `requiredWhen` AND the stored row complied (ADR-0113
+ * non-regression), so a record already inside the gate without the value
+ * moves between columns of an unrelated grouping, and the board must not ask.
+ * The verdict is `resolveFieldRuleState`'s `requiredWhenAtRest`, read through
+ * the stored column `name` this module hands it — never a second rule here.
+ */
+describe('collectRequiredWhenPromptFields judges the transition gate (objectstack#30220)', () => {
+  const SIGNED_WHEN_ACTIVATED = 'record.status == "activated"';
+  const contractFields = {
+    priority: { type: 'picklist', label: 'Priority' },
+    status: { type: 'picklist', label: 'Status' },
+    signed_copy: { type: 'text', label: 'Signed Copy', requiredWhen: SIGNED_WHEN_ACTIVATED },
+  };
+
+  it('asks for nothing when the stored record already rests inside the gate without the value', () => {
+    // An activated contract with no signed copy, regrouped by priority: the
+    // engine lets this PATCH through, so a prompt would only block the move.
+    expect(
+      collectRequiredWhenPromptFields(
+        contractFields,
+        { id: 'c1', priority: 'low', status: 'activated', signed_copy: null },
+        'priority',
+        'high',
+      ),
+    ).toEqual([]);
+  });
+
+  it('CONTROL: still asks when the drop moves a compliant record INTO the gate', () => {
+    // The stored row complied (a draft needs no signed copy) and the drop
+    // makes it violate: the engine refuses, so the board collects the value.
+    const out = collectRequiredWhenPromptFields(
+      contractFields,
+      { id: 'c2', priority: 'low', status: 'draft', signed_copy: null },
+      'status',
+      'activated',
+    );
+    expect(out.map((f) => f.name)).toEqual(['signed_copy']);
+  });
+});

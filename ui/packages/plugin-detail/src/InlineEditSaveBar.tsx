@@ -73,6 +73,7 @@ import {
   useInlineEdit,
   extractFieldErrors,
   extractWriteErrorMessage,
+  isExternalWriteRefusal,
   type WriteFieldError,
 } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
@@ -347,6 +348,15 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   const presentRefusal = React.useCallback(
     (err: unknown, inFlightField?: string) => {
       if (!inline) return;
+      // A write the object's external datasource does not admit (ADR-0015,
+      // `EXTERNAL_WRITE_FORBIDDEN`) is about the whole object, not a field:
+      // it reads the read-only line and marks no input.
+      if (isExternalWriteRefusal(err)) {
+        setRecordRefusal(null);
+        inline.setFieldErrors(null);
+        inline.setError(t('form.readOnlyExternalSource'));
+        return;
+      }
       const attributed = attributeInlineRefusal(err, inFlightField);
       if (!attributed) {
         setRecordRefusal(null);
@@ -369,7 +379,7 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
       );
       inline.setError(error);
     },
-    [inline, fieldLabelFor, isRecordField],
+    [inline, fieldLabelFor, isRecordField, t],
   );
 
   /**

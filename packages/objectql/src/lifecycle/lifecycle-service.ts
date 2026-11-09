@@ -84,6 +84,22 @@ export const DEFAULT_LIFECYCLE_SWEEP_MS = 3_600_000;
  * and keeps short-lived test kernels from ever sweeping. */
 export const DEFAULT_LIFECYCLE_INITIAL_DELAY_MS = 60_000;
 
+/**
+ * [#29918] The engine-owned object that holds the sweep's clock state:
+ * one row per datastore, carrying when the scheduled sweep last completed
+ * (`last_swept_at`). Declared by `@objectstack/platform-objects`
+ * (`sys-lifecycle-state.object.ts`); a kernel that does not register it is
+ * one that cannot say, and sweeps exactly as before.
+ *
+ * Internal state, not a setting: no settings key, no env override, no audit
+ * row per sweep, no data API. See {@link LifecycleService.start} for the read
+ * and {@link LifecycleService.sweep} for the write.
+ */
+export const LIFECYCLE_STATE_OBJECT = 'sys_lifecycle_state';
+
+/** [#29918] The row id of this service's clock in {@link LIFECYCLE_STATE_OBJECT}. */
+export const LIFECYCLE_STATE_ROW_ID = 'lifecycle';
+
 /** Minimal engine surface the service needs — duck-typed for tests. */
 export interface LifecycleEngineLike {
   registry: {
@@ -100,6 +116,14 @@ export interface LifecycleEngineLike {
      * exactly as it did before this member existed. Every real engine has it.
      */
     getObject?(name: string): unknown;
+    /**
+     * The objects as the storage layer sees them: a disabled package's
+     * `objectExtensions` folded in (`SchemaRegistry.getAllStorageObjects`).
+     * The sweep reads these, so the archive datasource's schema keeps every
+     * column the hot rows it copies carry. Optional, as `getObject` is: a
+     * double modelling only `getAllObjects` is read through that.
+     */
+    getAllStorageObjects?(): LifecycleObjectLike[];
   };
   delete(
     object: string,
@@ -118,7 +142,33 @@ export interface LifecycleEngineLike {
   inspectDanglingReferences?(
     options?: DanglingReferenceAuditOptions,
   ): Promise<DanglingReferenceReport>;
+  /**
+   * [#29918] Did this process create the datastore it talks to, from empty?
+   * `ObjectQL.wasDatastoreCreatedFromEmpty()` answers it from every driver's
+   * schema-sync stats, in process and without a statement. The scheduler asks
+   * it once, at the initial delay, to decide whether the first sweep is due
+   * yet. Optional: an engine without it is never treated as fresh, so its
+   * first sweep runs at the initial delay exactly as before.
+   */
+  wasDatastoreCreatedFromEmpty?(): boolean;
+  /**
+   * [#29918] Single-row read of the sweep's clock state
+   * ({@link LIFECYCLE_STATE_OBJECT}), by primary key. `findOne`, not `find`
+   * with `limit: 1`: it is the single-row route, and says what the read is.
+   * Optional with {@link insert} and {@link update}: an engine missing any of
+   * the three keeps no watermark, and its first sweep runs at the initial
+   * delay exactly as before.
+   */
+  findOne?(object: string, options: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  /** [#29918] Writes the clock-state row the first time. See {@link findOne}. */
+  insert?(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
+  /** [#29918] Advances the clock-state row. See {@link findOne}. */
+  update?(object: string, data: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
 }
+
+/** [#29918] The engine surface the watermark needs, once it is known present. */
+type WatermarkEngine = LifecycleEngineLike &
+  Required<Pick<LifecycleEngineLike, 'findOne' | 'insert' | 'update'>>;
 
 export interface LifecycleObjectLike {
   name: string;
@@ -224,6 +274,28 @@ const DEFAULT_GOVERNANCE: GovernanceSnapshot = {
   quotaDefaults: {},
   growthAlertRows: 0,
 };
+
+/**
+ * [#31241] The `lifecycle` settings this service indexes as maps — the `json`
+ * specifiers of `lifecycleSettingsManifest` — read through
+ * {@link LifecycleService.governanceMap}.
+ */
+const GOVERNANCE_MAP_KEYS: ReadonlySet<string> = new Set(['retention_overrides', 'quotas', 'quota_defaults']);
+
+/**
+ * [#31241] Map settings whose value stored as JSON text is NOT applied by
+ * {@link LifecycleService.governanceMap}: they drive deletion (the reaper and
+ * the archiver), so an old value waits for an administrator's save instead of
+ * taking effect on the first sweep after an upgrade.
+ */
+const LEGACY_TEXT_NOT_APPLIED_KEYS: ReadonlySet<string> = new Set(['retention_overrides']);
+
+/** A plain object (not an array, not a class instance): the shape a map setting persists. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
 
 /** Cap on tenants scanned for per-tenant overrides each sweep. */
 const TENANT_SCAN_LIMIT = 200;
@@ -457,6 +529,12 @@ export class LifecycleService {
   private sweeping = false;
   /** Row counts from the previous sweep — baseline for growth alerts. */
   private lastCounts = new Map<string, number>();
+  /**
+   * [#31241] Map-valued settings already said about, `key|organization|text`,
+   * so {@link governanceMap} warns once per stored value rather than once per
+   * sweep.
+   */
+  private readonly governanceMapSaid = new Set<string>();
   /** Governance snapshot for the sweep in flight. */
   private governance: GovernanceSnapshot = DEFAULT_GOVERNANCE;
   /**
@@ -484,6 +562,16 @@ export class LifecycleService {
    */
   private abort: { aborted: boolean } = { aborted: false };
 
+  /**
+   * [#29918] Whether the clock-state row exists in the store: `undefined`
+   * until a read or a write has said, so an advance knows whether to insert
+   * or update without a second read.
+   */
+  private watermarkRowExists: boolean | undefined;
+
+  /** [#29918] A watermark write that fails is logged at `warn` once, then at `debug`. */
+  private watermarkWriteWarned = false;
+
   constructor(private readonly opts: LifecycleServiceOptions) {
     this.now = opts.now ?? (() => Date.now());
   }
@@ -503,7 +591,13 @@ export class LifecycleService {
   }
 
   /** Arm the periodic sweep. Idempotent; timers are unref'ed so a kernel
-   * shutdown is never held open by the lifecycle schedule. */
+   * shutdown is never held open by the lifecycle schedule.
+   *
+   * [#29918] On a datastore this process created from empty, the first sweep
+   * is due one interval later instead of at the initial delay: see
+   * {@link firstSweepDueAtInitialDelay}. On a store that was there before
+   * this boot, the sweep's watermark decides: see {@link runFirstScheduledSweep}.
+   * The interval is armed either way. */
   start(): void {
     if (!this.enabled || this.timer || this.initialTimer) return;
     // A fresh bit per armed run — the one a previous sweep captured stays
@@ -513,11 +607,183 @@ export class LifecycleService {
     const initial = this.opts.initialDelayMs ?? DEFAULT_LIFECYCLE_INITIAL_DELAY_MS;
     this.initialTimer = setTimeout(() => {
       this.initialTimer = undefined;
-      void this.sweep();
+      void this.runFirstScheduledSweep(interval);
       this.timer = setInterval(() => void this.sweep(), interval);
       this.timer.unref?.();
     }, initial);
     this.initialTimer.unref?.();
+  }
+
+  /**
+   * [#29918] The scheduler's first tick, combining the two answers to "is a
+   * sweep due yet?".
+   *
+   *  1. A store this boot created from empty ({@link firstSweepDueAtInitialDelay})
+   *     defers one interval, as before, and seeds the watermark at now: no row
+   *     there can be older than this boot, so a sweep now would find nothing,
+   *     and a kernel that reboots onto the store inside the interval then
+   *     skips too.
+   *  2. Otherwise the watermark row is read, once ({@link watermarkIsYoung}).
+   *     Younger than the interval ⇒ that sweep is already done and the next is
+   *     due on the interval; the read is the only statement issued.
+   *  3. Otherwise (an old or absent watermark, an engine that cannot say, a
+   *     read that failed) the first sweep runs now, as before #29918.
+   *
+   * Only the scheduler asks: a direct {@link sweep} call always sweeps. Never
+   * throws, because the timer enters it as `void`.
+   */
+  private async runFirstScheduledSweep(intervalMs: number): Promise<void> {
+    if (this.stopped) return;
+    if (!this.firstSweepDueAtInitialDelay()) {
+      const engine = this.watermarkEngine(this.opts.getEngine());
+      await this.writeWatermark(engine, new Date(this.now()).toISOString(), false);
+      return;
+    }
+    if (await this.watermarkIsYoung(intervalMs)) return;
+    await this.sweep();
+  }
+
+  /**
+   * [#29918] The engine, when it can keep the watermark: it reads, inserts
+   * and updates, and its registry has {@link LIFECYCLE_STATE_OBJECT}. Asked
+   * through `registry.getObject` so an unregistered object is never read:
+   * the engine would refuse it with `OBJECT_NOT_FOUND` before any driver.
+   */
+  private watermarkEngine(engine: LifecycleEngineLike | undefined): WatermarkEngine | undefined {
+    if (!engine) return undefined;
+    if (typeof engine.findOne !== 'function' || typeof engine.insert !== 'function' || typeof engine.update !== 'function') {
+      return undefined;
+    }
+    let registered = false;
+    try {
+      registered = Boolean(engine.registry?.getObject?.(LIFECYCLE_STATE_OBJECT));
+    } catch {
+      registered = false;
+    }
+    return registered ? (engine as WatermarkEngine) : undefined;
+  }
+
+  /**
+   * [#29918] Whether the last completed sweep is younger than one interval.
+   *
+   * Every answer but a readable, past, younger-than-the-interval timestamp is
+   * `false`, which means "sweep": no engine that can keep a watermark, no row,
+   * an unparsable value, a value in the future (the clock moved back), and a
+   * read that failed. A failed read is logged at `warn`: it happens once per
+   * armed run, so that is once.
+   */
+  private async watermarkIsYoung(intervalMs: number): Promise<boolean> {
+    const engine = this.watermarkEngine(this.opts.getEngine());
+    if (!engine) return false;
+    let row: Record<string, unknown> | null;
+    try {
+      row = await engine.findOne(LIFECYCLE_STATE_OBJECT, {
+        where: { id: LIFECYCLE_STATE_ROW_ID },
+        context: { ...SYSTEM_CTX },
+      });
+    } catch (err) {
+      this.opts.logger.warn(
+        `[lifecycle] the sweep watermark could not be read (${(err as Error)?.message ?? err}); ` +
+          'sweeping at the initial delay as if none were recorded',
+      );
+      return false;
+    }
+    this.watermarkRowExists = Boolean(row);
+    if (!row) return false;
+    const at = Date.parse(String(row.last_swept_at ?? ''));
+    const age = this.now() - at;
+    if (!Number.isFinite(at) || age < 0 || age >= intervalMs) return false;
+    this.opts.logger.debug?.(
+      `[lifecycle] the last sweep completed ${Math.round(age / 1000)}s ago, inside the interval; ` +
+        'the first sweep runs on the interval',
+    );
+    return true;
+  }
+
+  /**
+   * [#29918] Record `at` as the last completed sweep. `exists` says whether
+   * the row is there; `undefined` asks the store once, then remembers.
+   *
+   * A write that fails is a functional degradation, not a durability one:
+   * the rows the sweep reaped are reaped, and the only cost is that the next
+   * boot sweeps again because the watermark is older than it should be. So
+   * it is logged at `warn` the first time and at `debug` after, never thrown.
+   */
+  private async writeWatermark(
+    engine: WatermarkEngine | undefined,
+    at: string,
+    exists: boolean | undefined = this.watermarkRowExists,
+  ): Promise<void> {
+    if (!engine) return;
+    try {
+      let present = exists;
+      if (present === undefined) {
+        const row = await engine.findOne(LIFECYCLE_STATE_OBJECT, {
+          where: { id: LIFECYCLE_STATE_ROW_ID },
+          context: { ...SYSTEM_CTX },
+        });
+        present = Boolean(row);
+      }
+      // Only the clock's own columns: the audit family (`created_at`,
+      // `updated_at`) is the engine's to stamp on its write path.
+      const row = { id: LIFECYCLE_STATE_ROW_ID, last_swept_at: at };
+      if (present) {
+        await engine.update(LIFECYCLE_STATE_OBJECT, row, { context: { ...SYSTEM_CTX } });
+      } else {
+        await engine.insert(LIFECYCLE_STATE_OBJECT, row, { context: { ...SYSTEM_CTX } });
+      }
+      this.watermarkRowExists = true;
+    } catch (err) {
+      // The row's presence is no longer known: the next write asks again.
+      this.watermarkRowExists = undefined;
+      const msg =
+        `[lifecycle] the sweep watermark could not be written (${(err as Error)?.message ?? err}); ` +
+        'nothing was lost, but the next boot sweeps again at the initial delay';
+      if (this.watermarkWriteWarned) {
+        this.opts.logger.debug?.(msg);
+      } else {
+        this.watermarkWriteWarned = true;
+        this.opts.logger.warn(msg);
+      }
+    }
+  }
+
+  /**
+   * [#29918] Whether the scheduled first sweep runs at the initial delay.
+   *
+   * Not when this process created the datastore from empty
+   * ({@link LifecycleEngineLike.wasDatastoreCreatedFromEmpty}). Every row in
+   * such a store was written by this process, so none is older than the
+   * initial delay, and no declared window is that short: the duration grammar's
+   * smallest unit is an hour ({@link parseLifecycleDuration}). The sweep would
+   * read every declared object, the governance settings and every lookup the
+   * reference audit walks, and find nothing to do. On a hosted tenant kernel
+   * that was 130 statements in the first minute of every first boot. The first
+   * sweep then runs on the interval, so deferring it costs at most one interval
+   * of overstay, which the hourly cadence already allows any row.
+   *
+   * Asked here, at the initial delay, and nowhere else. Schema sync has run by
+   * now, so the answer is final. Only the SCHEDULER asks it: a direct
+   * {@link sweep} call (the dogfood growth gate, `db:clean`-style tooling, a
+   * test) always sweeps. The reference audit is a leg of that same sweep, so
+   * it is deferred with it.
+   *
+   * An engine that cannot answer, or whose answer throws, is not fresh. That
+   * keeps the sweep at the initial delay, as before this method existed.
+   */
+  private firstSweepDueAtInitialDelay(): boolean {
+    let fresh = false;
+    try {
+      fresh = this.opts.getEngine()?.wasDatastoreCreatedFromEmpty?.() === true;
+    } catch {
+      fresh = false;
+    }
+    if (fresh) {
+      this.opts.logger.debug?.(
+        '[lifecycle] this process created the datastore from empty; the first sweep runs one interval later',
+      );
+    }
+    return !fresh;
   }
 
   /**
@@ -682,8 +948,9 @@ export class LifecycleService {
 
     this.sweeping = true;
     try {
-      const declared = engine.registry
-        .getAllObjects()
+      const declared = (typeof engine.registry.getAllStorageObjects === 'function'
+        ? engine.registry.getAllStorageObjects()
+        : engine.registry.getAllObjects())
         .filter((o) => o?.lifecycle && o.lifecycle.class !== 'record');
 
       // Governance snapshot (P4): settings-driven overrides / quotas.
@@ -805,7 +1072,16 @@ export class LifecycleService {
       //
       // Failure is isolated like every other leg: an audit that cannot run must
       // never cost a sweep its reaping.
-      await this.auditReferences(engine, report);
+      const audited = await this.auditReferences(engine, report);
+
+      // [#29918] Advance the watermark only for a sweep that COMPLETED: no
+      // policy error, the audit leg ran, and no teardown cut it short. A
+      // failed or partial sweep leaves the last good time in place, so the
+      // next boot sweeps. Stamped with the sweep's start: the cutoffs were
+      // taken from it.
+      if (audited && report.errors.length === 0 && !this.stopped) {
+        await this.writeWatermark(this.watermarkEngine(engine), report.at);
+      }
 
       if (report.swept.length > 0 || report.errors.length > 0 || report.alerts.length > 0) {
         // ADR-0057 §3.3: cleanup must not re-feed the tables it drains — one
@@ -834,30 +1110,36 @@ export class LifecycleService {
    * could not run has applied no policy either way. It logs instead, and its
    * own report already carries `unreadableObjects` / `undetermined` so a
    * partial run is never mistaken for a clean one.
+   *
+   * [#29918] Answers whether the leg is complete — `true` when it ran, or was
+   * never meant to (switched off, or an engine without the audit) — so a sweep
+   * whose audit threw or was cut short does not advance the watermark.
    */
   private async auditReferences(
     engine: LifecycleEngineLike,
     report: LifecycleSweepReport,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const cfg = this.opts.referenceAudit;
-    if (cfg?.enabled === false) return;
-    if (typeof engine.inspectDanglingReferences !== 'function') return;
+    if (cfg?.enabled === false) return true;
+    if (typeof engine.inspectDanglingReferences !== 'function') return true;
     // [#4747] Not a config switch keyed on "is this a one-shot process" — the
     // audit stays wired on every host, exactly as #4551 intends. What it gets
     // is the teardown bit: it reads while the engine is live and stops when the
     // engine is going away, so `unreadableObjects` keeps meaning "the
     // datasource refused" and nothing else.
-    if (this.stopped) return;
+    if (this.stopped) return false;
     try {
       const { enabled: _enabled, ...auditOptions } = cfg ?? {};
       report.danglingReferences = await engine.inspectDanglingReferences({
         ...auditOptions,
         signal: this.abort,
       });
+      return true;
     } catch (err) {
       this.opts.logger.warn(
         `[lifecycle] reference audit failed (${(err as Error)?.message ?? err})`,
       );
+      return false;
     }
   }
 
@@ -872,6 +1154,92 @@ export class LifecycleService {
    *
    * [#21597] The scan asks the registry before it reads. An unregistered
    * `sys_organization` is never read, and answers "no tenant overrides". */
+  /**
+   * [#31241] The value of one map-valued `lifecycle` setting
+   * (`retention_overrides`, `quotas`, `quota_defaults`) as the map this service
+   * indexes, or `undefined` for "nothing configured".
+   *
+   * These keys are `map` specifiers (#30208; `json` specifiers before it),
+   * which persist an object (ADR-0007). Until #31241, when they were still
+   * `json`, the console's `json` field sent the textarea's TEXT and the settings
+   * save door stored it, so a deployment that saved this page holds a JSON
+   * string where the map belongs; indexing that string reads every override and
+   * quota as absent, with nothing logged. The save door refuses a string now,
+   * but rows already stored are not re-judged, so this reader repairs them in
+   * place rather than through a migration, split by what the key drives:
+   *
+   *  - `quotas` / `quota_defaults` only ALERT. A string that parses to a plain
+   *    object IS the map its author typed, and it is applied, with one `warn`
+   *    per stored value naming the key and the one-step fix (save the page
+   *    again). The worst an old value does is raise an alert.
+   *  - `retention_overrides` drives the reaper and the archiver, which DELETE.
+   *    A window nobody has seen enforced, possibly for years, must not start
+   *    deleting rows on the first sweep after an upgrade, so its text is NOT
+   *    applied: the declared windows stay in force, and one `error` per stored
+   *    value names the key and the fix. Saving the Data Lifecycle page is that
+   *    fix: the page shows the stored text and sends it as an object, so the
+   *    administrator's save is the explicit consent the old value never had
+   *    ({@link LEGACY_TEXT_NOT_APPLIED_KEYS}).
+   *
+   * Anything else that is not a plain object (text that does not parse, a
+   * scalar, an array) cannot be applied. That was already the outcome; what
+   * changes is that it is now said, once, at `error`: the setting looks saved
+   * from the outside while the platform enforces the declared windows instead.
+   */
+  private governanceMap(key: string, value: unknown, tenantId?: string): unknown {
+    if (value === null || typeof value === 'undefined') return undefined;
+    if (isPlainRecord(value)) return value;
+    const where = tenantId ? `organization ${tenantId}'s ` : '';
+    const said = `${key}|${tenantId ?? ''}|${typeof value === 'string' ? value : typeof value}`;
+    const first = !this.governanceMapSaid.has(said);
+    if (first) this.governanceMapSaid.add(said);
+    if (typeof value === 'string') {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        parsed = undefined;
+      }
+      if (isPlainRecord(parsed) && LEGACY_TEXT_NOT_APPLIED_KEYS.has(key)) {
+        if (first) {
+          const message =
+            `[lifecycle] ${where}lifecycle.${key} is stored as JSON text, not an object ` +
+            '(saved by a console that sent the text), so it is NOT applied: the declared retention windows ' +
+            'stay in force, and no row is reaped or archived on its windows. To apply it, open ' +
+            'Setup → Data Lifecycle, check the value and save the page once; it is then stored as an object.';
+          if (this.opts.logger.error) this.opts.logger.error(message);
+          else this.opts.logger.warn(message);
+        }
+        return undefined;
+      }
+      if (isPlainRecord(parsed)) {
+        if (first) {
+          this.opts.logger.warn(
+            `[lifecycle] ${where}lifecycle.${key} is stored as JSON text, not an object ` +
+              '(saved by a console that sent the text). It is read as the object it holds and applied. ' +
+              'Save the Data Lifecycle settings page again to store it as an object.',
+          );
+        }
+        return parsed;
+      }
+    }
+    if (first) {
+      const shape =
+        typeof value === 'string'
+          ? `a string of ${value.length} characters that is not a JSON object`
+          : Array.isArray(value)
+            ? 'an array'
+            : `a ${typeof value}`;
+      const message =
+        `[lifecycle] ${where}lifecycle.${key} is not an object (${shape}), ` +
+        'so none of it applies: the declared lifecycle windows and no quotas are enforced instead. ' +
+        'Set it again on the Data Lifecycle settings page.';
+      if (this.opts.logger.error) this.opts.logger.error(message);
+      else this.opts.logger.warn(message);
+    }
+    return undefined;
+  }
+
   private async loadGovernance(
     engine: LifecycleEngineLike,
     declared: LifecycleObjectLike[],
@@ -882,7 +1250,10 @@ export class LifecycleService {
     const read = async <T>(key: string, fallback: T, ctx?: Record<string, unknown>): Promise<{ value: T; source?: string }> => {
       try {
         const r = await settings.get('lifecycle', key, ctx);
-        return { value: (r?.value ?? fallback) as T, source: r?.source };
+        const value = GOVERNANCE_MAP_KEYS.has(key)
+          ? this.governanceMap(key, r?.value, r?.source === 'tenant' ? (ctx?.tenantId as string | undefined) : undefined)
+          : r?.value;
+        return { value: (value ?? fallback) as T, source: r?.source };
       } catch {
         return { value: fallback };
       }

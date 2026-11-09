@@ -38,6 +38,9 @@ const PKG: InstalledPackageRow = {
   status: 'installed',
   source: 'authored',
   writable: true,
+  // A writable base is disableable too (objectstack#28318): the sheet offers
+  // Disable from this verdict alone.
+  disableable: true,
 };
 const DRAFTS = [
   { type: 'object', name: 'acme_lead' },

@@ -7,8 +7,8 @@
  * demonstrable on a FRESH boot, with no manual setup.
  *
  * Why this exists (and can't be a seed):
- *  - The `approval` flow nodes route to `{ type: 'position', value: 'finance' |
- *    'legal' | 'manager' }`. Approver resolution reads `sys_user_position`
+ *  - The `approval` flow nodes route to `{ type: 'position', value:
+ *    'showcase_finance' | 'showcase_legal' | 'showcase_manager' }`. Approver resolution reads `sys_user_position`
  *    (ADR-0090 D3), but users can't be seeded (they sign up) and position
  *    assignments are runtime admin actions — so out of the box NO ONE holds
  *    those positions and every request resolves to an empty slate and waits
@@ -21,7 +21,7 @@
  * So we play the admin's part imperatively: on `kernel:bootstrapped` (after
  * every `kernel:ready` handler has settled and the automation engine is
  * wired) we
- *   1. assign the dev-seeded admin to `manager` / `finance` / `legal` so they
+ *   1. assign the dev-seeded admin to `showcase_manager` / `showcase_finance` / `showcase_legal` so they
  *      are a resolvable approver on every demo request (and can act in the
  *      inbox);
  *   2. provision the two demo personas — a phone-based user so the "phone
@@ -60,13 +60,14 @@ const SYS = { isSystem: true } as const;
 /**
  * Positions the admin is granted so they resolve as an approver on the demos.
  * Covers every `{ type: 'position' }` the showcase approval flows route to and
- * expect the admin to hold — including `exec`, the SECOND tier of
- * `showcase_budget_approval` (manager → exec). Without `exec` a budget approval
- * that a user drives to step 2 routes to an unstaffed position and dead-ends
+ * expect the admin to hold — including `showcase_exec`, the SECOND tier of
+ * `showcase_budget_approval` (`showcase_manager` → `showcase_exec`). Without
+ * `showcase_exec` a budget approval that a user drives to step 2 routes to an
+ * unstaffed position and dead-ends
  * (framework#3424): undecidable request, record locked. Keep this in sync with
  * the position values authored in `automation/flows`.
  */
-const ADMIN_APPROVAL_POSITIONS = ['manager', 'finance', 'legal', 'exec'] as const;
+const ADMIN_APPROVAL_POSITIONS = ['showcase_manager', 'showcase_finance', 'showcase_legal', 'showcase_exec'] as const;
 
 interface ApprovalDemoContext {
   ql: {
@@ -377,10 +378,10 @@ export function registerShowcaseApprovalDemo(ctx: ApprovalDemoContext): void {
     // requester who is never also one of her own approvers.
     const submitterId = (await ensureDemoUser(ctx, PHONE_DEMO_USER, organizationId)) ?? null;
     // The auditor persona backs the `finance` group of the per-group demo. It
-    // deliberately holds ONLY `auditor`, so the two groups have distinct
+    // deliberately holds ONLY `showcase_auditor`, so the two groups have distinct
     // holders and the request stays open until each group has answered.
     const auditorId = await ensureDemoUser(ctx, AUDITOR_DEMO_USER, organizationId);
-    if (auditorId) await assignPositions(ctx, auditorId, ['auditor'], organizationId, 'auditor');
+    if (auditorId) await assignPositions(ctx, auditorId, ['showcase_auditor'], organizationId, 'auditor');
 
     // [#9308 fixture 1] Make both personas SIGN-INABLE. Provisioning them as
     // rows was never the hard half — the credential account was.

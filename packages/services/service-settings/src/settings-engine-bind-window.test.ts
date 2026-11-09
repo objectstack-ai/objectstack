@@ -51,7 +51,11 @@
  * on the new one — and asserts the second.
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
@@ -60,6 +64,12 @@ import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { SettingsServicePlugin, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
 import { SettingsEngineNotBoundError } from './settings-service.types.js';
+import {
+  DataKeyOpensNothingError,
+  KEY_FILE_CANDIDATE_CHANNEL_ENV,
+  KEY_FILE_CHANNEL_ENV,
+  LocalCryptoProvider,
+} from './local-crypto-provider.js';
 
 const OWNER_PACKAGE = 'com.objectstack.test.settings-engine-bind-window';
 
@@ -398,5 +408,102 @@ describe('engine-less callers outside the window observe nothing new', () => {
     svc.bindEngine(wrapEngineAsSettingsEngine(engine as never));
     const resolved = await svc.set('receipt_probe', 'last_run', 'now-fine');
     expect(resolved.value).toBe('now-fine');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #30042 — the data key's file is chosen in start(), before every
+// `kernel:ready` reader
+// ---------------------------------------------------------------------------
+
+/** Records, at `kernel:ready`, which key file the process env names by then. */
+class KeyFileAtReadyProbe implements Plugin {
+  name = 'com.objectstack.test.key-file-at-ready';
+  version = '0.0.0';
+  type = 'standard' as const;
+  channelAtReady: string | undefined = 'never-ran';
+  candidateAtReady: string | undefined = 'never-ran';
+  init = async (ctx: PluginContext) => {
+    ctx.hook('kernel:ready', async () => {
+      this.channelAtReady = process.env[KEY_FILE_CHANNEL_ENV];
+      this.candidateAtReady = process.env[KEY_FILE_CANDIDATE_CHANNEL_ENV];
+    });
+  };
+}
+
+describe('#30042 — the settings service chooses the data key file at start(), with the database open', () => {
+  const touched = [KEY_FILE_CHANNEL_ENV, KEY_FILE_CANDIDATE_CHANNEL_ENV, 'NODE_ENV'] as const;
+  const saved = Object.fromEntries(touched.map((k) => [k, process.env[k]]));
+  let dir: string | undefined;
+  afterEach(() => {
+    for (const k of touched) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+    vi.restoreAllMocks();
+  });
+
+  /** Two key files, one stored row sealed under `sealedUnder`, and the channels a `both-differ` parent sets. */
+  async function arrange(sealedUnder: 'legacy' | 'elsewhere') {
+    dir = mkdtempSync(join(tmpdir(), 'os-30042-plugin-'));
+    const canonical = join(dir, 'home', 'dev-crypto-key');
+    const legacy = join(dir, 'project', 'dev-crypto-key');
+    const keys: Record<string, Buffer> = {};
+    for (const [name, file] of [['canonical', canonical], ['legacy', legacy]] as const) {
+      keys[name] = randomBytes(32);
+      mkdirSync(join(file, '..'), { recursive: true });
+      writeFileSync(file, keys[name].toString('base64'), { mode: 0o600 });
+    }
+    const sealKey = sealedUnder === 'legacy' ? keys.legacy : randomBytes(32);
+    const handle = await new LocalCryptoProvider({ key: sealKey }).encrypt('sk-start', {
+      scope: 'settings',
+      namespace: 'ai',
+      key: 'openai_api_key',
+    });
+    const { driver, rowsOf } = makeMemoryDriver();
+    rowsOf('sys_secret').set(handle.id, {
+      id: handle.id,
+      namespace: 'ai',
+      key: 'openai_api_key',
+      ciphertext: handle.ciphertext,
+      kms_key_id: handle.kmsKeyId,
+      alg: handle.alg,
+      version: handle.version,
+      created_at: new Date().toISOString(),
+    });
+    const engine = new ObjectQL();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    for (const o of [SysSetting, SysPlatformSetting, SysSecret, SysSettingAudit, SysPlatformSettingAudit]) {
+      engine.registry.registerObject(o as any, OWNER_PACKAGE);
+    }
+    process.env[KEY_FILE_CHANNEL_ENV] = canonical;
+    process.env[KEY_FILE_CANDIDATE_CHANNEL_ENV] = legacy;
+    const probe = new KeyFileAtReadyProbe();
+    const kernel = new LiteKernel({ logger: { level: 'error' } as never });
+    kernel.use(new EnginePlugin(engine));
+    kernel.use(new SettingsServicePlugin({ registerRoutes: false, manifests: [], actionHandlers: {} }));
+    kernel.use(probe);
+    return { kernel, probe, canonical, legacy };
+  }
+
+  it('a database sealed under the legacy key: every kernel:ready reader sees the legacy file chosen', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { kernel, probe, legacy } = await arrange('legacy');
+    await kernel.bootstrap();
+    expect(probe.channelAtReady).toBe(legacy);
+    expect(probe.candidateAtReady).toBeUndefined();
+  });
+
+  it('production: a key that opens nothing stops the boot, naming both files', async () => {
+    process.env.NODE_ENV = 'production';
+    const { kernel, probe, canonical, legacy } = await arrange('elsewhere');
+    const refusal = await kernel.bootstrap().then(() => undefined, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(DataKeyOpensNothingError);
+    expect((refusal as Error).message).toContain(canonical);
+    expect((refusal as Error).message).toContain(legacy);
+    expect(probe.channelAtReady).toBe('never-ran');
   });
 });

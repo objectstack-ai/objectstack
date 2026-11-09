@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-settings",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "license": "Apache-2.0",
   "description": "Settings service for ObjectStack — manifest registry + K/V resolver (OS_* env > Tenant > User > Default) + REST routes. See ADR-0007.",
   "type": "module",
@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/service-cluster": "workspace:*",
     "@types/node": "^26.6.5",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"

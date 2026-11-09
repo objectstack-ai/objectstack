@@ -242,8 +242,8 @@
  * ⛔ Each fold widens what a key may RESOLVE against and nothing else: a name
  * no declaration and no contribution carries is still an orphan and still
  * errors, on the per-package leg exactly as on the union one. See
- * {@link contributedNavItemsByApp} and {@link objectExtensionsByTarget} for the
- * fold facts each rests on, and this rule's test file for the lit controls.
+ * {@link contributedNavItemsByApp} and the object-extension note above
+ * {@link artifactProvidedRecords} for the fold facts each rests on, and this rule's test file for the lit controls.
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS, expandViewContainer } from '@objectstack/spec';
@@ -259,7 +259,7 @@ import {
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
 import { walkFlowNodes } from './flow-walk.js';
-import { packagesOf, recordsOf, suggestName } from './object-graph.js';
+import { objectExtensionsByTarget, packagesOf, recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
 import { viewObjectName } from './view-walk.js';
@@ -722,7 +722,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   // rather than defer: the composer does give the default form a runtime
   // identity (`<object>.form`), but `_views.*` is a LIST-view convention —
   // `viewLabel` / `viewDescription` resolve view tabs, and the i18n walker
-  // emits no `_views` entry for any form view (`i18n-extract.ts`: "form views
+  // emits no `_views` entry for any form view (`i18n-walk.ts`: "form views
   // have no counterpart in the `viewLabel` / `_views.*` resolver convention").
   // A `_views` name registered here for the default form would make a key
   // legal that no consumer ever reads. Its SECTIONS are a different matter —
@@ -762,7 +762,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
  *     the failure that made `_views.form` a non-key (#5164).
  *  2. **The object comes from `interfaceConfig.source` first, then the page's
  *     own `object`.** That is the order `translateInterfaceTabs` resolves in and
- *     the order `walkObjectTabs` (`packages/cli/src/utils/i18n-extract.ts`)
+ *     the order `walkObjectTabs` (`packages/lint/src/i18n-walk.ts`)
  *     scaffolds in — the "component's own binding first" discipline `_sections`
  *     follows. A page-level lookup alone would file the presets of every
  *     `source`-bound list page under the wrong object, reporting correct keys.
@@ -808,7 +808,7 @@ function collectPageTabs(page: AnyRec, factsFor: (objectName: string) => ObjectF
  * (commit b3c1f3cd5, leg 1) and this rule called the key an orphan, in ONE `os lint` run:
  * six instances on the showcase, and no author action could make both green.
  * Ruled 2026-08-06 (#5164): canonical = the runtime identity's bare key.
- * Leg 1's `defaultListViewKey` in `packages/cli/src/utils/i18n-extract.ts` is
+ * Leg 1's `defaultListViewKey` in `packages/lint/src/i18n-walk.ts` is
  * this function's twin — deliberately, both are thin readers of the composer
  * rather than a third and fourth derivation of the key.
  *
@@ -1059,8 +1059,8 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
   return byApp;
 }
 
-/**
- * Target object name → every `objectExtensions[]` entry aimed at it (#18441).
+/*
+ * ## Object extensions in the universe (#18441)
  *
  * ## Why the universe has to include these at all
  *
@@ -1100,59 +1100,26 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
  * symmetry": an extension cannot contribute any of them, so a key there is an
  * orphan exactly as it was, and widening those rungs would silence real ones.
  *
- * ## Why a union is FAITHFUL here rather than a second implementation
+ * ## Read through the package's one fold (#30471)
  *
- * Same property as {@link contributedNavItemsByApp}, one collection over: the
- * registry merges EVERY extension layer onto the target and `priority` decides
- * only which layer WINS A CONFLICT — never whether a name arrives. So the set
- * of addressable names is invariant under the merge, and set membership is the
- * only question asked here. ⛔ The registry is not imported to answer it
- * (`@objectstack/lint` depends on `@objectstack/spec` and never on a runtime).
- *
- * ## Which two carriers are read, and why both
- *
- * `objectExtensions` is a STACK collection (`StackSchema`, disposition
- * `concat`), not a manifest key — so unlike the nav surface there is no
- * `stack.manifest` form to read:
- *
- *   1. `stack.objectExtensions` — the stack in hand. On the union leg that is
- *      every package's extensions already concatenated; on the per-package leg
- *      (`packageBodyAsStack`) it is this package's own, at the top level of its
- *      assembled body.
- *   2. `packages[].manifest.objectExtensions` — the ADR-0130 D4 artifact
- *      entries, whose bodies carry the collection (`concat` is one of the
- *      `ASSEMBLED_PACKAGE_BODY_DISPOSITIONS`). Read for the reason #16611 gave
- *      for object NAMES: the artifact is the co-ownership boundary, so a
- *      per-package leg that cannot see a sibling package's extension reports
- *      THIS RUN's blind spot as the author's mistake. Without it the union leg
- *      and the per-package leg would disagree about one key.
+ * The entries come from `objectExtensionsByTarget` in `object-graph.ts`, the
+ * fold every field-path rule of this package reads, which carries each
+ * entry's `fields` and `validations`. It reads extensions as the registry
+ * registers them: with `packages[]`, every body's `objectExtensions` (the
+ * per-package leg's own entries arrive in its `packages[]` entry too, so the
+ * top level is not read beside them); without it, the stack's own. ONE entry
+ * per package per target: a later entry of a package replaces its earlier
+ * one whole, so a key addressing a field or rule only the replaced entry adds
+ * is an orphan, as the registry serves it. This file kept its own fold until
+ * then (top level plus every body, every entry kept), because the shared fold
+ * did not carry validation rules.
  *
  * ⛔ What this cannot see, stated rather than implied: fields injected
  * IMPERATIVELY by plugin code are not metadata and no static rule can read
  * them — the same bound {@link contributedNavItemsByApp} records for
  * contributions registered from a plugin's `init`.
  */
-function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
-  const byTarget = new Map<string, AnyRec[]>();
-  const add = (extensions: unknown) => {
-    for (const extension of recordsOf(extensions)) {
-      // An extension names ONE target object. An entry with no `extend` merges
-      // into nothing at runtime, so it must not make anything addressable.
-      const target = strName(extension.extend);
-      if (!target) continue;
-      const entries = byTarget.get(target) ?? [];
-      entries.push(extension);
-      byTarget.set(target, entries);
-    }
-  };
-  add(stack.objectExtensions);
-  for (const entry of packagesOf(stack)) {
-    const body = entry.manifest;
-    if (!isRec(body)) continue;
-    add(body.objectExtensions);
-  }
-  return byTarget;
-}
+
 
 /**
  * Every RECORD of one metadata collection that an entry of `packages[]`
@@ -1164,7 +1131,7 @@ function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
  * Exactly the keys whose `COMPOSE_KEY_DISPOSITIONS` disposition is one of
  * `ASSEMBLED_PACKAGE_BODY_DISPOSITIONS` (`concat`, `objects`, `functions`) —
  * that membership IS what puts a key inside an ADR-0130 D4 entry's assembled
- * body, so it is the same proof {@link objectExtensionsByTarget} rests on one
+ * body, so it is the same proof the object-extension fold rests on one
  * collection over rather than a fresh assumption per rung. `objects` carries
  * disposition `objects`; `views`, `pages`, `actions`, `apps`, `dashboards` and
  * `flows` each carry `concat`.
@@ -1199,7 +1166,7 @@ function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
  * collector. ⛔ A name-only fold would resolve the object key and then judge
  * the owner's own field keys against an EMPTY fact set, reporting every one of
  * them as an orphan: the same false positive one level up, which is the mistake
- * {@link objectExtensionsByTarget} records for a target it cannot see.
+ * the object-extension note above records for a target it cannot see.
  *
  * ⇒ And because the sibling's declaration IS readable here, this is NOT rung
  * 2b. The subtree stays judged, against the sibling's own fields and rules, so
@@ -1214,7 +1181,7 @@ function objectExtensionsByTarget(stack: AnyRec): Map<string, AnyRec[]> {
  *
  * ⛔ Nothing else is read off the entry, and there is no `stack.manifest` form
  * beside it: `objects` is a STACK collection, not a manifest key — the same
- * asymmetry {@link objectExtensionsByTarget} records one collection over, and
+ * asymmetry the object-extension fold has one collection over, and
  * the reason the single-`defineStack` shape is untouched by this fold.
  */
 function artifactProvidedRecords(stack: AnyRec, collection: string): AnyRec[] {
@@ -1326,9 +1293,9 @@ function buildUniverse(stack: AnyRec): Universe {
   //
   // Folded AFTER the declaration loop above, into the facts it built, so the
   // two layers answer one question: is this name addressable at all. Only the
-  // two rungs an extension can reach are folded — see
-  // `objectExtensionsByTarget` for the measured surface, and ⛔ do not add the
-  // others.
+  // two rungs an extension can reach are folded — see the object-extension
+  // note above `artifactProvidedRecords` for the measured surface, and ⛔ do
+  // not add the others.
   //
   // A target this stack does NOT define gets no entry here: inventing one
   // would resolve the object key and then judge its fields against the
@@ -1346,7 +1313,7 @@ function buildUniverse(stack: AnyRec): Universe {
     const facts = objects.get(target);
     if (!facts) continue;
     for (const extension of extensions) {
-      for (const field of recordsOf(extension.fields)) {
+      for (const field of extension.fields) {
         const fieldName = strName(field.name);
         if (!fieldName) continue;
         // The object's OWN declaration keeps the slot. Which layer's
@@ -1360,7 +1327,7 @@ function buildUniverse(stack: AnyRec): Universe {
       // `_validations.<rule>` is keyed by the rule's own `name` (#14253), and
       // an extension's `validations[]` merge into the target's rule set — so
       // the same recursion the declaration loop uses, branches included.
-      for (const rule of recordsOf(extension.validations)) {
+      for (const rule of extension.validations) {
         collectValidationRuleNames(rule, facts.validations);
       }
     }
@@ -1453,7 +1420,8 @@ function buildUniverse(stack: AnyRec): Universe {
   //
   // ⛔ A name-only fold is wrong here for a reason peculiar to this rung: the
   // stored RECORD is itself read downstream — `checkActionEntry` judges
-  // `params.<name>`, `outcomeMessages.<outcome>`, `resultDialog.fields.<path>`
+  // `params.<name>`, `outcomeMessages.<outcome>`, `resultDialog.fields.<path>`,
+  // `preflight.fields.<path>`
   // and the dialog's own leaves off it — so folding a bare name would resolve
   // the action key and then report every one of those children as an orphan.
   //
@@ -2056,7 +2024,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
 
         // _actions.<name>[.params.<name>[.options.<value>] | .outcomeMessages.<outcome>
         //                 | .resultDialog.(title|description|acknowledge)
-        //                 | .resultDialog.fields.<path>] — see `checkActionEntry`
+        //                 | .resultDialog.fields.<path>
+        //                 | .preflight.fields.<path>] — see `checkActionEntry`
         for (const [actionName, rawAction] of Object.entries(asRecord(rawNode._actions))) {
           const actionPath = `${objPath}._actions.${actionName}`;
           const action = facts.actions.get(actionName);
@@ -2659,6 +2628,7 @@ interface ActionEntryContext {
  *   | `outcomeMessages.<outcome>`         | the action's `outcomeMessages` keys  | `resolveActionOutcomeMessages`  |
  *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
  *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
+ *   | `preflight.fields.<path>`           | `preflight.fields[].path`            | `resolveActionPreflight`        |
  *   | `submitText`                        | a non-empty `params` (the param dialog) | `translateAction`            |
  *   | `cancelText`                        | `confirmText` or a non-empty `params` (either dialog) | `translateAction` |
  *
@@ -2687,6 +2657,7 @@ function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryCon
   checkActionOutcomeMessages(findings, ctx);
   checkActionResultDialogLeaves(findings, ctx);
   checkActionResultDialogFields(findings, ctx);
+  checkActionPreflightFields(findings, ctx);
   checkActionSubmitText(findings, ctx);
   checkActionCancelText(findings, ctx);
 }
@@ -3077,6 +3048,49 @@ function checkActionResultDialogFields(findings: TranslationRefFinding[], ctx: A
             `\`resultDialog\` declares no \`fields\` (it renders the whole response as JSON), ` +
             `so nothing reads this label.`,
       hint: `Match the key to a declared field's literal \`path\` (dots included), or drop it.`,
+    });
+  }
+}
+
+/**
+ * [#31885] `preflight.fields.<path>` — keyed by the LITERAL `path` of a field
+ * the action's `preflight.fields[]` declares, the `resultDialog.fields` rule
+ * on the preflight panel (dots included: `"verdict.summary"` is one key).
+ *
+ * `resolveActionPreflight` maps over the declared `fields[]` and looks each
+ * one's label up by its `path`; it reads nothing when the action declares no
+ * `preflight`, or a preflight with no `fields` (the panel then shows the
+ * selected answer as JSON). A key naming any other path is never read.
+ */
+function checkActionPreflightFields(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  const rawPreflight = isRec(ctx.rawAction) ? ctx.rawAction.preflight : undefined;
+  const rawPaths = Object.keys(asRecord(isRec(rawPreflight) ? rawPreflight.fields : undefined));
+  if (rawPaths.length === 0) return;
+
+  const preflight = isRec(ctx.action.preflight) ? ctx.action.preflight : undefined;
+  const declared = new Set<string>();
+  for (const field of preflight && Array.isArray(preflight.fields) ? preflight.fields : []) {
+    if (isRec(field) && typeof field.path === 'string') declared.add(field.path);
+  }
+
+  for (const fieldPath of rawPaths) {
+    if (declared.has(fieldPath)) continue;
+    findings.push({
+      severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+      rule: TRANSLATION_TARGET_UNKNOWN,
+      where: `${ctx.where} · preflight field "${fieldPath}"`,
+      path: `${ctx.path}.preflight.fields${memberPath(fieldPath)}`,
+      message: !preflight
+        ? `Translations are keyed to preflight field "${fieldPath}", but ${ctx.subject} declares ` +
+          `no \`preflight\`, so nothing reads this label.`
+        : declared.size > 0
+          ? `Translations are keyed to preflight field "${fieldPath}", which ${ctx.subject}'s ` +
+            `\`preflight.fields\` does not declare, so this label is never shown.` +
+            suggest(fieldPath, declared)
+          : `Translations are keyed to preflight field "${fieldPath}", but ${ctx.subject}'s ` +
+            `\`preflight\` declares no \`fields\` (its panel shows the answer as JSON), ` +
+            `so nothing reads this label.`,
+      hint: `Match the key to a declared preflight field's literal \`path\` (dots included), or drop it.`,
     });
   }
 }

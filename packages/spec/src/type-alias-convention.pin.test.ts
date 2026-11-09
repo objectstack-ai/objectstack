@@ -287,9 +287,21 @@ import type * as M195 from './security/queue.zod.js';
 import type * as M196 from './system/push-config.zod.js';
 import type * as M197 from './api/push-delivery.zod.js';
 import type * as M198 from './system/push-device.zod.js';
+// The server -> push relay wire shape -- new module, next free index.
+import type * as M199 from './api/push-relay.zod.js';
+// A third-party sender's signature scheme on an api hook (`config.signature`) -- new module, next free index.
+import type * as M200 from './automation/api-trigger-signature.zod.js';
+// [ADR-0148] The recycle bin's spec half: the entry, its snapshot and the retention values -- new module, next free index.
+import type * as M201 from './data/recycle-bin.zod.js';
+// The marketplace taxonomy (business function, industry, solution type) and the maturity flag -- new module, next free index.
+import type * as M202 from './marketplace/taxonomy.zod.js';
+// The restriction profile a target environment publishes -- new module, next free index.
+import type * as M203 from './system/restriction-profile.zod.js';
+// [ADR-0149 D2] The dataset AI tools' inputs, outputs and provenance -- new module, next free index.
+import type * as M204 from './ai/dataset-tools.zod.js';
 
 // ---------------------------------------------------------------------------
-// 819 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 852 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -366,6 +378,16 @@ export type Iso_ai_conversation__MessageRoleSchema = Assert<Eq< z.input< typeof 
 export type Iso_ai_conversation__TextContentSchema = Assert<Eq< z.input< typeof M1.TextContentSchema >, z.infer< typeof M1.TextContentSchema > >>;
 export type Iso_ai_conversation__TokenBudgetStrategySchema = Assert<Eq< z.input< typeof M1.TokenBudgetStrategySchema >, z.infer< typeof M1.TokenBudgetStrategySchema > >>;
 
+// ai/dataset-tools.zod.ts -- [ADR-0149 D2] plain objects, enums and literals, no default and no transform
+export type Iso_ai_datasetTools__DatasetProvenanceSchema = Assert<Eq< z.input< typeof M204.DatasetProvenanceSchema >, z.infer< typeof M204.DatasetProvenanceSchema > >>;
+export type Iso_ai_datasetTools__DatasetTermMatchSchema = Assert<Eq< z.input< typeof M204.DatasetTermMatchSchema >, z.infer< typeof M204.DatasetTermMatchSchema > >>;
+export type Iso_ai_datasetTools__DatasetTermMatchedOn = Assert<Eq< z.input< typeof M204.DatasetTermMatchedOn >, z.infer< typeof M204.DatasetTermMatchedOn > >>;
+export type Iso_ai_datasetTools__DatasetToolCatalogDimensionSchema = Assert<Eq< z.input< typeof M204.DatasetToolCatalogDimensionSchema >, z.infer< typeof M204.DatasetToolCatalogDimensionSchema > >>;
+export type Iso_ai_datasetTools__DatasetToolCatalogEntrySchema = Assert<Eq< z.input< typeof M204.DatasetToolCatalogEntrySchema >, z.infer< typeof M204.DatasetToolCatalogEntrySchema > >>;
+export type Iso_ai_datasetTools__DatasetToolCatalogMeasureSchema = Assert<Eq< z.input< typeof M204.DatasetToolCatalogMeasureSchema >, z.infer< typeof M204.DatasetToolCatalogMeasureSchema > >>;
+export type Iso_ai_datasetTools__ListDatasetsOutputSchema = Assert<Eq< z.input< typeof M204.ListDatasetsOutputSchema >, z.infer< typeof M204.ListDatasetsOutputSchema > >>;
+export type Iso_ai_datasetTools__QueryDatasetOutputSchema = Assert<Eq< z.input< typeof M204.QueryDatasetOutputSchema >, z.infer< typeof M204.QueryDatasetOutputSchema > >>;
+
 // ai/embedding.zod.ts
 export type Iso_ai_embedding__EmbeddingModelSchema = Assert<Eq< z.input< typeof M2.EmbeddingModelSchema >, z.infer< typeof M2.EmbeddingModelSchema > >>;
 export type Iso_ai_embedding__VectorStoreProviderSchema = Assert<Eq< z.input< typeof M2.VectorStoreProviderSchema >, z.infer< typeof M2.VectorStoreProviderSchema > >>;
@@ -429,6 +451,8 @@ export type Iso_api_analytics__GetAnalyticsMetaRequestSchema = Assert<Eq< z.inpu
 export type Iso_api_authEndpoints__AuthEndpointSchema = Assert<Eq< z.input< typeof M12.AuthEndpointSchema >, z.infer< typeof M12.AuthEndpointSchema > >>;
 export type Iso_api_authEndpoints__DeviceTokenResponseSchema = Assert<Eq< z.input< typeof M12.DeviceTokenResponseSchema >, z.infer< typeof M12.DeviceTokenResponseSchema > >>;
 export type Iso_api_authEndpoints__EmailPasswordConfigPublicSchema = Assert<Eq< z.input< typeof M12.EmailPasswordConfigPublicSchema >, z.infer< typeof M12.EmailPasswordConfigPublicSchema > >>;
+export type Iso_api_authEndpoints__OneTimeTokenHandoffQuerySchema = Assert<Eq< z.input< typeof M12.OneTimeTokenHandoffQuerySchema >, z.infer< typeof M12.OneTimeTokenHandoffQuerySchema > >>;
+export type Iso_api_authEndpoints__OneTimeTokenVerifyRequestSchema = Assert<Eq< z.input< typeof M12.OneTimeTokenVerifyRequestSchema >, z.infer< typeof M12.OneTimeTokenVerifyRequestSchema > >>;
 
 // api/auth.zod.ts
 export type Iso_api_auth__AuthProvider = Assert<Eq< z.input< typeof M13.AuthProvider >, z.infer< typeof M13.AuthProvider > >>;
@@ -660,6 +684,15 @@ export type Iso_api_protocol__ValidateDataResponseSchema = Assert<Eq< z.input< t
 export type Iso_api_pushDelivery__PushDeliveryDataSchema = Assert<Eq< z.input< typeof M197.PushDeliveryDataSchema >, z.infer< typeof M197.PushDeliveryDataSchema > >>;
 export type Iso_api_pushDelivery__PushRouteSchema = Assert<Eq< z.input< typeof M197.PushRouteSchema >, z.infer< typeof M197.PushRouteSchema > >>;
 
+// api/push-relay.zod.ts
+export type Iso_api_pushRelay__PushRelayDeliverySchema = Assert<Eq< z.input< typeof M199.PushRelayDeliverySchema >, z.infer< typeof M199.PushRelayDeliverySchema > >>;
+export type Iso_api_pushRelay__PushRelayPayloadSchema = Assert<Eq< z.input< typeof M199.PushRelayPayloadSchema >, z.infer< typeof M199.PushRelayPayloadSchema > >>;
+export type Iso_api_pushRelay__PushRelayPrioritySchema = Assert<Eq< z.input< typeof M199.PushRelayPrioritySchema >, z.infer< typeof M199.PushRelayPrioritySchema > >>;
+export type Iso_api_pushRelay__PushRelayRequestSchema = Assert<Eq< z.input< typeof M199.PushRelayRequestSchema >, z.infer< typeof M199.PushRelayRequestSchema > >>;
+export type Iso_api_pushRelay__PushRelayResponseSchema = Assert<Eq< z.input< typeof M199.PushRelayResponseSchema >, z.infer< typeof M199.PushRelayResponseSchema > >>;
+export type Iso_api_pushRelay__PushRelayResultSchema = Assert<Eq< z.input< typeof M199.PushRelayResultSchema >, z.infer< typeof M199.PushRelayResultSchema > >>;
+export type Iso_api_pushRelay__PushRelayResultStatusSchema = Assert<Eq< z.input< typeof M199.PushRelayResultStatusSchema >, z.infer< typeof M199.PushRelayResultStatusSchema > >>;
+
 // api/query-adapter.zod.ts
 export type Iso_api_queryAdapter__OperatorMappingSchema = Assert<Eq< z.input< typeof M29.OperatorMappingSchema >, z.infer< typeof M29.OperatorMappingSchema > >>;
 export type Iso_api_queryAdapter__QueryAdapterTargetSchema = Assert<Eq< z.input< typeof M29.QueryAdapterTargetSchema >, z.infer< typeof M29.QueryAdapterTargetSchema > >>;
@@ -734,6 +767,11 @@ export type Iso_api_websocket__WebSocketPresenceStatus = Assert<Eq< z.input< typ
 
 // automation/api-trigger-secret-ref.zod.ts
 export type Iso_automation_apiTriggerSecretRef__ApiTriggerSecretRefSchema = Assert<Eq< z.input< typeof M191.ApiTriggerSecretRefSchema >, z.infer< typeof M191.ApiTriggerSecretRefSchema > >>;
+
+// automation/api-trigger-signature.zod.ts
+export type Iso_automation_apiTriggerSignature__ApiTriggerBodySignatureSchema = Assert<Eq< z.input< typeof M200.ApiTriggerBodySignatureSchema >, z.infer< typeof M200.ApiTriggerBodySignatureSchema > >>;
+export type Iso_automation_apiTriggerSignature__ApiTriggerSignatureSchema = Assert<Eq< z.input< typeof M200.ApiTriggerSignatureSchema >, z.infer< typeof M200.ApiTriggerSignatureSchema > >>;
+export type Iso_automation_apiTriggerSignature__ApiTriggerTimestampedSignatureSchema = Assert<Eq< z.input< typeof M200.ApiTriggerTimestampedSignatureSchema >, z.infer< typeof M200.ApiTriggerTimestampedSignatureSchema > >>;
 
 // automation/approval.zod.ts
 export type Iso_automation_approval__ApprovalDecision = Assert<Eq< z.input< typeof M37.ApprovalDecision >, z.infer< typeof M37.ApprovalDecision > >>;
@@ -929,6 +967,14 @@ export type Iso_data_query__AggregationNodeSchema = Assert<Eq< z.input< typeof M
 export type Iso_data_query__DateGranularity = Assert<Eq< z.input< typeof M71.DateGranularity >, z.infer< typeof M71.DateGranularity > >>;
 export type Iso_data_query__GroupByNodeSchema = Assert<Eq< z.input< typeof M71.GroupByNodeSchema >, z.infer< typeof M71.GroupByNodeSchema > >>;
 
+// data/recycle-bin.zod.ts
+export type Iso_data_recycleBin__RecycleBinClearedReferenceSchema = Assert<Eq< z.input< typeof M201.RecycleBinClearedReferenceSchema >, z.infer< typeof M201.RecycleBinClearedReferenceSchema > >>;
+export type Iso_data_recycleBin__RecycleBinEntrySchema = Assert<Eq< z.input< typeof M201.RecycleBinEntrySchema >, z.infer< typeof M201.RecycleBinEntrySchema > >>;
+export type Iso_data_recycleBin__RecycleBinRetentionDaysEnvSchema = Assert<Eq< z.input< typeof M201.RecycleBinRetentionDaysEnvSchema >, z.infer< typeof M201.RecycleBinRetentionDaysEnvSchema > >>;
+export type Iso_data_recycleBin__RecycleBinRetentionDaysSchema = Assert<Eq< z.input< typeof M201.RecycleBinRetentionDaysSchema >, z.infer< typeof M201.RecycleBinRetentionDaysSchema > >>;
+export type Iso_data_recycleBin__RecycleBinSnapshotRowSchema = Assert<Eq< z.input< typeof M201.RecycleBinSnapshotRowSchema >, z.infer< typeof M201.RecycleBinSnapshotRowSchema > >>;
+export type Iso_data_recycleBin__RecycleBinSnapshotSchema = Assert<Eq< z.input< typeof M201.RecycleBinSnapshotSchema >, z.infer< typeof M201.RecycleBinSnapshotSchema > >>;
+
 // data/seed-file.zod.ts
 export type Iso_data_seedFile__SeedFilePathSchema = Assert<Eq< z.input< typeof M193.SeedFilePathSchema >, z.infer< typeof M193.SeedFilePathSchema > >>;
 
@@ -1113,7 +1159,6 @@ export type Iso_kernel_startupOrchestrator__PluginStartupResultSchema = Assert<E
 // marketplace/marketplace.zod.ts
 export type Iso_marketplace_marketplace__ArtifactDownloadResponseSchema = Assert<Eq< z.input< typeof M50.ArtifactDownloadResponseSchema >, z.infer< typeof M50.ArtifactDownloadResponseSchema > >>;
 export type Iso_marketplace_marketplace__ListingStatusSchema = Assert<Eq< z.input< typeof M50.ListingStatusSchema >, z.infer< typeof M50.ListingStatusSchema > >>;
-export type Iso_marketplace_marketplace__MarketplaceCategorySchema = Assert<Eq< z.input< typeof M50.MarketplaceCategorySchema >, z.infer< typeof M50.MarketplaceCategorySchema > >>;
 export type Iso_marketplace_marketplace__MarketplaceInstallResponseSchema = Assert<Eq< z.input< typeof M50.MarketplaceInstallResponseSchema >, z.infer< typeof M50.MarketplaceInstallResponseSchema > >>;
 export type Iso_marketplace_marketplace__PricingModelSchema = Assert<Eq< z.input< typeof M50.PricingModelSchema >, z.infer< typeof M50.PricingModelSchema > >>;
 export type Iso_marketplace_marketplace__PublisherVerificationSchema = Assert<Eq< z.input< typeof M50.PublisherVerificationSchema >, z.infer< typeof M50.PublisherVerificationSchema > >>;
@@ -1126,13 +1171,20 @@ export type Iso_marketplace_packageVersion__UpdatePackageVersionRequestSchema = 
 
 // marketplace/package.zod.ts
 export type Iso_marketplace_package__CreatePackageRequestSchema = Assert<Eq< z.input< typeof M52.CreatePackageRequestSchema >, z.infer< typeof M52.CreatePackageRequestSchema > >>;
-export type Iso_marketplace_package__PackageCategorySchema = Assert<Eq< z.input< typeof M52.PackageCategorySchema >, z.infer< typeof M52.PackageCategorySchema > >>;
 export type Iso_marketplace_package__PackageLocaleSchema = Assert<Eq< z.input< typeof M52.PackageLocaleSchema >, z.infer< typeof M52.PackageLocaleSchema > >>;
 export type Iso_marketplace_package__PackagePublisherSchema = Assert<Eq< z.input< typeof M52.PackagePublisherSchema >, z.infer< typeof M52.PackagePublisherSchema > >>;
 export type Iso_marketplace_package__PackageTranslationSchema = Assert<Eq< z.input< typeof M52.PackageTranslationSchema >, z.infer< typeof M52.PackageTranslationSchema > >>;
 export type Iso_marketplace_package__PackageTranslationsSchema = Assert<Eq< z.input< typeof M52.PackageTranslationsSchema >, z.infer< typeof M52.PackageTranslationsSchema > >>;
 export type Iso_marketplace_package__PackageVisibilitySchema = Assert<Eq< z.input< typeof M52.PackageVisibilitySchema >, z.infer< typeof M52.PackageVisibilitySchema > >>;
 export type Iso_marketplace_package__UpdatePackageRequestSchema = Assert<Eq< z.input< typeof M52.UpdatePackageRequestSchema >, z.infer< typeof M52.UpdatePackageRequestSchema > >>;
+
+// marketplace/taxonomy.zod.ts
+export type Iso_marketplace_taxonomy__MarketplaceBusinessFunctionSchema = Assert<Eq< z.input< typeof M202.MarketplaceBusinessFunctionSchema >, z.infer< typeof M202.MarketplaceBusinessFunctionSchema > >>;
+export type Iso_marketplace_taxonomy__MarketplaceBusinessFunctionsSchema = Assert<Eq< z.input< typeof M202.MarketplaceBusinessFunctionsSchema >, z.infer< typeof M202.MarketplaceBusinessFunctionsSchema > >>;
+export type Iso_marketplace_taxonomy__MarketplaceIndustriesSchema = Assert<Eq< z.input< typeof M202.MarketplaceIndustriesSchema >, z.infer< typeof M202.MarketplaceIndustriesSchema > >>;
+export type Iso_marketplace_taxonomy__MarketplaceIndustrySchema = Assert<Eq< z.input< typeof M202.MarketplaceIndustrySchema >, z.infer< typeof M202.MarketplaceIndustrySchema > >>;
+export type Iso_marketplace_taxonomy__MarketplaceSolutionTypeSchema = Assert<Eq< z.input< typeof M202.MarketplaceSolutionTypeSchema >, z.infer< typeof M202.MarketplaceSolutionTypeSchema > >>;
+export type Iso_marketplace_taxonomy__PackageMaturitySchema = Assert<Eq< z.input< typeof M202.PackageMaturitySchema >, z.infer< typeof M202.PackageMaturitySchema > >>;
 
 // marketplace/template-manifest.zod.ts
 export type Iso_marketplace_templateManifest__TemplateManifestSchema = Assert<Eq< z.input< typeof M53.TemplateManifestSchema >, z.infer< typeof M53.TemplateManifestSchema > >>;
@@ -1275,6 +1327,7 @@ export type Iso_system_authConfig__AuthProviderConfigSchema = Assert<Eq< z.input
 export type Iso_system_authConfig__EmailVerificationConfigSchema = Assert<Eq< z.input< typeof M120.EmailVerificationConfigSchema >, z.infer< typeof M120.EmailVerificationConfigSchema > >>;
 export type Iso_system_authConfig__OidcProviderConfigSchema = Assert<Eq< z.input< typeof M120.OidcProviderConfigSchema >, z.infer< typeof M120.OidcProviderConfigSchema > >>;
 export type Iso_system_authConfig__OidcProvidersConfigSchema = Assert<Eq< z.input< typeof M120.OidcProvidersConfigSchema >, z.infer< typeof M120.OidcProvidersConfigSchema > >>;
+export type Iso_system_authConfig__TrustedAppSchemeSchema = Assert<Eq< z.input< typeof M120.TrustedAppSchemeSchema >, z.infer< typeof M120.TrustedAppSchemeSchema > >>;
 
 // system/cache.zod.ts
 export type Iso_system_cache__CacheConsistencySchema = Assert<Eq< z.input< typeof M121.CacheConsistencySchema >, z.infer< typeof M121.CacheConsistencySchema > >>;
@@ -1420,7 +1473,6 @@ export type Iso_system_objectStorage__StorageScopeSchema = Assert<Eq< z.input< t
 // system/push-config.zod.ts
 export type Iso_system_pushConfig__ApnsTransportConfigSchema = Assert<Eq< z.input< typeof M196.ApnsTransportConfigSchema >, z.infer< typeof M196.ApnsTransportConfigSchema > >>;
 export type Iso_system_pushConfig__FcmTransportConfigSchema = Assert<Eq< z.input< typeof M196.FcmTransportConfigSchema >, z.infer< typeof M196.FcmTransportConfigSchema > >>;
-export type Iso_system_pushConfig__PushServiceConfigSchema = Assert<Eq< z.input< typeof M196.PushServiceConfigSchema >, z.infer< typeof M196.PushServiceConfigSchema > >>;
 export type Iso_system_pushConfig__PushVendorSchema = Assert<Eq< z.input< typeof M196.PushVendorSchema >, z.infer< typeof M196.PushVendorSchema > >>;
 
 // system/push-device.zod.ts
@@ -1428,6 +1480,10 @@ export type Iso_system_pushDevice__UserDeviceSchema = Assert<Eq< z.input< typeof
 
 // system/registry-config.zod.ts
 export type Iso_system_registryConfig__RegistrySyncPolicySchema = Assert<Eq< z.input< typeof M143.RegistrySyncPolicySchema >, z.infer< typeof M143.RegistrySyncPolicySchema > >>;
+
+// system/restriction-profile.zod.ts
+export type Iso_system_restrictionProfile__RestrictionProfileNodeType = Assert<Eq< z.input< typeof M203.RestrictionProfileNodeType >, z.infer< typeof M203.RestrictionProfileNodeType > >>;
+export type Iso_system_restrictionProfile__RestrictionProfileSchema = Assert<Eq< z.input< typeof M203.RestrictionProfileSchema >, z.infer< typeof M203.RestrictionProfileSchema > >>;
 
 // system/search-engine.zod.ts
 export type Iso_system_searchEngine__AnalyzerConfigSchema = Assert<Eq< z.input< typeof M144.AnalyzerConfigSchema >, z.infer< typeof M144.AnalyzerConfigSchema > >>;
@@ -1604,6 +1660,7 @@ export type Iso_ui_dataset__DatasetDurationUnit = Assert<Eq< z.input< typeof M16
 export type Iso_ui_dataset__DatasetMeasurePolarity = Assert<Eq< z.input< typeof M160.DatasetMeasurePolarity >, z.infer< typeof M160.DatasetMeasurePolarity > >>;
 export type Iso_ui_dataset__DatasetMeasureDurationSchema = Assert<Eq< z.input< typeof M160.DatasetMeasureDurationSchema >, z.infer< typeof M160.DatasetMeasureDurationSchema > >>;
 export type Iso_ui_dataset__DatasetMeasureSchema = Assert<Eq< z.input< typeof M160.DatasetMeasureSchema >, z.infer< typeof M160.DatasetMeasureSchema > >>;
+export type Iso_ui_dataset__DatasetMemberSynonymsSchema = Assert<Eq< z.input< typeof M160.DatasetMemberSynonymsSchema >, z.infer< typeof M160.DatasetMemberSynonymsSchema > >>;
 export type Iso_ui_dataset__DatasetSchema = Assert<Eq< z.input< typeof M160.DatasetSchema >, z.infer< typeof M160.DatasetSchema > >>;
 export type Iso_ui_dataset__DerivedMeasureOp = Assert<Eq< z.input< typeof M160.DerivedMeasureOp >, z.infer< typeof M160.DerivedMeasureOp > >>;
 
@@ -1763,7 +1820,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 819 isomorphic pins', () => {
+  it('still declares all 852 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2760,7 +2817,64 @@ describe('ADR-0122 type-alias convention', () => {
     // its tree, so it is pinned here
     // (Iso_data_fieldValue__ReferenceNameOnlyValueSchema) rather than given a
     // `ReferenceNameOnlyValueParsed` synonym. +1 added.
-    expect(pins).toHaveLength(819);
+    // 819 -> 822 is the mobile sign-in hand-off: the hand-off query
+    // (`api/auth-endpoints.zod.ts`, a strict object of strings, a regex and
+    // an optional literal), the verify body (one regex string) and one
+    // registered app scheme (`system/auth-config.zod.ts`, a regex string),
+    // no default and no transform in any of them
+    // (Iso_api_authEndpoints__OneTimeToken*, Iso_system_authConfig__TrustedAppSchemeSchema).
+    // +3 added.
+    // 822 -> 828 is the push relay transport: `PushServiceConfigSchema`
+    // became the `transport` union whose members default `transport`, so
+    // input !== infer; Iso_system_pushConfig__PushServiceConfigSchema leaves
+    // and `PushServiceConfigParsed` is declared (-1). The server -> relay wire
+    // shape (`api/push-relay.zod.ts`: the priority and outcome enums, the
+    // payload, delivery, request, result and response) is plain or strict
+    // objects with no default and no transform (Iso_api_pushRelay__*, +7).
+    // Its error schemas extend the house error envelope, whose `retryable`
+    // defaults, so they carry `PushRelayErrorParsed` and
+    // `PushRelayErrorResponseParsed` instead of a pin.
+    // 828 -> 831 is `ApiTriggerSignatureSchema`
+    // (`automation/api-trigger-signature.zod.ts`), the scheme a third-party
+    // sender signs an `api` hook's posts with, and its two arms
+    // (`ApiTriggerBodySignatureSchema`, `ApiTriggerTimestampedSignatureSchema`):
+    // a discriminated union of two strict objects of enums, literals and regex
+    // strings, no default and no transform
+    // (Iso_automation_apiTriggerSignature__*). +3 added.
+    // 831 -> 837 is ADR-0148's recycle-bin spec half (`data/recycle-bin.zod.ts`):
+    // the entry, its snapshot, a snapshot row, a cleared reference and the two
+    // retention value schemas — plain objects, a number and a regex string,
+    // no default and no transform (Iso_data_recycleBin__*). +6 added.
+    // 837 -> 841 is the marketplace taxonomy (`marketplace/taxonomy.zod.ts`):
+    // the business-function, industry, solution-type and maturity enums and the
+    // two facet lists — enums and arrays of enums under a refinement, which
+    // changes no type, no default and no transform
+    // (Iso_marketplace_taxonomy__*), +6 added; and the two category defs it
+    // retired, `MarketplaceCategorySchema` and `PackageCategorySchema`, left
+    // their modules whole (RETIRED_DEFS_BY_MAJOR[18]) and took their pins with
+    // them, -2 removed.
+    // 841 -> 842 is the restriction profile a target environment publishes
+    // (`system/restriction-profile.zod.ts`): a strict object of two booleans,
+    // an array of the built-in node type enum and a strict object of two
+    // regex strings, no default and no transform
+    // (Iso_system_restrictionProfile__RestrictionProfileSchema). +1 added.
+    // 842 -> 843 is that profile's own node vocabulary
+    // (`RestrictionProfileNodeType`): an enum of the built-in node type ids
+    // plus the spec-declared approval pair, no default and no transform
+    // (Iso_system_restrictionProfile__RestrictionProfileNodeType). +1 added.
+    // 843 -> 851 is ADR-0149 D2's dataset AI tools (`ai/dataset-tools.zod.ts`):
+    // the catalogue entry, its dimension, measure and term-match rows, the
+    // matched-on enum, the provenance block and the two outputs, the query
+    // output extending the dataset answer's `data` members — plain objects,
+    // enums and literals, no default and no transform (Iso_ai_datasetTools__*).
+    // +8 added. The two tool inputs carry no pin: `ListDatasetsInput` and
+    // `QueryDatasetInput` end in `Input`, which `check:spec-parsed-alias` reads
+    // as a name that claims its state, so no bare alias relies on an exemption.
+    // 851 -> 852 is the same record's D1 vocabulary (`ui/dataset.zod.ts`
+    // `DatasetMemberSynonymsSchema`): an array of bounded, regex-checked
+    // strings, no default and no transform
+    // (Iso_ui_dataset__DatasetMemberSynonymsSchema). +1 added.
+    expect(pins).toHaveLength(852);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

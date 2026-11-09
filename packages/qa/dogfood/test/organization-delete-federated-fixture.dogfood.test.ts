@@ -30,10 +30,13 @@
  *
  *  - the fixture IS provisioned: the federated object answers its seeded rows,
  *    so the delete cannot be passing through the missing-table branch;
- *  - the remote really lacks the column: a system read filtered on
- *    `organization_id`, the probe the scan used to run, is refused;
- *  - the field that probe named is the platform's injected anchor
- *    (`resolveInjectedColumnProvenance` answers `injected-unprovisioned`).
+ *  - [ADR-0015 §10] the shipped federated object now DECLARES its organization
+ *    scope (`tenancy: { enabled: false }` — the remote table carries no
+ *    organization column), so the registry injects no `organization_id` into it
+ *    at all (`resolveInjectedColumnProvenance` answers `absent`) and the scan
+ *    has no tenant anchor to probe on it. The skip of an INJECTED tenant anchor
+ *    on a federated object that states nothing stays pinned at the seam, in
+ *    `packages/objectql/src/engine-cascade-federated-tenant-anchor.test.ts`.
  *
  * Booted with `orgContext`, which asserts the admin is seated in the Default
  * Organization. The organization deleted is a SECOND one the admin owns, not
@@ -117,7 +120,7 @@ describe('[#21910] an organization delete with the showcase federated fixture pr
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('PREMISE: the fixture is provisioned, and its remote table refuses a filter on the injected organization_id', async () => {
+  it('PREMISE: the fixture is provisioned, and the shipped federated object declares its organization scope, so no tenant anchor is registered on it', async () => {
     const listed = await stack.apiAs(token, 'GET', `/data/${FEDERATED}`);
     expect(listed.status, await listed.clone().text()).toBe(200);
     const body: any = await listed.json();
@@ -126,17 +129,11 @@ describe('[#21910] an organization delete with the showcase federated fixture pr
 
     const schema = ql.getSchema(FEDERATED);
     expect(schema?.external, `${FEDERATED} is federated`).toBeTruthy();
-    expect(resolveInjectedColumnProvenance(schema, 'organization_id')).toBe('injected-unprovisioned');
-
-    // The read the cascade scan used to issue: SYSTEM identity, filtered on
-    // the injected column. It is refused, so a scan that still probed this
-    // object could not answer the delete below with 200.
-    const refused: any = await findRows(ql, FEDERATED, { organization_id: orgId }, 1).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(refused, 'the remote has no organization_id column').not.toBeNull();
-    expect(refused.code).toBe('INVALID_FILTER');
+    // [ADR-0015 §10] Declared shared: the registry injects no organization_id,
+    // so the cascade scan finds no tenant-anchor reference here to probe.
+    expect(schema?.tenancy?.enabled).toBe(false);
+    expect(Object.keys(schema?.fields ?? {})).not.toContain('organization_id');
+    expect(resolveInjectedColumnProvenance(schema, 'organization_id')).toBe('absent');
   });
 
   it('the owner deletes the organization: 200, nothing names it any more, and the federated rows are untouched', async () => {

@@ -168,7 +168,7 @@
  * import edge:
  *
  *   grep -rn --include=*.ts --include=*.tsx -E \
- *     "import \{[^}]*\b(en|zh|builtInLocales|getLoadedBuiltInLocales|ja|ko|de|fr|es|pt|ru|ar)\b[^}]*\}" \
+ *     "import \{[^}]*\b(en|zh|zhHant|builtInLocales|getLoadedBuiltInLocales|ja|ko|de|fr|es|pt|ru|ar)\b[^}]*\}" \
  *     packages apps examples e2e \
  *     | grep "@object-ui/i18n" | grep -v '^packages/i18n/'
  *
@@ -271,10 +271,11 @@
  *   - `packages/app-shell/src/utils/flowResponse.ts` — reads ONE key, the
  *     record form's permission line, for a failed flow run whose write node was
  *     refused, through `getLoadedBuiltInLocales()` and never a static pack
- *     import. Three chains, each written straight off the call so the
- *     derivation can follow them: the active tag and its base language are
- *     RUNTIME-indexed (opaque rows, class 1 below, like `outboundAgentText`),
- *     and the `en` fallback is spelled in full and resolves to that leaf. It is
+ *     import. Two chains, each written straight off the call so the
+ *     derivation can follow them: the table tag the active locale reads as
+ *     (`resolveBuiltInLanguage`, objectstack#30511) is RUNTIME-indexed (an
+ *     opaque row, class 1 below, like `outboundAgentText`), and the `en`
+ *     fallback is spelled in full and resolves to that leaf. It is
  *     a TWO-segment key, under the property-chain leg's three-segment floor,
  *     so that leg is blind to it; the full-key probe sees it only because the
  *     same dotted key is spelled in this file's own comments. ⇒ covered BY
@@ -464,8 +465,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
-import { EXCLUDED_TRANSLATORS, analyze, collectEnKeys, collectSourceFiles } from './check-i18n-call-site-keys.mjs';
+import {
+  EXCLUDED_TRANSLATORS,
+  PACK_DEFINITION_DIRS,
+  analyze,
+  collectEnKeys,
+  collectSourceFiles,
+} from './check-i18n-call-site-keys.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -512,8 +520,9 @@ const TEXT_SWEEP_SKIP_DIRS = new Set([
  */
 const PACK_IMPORT_SPECIFIER = '@object-ui/i18n';
 
-/** The locale pack directory — every candidate's DEFINITION lives here, so a
- *  hit inside it is not evidence of a reference and must not count as one. */
+/** The locale pack directory — every candidate's DEFINITION lives here or in
+ *  a pack-shaped namespace (`PACK_DEFINITION_DIRS`, objectstack#30588), so a
+ *  hit inside one is not evidence of a reference and must not count as one. */
 const LOCALES_DIR = 'packages/i18n/src/locales/';
 
 /** Appended to a hit path that only the property-chain probe matched, so the
@@ -624,7 +633,7 @@ function occursAtKeyBoundary(content, key) {
 
 /**
  * Whether the literal dotted string of each `key` in `keys` occurs anywhere in
- * the repo outside `LOCALES_DIR`, OR — for keys of three or more segments —
+ * the repo outside `PACK_DEFINITION_DIRS`, OR — for keys of three or more segments —
  * its property chain does (`propertyChainProbe()`; header section "The
  * property-chain leg").
  *
@@ -641,7 +650,8 @@ function occursAtKeyBoundary(content, key) {
  * @param {object} [options]
  * @param {string | string[]} [options.definitionPrefix] Repo-relative path
  *   prefix (or prefixes) whose hits are NOT evidence, because it is where the
- *   keys are defined. Defaults to `LOCALES_DIR` (the packs). The designer
+ *   keys are defined. Defaults to `PACK_DEFINITION_DIRS` (the packs and the
+ *   pack-shaped namespaces). The designer
  *   corpus passes its table FILE and its namespace homes instead — the whole
  *   table file, not just its two table literals, because that module's header
  *   docblock quotes example keys in prose and a grep cannot tell prose from a
@@ -659,7 +669,7 @@ function occursAtKeyBoundary(content, key) {
  *   absent from the map, or mapped to `[]`, has no textual footprint at all.
  */
 export function textFootprint(root, keys, options = {}) {
-  const { definitionPrefix = LOCALES_DIR, propertyChain = true, keyBoundary = true } = options;
+  const { definitionPrefix = PACK_DEFINITION_DIRS, propertyChain = true, keyBoundary = true } = options;
   const definitionPrefixes = [definitionPrefix].flat();
   const result = new Map(keys.map((key) => [key, []]));
   if (keys.length === 0) return result;
@@ -807,7 +817,7 @@ export function derivePackObjectImporters(root) {
     '--include=*.tsx',
     ...[...TEXT_SWEEP_SKIP_DIRS].flatMap((dir) => ['--exclude-dir', dir]),
     '-E',
-    String.raw`import \{[^}]*\b(en|zh|builtInLocales|getLoadedBuiltInLocales|ja|ko|de|fr|es|pt|ru|ar)\b[^}]*\}`,
+    String.raw`import \{[^}]*\b(en|zh|zhHant|builtInLocales|getLoadedBuiltInLocales|ja|ko|de|fr|es|pt|ru|ar)\b[^}]*\}`,
     '--',
     ...dirs,
   ];
@@ -840,8 +850,17 @@ export function derivePackObjectImporters(root) {
 
 /** The named exports of the pack package that ARE a locale pack object — the
  *  same set the header's importer grep alternates over, held here so the walk
- *  below and that recipe cannot drift apart in what counts as a pack. */
-const PACK_EXPORT_NAMES = new Set(['en', 'zh', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar']);
+ *  below and that recipe cannot drift apart in what counts as a pack. These are
+ *  export IDENTIFIERS (`zh` is the `zh-Hans` pack, `zhHant` the `zh-Hant` one,
+ *  `pt` the `pt-BR` one), never locale tags: see {@link PACK_MAP_TAGS}. */
+const PACK_EXPORT_NAMES = new Set(['en', 'zh', 'zhHant', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar']);
+
+/** The keys of the locale-tag MAP ({@link PACK_MAP_EXPORT_NAME}, and the
+ *  accessor's result): the platform locale table's tags (objectstack#30511), so
+ *  `builtInLocales['zh-Hans']` opens with a tag exactly as `builtInLocales.en`
+ *  does. Read from the table, not listed, so a tag the table gains is stripped
+ *  as a tag on the run that first sees it. */
+const PACK_MAP_TAGS = new Set(PLATFORM_LOCALE_TAGS);
 
 /** The pack export that is a MAP of locale tag -> pack object rather than a
  *  pack itself. A chain off it opens with a locale tag, which is not part of
@@ -1300,7 +1319,7 @@ export function classifyPackObjectRead(read, packKeys, fileText) {
   // A chain off the locale-tag MAP opens with the tag, which is not a key
   // segment. Strip exactly one, and only when it really is a tag.
   const chain =
-    read.pack === PACK_MAP_EXPORT_NAME && PACK_EXPORT_NAMES.has(read.chain[0]) ? read.chain.slice(1) : read.chain;
+    read.pack === PACK_MAP_EXPORT_NAME && PACK_MAP_TAGS.has(read.chain[0]) ? read.chain.slice(1) : read.chain;
   if (chain.length === 0) return opaque;
 
   const key = chain.join('.');

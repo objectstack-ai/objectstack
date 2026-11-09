@@ -247,7 +247,12 @@ function makeCountingDriver() {
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; },
     async find(object: string, ast: any) {
-      reads.findOn[object] = (reads.findOn[object] ?? 0) + 1;
+      // [#29029] The write's own reference check reads each lookup / user
+      // value it names through the caller's read door, projected to `id`
+      // alone: that read is the write's, not this plugin's, so it is not
+      // counted here.
+      const referenceCheckRead = Array.isArray(ast?.fields) && ast.fields.length === 1 && ast.fields[0] === 'id';
+      if (!referenceCheckRead) reads.findOn[object] = (reads.findOn[object] ?? 0) + 1;
       return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).map(copy);
     },
     async findOne(object: string, ast: any) {

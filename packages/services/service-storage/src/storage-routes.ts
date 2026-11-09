@@ -12,6 +12,9 @@ import { InitiateChunkedUploadRequestSchema, UploadScopeSchema } from '@objectst
 // [#23174] A catch-all 5xx answers through `sendServerFault`: the route's
 // generic text on the wire, the caught error with its stack in the fault log.
 import { sendOk, sendError, sendServerFault } from '@objectstack/types';
+// The commit door's attach arm relays the attach verb's declared refusals as
+// the print door relays its service's: the producer's code and status.
+import { declaredRefusalMessage, demotedDeclaredCode, resolveThrownHttpError } from '@objectstack/types';
 // [#15999] The BRAND predicate, never `instanceof` — this error crosses package
 // boundaries and a monorepo resolves the same module through more than one path
 // (`src` under vitest aliases, `dist` under the published `exports`), so two
@@ -50,6 +53,16 @@ import {
 // guard's own `findFileHolder`.
 import type { FileHolder } from './attachment-lifecycle.js';
 import { contentDispositionValue } from './content-disposition.js';
+// [#30892] The upload-link doors: the service verbs they call, the one
+// refusal an unusable link gets, and the page a link opens.
+import type { UploadLinkDoor, UploadLinkView } from './record-file-access.js';
+import {
+  UPLOAD_LINK_SEGMENT,
+  UPLOAD_LINK_UNUSABLE_CODE,
+  UPLOAD_LINK_UNUSABLE_MESSAGE,
+  UPLOAD_LINK_UNUSABLE_STATUS,
+} from './upload-link-wire.js';
+import { sendUnusableUploadLinkPage, sendUploadLinkPage } from './upload-link-page.js';
 // [#22283] The `storage` settings namespace's Limits group — read and resolved
 // in ONE module, called per request by the doors below.
 // [#23306] The size refusal itself lives there too, beside the limit it
@@ -210,6 +223,28 @@ function chunkIndexRefusalMessage(totalChunks: number): string {
     `chunkIndex ${range}: this upload declared ${totalChunks} chunk${totalChunks === 1 ? '' : 's'}, ` +
     'indexed from zero.'
   );
+}
+
+/**
+ * Hand the backend the object key of chunked upload `uploadId`, read from the
+ * upload session row, before every backend call that names the upload.
+ *
+ * S3 addresses a multipart upload by key AND upload id, but the
+ * `IStorageService` chunk and completion methods carry the upload id alone, so
+ * the S3 adapter answers the key from what `setUploadKey` gave it. That record
+ * lives in one process: a chunk or a completion served by another replica, or
+ * after a restart or an adapter swap, finds nothing there. The durable record
+ * is `sys_upload_session.key`, which the init door writes and every later door
+ * already reads, so each door hands it down again rather than trusting
+ * whichever process happened to start the upload.
+ *
+ * Off the `IStorageService` contract: reached by name, on the swappable proxy
+ * (which forwards it) or on a bare adapter. A no-op for a backend without it —
+ * the local adapter records the key beside the parts itself.
+ */
+function handUploadKeyToBackend(storage: IStorageService, uploadId: string, key: string): void {
+  const keyed = storage as IStorageService & { setUploadKey?: (uploadId: string, key: string) => void };
+  if (typeof keyed.setUploadKey === 'function') keyed.setUploadKey(uploadId, key);
 }
 
 /**
@@ -435,7 +470,8 @@ export interface StorageRoutesOptions {
  *
  * Routes:
  * - POST   /storage/upload/presigned               → get presigned upload URL
- * - POST   /storage/upload/complete                → mark upload as committed
+ * - POST   /storage/upload/complete                → mark upload as committed (and, with
+ *                                                   `attachTo`, attach it to a record as the caller)
  * - POST   /storage/upload/chunked                 → initiate chunked upload
  * - PUT    /storage/upload/chunked/:uploadId/chunk/:chunkIndex → upload a chunk
  * - POST   /storage/upload/chunked/:uploadId/complete          → complete chunked
@@ -468,6 +504,60 @@ export function registerStorageRoutes(
  */
 export type StorageGatedSessionReader = (req: IHttpRequest) => Promise<unknown>;
 
+/** What the commit door's `attachTo` names: the upload, and the record it is attached to. */
+export interface StorageUploadAttachment {
+  fileId: string;
+  parentObject: string;
+  parentId: string;
+  eTag?: string;
+}
+
+/**
+ * Package-internal: attach the request's caller's own pending upload to a
+ * record and commit it, as that caller — the commit door's `attachTo` arm.
+ * Resolves the request's FULL execution context (the one request-to-context
+ * composition, as the download authorizer does) and hands it to the
+ * file-attachments service's caller-scoped `attachUploadAs`, which asks every
+ * check and vouches for that one file. It throws what that verb throws, with
+ * its declared `code` and `status`.
+ *
+ * Bound by `composeStorageRoutes` alone, like every other storage gate, and a
+ * parameter of {@link registerStorageFamily} rather than a
+ * `StorageRoutesOptions` key, so no exported declaration moves and no host can
+ * hand the door an attacher of its own. `undefined` (no `auth` service, or no
+ * data engine): the door refuses an `attachTo` with `501`, and a completion
+ * without one is unchanged.
+ */
+export type StorageUploadAttacher = (
+  req: IHttpRequest,
+  upload: StorageUploadAttachment,
+) => Promise<{ attachmentId: string }>;
+
+/** The body keys of `attachTo` — `CompleteUploadRequestSchema.attachTo` (`@objectstack/spec/api`). */
+const ATTACH_TO_FIELDS = ['parentObject', 'parentId'] as const;
+
+/**
+ * The commit door's `attachTo`: `null` when the request carries none, the
+ * target when it is well formed, or the sentence a `400` answers.
+ */
+function attachTargetOf(value: unknown): { parentObject: string; parentId: string } | null | string {
+  if (value === undefined) return null;
+  const shape =
+    `attachTo is an object with the fields ${ATTACH_TO_FIELDS.join(' and ')}, each a non-empty string: ` +
+    'the record the upload is attached to.';
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return shape;
+  const fields = value as Record<string, unknown>;
+  const known = new Set<string>(ATTACH_TO_FIELDS);
+  const unknown = Object.keys(fields).filter((key) => !known.has(key));
+  if (unknown.length > 0) {
+    return `${unknown.map((k) => `'${k}'`).join(', ')} ${unknown.length === 1 ? 'is not a field' : 'are not fields'} of attachTo. ${shape}`;
+  }
+  const { parentObject, parentId } = fields;
+  if (typeof parentObject !== 'string' || parentObject.length === 0) return shape;
+  if (typeof parentId !== 'string' || parentId.length === 0) return shape;
+  return { parentObject, parentId };
+}
+
 /**
  * Package-internal: register the storage family through ONE door, which asks
  * the ADR-0069 gate before any route runs (see `mountFamilyRoute` below).
@@ -485,9 +575,11 @@ export function registerStorageFamily(
   store: StorageMetadataStore,
   opts: StorageRoutesOptions,
   readGatedSessionUser: StorageGatedSessionReader | undefined,
+  attachUpload: StorageUploadAttacher | undefined = undefined,
+  getUploadLinkDoor?: () => UploadLinkDoor | undefined,
 ): void {
   const basePath = opts.basePath ?? '/api/v1/storage';
-  const downloadTtl = opts.downloadTtl ?? 300;
+  const downloadTtl = opts.downloadTtl ?? DEFAULT_DOWNLOAD_TTL;
 
   // [#22283] The limits THIS request is served under — the saved Limits group
   // resolved against this mount's own options, asked per request (never
@@ -1053,9 +1145,15 @@ export function registerStorageFamily(
       // statement unscoped and raising `[tenant-audit]`.
       const session = await requireUploadSession(req, res);
       if (session === false) return;
-      const { fileId, eTag } = req.body ?? {};
+      const { fileId, eTag, attachTo } = req.body ?? {};
       if (!fileId) {
         sendError(res, 400, 'INVALID_REQUEST', 'fileId is required');
+        return;
+      }
+      // The attach arm's target, judged before anything is read.
+      const attach = attachTargetOf(attachTo);
+      if (typeof attach === 'string') {
+        sendError(res, 400, 'INVALID_REQUEST', attach);
         return;
       }
 
@@ -1082,6 +1180,43 @@ export function registerStorageFamily(
         return;
       }
 
+      // The attach arm: the record attachments surface's attach verb. The
+      // commit and the `sys_attachment` insert are one unit, run as the caller
+      // by the file-attachments service (`attachUploadAs`), which asks the
+      // ownership rule again, the upload's state and scope, the permission to
+      // create an attachment, the parent-EDIT attach rule and the parent read,
+      // and vouches for this one file on its own insert — so a member who may
+      // attach need not read `sys_file`. ⛔ The generic data door gets no such
+      // mark: a `sys_attachment` create through it naming a file the caller
+      // cannot read is still refused `reference_not_found`.
+      if (attach) {
+        if (!attachUpload || session === null) {
+          sendError(
+            res,
+            501,
+            'NOT_IMPLEMENTED',
+            'This storage mount cannot attach an upload as its caller: the kernel composes no auth service or no ' +
+              'data engine. Complete the upload without attachTo.',
+          );
+          return;
+        }
+        let attached: { attachmentId: string };
+        try {
+          attached = await attachUpload(req, {
+            fileId: String(fileId),
+            parentObject: attach.parentObject,
+            parentId: attach.parentId,
+            ...(eTag !== undefined && eTag !== null ? { eTag } : {}),
+          });
+        } catch (err) {
+          relayAttachFailure(res, err, `${basePath}/upload/complete`);
+          return;
+        }
+        const attachedFile = (await store.getFile(fileId)) ?? file;
+        sendOk(res, { ...committedFileMetadata(attachedFile, fileId), attachmentId: attached.attachmentId });
+        return;
+      }
+
       const updated = await store.updateFile(
         fileId,
         {
@@ -1091,19 +1226,7 @@ export function registerStorageFamily(
         writeContext,
       );
 
-      sendOk(res, {
-        // The opaque sys_file id — the value a file field stores as a
-        // reference (ADR-0104 D3). Previously omitted, so a caller could not
-        // learn the id to persist after committing an upload.
-        fileId: updated!.id ?? fileId,
-        path: updated!.key,
-        name: updated!.name,
-        size: updated!.size ?? 0,
-        mimeType: updated!.mime_type ?? 'application/octet-stream',
-        lastModified: updated!.updated_at ?? new Date().toISOString(),
-        created: updated!.created_at ?? new Date().toISOString(),
-        etag: updated!.etag,
-      });
+      sendOk(res, committedFileMetadata(updated!, fileId));
     } catch (err: any) {
       sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
     }
@@ -1173,10 +1296,6 @@ export function registerStorageFamily(
       let backendUploadId: string | undefined;
       if (storage.initiateChunkedUpload) {
         backendUploadId = await storage.initiateChunkedUpload(key, { contentType: mimeType, metadata });
-        // S3 adapter needs to know the key for subsequent chunk/complete calls
-        if ('setUploadKey' in storage && typeof (storage as any).setUploadKey === 'function') {
-          (storage as any).setUploadKey(backendUploadId, key);
-        }
       }
 
       const uploadId = backendUploadId ?? randomUUID().replace(/-/g, '');
@@ -1319,6 +1438,7 @@ export function registerStorageFamily(
       // Upload the chunk (S3 uses 1-based part numbers)
       let eTag = '';
       if (storage.uploadChunk) {
+        handUploadKeyToBackend(storage, uploadId, session.key);
         eTag = await storage.uploadChunk(uploadId, chunkIndex + 1, data);
       }
 
@@ -1464,6 +1584,7 @@ export function registerStorageFamily(
       let finalKey = session.key;
       try {
         if (storage.completeChunkedUpload) {
+          handUploadKeyToBackend(storage, uploadId, session.key);
           finalKey = await storage.completeChunkedUpload(uploadId, partsForBackend);
         }
 
@@ -1570,14 +1691,8 @@ export function registerStorageFamily(
       const ttl = await authorizeDownload(file, req, res);
       if (ttl === false) return;
 
-      const downloadOpts = { filename: file.name, contentType: file.mime_type };
-      let url: string;
-      if (storage.getPresignedDownload) {
-        const desc = await storage.getPresignedDownload(file.key, ttl, downloadOpts);
-        url = desc.downloadUrl;
-      } else if (storage.getSignedUrl) {
-        url = await storage.getSignedUrl(file.key, ttl, downloadOpts);
-      } else {
+      const url = await mintDownloadUrl(storage, file, ttl);
+      if (url === null) {
         // See the sibling branch on `GET /files/:fileId`: no adapter capability
         // means no download URL, and handing back an unmounted one is worse
         // than admitting it (#3641).
@@ -1620,14 +1735,8 @@ export function registerStorageFamily(
       const ttl = await authorizeDownload(file, req, res);
       if (ttl === false) return;
 
-      const downloadOpts = { filename: file.name, contentType: file.mime_type };
-      let url: string;
-      if (storage.getPresignedDownload) {
-        const desc = await storage.getPresignedDownload(file.key, ttl, downloadOpts);
-        url = desc.downloadUrl;
-      } else if (storage.getSignedUrl) {
-        url = await storage.getSignedUrl(file.key, ttl, downloadOpts);
-      } else {
+      const url = await mintDownloadUrl(storage, file, ttl);
+      if (url === null) {
         // An adapter with neither `getPresignedDownload` nor `getSignedUrl`
         // cannot produce a download URL. This used to redirect to
         // `${basePath}/_local/file/<key>`, which no registrar mounts — a 302
@@ -1640,6 +1749,121 @@ export function registerStorageFamily(
       res.status(302).header('Location', url).send('');
     } catch (err: any) {
       sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // [#30892] GET / PUT /storage/upload-links/:token — a single-use upload link
+  //
+  // Minted for a signed-in user by `createUploadLinkAs` (the MCP door's
+  // `create_upload_link` tool) and opened by that same user, signed in: the
+  // token AND the request's own session are both required. No session answers
+  // 401 `AUTH_REQUIRED`, as every other storage door does, so this is not an
+  // anonymous door (ADR-0138 D2); a session naming another user answers the
+  // one unusable-link refusal and spends nothing. The GET answers the picker
+  // page, the PUT spends the link on the body. What a link is bound to, who
+  // the upload acts as, and how one use is enforced are the service's
+  // (`record-file-access.ts`); these doors read no query parameter, carry
+  // the bytes, and answer.
+  // ---------------------------------------------------------------------------
+
+  // The signed-in user a link request carries, or `null` once the 401 is sent.
+  // No resolver wired (a kernel without an auth service) fails CLOSED here,
+  // unlike the bare-kernel upload doors: a link is minted for a user, so a
+  // request whose user cannot be read can never be that user. A resolver that
+  // throws fails closed too.
+  const uploadLinkCaller = async (req: IHttpRequest, res: IHttpResponse): Promise<string | null> => {
+    let session: StorageUploadSession | null | undefined = null;
+    if (opts.resolveSession) {
+      try {
+        session = await opts.resolveSession(req);
+      } catch {
+        session = null;
+      }
+    }
+    if (session?.userId) return String(session.userId);
+    sendError(
+      res,
+      401,
+      'AUTH_REQUIRED',
+      'Sign in as the person this upload link was made for, then open the link again.',
+    );
+    return null;
+  };
+
+  mountFamilyRoute('get', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+    try {
+      const caller = await uploadLinkCaller(req, res);
+      if (caller === null) return;
+      const door = getUploadLinkDoor?.();
+      if (!door) {
+        sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
+        return;
+      }
+      let view: UploadLinkView;
+      try {
+        view = await door.inspectUploadLink(String(req.params.token ?? ''), caller);
+      } catch (err) {
+        if (isUnusableUploadLink(err)) {
+          sendUnusableUploadLinkPage(res, UPLOAD_LINK_UNUSABLE_STATUS);
+          return;
+        }
+        throw err;
+      }
+      sendUploadLinkPage(res, view);
+    } catch (err: any) {
+      if (relayUploadLinkRefusal(res, err)) return;
+      sendServerFault(res, 500, 'INTERNAL', 'Internal error', err);
+    }
+  });
+
+  mountFamilyRoute('put', `${basePath}/${UPLOAD_LINK_SEGMENT}/:token`, async (req: IHttpRequest, res: IHttpResponse) => {
+    try {
+      const caller = await uploadLinkCaller(req, res);
+      if (caller === null) return;
+      const door = getUploadLinkDoor?.();
+      if (!door) {
+        sendError(res, UPLOAD_LINK_UNUSABLE_STATUS, UPLOAD_LINK_UNUSABLE_CODE, UPLOAD_LINK_UNUSABLE_MESSAGE);
+        return;
+      }
+      // The declared length first, so an oversized body is refused before it
+      // is read; the service judges the bytes read again, before the link is
+      // spent, so an oversized upload never uses it up.
+      const { maxUploadBytes } = currentLimits();
+      const declaredBody = declaredContentLength(req);
+      if (
+        declaredBody !== undefined &&
+        !requireWithinUploadLimit(declaredBody, maxUploadBytes, (n) => `The upload body is ${n} bytes`, res)
+      ) {
+        return;
+      }
+      let data: Buffer;
+      if (req.rawBody) {
+        data = await req.rawBody();
+      } else if (Buffer.isBuffer(req.body)) {
+        data = req.body;
+      } else {
+        sendError(res, 400, 'INVALID_REQUEST', 'Binary body required: the file bytes, as the request body');
+        return;
+      }
+      const outcome = await door.consumeUploadLink(
+        String(req.params.token ?? ''),
+        {
+          filename: uploadLinkFilename(req.headers?.['x-file-name']),
+          mimeType: uploadLinkMimeType(req.headers?.['content-type']),
+          data,
+        },
+        caller,
+      );
+      sendOk(res, {
+        fileId: outcome.fileId,
+        size: outcome.size,
+        ...(outcome.field !== undefined ? { field: outcome.field } : {}),
+        ...(outcome.attachmentId !== undefined ? { attachmentId: outcome.attachmentId } : {}),
+      });
+    } catch (err: any) {
+      if (relayUploadLinkRefusal(res, err)) return;
+      sendServerFault(res, 500, 'INTERNAL', 'Upload failed', err);
     }
   });
 
@@ -1972,8 +2196,12 @@ function judgeCompletion(session: UploadSessionRecord, listed: ReadonlyArray<Lis
  *
  * The eTag a completion may carry is not compared: no adapter's `getInfo`
  * reports the stored object's ETag, so there is nothing to compare it with.
+ *
+ * Package-internal (not re-exported from `index.ts`): exported so the attach
+ * verb's commit of an upload (`FileAttachmentService.attachUploadAs`) asks the
+ * same question before it commits.
  */
-async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Promise<string | null> {
+export async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Promise<string | null> {
   const remedy =
     'Send the file to its upload URL (start a new upload if that URL has expired), then complete again. ' +
     'The file stays pending until then.';
@@ -1992,6 +2220,54 @@ async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Pro
 }
 
 /**
+ * The commit door's answer for a committed file — `FileUploadResponseSchema`'s
+ * `data` (`@objectstack/spec/api`).
+ */
+function committedFileMetadata(file: FileRecord, fileId: string): Record<string, unknown> {
+  return {
+    // The opaque sys_file id — the value a file field stores as a
+    // reference (ADR-0104 D3). Previously omitted, so a caller could not
+    // learn the id to persist after committing an upload.
+    fileId: file.id ?? fileId,
+    path: file.key,
+    name: file.name,
+    size: file.size ?? 0,
+    mimeType: file.mime_type ?? 'application/octet-stream',
+    lastModified: file.updated_at ?? new Date().toISOString(),
+    created: file.created_at ?? new Date().toISOString(),
+    etag: file.etag,
+  };
+}
+
+/**
+ * The commit door's relay for a refused or failed attach: a declared `4xx` —
+ * the attach verb's own refusals, the `sys_attachment` insert's gates (the
+ * permission to create, `ATTACHMENT_PARENT_ACCESS`, `FILES_DISABLED`, a
+ * `VALIDATION_FAILED` with its field details) — keeps its code, status,
+ * message and details; a declared `5xx` keeps its code and status with this
+ * door's generic text unless the producer declared the text for its caller;
+ * anything else is a fault.
+ */
+function relayAttachFailure(res: IHttpResponse, err: unknown, path: string): void {
+  const thrown = resolveThrownHttpError(err, 500);
+  if (thrown.status < 500) {
+    const declaredCode = demotedDeclaredCode(thrown);
+    sendError(res, thrown.status, thrown.code, thrown.message, {
+      ...(thrown.details ? { details: thrown.details } : {}),
+      ...(declaredCode !== undefined ? { declaredCode } : {}),
+      ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
+    });
+    return;
+  }
+  const refusal = declaredRefusalMessage(err);
+  if (refusal !== undefined) {
+    sendError(res, thrown.status, thrown.code, refusal);
+    return;
+  }
+  sendServerFault(res, thrown.status, thrown.code, 'Internal error', err, { method: 'POST', path });
+}
+
+/**
  * [#24548] Whether a local adapter read failed because no file is stored under
  * the key: Node's `ENOENT`, which `LocalStorageAdapter.download` passes through
  * unchanged. Nothing else — a key naming a directory, an unreadable root, any
@@ -1999,6 +2275,83 @@ async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Pro
  */
 function isMissingLocalFile(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'ENOENT';
+}
+
+/**
+ * The signed-URL lifetime, in seconds, of a download a record's rule governs
+ * ({@link StorageRoutesOptions.downloadTtl}'s default): five minutes.
+ */
+export const DEFAULT_DOWNLOAD_TTL = 300;
+
+/** [#30892] Is `err` the one refusal an unusable upload link gets? */
+function isUnusableUploadLink(err: unknown): boolean {
+  const e = err as { code?: unknown; status?: unknown } | null;
+  return !!e && e.code === UPLOAD_LINK_UNUSABLE_CODE && e.status === UPLOAD_LINK_UNUSABLE_STATUS;
+}
+
+/**
+ * [#30892] Answer a refusal the upload-link service or a write it ran threw,
+ * with the status and code it declared (ADR-0112), and say whether it did.
+ * A 4xx is the caller's to read; a 5xx is relayed only for the two declared
+ * outages (the authorization store's, and a `503` `SERVICE_UNAVAILABLE`),
+ * so a fault's own text never reaches the link's holder — every other throw
+ * is the route's `500`.
+ */
+function relayUploadLinkRefusal(res: IHttpResponse, err: unknown): boolean {
+  if (isAuthzStoreUnavailableError(err)) {
+    sendError(res, err.status, err.code, err.message);
+    return true;
+  }
+  const e = err as { code?: unknown; status?: unknown; message?: unknown } | null;
+  if (!e || typeof e.code !== 'string' || typeof e.status !== 'number') return false;
+  const relayable =
+    (e.status >= 400 && e.status < 500) || (e.status === 503 && e.code === 'SERVICE_UNAVAILABLE');
+  if (!relayable) return false;
+  sendError(res, e.status, e.code as ErrorCode, typeof e.message === 'string' ? e.message : 'Upload refused');
+  return true;
+}
+
+/** The longest file name an upload link stores, in characters. */
+const UPLOAD_LINK_FILENAME_MAX = 255;
+
+/**
+ * [#30892] The upload's file name, from the page's `x-file-name` header
+ * (URI-encoded so any name survives a header): the last path segment, with
+ * control characters dropped and the length bounded. `upload` when none is
+ * given or none survives.
+ */
+function uploadLinkFilename(raw: string | string[] | undefined): string {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  let name = typeof first === 'string' ? first : '';
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    // Not URI-encoded: taken as sent.
+  }
+  name = name.split(/[\\/]/).pop() ?? '';
+  name = name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, UPLOAD_LINK_FILENAME_MAX);
+  return name && name !== '.' && name !== '..' ? name : 'upload';
+}
+
+/** [#30892] The upload's media type, from `content-type` without parameters; anything that is not one is bytes. */
+function uploadLinkMimeType(raw: string | string[] | undefined): string {
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  const type = typeof first === 'string' ? first.split(';')[0].trim().toLowerCase() : '';
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(type) ? type : 'application/octet-stream';
+}
+
+/**
+ * A download URL for `file`, valid for `ttl` seconds: the adapter's presigned
+ * download where it has one, else its signed URL, else `null` (the adapter
+ * can issue none). Package-internal (not re-exported from `index.ts`); the two
+ * download doors mint through it, and [#30892] so does the caller-scoped read
+ * of a record's file, so all three hand out the same link.
+ */
+export async function mintDownloadUrl(storage: IStorageService, file: FileRecord, ttl: number): Promise<string | null> {
+  const downloadOpts = { filename: file.name, contentType: file.mime_type };
+  if (storage.getPresignedDownload) return (await storage.getPresignedDownload(file.key, ttl, downloadOpts)).downloadUrl;
+  if (storage.getSignedUrl) return storage.getSignedUrl(file.key, ttl, downloadOpts);
+  return null;
 }
 
 /**

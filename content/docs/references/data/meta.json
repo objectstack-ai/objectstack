@@ -30,12 +30,15 @@
     "driver-common",
     "driver-memory",
     "driver-mongo",
+    "driver-mssql",
     "driver-mysql",
+    "driver-oracle",
     "driver-postgres",
     "driver-sqlite",
     "driver-turso",
     "field-value",
     "picklist",
+    "recycle-bin",
     "seed-file"
   ]
 }

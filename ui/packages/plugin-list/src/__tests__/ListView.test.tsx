@@ -465,7 +465,7 @@ describe('ListView', () => {
   });
 
   it('surfaces export failures instead of swallowing them', async () => {
-    const exportDownload = vi.fn().mockRejectedValue(new Error('Permission denied'));
+    const exportDownload = vi.fn().mockRejectedValue(Object.assign(new Error('Export timed out'), { status: 504 }));
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:export');
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     const ds: any = {
@@ -495,7 +495,43 @@ describe('ListView', () => {
     fireEvent.click(screen.getByRole('button', { name: /export/i }));
     fireEvent.click(await screen.findByRole('button', { name: /export as csv/i }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Permission denied');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Export timed out');
+  });
+
+  it('an export refusal reads in the Console\'s language, not as the route\'s English sentence (objectstack#30069)', async () => {
+    const exportDownload = vi.fn().mockRejectedValue(Object.assign(new Error("Export is not permitted on object 'contacts' for this user"), { code: 'EXPORT_NOT_PERMITTED', status: 403 }));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:export');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const ds: any = {
+      find: vi.fn().mockResolvedValue([]),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      exportDownload,
+    };
+
+    const schema: ListViewSchema = {
+      type: 'list-view',
+      compactToolbar: false,
+      objectName: 'contacts',
+      viewType: 'grid',
+      fields: ['name', 'email'],
+      exportOptions: { formats: ['csv', 'xlsx'] },
+    };
+
+    render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView schema={schema} dataSource={ds} />
+      </SchemaRendererProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /export/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /export as csv/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe('You don\u2019t have permission to export these records. Contact your administrator if you think you should be able to.');
+    expect(alert.textContent).not.toContain('Export is not permitted');
   });
 
   it('does not call exportDownload when operations.export is false (programmatic guard)', () => {
@@ -2834,7 +2870,8 @@ describe('ListView — gantt view whose ViewData is a retired api block', () => 
   //
   // The rows prop is asserted against the props-recording STUB below: the real
   // `object-gantt` renderer forwards no host prop but `schema` (objectui#7222;
-  // pinned in `plugin-gantt/src/ObjectGantt.hostDataProp-7210.test.tsx`).
+  // pinned in the `ObjectGantt.hostDataProp-7210` block of
+  // `plugin-gantt/src/ObjectGantt.harness.test.tsx`).
   let prevObjectGantt: ReturnType<typeof ComponentRegistry.get>;
   let ganttCalls: any[];
 

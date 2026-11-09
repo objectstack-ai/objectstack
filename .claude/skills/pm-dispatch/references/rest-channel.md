@@ -13,7 +13,8 @@
 - ⛔ 它、赋值与 `cd … &&` 前缀都落分类器;多仓云会话首调单独裸 `cd /home/user/objectstack`。
 - 活着 = 工作流文件在 `main` 且 Actions 状态 `active`;维护者在 Actions UI 停用即整队回 `direct`。
 - dispatch 带会话令牌发往 objectstack;run 在 runner 上以逐次铸造、窄到目标仓的 App 令牌执行。
-- 闭合 op 表住 `fleet-write/ops.mjs`;读侧不走中继;批量恒走逐 op 工具,直调 `dispatch.mjs` 仅落地。
+- 闭合 op 表住 `fleet-write/ops.mjs`;读侧不走中继;批量恒走逐 op 工具。
+- 直调 `dispatch.mjs` 仅落地,与 PR 正文单笔 `issue_patch`(`seat-post-protocol.md` 正文行)。
 - 正文超 60,000 字节的那一笔 `post-stamped` 写走 `direct` 并印一行,身份是席位自己的用户。
 - run 失败记 5(post-stamped 4,close-cards 有步落地或读不回 4),UNCONFIRMED 6:只读,⛔ 永不重试。
 
@@ -39,7 +40,6 @@
 
 - ✓ 评论 `POST .../issues/{n}/comments`;改评论 `PATCH .../issues/comments/{id}`。
 - ✓ 标签加法 `POST .../issues/{n}/labels`,定向删 `DELETE .../issues/{n}/labels/{name}`;加法优先。
-- ⛔ `post-stamped`/`label-write` 永不接进管道再 `&&`:拒收读成 0;看尾先落文件或 `set -o pipefail`。
 - ⛔ 永不 MCP `issue_write`(锁 1 已拒);会话分类器拒改动 ⇒ 无通道,交有通道席位立卡。
 - ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
 - ✓ 该 `PATCH` 带 `state` 关卡/重开,`state_reason` 交付 `completed`、撤单 `not_planned`,走裸 REST。
@@ -47,8 +47,8 @@
 - ✓ 请审 `POST .../pulls/{n}/requested_reviewers`(Tier H 归中继 op)· 开 PR `POST .../pulls` 带 `draft=true`。
 - ✓ `origin/main` 合进 PR head:中继 op `pr_update_branch`(`pull` + 40 位 `expected_head_sha`),真合并提交。
 - 挂子卡走中继 op `sub_issue_add`/`sub_issue_remove`(`issue` 父号,`sub_issue` 子号),回读父列表。
-- 公告经中继 `advisory_create`(首选)等四操作,规则住 `security-findings.md`;发布归维护者。
-- 读公告经中继 `advisory_read`:席位进程一次性密钥,密文回传;`--reveal` 才印明文到 stdout。
+- 公告经中继 `advisory_create` 等操作与 `advisory_read`,发布亦经中继;规则住 `security-findings.md`。
+- `advisory_report` 403 复测不复现:按 `security-findings.md` 两因读,隔日重试一次,⛔ 不换账号。
 - ✓ 落地经中继 `node scripts/pm/fleet-write/dispatch.mjs --repo O/N --actions-file F`;`--via dispatch` 同载。
 - ✓ 启动 run 走 op `workflow_dispatch`:解锁物是白名单 run 才启;入表只经 workflow 自己的 PR。
 - F = `[{"op":"workflow_dispatch","workflow":"release.yml","ref":"main","inputs":{"refresh_version_pr":true}}]`。

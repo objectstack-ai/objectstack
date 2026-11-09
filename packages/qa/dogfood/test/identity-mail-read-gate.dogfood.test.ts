@@ -54,7 +54,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { VerifyStack } from '@objectstack/verify';
 import { ceremoniedFixture } from './upgrade-harness/ceremony.js';
 import { readFixtureAsOf } from './upgrade-harness/fixture-as-of.js';
@@ -298,14 +298,20 @@ describe('[#24625] identity-mail bodies over a ceremonied 18.0 database: princip
 
     beforeAll(async () => {
       // HEAD's own identity mail, through the real door: a password reset.
+      // The door sends it after the response, so its row is the one that
+      // appears after the 200 — never the fixture's own 18.0 reset row.
+      const priorIdentity = new Set((await ql.find('sys_identity_email', { where: {}, limit: 100, ...SYS })).map((r: Row) => r.id));
       const requested = await stack.api('/auth/request-password-reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: FIXTURE_PEOPLE.memberB.email, redirectTo: '/reset-password' }),
       });
       expect(requested.status).toBe(200);
-      [identityRow] = await ql.find('sys_identity_email', { where: {}, orderBy: [{ field: 'created_at', order: 'desc' }], limit: 1, ...SYS });
-      expect(identityRow, 'HEAD wrote the reset to the identity log').toBeTruthy();
+      await vi.waitFor(async () => {
+        const landed = (await ql.find('sys_identity_email', { where: {}, limit: 100, ...SYS })).find((r: Row) => !priorIdentity.has(r.id));
+        expect(landed, 'HEAD wrote the reset to the identity log').toBeTruthy();
+        identityRow = landed!;
+      });
       identitySpan = credentialSpanOf(identityRow);
 
       // HEAD's own tenant mail: an organization invitation.

@@ -6,7 +6,7 @@
 //
 // `seed-approval-demo.ts` has provisioned two persona ROWS since #3411/#3409:
 // Mei Phone (the submitter who holds no approver position) and Ada Auditor (the
-// only holder of the `auditor` position, which backs the `finance` group of the
+// only holder of the `showcase_auditor` position, which backs the `finance` group of the
 // per-group 会签 demo). Both were display/routing identities only — enough to
 // resolve a notify recipient, enough to route an approval, and not enough to
 // open a second session. Every checklist item that needs TWO acting identities
@@ -167,7 +167,7 @@ describe('showcase demo personas are real logins (#9308 fixture 1)', () => {
     }
   });
 
-  it('the two sessions are the DISTINCT identities the 会签 demo needs: Ada holds auditor, Mei holds no approver position', async () => {
+  it('the two sessions are the DISTINCT identities the 会签 demo needs: Ada holds showcase_auditor, Mei holds no approver position', async () => {
     const positionsOf = async (userId: string) =>
       rowsOf(await ql.find('sys_user_position', { where: { user_id: userId }, context: SYS }))
         .map((r) => String(r.position))
@@ -176,7 +176,7 @@ describe('showcase demo personas are real logins (#9308 fixture 1)', () => {
     expect(
       await positionsOf(AUDITOR_DEMO_USER.id),
       'Ada backs the finance group of the per-group demo and nothing else',
-    ).toEqual(['auditor']);
+    ).toEqual(['showcase_auditor']);
     expect(
       await positionsOf(PHONE_DEMO_USER.id),
       'Mei is a clean submitter — never one of her own approvers',
@@ -184,6 +184,6 @@ describe('showcase demo personas are real logins (#9308 fixture 1)', () => {
     expect(
       await positionsOf(adminId),
       'the admin holds the OTHER group, so the two groups resolve to two different people',
-    ).toContain('manager');
+    ).toContain('showcase_manager');
   });
 });

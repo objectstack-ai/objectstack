@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import { UploadProvider } from '@object-ui/providers';
+import { UploadProvider } from './UploadProvider';
 import { formatDate, formatDateTime } from '@object-ui/core';
 import { GridField, LineItemsField, sumColumn, lookupAutofillPatch } from './GridField';
 

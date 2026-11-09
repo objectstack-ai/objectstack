@@ -15,6 +15,11 @@ export const Account = ObjectSchema.create({
   description: 'A company that the org sells to or supports.',
   // What the record page shows at a glance, under the title.
   highlightFields: ['industry', 'annual_revenue', 'website'],
+  // Field history on the record page: the timeline shows each field change
+  // with its before and after values, and offers the Changes filter. The audit
+  // log records every change either way; this opt-in flag is what makes the
+  // record page show it.
+  enable: { trackHistory: true },
 
   fields: {
     name: Field.text({

@@ -379,7 +379,50 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 103 once objectstack-ai/objectstack#28789 retired
     // `packagedAutomation.cloneCreated` with the Packaged automation flows page
     // it named a clone on — one interpolated span fewer.
-    expect(okSpans, 'correctly paired spans').toBe(103);
+    // 102 once the Connect an Agent page dropped its VS Code card and with it
+    // `connectAgent.vscode.body`, which quoted the „MCP: Add Server“ command.
+    // 103 once objectstack-ai/objectstack#30199 added
+    // `marketplace.suggestedBindings.reopenedToast`, the toast after a dismissed
+    // suggestion is re-opened, which quotes the set („{{set}}“) — one
+    // interpolated span, runtime data.
+    // 104 once objectstack-ai/objectstack#30295 added
+    // `console.organizationMfa.needsTwoFactor`, the organization form's notice
+    // that names the Setup switch to turn on („Mehrstufige Authentifizierung
+    // verlangen“) — one literal span, a UI label.
+    // 105 once objectstack-ai/objectstack#30323 added
+    // `marketplace.detail.sampleDataBannerTitle`, the banner that names the
+    // installed app holding sample data („{{name}}“) — one interpolated span,
+    // runtime data.
+    // 107 once objectstack-ai/objectstack#30206 added the first-run checklist:
+    // `console.firstRunChecklist.organizationName.todo` quotes the name the
+    // organization still carries („{{name}}“) — one interpolated span, runtime
+    // data — and `.timezone.todo` quotes the word formulas read („heute“) —
+    // one literal span.
+    // 108 once objectstack-ai/objectstack#30894 added
+    // `connectAgent.access.revokeTitle`, the confirm that names the API key
+    // being revoked („{{name}}“) — one interpolated span, runtime data.
+    // 109 once objectstack-ai/objectstack#31062 added
+    // `fields.preferenceOption.useTyped`, the picker row that commits the typed
+    // topic or channel („{{value}}“ verwenden) — one interpolated span, runtime
+    // data.
+    // 110 once objectstack-ai/objectstack#30898 added
+    // `connectAgent.capabilities.connectedKey`, the Connect line that names the
+    // API key a connection runs on („{{name}}“) — one interpolated span,
+    // runtime data. 109 once the organization form's notices over the retired
+    // `require_mfa` column were removed with
+    // `console.organizationMfa.needsTwoFactor` — one literal span fewer.
+    // 110 once objectstack-ai/objectstack#28104 added `form.aiDraftNotice`,
+    // the notice above a form an AI chat draft filled, which quotes the
+    // field mark („KI-Vorschlag“) — one literal span.
+    // 111 once objectstack-ai/objectstack#30239 added
+    // `objectActions.restoredNamed`, the toast after a recycle-bin Undo that
+    // names the restored record („{{name}}“) — one interpolated span, runtime
+    // data.
+    // 114 once objectstack-ai/objectstack#31893 (2026-11-09) added
+    // `list.loadErrorUnknownColumnMessage` and `list.loadErrorUnknownFieldMessage`,
+    // the rejected list panel naming a refused column („{{column}}“) and field
+    // („{{field}}“, twice) — three interpolated spans, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(114);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -457,8 +500,31 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 104 / 104 / 0 after objectstack-ai/objectstack#28382 added
     // `form.requiredForAction`, one more matched pair. 103 / 103 / 0 after
     // objectstack-ai/objectstack#28789 retired `packagedAutomation.cloneCreated`,
-    // one matched pair fewer.
-    expect({ open, close, rdq }).toEqual({ open: 103, close: 103, rdq: 0 });
+    // one matched pair fewer. 102 / 102 / 0 after the Connect an Agent page
+    // dropped `connectAgent.vscode.body`, one matched pair fewer. 103 / 103 / 0
+    // after objectstack-ai/objectstack#30199 added
+    // `marketplace.suggestedBindings.reopenedToast`, one more matched pair.
+    // 104 / 104 / 0 after objectstack-ai/objectstack#30295 added
+    // `console.organizationMfa.needsTwoFactor`, one more matched pair.
+    // 105 / 105 / 0 after objectstack-ai/objectstack#30323 added
+    // `marketplace.detail.sampleDataBannerTitle`, one more matched pair.
+    // 107 / 107 / 0 after objectstack-ai/objectstack#30206 added
+    // `console.firstRunChecklist.organizationName.todo` and `.timezone.todo`,
+    // one matched pair each. 108 / 108 / 0 after objectstack-ai/objectstack#30894
+    // added `connectAgent.access.revokeTitle`, one more matched pair. 109 / 109 / 0
+    // after objectstack-ai/objectstack#31062 added
+    // `fields.preferenceOption.useTyped`, one more matched pair.
+    // 110 / 110 / 0 after objectstack-ai/objectstack#30898 added
+    // `connectAgent.capabilities.connectedKey`, one more matched pair. 109 / 109
+    // / 0 after `console.organizationMfa.needsTwoFactor` was removed with the
+    // organization form's notices over the retired `require_mfa` column, one
+    // matched pair fewer. 110 / 110 / 0 after objectstack-ai/objectstack#28104
+    // added `form.aiDraftNotice`, one more matched pair. 111 / 111 / 0 after
+    // objectstack-ai/objectstack#30239 added `objectActions.restoredNamed`, one
+    // more matched pair. 114 / 114 / 0 after objectstack-ai/objectstack#31893
+    // (2026-11-09) added `list.loadErrorUnknownColumnMessage` and
+    // `list.loadErrorUnknownFieldMessage`, three more matched pairs.
+    expect({ open, close, rdq }).toEqual({ open: 114, close: 114, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

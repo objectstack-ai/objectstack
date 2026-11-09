@@ -141,6 +141,12 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // with the `branding` namespace, which is offered only where no
       // organization wall stands (#24766) — so the entry lives and dies with it.
       { id: 'nav_settings_auth', type: 'url', label: 'Authentication', url: '/apps/setup/system/settings/auth', icon: 'lock-keyhole', requiredPermissions: ['manage_platform_settings'] },
+      // [ADR-0069 TL;DR 6] An organization's own sign-in restrictions, held to
+      // the deployment's Authentication values (the `access_policy` namespace,
+      // scope `tenant`). No `requiredPermissions`: like Localization, the
+      // manifest's `setup.access` read is the app's base permission, and an
+      // organization administrator writes it (`setup.write`).
+      { id: 'nav_settings_access_policy', type: 'url', label: 'Access policy', url: '/apps/setup/system/settings/access_policy', icon: 'shield-check' },
       // Every entry below opening a settings page carries that page's hub
       // title, and every hub page has one (#27854): the sidebar and the
       // "All Settings" hub are two lists of one set of pages. Pinned against
@@ -154,7 +160,12 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `lifecycle` is `@objectstack/objectql`'s manifest (ADR-0057), offered
       // wherever a settings service is mounted, like the entries above.
       { id: 'nav_settings_lifecycle', type: 'url', label: 'Data Lifecycle', url: '/apps/setup/system/settings/lifecycle', icon: 'timer', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_feature_flags', type: 'url', label: 'Feature Flags', url: '/apps/setup/system/settings/feature_flags', icon: 'flag' },
+      // The recycle bin (ADR-0148, objectstack#30239): each object's deleted
+      // records, to restore one or empty the bin. Beside the `sys_recycle_bin`
+      // store this package registers. No `requiredPermissions`: the grant is
+      // per object (`manageRecycleBin`), and the page lists only the objects
+      // whose bin the caller manages.
+      { id: 'nav_recycle_bin', type: 'component', label: 'Recycle Bin', componentRef: 'data:recycle-bin', icon: 'trash-2' },
     ],
   },
   {

@@ -30,7 +30,9 @@
  * door, the REAL install primitive and the REAL uninstall run against it; its
  * write verbs route through the producer's own dispatch predicates.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ImportUnmanagedPackageResponseSchema } from '@objectstack/spec/api';
 import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, listMetadataTypeSchemaTypes } from '@objectstack/spec/kernel';
@@ -94,12 +96,16 @@ function makeEngine(opts: { artifacts?: Array<{ type: string; name: string; pack
             assertEngineFindOnePredicate(t, q);
             return table(t).find((r) => matches(r, q.where)) ?? null;
         },
-        async insert(t: string, data: Row) {
-            writes.push({ op: 'insert', table: t });
-            nextId += 1;
-            const row = { id: `r_${nextId}`, ...data };
-            table(t).push(row);
-            return { ...row };
+        // One record, or the batch the seed loader inserts a dataset in.
+        async insert(t: string, data: Row | Row[]): Promise<Row | Row[]> {
+            const one = (record: Row) => {
+                writes.push({ op: 'insert', table: t });
+                nextId += 1;
+                const row = { id: `r_${nextId}`, ...record };
+                table(t).push(row);
+                return { ...row };
+            };
+            return Array.isArray(data) ? data.map(one) : one(data);
         },
         async update(t: string, data: Row, q?: Record<string, unknown>) {
             assertEngineUpdateDispatch(data, q);
@@ -874,5 +880,518 @@ describe('importUnmanagedPackage — the verb', () => {
         expect(table('sys_metadata').filter((r) => r.package_id === 'com.example.crm-copy')).toEqual([]);
         // The object the copy created had its table made, then dropped by the rollback.
         expect(ddl).toEqual(expect.arrayContaining(['sync crm_lead', 'drop crm_lead']));
+    });
+});
+
+/**
+ * [#30794] Rename-on-install: a `targetNamespace` copies the package under a
+ * namespace of its own, through the duplicate's own rename engine
+ * (`package-namespace-rename.ts`), after the view containers are expanded.
+ */
+function renamableBody(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    return crmBody({
+        objects: [
+            {
+                name: 'crm_account',
+                label: 'Account',
+                sharingModel: 'private',
+                description: 'Every crm_lead belongs to one.',
+                fields: { title: { type: 'text', label: 'Title' } },
+            },
+            {
+                name: 'crm_lead',
+                label: 'Lead',
+                sharingModel: 'private',
+                fields: {
+                    title: { type: 'text', label: 'Title' },
+                    account: { type: 'lookup', label: 'Account', reference: 'crm_account' },
+                },
+            },
+        ],
+        views: [
+            {
+                name: 'crm_lead_open',
+                label: 'Open leads',
+                object: 'crm_lead',
+                viewKind: 'list',
+                columns: [{ field: 'title', label: 'Title' }],
+            },
+            // A container: named by the object it binds, expanding into `crm_account.<key>` names.
+            { object: 'crm_account', list: { label: 'All', columns: [{ field: 'title' }] } },
+        ],
+        translations: [{ 'zh-CN': { objects: { crm_lead: { label: '线索' }, crm_account: { label: '客户' } } } }],
+        ...extra,
+    });
+}
+
+describe('planUnmanagedImport — `targetNamespace`, the rename-on-install (#30794)', () => {
+    it('renames every object, view item, container and its expansion, and translation into the target namespace', () => {
+        const p = plan(renamableBody(), { targetNamespace: 'acme' });
+        expect(p.namespace).toBe('acme');
+        expect(p.sourceNamespace).toBe('crm');
+        expect(p.baseManifest).toMatchObject({ namespace: 'acme' });
+        expect(p.items.map((i) => `${i.type}/${i.sourceName} -> ${i.name}`)).toEqual([
+            'object/crm_account -> acme_account',
+            'object/crm_lead -> acme_lead',
+            'view/crm_lead_open -> acme_lead_open',
+            'view/crm_account -> acme_account',
+            'translation/crm_zh_cn -> acme_zh_cn',
+        ]);
+        // The translation item is named for the target namespace, as an import into it names it.
+        expect(p.items.find((i) => i.type === 'translation')!.name).toBe(unmanagedTranslationItemName('acme', 'zh-CN'));
+        // The container's expansion takes its object's copy name: what the save door expands the renamed container into.
+        const container = p.items.find((i) => i.type === 'view' && i.name === 'acme_account')!;
+        expect(container.expands.length).toBeGreaterThan(0);
+        expect(container.expands.every((name) => name.startsWith('acme_account.'))).toBe(true);
+        // Bodies are rewritten by the verb after conversion; the plan carries the engine for it.
+        expect(p.rename?.objectRenames).toEqual(new Map([['crm_account', 'acme_account'], ['crm_lead', 'acme_lead']]));
+    });
+
+    it('absent, the copy keeps the source namespace exactly as before; the source\'s own namespace named is no rename', () => {
+        for (const extra of [{}, { targetNamespace: 'crm' }]) {
+            const p = plan(renamableBody(), extra);
+            expect(p.namespace).toBe('crm');
+            expect(p.sourceNamespace).toBe('crm');
+            expect(p).not.toHaveProperty('rename');
+            expect(p.items.every((i) => i.sourceName === undefined)).toBe(true);
+            expect(p.items.map((i) => i.name)).toEqual(['crm_account', 'crm_lead', 'crm_lead_open', 'crm_account', 'crm_zh_cn']);
+        }
+    });
+
+    it('refuses a value the namespace declaration refuses — INVALID_REQUEST / 400, naming `targetNamespace`, never sanitised', () => {
+        for (const targetNamespace of ['Acme', 'a', 'my-ns', '1acme', 'acme_namespace_too_long']) {
+            const err = (() => { try { plan(renamableBody(), { targetNamespace }); } catch (e) { return e as any; } })();
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+            expect(err.details).toEqual({ targetNamespace });
+            expect(err.message).toContain(`Invalid package namespace '${targetNamespace}' on \`targetNamespace\``);
+        }
+    });
+
+    it('refuses a platform-reserved namespace — `base`, `system`, `sys` — INVALID_REQUEST / 400, naming `targetNamespace`', () => {
+        for (const targetNamespace of ['base', 'system', 'sys']) {
+            const err = (() => { try { plan(renamableBody(), { targetNamespace }); } catch (e) { return e as any; } })();
+            const envelope = resolveThrownHttpError(err);
+            expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+            expect(err.details).toEqual({ targetNamespace });
+            expect(err.message).toContain(`\`targetNamespace\` '${targetNamespace}' is a platform-reserved namespace`);
+        }
+    });
+
+    it('refuses an object whose copy name another object\'s copy claims — INVALID_REQUEST / 400, naming it', () => {
+        // `lead` lacks the prefix, so its copy is `acme_lead`, which `crm_lead`'s copy already takes.
+        const body = renamableBody();
+        (body.objects as unknown[]).push({ name: 'lead', label: 'Bare', sharingModel: 'private', fields: {} });
+        const err = (() => { try { plan(body, { targetNamespace: 'acme' }); } catch (e) { return e as any; } })();
+        const envelope = resolveThrownHttpError(err);
+        expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.targetNamespace).toBe('acme');
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual(['object/lead']);
+        expect(err.details.refused[0].reason).toContain("'acme_lead' is already the copy name of object 'crm_lead'");
+        expect(err.details.refused[0].reason).toContain('then install again');
+    });
+
+    it('refuses an object whose copy name exceeds the storage identifier limit of its table — naming it', () => {
+        // 59 characters under `crm`; 75 under the 19-character `acme_long_namespace`.
+        const long = `crm_${'x'.repeat(55)}`;
+        const body = renamableBody();
+        (body.objects as unknown[]).push({ name: long, label: 'Long', sharingModel: 'private', fields: {} });
+        expect(plan(body).items.some((i) => i.name === long)).toBe(true);
+        const err = (() => { try { plan(body, { targetNamespace: 'acme_long_namespace' }); } catch (e) { return e as any; } })();
+        const envelope = resolveThrownHttpError(err);
+        expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual([`object/${long}`]);
+        expect(err.details.refused[0].reason).toContain('63-character storage identifier limit');
+    });
+
+    it('refuses an item whose copy name exceeds the column that stores an item name — naming it', () => {
+        const key = 'k'.repeat(240);
+        const body = renamableBody({
+            views: [{ name: `crm_lead.${key}`, label: 'Long', object: 'crm_lead', viewKind: 'list', columns: [{ field: 'title' }] }],
+        });
+        expect(`crm_lead.${key}`.length).toBeLessThanOrEqual(255);
+        const err = (() => { try { plan(body, { targetNamespace: 'acme_long_namespace' }); } catch (e) { return e as any; } })();
+        const envelope = resolveThrownHttpError(err);
+        expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual([`view/crm_lead.${key}`]);
+        expect(err.details.refused[0].reason).toContain('255-character limit of the column that stores an item name');
+    });
+
+    it('refuses a container whose expanded copy name exceeds that column — naming the expanded view', () => {
+        const key = 'k'.repeat(240);
+        const body = renamableBody({
+            views: [{ object: 'crm_lead', listViews: { [key]: { label: 'Long', columns: [{ field: 'title' }] } } }],
+        });
+        const container = plan(body).items.find((i) => i.type === 'view')!;
+        expect(container.expands).toContain(`crm_lead.${key}`);
+        const err = (() => { try { plan(body, { targetNamespace: 'acme_long_namespace' }); } catch (e) { return e as any; } })();
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual([`view/crm_lead.${key}`]);
+    });
+});
+
+describe('importUnmanagedPackage — `targetNamespace` (#30794)', () => {
+    it('copies under the target namespace: every name, every reference, the base, and the source namespace on the answer', async () => {
+        const { protocol, table, packages } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' });
+
+        expect(ImportUnmanagedPackageResponseSchema.parse(result)).toEqual(result);
+        expect(result).toMatchObject({ namespace: 'acme', sourceNamespace: 'crm', targetPackageId: 'com.example.crm-copy' });
+        const active = table('sys_metadata').filter((r) => r.state === 'active');
+        expect(active.map((r) => `${r.type}/${r.name}@${r.package_id}`).sort()).toEqual([
+            'object/acme_account@com.example.crm-copy',
+            'object/acme_lead@com.example.crm-copy',
+            'translation/acme_zh_cn@com.example.crm-copy',
+            'view/acme_account@com.example.crm-copy',
+            'view/acme_lead_open@com.example.crm-copy',
+        ]);
+        const body = (type: string, name: string) => JSON.parse(active.find((r) => r.type === type && r.name === name)!.metadata);
+        expect(body('object', 'acme_lead').fields.account.reference).toBe('acme_account');
+        // Free text names the renamed object as a whole identifier.
+        expect(body('object', 'acme_account').description).toBe('Every acme_lead belongs to one.');
+        expect(body('view', 'acme_lead_open')).toMatchObject({ name: 'acme_lead_open', object: 'acme_lead' });
+        // The translation's object keys follow the renamed objects.
+        expect(body('translation', 'acme_zh_cn')).toMatchObject({
+            name: 'acme_zh_cn', locale: 'zh-CN', objects: { acme_lead: { label: '线索' }, acme_account: { label: '客户' } },
+        });
+        expect(packages.get('com.example.crm-copy')?.manifest).toMatchObject({ namespace: 'acme' });
+        // Nothing is left under a source name.
+        expect(active.some((r) => String(r.name).startsWith('crm_'))).toBe(false);
+    });
+
+    it('the copy kept under the source namespace answers no `sourceNamespace` — the answer\'s key set unchanged', async () => {
+        const { protocol } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({ manifest: renamableBody() });
+        expect(result.namespace).toBe('crm');
+        expect(result).not.toHaveProperty('sourceNamespace');
+    });
+
+    it('judges collisions on the RENAMED names: a row holding the copy name refuses (409); the source name does not', async () => {
+        const held = { id: 'held', type: 'object', organization_id: null, package_id: 'com.example.studio', state: 'active', metadata: '{}' };
+        {
+            const { protocol, table, packages } = makeProtocol();
+            table('sys_metadata').push({ ...held, name: 'acme_lead' });
+            const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' }));
+            expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(err.details.collisions).toEqual([
+                { type: 'object', name: 'acme_lead', heldBy: "an environment item of package 'com.example.studio'" },
+            ]);
+            expect(packages.size).toBe(0);
+        }
+        {
+            // CONTROL: the source's own name, held, is no collision of the renamed copy.
+            const { protocol, table } = makeProtocol();
+            table('sys_metadata').push({ ...held, name: 'crm_lead' });
+            const result = await protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' });
+            expect(result.copied).toContainEqual({ type: 'object', name: 'acme_lead' });
+        }
+    });
+
+    it('refuses an existing target base whose namespace differs from `targetNamespace` — 409, nothing written', async () => {
+        const { protocol, engine, writes } = makeProtocol();
+        engine.registry.installPackage({ id: 'com.example.mine', name: 'Mine', namespace: 'mine' }, 'code');
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: renamableBody(), targetPackageId: 'com.example.mine', targetNamespace: 'acme',
+        }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(err.details).toEqual({ targetPackageId: 'com.example.mine' });
+        expect(writes).toEqual([]);
+    });
+
+    it('refuses a target namespace another package owns — 409, naming `targetNamespace`, nothing written', async () => {
+        const { protocol, writes, packages } = makeProtocol({ owners: { acme: ['com.example.acme'] } });
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(err.details).toEqual({ namespace: 'acme', owners: ['com.example.acme'] });
+        expect(err.message).toContain('named by `targetNamespace`');
+        expect(packages.size).toBe(0);
+        expect(writes).toEqual([]);
+    });
+
+    it('admits the copy beside the package that owns the SOURCE namespace — a managed install of it included', async () => {
+        const { protocol } = makeProtocol({ owners: { crm: ['com.example.crm'] } });
+        const result = await protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 'acme' });
+        expect(result).toMatchObject({ namespace: 'acme', sourceNamespace: 'crm' });
+    });
+
+    it('refuses a reference collision the converted body meets — INVALID_REQUEST / 400, before any write', async () => {
+        const { protocol, writes, packages } = makeProtocol();
+        // The source set already grants on `acme_lead` (an object outside the package), and `crm_lead` moves onto it.
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: renamableBody({
+                permissions: [{ name: 'crm_ops', label: 'Ops', objects: { crm_lead: { allowRead: true }, acme_lead: { allowRead: true } } }],
+            }),
+            targetNamespace: 'acme',
+        }));
+        const envelope = resolveThrownHttpError(err);
+        expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual(['permission/crm_ops']);
+        expect(err.details.refused[0].reason).toContain("its `objects` key 'crm_lead' follows the copied object to 'acme_lead'");
+        expect(writes).toEqual([]);
+        expect(packages.size).toBe(0);
+    });
+
+    it('refuses a `targetNamespace` its published declaration refuses (not a string) — 400, nothing written', async () => {
+        const { protocol, writes } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 7 }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'VALIDATION_ERROR']);
+        expect(writes).toEqual([]);
+    });
+});
+
+describe('the rename parity — one package, one `targetNamespace`, two doors, identical items (#30794)', () => {
+    /** Every active row of one package: `type/name` → its stored body. */
+    const itemsOf = (table: (name: string) => Row[], packageId: string) => Object.fromEntries(
+        table('sys_metadata')
+            .filter((r) => r.package_id === packageId && r.state === 'active')
+            .map((r) => [`${r.type}/${r.name}`, typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata])
+            .sort(([a], [b]) => String(a).localeCompare(String(b))),
+    );
+
+    it('duplicatePackage of the package\'s base and the unmanaged import into the same namespace store the same items', async () => {
+        const body = renamableBody({
+            actions: [{ name: 'crm_new_lead', label: 'New lead', type: 'form', objectName: 'crm_lead', target: 'crm_lead.entry' }],
+        });
+
+        // Door 1: the package as a base (an unmanaged copy keeping its names), then duplicated into `acme`.
+        const viaDuplicate = makeProtocol();
+        await viaDuplicate.protocol.importUnmanagedPackage({ manifest: body, targetPackageId: 'com.example.crm-base' });
+        const duplicated = await viaDuplicate.protocol.duplicatePackage({
+            sourcePackageId: 'com.example.crm-base', targetPackageId: 'com.example.acme', targetNamespace: 'acme',
+        });
+        expect(duplicated.failed).toEqual([]);
+
+        // Door 2: the same package imported straight into `acme`.
+        const viaImport = makeProtocol();
+        await viaImport.protocol.importUnmanagedPackage({ manifest: body, targetPackageId: 'com.example.acme', targetNamespace: 'acme' });
+
+        const duplicatedItems = itemsOf(viaDuplicate.table, 'com.example.acme');
+        const importedItems = itemsOf(viaImport.table, 'com.example.acme');
+        expect(Object.keys(importedItems)).toEqual([
+            'action/acme_new_lead',
+            'object/acme_account',
+            'object/acme_lead',
+            'translation/acme_zh_cn',
+            'view/acme_account',
+            'view/acme_lead_open',
+        ]);
+        expect(importedItems).toEqual(duplicatedItems);
+        expect(viaImport.packages.get('com.example.acme')?.manifest.namespace)
+            .toBe(viaDuplicate.packages.get('com.example.acme')?.manifest.namespace);
+    });
+});
+
+describe('the sample data, copied when the door asks — the seed receipt (#30808)', () => {
+    /** Two datasets in load order: the lead names its account by the account's natural key. */
+    const seededBody = (extra: Record<string, unknown> = {}) => renamableBody({
+        data: [
+            { object: 'crm_account', externalId: 'title', records: [{ title: 'Acme' }, { title: 'crm_lead' }] },
+            { object: 'crm_lead', externalId: 'title', records: [{ title: 'First', account: 'Acme' }] },
+        ],
+        ...extra,
+    });
+    const seedRows = (table: (name: string) => Row[]) => table('sys_metadata')
+        .filter((r) => r.type === 'seed' && r.state === 'active')
+        .map((r) => ({ name: r.name, package_id: r.package_id, body: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata }));
+
+    it('off by default: no `seed` item is planned or written, and the answer lists none', async () => {
+        expect(plan(seededBody()).items.filter((i) => i.type === 'seed')).toEqual([]);
+        const { protocol, table } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({ manifest: seededBody() });
+        expect(result.copied.filter((c: any) => c.type === 'seed')).toEqual([]);
+        expect(seedRows(table)).toEqual([]);
+    });
+
+    it('asked for: one `seed` item per dataset, after every other item, named `<object>_seed`, the records verbatim', () => {
+        const p = plan(seededBody(), { seedData: true });
+        const seeds = p.items.filter((i) => i.type === 'seed');
+        expect(seeds.map((i) => i.name)).toEqual(['crm_account_seed', 'crm_lead_seed']);
+        expect(p.items.slice(-2)).toEqual(seeds);
+        expect(seeds[0]!.body).toEqual({ object: 'crm_account', externalId: 'title', records: [{ title: 'Acme' }, { title: 'crm_lead' }] });
+    });
+
+    it('under a `targetNamespace`, only `object` follows the rename map: no record value is rewritten, `externalId` stays', () => {
+        const p = plan(seededBody(), { seedData: true, targetNamespace: 'acme' });
+        const seeds = p.items.filter((i) => i.type === 'seed');
+        expect(seeds.map((i) => [i.name, i.body.object])).toEqual([
+            ['acme_account_seed', 'acme_account'],
+            ['acme_lead_seed', 'acme_lead'],
+        ]);
+        // A record value spelled like a source object name is data, never a reference to rename.
+        expect(seeds[0]!.body.records).toEqual([{ title: 'Acme' }, { title: 'crm_lead' }]);
+        expect(seeds[0]!.body.externalId).toBe('title');
+    });
+
+    it('a dataset that carries `files` keeps its bytes in the receipt, verbatim — the managed loader is handed them as written', async () => {
+        const files = { 'fixtures/hello.txt': { contentType: 'text/plain', size: 2, sha256: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4', data: 'aGk=' } };
+        const { protocol, table } = makeProtocol();
+        await protocol.importUnmanagedPackage({
+            manifest: seededBody({ data: [{ object: 'crm_account', externalId: 'title', records: [{ title: 'Acme' }], files }] }),
+            seedData: true,
+        });
+        expect(seedRows(table).map((r) => [r.name, r.body.files])).toEqual([['crm_account_seed', files]]);
+    });
+
+    it('names a second dataset of one object `<object>_seed_2`', () => {
+        const p = plan(seededBody({
+            data: [
+                { object: 'crm_lead', externalId: 'title', locale: 'en', records: [{ title: 'First' }] },
+                { object: 'crm_lead', externalId: 'title', locale: 'zh-CN', records: [{ title: '首个' }] },
+            ],
+        }), { seedData: true });
+        expect(p.items.filter((i) => i.type === 'seed').map((i) => i.name)).toEqual(['crm_lead_seed', 'crm_lead_seed_2']);
+    });
+
+    it('refuses a dataset that names no object or carries no records — INVALID_REQUEST / 400, before anything is written', async () => {
+        const body = seededBody({ data: [{ object: 'crm_lead', records: 'none' }, { records: [] }] });
+        const planned = (() => { try { plan(body, { seedData: true }); } catch (e) { return e; } return undefined; })() as any;
+        expect([resolveThrownHttpError(planned).status, resolveThrownHttpError(planned).code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(planned.message).toContain('`data[0]` (object \'crm_lead\') has no `records` array');
+        expect(planned.message).toContain('`data[1]` names no `object`');
+        // Off, the same body is not this refusal's: `data` stays the door's.
+        expect(() => plan(body)).not.toThrow();
+        const { protocol, writes, packages } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: body, seedData: true }));
+        expect(resolveThrownHttpError(err).code).toBe('INVALID_REQUEST');
+        expect(writes).toEqual([]);
+        expect(packages.size).toBe(0);
+    });
+
+    it('refuses the copy whole when `seed` is not runtime-creatable — asked of the registry\'s own flag', () => {
+        const err = (() => {
+            try {
+                plan(seededBody(), { seedData: true, isRuntimeCreatable: (t: string) => t !== 'seed' && registryCreatable(t) });
+            } catch (e) { return e; }
+            return undefined;
+        })() as any;
+        expect(err?.details?.findings).toEqual([expect.objectContaining({ key: 'data' })]);
+    });
+
+    it('the verb writes each seed item into the NEW base, environment-wide, the renamed object in its body', async () => {
+        const { protocol, table } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({
+            manifest: seededBody(), targetPackageId: 'com.example.acme', targetNamespace: 'acme', seedData: true,
+        });
+        expect(ImportUnmanagedPackageResponseSchema.parse(result)).toEqual(result);
+        expect(result.copied.slice(-2)).toEqual([{ type: 'seed', name: 'acme_account_seed' }, { type: 'seed', name: 'acme_lead_seed' }]);
+        const rows = seedRows(table);
+        expect(rows.map((r) => [r.name, r.package_id, r.body.object])).toEqual([
+            ['acme_account_seed', 'com.example.acme', 'acme_account'],
+            ['acme_lead_seed', 'com.example.acme', 'acme_lead'],
+        ]);
+        expect(rows[0]!.body.records).toEqual([{ title: 'Acme' }, { title: 'crm_lead' }]);
+        expect(table('sys_metadata').filter((r) => r.type === 'seed').every((r) => !('organization_id' in r))).toBe(true);
+    });
+
+    it('a seed item the save door refuses rolls the whole copy back — no base, no item', async () => {
+        const { protocol, table, packages } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: seededBody({ data: [{ object: 'crm_lead', externalId: 7, records: [] }] }), seedData: true,
+        }));
+        expect(resolveThrownHttpError(err).status).toBeGreaterThanOrEqual(400);
+        expect(err.details?.failedItem).toEqual({ type: 'seed', name: 'crm_lead_seed' });
+        expect(packages.has('com.example.crm-copy')).toBe(false);
+        expect(table('sys_metadata').filter((r) => r.package_id === 'com.example.crm-copy' && r.state === 'active')).toEqual([]);
+    });
+
+    it('a re-run is refused 409 before any write: the `-copy` base exists', async () => {
+        const { protocol, writes } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true });
+        const before = writes.length;
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(writes.length).toBe(before);
+    });
+
+
+    it('a copied seed item is an environment seed item like any other: a plain save loads nothing, even with every row gone', async () => {
+        const { protocol, table, writes } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true });
+        // The state after a purge: the install's one organization, and no row of the dataset.
+        table('sys_organization').push({ id: 'org_1', name: 'Acme Corp' });
+        const stored = seedRows(table).find((r) => r.name === 'crm_account_seed')!.body;
+        const inserts = () => writes.filter((w) => w.op === 'insert' && w.table === 'crm_account').length;
+
+        // A plain save writes metadata only: a seed is applied when it is PUBLISHED. Every
+        // record is missing here, so a save that loaded would insert both.
+        await protocol.saveMetaItem({ type: 'seed', name: 'crm_account_seed', item: stored, mode: 'publish', packageId: 'com.example.crm-copy' });
+        expect(inserts()).toBe(0);
+        expect(table('crm_account')).toEqual([]);
+    });
+
+    it('drafted and published while its rows are there, a copied seed item loads no row twice', async () => {
+        const { protocol, table, writes } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true });
+        // The install's one organization, and the rows the install door loaded
+        // from the receipt (`seedSampleData`) under it.
+        table('sys_organization').push({ id: 'org_1', name: 'Acme Corp' });
+        table('crm_account').push(
+            { id: 'a1', title: 'Acme', organization_id: 'org_1' },
+            { id: 'a2', title: 'crm_lead', organization_id: 'org_1' },
+        );
+        const stored = seedRows(table).find((r) => r.name === 'crm_account_seed')!.body;
+        const inserts = () => writes.filter((w) => w.op === 'insert' && w.table === 'crm_account').length;
+
+        // Applied create-only (`ignore`, the spec default): every record already has its row.
+        await protocol.saveMetaItem({ type: 'seed', name: 'crm_account_seed', item: stored, mode: 'draft', packageId: 'com.example.crm-copy' });
+        const published = await protocol.publishPackageDrafts({ packageId: 'com.example.crm-copy' });
+        expect(published.seedApplied).toMatchObject({
+            success: true, inserted: 0, updated: 0,
+            landed: [{ object: 'crm_account', inserted: { total: 0 }, matched: { ids: ['a1', 'a2'], total: 2 } }],
+        });
+        expect(inserts()).toBe(0);
+        expect(table('crm_account').map((r) => r.title)).toEqual(['Acme', 'crm_lead']);
+    });
+
+    it('drafted and published after a purge, a copied seed item loads its rows again under the publish rule: no installer, no owner stamped', async () => {
+        const { protocol, table } = makeProtocol();
+        await protocol.importUnmanagedPackage({ manifest: seededBody(), seedData: true });
+        table('sys_organization').push({ id: 'org_1', name: 'Acme Corp' });
+        const stored = seedRows(table).find((r) => r.name === 'crm_account_seed')!.body;
+
+        await protocol.saveMetaItem({ type: 'seed', name: 'crm_account_seed', item: stored, mode: 'draft', packageId: 'com.example.crm-copy' });
+        const published = await protocol.publishPackageDrafts({ packageId: 'com.example.crm-copy' });
+        expect(published.seedApplied).toMatchObject({ success: true, inserted: 2 });
+        // A publish names no person to the loader, so the rows carry the
+        // organization the loader derives and no owner: the installer rule
+        // (`owner_id` / `created_by`) is the install door's, not the publish's.
+        expect(table('crm_account').map((r) => [r.title, r.organization_id, r.owner_id, r.created_by]))
+            .toEqual([['Acme', 'org_1', undefined, undefined], ['crm_lead', 'org_1', undefined, undefined]]);
+    });
+
+    it('`seedData` is the door\'s, never the published request\'s: the declaration still refuses an undeclared key', async () => {
+        const { protocol } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: seededBody(), withSampleData: true }));
+        expect(resolveThrownHttpError(err).status).toBe(400);
+    });
+});
+
+describe('[#31530] the base row, as its own write answered it (`baseInstance`, door-only)', () => {
+    /** The protocol over the stub engine, with a `package` service whose `publish` answers `answer`. */
+    function withPackageService(answer: (manifest: any) => unknown) {
+        const harness = makeEngine();
+        const published: any[] = [];
+        const packageService = {
+            publish: vi.fn(async ({ manifest }: { manifest: any }) => { published.push(manifest); return answer(manifest); }),
+        };
+        const protocol = new ObjectStackProtocolImplementation(harness.engine, () => new Map([['package', packageService]])) as any;
+        return { ...harness, protocol, published, packageService };
+    }
+
+    it('answers the base row the package service\'s write answered, beside the published answer', async () => {
+        const { protocol, published } = withPackageService((manifest) => ({ success: true, version: manifest.version, createdAt: '2026-11-08 14:40:07' }));
+        const result = await protocol.importUnmanagedPackage({ manifest: crmBody() });
+        expect(published.map((m) => m.id)).toEqual(['com.example.crm-copy']);
+        expect(result.baseInstance).toEqual({ version: published[0].version, createdAt: '2026-11-08 14:40:07' });
+        // Door-only: outside the published answer, whose declaration still reads every other key.
+        const { baseInstance: _door, ...answer } = result;
+        expect(ImportUnmanagedPackageResponseSchema.parse(answer)).toEqual(answer);
+        expect(ImportUnmanagedPackageResponseSchema.parse(result)).not.toHaveProperty('baseInstance');
+    });
+
+    it('answers none when the write named no stamp, or when there is no package service', async () => {
+        const silent = withPackageService(() => ({ success: true }));
+        expect(await silent.protocol.importUnmanagedPackage({ manifest: crmBody() })).not.toHaveProperty('baseInstance');
+        const { protocol } = makeProtocol();
+        expect(await protocol.importUnmanagedPackage({ manifest: crmBody() })).not.toHaveProperty('baseInstance');
     });
 });

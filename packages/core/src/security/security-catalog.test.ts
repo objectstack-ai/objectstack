@@ -1,9 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   createSecurityCatalogReader,
+  resolveCatalogReference,
+  storedPermissionSetScope,
+  type SecurityCatalogEntry,
   type SecurityCatalogMetadataService,
+  type SecurityCatalogPackageScopedRegistry,
   type SecurityCatalogRegistry,
 } from './security-catalog.js';
 import { isAuthzStoreUnavailableError } from './authz-store-unavailable.js';
@@ -237,5 +241,284 @@ describe('security catalog read — refusals at the edge', () => {
     });
     expect(await reader.resolve('permission', '')).toBeUndefined();
     expect(await reader.resolve('permission', undefined as never)).toBeUndefined();
+  });
+});
+
+/**
+ * [ADR-0150 D3/D4/D7] Permission sets by `(package, name)`: the catalog's own
+ * plumbing around the one rule (`resolvePackageScopedHolders`) and the one
+ * closure walk (`packageResolutionClosure`), over a stand-in registry that
+ * carries the package-scoped reads and records who asked. The answers over
+ * ObjectQL's real `SchemaRegistry` are pinned in plugin-security's
+ * `security-catalog-permission-sets-by-package.test.ts`.
+ */
+describe('security catalog read — permission sets by (package, name) through the package-scoped registry', () => {
+  interface Held { packageId: string | null; item: Def }
+  interface ScopedOptions {
+    /** Every holder's item per permission-set name; `packageId: null` is the environment's own item. */
+    holders?: Record<string, Held[]>;
+    /** Installed packages: id → declared dependencies (and the namespace, `sys` for a kernel package). */
+    packages?: Record<string, { deps?: string[]; namespace?: string }>;
+    /** Which `(position, package)` pairs are the package's own shipped position. Default: every one. */
+    shipped?: (name: string, pkg: string) => boolean;
+    disabled?: readonly string[];
+    throwOnHolders?: boolean;
+  }
+
+  /** The by-name reads of {@link registry}, plus the package-scoped reads a `SchemaRegistry` carries. */
+  function scopedRegistry(
+    byName: Record<string, Def[]>,
+    opts: ScopedOptions = {},
+  ): SecurityCatalogRegistry & SecurityCatalogPackageScopedRegistry & { asked: Array<{ name: string; caller: string | null | undefined }> } {
+    const asked: Array<{ name: string; caller: string | null | undefined }> = [];
+    const held = (type: string, name: string) => (type === 'permission' ? opts.holders?.[name] ?? [] : []);
+    const rows = Object.entries(opts.packages ?? {}).map(([id, p]) => ({
+      manifest: { id, namespace: p.namespace ?? id.split('.').pop(), dependencies: Object.fromEntries((p.deps ?? []).map((d) => [d, '^1.0.0'])) },
+    }));
+    return {
+      ...registry(byName, { disabled: opts.disabled }),
+      asked,
+      packageScopedHoldersOf(type, name, caller) {
+        if (opts.throwOnHolders) throw new Error('registry gone');
+        if (type === 'permission') asked.push({ name, caller });
+        return held(type, name).filter((h) => h.packageId !== null).map((h) => h.packageId as string);
+      },
+      getPackageScopedItem: (type, name, packageId) => held(type, name).find((h) => h.packageId === packageId)?.item,
+      getEnvironmentScopedItem: (type, name) => held(type, name).find((h) => h.packageId === null)?.item,
+      getArtifactItem: (_type, name, pkg) => (opts.shipped?.(name, pkg as string) ?? true ? SHIPPED : undefined),
+      getPackage: (id) => rows.find((r) => r.manifest.id === id),
+      getAllPackages: () => rows,
+    };
+  }
+
+  /** The one definition every stand-in position below uses, so `getArtifactItem` can answer "shipped" by identity. */
+  const SHIPPED: Def = { name: 'shipped_position' };
+  const positionEntry = (over: Partial<SecurityCatalogEntry> & { name: string }): SecurityCatalogEntry => ({
+    type: 'position',
+    definition: SHIPPED,
+    source: 'registry',
+    ...over,
+  });
+  const P = 'com.acme.p';
+  const Q = 'com.acme.q';
+  const at = (packageId = P) => ({ position: positionEntry({ name: 'p_pos', packageId }) });
+
+  it('a refusal confers nothing, names every candidate, and never falls back to the by-name read or the metadata service', async () => {
+    const reader = createSecurityCatalogReader({
+      registry: scopedRegistry(
+        { permission: [{ name: 'q_set', _packageId: Q }] },
+        { packages: { [P]: {}, [Q]: {} }, holders: { q_set: [{ packageId: Q, item: { name: 'q_set', _packageId: Q } }, { packageId: null, item: { name: 'q_set' } }] } },
+      ),
+      metadata: metadata({ permission: [{ name: 'q_set' }] }),
+    });
+    expect(await reader.resolve('permission', 'q_set', at())).toBeUndefined();
+    const answer = await resolveCatalogReference(reader, 'permission', 'q_set', at());
+    expect(answer).toMatchObject({ status: 'refused', reason: 'outside-closure' });
+    if (answer.status !== 'refused') return;
+    expect(answer.candidates).toEqual([expect.stringContaining(Q), expect.stringContaining('the environment')]);
+    expect(answer.message).toContain(P);
+  });
+
+  it('a name two packages in the closure hold is refused, naming both; with no package, environment-wide, naming both', async () => {
+    const two = {
+      packages: { [P]: { deps: [Q, 'com.acme.r'] }, [Q]: {}, 'com.acme.r': {} },
+      holders: { shared: [{ packageId: Q, item: { name: 'shared', _packageId: Q } }, { packageId: 'com.acme.r', item: { name: 'shared', _packageId: 'com.acme.r' } }] },
+    };
+    const reader = createSecurityCatalogReader({ registry: scopedRegistry({}, two), metadata: metadata({}) });
+    for (const [scope, reason] of [[at(), 'ambiguous-in-closure'], [undefined, 'ambiguous-in-environment']] as const) {
+      const answer = await resolveCatalogReference(reader, 'permission', 'shared', scope);
+      expect(answer).toMatchObject({ status: 'refused', reason });
+      if (answer.status === 'refused') expect(answer.candidates).toEqual([expect.stringContaining(Q), expect.stringContaining('com.acme.r')]);
+    }
+  });
+
+  it("a package position's set is asked as that package and reaches its own and its declared dependency's; a stored grant asks as no package", async () => {
+    const r = scopedRegistry({}, {
+      packages: { [P]: { deps: [Q] }, [Q]: {} },
+      holders: {
+        p_set: [{ packageId: P, item: { name: 'p_set', _packageId: P } }],
+        q_set: [{ packageId: Q, item: { name: 'q_set', _packageId: Q } }],
+      },
+    });
+    const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+    expect((await reader.resolve('permission', 'p_set', at()))?.packageId).toBe(P);
+    expect((await reader.resolve('permission', 'q_set', at()))?.packageId).toBe(Q);
+    expect((await reader.resolve('permission', 'p_set'))?.packageId).toBe(P);
+    expect(r.asked).toEqual([{ name: 'p_set', caller: P }, { name: 'q_set', caller: P }, { name: 'p_set', caller: null }]);
+  });
+
+  it("the environment's positions ask as no package: an overlay, an environment row, a stack position with no owner, the audience anchors", async () => {
+    const r = scopedRegistry({}, { shipped: (name) => name !== 'overlaid_pos' });
+    const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+    for (const position of [
+      positionEntry({ name: 'overlaid_pos', packageId: P }),
+      positionEntry({ name: 'env_pos', packageId: 'sys_metadata' }),
+      positionEntry({ name: 'stack_pos', source: 'metadata' }),
+      positionEntry({ name: 'everyone', packageId: 'com.objectstack.security' }),
+      positionEntry({ name: 'guest', packageId: 'com.objectstack.security' }),
+    ]) {
+      await reader.resolve('permission', 'x', { position });
+    }
+    expect(r.asked.map((a) => a.caller)).toEqual([null, null, null, null, null]);
+  });
+
+  it('a stack-declared position that names its package asks as that package', async () => {
+    const r = scopedRegistry({});
+    const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+    await reader.resolve('permission', 'x', { position: positionEntry({ name: 'app_pos', source: 'metadata', packageId: 'com.acme.app' }) });
+    expect(r.asked).toEqual([{ name: 'x', caller: 'com.acme.app' }]);
+  });
+
+  it("a name the registry holds nowhere: the metadata service's body serves a caller with no package, and a package's reference is the D3 (a) refusal naming the environment", async () => {
+    const reader = createSecurityCatalogReader({
+      registry: scopedRegistry({}, { packages: { [P]: {} } }),
+      metadata: metadata({ permission: [{ name: 'declared_set', label: 'from the metadata service' }] }),
+    });
+    expect((await reader.resolve('permission', 'declared_set'))?.source).toBe('metadata');
+    expect(await reader.resolve('permission', 'declared_set', at())).toBeUndefined();
+    const answer = await resolveCatalogReference(reader, 'permission', 'declared_set', at());
+    expect(answer).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [expect.stringContaining('the environment')] });
+    if (answer.status === 'refused') {
+      expect(answer.message).toContain(P);
+      expect(answer.message).toContain('declared_set');
+    }
+    expect(await resolveCatalogReference(reader, 'permission', 'nowhere_set', at())).toEqual({ status: 'not-found' });
+  });
+
+  it("a resolved holder that may not be served (a disabled package's set) is final: not-found, never a by-name metadata-service read", async () => {
+    const reader = createSecurityCatalogReader({
+      registry: scopedRegistry({}, { disabled: ['com.acme.off'], holders: { off_set: [{ packageId: 'com.acme.off', item: { name: 'off_set', _packageId: 'com.acme.off' } }] } }),
+      metadata: metadata({ permission: [{ name: 'off_set', label: 'a metadata-service body of that name' }] }),
+    });
+    expect(await reader.resolve('permission', 'off_set')).toBeUndefined();
+    expect(await resolveCatalogReference(reader, 'permission', 'off_set')).toEqual({ status: 'not-found' });
+    expect(await reader.resolve('permission', 'off_set', at())).toBeUndefined();
+  });
+
+  it('the permission-set list carries one entry per (package, name) holder, never one picked per name', async () => {
+    const reader = createSecurityCatalogReader({
+      registry: scopedRegistry({ permission: [{ name: 'shared', _packageId: 'com.acme.a' }] }, {
+        holders: {
+          shared: [
+            { packageId: 'com.acme.a', item: { name: 'shared', _packageId: 'com.acme.a' } },
+            { packageId: 'com.acme.b', item: { name: 'shared', _packageId: 'com.acme.b' } },
+          ],
+        },
+      }),
+      metadata: metadata({}),
+    });
+    expect((await reader.list('permission')).map((e) => e.packageId)).toEqual(['com.acme.a', 'com.acme.b']);
+  });
+
+  it('positions and capabilities are read by name, never through the package-scoped reads (ADR-0150 D7; bucket 1)', async () => {
+    const r = scopedRegistry({ position: [{ name: 'p_pos' }], capability: [{ name: 'acme.cap' }] });
+    const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+    expect((await reader.resolve('position', 'p_pos'))?.name).toBe('p_pos');
+    expect((await reader.resolve('capability', 'acme.cap'))?.name).toBe('acme.cap');
+    expect(r.asked).toEqual([]);
+  });
+
+  it('construction refuses a registry carrying only some of the package-scoped reads', () => {
+    const partial = { ...registry({}), packageScopedHoldersOf: () => [] } as never;
+    expect(() => createSecurityCatalogReader({ registry: partial, metadata: metadata({}) })).toThrow(TypeError);
+    const noArtifactRead = { ...scopedRegistry({}), getArtifactItem: undefined } as never;
+    expect(() => createSecurityCatalogReader({ registry: noArtifactRead, metadata: metadata({}) })).toThrow(TypeError);
+  });
+
+  it('a by-name registry carrying only the artifact or package reads is still read by name', async () => {
+    const byName = { ...registry({ permission: [{ name: 'x', _packageId: P }] }), getArtifactItem: () => undefined, getPackage: () => undefined, getAllPackages: () => [] };
+    const reader = createSecurityCatalogReader({ registry: byName, metadata: metadata({}) });
+    expect((await reader.resolve('permission', 'x', at()))?.packageId).toBe(P);
+  });
+
+  it('a package-scoped read that throws is an unreadable catalog, never "no such set"', async () => {
+    const reader = createSecurityCatalogReader({ registry: scopedRegistry({}, { throwOnHolders: true }), metadata: metadata({}) });
+    expect(isAuthzStoreUnavailableError(await rejection(reader.resolve('permission', 'x')))).toBe(true);
+    expect(isAuthzStoreUnavailableError(await rejection(reader.resolve('permission', 'x', at())))).toBe(true);
+  });
+
+  // [ADR-0150 D8 R1/R3] A stored reference read by its package column.
+  describe('a stored reference read by its package column', () => {
+    const R = 'com.acme.r';
+    /** `shared` held by Q and R (a pre-phase-1 clash); `q_only` by Q alone; `env_set` by the environment. */
+    const stored = () => scopedRegistry(
+      { permission: [{ name: 'shared', _packageId: Q }, { name: 'q_only', _packageId: Q }] },
+      {
+        packages: { [P]: { deps: [Q] }, [Q]: {}, [R]: {} },
+        holders: {
+          shared: [{ packageId: Q, item: { name: 'shared', _packageId: Q, label: 'Q' } }, { packageId: R, item: { name: 'shared', _packageId: R, label: 'R' } }],
+          q_only: [{ packageId: Q, item: { name: 'q_only', _packageId: Q } }],
+          env_set: [{ packageId: null, item: { name: 'env_set' } }],
+        },
+      },
+    );
+
+    it('a column naming a holder reads that package\'s set and no other, even where the bare name is refused', async () => {
+      const reader = createSecurityCatalogReader({ registry: stored(), metadata: metadata({}) });
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope(Q)))?.definition.label).toBe('Q');
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope(R)))?.definition.label).toBe('R');
+      expect(await resolveCatalogReference(reader, 'permission', 'shared')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+    });
+
+    it('a stale column (its package no longer serves the set) reads as a null one: one holder grants, two are refused naming both — said once', async () => {
+      const warn = vi.fn();
+      const reader = createSecurityCatalogReader({
+        registry: stored(),
+        metadata: metadata({ permission: [{ name: 'meta_only' }] }),
+        logger: { warn },
+      });
+      const gone = storedPermissionSetScope('com.acme.gone');
+      // The set moved to Q on an upgrade: the grant follows it, as an unbound one does.
+      expect((await reader.resolve('permission', 'q_only', gone))?.packageId).toBe(Q);
+      expect((await reader.resolve('permission', 'env_set', gone))?.definition).toEqual({ name: 'env_set' });
+      expect((await reader.resolve('permission', 'meta_only', gone))?.definition).toEqual({ name: 'meta_only' });
+      // ⛔ Two holders: refused, naming both — never the first registered.
+      const answer = await resolveCatalogReference(reader, 'permission', 'shared', gone);
+      expect(answer).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+      if (answer.status === 'refused') expect(answer.candidates).toEqual([expect.stringContaining(Q), expect.stringContaining(R)]);
+      // R3: a stale column is read from the writer, as its null column is.
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope('com.acme.gone', P)))?.definition.label).toBe('Q');
+      // Said once per (package, name), however often it is read.
+      await reader.resolve('permission', 'q_only', gone);
+      expect(warn.mock.calls.map(([, meta]) => `${meta.packageId}:${meta.name}`)).toEqual([
+        'com.acme.gone:q_only', 'com.acme.gone:env_set', 'com.acme.gone:meta_only', 'com.acme.gone:shared',
+      ]);
+      expect(warn.mock.calls[0][0]).toContain('os migrate stored-references');
+      expect(warn.mock.calls[0][0]).toContain(`package "${Q}"'s set`);
+      expect(warn.mock.calls[3][0]).toContain('it is refused');
+    });
+
+    it('a null column with two or more holders is refused, naming every candidate — never the first registered', async () => {
+      const r = stored();
+      const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+      expect(storedPermissionSetScope(null)).toBeUndefined();
+      expect(await reader.resolve('permission', 'shared', storedPermissionSetScope(null))).toBeUndefined();
+      const answer = await resolveCatalogReference(reader, 'permission', 'shared', storedPermissionSetScope(''));
+      expect(answer).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+      if (answer.status === 'refused') expect(answer.candidates).toEqual([expect.stringContaining(Q), expect.stringContaining(R)]);
+    });
+
+    it('a null column with one holder resolves by D3, as today; a writer\'s package is the D3 caller (R3)', async () => {
+      const r = stored();
+      const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+      expect((await reader.resolve('permission', 'q_only', storedPermissionSetScope(null)))?.packageId).toBe(Q);
+      expect((await reader.resolve('permission', 'env_set', storedPermissionSetScope(undefined)))?.definition).toEqual({ name: 'env_set' });
+      // R3: the suggesting package P reaches its declared dependency Q; R's copy of `shared` is outside P's closure.
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope(null, P)))?.definition.label).toBe('Q');
+      expect(await resolveCatalogReference(reader, 'permission', 'q_only', storedPermissionSetScope(null, R))).toMatchObject({ status: 'refused', reason: 'outside-closure' });
+      expect(r.asked).toEqual([
+        { name: 'q_only', caller: null },
+        { name: 'env_set', caller: null },
+        { name: 'shared', caller: P },
+        { name: 'q_only', caller: R },
+      ]);
+    });
+
+    it('the column names the exact holder ahead of a writer and a position', async () => {
+      const r = stored();
+      const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+      expect((await reader.resolve('permission', 'shared', { ...at(), ...storedPermissionSetScope(R, P) }))?.definition.label).toBe('R');
+      expect(r.asked).toEqual([]);
+    });
   });
 });

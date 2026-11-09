@@ -8,10 +8,12 @@
 // are new. `protocol.ts` re-exports what it exported.
 import {
     itemDiscriminator,
+    pairsOf,
+    type InstalledManifestLookup,
 } from '@objectstack/metadata-core';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
-import { customizationPackageId } from '@objectstack/spec/kernel';
-import { isServedOverrideRowOf } from './served-override.js';
+import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
+import { isMovedBaseRowOf, isMovedOverrideRowOf, type ShipsName } from './suite-moved-overlay.js';
 import {
     listSlotNameOf,
 } from './protocol-object-extension-item.js';
@@ -38,6 +40,40 @@ interface ServedOverlayRowCandidate {
      * package's own item, never the base's.
      */
     readonly overrideOf?: string;
+    /**
+     * [#31593] Set on the two candidates that hold a tenant's edit of the
+     * item from before it moved to `overrideOf` from another package of the
+     * same App (`suite-moved-overlay.ts`): `'override'`, a declared override
+     * in the App's pair that names the former owner
+     * ({@link isMovedOverrideRowOf}), at `packageId` the pair; `'base'`, a row
+     * bound to the former owner itself ({@link isMovedBaseRowOf}), at any
+     * package (`packageId` undefined). A row holds such a candidate only when
+     * its predicate admits it, and it is then served as `overrideOf`'s item.
+     */
+    readonly moved?: 'override' | 'base';
+}
+
+/**
+ * [#31593] Whether `row` holds `candidate`'s place beyond the `where` it
+ * matched: the declared override when the candidate is one
+ * ({@link isServedOverrideRowOf}), the moved edit when the candidate is one
+ * ({@link isMovedOverrideRowOf}, {@link isMovedBaseRowOf}), and any row
+ * otherwise. The one reading both readers of the candidates take
+ * ({@link findServedOverlayRow}, {@link mergePackageAwareOverlay}).
+ */
+export function holdsServedOverlayCandidate(
+    candidate: ServedOverlayRowCandidate,
+    row: ServedOverrideRow,
+    installed: InstalledManifestLookup | undefined,
+    ships: ShipsName | undefined,
+): boolean {
+    if (candidate.overrideOf === undefined) return true;
+    if (installed === undefined) return false;
+    if (candidate.moved === undefined) return isServedOverrideRowOf(row, candidate.overrideOf, installed);
+    if (ships === undefined) return false;
+    return candidate.moved === 'override'
+        ? isMovedOverrideRowOf(row, candidate.overrideOf, installed, ships)
+        : isMovedBaseRowOf(row, candidate.overrideOf, installed, ships);
 }
 
 /**
@@ -47,6 +83,39 @@ interface ServedOverlayRowCandidate {
  */
 interface StoredRowPlace {
     readonly type: string;
+    /**
+     * [#31399] The row's own `name` column: the name the by-name read finds
+     * the row under. The merge slots a stored body by it when the body states
+     * no name of its own ({@link mergePackageAwareOverlay}).
+     */
+    readonly name?: string;
+}
+
+/**
+ * [#31399] Marks a listed body that carries its row's `name` because it states
+ * none of its own ({@link mergePackageAwareOverlay}). A symbol key: object
+ * spreads along the list keep it, and it never reaches the wire. The list's
+ * served exit judges such a body's `_diagnostics` without that `name`
+ * ({@link withoutServedRowName}), since the document's schema does not
+ * declare it: the verdict is the one the by-name read gives the same row.
+ *
+ * ⚠️ The one exception to {@link listSlotNameOf}'s "the body is not given a
+ * `name`, so what a GET answers PUTs back through the strict schema": a body
+ * the list served its row's name (a `seed`; or any stored body that states no
+ * name, such as a legacy row saved before its schema declared one) carries a
+ * `name` the strict schema refuses, so a listed item PUT back verbatim is
+ * refused. The by-name read serves the body as stored, without it.
+ */
+export const SERVED_ROW_NAME: unique symbol = Symbol('metadata-protocol.servedRowName');
+
+/**
+ * [#31399] The body a listed item was stored as, when the list served it its
+ * row's `name` ({@link SERVED_ROW_NAME}); otherwise `undefined`.
+ */
+export function withoutServedRowName(item: unknown): Record<string, unknown> | undefined {
+    if (item === null || typeof item !== 'object' || (item as Record<PropertyKey, unknown>)[SERVED_ROW_NAME] !== true) return undefined;
+    const { name: _name, [SERVED_ROW_NAME]: _mark, ...stored } = item as Record<PropertyKey, unknown>;
+    return stored as Record<string, unknown>;
 }
 
 /**
@@ -78,6 +147,14 @@ interface StoredRowPlace {
  *    the save never wrote (#23165's shape). A package-unbound row still wins
  *    over the code package and over another package's row (ADR-0146 D8
  *    item 1) until the migration moves it into the pair (D11).
+ *  - [#31593] …and, when the read also names which packages ship the name
+ *    (`ships`), a tenant's edit of the item from before it moved to the
+ *    package from another package of the same App (`suite-moved-overlay.ts`):
+ *    the App's pair's override that declares the former owner, right after
+ *    the package's own declared override; and a row bound to the former owner
+ *    itself, LAST, after the package-less row, which wins over another
+ *    package's row (D8 item 1). A read that names no `ships` (every write
+ *    address) is unchanged.
  *
  * Both readers of stored content take this order, so they cannot pick
  * differently: {@link ObjectStackProtocolImplementation.findServedOverlayRow}
@@ -92,39 +169,69 @@ interface StoredRowPlace {
  * It decides content only. The lock is selected separately, from every row in
  * scope (`resolveOverlayLockLayer` in `item-lock.ts`, #21761).
  */
-export function servedOverlayRowCandidates(address: {
-    /**
-     * [#23715] `null` addresses the package-unbound row alone: the strict
-     * draft read naming no package, at the draft its `version` names
-     * ({@link ObjectStackProtocolImplementation.strictDraftReadAddress}).
-     */
-    readonly packageId: string | null | undefined;
-    /**
-     * [#28409, ADR-0146 D8 item 2] Whether the address's declared override
-     * is a candidate: the reads that SERVE a package's name (the active
-     * by-name read and its draft preview, the layered read, the list's merges)
-     * pass `true`. A read that answers a write's address (the strict draft
-     * read, the view container expansion's package order) passes nothing: a
-     * save naming the base writes the base's own partition, never its pair's.
-     */
-    readonly servedOverride?: boolean;
-}): ServedOverlayRowCandidate[] {
+export function servedOverlayRowCandidates(address: ServedOverlayAddress): ServedOverlayRowCandidate[] {
     const base = address.packageId;
-    const pair = address.servedOverride === true && typeof base === 'string' && base !== ''
-        ? customizationPackageId(base)
-        : undefined;
-    const places: ReadonlyArray<Pick<ServedOverlayRowCandidate, 'packageId' | 'overrideOf'>> = base === null
+    // [ADR-0146 D3 merge question 12] The App's pair first, then a per-package
+    // pair an earlier version created, while it is installed (`pairsOf`).
+    const pairs = address.servedOverride === true && typeof base === 'string' && base !== ''
+        ? pairsOf(base, address.installed)
+        : [];
+    // [#31593] The moved edits are candidates only when the read names the
+    // packages that ship the name (`ships`): the predicates need it.
+    const moved = typeof base === 'string' && base !== '' && address.servedOverride === true && address.ships !== undefined;
+    const places: ReadonlyArray<Pick<ServedOverlayRowCandidate, 'packageId' | 'overrideOf' | 'moved'>> = base === null
         ? [{ packageId: null }]
         : base
             ? [
-                ...(pair?.ok ? [{ packageId: pair.value, overrideOf: base }] : []),
+                ...pairs.map((pair) => ({ packageId: pair, overrideOf: base })),
+                ...(moved ? pairs.map((pair) => ({ packageId: pair, overrideOf: base, moved: 'override' as const })) : []),
                 { packageId: base },
                 { packageId: null },
+                ...(moved ? [{ packageId: undefined, overrideOf: base, moved: 'base' as const }] : []),
             ]
             : [{ packageId: undefined }];
     return (['canonical', 'other'] as const).flatMap((spelling) =>
         places.map((place) => ({ spelling, ...place })));
 }
+
+/**
+ * The address {@link servedOverlayRowCandidates} orders the rows of. A read
+ * that may serve a declared override names the registry it serves
+ * (`installed`), because the address's pair is the pair of the App that
+ * carries its package (`pairOf`); a read that never serves one names neither,
+ * so `servedOverride` without `installed` does not compile.
+ */
+export type ServedOverlayAddress =
+    | {
+        /**
+         * [#23715] `null` addresses the package-unbound row alone: the strict
+         * draft read naming no package, at the draft its `version` names
+         * ({@link ObjectStackProtocolImplementation.strictDraftReadAddress}).
+         */
+        readonly packageId: string | null | undefined;
+        readonly servedOverride?: undefined;
+        readonly installed?: undefined;
+    }
+    | {
+        readonly packageId: string | null | undefined;
+        /**
+         * [#28409, ADR-0146 D8 item 2] Whether the address's declared override
+         * is a candidate: the reads that SERVE a package's name (the active
+         * by-name read and its draft preview, the layered read, the list's merges)
+         * pass `true`. A read that answers a write's address (the strict draft
+         * read, the view container expansion's package order) passes nothing: a
+         * save naming the base writes the base's own partition, never its pair's.
+         */
+        readonly servedOverride: boolean | undefined;
+        /** The installed manifests of the registry the read serves, read for the address's pair. */
+        readonly installed: InstalledManifestLookup;
+        /**
+         * [#31593] Which code packages ship the item the read serves, in the
+         * registry it serves. Named, the moved edits of the item are
+         * candidates too (`suite-moved-overlay.ts`); omitted, they are not.
+         */
+        readonly ships?: ShipsName;
+    };
 
 /**
  * [#24371] Whether a stored row read by
@@ -261,16 +368,24 @@ export function mergePackageAwareOverlay(
     records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
     transform?: (data: any, prev: any) => any,
     unseated?: WeakSet<object>,
-    options: {
-        /**
-         * [#28409, ADR-0146 D8 item 2] Serve each package's declared override
-         * over its slot ({@link servedOverlayRowCandidates}' `servedOverride`):
-         * the effective list's merges pass `true`; the per-package layer
-         * ({@link ObjectStackProtocolImplementation.getMetaItemsPerPackage})
-         * and the MetadataService merge pass nothing.
-         */
-        readonly servedOverride?: boolean;
-    } = {},
+    options:
+        | { readonly servedOverride?: undefined; readonly installed?: undefined }
+        | {
+            /**
+             * [#28409, ADR-0146 D8 item 2] Serve each package's declared override
+             * over its slot ({@link servedOverlayRowCandidates}' `servedOverride`):
+             * the effective list's merges pass `true`; the per-package layer
+             * ({@link ObjectStackProtocolImplementation.getMetaItemsPerPackage})
+             * and the MetadataService merge pass nothing.
+             */
+            readonly servedOverride: boolean | undefined;
+            /**
+             * The installed manifests of the registry the list serves: the
+             * declared override of a package's slot is its App's pair's
+             * ({@link servedOverlayRowCandidates}).
+             */
+            readonly installed: InstalledManifestLookup;
+        } = {},
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
     // `stored` marks a contribution that is a stored row the caller read;
@@ -298,17 +413,28 @@ export function mergePackageAwareOverlay(
         list: readonly Contribution[],
         real: string | undefined,
     ): { item: any; overrideOf?: string } | undefined => {
-        for (const candidate of servedOverlayRowCandidates({ packageId: real, servedOverride: options.servedOverride })) {
-            const hit = list.find((c) => c.stored !== undefined
+        // [#31593] The code packages that ship the slot's item: its
+        // lower-layer contributions, each under its own package.
+        const shippers = new Set(list
+            .filter((c) => c.stored === undefined && !c.standIn && c.pkg !== undefined)
+            .map((c) => c.pkg as string));
+        const ships = (packageId: string): boolean => shippers.has(packageId);
+        for (const candidate of servedOverlayRowCandidates(options.installed !== undefined
+            ? { packageId: real, servedOverride: options.servedOverride, installed: options.installed, ships }
+            : { packageId: real })) {
+            const hits = list.filter((c) => c.stored !== undefined
                 && (c.stored.type === type ? 'canonical' : 'other') === candidate.spelling
                 && (candidate.packageId === undefined || (c.pkg ?? null) === candidate.packageId)
                 // [#28409] The pair's row holds the override candidate only
                 // when it declares the override: judged on the row's own
                 // binding (the contribution's `pkg`, the row's `package_id`)
                 // and its body, never on a stamp the body carries.
-                && (candidate.overrideOf === undefined || isServedOverrideRowOf(
-                    { type: c.stored.type, package_id: c.pkg, metadata: c.item }, candidate.overrideOf,
-                )));
+                // [#31593] …and a moved candidate, when its predicate admits it.
+                && holdsServedOverlayCandidate(candidate,
+                    { type: c.stored.type, package_id: c.pkg, metadata: c.item }, options.installed, ships));
+            // [#31593] Two former owners' rows could follow the item: neither
+            // is guessed (`suite-moved-overlay.ts`).
+            const hit = candidate.moved === 'base' ? (hits.length === 1 ? hits[0] : undefined) : hits[0];
             if (hit) return candidate.overrideOf === undefined ? { item: hit.item } : { item: hit.item, overrideOf: candidate.overrideOf };
         }
         return undefined;
@@ -326,8 +452,23 @@ export function mergePackageAwareOverlay(
         }
     }
     for (const { data, packageId, stored, standIn } of records) {
-        const body = data as any;
-        const bodyName = listSlotNameOf(canonicalType, body);
+        // [#31399] A stored body that states no name of its own (a `seed`:
+        // `SeedSchema` declares none, the name lives on the row) is slotted by
+        // its row's `name` column, the name the by-name read finds it under,
+        // and served carrying that name, as every listed item carries its own.
+        // Before, the merge skipped it, so `GET /meta/seed` listed no stored
+        // seed while `GET /meta/seed/:name` served each one. A body that states
+        // a name keeps it; the stored body is never written.
+        const ownName = listSlotNameOf(canonicalType, data);
+        const rowName = ownName === undefined && stored?.name !== undefined && stored.name !== ''
+            && data !== null && typeof data === 'object' && !Array.isArray(data)
+            ? stored.name
+            : undefined;
+        const body = (rowName !== undefined ? { ...(data as object), name: rowName, [SERVED_ROW_NAME]: true } : data) as any;
+        // A body whose own `name` is null still states one: it is listed under
+        // it (with `_diagnostics` flagging it), as before; only an absent name
+        // falls to the row's.
+        const bodyName = ownName !== undefined ? ownName : rowName;
         if (bodyName === undefined) continue;
         // The base row this record shadows at its own slot (for view-identity
         // healing): a same-package row, else a package-less one, else any

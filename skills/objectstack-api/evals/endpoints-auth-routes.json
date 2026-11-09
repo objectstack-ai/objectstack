@@ -28,7 +28,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["x-objectstack-signature", "functions"],
-        "must_not_contain": ["http.server", "kernel:ready", "getService"]
+        "must_not_contain": ["'http.server'", "kernel:ready", "getService"]
       }
     },
     {
@@ -44,11 +44,11 @@
     {
       "id": 5,
       "prompt": "Lock the `invoice` object's API down to read, list, search and export; add a `/bulk` route for imports and a `restore` operation so deleted invoices can be undeleted.",
-      "expected_output": "Authors only the primitives: `apiMethods: ['get', 'list']` — `search` and `export` derive from `list` automatically and are never declared (a declared derived verb is stripped with a warning). Explains there is no `/bulk` route (batch writes go through `POST /api/v1/data/{object}/batch`) and that `restore` / `purge` never derive because DELETE is a hard delete; recoverability is per-field `trackHistory` or a `lifecycle` archive policy.",
+      "expected_output": "Authors only the primitives: `apiMethods: ['get', 'list']` — `search` and `export` derive from `list` automatically and are never declared (a declared derived verb is stripped with a warning). Explains there is no `/bulk` route (batch writes go through `POST /api/v1/data/{object}/batch`) and that `restore` is never declared either: it derives from `delete`, and a by-id delete of a business object already keeps its rows in the recycle bin (`sys_recycle_bin`). Points out the conflict: with `delete` left out, the bin's doors are closed too, so undeleting over the API needs `delete` in `apiMethods`; a caller then restores with `POST /api/v1/data/invoice/recycle-bin/:entryId/restore` (the `recycleBinEntryId` the delete answered), under `allowRestoreOwnDeleted` for its own deletes or `manageRecycleBin` for anyone's. No custom soft-delete to build.",
       "files": [],
       "assertions": {
-        "must_contain": ["apiMethods", "/batch", "trackHistory", "lifecycle"],
-        "must_not_contain": ["'search'", "'restore'"]
+        "must_contain": ["apiMethods", "/batch", "sys_recycle_bin", "recycle-bin"],
+        "must_not_contain": ["'search'", "'restore'", "nothing lists or restores"]
       }
     },
     {
@@ -59,6 +59,16 @@
       "assertions": {
         "must_contain": ["applyOn", "'create'", "sourceField", "targetField"],
         "must_not_contain": ["writeMode: 'insert'"]
+      }
+    },
+    {
+      "id": 7,
+      "prompt": "Our integration boots by reading the `account`, `contact` and `lead` object definitions from the runtime's metadata API. Today it sends three requests; our `?name=account,contact,lead` attempt came back 400. Make it one request.",
+      "expected_output": "One `GET /api/v1/meta/object?names=account,contact,lead` — the list door's `?names=` filter takes one comma-separated value and answers only the named items the caller may see; a name that matches no item is simply absent (no 404), and an empty value is refused `400`. Does not spell the filter `?name=`, `?ids=` or `?filter=`: the list reads a closed query set (`package`, `preview`, `object`, `include`, `id`, `names`, `locale`) and refuses any other key with `400 VALIDATION_ERROR` instead of ignoring it, so a misspelt filter never silently answers the whole list.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["?names=", "/api/v1/meta/object", "VALIDATION_ERROR"],
+        "must_not_contain": ["object?ids=", "object?filter="]
       }
     }
   ]

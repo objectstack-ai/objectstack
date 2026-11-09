@@ -214,7 +214,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       channel: {
         label: "Channel",
-        help: "The channel: inbox (notifications shown inside the app, always available), email (once an email service is configured), sms (once an SMS service is configured), or the id of a channel an installed plugin adds. Enter * for all channels. An id no channel uses matches nothing."
+        help: "The channel: inbox (notifications shown inside the app, always available), email (once an email service is configured), sms (once an SMS service is configured), push (once a push service is configured, to the user's registered devices), or the id of a channel an installed plugin adds. Enter * for all channels. An id no channel uses matches nothing."
       },
       enabled: {
         label: "Enabled",
@@ -460,7 +460,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       locale: {
         label: "Locale",
-        help: "Device locale that pushes to this device are rendered in."
+        help: "Device locale, as the registration named it. Stored for the device; no push renders by it: a push arrives in the recipient's language (their user locale, then the deployment default)."
+      },
+      origin: {
+        label: "Server Origin",
+        help: "The origin the Console was loaded from when it registered the device (for example https://crm.example.com). Every push to the device carries it, so a mobile shell with several saved servers opens the push on this one. Empty for a device registered without one."
       },
       name: {
         label: "Device Name"

@@ -69,6 +69,12 @@ function makeDataSource() {
         name: { type: 'text' },
         status: { type: 'text' },
       },
+      // Declared, because a bare bulk-action name draws only when the object
+      // declares the action it names (objectstack#30169).
+      actions: [
+        { name: 'approve', label: 'Approve' },
+        { name: 'reject', label: 'Reject' },
+      ],
     }),
   } as any;
 }

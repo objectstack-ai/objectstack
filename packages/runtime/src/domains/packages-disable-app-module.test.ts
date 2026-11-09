@@ -149,6 +149,9 @@ interface Booted {
     engine: ObjectQL;
 }
 
+/** [#30581] The host plugin's context of the last boot, to fire the kernel event an artifact reload fires. */
+let lastHostContext: PluginContext | undefined;
+
 /**
  * One kernel, the suite arriving by `path`:
  *  - `code`: the suite is the `AppPlugin`'s bundle, registered through the
@@ -174,6 +177,7 @@ async function bootKernel(path: InstallPath, root: string): Promise<Booted> {
         name: 'qa.suite-host',
         dependencies: ['com.objectstack.engine.objectql'],
         init: async (ctx: PluginContext) => {
+            lastHostContext = ctx;
             const door = ctx.getService<ManifestDoor>('manifest');
             if (path === 'marketplace') await door.register(suiteArtifact(), { source: 'marketplace' });
             for (const manifest of STANDALONE) await door.register(manifest);
@@ -367,6 +371,47 @@ describe('[#28117] a disabled module stays disabled across a restart (the enviro
             await shutdown(third);
         }
     }, 120_000);
+});
+
+describe('[#30581] a module disabled and enabled again, around artifact reloads, lists its nav entries once', () => {
+    let root: string;
+    let booted: Booted | undefined;
+    let context: PluginContext;
+
+    beforeAll(async () => {
+        root = mkdtempSync(join(tmpdir(), 'os-suite-reload-'));
+        process.env.OS_HOME = mkdtempSync(join(home, 'reload-'));
+        booted = await bootKernel('code', root);
+        context = lastHostContext!;
+    }, 60_000);
+    afterAll(async () => {
+        await shutdown(booted);
+        rmSync(root, { recursive: true, force: true });
+    }, 60_000);
+
+    // What `MetadataPlugin` fires when it reloads the artifact (`os dev` recompiling
+    // `dist/objectstack.json`, the HMR POST): `ObjectQLPlugin` re-registers every
+    // package of it through `registerApp`, the step that used to append each
+    // contribution once more per reload.
+    const reloadArtifact = () => context.trigger('metadata:reloaded', { changed: ['dist/objectstack.json'], metadata: suiteArtifact() });
+
+    it('serves the fresh boot\'s navigation after two disable/enable cycles, each with a reload, and after a manifest replay', async () => {
+        const kernel = booted!.kernel;
+        const fresh = await servedGroupIds(kernel);
+        expect(fresh, 'precondition: the fresh boot lists each entry once').toEqual(['nav_accounts', 'nav_orders']);
+
+        for (let cycle = 1; cycle <= 2; cycle++) {
+            expect((await dispatchAs(kernel, 'PATCH', `/packages/${MODULE}/disable`)).status, `disable #${cycle}`).toBe(200);
+            await reloadArtifact();
+            expect(await servedGroupIds(kernel), `disabled, after reload #${cycle}`).toEqual(['nav_accounts']);
+            expect((await dispatchAs(kernel, 'PATCH', `/packages/${MODULE}/enable`)).status, `enable #${cycle}`).toBe(200);
+            expect(await servedGroupIds(kernel), `enabled again #${cycle}`).toEqual(fresh);
+            expect(registryGroupIds(booted!.engine)).toEqual(fresh);
+        }
+
+        await kernel.getService<ManifestDoor>('manifest').register(suiteArtifact());
+        expect(await servedGroupIds(kernel), 'after the suite is registered again through the manifest door').toEqual(fresh);
+    });
 });
 
 describe('[#28117 addendum 6523684730] what an app hook meets reading a disabled module\'s object through ctx.api.object()', () => {

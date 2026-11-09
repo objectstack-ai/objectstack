@@ -10,14 +10,19 @@ import { loadConfig, bundleConfigModule } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
+import { mountsAiServicePlugin, resolveAiServiceLoad, resolveOptionalPluginLoad } from '../utils/ai-service-auto-inject.js';
 import { registerInstalledPlugins } from '../utils/installed-plugins-boot.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+import { readAuthSecretFileChannel } from '../utils/internal-auth-secret-channel.js';
+import { readCeremonyConnectionChannel, readCeremonyDatabaseChannel } from '../utils/internal-ceremony-database-channel.js';
 import { compileForDevBoot, devCompilesAtBoot } from '../utils/dev-compile-at-boot.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
 import { cwdConfigJoinsBoot } from '../utils/artifact-precedence.js';
+import { declaresReplicasSharingState } from './start.js';
 import {
+  inferDriverTypeFromUrl,
   resolveDriverType,
   resolveStorageDefinition,
   loadTursoDriverFactory,
@@ -29,7 +34,7 @@ import {
 // posture is the authoritative knob and `resolveTenancyPosture()` already folds
 // the legacy boolean in as its unset-fallback. serve's last direct reader of the
 // boolean was the banner, and that was exactly the drift #4801 fixed.
-import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError, DATASOURCE_SECRET_RESOLVER_SERVICE, type IDatasourceSecretResolver } from '@objectstack/types';
+import { readEnvWithDeprecation, resolveTenancyPosture, resolveAllowDegradedTenancy, isMcpServerEnabled, stampSearchPinyinEnabled, isModuleNotFoundError, DATASOURCE_SECRET_RESOLVER_SERVICE, CRYPTO_PROVIDER_SERVICE, type IDatasourceSecretResolver } from '@objectstack/types';
 import { PLATFORM_CAPABILITY_TOKENS, PLATFORM_ALWAYS_ON_CAPABILITIES, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from '@objectstack/spec/kernel';
 // [#22301] The `requires` token → provider table and its exact identity match,
 // shared with `@objectstack/verify`'s `bootStack` — see `Serve.CAPABILITY_PROVIDERS`
@@ -64,6 +69,7 @@ import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/securit
 // tally could certify itself.
 import {
   SEED_SETTLEMENT_SERVICE,
+  type ICryptoProvider,
   type ISeedSettlementService,
   type SeedSettlementSnapshot,
   type SeedSuppressionReason,
@@ -80,7 +86,7 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 // app-declared package wins there (per commit 5a90c56d1).
 import { resolveDeploymentAppName } from '@objectstack/plugin-email';
 import { createHash } from 'node:crypto';
-import { resolveObjectStackHome } from '@objectstack/runtime';
+import { resolveObjectStackHome, type InstalledPluginRefusal, type StandaloneStackConfig } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 // The ONE port contract — range, reader and refusal prose — shared with the two
 // commands that spawn this one (#12673). `serve`'s own door below calls it
@@ -124,6 +130,7 @@ import {
   resolveStackCollection,
   stackDeclaredCapabilities,
   stackBootPlugins,
+  hasMetadataPlugin,
 } from '../utils/stack-collections.js';
 import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
 import { captureServedDatabaseFile, watchServedDatabaseFile } from '../utils/served-database-file.js';
@@ -1647,10 +1654,8 @@ export default class Serve extends Command {
     required: boolean;
     declared: boolean;
   }): 'required' | 'auto' | 'off' {
-    if (!opts.tierAllowed) return 'off';
-    if (opts.required) return 'required';
-    if (opts.declared) return 'auto';
-    return 'off';
+    // [#31411] The rule's one home, shared with `os migrate`.
+    return resolveOptionalPluginLoad(opts);
   }
 
   /**
@@ -2471,8 +2476,10 @@ export default class Serve extends Command {
      * #21501 — the compiled artifact a CONFIG boot loaded as its app bundle,
      * as the ready banner displays it; set only when one did. A non-host
      * config's standalone stack serves its metadata from that bundle, so the
-     * banner's `Artifact:` row names it; a host config (its `plugins` hold
-     * code) boots its own module and the row stays `Config:`.
+     * banner's `Artifact:` row names it; so does a host config's dev boot
+     * whose wrap carries the dev artifact door's file (#31761). Any other
+     * host-config boot (its `plugins` hold code) serves its own module and
+     * the row stays `Config:`.
      */
     let configBootBundle: string | undefined;
 
@@ -2682,6 +2689,11 @@ export default class Serve extends Command {
     // `servedSqliteFilePath` cannot serve: on this path it is only learned by
     // probing the booted kernel. Unset for every other boot and every other kind.
     let standaloneSqlitePrimary: string | undefined;
+    // The input a composed STANDALONE stack resolved its `default` database
+    // from — set at the same two sites as `standaloneSqlitePrimary` — so the
+    // multi-replica local-database refusal before step 2 reads the runtime's
+    // own resolution of it. Unset on the legacy route.
+    let standaloneDatabaseInput: StandaloneStackConfig | undefined;
 
     // Resolve the kernel logger level up front. It decides more than the
     // logger's own threshold: it decides whether the boot-quiet window below
@@ -2864,6 +2876,13 @@ export default class Serve extends Command {
       // boot modes live in a separate distribution and are no longer
       // resolved from this package.
       if (useArtifactFallback || shouldBootWithLibrary(config)) {
+        // The authored `plugins` is set aside below (the boot stack's own
+        // replaces it): an entry that may provide the crypto provider refuses
+        // the boot first. See the function.
+        await refuseSetAsideCryptoProviderPlugins(
+          stackBootPlugins(config, false),
+          async (specifier) => await Serve.importConfigPlugin(specifier, servedAppRootOrCwd()),
+        );
         // The boot stack returns only `{plugins, api}` — preserve the
         // original stack metadata (notably `requires`, `analyticsCubes`,
         // `tiers`) so the capability resolver further down can read it.
@@ -2899,6 +2918,7 @@ export default class Serve extends Command {
           // declares none, so the artifact rung `createDefaultHostConfig`
           // settles internally cannot answer differently.
           standaloneSqlitePrimary = await standaloneTelemetryPrimary(defaultHostInput);
+          standaloneDatabaseInput = defaultHostInput;
           // [#4002] `api` merges per key — see mergeBootConfig. A shallow spread
           // let the boot builder's two scoping keys wipe the author's whole `api`
           // block, silently dropping `requireAuth` / `enforceProjectMembership`.
@@ -2926,6 +2946,7 @@ export default class Serve extends Command {
           // by the runtime's own pre-boot resolution over the SAME input, for
           // the telemetry sibling (step 2).
           standaloneSqlitePrimary = await standaloneTelemetryPrimary(standaloneInput);
+          standaloneDatabaseInput = standaloneInput;
           // #21501 — did the standalone stack load a compiled artifact as this
           // app's bundle? Its AppPlugin over the bundle is the proof (it is
           // pushed only when the bundle loaded, and a non-host config carries
@@ -2989,7 +3010,8 @@ export default class Serve extends Command {
       //    on the SAME decision point (`isMcpServerEnabled`), so serving the
       //    route without also loading the MCP plugin would 501 every request
       //    (#2698: the default must yield a connectable MCP endpoint). Explicit
-      //    `requires: ['mcp']` in config works regardless of the env var.
+      //    `requires: ['mcp']` still mounts the plugin, but with the env var off
+      //    the route is not served: `isMcpServerEnabled()` alone decides it.
       //  - Pinyin search recall (#2486): locale-gated platform capability. When
       //    `OS_SEARCH_PINYIN_ENABLED` is unset, the default derives from the
       //    stack's configured locales (any `zh-*` → on), and the resolved
@@ -3024,6 +3046,11 @@ export default class Serve extends Command {
       const tiers: Set<string> = resolveStackTiers({ declaredTiers, requires, preset: presetName });
       const tierEnabled = (t: string) => tiers.has(t);
       const requiresCapability = (c: string) => requires.includes(c);
+      // [#29820] A stack `push` key with no `push` in `requires` mounts nothing
+      // and is read by nothing: push is requested, never on the always-on
+      // slate. Say so once instead of booting as if the key took effect.
+      const unrequestedPushKey = formatUnrequestedPushKeyWarning(config, requires);
+      if (unrequestedPushKey) console.warn(chalk.yellow(`  ⚠ ${unrequestedPushKey}`));
 
       // Import ObjectStack runtime
       const { Runtime } = await import('@objectstack/runtime');
@@ -3104,6 +3131,14 @@ export default class Serve extends Command {
         // that is the instance `defineCluster()` consults (#13330).
         const __clusterModule = (await importFromHost(__clusterPkg)) as {
           checkMultiNodeAllowed: (requested?: number) => MultiNodeGateVerdict;
+          /**
+           * The ONE reading of "did the operator declare a multi-node
+           * topology" — both spellings, `OS_CLUSTER_REPLICAS>1` and
+           * `OS_EXPECT_MULTI_NODE=true` — owned by the split-brain guard and
+           * shared by every multi-replica reader. Required: it predates the
+           * gate's count parameter, so no app pins a service-cluster without it.
+           */
+          declaresMultiNode: (env: { OS_EXPECT_MULTI_NODE?: string; OS_CLUSTER_REPLICAS?: string }) => boolean;
           /** Optional: an app on a pre-#13330 `service-cluster` does not have it. */
           listClusterDrivers?: () => string[];
           // Optional: an app may pin an older service-cluster that predates
@@ -3112,7 +3147,7 @@ export default class Serve extends Command {
             importer: (specifier: string) => Promise<unknown>,
           ) => Promise<unknown>;
         };
-        const { checkMultiNodeAllowed, mountMultiNodeGateFromHost } = __clusterModule;
+        const { checkMultiNodeAllowed, declaresMultiNode, mountMultiNodeGateFromHost } = __clusterModule;
         // [#13537] Mount the distribution's gate on EVERY boot route, BEFORE
         // consulting it. Registration used to depend on one app config file
         // executing (the EE config calling `registerMultiNodeGate`), so the
@@ -3147,7 +3182,34 @@ export default class Serve extends Command {
         // `Number(undefined)` is `NaN`, which the gate normalizes to "not
         // declared" — normalization lives at the seam on purpose, so there is
         // deliberately no `?? 0` or pre-parse here.
-        const __gate = checkMultiNodeAllowed(Number(process.env.OS_CLUSTER_REPLICAS));
+        //
+        // ⛔ But the count is only ONE of the two spellings of the declaration.
+        // `OS_EXPECT_MULTI_NODE=true` declares multi-node with NO count, and
+        // asked with `NaN` the gate read that topology as "not declared": with
+        // no gate registered the boot then ran the remote driver multi-node,
+        // exactly what the fail-closed default exists to refuse — while the
+        // same deployment spelled `OS_CLUSTER_REPLICAS=2` was refused. So the
+        // topology is read through `declaresMultiNode` (the split-brain guard's
+        // reading, never a second parse of either spelling here), and the
+        // count spelling is asked on its own only to learn whether a count was
+        // given:
+        //   - not declared            → the raw count, as before (NaN / 0 / 1);
+        //   - declared WITH a count   → that count, as before;
+        //   - declared, count unknown → 2, the smallest count that IS
+        //     multi-node. The gate takes a desired count and has no
+        //     "declared, uncounted" input: `undefined` and every non-finite or
+        //     non-positive value mean "not declared", and 1 is single-node.
+        //     2 claims the least: a no-gate boot is refused as for any declared
+        //     topology, and a cap-aware gate is asked about the minimum it would
+        //     have to admit. Telemetry still reads `OS_CLUSTER_REPLICAS` itself,
+        //     so no `cluster_declared_nodes` series is invented from this 2,
+        //     and the cap advisory is told the count was not given, so it never
+        //     prints this 2 as a count the operator wrote.
+        const __countUnknown =
+          declaresMultiNode(process.env)
+          && !declaresMultiNode({ OS_CLUSTER_REPLICAS: process.env.OS_CLUSTER_REPLICAS });
+        const __requestedNodes = __countUnknown ? 2 : Number(process.env.OS_CLUSTER_REPLICAS);
+        const __gate = checkMultiNodeAllowed(__requestedNodes);
         // Held for BOTH branches below: an outright denial is as much an
         // operator-facing reading as a licensed overflow, and only one of the
         // two currently reaches a log line an operator is likely to still have.
@@ -3165,7 +3227,7 @@ export default class Serve extends Command {
           // Licensed-overflow advisory: the cluster IS entitled to run, it just
           // asked for more nodes than it paid for. Distinct from the denial
           // above, and deliberately not a downgrade.
-          const __capAdvisory = formatMultiNodeCapAdvisory(__gate);
+          const __capAdvisory = formatMultiNodeCapAdvisory(__gate, { countDeclared: !__countUnknown });
           if (__capAdvisory) console.warn(__capAdvisory);
           // Same host-anchored resolution as the gate above — the shipped
           // drivers (`-redis`, `-postgres`, …) are app-declared too.
@@ -3292,6 +3354,10 @@ export default class Serve extends Command {
       // `stackBootPlugins` [#22371], the list `os migrate
       // security-catalog-overlays --dev` composes too.
       let plugins: any[] = stackBootPlugins(config, flags.dev);
+      // Where `devPlugins` sit in that list (after the stack's own `plugins`),
+      // so an entry that does not load is named by the list it was written in.
+      const authoredPluginCount = stackBootPlugins(config, false).length;
+      const bootPluginCount = plugins.length;
 
       // 1. Auto-register ObjectQL Plugin if objects define but plugins missing
       // [#15006] The whole gate — the `objects` read AND the already-composed
@@ -3328,6 +3394,40 @@ export default class Serve extends Command {
           printDiagnostic(chalk.dim(`  telemetry datasource: ${telemetryPath} (lifecycle-classed system data; OS_TELEMETRY_DB=0 to disable)`));
         }
       };
+
+      // Several replicas declared over the redis cluster driver (cloud#3814
+      // N3) cannot share a database that is a file on one replica's own disk:
+      // each replica would open its own copy and the data would diverge. The
+      // boot is refused here, once the primary database is resolved and before
+      // anything is connected, created or booted — so ahead of the split-brain
+      // guard too, which it does not replace. Asked only under the declaration
+      // (`declaresReplicasSharingState`, #31600's pre-boot form of
+      // `declaresMultiReplicaOnRedis`), so a single-node boot resolves nothing
+      // more than it did. The primary is the one each route resolves for
+      // itself, never a second reading of the URL: the standalone stack's
+      // `resolveStandaloneDatabase` over the input it was composed from, or
+      // this command's own `OS_DATABASE_URL` fallback below. A host config whose
+      // own plugin provides the driver declares nothing either route can read,
+      // and is not judged. A fallback selection the step below refuses anyway
+      // (an unknown driver or scheme) is left to that refusal.
+      if (await declaresReplicasSharingState(process.env)) {
+        let primaryDatabase: MultiReplicaPrimaryDatabase | undefined;
+        if (standaloneDatabaseInput !== undefined) {
+          const { resolveStandaloneDatabase } = await import('@objectstack/runtime');
+          primaryDatabase = resolveStandaloneDatabase(standaloneDatabaseInput);
+        } else if (shouldAutoRegisterStorageDriver(config, plugins)) {
+          const databaseUrl = process.env.OS_DATABASE_URL;
+          try {
+            const fallback = resolveStorageDefinition(
+              resolveDriverType(process.env.OS_DATABASE_DRIVER, databaseUrl),
+              { databaseUrl, isDev },
+            );
+            if (fallback) primaryDatabase = { driver: fallback.driverId, url: databaseUrl };
+          } catch { /* refused, fatally, by step 2 below */ }
+        }
+        const refusal = primaryDatabase && multiReplicaLocalDatabaseRefusal(primaryDatabase);
+        if (refusal) throw new Error(refusal);
+      }
 
       // 2. Auto-register storage driver
       // Priority:
@@ -3505,7 +3605,10 @@ export default class Serve extends Command {
       // points except by the AppPlugin append below, and an AppPlugin is not a
       // MetadataPlugin.
       let devArtifactDoor: any;
-      if (isDev && flags.server && !plugins.some((p: any) => p?.constructor?.name === 'MetadataPlugin')) {
+      // The file `devArtifactDoor` reads — set exactly when the door is
+      // constructed, so the wrap below can read the SAME file (#31761).
+      let devArtifactDoorPath: string | undefined;
+      if (isDev && flags.server && !hasMetadataPlugin(plugins)) {
         try {
           const { resolveDefaultArtifactPath } = await import('@objectstack/runtime');
           // `os dev` is the only caller that reaches here, and it is a
@@ -3602,6 +3705,7 @@ export default class Serve extends Command {
                 artifactWatch: true,
                 artifactSource: { mode: 'local-file', path: hmrArtifactPath },
               });
+              devArtifactDoorPath = hmrArtifactPath;
             }
           }
         } catch (e: any) {
@@ -3646,7 +3750,7 @@ export default class Serve extends Command {
       if (
         !devArtifactDoor
         && isHostConfig(config)
-        && !plugins.some((p: any) => p?.name === 'com.objectstack.metadata' || p?.constructor?.name === 'MetadataPlugin')
+        && !hasMetadataPlugin(plugins)
       ) {
         const { MetadataPlugin } = await import('@objectstack/metadata');
         hostConfigMetadataDoor = new MetadataPlugin({
@@ -3666,20 +3770,68 @@ export default class Serve extends Command {
       // produced. Appending is kept so both boot paths (config-derived wrap
       // here, `createStandaloneStack`'s own AppPlugin) share one plugin
       // order and one story in the boot logs.
+      // A config whose code found no app bundle to land on is reported, never
+      // dropped (#4095) — on both routes below that graft it.
+      const warnOrphanedRuntimeMembers = (graft: ReturnType<typeof graftAuthoredRuntimeMembers>): void => {
+        if (graft.orphaned.length === 0) return;
+        console.warn(chalk.yellow(
+          `  ⚠ ${relativeConfig} exports ${graft.orphaned.join(' / ')} but no app bundle claimed `
+          + `${graft.orphaned.length === 1 ? 'it' : 'them'}`
+          + `${graft.reason === 'ambiguous-app-plugin'
+            ? ' — several apps are registered and the config declares no manifest.id to match'
+            : ' — no registered app bundle has a matching manifest.id'}`
+          + '. Action handlers registered there will NOT be reachable (they 404 at dispatch).',
+        ));
+      };
       if (!hasAppPluginAlready && configHasMetadata) {
         try {
-            const { AppPlugin } = await import('@objectstack/runtime');
+            const { AppPlugin, loadArtifactBundle } = await import('@objectstack/runtime');
+            // ── With the dev artifact door composed, the wrap carries the
+            // door's FILE, not the config module (#31761) ──────────────────
+            // The door reads `dist/objectstack.json`; a wrap over the module
+            // registered a second copy over it — and won the cold boot for every
+            // type it registers last. Measured on an `os dev --no-compile` boot
+            // of a host config over an artifact older than its sources:
+            // `/meta/view` and `GET /forms/:slug` answered the edited module,
+            // `/meta/object` the artifact, and the supervisor's "this boot
+            // serves the STALE build" warning was true of neither. The blank
+            // scaffold is a host config (its `plugins[]` holds connector
+            // instances), so that was every fresh project. One source per boot:
+            // the wrap reads the door's file, exactly as `createStandaloneStack`
+            // composes a non-host config (door + `AppPlugin` over the same
+            // artifact), and the module contributes only the members a JSON
+            // artifact cannot carry — the same graft as the `hasAppPluginAlready`
+            // branch below. With the default compile both are one evaluation of
+            // the same module, so nothing served changes; with `--no-compile`
+            // the boot serves the artifact, as the warning says.
+            //
+            // An artifact that does not load (malformed, unreadable) leaves the
+            // module as the wrap's bundle, as before — `loadArtifactBundle`
+            // has already said why, and the door, reading the same bytes,
+            // registers nothing either.
+            const artifactBundle = devArtifactDoor && devArtifactDoorPath
+              ? await loadArtifactBundle(devArtifactDoorPath, { tag: '[serve]', unwrapEnvelope: true })
+              : null;
             // The registrar is DECLARED by this composition, never inferred by
             // AppPlugin — see the `devArtifactDoor` block above. Default
             // (`'app-plugin'`) whenever no artifact door composes, which is
             // every non-dev boot of a host config — including every boot that
             // composes `hostConfigMetadataDoor`, which reads no artifact and
             // so registers none of the stack.
-            plugins = [...plugins, new AppPlugin(
-              config,
+            const wrap = new AppPlugin(
+              artifactBundle ?? config,
               undefined,
               devArtifactDoor ? { securityMetadataRegistrar: 'artifact-door' } : {},
-            )];
+            );
+            plugins = [...plugins, wrap];
+            if (artifactBundle && devArtifactDoorPath) {
+              // Grafted onto THIS wrap only: the host's own `plugins[]` may hold
+              // other apps, and the module's code belongs to the bundle it was
+              // compiled into.
+              warnOrphanedRuntimeMembers(graftAuthoredRuntimeMembers([wrap], config));
+              // The ready banner names the file the metadata came from (#21501).
+              configBootBundle = path.relative(process.cwd(), devArtifactDoorPath) || devArtifactDoorPath;
+            }
         } catch (e: any) {
             // Non-fatal — the platform still boots, just without this app's
             // metadata. But it must SAY so: this catch was silent, and the two
@@ -3705,17 +3857,7 @@ export default class Serve extends Command {
         // Success is silent: on the config-boot path this is now the normal
         // route by which handlers reach the engine, and the observable proof is
         // that the actions dispatch.
-        const graft = graftAuthoredRuntimeMembers(plugins, config);
-        if (graft.orphaned.length > 0) {
-          console.warn(chalk.yellow(
-            `  ⚠ ${relativeConfig} exports ${graft.orphaned.join(' / ')} but no app bundle claimed `
-            + `${graft.orphaned.length === 1 ? 'it' : 'them'}`
-            + `${graft.reason === 'ambiguous-app-plugin'
-              ? ' — several apps are registered and the config declares no manifest.id to match'
-              : ' — no registered app bundle has a matching manifest.id'}`
-            + '. Action handlers registered there will NOT be reachable (they 404 at dispatch).',
-          ));
-        }
+        warnOrphanedRuntimeMembers(graftAuthoredRuntimeMembers(plugins, config));
       }
 
       // 3b. Auto-register I18nServicePlugin if config contains translations/i18n
@@ -4194,8 +4336,19 @@ export default class Serve extends Command {
         const { OrganizationOwnershipBootGuardPlugin } = await import('@objectstack/runtime');
         // A development boot's refusal names the ceremony with `--dev`, so the
         // ceremony boots the way this one did (its secret, .env* files and
-        // `telemetry` sibling).
-        await kernel.use(new OrganizationOwnershipBootGuardPlugin({ dev: isDev }));
+        // `telemetry` sibling). A boot `os start` supervises with the secret it
+        // persisted in its home names that file, so the ceremony runs with the
+        // secret this server composes its security plugin with. A boot on a
+        // database the ceremony would not find by default (`os start -d` or
+        // `--home`, #31488; `os dev -d`, #31547) names it, so the commands plan
+        // this database, with the driver and token its parent's flags chose.
+        const ceremonyDatabase = readCeremonyDatabaseChannel(process.env);
+        await kernel.use(new OrganizationOwnershipBootGuardPlugin({
+          dev: isDev,
+          authSecretFile: readAuthSecretFileChannel(process.env),
+          ...(ceremonyDatabase ? { databaseUrl: ceremonyDatabase } : {}),
+          ...readCeremonyConnectionChannel(process.env),
+        }));
         trackPlugin('OrganizationOwnershipBootGuard');
       }
 
@@ -4345,6 +4498,10 @@ export default class Serve extends Command {
             await kernel.use(new AuthPlugin({
               secret,
               baseUrl,
+              // No base-URL variable set: `baseUrl` is this boot's own
+              // loopback fallback, so plugin-auth may correct its port to the
+              // one the transport bound. A configured value is kept as written.
+              baseUrlDefaulted: baseUrlResolution.source === null,
               // The deployment's product name, from the resolver the email
               // capability's template context uses: the auth emails'
               // `{{appName}}` and the TOTP issuer. Unpassed, auth answered
@@ -4352,6 +4509,12 @@ export default class Serve extends Command {
               appName: resolveDeploymentAppName((config as any).email ?? {}, process.env, (config as any).appName),
               socialProviders: Object.keys(socialProviders).length > 0 ? socialProviders : undefined,
               trustedOrigins: trustedOrigins.length ? trustedOrigins : undefined,
+              // The native app schemes the mobile sign-in hand-off may redirect a
+              // token to, from `OS_TRUSTED_APP_SCHEMES` (#29972). Unset stays
+              // unset: no scheme registered, the `one-time-token` plugin is not
+              // mounted and the hand-off refuses every target. A bad entry is
+              // refused by AuthPlugin at construction, never dropped.
+              trustedAppSchemes: resolveTrustedAppSchemes(process.env),
               // The stack's `server.trustProxy`, the same authored value the
               // dispatcher's inbound rate limiter receives below: whether the
               // ADR-0069 D5 IP allow-list and the D7 login audit may believe
@@ -4689,15 +4852,25 @@ export default class Serve extends Command {
         }
       }
 
+      // The stack's plugins as the kernel received them — instances, after
+      // `materializeStackPlugin` — so the crypto-provider composition check
+      // before `runtime.start()` reads what each one declares.
+      const stackMountedPlugins: unknown[] = [];
+      // The entries that did not load, with what each materialized to (when it
+      // got that far), for `refuseUnloadedCryptoProviderPlugins` below.
+      const unloadedStackPlugins: UnloadedStackPlugin[] = [];
       if (plugins.length > 0) {
+        let index = -1;
         for (const plugin of plugins) {
+          index += 1;
+          let materialized: unknown;
           try {
             // [#22301] What an entry becomes — a string is a package specifier,
             // a plain bundle (no `init`) is wrapped into `AppPlugin`, an instance
             // is itself — is ONE rule, `materializeStackPlugin` (`@objectstack/
             // core`), which `@objectstack/verify`'s `bootStack` mounts the same
             // array by. Only the loading is this boot's own:
-            const pluginToLoad: any = await materializeStackPlugin(plugin, {
+            const pluginToLoad: any = materialized = await materializeStackPlugin(plugin, {
               // Host-anchored, NOT a bare `import()`: this specifier comes from
               // the served app's own config, so what the app DECLARES about it is
               // the contract (commit 9cc6777d3). The helper carries the failure wrapper too.
@@ -4724,13 +4897,22 @@ export default class Serve extends Command {
             // with a `warn` naming both versions. That is how an app supplies
             // options to a plugin this CLI mounts without them.
             await kernel.use(pluginToLoad);
+            stackMountedPlugins.push(pluginToLoad);
             const pluginName = plugin.name || plugin.constructor?.name || 'unnamed';
             trackPlugin(pluginName);
           } catch (e: any) {
             console.error(chalk.red(`  ✗ Failed to load plugin: ${e.message}`));
+            unloadedStackPlugins.push(
+              index >= authoredPluginCount && index < bootPluginCount
+                ? { list: 'devPlugins', index: index - authoredPluginCount, entry: plugin, materialized, error: e }
+                : { index, entry: plugin, materialized, error: e },
+            );
           }
         }
       }
+      // An entry that did not load and may provide the crypto provider refuses
+      // the boot, before any secret is sealed: see the function.
+      refuseUnloadedCryptoProviderPlugins(unloadedStackPlugins);
 
       // [ADR-0025 §3.5 M1] The plugins `os plugin install` installed for this
       // project and environment, verified again before any of their code is
@@ -4738,9 +4920,11 @@ export default class Serve extends Command {
       // environment's trusted keys, the unpacked tree, the `runtime` tier) and
       // registered here, after the config's own `plugins`, while the kernel
       // still takes plugins. Only `runtime: 'node'` is dispatched; a refused
-      // plugin is printed by name and the boot goes on without it. No
-      // installations file, no read. See `../utils/installed-plugins-boot.ts`.
+      // plugin is printed by name, and the boot goes on without it unless it
+      // may provide the crypto provider: see the function. No installations
+      // file, no read. See `../utils/installed-plugins-boot.ts`.
       const installedPluginsBoot = await registerInstalledPlugins({ kernel, track: trackPlugin });
+      refuseRefusedInstalledCryptoProviderPlugins(installedPluginsBoot?.refused ?? []);
 
       // Register REST API and Dispatcher plugins (consume http.server + protocol services)
       //
@@ -4920,10 +5104,7 @@ export default class Serve extends Command {
       // 4. Auto-register AIServicePlugin if not already loaded by config plugins.
       // Registered AFTER Dispatcher so that the ai:routes hook listener is
       // already in place when AIServicePlugin.start() fires the hook.
-      const hasAIPlugin = plugins.some(
-        (p: any) => p.name === 'com.objectstack.service-ai'
-            || p.constructor?.name === 'AIServicePlugin'
-      );
+      const hasAIPlugin = mountsAiServicePlugin(plugins);
       // `importFromHost` (module scope, hoisted over this whole file — it is no
       // longer "declared above" anything, which is the point) resolves optional
       // plugin packages from the HOST APP's context — the app being served
@@ -4946,16 +5127,14 @@ export default class Serve extends Command {
       // now go through the one owner in `@objectstack/types/node`, so "declared"
       // cannot mean two different things in one file (Prime Directive #12).
       const hostDeclaresDependency = (pkg: string): boolean => isDeclaredByHost(pkg, hostRoot);
-      // `wantsAiService` is the AUTO (opt-in) signal: the host app listed the base
-      // AI service — or the Studio that builds on it — in its OWN package.json. This
-      // is a package.json READ (a deliberate authoring act), not a speculative
-      // import: gating on a *declared* dep, not mere resolvability, is reliable in a
+      // The AUTO (opt-in) signal is the host app listing the base AI service — or
+      // the Studio that builds on it — in its OWN package.json. This is a
+      // package.json READ (a deliberate authoring act), not a speculative import:
+      // gating on a *declared* dep, not mere resolvability, is reliable in a
       // workspace/monorepo where a package stays hoist-resolvable when undeclared.
       // Studio implies the base service (it attaches via the `ai:ready` hook the base
       // fires; the base is a transitive dep of Studio, so it stays resolvable).
-      const wantsAiService =
-        hostDeclaresDependency('@objectstack/service-ai')
-        || hostDeclaresDependency('@objectstack/service-ai-studio');
+      // `resolveAiServiceLoad` below reads it.
 
       // Load an optional, separately-published service plugin by INTENT (#1597).
       // `required` (from an explicit `requires: [...]` capability) makes a missing
@@ -5019,12 +5198,12 @@ export default class Serve extends Command {
       // `tiers` omit `ai` never loads it, whatever the intent — so a CE app that
       // omits AI gets no AI service, no agents, and no `services.ai` in discovery
       // (the console hides its AI surface), while every other capability is unaffected.
-      const aiRequired =
-        declaredRequires.has('ai') || declaredRequires.has('ai-studio');
-      const aiDecision = Serve.resolveOptionalPluginLoad({
-        tierAllowed: tierEnabled('ai'),
-        required: aiRequired,
-        declared: wantsAiService,
+      // [#31411] The rule's one reading, shared with `os migrate`, which refuses a
+      // config whose AI plugin only this auto-inject would mount.
+      const aiDecision = resolveAiServiceLoad({
+        declaredRequires,
+        aiTierEnabled: tierEnabled('ai'),
+        hostDeclaresDependency,
       });
       if (!hasAIPlugin && aiDecision !== 'off') {
         // AIServicePlugin auto-detects its LLM provider from environment
@@ -5065,6 +5244,39 @@ export default class Serve extends Command {
             }
           }
         }
+      }
+
+      // ── The ONE secret crypto provider (host composition root) ─────────
+      // Every `sys_secret` row is sealed by one ICryptoProvider: the data
+      // engine's secret fields (wired after `runtime.start()` below), the
+      // datasource secret binder and the default settings service (both
+      // composed before it). A plugin supplies that provider — a KMS/Vault one,
+      // for customer-managed keys — by registering it as the kernel service
+      // CRYPTO_PROVIDER_SERVICE during its init; without one this host keeps
+      // its own LocalCryptoProvider (AES-256-GCM keyed off `OS_SECRET_KEY` or a
+      // persisted key file), exactly as before the seam existed. All three
+      // consumers hold `hostCrypto.provider`, which chooses once every plugin
+      // has initialized (`createHostCryptoProvider`). The fallback is the
+      // deferred LocalCryptoProvider: built at that choice, not here, because
+      // the key file is settled only once the database is open (the settings
+      // service's `start()`).
+      let hostCrypto: ReturnType<typeof createHostCryptoProvider> | undefined;
+      let hostCryptoUnavailable: unknown;
+      try {
+        const { deferredLocalCryptoProvider } = await import(
+          /* webpackIgnore: true */ '@objectstack/service-settings'
+        );
+        const localCryptoProvider = deferredLocalCryptoProvider();
+        hostCrypto = createHostCryptoProvider(() => localCryptoProvider.resolve());
+        // ⛔ Not `trackPlugin`ed: it is the host's own seam, not a capability.
+        await kernel.use(hostCrypto.plugin);
+      } catch (cryptoErr: unknown) {
+        // Reached only when the settings package (which ships the local
+        // provider) does not load. The consumers below then report it where
+        // they did before: the datasource admin builds no binder, and the
+        // secret-field wiring warns that writing a secret field fails closed.
+        hostCrypto = undefined;
+        hostCryptoUnavailable = cryptoErr;
       }
 
       // 5. Capability resolver — auto-load service plugins declared in
@@ -5166,7 +5378,15 @@ export default class Serve extends Command {
               `  ⚠ StorageServicePlugin using local driver (${resolved.localStorageRoot}) — switch to S3/GCS/Azure for production (set OS_STORAGE_* or configure storage in Setup → Settings).`,
             ));
           }
-          const provider = arg !== undefined ? new Ctor(arg) : new Ctor();
+          // The default settings service seals its encrypted settings with the
+          // host's one crypto provider (above), not a LocalCryptoProvider of its
+          // own: a provider a plugin registers then holds the settings' keys
+          // too. Without a registration the shared one is that same local
+          // provider — same constructor, same key source.
+          const ctorArg: any = cap === 'settings' && hostCrypto
+            ? { ...(arg ?? {}), cryptoProvider: hostCrypto.provider }
+            : arg;
+          const provider = ctorArg !== undefined ? new Ctor(ctorArg) : new Ctor();
           await kernel.use(provider);
           resolverMounted.push(provider);
           trackPlugin(spec.export);
@@ -5217,12 +5437,6 @@ export default class Serve extends Command {
         }
       }
 
-      // Shared dev crypto provider for ALL of sys_secret (datasource creds
-      // below + secret fields after start). One instance ⇒ one key, so every
-      // encrypted secret decrypts under the same provider. Created lazily by
-      // whichever block runs first.
-      let sharedCryptoProvider: any = undefined;
-
       // ── External Datasource Federation (ADR-0015) ─────────────────
       // Federation (introspect / draft / import / validate of external
       // tables) ships in the open framework.
@@ -5265,11 +5479,12 @@ export default class Serve extends Command {
       // whether the UI can manage datasources. Mounted by default so a
       // self-host runtime is a complete low-code platform out of the box.
       //
-      // Credentials are bound through the SAME crypto provider used for
-      // `secret` fields below (`sharedCryptoProvider`), so every secret in
-      // `sys_secret` (settings, secret fields, datasource creds) shares one
-      // key. Wired BEFORE runtime.start() so the plugin's kernel:ready boot
-      // rehydration (which decrypts persisted creds) has its binder ready.
+      // Credentials are bound through the host's ONE crypto provider
+      // (`hostCrypto`, above), the one `secret` fields and the settings service
+      // use, so every secret in `sys_secret` (settings, secret fields,
+      // datasource creds) is sealed by one provider. Wired BEFORE
+      // runtime.start() so the plugin's kernel:ready boot rehydration (which
+      // decrypts persisted creds) has its binder ready.
       try {
         const adminMod: any = await import('@objectstack/service-datasource');
         const {
@@ -5302,30 +5517,32 @@ export default class Serve extends Command {
             find: (o: string, q?: any) => resolveEngine()?.find(o, q),
           };
 
-          // Fail-closed binder over the shared dev crypto provider. If the
-          // provider can't be created, leave `secrets` undefined — the plugin
+          // Fail-closed binder over the host's one crypto provider. If the
+          // binder can't be built, leave `secrets` undefined — the plugin
           // then rejects secret-bearing create/update instead of storing
           // cleartext (by design).
           let secrets: any = undefined;
           try {
-            const { LocalCryptoProvider } = await import(
-              /* webpackIgnore: true */ '@objectstack/service-settings'
-            );
-            // First block to touch `sharedCryptoProvider` (still undefined
-            // here), so create it directly; the secret-field wiring below
-            // reuses this instance so every sys_secret shares one key.
-            sharedCryptoProvider = new LocalCryptoProvider();
+            if (!hostCrypto) throw hostCryptoUnavailable;
+            // The host provider chooses nothing here: plugins have not
+            // initialized, and a plugin may still register the provider. The
+            // binder first seals or opens a credential at `kernel:ready`, after
+            // every init and after the key file is settled, so a credential
+            // written before the post-start wiring below is sealed by the
+            // registered provider when there is one, never by the local one.
             secrets = createDatasourceSecretBinder({
               engine: lazySecretEngine,
-              cryptoProvider: sharedCryptoProvider,
+              cryptoProvider: hostCrypto.provider,
             });
           } catch (cryptoErr: any) {
-            // Best-effort fail-closed: leave `secrets` undefined so the plugin
-            // rejects secret-bearing create/update rather than storing
-            // cleartext. A production deployment with no stable key still
-            // aborts boot loudly at the secret-field wiring below (where
-            // LocalCryptoProvider's "Refusing to start in production" error is
-            // rethrown), so we don't duplicate that abort here.
+            // Reached only when the settings package or the binder fails to
+            // load: the host provider constructs nothing here, so a key
+            // problem never lands in this catch. Leave `secrets` undefined so
+            // the plugin rejects secret-bearing create/update rather than
+            // storing cleartext. A key problem surfaces where the provider is
+            // first built (`kernel:ready`, or the secret-field wiring below),
+            // which rethrows a production "Refusing to start in production"
+            // error, so the boot still refuses and nothing is duplicated here.
             console.warn(
               chalk.yellow(
                 `  ⚠ datasource admin: no CryptoProvider (${cryptoErr?.message ?? cryptoErr}); secret-bearing datasource create/update will fail closed`,
@@ -5581,6 +5798,12 @@ export default class Serve extends Command {
         } as any);
       }
 
+      // Two plugins that each declare the crypto provider (`providesServices`)
+      // refuse here, both named, before either initializes; see
+      // `refuseTwoCryptoProviderPlugins`. An undeclared second registration is
+      // refused by the kernel itself when it happens.
+      refuseTwoCryptoProviderPlugins([...stackMountedPlugins, ...resolverMounted]);
+
       // Boot the runtime
       await runtime.start();
 
@@ -5592,41 +5815,48 @@ export default class Serve extends Command {
       // objectql's `secret` field type encrypts on write to `sys_secret`
       // and fails closed when no ICryptoProvider is registered. objectql
       // must NOT depend on a crypto implementation (layering), so the
-      // host injects one here. Dev/self-host gets a LocalCryptoProvider
-      // (AES-256-GCM keyed off `OS_SECRET_KEY` or a persisted dev key);
-      // production hosts swap this for a KMS/Vault-backed provider (e.g.
-      // via an env-gated branch or a dedicated plugin) before secrets are
-      // written. We resolve the data engine by its registered service name
-      // and feature-detect `setCryptoProvider` so older engines / alternate
-      // data services degrade gracefully (writing a secret then fails
-      // closed, as designed, rather than silently storing cleartext).
+      // host injects one here: its ONE crypto provider (`hostCrypto`, composed
+      // before the capability resolver), which the datasource binder and the
+      // default settings service already hold. That is the provider a plugin
+      // registered as CRYPTO_PROVIDER_SERVICE during init (a KMS/Vault one),
+      // else this host's LocalCryptoProvider (AES-256-GCM keyed off
+      // `OS_SECRET_KEY` or a persisted dev key). We resolve the data engine by
+      // its registered service name and feature-detect `setCryptoProvider` so
+      // older engines / alternate data services degrade gracefully (writing a
+      // secret then fails closed, as designed, rather than silently storing
+      // cleartext).
       try {
         const dataEngine: any =
           kernel.getService?.('data') ?? kernel.getService?.('objectql');
         if (dataEngine && typeof dataEngine.setCryptoProvider === 'function') {
-          if (!sharedCryptoProvider) {
-            const { LocalCryptoProvider } = await import(
-              /* webpackIgnore: true */ '@objectstack/service-settings'
-            );
-            // In production LocalCryptoProvider throws when no stable key
-            // (OS_SECRET_KEY / persisted file) is available — the fail-loud
-            // guard against silently minting an ephemeral key and losing
-            // every sys_secret value after a restart. Let that error be loud:
-            // secret writes must not proceed under an unstable key.
-            sharedCryptoProvider = new LocalCryptoProvider();
+          if (!hostCrypto) {
+            throw hostCryptoUnavailable instanceof Error
+              ? hostCryptoUnavailable
+              : new Error(String(hostCryptoUnavailable));
           }
-          dataEngine.setCryptoProvider(sharedCryptoProvider);
+          // Chosen by now (at `kernel:ready`) and held to it: a provider
+          // registered after init, or the registered one replaced, refuses the
+          // boot here. On the local path, LocalCryptoProvider throws in
+          // production when no stable key (OS_SECRET_KEY / persisted file) is
+          // available — the fail-loud guard against silently minting an
+          // ephemeral key and losing every sys_secret value after a restart.
+          // Let that error be loud: secret writes must not proceed under an
+          // unstable key.
+          hostCrypto.provider.confirm();
+          dataEngine.setCryptoProvider(hostCrypto.provider);
           if (isDev) {
             printDiagnostic(
               chalk.dim(
-                '  ↪ secret fields: LocalCryptoProvider wired (dev) — set OS_SECRET_KEY and swap for KMS/Vault in production',
+                hostCrypto.provider.source === 'registered'
+                  ? `  ↪ secret fields: the crypto provider a plugin registered as '${CRYPTO_PROVIDER_SERVICE}' wired`
+                  : '  ↪ secret fields: LocalCryptoProvider wired (dev) — set OS_SECRET_KEY and swap for KMS/Vault in production',
               ),
             );
           }
         }
       } catch (err: any) {
         const msg = String(err?.message ?? err);
-        if (msg.includes('Refusing to start in production')) {
+        if (err instanceof HostCryptoProviderRefusal || msg.includes('Refusing to start in production')) {
           // Fail-loud config error: print the actionable guidance verbatim.
           console.error(chalk.red(msg));
           throw err;
@@ -6111,6 +6341,398 @@ export function createDatasourceSecretResolverPlugin(
 }
 
 /**
+ * Which provider seals this boot's secrets: the one a plugin registered as
+ * {@link CRYPTO_PROVIDER_SERVICE}, or the host's own `LocalCryptoProvider`.
+ */
+export type HostCryptoProviderSource = 'registered' | 'local';
+
+/**
+ * The ONE crypto provider `os serve` hands every producer of a `sys_secret`
+ * row — the data engine (secret fields), the datasource secret binder
+ * (datasource credentials) and the default `SettingsServicePlugin` (encrypted
+ * settings) — so every secret opens under the provider that sealed it.
+ *
+ * Those consumers are composed before any plugin initializes, and the provider
+ * is decided by what a plugin registers DURING init. So this object is handed
+ * out first and chooses later — at its first use, or at `kernel:ready`,
+ * whichever comes first — and never while plugin init is still running
+ * (AGENTS.md, "Startup registry reads": resolve where it is used).
+ */
+export interface HostCryptoProvider extends ICryptoProvider {
+  /**
+   * The provider every call goes to, chosen at the first call and then kept:
+   * the registered one, or the local fallback when no plugin registered one.
+   * While plugin init is still running it refuses and chooses nothing: a
+   * provider may still register, and a secret another provider sealed now
+   * would not open under it. A fallback whose constructor refuses (production
+   * without a stable key) throws that refusal from every call.
+   */
+  resolve(): ICryptoProvider;
+  /**
+   * {@link resolve}, then refuse when the registry no longer holds what was
+   * chosen: a provider registered after plugin init (this boot already chose
+   * the local one), or the registered one replaced. Called once the boot is
+   * over, before the data engine is handed the provider.
+   */
+  confirm(): ICryptoProvider;
+  /** What {@link resolve} chose, or `undefined` before it has chosen. */
+  readonly source: HostCryptoProviderSource | undefined;
+}
+
+/**
+ * A refusal of the host's crypto-provider composition. It names the service
+ * and the plugins, ⛔ never a registered value: the provider holds every
+ * secret's key.
+ */
+export class HostCryptoProviderRefusal extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'HostCryptoProviderRefusal';
+  }
+}
+
+/** The plugin context members {@link createHostCryptoProvider}'s plugin reads. */
+interface HostCryptoProviderContext {
+  getServices(): Map<string, unknown>;
+  getKernel?: () => { getState?: () => string } | undefined;
+  hook(name: string, handler: () => Promise<void> | void): void;
+}
+
+/** What a value registered as {@link CRYPTO_PROVIDER_SERVICE} must carry, as callable members. */
+const CRYPTO_PROVIDER_MEMBERS = ['encrypt', 'decrypt', 'rotateKey', 'digest', 'keyedDigest'] as const;
+
+/** `'a'`, `'a' and 'b'`, `'a', 'b' and 'c'`. */
+function quotedNameList(names: readonly string[]): string {
+  const quoted = names.map((name) => `'${name}'`);
+  return quoted.length <= 1 ? quoted.join('') : `${quoted.slice(0, -1).join(', ')} and ${quoted[quoted.length - 1]}`;
+}
+
+/**
+ * Build the host's one crypto provider ({@link HostCryptoProvider}) and the
+ * plugin that lets it read the kernel's service registry.
+ *
+ * - `local` builds the fallback, `LocalCryptoProvider`. It is called only when
+ *   no plugin registered a provider, so its production refusal for an unstable
+ *   key is reached exactly where it was before a plugin could supply one.
+ * - The plugin reads nothing in `init()`: it keeps the context and resolves
+ *   the provider from a `kernel:ready` hook. Registered during init, that hook
+ *   runs before every hook registered in a `start()` — the settings service's
+ *   among them — so a production boot without a stable local key still stops
+ *   at `kernel:ready`.
+ */
+export function createHostCryptoProvider(local: () => ICryptoProvider): {
+  provider: HostCryptoProvider;
+  plugin: { name: string; version: string; init(ctx: HostCryptoProviderContext): Promise<void> };
+} {
+  let registry: { read(): unknown; initDone(): boolean } | undefined;
+  let chosen: { provider: ICryptoProvider; source: HostCryptoProviderSource; registered: unknown } | undefined;
+
+  const asCryptoProvider = (value: unknown): ICryptoProvider => {
+    const missing = CRYPTO_PROVIDER_MEMBERS.filter(
+      (member) => typeof (value as Record<string, unknown> | null)?.[member] !== 'function',
+    );
+    if (missing.length > 0) {
+      throw new HostCryptoProviderRefusal(
+        `Refusing to boot: the service '${CRYPTO_PROVIDER_SERVICE}' a plugin registered is not a crypto provider — `
+        + `it has no ${missing.map((member) => `${member}()`).join(', ')}. Register an ICryptoProvider there.`,
+      );
+    }
+    return value as ICryptoProvider;
+  };
+
+  const resolve = (): ICryptoProvider => {
+    if (chosen) return chosen.provider;
+    if (!registry?.initDone()) {
+      throw new HostCryptoProviderRefusal(
+        'Refusing to seal or open a secret while plugins are still initializing: a plugin may still register '
+        + `the crypto provider ('${CRYPTO_PROVIDER_SERVICE}'), and a secret another provider sealed now would `
+        + 'not open under it. Seal and open secrets from start() or later, never from init().',
+      );
+    }
+    const registered = registry.read();
+    chosen = registered === undefined
+      ? { provider: local(), source: 'local', registered }
+      : { provider: asCryptoProvider(registered), source: 'registered', registered };
+    return chosen.provider;
+  };
+
+  const confirm = (): ICryptoProvider => {
+    const provider = resolve();
+    if (registry!.read() !== chosen!.registered) {
+      throw new HostCryptoProviderRefusal(
+        chosen!.source === 'local'
+          ? `Refusing to boot: a plugin registered the crypto provider ('${CRYPTO_PROVIDER_SERVICE}') after every `
+            + 'plugin had initialized, when this boot had already chosen LocalCryptoProvider for its secrets. '
+            + "Register it with ctx.registerService in the plugin's init()."
+          : `Refusing to boot: the crypto provider registered as '${CRYPTO_PROVIDER_SERVICE}' was replaced after `
+            + 'this boot chose it. Every secret is sealed by one provider, so it is registered once, in init(), '
+            + 'and never replaced.',
+      );
+    }
+    return provider;
+  };
+
+  const provider: HostCryptoProvider = {
+    encrypt: async (plain, ctx) => resolve().encrypt(plain, ctx),
+    decrypt: async (handle, ctx) => resolve().decrypt(handle, ctx),
+    rotateKey: async (handle, ctx) => resolve().rotateKey(handle, ctx),
+    digest: (plain) => resolve().digest(plain),
+    keyedDigest: async (plain) => resolve().keyedDigest(plain),
+    resolve,
+    confirm,
+    get source() {
+      return chosen?.source;
+    },
+  };
+
+  const plugin = {
+    name: 'com.objectstack.cli.host-crypto-provider',
+    version: '1.0.0',
+    init: async (ctx: HostCryptoProviderContext): Promise<void> => {
+      let ready = false;
+      registry = {
+        read: () => ctx.getServices().get(CRYPTO_PROVIDER_SERVICE),
+        // Every init() has run once the kernel leaves `initializing` (Phase 2
+        // begins) — read where the question is asked, never recorded here.
+        // Assumes `ctx.getKernel` (ObjectKernel's context has it); without it
+        // nothing is chosen before this plugin's own `kernel:ready` hook.
+        initDone: () => {
+          const state = ctx.getKernel?.()?.getState?.();
+          return ready || (state !== undefined && state !== 'idle' && state !== 'initializing');
+        },
+      };
+      ctx.hook('kernel:ready', async () => {
+        ready = true;
+        resolve();
+      });
+    },
+  };
+
+  return { provider, plugin };
+}
+
+/**
+ * The plugins of a composition that declare, in `providesServices`
+ * (ADR-0116), that they register {@link CRYPTO_PROVIDER_SERVICE} — by name, in
+ * composition order. A plugin composed twice under one `name` boots once (the
+ * later one), and is listed once, as that later instance.
+ *
+ * The one reading of "who provides the crypto provider" that `os serve`
+ * ({@link refuseTwoCryptoProviderPlugins}) and the one-shot commands
+ * (`utils/one-shot-settings.ts`) both take.
+ */
+export function cryptoProviderPlugins(composed: Iterable<unknown>): Array<{ name: string; plugin: object }> {
+  const byName = new Map<string, object>();
+  for (const candidate of composed) {
+    const name = (candidate as { name?: unknown } | null)?.name;
+    if (typeof name === 'string') byName.set(name, candidate as object);
+  }
+  return [...byName]
+    .filter(([, plugin]) => declaresCryptoProvider(plugin))
+    .map(([name, plugin]) => ({ name, plugin }));
+}
+
+/**
+ * Does this plugin (or entry) declare, in `providesServices` (ADR-0116), that
+ * it registers {@link CRYPTO_PROVIDER_SERVICE}? The one predicate behind
+ * {@link cryptoProviderPlugins} and {@link refuseUnloadedCryptoProviderPlugins}.
+ */
+function declaresCryptoProvider(plugin: object): boolean {
+  const provides = (plugin as { providesServices?: unknown }).providesServices;
+  return Array.isArray(provides) && provides.includes(CRYPTO_PROVIDER_SERVICE);
+}
+
+/**
+ * Refuse a composition in which more than one plugin declares, in
+ * `providesServices` (ADR-0116), that it registers {@link CRYPTO_PROVIDER_SERVICE}.
+ *
+ * The provider seals every secret field, datasource credential and encrypted
+ * setting, so letting either one win would leave secrets the other sealed
+ * unreadable. The kernel already refuses a second `registerService` under one
+ * name, but cannot say who registered first; a declaration can, so this names
+ * every declaring plugin before any of them initializes. A plugin registered
+ * twice under one `name` boots once (the later one), and is counted once.
+ */
+export function refuseTwoCryptoProviderPlugins(composed: Iterable<unknown>): void {
+  const declaring = cryptoProviderPlugins(composed).map(({ name }) => name);
+  if (declaring.length > 1) {
+    throw new HostCryptoProviderRefusal(
+      `Refusing to boot: ${declaring.length} plugins provide the crypto provider ('${CRYPTO_PROVIDER_SERVICE}'): `
+      + `${quotedNameList(declaring)}. It seals every secret field, datasource credential and encrypted setting, `
+      + "so exactly one plugin may provide it — keep one of them in the stack's plugins.",
+    );
+  }
+}
+
+/** A `plugins` entry `os serve` could not load: {@link refuseUnloadedCryptoProviderPlugins}. */
+export interface UnloadedStackPlugin {
+  /** The list the entry was written in; `plugins` when absent. */
+  list?: 'plugins' | 'devPlugins';
+  /** Its position in that list. */
+  index: number;
+  /** The entry as the config wrote it. */
+  entry: unknown;
+  /** What it materialized to before it failed; `undefined` when it never did. */
+  materialized?: unknown;
+  error: unknown;
+}
+
+/**
+ * Refuse a boot in which a `plugins` entry did not load and nothing rules out
+ * that it provides the crypto provider ({@link CRYPTO_PROVIDER_SERVICE}).
+ *
+ * The provider seals every secret field, datasource credential and encrypted
+ * setting, and the host chooses it once at `kernel:ready`
+ * ({@link createHostCryptoProvider}). A boot that goes on without the plugin
+ * that provides it would choose another one, so it does not go on. An entry is
+ * judged by what it says it provides, read as {@link cryptoProviderPlugins}
+ * reads it: the plugin it materialized to (or the entry itself, when it is an
+ * object) is refused when its `providesServices` (ADR-0116) names the
+ * provider, and ruled out when it declares other services or declares none.
+ * An entry that never materialized (a package specifier that does not resolve
+ * or import) says nothing, and is refused. Every ruled-out entry keeps the
+ * boot's existing handling: it is printed and the boot goes on without it.
+ *
+ * The one-shot secret commands keep the same rule over the same host config.
+ */
+export function refuseUnloadedCryptoProviderPlugins(unloaded: readonly UnloadedStackPlugin[]): void {
+  const refused = unloaded.filter(({ entry, materialized }) => {
+    const said = materialized && typeof materialized === 'object'
+      ? materialized
+      : entry && typeof entry === 'object' ? entry : undefined;
+    if (!said) return true;
+    return declaresCryptoProvider(said);
+  });
+  if (refused.length === 0) return;
+  const label = ({ list = 'plugins', index, entry, materialized }: UnloadedStackPlugin): string => {
+    if (typeof entry === 'string') return `${list}[${index}] ('${entry}')`;
+    const name = (materialized as { name?: unknown } | null | undefined)?.name ?? (entry as { name?: unknown } | null)?.name;
+    return typeof name === 'string' ? `${list}[${index}] ('${name}')` : `${list}[${index}]`;
+  };
+  const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+  throw new HostCryptoProviderRefusal(
+    `Refusing to boot: ${refused.map((u) => `${label(u)} did not load (${reason(u.error)})`).join('; ')}, `
+    + `and nothing rules out that ${refused.length === 1 ? 'it provides' : 'one of them provides'} the crypto provider `
+    + `('${CRYPTO_PROVIDER_SERVICE}'). It seals every secret field, datasource credential and encrypted setting, `
+    + 'so this boot does not choose another one. Make the entry load, or remove it from the stack\'s plugins.',
+  );
+}
+
+/**
+ * Refuse a boot in which a plugin `os plugin install` installed was refused at
+ * boot and nothing rules out that it provides the crypto provider
+ * ({@link CRYPTO_PROVIDER_SERVICE}): the rule
+ * {@link refuseUnloadedCryptoProviderPlugins} keeps for the stack's `plugins`.
+ *
+ * A refusal is ruled out when the plugin's verified artifact declares a tier
+ * this host does not run in process (`runtime_undeclared`,
+ * `runtime_not_dispatched`), or when the plugin was imported and what it
+ * declares in `providesServices` (ADR-0116) could be read and does not name
+ * the provider. Every other refusal, the loader's own failure included, says
+ * nothing it provides, and is refused. A disabled plugin is not a refusal.
+ *
+ * The refusal names each plugin with its refusal code and the step that lets
+ * the next boot go on: `os plugin disable <id>` for most codes. A code that
+ * `os plugin disable` cannot clear names its own step instead: a record whose
+ * directory is not its install directory is checked before the disabled set,
+ * so it is installed again; an uninstall the boot could not finish is finished
+ * by a later boot; an unreadable disable-state file, or installations file,
+ * is repaired; a loader that failed outright is fixed.
+ */
+export function refuseRefusedInstalledCryptoProviderPlugins(refused: readonly InstalledPluginRefusal[]): void {
+  const stopping = refused.filter(({ error, declaredServices }) => {
+    if (error === 'runtime_undeclared' || error === 'runtime_not_dispatched') return false;
+    return declaredServices === undefined || declaredServices.includes(CRYPTO_PROVIDER_SERVICE);
+  });
+  if (stopping.length === 0) return;
+  const unnamed = ({ id }: InstalledPluginRefusal): boolean => id === '*' || id === '?';
+  const label = (r: InstalledPluginRefusal): string =>
+    unnamed(r) ? `the installed plugins could not be read (${r.error})` : `installed plugin ${r.id}@${r.version} was refused (${r.error})`;
+  /** The step for a code `os plugin disable` cannot clear; `null` when it can. */
+  const ownStep = ({ id, error }: InstalledPluginRefusal): string | null => {
+    switch (error) {
+      case 'install_dir_unexpected':
+        return `Install ${id} again (os plugin install): its record names a directory that is not its install directory.`;
+      case 'uninstall_failed':
+      case 'record_changed':
+        return `${id} is being uninstalled: fix what stopped it, and a later boot finishes the uninstall.`;
+      case 'disabled_state_unreadable':
+        return "Repair this environment's disable-state file: until it reads, no installed plugin can be disabled.";
+      case 'records_unreadable':
+        return "Repair this project's installations file.";
+      case 'loader_failed':
+        return 'Fix what failed the installed-plugin loader.';
+      default:
+        return null;
+    }
+  };
+  const disables = [...new Set(stopping.filter((r) => !unnamed(r) && ownStep(r) === null).map(({ id }) => `os plugin disable ${id}`))];
+  const steps = [
+    ...(disables.length > 0
+      ? [`Fix what refused ${disables.length === 1 ? 'it' : 'them'}, or boot without ${disables.length === 1 ? 'it' : 'them'}: ${disables.join(', ')}.`]
+      : []),
+    ...new Set(stopping.map(ownStep).filter((step): step is string => step !== null)),
+  ];
+  throw new HostCryptoProviderRefusal(
+    `Refusing to boot: ${stopping.map(label).join('; ')}, and nothing rules out that `
+    + `${stopping.length === 1 ? 'it provides' : 'one of them provides'} the crypto provider ('${CRYPTO_PROVIDER_SERVICE}'). `
+    + 'It seals every secret field, datasource credential and encrypted setting, so this boot does not choose another one. '
+    + steps.join(' '),
+  );
+}
+
+/**
+ * Refuse a boot that would set aside a `plugins` entry which may provide the
+ * crypto provider ({@link CRYPTO_PROVIDER_SERVICE}).
+ *
+ * A stack whose `plugins` holds no plugin instance (no entry with `init`) is
+ * not a host config: `os serve` boots the standalone stack and uses that
+ * stack's plugins in place of the authored list ({@link mergeBootConfig}), so
+ * no authored `plugins` entry is loaded. The provider seals every secret
+ * field, datasource credential and encrypted setting, and the one-shot secret
+ * commands read the same list, so an entry the boot sets aside must be ruled
+ * out by what it declares. Each entry is materialized the way the boot loop
+ * reads one (a string is imported host-anchored; an object is read as it is,
+ * never wrapped or booted) and is refused when it declares the provider in
+ * `providesServices` (ADR-0116), or when it does not import, since an entry
+ * that never materialized declares nothing. Every other entry keeps today's
+ * handling.
+ */
+export async function refuseSetAsideCryptoProviderPlugins(
+  authored: unknown,
+  importSpecifier: (specifier: string) => Promise<unknown>,
+): Promise<void> {
+  if (!Array.isArray(authored)) return;
+  const unloaded: UnloadedStackPlugin[] = [];
+  const declaring: string[] = [];
+  for (const [index, entry] of authored.entries()) {
+    if (entry === undefined || entry === null || entry === false) continue;
+    let materialized: unknown;
+    try {
+      materialized = await materializeStackPlugin(entry, {
+        importSpecifier,
+        wrapBundle: async (bundle) => bundle,
+      });
+    } catch (error) {
+      unloaded.push({ index, entry, error });
+      continue;
+    }
+    if (cryptoProviderPlugins([materialized]).length > 0) {
+      const name = (materialized as { name?: unknown }).name;
+      declaring.push(typeof entry === 'string' ? `plugins[${index}] ('${entry}')` : `plugins[${index}] ('${String(name)}')`);
+    }
+  }
+  refuseUnloadedCryptoProviderPlugins(unloaded);
+  if (declaring.length === 0) return;
+  throw new HostCryptoProviderRefusal(
+    `Refusing to boot: ${declaring.join(', ')} ${declaring.length === 1 ? 'provides' : 'provide'} the crypto provider `
+    + `('${CRYPTO_PROVIDER_SERVICE}'), but this stack's plugins lists no plugin instance, so os serve boots the `
+    + 'standalone stack and does not load it. It seals every secret field, datasource credential and encrypted '
+    + "setting, so this boot does not choose another one. Add the provider's plugin instance to the stack's plugins.",
+  );
+}
+
+/**
  * What {@link createUnknownHostnameGuardPlugin} is constructed with.
  */
 export interface UnknownHostnameGuardOptions {
@@ -6479,6 +7101,22 @@ export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
   }
 }
 
+
+/**
+ * The boot warning for a stack whose `push` key is set while its served
+ * capabilities do not include `push` (#29820), or `null` when there is nothing
+ * to say. Push is a requested capability, never on the always-on slate, so
+ * without the token `PushServicePlugin` is not mounted and the key is read by
+ * nothing; the operator who wrote the key is told how to turn it on.
+ *
+ * Returns PLAIN text; the caller owns the channel (`console.warn`, stderr).
+ */
+export function formatUnrequestedPushKeyWarning(stack: unknown, requires: readonly string[]): string | null {
+  const push = stack && typeof stack === 'object' ? (stack as { push?: unknown }).push : undefined;
+  if (push === undefined || push === null || requires.includes('push')) return null;
+  return "The stack definition sets a push key, but requires does not name 'push', so the push service is not "
+    + "started and the key is not read. Add 'push' to requires to turn mobile push on.";
+}
 
 /**
  * The diagnosis the optional i18n service load prints when it fails — a
@@ -6870,6 +7508,35 @@ export function formatUnusableAuthBaseUrlDiagnostic(
     + '    OS_BASE_URL / http://localhost:<port>.';
 }
 
+/** The variable `serve` reads the deployment's registered app schemes from (#29972). */
+export const TRUSTED_APP_SCHEMES_ENV_NAME = 'OS_TRUSTED_APP_SCHEMES';
+
+/**
+ * The app schemes this deployment registers for the mobile sign-in hand-off
+ * (`AuthConfig.trustedAppSchemes`), read from `OS_TRUSTED_APP_SCHEMES` in the
+ * shape `OS_TRUSTED_ORIGINS` is read: comma-separated, each entry trimmed,
+ * empty entries dropped, repeats folded (#29972).
+ *
+ * Unset (or nothing but separators and spaces) answers `undefined`: no scheme
+ * is registered, so plugin-auth mounts no `one-time-token` plugin and the
+ * hand-off route refuses every target. There is no default scheme — the
+ * hand-off is opt-in per deployment.
+ *
+ * ⛔ An entry is never validated, lower-cased or dropped here. A bad one goes
+ * through to `new AuthPlugin(...)` as typed, where `assertTrustedAppSchemes`
+ * refuses it at construction naming the entry, so a misspelt scheme fails the
+ * boot instead of booting a hand-off that refuses the deployment's own app.
+ */
+export function resolveTrustedAppSchemes(env: NodeJS.ProcessEnv): string[] | undefined {
+  const raw = env[TRUSTED_APP_SCHEMES_ENV_NAME];
+  if (raw === undefined) return undefined;
+  const schemes: string[] = [];
+  for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (!schemes.includes(entry)) schemes.push(entry);
+  }
+  return schemes.length ? schemes : undefined;
+}
+
 // [#22301] The constructor arguments a served boot hands the `storage`, `email`
 // and `sms` providers are read by ONE rule, `resolveCapabilityArgument`
 // (`@objectstack/core`), which `@objectstack/verify`'s `bootStack` reads too —
@@ -6953,8 +7620,21 @@ export interface MultiNodeGateVerdict {
  * (licensed-overflow) case, keeping it `false` for an outright `allowed: false`
  * denial — that one is the unlicensed case and the call site already reports it
  * as a downgrade. Reading `refused > 0` instead would double-report it.
+ *
+ * `declaration.countDeclared` says whether the count the gate was asked about
+ * is one the operator WROTE (`OS_CLUSTER_REPLICAS`). It is `false` only when the
+ * topology was declared as `OS_EXPECT_MULTI_NODE=true` with no count, and the
+ * call site asked the gate about 2 nodes, the smallest multi-node count. That 2
+ * is the call site's, not the operator's, so the text then names the spelling
+ * the operator used and prints no declared count and no excess: a wrong number
+ * here is worse than no number. The call site passes the flag; this function
+ * never re-reads the environment. Required, so no caller can fall back to the
+ * counted wording by omission.
  */
-export function formatMultiNodeCapAdvisory(verdict: MultiNodeGateVerdict): string | null {
+export function formatMultiNodeCapAdvisory(
+  verdict: MultiNodeGateVerdict,
+  declaration: { countDeclared: boolean },
+): string | null {
   // `capped: true` is produced only together with a numeric `admitted` and a
   // positive `refused`. The extra narrowing is the type system asking for that
   // invariant in writing — not tolerance of an off-spec producer: a stale build
@@ -6966,8 +7646,18 @@ export function formatMultiNodeCapAdvisory(verdict: MultiNodeGateVerdict): strin
   const excess = verdict.refused;
   if (typeof admitted !== 'number' || excess <= 0) return null;
 
-  const declared = admitted + excess;
   const why = verdict.reason ? ` (${verdict.reason})` : '';
+  if (!declaration.countDeclared) {
+    return (
+      `[cluster] licensed node cap exceeded${why}: the licence admits ${admitted} node(s), `
+      + 'but OS_EXPECT_MULTI_NODE=true declares a multi-node topology without a replica count.\n'
+      + '[cluster] This cap is ADVISORY and is not enforced yet: nothing is refused, and every '
+      + 'replica will still join the cluster.\n'
+      + `[cluster] Run at most ${admitted} replica(s) (or set OS_CLUSTER_REPLICAS to the count you run), `
+      + 'or raise the licensed node limit.'
+    );
+  }
+  const declared = admitted + excess;
   return (
     `[cluster] licensed node cap exceeded${why}: the licence admits ${admitted} node(s), `
     + `but OS_CLUSTER_REPLICAS declares ${declared} — ${excess} beyond the cap.\n`
@@ -7214,10 +7904,11 @@ export function describeRegisteredDriver(
  *   row rather than name a nonexistent file or risk leaking a secret.
  * - Neither set → the config-boot path, which names what that boot actually
  *   loaded as the app (#21501): `configBootBundle` set — a non-host config
- *   whose standalone stack served a compiled artifact as its bundle — reports
- *   THAT file as `bundleSource`; otherwise (a host config, whose `plugins` hold
- *   code and which boots its own module, or a config whose artifact was absent)
- *   report `relativeConfig`. No row names a file the boot did not load.
+ *   whose standalone stack served a compiled artifact as its bundle, or a host
+ *   config whose dev boot wrapped the dev artifact door's file (#31761) —
+ *   reports THAT file as `bundleSource`; otherwise (a host config booting its
+ *   own module, or a config whose artifact was absent) report
+ *   `relativeConfig`. No row names a file the boot did not load.
  */
 export function resolveBannerConfigRow(opts: {
   relativeConfig: string;
@@ -7367,4 +8058,62 @@ export function collectAutomationSummary(
       .map((r) => ({ flowName: r.name, armed: r.armed, shadowedCount: r.shadowed.length })),
     draftCount: states.filter((s) => s.enabled && (s.status ?? 'draft') === 'draft').length,
   };
+}
+
+/**
+ * The primary database a boot resolved, as {@link multiReplicaLocalDatabaseRefusal}
+ * reads it: the driver id the boot will build (`resolveStandaloneDatabase`'s
+ * `driver`, or the `OS_DATABASE_URL` fallback's `driverId`) and the URL it was
+ * resolved from, when there was one.
+ */
+export interface MultiReplicaPrimaryDatabase {
+  driver: string;
+  url?: string;
+}
+
+/**
+ * The refusal a boot that declares several replicas over the redis cluster
+ * driver prints when its primary database is local to the replica — a file on
+ * its own disk, or SQLite's in-memory database — or `undefined` when it is not.
+ * Three kinds are local:
+ *
+ *   - `sqlite` — a `file:` URL, a path, `:memory:`, and the SQLite file a boot
+ *     falls back to with no URL at all;
+ *   - `sqlite-wasm` — the WASM engine over the same kinds of file;
+ *   - `turso` over a URL that is itself a SQLite file (`file:`, a path,
+ *     `:memory:`): libSQL's embedded mode. Whether it is one is the URL
+ *     classification this command already owns ({@link inferDriverTypeFromUrl}),
+ *     never a second reading of it; a URL that classification refuses is left
+ *     to the driver, which refuses it too.
+ *
+ * Every other kind — postgres, mysql, mongodb, and libSQL over a server URL
+ * (`libsql://`, a Turso `https://` host) — is one database every replica
+ * reaches, and is not refused. The text names the variable and the remedy and
+ * never the URL, which can carry a credential.
+ */
+export function multiReplicaLocalDatabaseRefusal(primary: MultiReplicaPrimaryDatabase): string | undefined {
+  const kind = localDatabaseKindOf(primary);
+  if (!kind) return undefined;
+  return (
+    `[database] Refusing to start: several replicas are declared (OS_EXPECT_MULTI_NODE / OS_CLUSTER_REPLICAS>1) ` +
+    `over the redis cluster driver, but the primary database is ${kind}, local to each replica — each ` +
+    `replica would read and write its own copy, and a record written through one would be missing from the ` +
+    `others. Fix: point every replica at one shared Postgres database, ` +
+    `e.g. OS_DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DATABASE`
+  );
+}
+
+function localDatabaseKindOf(primary: MultiReplicaPrimaryDatabase): string | undefined {
+  if (primary.driver === 'sqlite') return 'SQLite';
+  if (primary.driver === 'sqlite-wasm') return 'SQLite (sqlite-wasm)';
+  if (isTursoDriverId(primary.driver)) {
+    let urlKind: string;
+    try {
+      urlKind = inferDriverTypeFromUrl(primary.url);
+    } catch {
+      return undefined;
+    }
+    if (urlKind === 'sqlite' || urlKind === 'sqlite-wasm') return 'a libSQL file';
+  }
+  return undefined;
 }

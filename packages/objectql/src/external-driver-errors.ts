@@ -22,6 +22,7 @@
  */
 
 import { ErrorCode, StandardErrorCode } from '@objectstack/spec/api';
+import { EXTERNAL_ROW_CAP_CEILING, EXTERNAL_ROW_CAP_DEFAULT } from '@objectstack/spec/data';
 
 /** The `code` {@link ExternalWriteRefusedError} carries. */
 export const EXTERNAL_WRITE_REFUSED_CODE = 'EXTERNAL_WRITE_REFUSED' as const;
@@ -31,10 +32,27 @@ export const EXTERNAL_ROW_CAP_EXCEEDED_CODE = 'EXTERNAL_ROW_CAP_EXCEEDED' as con
 
 /**
  * The most rows the engine reads from a plugin driver for one request, and so
- * the most matching rows such a request can be answered over. Fixed in P1 —
- * not an authorable key (maintainer ruling 2 on #27261, comment 6472620372).
+ * the most matching rows such a request can be answered over, when the
+ * datasource sets no `external.rowCap` (`EXTERNAL_ROW_CAP_DEFAULT` in
+ * `@objectstack/spec/data`). Fixed in P1 (maintainer ruling 2 on #27261,
+ * comment 6472620372); per datasource since #29762, bounded by
+ * `EXTERNAL_ROW_CAP_CEILING` — see {@link resolveExternalRowCap}.
  */
-export const EXTERNAL_ROW_CAP = 1000;
+export const EXTERNAL_ROW_CAP = EXTERNAL_ROW_CAP_DEFAULT;
+
+/**
+ * [#29762] The cap one read on a floored datasource applies: the datasource's
+ * `external.rowCap` when it is a whole number from 1 to
+ * `EXTERNAL_ROW_CAP_CEILING`, else {@link EXTERNAL_ROW_CAP}. The schema refuses
+ * any other value at the authoring door; this is the engine's own reading of a
+ * def that reached it unparsed (a host calling `registerDatasourceDef`
+ * directly), where a value above the ceiling is held AT the ceiling — the
+ * platform maximum is never exceeded — and anything else is the default.
+ */
+export function resolveExternalRowCap(rowCap: unknown): number {
+  if (typeof rowCap !== 'number' || !Number.isInteger(rowCap) || rowCap < 1) return EXTERNAL_ROW_CAP;
+  return Math.min(rowCap, EXTERNAL_ROW_CAP_CEILING);
+}
 
 /**
  * The write a refusal names. `updateMany` / `deleteMany` are not among them:
@@ -159,11 +177,13 @@ export class ExternalWriteRefusedError extends Error {
 
 /**
  * A read on an object served by a plugin driver matched more rows than the
- * engine reads from such a driver ({@link EXTERNAL_ROW_CAP}). The engine
- * applies the query itself over the rows the driver returns, so it cannot
- * answer correctly over a set it only partly holds, and refuses instead of
- * returning a short or wrongly ordered list. 422 with the prescription: narrow
- * the filter, or mirror the data into a real object with DataSync.
+ * engine reads from that datasource's driver (its `external.rowCap`, else
+ * {@link EXTERNAL_ROW_CAP}). The engine applies the query itself over the rows
+ * the driver returns, so it cannot answer correctly over a set it only partly
+ * holds, and refuses instead of returning a short or wrongly ordered list. 422
+ * with the prescription: narrow the filter, mirror the data into a real object
+ * with DataSync, or — below the platform maximum — raise the datasource's
+ * `external.rowCap`.
  */
 export class ExternalRowCapExceededError extends Error {
   readonly code = EXTERNAL_ROW_CAP_EXCEEDED_CODE;
@@ -174,8 +194,11 @@ export class ExternalRowCapExceededError extends Error {
   constructor(datasource: string, object: string, cap: number = EXTERNAL_ROW_CAP) {
     super(
       `This read on '${object}' matched more than ${cap} rows from datasource '${datasource}', the most the `
-      + `engine reads from a plugin driver for one request. Narrow the filter so fewer than ${cap + 1} rows `
-      + `match, or mirror the data into a real object with DataSync and read that instead.`,
+      + `engine reads from its plugin driver for one request. Narrow the filter so fewer than ${cap + 1} rows `
+      + `match, or mirror the data into a real object with DataSync and read that instead`
+      + (cap < EXTERNAL_ROW_CAP_CEILING
+        ? `; an administrator may raise the datasource's \`external.rowCap\` (at most ${EXTERNAL_ROW_CAP_CEILING}).`
+        : '.'),
     );
     this.name = 'ExternalRowCapExceededError';
     this.details = { datasource, object, cap };

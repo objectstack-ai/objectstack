@@ -295,6 +295,11 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         getPackagedDashboardBase: vi.fn((name: string) => ({ kind: 'dashboard', name })),
         getPackagedViewBase: vi.fn((name: string) => ({ kind: 'view', name })),
         getPackagedReportBase: vi.fn((name: string) => ({ kind: 'report', name })),
+        // [#30062] A pair's declared override of a page, dataset, app or book replaces the base's item too.
+        getPackagedPageBase: vi.fn((name: string) => ({ kind: 'page', name })),
+        getPackagedDatasetBase: vi.fn((name: string) => ({ kind: 'dataset', name })),
+        getPackagedAppBase: vi.fn((name: string) => ({ kind: 'app', name })),
+        getPackagedBookBase: vi.fn((name: string) => ({ kind: 'book', name })),
     });
 
     it('asks each type its own accessor, handing the served name through unchanged', () => {
@@ -309,17 +314,24 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         expect(p.getPackagedDashboardBase).toHaveBeenCalledTimes(1);
         expect(p.getPackagedViewBase).toHaveBeenCalledTimes(1);
         expect(p.getPackagedReportBase).toHaveBeenCalledTimes(1);
+        // [#30062] The four sealed types a pair's declared override replaces.
+        expect(packagedObjectBaseOf(p, 'page', 'crm_welcome')).toEqual({ kind: 'page', name: 'crm_welcome' });
+        expect(packagedObjectBaseOf(p, 'dataset', 'opportunity_metrics')).toEqual({ kind: 'dataset', name: 'opportunity_metrics' });
+        expect(packagedObjectBaseOf(p, 'app', 'crm')).toEqual({ kind: 'app', name: 'crm' });
+        expect(packagedObjectBaseOf(p, 'book', 'crm_manual')).toEqual({ kind: 'book', name: 'crm_manual' });
+        for (const accessor of ['getPackagedPageBase', 'getPackagedDatasetBase', 'getPackagedAppBase', 'getPackagedBookBase'] as const) {
+            expect(p[accessor], accessor).toHaveBeenCalledTimes(1);
+        }
     });
 
     it('asks nothing for a type with no packaged base', () => {
         const p = protocol();
-        for (const type of ['action', 'app', 'dataset', 'page', 'toString', 'constructor']) {
+        for (const type of ['action', 'flow', 'pages', 'toString', 'constructor']) {
             expect(packagedObjectBaseOf(p, type, 'x'), type).toBeUndefined();
         }
-        expect(p.getPackagedObjectBase).not.toHaveBeenCalled();
-        expect(p.getPackagedDashboardBase).not.toHaveBeenCalled();
-        expect(p.getPackagedViewBase).not.toHaveBeenCalled();
-        expect(p.getPackagedReportBase).not.toHaveBeenCalled();
+        for (const accessor of Object.keys(p) as (keyof typeof p)[]) {
+            expect(p[accessor], accessor).not.toHaveBeenCalled();
+        }
     });
 
     it('answers undefined for an empty name, a protocol without the accessor, and an accessor that throws', () => {
@@ -414,5 +426,259 @@ describe('#25788 §4 report — a published overlay on a packaged report is what
     it.each(cells())('$read read, $who, $locale: after a reset the shipped label is served, translated', async ({ who, locale, read }) => {
         const host = makeHost([], who);
         expect((await host[read]('report', REPORT, locale))?.label).toBe(locale === 'zh-CN' ? '各阶段商机' : SHIPPED_REPORT_LABEL);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §5 — [#30062] a `.custom` pair's declared override: the ruled label order
+// ---------------------------------------------------------------------------
+
+/**
+ * [#30062 item 3, ruling record 6631250894] A pair's declared override
+ * (ADR-0146 D2) is served with ONE label order on every type and every read: a
+ * translation the pair ships, then the override's own label, then the base's
+ * translation. The order itself is `@objectstack/spec/system`'s
+ * (`labelCatalogs`); what is pinned here is that the `/meta` reads hand the
+ * translators both inputs it needs:
+ *
+ *  - `packagedBase` — the BASE's item, for a page, a dataset, an app and a
+ *    book too (`getPackagedPageBase`, `getPackagedDatasetBase`,
+ *    `getPackagedAppBase`, `getPackagedBookBase`), as the object, dashboard,
+ *    view and report already had it;
+ *  - `pairBundle` — the translations the pair ships itself
+ *    (`servedOverrideBaseOf` + `getPairTranslationBundle`), for every served
+ *    declared override.
+ *
+ * Measured before (a booted CRM in zh-CN, the card's table): a page override
+ * labelled `OVpage` served the base's `欢迎页`, a dataset override served the
+ * base's text. And a view override whose pair ships a `zh-CN` translation of its
+ * new label served the override's English: the pair's translation never got in.
+ *
+ * The rows are seeded the way Studio's Customize publishes them: the override
+ * row bound to the pair (`package_id: <base>.custom`) declaring
+ * `overrides: { package: <base> }`, and the pair's translation an active
+ * `translation` row bound to the pair. The deployment catalog is what the i18n
+ * service serves: every code bundle deep-merged with every authored row
+ * (`readAuthoredTranslationLayer`), so the pair's row is in it too, with its
+ * package dropped.
+ */
+
+const PAIR_PKG = `${SHOWCASE_PKG}.custom`;
+const OVERRIDE_DECLARATION = { package: SHOWCASE_PKG, basedOn: '1.0.0' };
+
+interface PrecedenceType {
+    readonly type: 'page' | 'dataset' | 'app' | 'book' | 'view';
+    readonly name: string;
+    /** The base's item, as the code package ships it. */
+    readonly shipped: () => Record<string, unknown>;
+    /** The deployment catalog's group for this item, keyed by the item's label. */
+    readonly catalog: (label: string) => Record<string, unknown>;
+    readonly shippedZh: string;
+}
+
+const PRECEDENCE_TYPES: readonly PrecedenceType[] = [
+    {
+        type: 'page', name: 'crm_welcome', shippedZh: '欢迎页',
+        shipped: () => ({ name: 'crm_welcome', label: 'Welcome', type: 'app', regions: [] }),
+        catalog: (label) => ({ pages: { crm_welcome: { label } } }),
+    },
+    {
+        type: 'dataset', name: 'opportunity_metrics', shippedZh: '商机指标',
+        shipped: () => ({
+            name: 'opportunity_metrics', label: 'Opportunity Metrics', object: OBJ,
+            dimensions: [{ name: 'status', label: 'Status', field: 'status', type: 'string' }],
+            measures: [{ name: 'task_count', label: 'Tasks', aggregate: 'count' }],
+        }),
+        catalog: (label) => ({ datasets: { opportunity_metrics: { label } } }),
+    },
+    {
+        type: 'app', name: 'crm', shippedZh: '客户关系',
+        shipped: () => ({ name: 'crm', label: 'CRM' }),
+        catalog: (label) => ({ apps: { crm: { label } } }),
+    },
+    {
+        type: 'book', name: 'crm_manual', shippedZh: '手册',
+        shipped: () => ({ name: 'crm_manual', label: 'Manual', groups: [{ key: 'start', label: 'Start', pages: [] }] }),
+        catalog: (label) => ({ books: { crm_manual: { label } } }),
+    },
+    // An existing type, for the pair's rank: the base was always handed over, the pair's translation never.
+    {
+        type: 'view', name: VIEW, shippedZh: '进行中',
+        shipped: () => ({ ...packagedViewItem(VIEW) }),
+        catalog: (label) => ({ objects: { [OBJ]: { _views: { in_progress: { label } } } } }),
+    },
+];
+
+/** Deep merge, `top` over `under`, of two translation-data groups (the shape `deepMerge` gives). */
+const mergeData = (under: Record<string, any>, top: Record<string, any>): Record<string, any> => {
+    const out: Record<string, any> = { ...under };
+    for (const [k, v] of Object.entries(top)) {
+        out[k] = v && typeof v === 'object' && !Array.isArray(v) && out[k] && typeof out[k] === 'object'
+            ? mergeData(out[k], v)
+            : v;
+    }
+    return out;
+};
+
+/** The deployment's code catalog: `en` repeats each shipped label, `zh-CN` translates it. */
+const precedenceStaticCatalog = (): Record<string, Record<string, any>> => {
+    let en: Record<string, any> = {};
+    let zh: Record<string, any> = {};
+    for (const t of PRECEDENCE_TYPES) {
+        en = mergeData(en, t.catalog(String(t.shipped().label)));
+        zh = mergeData(zh, t.catalog(t.shippedZh));
+    }
+    return { en, 'zh-CN': zh };
+};
+
+interface PrecedenceSeed {
+    /** The override's label per type; absent = no override row. */
+    readonly overrides?: Partial<Record<PrecedenceType['type'], string>>;
+    /** The pair's own `zh-CN` translation of the item's label, per type. */
+    readonly pairZh?: Partial<Record<PrecedenceType['type'], string>>;
+}
+
+function makePrecedenceHost(seed: PrecedenceSeed, who: Who) {
+    const registry = new SchemaRegistry({ multiTenant: false });
+    registry.logLevel = 'silent';
+    registry.registerItem('view', { name: OBJ, ...taskContainer() }, 'name', SHOWCASE_PKG);
+    for (const item of expandViewContainer(OBJ, taskContainer())) registry.registerItem('view', item, 'name', SHOWCASE_PKG);
+    for (const t of PRECEDENCE_TYPES) {
+        if (t.type !== 'view') registry.registerItem(t.type, t.shipped(), 'name', SHOWCASE_PKG);
+    }
+
+    const rows: Record<string, unknown>[] = [];
+    for (const t of PRECEDENCE_TYPES) {
+        const label = seed.overrides?.[t.type];
+        if (label === undefined) continue;
+        rows.push({
+            id: `ov_${t.type}`, type: t.type, name: t.name, package_id: PAIR_PKG, organization_id: null, state: 'active',
+            metadata: JSON.stringify({ ...t.shipped(), label, overrides: OVERRIDE_DECLARATION }),
+        });
+    }
+    let pairZh: Record<string, any> = {};
+    for (const t of PRECEDENCE_TYPES) {
+        const label = seed.pairZh?.[t.type];
+        if (label !== undefined) pairZh = mergeData(pairZh, t.catalog(label));
+    }
+    if (Object.keys(pairZh).length > 0) {
+        rows.push({
+            id: 'tr_pair_zh', type: 'translation', name: 'showcase_custom_zh', package_id: PAIR_PKG, organization_id: null,
+            state: 'active', metadata: JSON.stringify({ name: 'showcase_custom_zh', locale: 'zh-CN', ...pairZh }),
+        });
+    }
+
+    // What the i18n service serves: the code catalog with every authored row merged over it.
+    const catalog = precedenceStaticCatalog();
+    const merged: Record<string, any> = { en: catalog.en, 'zh-CN': mergeData(catalog['zh-CN'], pairZh) };
+    const i18n = {
+        getLocales: () => ['en', 'zh-CN'],
+        getTranslations: (locale: string) => merged[locale],
+        getDefaultLocale: () => 'en',
+    };
+
+    const matches = (r: Record<string, unknown>, w: Record<string, unknown>) =>
+        Object.entries(w ?? {}).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            return whereValueMatches(r[k] ?? null, v ?? null);
+        });
+    const engine = {
+        registry,
+        find: async (table: string, q: { where: Record<string, unknown>; limit?: number }) => {
+            if (table !== 'sys_metadata') return [];
+            const matched = rows.filter((r) => matches(r, q.where));
+            return typeof q?.limit === 'number' ? matched.slice(0, q.limit) : matched;
+        },
+        findOne: async (table: string, q: { where: Record<string, unknown> }) => {
+            assertEngineFindOnePredicate(table, q);
+            return table === 'sys_metadata' ? rows.find((r) => matches(r, q.where)) ?? null : null;
+        },
+    };
+    const protocol = new ObjectStackProtocolImplementation(engine as never, undefined, 'env_test');
+    const rest = new RestServer(
+        createMockServer() as never, protocol as never, { api: { requireAuth: false } } as never,
+        undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined, undefined,
+        async () => i18n as never,
+    );
+    (rest as unknown as { resolveExecCtx: () => Promise<unknown> }).resolveExecCtx = async () => ({ ...CALLERS[who] });
+    rest.registerRoutes();
+    const routes = rest.getRouteManager();
+    const run = async (path: string, params: Record<string, string>, locale: string) => {
+        const entry = routes.get('GET', path);
+        if (!entry) throw new Error(`route not registered: GET ${path}`);
+        let body: unknown;
+        let status = 200;
+        const res = {
+            status: (s: number) => { status = s; return res; },
+            header: () => res,
+            setHeader: () => res,
+            json: (b: unknown) => { body = b; },
+            send: (b: unknown) => { body = b; },
+        } as unknown as Parameters<typeof entry.handler>[1];
+        await entry.handler(
+            { params, query: {}, body: {}, headers: { 'accept-language': locale }, method: 'GET', path } as unknown as Parameters<typeof entry.handler>[0],
+            res,
+        );
+        expect(status, `GET ${path} ${JSON.stringify(params)}: ${JSON.stringify(body)}`).toBe(200);
+        return body as any;
+    };
+    return {
+        item: async (type: string, name: string, locale: string) =>
+            (await run('/api/v1/meta/:type/:name', { type, name }, locale))?.item,
+        listed: async (type: string, name: string, locale: string) => {
+            const body = await run('/api/v1/meta/:type', { type }, locale);
+            const items: any[] = Array.isArray(body) ? body : body?.items ?? [];
+            return items.find((d) => d?.name === name);
+        },
+        /** `GET /meta/book/:name/tree` — the docs sidebar's book. */
+        bookTree: async (name: string, locale: string) => run('/api/v1/meta/book/:name/tree', { name }, locale),
+    };
+}
+
+const precedenceCells = () => PRECEDENCE_TYPES.flatMap((t) => READS.map((read) => ({ t, type: t.type, read })));
+const OV = (type: string) => `OV ${type} (30062)`;
+const PAIR_ZH = (type: string) => `配对包译文 ${type}`;
+
+describe('[#30062] §5 a .custom pair\'s declared override serves the ruled label order on both /meta reads', () => {
+    it.each(precedenceCells())('$type, $read read: the override\'s own label beats the base\'s translation (no pair translation)', async ({ t, read }) => {
+        const host = makePrecedenceHost({ overrides: { [t.type]: OV(t.type) } }, 'admin');
+        expect((await host[read](t.type, t.name, 'zh-CN'))?.label, 'zh-CN').toBe(OV(t.type));
+        expect((await host[read](t.type, t.name, 'en'))?.label, 'en').toBe(OV(t.type));
+    });
+
+    it.each(precedenceCells())('$type, $read read: a translation the pair ships beats the override\'s own label', async ({ t, read }) => {
+        const host = makePrecedenceHost({ overrides: { [t.type]: OV(t.type) }, pairZh: { [t.type]: PAIR_ZH(t.type) } }, 'admin');
+        expect((await host[read](t.type, t.name, 'zh-CN'))?.label, 'zh-CN').toBe(PAIR_ZH(t.type));
+        // The pair ships no `en`: the override's own label.
+        expect((await host[read](t.type, t.name, 'en'))?.label, 'en').toBe(OV(t.type));
+    });
+
+    it.each(precedenceCells())('$type, $read read: with no override the base\'s item reads its translation', async ({ t, read }) => {
+        const host = makePrecedenceHost({}, 'admin');
+        expect((await host[read](t.type, t.name, 'zh-CN'))?.label, 'zh-CN').toBe(t.shippedZh);
+        expect((await host[read](t.type, t.name, 'en'))?.label, 'en').toBe(t.shipped().label);
+    });
+
+    it('a member reads the same order as an admin', async () => {
+        const host = makePrecedenceHost({ overrides: { page: OV('page'), dataset: OV('dataset') }, pairZh: { page: PAIR_ZH('page') } }, 'member');
+        for (const read of READS) {
+            expect((await host[read]('page', 'crm_welcome', 'zh-CN'))?.label, `page ${read}`).toBe(PAIR_ZH('page'));
+            expect((await host[read]('dataset', 'opportunity_metrics', 'zh-CN'))?.label, `dataset ${read}`).toBe(OV('dataset'));
+        }
+    });
+
+    it('the book tree serves the label the book list serves (#26690: the docs sidebar and the list never disagree)', async () => {
+        for (const seed of [
+            { overrides: { book: OV('book') } },
+            { overrides: { book: OV('book') }, pairZh: { book: PAIR_ZH('book') } },
+            {},
+        ] as PrecedenceSeed[]) {
+            const host = makePrecedenceHost(seed, 'admin');
+            for (const locale of LOCALES) {
+                const listed = (await host.listed('book', 'crm_manual', locale))?.label;
+                expect((await host.bookTree('crm_manual', locale))?.label, `${JSON.stringify(seed)} ${locale}`).toBe(listed);
+            }
+        }
     });
 });

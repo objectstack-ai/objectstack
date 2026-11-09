@@ -28,10 +28,11 @@ import { GetMetaItemResponseSchema } from './protocol.zod';
  * caller is served (navigation already pruned to that caller):
  *
  * - `objects` — every object an `object` navigation entry names (top-level
- *   `navigation`, each area's `navigation`, and `children` at any depth), in
- *   navigation order; then every object with a `lookup` or `master_detail`
- *   field whose `reference` is one of those, in registry order. One hop: an
- *   object related only to a related object is not included.
+ *   `navigation`, each area's `navigation`, and `children` at any depth), and
+ *   every object with a `lookup` or `master_detail` field whose `reference` is
+ *   one of those, all in the object list's order; a name the object list does
+ *   not hold follows the listed ones, in navigation order. One hop: an object
+ *   related only to a related object is not included.
  * - `views` — every view a navigation entry names by `viewName`, and every view
  *   bound to an object in `objects`.
  * - `pages` — every page a `page` navigation entry names, and every page bound
@@ -56,8 +57,8 @@ export const AppMetadataBundleResponseSchema = lazySchema(() => z.object({
     'The app, as `GET /meta/app/{appId}` answers it to this caller (its navigation pruned to what the caller may open).',
   ),
   objects: z.array(GetMetaItemResponseSchema).describe(
-    'The objects the app\'s navigation reaches, then the objects whose relationship fields reference them, each as '
-    + '`GET /meta/object/{name}` answers it. An object the caller may not read is absent.',
+    'The objects the app\'s navigation reaches and the objects whose relationship fields reference them, in the '
+    + 'object list\'s order, each as `GET /meta/object/{name}` answers it. An object the caller may not read is absent.',
   ),
   views: z.array(GetMetaItemResponseSchema).describe(
     'The views the navigation names and the views bound to the bundled objects, each as `GET /meta/view/{name}` '

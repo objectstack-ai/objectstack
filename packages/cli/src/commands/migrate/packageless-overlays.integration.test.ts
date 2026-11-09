@@ -102,9 +102,27 @@ const BOUND_SEED: SeedRow[] = [
   { type: 'view', name: ENV_VIEW, state: 'active', body: viewBody(ENV_VIEW, STORED_COLUMNS) },
 ];
 
+/**
+ * [#30261] A database whose customization of the package's view container (a
+ * list view the package does not ship added beside its default list) was
+ * stored as a package-less CONTAINER row, beside the environment row (control).
+ */
+const CONTAINER = 'm28413_task';
+const CONTAINER_SEED: SeedRow[] = [
+  {
+    type: 'view', name: CONTAINER, state: 'active', body: {
+      object: 'm28413_task',
+      list: { label: 'All', type: 'grid', data: { provider: 'object', object: 'm28413_task' }, columns: STORED_COLUMNS.map((field) => ({ field })) },
+      listViews: { mine: { label: 'Mine', type: 'grid', data: { provider: 'object', object: 'm28413_task' }, columns: DRAFT_COLUMNS.map((field) => ({ field })) } },
+    },
+  },
+  { type: 'view', name: ENV_VIEW, state: 'active', body: viewBody(ENV_VIEW, STORED_COLUMNS) },
+];
+
 let dir: string;
 let templateDb: string;
 let boundTemplateDb: string;
+let containerTemplateDb: string;
 const savedCwd = process.cwd();
 const ENV_KEYS = ['OS_ARTIFACT_PATH', 'OS_DATABASE_URL', 'DATABASE_URL', 'OS_DATABASE_DRIVER', 'OS_HOME', 'NODE_ENV',
   'OS_AUTH_SECRET', 'AUTH_SECRET', 'BETTER_AUTH_SECRET', 'OS_ENVIRONMENT_ID'] as const;
@@ -250,8 +268,11 @@ beforeAll(async () => {
   await seed.shutdown();
   boundTemplateDb = join(dir, 'bound-template.db');
   copyFileSync(templateDb, boundTemplateDb);
+  containerTemplateDb = join(dir, 'container-template.db');
+  copyFileSync(templateDb, containerTemplateDb);
   await insertRows(templateDb, SEED);
   await insertRows(boundTemplateDb, BOUND_SEED);
+  await insertRows(containerTemplateDb, CONTAINER_SEED);
 }, CASE_TIMEOUT_MS);
 
 afterAll(() => {
@@ -383,4 +404,35 @@ describe('os migrate packageless-overlays: a row bound to the read-only package'
     expect(again.payload.moved).toBe(0);
     expect(again.payload.rows).toEqual([]);
   }, CASE_TIMEOUT_MS * 3);
+});
+
+/**
+ * [#30261] A package-less view CONTAINER row of the package's view: its shape
+ * refuses the `overrides` key, so the declared save `--apply` makes could
+ * never land. The preview lists it `cannot_declare` (left), and `--apply`
+ * attempts nothing: no failure, exit 0, the row and the database as they were.
+ * Before, the preview listed it movable and every `--apply` failed it.
+ */
+describe('os migrate packageless-overlays: a package-less view container', () => {
+  it('the preview lists it `cannot_declare`, left; --apply attempts nothing, fails nothing, and leaves the row', async () => {
+    const db = caseDb(containerTemplateDb);
+    const before = await storedRows(db);
+    const preview = await runJson(['--database-url', `file:${db}`, '--json']);
+    expect(preview.payload.error, JSON.stringify(preview.payload).slice(0, 600)).toBeUndefined();
+    expect(preview.exitCode).toBe(0);
+    expect(preview.payload.rows.map((r: any) => `${r.type}/${r.name}/${r.state} ${r.disposition} ${r.base} → ${r.pair} ${r.outcome}`)).toEqual([
+      `view/${CONTAINER}/active cannot_declare ${PKG} → ${PAIR} left`,
+    ]);
+    expect(preview.payload.movable).toBe(0);
+    expect(preview.payload.left).toBe(1);
+
+    const { payload, exitCode } = await runJson(['--apply', '--yes', '--database-url', `file:${db}`, '--json']);
+    expect(payload.error, JSON.stringify(payload).slice(0, 600)).toBeUndefined();
+    expect(exitCode).toBe(0);
+    expect(payload.failed).toBe(0);
+    expect(payload.moved).toBe(0);
+    expect(payload.rows.map((r: any) => `${r.name} ${r.disposition} ${r.outcome}`)).toEqual([`${CONTAINER} cannot_declare left`]);
+    expect(await storedRows(db)).toEqual(before);
+    expect(await storedPackages(db)).not.toContain(PAIR);
+  }, CASE_TIMEOUT_MS * 2);
 });

@@ -77,6 +77,7 @@ const result = DatasourceSchema.parse(data);
 | **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. Valid in every schemaMode — the one `external` key a managed datasource may carry. |
 | **connector** | `string` | optional | Name of a declared connector instance (a `connectors` entry with a `provider`) whose credential this API-backed datasource borrows — whichever kind the instance's `auth` declares (`bearer`, `api-key` or `basic`; ADR-0143 D2 adds the grant-bearing kinds), resolved the way the connector resolves it. One Connect serves both the connector's actions and this datasource's records. Exclusive with `credentialsRef`; refused on a built-in database driver and on a managed datasource. |
 | **queryTimeoutMs** | `number` | optional (default: `30000`) | Hard cap on per-query execution time. |
+| **rowCap** | `integer` | optional | Plugin-driver datasources only (a non-managed datasource whose `driver` is not a built-in id): the most rows the engine reads from the driver for one request, and so the most rows one read may match before it is refused with EXTERNAL_ROW_CAP_EXCEEDED (422). Absent: 1000. At most 10000. Each list page reads every match up to this cap from the remote, twice (the rows and the total), so raise it only as far as the widest read needs. |
 
 
 ---
@@ -119,6 +120,7 @@ External datasource settings: federation policy (schemaMode != "managed") plus t
 | **credentialsRef** | `string` | optional | Reference into the secrets store; never inline credentials. Valid in every schemaMode — the one `external` key a managed datasource may carry. |
 | **connector** | `string` | optional | Name of a declared connector instance (a `connectors` entry with a `provider`) whose credential this API-backed datasource borrows — whichever kind the instance's `auth` declares (`bearer`, `api-key` or `basic`; ADR-0143 D2 adds the grant-bearing kinds), resolved the way the connector resolves it. One Connect serves both the connector's actions and this datasource's records. Exclusive with `credentialsRef`; refused on a built-in database driver and on a managed datasource. |
 | **queryTimeoutMs** | `number` | optional (default: `30000`) | Hard cap on per-query execution time. |
+| **rowCap** | `integer` | optional | Plugin-driver datasources only (a non-managed datasource whose `driver` is not a built-in id): the most rows the engine reads from the driver for one request, and so the most rows one read may match before it is refused with EXTERNAL_ROW_CAP_EXCEEDED (422). Absent: 1000. At most 10000. Each list page reads every match up to this cap from the remote, twice (the rows and the total), so raise it only as far as the widest read needs. |
 
 ### Nested Shape: `ExternalDatasourceSettings.validation`
 

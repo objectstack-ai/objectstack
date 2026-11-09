@@ -18,6 +18,9 @@
  *  - UNREADABLE: field-level read denies it (`canReadField`, objectui#11943).
  *  - PLATFORM-REFUSED: the served projection refuses to order by it (#6455).
  *  - RELATIONAL: a lookup, listed as ordering by ID (objectui#4243).
+ *  - HIDDEN: the object definition marks it `hidden: true` (objectstack#30037),
+ *    the rule the Filter panel's list already follows. `search_index` stands
+ *    in for the platform's `__search` companion and its `queue` column.
  *
  * In each case the field is declared FIRST on the object, so an "Add sort" that
  * still seeded the first entry would seed it. The controls: a field the picker
@@ -44,6 +47,7 @@ const FIELD_DEFS: Record<string, Record<string, unknown>> = {
   owner: { type: 'lookup', label: 'Owner', reference: 'sys_user' },
   title: { type: 'text', label: 'Title' },
   priority: { type: 'number', label: 'Priority' },
+  search_index: { type: 'text', label: 'Search Index', hidden: true },
 };
 
 /** The object definition with `first` declared first, the rest in `FIELD_DEFS` order. */
@@ -74,7 +78,7 @@ function attachProjection(def: ReturnType<typeof definition>) {
   const resolved = resolveObjectSortability(def) as { fields: Record<string, unknown> };
   const fields: Record<string, unknown> = { ...resolved.fields };
   // The base the refusal is measured against: every other field is sortable.
-  for (const name of ['secret_note', 'owner', 'title', 'priority']) {
+  for (const name of ['secret_note', 'owner', 'title', 'priority', 'search_index']) {
     expect(fields[name]).toEqual({ sortable: true });
   }
   fields.remote_status = { sortable: false };
@@ -175,6 +179,7 @@ const CASES = [
   { name: 'unreadable', field: 'secret_note', label: 'Secret Note' },
   { name: 'platform-refused', field: 'remote_status', label: 'Remote Status' },
   { name: 'relational', field: 'owner', label: 'Owner (by ID)' },
+  { name: 'hidden', field: 'search_index', label: 'Search Index' },
 ] as const;
 
 describe('a field the Sort picker keeps only for the current sort is removable only (objectui#11943)', () => {

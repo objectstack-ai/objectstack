@@ -664,7 +664,10 @@ export interface ITeamGraphService {
   expandUsers(teamId: string): Promise<string[]>;
   /** Return all user ids that hold a role of `roleName` in `organizationId`. */
   expandRoleUsers(roleName: string, organizationId?: string): Promise<string[]>;
-  /** Return the manager id for a user (best-effort; null when none). */
+  /**
+   * Return the manager id for a user: refuses (throws) on a failed read;
+   * `null` when none.
+   */
   managerOf(userId: string, organizationId?: string): Promise<string | null>;
 }
 
@@ -683,7 +686,10 @@ export interface IBusinessUnitGraphService {
   descendants(businessUnitId: string): Promise<string[]>;
   /** Return all user ids in `businessUnitId` or any descendant business unit. */
   expandUsers(businessUnitId: string): Promise<string[]>;
-  /** Return the department head (manager_user_id) — best-effort, null when none. */
+  /**
+   * Return the department head (manager_user_id): refuses (throws) on a failed
+   * read; `null` when none.
+   */
   headOf(businessUnitId: string): Promise<string | null>;
   /** Return the manager id for a user — proxy to {@link ITeamGraphService.managerOf}. */
   managerOf(userId: string, organizationId?: string): Promise<string | null>;

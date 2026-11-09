@@ -46,6 +46,12 @@ onlyBuiltDependencies:
 #     here have more than one DTS entry; @objectstack/spec had 18 programs
 #     and now has one, and its DTS pass went from 4997 MB to 882 MB of live
 #     heap. Every one of the twelve emits the same types as before.
+#     The patch also emits every source file once, in the program's own
+#     file order, before rollup transforms any (#30061). The plugin emitted
+#     each file in rollup's transform order, which async loading changes
+#     from run to run; TypeScript prints union members in type-creation
+#     order, so two builds of one commit wrote different .d.ts bytes and
+#     chunk names. packages/spec/scripts/dts-emit-order.pin.test.ts pins it.
 #     The key names the exact version. When the installed tsup is any other
 #     version, the patch goes unused and `pnpm install` fails
 #     (ERR_PNPM_UNUSED_PATCH), so a tsup upgrade cannot drop the patch

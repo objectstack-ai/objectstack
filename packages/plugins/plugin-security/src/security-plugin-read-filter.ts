@@ -65,6 +65,7 @@ import { isPrincipalLessContext } from './security-plugin.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 import { andComposeLayers } from './tenant-layer.js';
 import { delegatedOrganizationRefusal, intersectDelegatedScope, resolveDelegatorContext } from './explain-engine.js';
+import { delegatedUnitReadAdmission } from './delegated-admin-gate.js';
 
 /**
  * The `SecurityPlugin` members the functions below read — every one of them,
@@ -75,6 +76,7 @@ import { delegatedOrganizationRefusal, intersectDelegatedScope, resolveDelegator
  * for which members are getters.
  */
 export interface ReadFilterHost {
+  readonly delegatedAdminGate: SecurityPlugin['delegatedAdminGate'];
   readonly logger: SecurityPlugin['logger'];
   readonly permissionEvaluator: SecurityPlugin['permissionEvaluator'];
   readonly ql: SecurityPlugin['ql'];
@@ -89,7 +91,7 @@ export interface ReadFilterHost {
 
 /** The body of `SecurityPlugin#getReadFilter`; the method's docblock there is its contract. */
 export async function getReadFilter(
-  this: Pick<ReadFilterHost, 'computeControlledByParentFilter' | 'computeDelegatedReadFilter' | 'computeRlsFilter' | 'logger' | 'resolvePermissionSetsForContext' | 'resolveSharingReadFilter'>,
+  this: Pick<ReadFilterHost, 'computeControlledByParentFilter' | 'computeDelegatedReadFilter' | 'computeRlsFilter' | 'delegatedAdminGate' | 'getObjectSecurityMeta' | 'logger' | 'permissionEvaluator' | 'resolvePermissionSetsForContext' | 'resolveSharingReadFilter'>,
   object: string,
   context?: any,
 ): Promise<Record<string, unknown> | undefined> {
@@ -156,12 +158,27 @@ export async function getReadFilter(
     // sentinel for an unresolvable relation, `$in: []` for a chain the
     // registry walk refuses); a THROW propagates to the catch below, which
     // denies — the same posture as the surrounding layers.
-    const cbpFilter = this.computeControlledByParentFilter(object, 'find', context);
+    const cbpFilter = this.computeControlledByParentFilter(object, 'find', context, permissionSets);
+    // [ADR-0090 D12, ruling of record 6663849489] The THIRD thing the
+    // middleware ANDs in for a read: where no set grants it, the delegated
+    // business-unit read it admits beside the grant (step 2) is confined to
+    // `id IN <the covered units>` (step 3). `canReadObject` admits that read
+    // on the same judgment ({@link delegatedUnitReadAdmission}), so the two
+    // answers a bypassing door asks agree with the door: the delegate's units,
+    // and no other. A delegated (on-behalf-of) context never reaches here, and
+    // the judgment admits none.
+    let unitScope: Record<string, unknown> | null = null;
+    if (this.delegatedAdminGate) {
+      const { isPrivate } = await this.getObjectSecurityMeta(object);
+      if (!this.permissionEvaluator.checkObjectPermission('find', object, permissionSets, { isPrivate })) {
+        unitScope = await delegatedUnitReadAdmission(this.delegatedAdminGate, object, 'find', context, permissionSets, null);
+      }
+    }
     // [#4467] RLS AND controlled-by-parent AND sharing — the same
     // AND-composition the middlewares achieve by all writing into `ast.where`.
     // Any layer may be absent; `andComposeLayers` returns the others, or null
     // when none constrains.
-    return andComposeLayers(andComposeLayers(filter, cbpFilter), sharingFilter) ?? undefined;
+    return andComposeLayers(andComposeLayers(andComposeLayers(filter, cbpFilter), unitScope), sharingFilter) ?? undefined;
   } catch (e) {
     // Fail CLOSED — a resolution failure must deny (zero rows), never expose
     // every tenant's data through the raw-SQL analytics path.
@@ -231,9 +248,9 @@ export async function computeDelegatedReadFilter(
 
   // Layers 1 to 4 — the security middleware's own four, in its order.
   const filter = await this.computeRlsFilter(permissionSets, object, 'find', context);
-  const cbpFilter = this.computeControlledByParentFilter(object, 'find', context);
+  const cbpFilter = this.computeControlledByParentFilter(object, 'find', context, permissionSets);
   const delFilter = await this.computeRlsFilter(delegatorSets, object, 'find', delegatorContext);
-  const delCbpFilter = this.computeControlledByParentFilter(object, 'find', delegatorContext);
+  const delCbpFilter = this.computeControlledByParentFilter(object, 'find', delegatorContext, delegatorSets);
 
   const securityLayers = andComposeLayers(andComposeLayers(filter, cbpFilter), andComposeLayers(delFilter, delCbpFilter));
   const sharingLayers = andComposeLayers(sharingFilter, delegatorSharingFilter);

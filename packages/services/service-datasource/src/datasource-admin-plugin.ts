@@ -560,16 +560,24 @@ export class DatasourceAdminServicePlugin implements Plugin {
         const metadata = metadataOf();
         const objects = ((await metadata?.listObjects?.()) ??
           (await metadata?.list('object')) ??
-          []) as Array<{ datasource?: string }>;
-        const count = objects.filter((o) => o?.datasource === datasource).length;
+          []) as Array<{ name?: unknown; datasource?: string }>;
+        // [#30444] The names ride on the same filtered listing as the count,
+        // so a refusal's message and its `details` describe one read.
+        const bound = objects.filter((o) => o?.datasource === datasource);
+        const count = bound.length;
+        const names = bound
+          .map((o) => o.name)
+          .filter((n): n is string => typeof n === 'string')
+          .sort();
         if (typeof metadata?.listDiagnosed !== 'function') {
-          return { count, degraded: false, errors: [] };
+          return { count, degraded: false, errors: [], objects: names };
         }
         const diagnosed = await metadata.listDiagnosed('object');
         return {
           count,
           degraded: diagnosed?.degraded === true,
           errors: Array.isArray(diagnosed?.errors) ? diagnosed.errors : [],
+          objects: names,
         };
       },
 
@@ -616,19 +624,57 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // [#27750] The rebuild carries the objects bound to the NEW record, the
       // way `registerPool` does on create: a changed `config` can open a new,
       // empty database, and without them the bound objects had no table there.
+      //
+      // [#29879] It reports whether the previous pool was kept, which the
+      // update door reads to store none of a configuration that never came
+      // into force. The reading is the state the rebuild left: the new
+      // configuration is not available, yet a driver still answers the name —
+      // `reconnect` put the previous pool back, the only driver a failed
+      // rebuild leaves registered. The pool record follows the pool, so a
+      // later cluster convergence compares the shared row against the
+      // configuration actually serving.
       reregisterPool: async (previous, next) => {
+        const connection = this.connection;
+        if (!connection) return { previousPoolKept: false };
         this.livePoolRecords.set(next.name, next);
-        await this.connection?.reconnect(next, {
-          objects: managedObjectsBoundTo(next),
-          previous,
-          context: { origin: next.origin ?? 'runtime', trigger: 'runtime-admin' },
-        });
+        let failure: { error: unknown } | undefined;
+        try {
+          await connection.reconnect(next, {
+            objects: managedObjectsBoundTo(next),
+            previous,
+            context: { origin: next.origin ?? 'runtime', trigger: 'runtime-admin' },
+          });
+        } catch (error) {
+          failure = { error };
+        }
+        const engine = engineOf() as ConnectionEngineLike | undefined;
+        const previousPoolKept =
+          connection.getConnectionState(next.name)?.availability !== 'available'
+          && engine?.getDriverByName?.(next.name) !== undefined;
+        if (!previousPoolKept) {
+          if (failure) throw failure.error;
+          return { previousPoolKept };
+        }
+        this.livePoolRecords.set(next.name, previous);
+        if (failure) logger?.warn(`reregisterPool('${next.name}') failed`, failure.error);
+        return { previousPoolKept };
       },
 
       // [#13805] The receive half of the datasource cluster bridge — see
       // `convergePool` below for the decision table. The engine is resolved
       // per call for the same reason every other seam here resolves lazily.
       convergePool: (name) => this.convergePool(ctx, name, engineOf),
+      // The resync's address list: the SHARED store's rows (the read
+      // `convergePool` makes), plus the pools this replica built — a pool
+      // whose row was deleted during an outage has no row left to name it.
+      listConvergeNames: async () => {
+        const names = new Set<string>(this.livePoolRecords.keys());
+        for (const row of await findEnvironmentRows(engineOf())) {
+          const name = (row as { name?: unknown }).name;
+          if (typeof name === 'string' && name.length > 0) names.add(name);
+        }
+        return [...names];
+      },
 
       // The admin list's `status` reads the connection service's retained
       // verdicts (framework#3827). Resolved lazily per call: the service exists
@@ -981,9 +1027,20 @@ export class DatasourceAdminServicePlugin implements Plugin {
       if (typeof driver?.connect === 'function') await driver.connect();
       // Prefer a cheap ping; fall back to the engine driver's health check, then
       // a schema introspection round-trip — whichever the handle exposes.
-      if (typeof driver?.ping === 'function') await driver.ping();
-      else if (typeof driver?.checkHealth === 'function') await driver.checkHealth();
+      //
+      // [#30407] The answer is read, not only awaited: the shared factory's
+      // `toHandle` (and `createPrebuiltDriverFactory`) map `ping` to the
+      // driver's own `checkHealth()`, which reports an unhealthy connection by
+      // answering `false` rather than throwing. A connect that only warns and
+      // then reports itself unhealthy answered Test connection `ok: true`.
+      // Only a literal `false` refuses: `ping` is `Promise<unknown>` on the
+      // contract, and a host-built handle's ping that answers nothing (or any
+      // other value) keeps meaning "the round-trip succeeded".
+      let health: unknown;
+      if (typeof driver?.ping === 'function') health = await driver.ping();
+      else if (typeof driver?.checkHealth === 'function') health = await driver.checkHealth();
       else if (typeof driver?.introspectSchema === 'function') await driver.introspectSchema();
+      if (health === false) return { ok: false, error: UNHEALTHY_PROBE_REFUSAL };
       const latencyMs = elapsedSince(startedAt);
       let serverVersion: string | undefined;
       try {
@@ -1003,6 +1060,16 @@ export class DatasourceAdminServicePlugin implements Plugin {
     }
   }
 }
+
+/**
+ * [#30407] What Test connection answers when the driver connected but its own
+ * health check answered `false`. The thrown-error path keeps answering the
+ * driver's message; this is the one answer for a health check that reports
+ * failure without throwing.
+ */
+const UNHEALTHY_PROBE_REFUSAL =
+  'The driver connected, but its health check reported the database as unhealthy, so this '
+  + 'connection is not usable. Check that the database exists and accepts these settings, then test again.';
 
 function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
   try {

@@ -108,7 +108,10 @@ describe('annotateEffectiveApiOperations (#3391)', () => {
     expect(objects.deal.apiOperations).toContain('import');
     expect(objects.deal.apiOperations).toContain('export');
     expect(objects.deal.apiOperations).toContain('upsert');
-    expect(objects.deal.apiOperations).not.toContain('restore');
+    // [#30237] The recycle bin's doors derive from `delete` (ADR-0148): the
+    // whitelist grants it, so `restore` and `purge` are served too.
+    expect(objects.deal.apiOperations).toContain('restore');
+    expect(objects.deal.apiOperations).toContain('purge');
   });
 
   // [#3544] user-level export axis: allowExport on the per-object perm entry
@@ -350,7 +353,7 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
       // unrestricted closure minus `export`, so the fix cannot be satisfied by
       // an over-narrow entry that hides unrelated affordances too.
       expect(objects.crm_lead.apiOperations).toEqual(
-        ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+        ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'],
       );
     });
 
@@ -398,7 +401,7 @@ describe('seedSuperUserRestrictedObjects (#3391)', () => {
       // does for the modify-all class above — one predicate, both classes.
       expect(objects.crm_lead.apiOperations).not.toContain('export');
       expect(objects.crm_lead.apiOperations).toEqual(
-        ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+        ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'],
       );
     });
 

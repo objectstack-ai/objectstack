@@ -53,7 +53,8 @@
  * registered as `object-gantt` (the `ObjectView.stableFilterIdentity-7237`
  * precedent: `app-shell` does not depend on `plugin-gantt`). It reads the REAL
  * bus hook and queries on it exactly as `ObjectGantt` now does —
- * `ObjectGantt.invalidationRefetch-10035.test.tsx` proves the real component
+ * the `ObjectGantt.invalidationRefetch-10035` block of `plugin-gantt`'s
+ * `ObjectGantt.harness.test.tsx` proves the real component
  * does that — and carries an instance id from a `useState` initializer, so a
  * remount of the visualization itself is visible too.
  */

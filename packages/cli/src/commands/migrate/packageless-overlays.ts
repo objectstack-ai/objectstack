@@ -63,6 +63,17 @@ function reasonOf(row: CensusRow): string {
         + '(served then at that package\'s address, ?package=<base>).';
     case 'no_pair':
       return `'${row.base}' has no paired .custom package id, so there is nowhere to move it. Left as it is.`;
+    case 'cannot_declare':
+      // [#30261] Its shape refuses the `overrides` key, so the move's declared save can never land.
+      return (row.type === 'view'
+        ? 'it is a view container (list/listViews/form/formViews), and only a single view can declare an override, '
+        : 'its shape cannot carry an `overrides` declaration, ')
+        + 'so it cannot be moved as one. Left as it is: '
+        + (row.type === 'view'
+          ? `save each of its views into '${row.pair}' as a single view named <object>.<view> (?package=${row.pair}) — `
+            + `one '${row.base}' ships declaring overrides: { package: '${row.base}', basedOn }, a new one declaring nothing — `
+          : `save its content into '${row.pair}' in a shape that declares overrides: { package: '${row.base}', basedOn } — `)
+        + `then delete this row with a delete naming ${row.boundToBase ? `'${row.base}'` : 'no package'}.`;
     case 'foreign_declaration':
       return `its body already carries an \`overrides\` key that does not name '${row.base}'. Left as it is: `
         + (row.boundToBase

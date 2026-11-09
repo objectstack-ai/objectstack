@@ -119,7 +119,7 @@
 import { walkFilterFieldKeys } from './filter-walk.js';
 import {
   describeFieldPathVerdict,
-  indexObjectGraph,
+  indexServedObjectGraph,
   isUnjudgeable,
   joinablePrefixes,
   recordsOf,
@@ -182,7 +182,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
   const datasets = recordsOf(stack.datasets);
   if (datasets.length === 0) return findings;
 
-  const graph: ObjectGraph = indexObjectGraph(stack);
+  const graph: ObjectGraph = indexServedObjectGraph(stack);
 
   datasets.forEach((ds, di) => {
     const dsName = strName(ds.name) ?? `#${di}`;

@@ -65,6 +65,8 @@ function fakeEngine(opts: { owner?: string; provider?: boolean } = {}) {
     find: vi.fn(async (object: string, query?: any, options?: any) => {
       const context = options?.context ?? query?.context;
       if (object === 'sys_api_key') return [{ id: 'k1', user_id: owner, revoked: false }];
+      // The key's owner exists: an API key authenticates only as an owner who exists.
+      if (object === 'sys_user') return query?.where?.id === owner ? [{ id: owner }] : [];
       // The two metadata tables this suite serves — not the activation ledger
       // the authorization resolver reads under a system context (ADR-0131 D3).
       if ((object === 'sys_metadata' || object === 'sys_metadata_history') && context?.userId !== ADMIN) {

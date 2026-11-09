@@ -22,12 +22,26 @@ import { en } from './en.js';
 import { zhCN } from './zh-CN.js';
 import { jaJP } from './ja-JP.js';
 import { esES } from './es-ES.js';
+import { zhHant } from './zh-Hant.js';
+import { ar } from './ar.js';
+import { fr } from './fr.js';
+import { ptBR } from './pt-BR.js';
+import { ru } from './ru.js';
+import { de } from './de.js';
+import { ko } from './ko.js';
 
-export { en, zhCN, jaJP, esES };
+export { en, zhCN, jaJP, esES, zhHant, ar, fr, ptBR, ru, de, ko };
 
 export const settingsBuiltinTranslations: PlatformTranslationBundle = {
   en,
   'zh-CN': zhCN,
   'ja-JP': jaJP,
   'es-ES': esES,
+  'zh-Hant': zhHant,
+  'ar': ar,
+  'fr': fr,
+  'pt-BR': ptBR,
+  'ru': ru,
+  'de': de,
+  'ko': ko,
 };

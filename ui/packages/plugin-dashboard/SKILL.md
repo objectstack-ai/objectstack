@@ -93,9 +93,12 @@ without per-card configuration:
 | Filter contains | Translation key |
 |---|---|
 | `{current_year_*}` / `{year_*}` | `dashboard.trend.vsLastYear` |
+| `{next_quarter_*}` | `dashboard.trend.vsThisQuarter` |
 | `{current_quarter_*}` / `{quarter_*}` | `dashboard.trend.vsLastQuarter` |
+| `{next_month_*}` | `dashboard.trend.vsThisMonth` |
 | `{current_month_*}` / `{month_*}` | `dashboard.trend.vsLastMonth` |
 | `{current_week_*}` / `{week_*}` | `dashboard.trend.vsLastWeek` |
+| `{today}` … `{N_days_from_now}` | `dashboard.trend.vsPreviousPeriod` |
 | `{today}` | `dashboard.trend.vsYesterday` |
 | anything else | `dashboard.trend.vsPreviousPeriod` |
 

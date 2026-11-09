@@ -20,6 +20,7 @@
 
 import type { HierarchyScope } from '@objectstack/spec/contracts';
 import { objectPermissionGrants, type ObjectAccessScope } from '@objectstack/spec/security';
+import { customizationBasePackageId } from '@objectstack/spec/kernel';
 
 export interface ObjectPerm {
   allowCreate?: boolean;
@@ -29,28 +30,30 @@ export interface ObjectPerm {
   /** Bulk export of the object's records — an opt-in grant no bulk button sets. */
   allowExport?: boolean;
   allowTransfer?: boolean;
-  // `allowRestore` / `allowPurge` were REMOVED here (objectui#6595). Both gated
-  // `restore` / `purge` ObjectQL operations that have never existed — a
-  // dispatched restore/purge is denied unconditionally by the evaluator's
+  // `allowRestore` / `allowPurge` were REMOVED here (objectui#6595). Both claimed
+  // to gate `restore` / `purge` ObjectQL operations that did not exist then — a
+  // dispatched restore/purge was denied unconditionally by the evaluator's
   // fail-closed destructive-operation backstop — so the matrix authored two
-  // checkboxes no runtime has ever read. `@objectstack/spec` retired both keys
+  // checkboxes no runtime ever read. `@objectstack/spec` retired both keys
   // as `retiredKey()` tombstones (objectstack#12497; maintainer ruling
   // 2026-08-26 accepting objectstack#1883 recommendation B, ADR-0049
   // enforce-or-remove).
   //
-  // THE RETURN PATH: both keys come back with the M2 lifecycle initiative,
-  // whose restart is recorded upstream on objectstack#1883. Restoring them
-  // means restoring three things together — these fields, the columns in
-  // `PermissionMatrixEditor`, the rows in `previews/PermissionPreview` — and
-  // only alongside the operations that make them enforceable.
+  // NO RETURN PATH: the keys stay retired. The operations now exist with the
+  // recycle bin (ADR-0148), and their grants are the NEW keys
+  // `allowRestoreOwnDeleted` (restore the entries you deleted) and
+  // `manageRecycleBin` (restore any entry, purge, empty) — ADR-0148 D5. Any
+  // matrix support for the bin belongs to those two keys, never to these
+  // spellings.
   //
   // A value written by an older editor is not modelled here and not authorable.
   // It is carried through save untouched, as any key this editor does not model
   // is (`PermissionSetDraft`'s index signature below states that rule for the
   // record; `updateObjectPerm`'s spread applies it per row). Stripping it is
-  // NOT this change: the installed spec still accepts both keys, so a strip
-  // today would delete stored data the schema still honours. That belongs with
-  // the `@objectstack/spec` bump that lands the retirement.
+  // NOT this editor's job: the spec tolerates only the retired `false` residue
+  // (objectstack#12840) and refuses every other value with the tombstone's
+  // prescription, and sources are rewritten by `os migrate meta` (conversion
+  // `permission-allow-restore-purge-removed`).
   viewAllRecords?: boolean;
   modifyAllRecords?: boolean;
   /**
@@ -352,6 +355,21 @@ export function fieldKeyObject(key: string): string {
 
 function asScopeSet(scope: Iterable<string>): Set<string> {
   return scope instanceof Set ? scope : new Set(scope);
+}
+
+/**
+ * objectstack#29674 (ADR-0146 D3) — the packages whose objects a set saved at
+ * `packageId` is scoped to, in the order their rows are listed: the package
+ * itself first. A paired `<base>.custom` package receives the permission sets
+ * FOR its base ("New similar" copies of the base's sets, and sets created
+ * there), and a pair declares none of the base's objects, so its sets are
+ * scoped to the base's objects as well as its own. Scoped to the pair alone, a
+ * copy granting 8 base objects listed none of them and read "0 objects
+ * granted". Every other package is scoped to itself.
+ */
+export function permissionObjectScopePackages(packageId: string): string[] {
+  const base = customizationBasePackageId(packageId);
+  return base === null ? [packageId] : [packageId, base];
 }
 
 /**

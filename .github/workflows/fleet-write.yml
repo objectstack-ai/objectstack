@@ -151,14 +151,15 @@ jobs:
           # also reaches cancel, re-run, delete, cache and artifact endpoints; the op table has no
           # row for any of them, and `validate.mjs --self-test` pins that none is reachable.
           permission-actions: ${{ steps.validate.outputs.permission_actions }}
-          # FOUR write consumers, one at a time: the advisory rows — `advisory_report` (one private report),
-          # `advisory_create` (one draft advisory), `advisory_collaborators_add` and `advisory_state` (one
-          # advisory's PATCH). Minted ONLY for a stroke carrying one of them, which travels alone, the same
-          # way as `permission-actions`: the validator writes `permission_repository_advisories=write` for it
-          # and an EMPTY value for every other stroke. Separately, `advisory_read` (one advisory's GET, also
-          # alone) gets a READ-ONLY mint through this same input: the validator writes
-          # `permission_repository_advisories=read` for its stroke, never `write`. Measured 2026-11-02 with
-          # this action and a control token minted without the grant
+          # FIVE write consumers, one at a time: the advisory rows — `advisory_report` (one private report),
+          # `advisory_create` (one draft advisory), `advisory_collaborators_add`, `advisory_versions` and
+          # `advisory_state` (one advisory's PATCH). Minted ONLY for a stroke carrying one of them, which
+          # travels alone, the same way as `permission-actions`: the validator writes
+          # `permission_repository_advisories=write` for it and an EMPTY value for every other stroke.
+          # Separately, TWO read consumers, each also alone, get a READ-ONLY mint through this same input:
+          # `advisory_read` (one advisory's GET) and `advisory_list` (the collection's GET, the listing). The
+          # validator writes `permission_repository_advisories=read` for either's stroke, never `write`.
+          # Measured 2026-11-02 with this action and a control token minted without the grant
           # (run 41415522766): the narrowed mint succeeds, and the grant opens an advisory's read and PATCH.
           # ⚠️ EXPECTED: such a run warns "Unexpected input(s) 'permission-repository-advisories'", because
           # the action's `action.yml` does not declare the input; its `lib/get-permissions-from-inputs.js`
@@ -166,6 +167,15 @@ jobs:
           # warning by removing the input. ⛔ A refused mint fails this step with zero writes; no step here
           # ever mints an un-narrowed token instead.
           permission-repository-advisories: ${{ steps.validate.outputs.permission_repository_advisories }}
+          # ONE consumer: the `pr_enqueue_front` row — `enqueuePullRequest(jump: true)`, the front of a base's merge
+          # queue, which reorders every queued pull behind it ("Jump to the front of the queue" is a repository
+          # permission above write). Minted ONLY for a stroke carrying that op, which travels alone, the same way as
+          # `permission-actions`: the validator writes `permission_merge_queues=write` for it and an EMPTY value for
+          # every other stroke, so every other run's token is exactly what it was. The App installation must hold
+          # `Merge queues: write` (a maintainer's setting); without it this mint fails with zero writes. Whether
+          # GitHub honours the jump for an App token is NOT MEASURED until the first live stroke, whose read-back
+          # judges it (`scripts/pm/fleet-write/execute.mjs`, "The front-of-queue enqueue").
+          permission-merge-queues: ${{ steps.validate.outputs.permission_merge_queues }}
 
       # The sender gate, then the actions in order, then the step summary —
       # request id · sender and role · session · target · one row per request.

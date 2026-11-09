@@ -7,11 +7,17 @@
  * and `read()` (#5426) — and manifest-id sanitisation.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { LocalManifestSource, type InstalledManifestEntry } from './local-manifest-source.js';
+import { homedir, tmpdir } from 'node:os';
+import {
+    DEFAULT_INSTALLED_PACKAGES_DIR,
+    FRESH_HOME_CHANNEL_ENV,
+    LocalManifestSource,
+    resolveInstalledPackagesDir,
+    type InstalledManifestEntry,
+} from './local-manifest-source.js';
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'lms-')); });
@@ -215,5 +221,114 @@ describe('LocalManifestSource', () => {
         expect(files).toHaveLength(1);
         expect(files[0]).not.toContain('/');
         expect(src.has('../../etc/passwd')).toBe(true);
+    });
+});
+
+describe('resolveInstalledPackagesDir — the ledger follows OS_HOME (#30217)', () => {
+    const cwd = '/srv/project';
+    const legacy = join(cwd, DEFAULT_INSTALLED_PACKAGES_DIR);
+
+    it('OS_HOME unset (or blank): the working-directory ledger, nothing to adopt', () => {
+        expect(resolveInstalledPackagesDir({ env: {}, cwd })).toEqual({ dir: legacy, legacyDir: null });
+        expect(resolveInstalledPackagesDir({ env: { OS_HOME: '  ' }, cwd })).toEqual({ dir: legacy, legacyDir: null });
+    });
+
+    it('OS_HOME set: <OS_HOME>/installed-packages, adopting from the working directory', () => {
+        expect(resolveInstalledPackagesDir({ env: { OS_HOME: '/data/os' }, cwd })).toEqual({
+            dir: '/data/os/installed-packages',
+            legacyDir: legacy,
+        });
+    });
+
+    it('expands a leading ~ the way the home resolver does', () => {
+        expect(resolveInstalledPackagesDir({ env: { OS_HOME: '~/os-home' }, cwd }).dir)
+            .toBe(join(homedir(), 'os-home', 'installed-packages'));
+    });
+
+    it('os start in project mode (OS_HOME = <cwd>/.objectstack) keeps the directory it always had', () => {
+        expect(resolveInstalledPackagesDir({ env: { OS_HOME: join(cwd, '.objectstack') }, cwd }))
+            .toEqual({ dir: legacy, legacyDir: null });
+    });
+
+    it('the --fresh channel stops the adoption only for the home it names', () => {
+        const fresh = '/tmp/objectstack-dev-abc';
+        expect(resolveInstalledPackagesDir({ env: { OS_HOME: fresh, [FRESH_HOME_CHANNEL_ENV]: fresh }, cwd }))
+            .toEqual({ dir: join(fresh, 'installed-packages'), legacyDir: null });
+        // An inherited copy naming another run's home speaks for nothing here.
+        expect(resolveInstalledPackagesDir({ env: { OS_HOME: '/data/os', [FRESH_HOME_CHANNEL_ENV]: fresh }, cwd }).legacyDir)
+            .toBe(legacy);
+    });
+
+    it('the default constructor reads the same answer; an explicit storageDir adopts nothing', () => {
+        vi.stubEnv('OS_HOME', '/data/os');
+        try {
+            const src = new LocalManifestSource();
+            expect(src.dir).toBe('/data/os/installed-packages');
+            expect(src.legacyDir).toBe(join(process.cwd(), DEFAULT_INSTALLED_PACKAGES_DIR));
+            expect(new LocalManifestSource('/elsewhere').legacyDir).toBeNull();
+        } finally {
+            vi.unstubAllEnvs();
+        }
+    });
+});
+
+describe('LocalManifestSource.adoptLegacyEntries — one copy from the old place (#30217)', () => {
+    /** A source whose ledger is `<dir>/home/installed-packages`, adopting from `<dir>/legacy`. */
+    function sources() {
+        const legacyDir = join(dir, 'legacy');
+        const target = join(dir, 'home', 'installed-packages');
+        const src = Object.assign(new LocalManifestSource(target), { legacyDir }) as LocalManifestSource;
+        return { src, legacyDir, target };
+    }
+
+    it('copies every .json file byte for byte — unreadable ones too — and leaves the old ones', () => {
+        const { src, legacyDir, target } = sources();
+        new LocalManifestSource(legacyDir).write(entry('com.acme.crm'));
+        writeFileSync(join(legacyDir, 'broken.json'), '{"manifestId":"bro', 'utf8');
+        writeFileSync(join(legacyDir, 'notes.txt'), 'not an entry', 'utf8');
+
+        const adoption = src.adoptLegacyEntries();
+
+        expect(adoption).toEqual({ from: legacyDir, to: target, files: expect.arrayContaining(['com.acme.crm.json', 'broken.json']) });
+        expect(adoption!.files).toHaveLength(2);
+        expect(readdirSync(target).sort()).toEqual(['broken.json', 'com.acme.crm.json']);
+        expect(readFileSync(join(target, 'broken.json'), 'utf8')).toBe('{"manifestId":"bro');
+        // The unreadable one is reported from its new place, as before.
+        expect(src.list().skipped.map((s) => s.file)).toEqual(['broken.json']);
+        expect(readdirSync(legacyDir).sort()).toEqual(['broken.json', 'com.acme.crm.json', 'notes.txt']);
+        // No staging directory is left beside the ledger.
+        expect(readdirSync(join(dir, 'home'))).toEqual(['installed-packages']);
+    });
+
+    it('adopts nothing once the ledger directory exists — an uninstall there sticks', () => {
+        const { src, legacyDir } = sources();
+        new LocalManifestSource(legacyDir).write(entry('com.acme.crm'));
+        expect(src.adoptLegacyEntries()).not.toBeNull();
+
+        src.remove('com.acme.crm');
+
+        expect(src.adoptLegacyEntries()).toBeNull();
+        expect(src.has('com.acme.crm')).toBe(false);
+    });
+
+    it('answers null with no legacy directory, an absent one, or one with no entry — and creates nothing', () => {
+        const { src, legacyDir, target } = sources();
+        expect(new LocalManifestSource(target).adoptLegacyEntries()).toBeNull();
+        expect(src.adoptLegacyEntries()).toBeNull();
+        mkdirSync(legacyDir, { recursive: true });
+        writeFileSync(join(legacyDir, 'notes.txt'), 'x', 'utf8');
+        expect(src.adoptLegacyEntries()).toBeNull();
+        expect(existsSync(target)).toBe(false);
+    });
+
+    it('a copy that fails throws and leaves no ledger directory, so the next boot adopts again', () => {
+        const { src, legacyDir, target } = sources();
+        new LocalManifestSource(legacyDir).write(entry('com.acme.crm'));
+        // An unreadable "file": a directory named like an entry fails the copy.
+        mkdirSync(join(legacyDir, 'zz-dir.json'));
+
+        expect(() => src.adoptLegacyEntries()).toThrow();
+        expect(existsSync(target)).toBe(false);
+        expect(readdirSync(join(dir, 'home'))).toEqual([]);
     });
 });

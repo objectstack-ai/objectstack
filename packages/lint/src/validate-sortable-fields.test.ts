@@ -8,10 +8,19 @@ import {
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
+  PAGE_BLOCK_SORT_OBJECT_PROP,
+  indexObjectSortability,
 } from './validate-sortable-fields.js';
+import { resolveObjectSortability } from '@objectstack/spec/api';
+import { ComponentPropsMap } from '@objectstack/spec/ui';
 import { indexObjectSearchTargets } from './validate-searchable-fields.js';
 import { indexUnprovisionedAnchors } from './system-fields.js';
 import { explainRule } from './rule-explanations.js';
+import {
+  PAGE_FIELD_UNKNOWN,
+  PAGE_FIELD_UNPROVISIONED,
+  validatePageFieldBindings,
+} from './validate-page-field-bindings.js';
 
 // [#22161] Each finding of the three ids is one verdict sentence; the reasoning
 // it used to carry is the id's `os explain` entry. Every call below records
@@ -716,11 +725,363 @@ describe('checkSortDeclaration — the provenance parameter is OPTIONAL (#10474)
   });
 });
 
+/**
+ * [#30023] The author-declared verdict: a stored field whose author wrote
+ * `sortable: false`. Since #29896 the Data API list door refuses a sort on it
+ * (`400 INVALID_SORT`, reason `author-declared`), judged by the served
+ * sortability projection, and this rule reads the same projection.
+ */
+const ticketFields = {
+  subject: { type: 'text', label: 'Subject' },
+  // The author's own refusal: a stored column the list does not offer as a sort.
+  body: { type: 'textarea', label: 'Body', sortable: false },
+  // An explicit `true` is the default spelled out.
+  priority: { type: 'number', label: 'Priority', sortable: true },
+  // Virtual AND declared: the projection keeps the storage reason.
+  score: { type: 'formula', label: 'Score', sortable: false },
+};
+const ticket = { name: 'help_ticket', fields: ticketFields };
+const ticketListView = (sort: unknown) => ({
+  objects: [{ ...ticket, listViews: { inbox: { type: 'grid', sort } } }],
+});
+
+describe('validateSortableFields — the author-declared verdict (#30023)', () => {
+  it('refuses a list-view sort naming a `sortable: false` field, with the door\'s field and reason', () => {
+    const findings = validateSortableFields(ticketListView([{ field: 'body', order: 'asc' }]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: SORT_FIELD_UNSORTABLE,
+      where: 'object "help_ticket" › listViews.inbox',
+      path: 'objects[0].listViews.inbox.sort[0]',
+    });
+    expect(findings[0].message).toBe(
+      'list-view sort orders by "body", a field on object "help_ticket" that declares `sortable: false`, ' +
+        'so every load answers 400 INVALID_SORT',
+    );
+    expect(findings[0].hint).toBe('Sort by another field, or remove `sortable: false` from "body" to make it sortable');
+  });
+
+  it('reads the legacy string form and the `-field` shorthand', () => {
+    const findings = validateSortableFields(ticketListView('subject asc, -body'));
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].listViews.inbox.sort[1]']);
+  });
+
+  it('refuses it on the standalone view door shapes too (flattened overlay, ViewItem record)', () => {
+    const overlay = validateSortableFields({
+      objects: [ticket],
+      views: [{ name: 'inbox', object: 'help_ticket', viewKind: 'list', type: 'grid', sort: [{ field: 'body' }] }],
+    });
+    expect(overlay.map((f) => [f.rule, f.path])).toEqual([[SORT_FIELD_UNSORTABLE, 'views[0].sort[0]']]);
+    const record = validateSortableFields({
+      objects: [ticket],
+      views: [{ name: 'inbox', object: 'help_ticket', viewKind: 'list', config: { sort: [{ field: 'body' }] } }],
+    });
+    expect(record.map((f) => [f.rule, f.path])).toEqual([[SORT_FIELD_UNSORTABLE, 'views[0].config.sort[0]']]);
+  });
+
+  it('controls: no `sortable` key and `sortable: true` sort as before', () => {
+    expect(validateSortableFields(ticketListView([{ field: 'subject' }, { field: 'priority', order: 'desc' }]))).toEqual([]);
+  });
+
+  it('a virtual field that also declares `sortable: false` keeps its own (storage) verdict', () => {
+    const [f, ...rest] = validateSortableFields(ticketListView([{ field: 'score' }]));
+    expect(rest).toEqual([]);
+    expect(f.rule).toBe(SORT_FIELD_UNSORTABLE);
+    expect(f.message).toContain("a virtual 'formula' field");
+    expect(f.message).not.toContain('sortable: false');
+  });
+
+  it('judges by the projection the door serves, for every field the object declares', () => {
+    // The rule's index IS `resolveObjectSortability` over the authored object,
+    // so the two cannot disagree about which name is refused or why.
+    expect(indexObjectSortability({ objects: [ticket] }).get('help_ticket')).toEqual(
+      resolveObjectSortability(ticket).fields,
+    );
+    expect(resolveObjectSortability(ticket).fields.body).toEqual({ sortable: false, reason: 'author-declared' });
+  });
+
+  it('the exported core answers it only when the caller passes the projection (out-of-repo posture)', () => {
+    const stack = { objects: [ticket] };
+    const targets = indexObjectSearchTargets(stack);
+    const anchors = indexUnprovisionedAnchors(stack);
+    const core = (field: string, sortability?: ReturnType<typeof indexObjectSortability>) =>
+      checkSortDeclaration([{ field }], 'help_ticket', targets, 'x', 'x.sort', 'sort', anchors, sortability);
+    expect(core('body')).toEqual([]);
+    // The virtual verdict is still answered without it, as before.
+    expect(core('score')).toHaveLength(1);
+    expect(core('body', indexObjectSortability(stack)).map((f) => f.path)).toEqual(['x.sort[0]']);
+  });
+});
+
+const pageStack = (page: Record<string, unknown>) => ({ objects: [ticket, { name: 'crm_opportunity', fields: opportunityFields }], pages: [page] });
+const region = (...components: unknown[]) => ({ name: 'p', type: 'record', object: 'crm_opportunity', regions: [{ name: 'main', components }] });
+
+describe('validateSortableFields — stored PAGE sorts (#30023)', () => {
+  it('refuses a `sortable: false` sort at every page slot that reaches the list door', () => {
+    const page = {
+      ...region(
+        { type: 'record:related_list', properties: { objectName: 'help_ticket', relationshipField: 'subject', sort: [{ field: 'body' }] } },
+        {
+          type: 'record:related_list',
+          dataSource: { object: 'help_ticket', sort: [{ field: 'body', order: 'desc' }] },
+          properties: { relationshipField: 'subject', parentDataSource: { object: 'help_ticket', sort: [{ field: 'body' }] } },
+        },
+        { type: 'object-grid', properties: { objectName: 'help_ticket', sort: [{ field: 'subject' }, { field: 'body' }] } },
+        { type: 'record:line_items', properties: { childObject: 'help_ticket', sort: [{ field: 'body' }] } },
+        { type: 'list-view', properties: { type: 'grid', data: { provider: 'object', object: 'help_ticket' }, sort: [{ field: 'body' }] } },
+        { type: 'element:number', dataSource: { object: 'help_ticket', sort: [{ field: 'body' }] }, properties: { field: 'priority' } },
+      ),
+      interfaceConfig: { source: 'help_ticket', sort: [{ field: 'body' }] },
+      record: { object: 'help_ticket', sort: [{ field: 'body' }] },
+    };
+    const findings = validateSortableFields(pageStack(page));
+    expect(findings.every((f) => f.rule === SORT_FIELD_UNSORTABLE && f.severity === 'error')).toBe(true);
+    expect(findings.every((f) => f.message.includes('"body", a field on object "help_ticket" that declares `sortable: false`'))).toBe(true);
+    expect(findings.map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.sort[0]',
+      'pages[0].regions[0].components[1].dataSource.sort[0]',
+      'pages[0].regions[0].components[1].properties.parentDataSource.sort[0]',
+      'pages[0].regions[0].components[2].properties.sort[1]',
+      'pages[0].regions[0].components[3].properties.sort[0]',
+      'pages[0].regions[0].components[4].properties.sort[0]',
+      'pages[0].regions[0].components[5].dataSource.sort[0]',
+      'pages[0].interfaceConfig.sort[0]',
+      'pages[0].record.sort[0]',
+    ]);
+    expect(findings.map((f) => f.where)).toContain('page "p" · record:related_list');
+    expect(findings.map((f) => f.where)).toContain('page "p" · interfaceConfig');
+  });
+
+  it('binds a block\'s own `sort` to its `dataSource.object` first, then the block\'s object prop', () => {
+    const findings = validateSortableFields(pageStack(region({
+      type: 'object-grid',
+      dataSource: { object: 'help_ticket' },
+      properties: { objectName: 'crm_opportunity', sort: [{ field: 'body' }] },
+    })));
+    expect(findings.map((f) => f.path)).toEqual(['pages[0].regions[0].components[0].properties.sort[0]']);
+  });
+
+  it('a list page with no `source` binds the page object', () => {
+    const findings = validateSortableFields(pageStack({ name: 'p', type: 'list', object: 'help_ticket', interfaceConfig: { sort: [{ field: 'body' }] } }));
+    expect(findings.map((f) => f.path)).toEqual(['pages[0].interfaceConfig.sort[0]']);
+  });
+
+  it('refuses a formula sort on a page slot too — the same projection\'s other reason', () => {
+    const findings = validateSortableFields(pageStack(region({
+      type: 'record:related_list',
+      properties: { objectName: 'crm_opportunity', relationshipField: 'name', sort: [{ field: 'expected_revenue' }] },
+    })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain("a virtual 'formula' field");
+  });
+
+  it('controls: no key, `true`, a dotted path, a system column and another package\'s object are not this rule\'s', () => {
+    const findings = validateSortableFields(pageStack({
+      ...region(
+        {
+          type: 'record:related_list',
+          properties: {
+            objectName: 'help_ticket',
+            relationshipField: 'subject',
+            // A dotted path is refused by the door as its own verdict; neither
+            // family judges it. An unknown name is #30093's (below).
+            sort: [{ field: 'subject' }, { field: 'priority' }, { field: 'owner.name' }, { field: 'created_at' }],
+          },
+        },
+        { type: 'object-grid', properties: { objectName: 'not_in_this_stack', sort: [{ field: 'body' }] } },
+        // A block with no `sort` prop of its own is not read for one.
+        { type: 'record:highlights', properties: { object: 'help_ticket', sort: [{ field: 'body' }] } },
+      ),
+      record: { object: 'help_ticket', sort: [{ field: 'priority' }] },
+    }));
+    expect(findings).toEqual([]);
+  });
+
+  it('a source-authored page\'s cached regions are not walked', () => {
+    expect(validateSortableFields(pageStack({
+      ...region({ type: 'object-grid', properties: { objectName: 'help_ticket', sort: [{ field: 'body' }] } }),
+      kind: 'react',
+    }))).toEqual([]);
+  });
+});
+
+/**
+ * [#30093] Existence and provenance on every stored page sort slot. The list
+ * door answers an unknown sort name `400 INVALID_SORT` on every load, so a page
+ * slot naming one is graded `error`, like a list view's `sort-field-unknown`,
+ * under the page family's id. Before #30093 two slots warned (from
+ * `validate-page-field-bindings`) and the rest were read by nothing.
+ */
+describe('validateSortableFields — an unknown field on a stored PAGE sort (#30093)', () => {
+  const everySlot = (field: string) => ({
+    ...region(
+      { type: 'record:related_list', properties: { objectName: 'help_ticket', relationshipField: 'subject', sort: [{ field }] } },
+      {
+        type: 'record:related_list',
+        dataSource: { object: 'help_ticket', sort: [{ field, order: 'desc' }] },
+        properties: { relationshipField: 'subject', parentDataSource: { object: 'help_ticket', sort: [{ field }] } },
+      },
+      { type: 'object-grid', properties: { objectName: 'help_ticket', sort: [{ field: 'subject' }, { field }] } },
+      { type: 'record:line_items', properties: { childObject: 'help_ticket', sort: [{ field }] } },
+      { type: 'list-view', properties: { type: 'grid', data: { provider: 'object', object: 'help_ticket' }, sort: [{ field }] } },
+      { type: 'element:number', dataSource: { object: 'help_ticket', sort: [{ field }] }, properties: { field: 'priority' } },
+    ),
+    interfaceConfig: { source: 'help_ticket', sort: [{ field }] },
+    record: { object: 'help_ticket', sort: [{ field }] },
+  });
+  const SLOT_PATHS = [
+    'pages[0].regions[0].components[0].properties.sort[0]',
+    'pages[0].regions[0].components[1].dataSource.sort[0]',
+    'pages[0].regions[0].components[1].properties.parentDataSource.sort[0]',
+    'pages[0].regions[0].components[2].properties.sort[1]',
+    'pages[0].regions[0].components[3].properties.sort[0]',
+    'pages[0].regions[0].components[4].properties.sort[0]',
+    'pages[0].regions[0].components[5].dataSource.sort[0]',
+    'pages[0].interfaceConfig.sort[0]',
+    'pages[0].record.sort[0]',
+  ];
+
+  it('refuses it at every page slot, as `page-field-unknown` at `error`, at the slot path', () => {
+    const findings = validateSortableFields(pageStack(everySlot('subjcet')));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual(
+      SLOT_PATHS.map((path) => [PAGE_FIELD_UNKNOWN, 'error', path]),
+    );
+    expect(findings[0].message).toBe(
+      'field "subjcet" is not a field on object "help_ticket" — the record:related_list sort orders by it, ' +
+        'so every load answers 400 INVALID_SORT.',
+    );
+    expect(findings[0].hint).toBe('Fix the field name, or add "subjcet" to help_ticket. Did you mean "subject"?');
+    expect(findings.map((f) => f.where)).toContain('page "p" · record');
+  });
+
+  it('is the one reader of a page sort: validate-page-field-bindings reports none of those slots', () => {
+    const stack = pageStack(everySlot('subjcet'));
+    const bindingPaths = validatePageFieldBindings(stack).map((f) => f.path);
+    expect(bindingPaths.filter((p) => /\.sort(\[|\.|$)/.test(p))).toEqual([]);
+    // Non-vacuity: the same walk still reads a related list's other child refs.
+    const withColumn = pageStack(region({
+      type: 'record:related_list',
+      properties: { objectName: 'help_ticket', relationshipField: 'subject', columns: ['subjcet'], sort: [{ field: 'subjcet' }] },
+    }));
+    expect(validatePageFieldBindings(withColumn).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.columns[0]',
+    ]);
+  });
+
+  it('binds each slot to the object its renderer reads', () => {
+    // `body` is a help_ticket field and not a crm_opportunity one.
+    const blockOnDataSource = validateSortableFields(pageStack(region({
+      type: 'object-grid',
+      dataSource: { object: 'crm_opportunity' },
+      properties: { objectName: 'help_ticket', sort: [{ field: 'subject' }] },
+    })));
+    expect(blockOnDataSource.map((f) => [f.rule, f.path])).toEqual([
+      [PAGE_FIELD_UNKNOWN, 'pages[0].regions[0].components[0].properties.sort[0]'],
+    ]);
+    expect(blockOnDataSource[0].message).toContain('object "crm_opportunity"');
+    const listPageOnPageObject = validateSortableFields(pageStack({
+      name: 'p', type: 'list', object: 'crm_opportunity', interfaceConfig: { sort: [{ field: 'subject' }] },
+    }));
+    expect(listPageOnPageObject.map((f) => f.message)).toEqual([expect.stringContaining('object "crm_opportunity"')]);
+  });
+
+  it('judges the head of the legacy string form, its `-field` shorthand and each comma-separated key', () => {
+    const listPage = (sort: unknown) => pageStack({ name: 'p', type: 'list', object: 'help_ticket', interfaceConfig: { sort } });
+    expect(validateSortableFields(listPage('subject desc'))).toEqual([]);
+    const bad = validateSortableFields(listPage('ghost_col desc'));
+    expect(bad.map((f) => [f.rule, f.path])).toEqual([[PAGE_FIELD_UNKNOWN, 'pages[0].interfaceConfig.sort']]);
+    expect(bad[0].message).toContain('"ghost_col"');
+    expect(bad[0].message).not.toContain('ghost_col desc');
+    expect(validateSortableFields(listPage('-ghost_col')).map((f) => f.rule)).toEqual([PAGE_FIELD_UNKNOWN]);
+    expect(validateSortableFields(listPage('subject asc, ghost_col desc')).map((f) => f.path)).toEqual([
+      'pages[0].interfaceConfig.sort[1]',
+    ]);
+  });
+
+  it('skips what the family cannot judge: a dotted path, another package\'s object, an object with no field map', () => {
+    const findings = validateSortableFields({
+      objects: [ticket, { name: 'introspected_table' }],
+      pages: [region(
+        { type: 'object-grid', properties: { objectName: 'help_ticket', sort: [{ field: 'ghost.name' }] } },
+        { type: 'object-grid', properties: { objectName: 'not_in_this_stack', sort: [{ field: 'ghost' }] } },
+        { type: 'object-grid', properties: { objectName: 'introspected_table', sort: [{ field: 'ghost' }] } },
+      )],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('asks provenance of an injected anchor on an external object, at `warning`, and not on the local twin', () => {
+    const page = (object: string) => ({ name: 'p', type: 'list', object, interfaceConfig: { sort: [{ field: 'created_at' }] } });
+    const external = validateSortableFields({ objects: [externalObject], pages: [page('showcase_ext_customer')] });
+    expect(external.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [PAGE_FIELD_UNPROVISIONED, 'warning', 'pages[0].interfaceConfig.sort[0]'],
+    ]);
+    expect(external[0].message).toContain('so its ORDER BY is dropped');
+    expect(external[0].hint).toContain('columnMap');
+    expect(validateSortableFields({ objects: [localTwin], pages: [page('showcase_customer')] })).toEqual([]);
+  });
+
+  it('an author-declared field of a system name is the author\'s column, judged by the projection', () => {
+    const owned = { name: 'help_ticket', fields: { ...ticketFields, created_at: { type: 'datetime', label: 'Created', sortable: false } } };
+    const findings = validateSortableFields({
+      objects: [owned],
+      pages: [{ name: 'p', type: 'list', object: 'help_ticket', interfaceConfig: { sort: [{ field: 'created_at' }] } }],
+    });
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([[SORT_FIELD_UNSORTABLE, 'pages[0].interfaceConfig.sort[0]']]);
+  });
+});
+
+/** As much of a zod (v4) node as the drift pin below reads. */
+interface ZodDefLite { type?: string; shape?: Record<string, unknown>; in?: unknown; getter?: () => unknown; innerType?: unknown }
+const defOf = (node: unknown): ZodDefLite | undefined => (node as { _zod?: { def?: ZodDefLite } } | undefined)?._zod?.def;
+function shapeOf(schema: unknown): Record<string, unknown> | undefined {
+  let def = defOf(schema);
+  for (let hops = 0; def && !def.shape && hops < 4; hops++) {
+    if (def.type === 'pipe') def = defOf(def.in);
+    else if (def.type === 'lazy' && def.getter) def = defOf(def.getter());
+    else break;
+  }
+  return def?.shape;
+}
+function isLive(prop: unknown): boolean {
+  let def = defOf(prop);
+  for (let hops = 0; def && hops < 6; hops++) {
+    if (def.type === 'never') return false;
+    if (def.innerType === undefined) return true;
+    def = defOf(def.innerType);
+  }
+  return true;
+}
+
+describe('PAGE_BLOCK_SORT_OBJECT_PROP — pinned against ComponentPropsMap (#30023)', () => {
+  it('lists exactly the components whose props declare a live `sort`, each with a live object prop', () => {
+    const declaring = Object.entries(ComponentPropsMap as Record<string, unknown>)
+      .filter(([, schema]) => { const shape = shapeOf(schema); return !!shape && 'sort' in shape && isLive(shape.sort); })
+      .map(([type]) => type)
+      .sort();
+    // Non-vacuity: the detector sees a tombstone as dead and a live key as live.
+    const picker = shapeOf((ComponentPropsMap as Record<string, unknown>)['element:record_picker']);
+    expect(picker && isLive(picker.sort)).toBe(false);
+    expect(declaring).toEqual(Object.keys(PAGE_BLOCK_SORT_OBJECT_PROP).sort());
+    for (const [type, objectProp] of Object.entries(PAGE_BLOCK_SORT_OBJECT_PROP)) {
+      const shape = shapeOf((ComponentPropsMap as Record<string, unknown>)[type])!;
+      const head = objectProp.split('.')[0];
+      expect(head in shape && isLive(shape[head]), `${type}.${objectProp}`).toBe(true);
+    }
+  });
+});
+
 describe('[#22161] one-line verdicts — the three sort ids', () => {
   it('every verdict the cases above fired is one line of at most 200 characters', () => {
     // The coverage control first: each id fired at least once, so the shape
     // assertion below cannot pass over an empty record.
-    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...SORT_IDS].sort());
+    // [#30093] Page sort slots answer existence and provenance under the page
+    // family's ids, so those fire from this module too and are held to the
+    // same one-line shape.
+    expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual(
+      [...SORT_IDS, PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED].sort(),
+    );
     for (const f of fired) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);

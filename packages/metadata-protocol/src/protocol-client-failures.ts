@@ -7,7 +7,7 @@
 // A MOVE, not a redesign: every declaration below is byte-identical to the text that stood
 // above `ObjectStackProtocolImplementation`; only the imports and the export list at the foot
 // are new. `protocol.ts` re-exports what it exported.
-import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveThrownHttpError, sandboxBusinessMessage } from '@objectstack/types';
+import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveThrownHttpError, sandboxBusinessMessage, UNDECLARED_HOOK_REFUSAL_CODE } from '@objectstack/types';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { zodIssuesToMetadataIssues } from './protocol-metadata-issues.js';
@@ -139,6 +139,9 @@ export type BatchDataRowResult = BatchOperationResult;
  * answers, the `code` limb derives from the `400` the doors serve (the
  * `declared ?? 400` of `classifyDataError`, `@objectstack/types`). A code or
  * status the body DID declare still wins, as for every other producer.
+ * [#29894] Since #27597 those doors answer that refusal `HOOK_ABORTED`, not the
+ * 400's `VALIDATION_ERROR`, so the row does too: {@link isUndeclaredHookAbort}
+ * picks {@link UNDECLARED_HOOK_REFUSAL_CODE} before the status derivation.
  *
  * ⛔ `httpStatus` is NOT stamped for it. That limb carries only a status the
  * producer declared (above), and this body declared none.
@@ -150,12 +153,35 @@ export function toRowApiError(err: any, fallback: string): ApiError {
             ? (err.code as ApiError['code'])
             : undefined;
     const { declaredStatus } = resolveThrownHttpError(err);
-    const servedStatus = declaredStatus ?? (sandboxRefusalSentence(err) !== undefined ? 400 : undefined);
+    const refusal = sandboxRefusalSentence(err) !== undefined;
+    const servedStatus = declaredStatus ?? (refusal ? 400 : undefined);
     return {
-        code: thrown ?? (servedStatus !== undefined ? standardErrorCodeForHttpStatus(servedStatus) : 'INTERNAL_ERROR'),
+        code: thrown
+            ?? (isUndeclaredHookAbort(err, refusal, servedStatus) ? UNDECLARED_HOOK_REFUSAL_CODE
+                : servedStatus !== undefined ? standardErrorCodeForHttpStatus(servedStatus) : 'INTERNAL_ERROR'),
         message: clientFacingRowFailureText(err, fallback),
         ...(declaredStatus !== undefined ? { httpStatus: declaredStatus } : {}),
     };
+}
+
+/**
+ * [#29894] Is this row failure a hook ABORT that declared no code?
+ *
+ * #27597 gave a sandboxed body's free-text refusal one wire code,
+ * {@link UNDECLARED_HOOK_REFUSAL_CODE} (`HOOK_ABORTED`), on `/data`, and
+ * #27672 moved `resolveThrownHttpError`'s doors to it. The batch row kept the
+ * code its `400` derives (`VALIDATION_ERROR`), so `POST /data/:object/batch`
+ * named the same refusal differently from `/data`, `/createMany` and
+ * `/batch`. This is the resolver's own test, restated over the row's inputs:
+ * a sandboxed refusal ({@link sandboxRefusalSentence} answered), no `code`
+ * spelled at all (an unregistered one is a declaration and keeps the
+ * status-derived code, as on the resolver's doors), served at a 4xx.
+ */
+function isUndeclaredHookAbort(err: unknown, refusal: boolean, servedStatus: number | undefined): boolean {
+    const code = (err as { code?: unknown } | null | undefined)?.code;
+    return refusal
+        && !(typeof code === 'string' && code !== '')
+        && servedStatus !== undefined && servedStatus >= 400 && servedStatus < 500;
 }
 
 /**

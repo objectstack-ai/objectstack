@@ -18,6 +18,7 @@ import { ObjectListViewSchema } from '../ui/view.zod';
  */
 import { EvaluatedExpressionInputSchema, TemplateExpressionInputSchema, type EvaluatedExpression, type EvaluatedExpressionInput } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
+import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/public-auth-features';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
@@ -32,10 +33,11 @@ import { SINGLE_OPTION_TYPES } from './field-value.zod';
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
 import { isMaskedOnReadFieldType } from './masked-field-types';
-// The one-required-master predicate, shared with the v18 stored-row listing
+// The one-master predicate, shared with the v18 stored-row listing
 // (`conversions/refused-shapes.ts`) so the parse and the upgrade's preview
 // refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
-// field predicate `isControlledByParentMasterField` it counts.
+// field predicate `isControlledByParentMasterField` it counts and the
+// resolver `controlledByParentMasterOf` it judges the one master with.
 import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
 // The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
 // cross-reference pass and the v18 stored-row listing. Internal to the spec.
@@ -79,8 +81,8 @@ export const LEGACY_API_METHOD_GUIDANCE: Record<LegacyApiMethod, string> = {
   aggregate: "declare ['list'] — `aggregate` derives from list",
   history: "declare ['get'] with `enable.trackHistory: true` — `history` derives from get ∧ trackHistory",
   search: "declare ['list'] (with `searchable` not false) — `search` derives from list ∧ searchable",
-  restore: "delete the value — `restore` never derives (`enable.trash` was retired because no runtime ever read it); it returns only with a real recycle bin, and that soft-delete work is parked",
-  purge: "delete the value — `purge` never derives (`enable.trash` was retired because no runtime ever read it)",
+  restore: "declare ['delete'] — `restore` derives from delete: it is the recycle bin's restore door (ADR-0148), served on a business object only, because a platform object (`sys_`, `cloud_`, `ai_`) has no bin",
+  purge: "declare ['delete'] — `purge` derives from delete: it is the recycle bin's purge door (ADR-0148), served on a business object only, because a platform object (`sys_`, `cloud_`, `ai_`) has no bin",
   import: "declare ['create'] and/or ['update'] — `import` derives from create ∨ update (writeMode-precise at the gate)",
   export: "declare ['list'] — `export` derives from list",
 };
@@ -167,12 +169,14 @@ export function stripLegacyApiMethods(
 const CAPABILITIES_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   trash:
     '`enable.trash` was removed from @objectstack/spec in the 16.x line (' +
-    'ADR-0049) — it never had a runtime consumer: every delete has always been a ' +
-    'hard delete, and a default-true flag promising a recycle bin was a false ' +
+    'ADR-0049) — it never had a runtime consumer: every delete was then a hard ' +
+    'delete, and a default-true flag promising a recycle bin was a false ' +
     'affordance (authors wrote `trash: false` believing they were opting out of a ' +
-    'soft-delete that never ran). Delete the key. For recoverability use per-field ' +
-    '`trackHistory` (audit trail) or a `lifecycle` policy; soft delete is parked, ' +
-    'and if built returns as a live enforced flag (ADR-0049 prune-or-build). ' +
+    'soft-delete that never ran). Delete the key. The recycle bin that shipped ' +
+    'later (ADR-0148) has no flag: it takes every by-id delete of a business ' +
+    'object, and none of a platform object (`sys_`, `cloud_`, `ai_`), whose ' +
+    'deletes stay permanent. For history use per-field `trackHistory` (audit ' +
+    'trail), and for retention a `lifecycle` policy. ' +
     'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.',
   mru:
     '`enable.mru` was removed from @objectstack/spec in the 16.x line (' +
@@ -1290,6 +1294,38 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   ).meta({ title: 'Visible When' }),
 
   /**
+   * Declarative capability gate — the field-group twin of the action-level
+   * `requiresFeature` (`ui/action.zod.ts`). Names a deployment feature flag of
+   * `PUBLIC_AUTH_FEATURES` (`@objectstack/spec/kernel`), the same vocabulary
+   * actions use, so a flag outside it is refused at parse. Lowered at parse
+   * time into this group's `visibleWhen` by `lowerRequiresFeature` — the same
+   * gate an action gets (`features.multiOrgEnabled != false` for a default-on
+   * flag, `== true` for an opt-in one) — and stripped from the output, so a
+   * consumer only ever sees the canonical `visibleWhen`.
+   *
+   * Composition with an authored `visibleWhen`: AND, the author's predicate
+   * first and the gate last — `(<author predicate>) && <gate>` — so the group
+   * shows only where both hold. A non-CEL `visibleWhen` refuses the pair;
+   * write the combined predicate by hand.
+   *
+   * Both renderers bind the host's `features` root when they evaluate a
+   * group's `visibleWhen` (the form's section gate and the record page's
+   * `record:details`), so the lowered gate is enforced on both. Like every
+   * field-group predicate it is presentation only: the fields stay readable
+   * through the API.
+   *
+   * Fault direction: this slot is fail-closed, an action's `visible` is
+   * fail-soft. A `features` scope that does not carry the flag (the console's
+   * `{}` until `/auth/config` resolves, or for good if that fetch fails) makes
+   * the gate fault rather than answer, so the group is HIDDEN there even for a
+   * default-on flag, where the same gate on an action would show it. The group
+   * appears once the host publishes the flag.
+   */
+  requiresFeature: z.enum(PUBLIC_AUTH_FEATURE_NAMES).optional().describe(
+    "Deployment feature flag gating this group, from the same set an action's `requiresFeature` names (e.g. 'multiOrgEnabled'). Lowered at parse time into the group's `visibleWhen` (AND-composed after an authored `visibleWhen`) and stripped from the output; the whole group is hidden where the flag is off. Presentation only: the fields stay readable through the API.",
+  ).meta({ title: 'Requires Feature' }),
+
+  /**
    * [ADR-0085] Collapse behaviour of the group's rendered section, on every
    * surface (form, detail, drawer). One enum, three valid states — replaces
    * the old `defaultExpanded` flag AND the UI-dialect `collapsible`/`collapsed`
@@ -1310,7 +1346,9 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   collapsible: z.boolean().optional().describe("[DEPRECATED → collapse] Boolean pair with `collapsed`; use the `collapse` enum.").meta({ title: 'Collapsible' }),
   /** @deprecated [ADR-0085 → `collapse`] UI-dialect alias (pair with `collapsible`); mapped onto `collapse` at parse. */
   collapsed: z.boolean().optional().describe("[DEPRECATED → collapse] true → 'collapsed' (collapsible, starts closed) on its own — it needs no `collapsible` and outranks `collapsible: false`; false → 'none', or 'expanded' beside `collapsible: true`. Use the `collapse` enum.").meta({ title: 'Collapsed' }),
-}));
+  // `requiresFeature` → `visibleWhen`, the action precedent's lowering with the
+  // group's slot name; the key never reaches the output.
+}).transform((group, ctx) => lowerRequiresFeature(group, ctx, 'visibleWhen')));
 
 export type ObjectFieldGroup = z.input<typeof ObjectFieldGroupSchema>;
 /** Post-parse shape of {@link ObjectFieldGroup} — defaults applied, transforms run (ADR-0122). */
@@ -1628,9 +1666,12 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     'layout derives from `fieldGroups` + `Field.group`.',
   softDelete:
     '`softDelete` was removed from the spec in 16.0 (ADR-0049 ' +
-    'enforce-or-remove) — there is no soft-delete/recycle-bin runtime, so it ' +
-    'stored nothing and implied restore semantics that do not exist. Deletes ' +
-    'are hard deletes; remove the key.',
+    'enforce-or-remove) — no soft-delete runtime read it then, so it stored ' +
+    'nothing and implied restore semantics that did not exist. Remove the key: ' +
+    'the recycle bin that shipped later (ADR-0148) has no per-object switch. It ' +
+    'takes every by-id delete of a business object, which can then be restored ' +
+    'or purged; a platform object (`sys_`, `cloud_`, `ai_`) has no bin, so its ' +
+    'deletes are permanent.',
   versioning:
     '`versioning` was removed from the spec in 16.0 (ADR-0049) — no ' +
     'record-versioning engine ever read it (it snapshotted no history). Use ' +
@@ -1886,6 +1927,11 @@ function refuseNonPictureImageField(
  *    repeating the literal);
  *  - the field is of such a type without `valueDomain: 'iso_4217_currency'`.
  *
+ * Amended 2026-11-09 (#31743, ruling A): a two-segment pointer
+ * `PARENT_FIELD.CODE_FIELD` follows the parent's code instead, and is judged
+ * by {@link refuseDishonestRecordCurrencyPath}; the three refusals above are
+ * for the one-segment pointer.
+ *
  * Judged against the AUTHORED field map. Not judged on
  * `ObjectExtensionSchema`: an extension's fields merge into an object it does
  * not hold, so its pointer may name a field only the owner declares.
@@ -1905,6 +1951,10 @@ function refuseDishonestRecordCurrencyField(
   for (const [name, field] of Object.entries(map)) {
     const config = field?.currencyConfig as { currencyMode?: unknown; currencyField?: unknown } | undefined;
     if (config?.currencyMode !== 'record' || typeof config.currencyField !== 'string') continue;
+    // A `count` roll-up may carry no currency at all, so its pointer is not
+    // worth judging: {@link refuseUnadmittedSummaryCurrency} refuses the whole
+    // config, once.
+    if (summaryRollupOf(field)?.function === 'count') continue;
     const target = config.currencyField;
     const candidates = Object.keys(map).filter((k) => k !== name && isCodeField(map[k]!));
     const prescription =
@@ -1913,6 +1963,10 @@ function refuseDishonestRecordCurrencyField(
         ? `candidates: ${candidates.map((c) => `\`${c}\``).join(', ')}.`
         : 'the object has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`.');
     const path = ['fields', name, 'currencyConfig', 'currencyField'];
+    if (target.includes('.')) {
+      refuseDishonestRecordCurrencyPath(objectName, name, field, target, map, path, ctx);
+      continue;
+    }
     const declared = target !== name && Object.prototype.hasOwnProperty.call(map, target);
     if (!declared) {
       ctx.addIssue({
@@ -1945,8 +1999,231 @@ function refuseDishonestRecordCurrencyField(
   }
 }
 
+/** A field's machine name, the grammar each segment of a two-segment `currencyField` is held to. */
+const RECORD_CURRENCY_PATH_SEGMENT = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * [ADR-0144 D2, amended 2026-11-09 by #31743] The half of a two-segment
+ * `currencyField` (`PARENT_FIELD.CODE_FIELD`) that the amount's own object can
+ * see. Ruling A, recorded in 6739066323: "`currencyField` may name
+ * `<master_detail field>.<parent code field>`, so a child follows its
+ * parent's currency by construction". The amended D2 note: "The two-segment
+ * form is admitted only when its first segment is a `master_detail` field of
+ * the amount's own object and its second names, on that field's target
+ * object, a code field of the kind the first bullet requires. The ruling
+ * names `master_detail` only, so a path through a `lookup` stays refused."
+ *
+ * Refused here, at the pointer, each with its remedy:
+ *
+ *  - a spelling other than two field machine names joined by one dot (three
+ *    or more segments, or an empty or non-snake_case one). Judged at this
+ *    door alone, never on `CurrencyConfigSchema`, so the surfaces that see
+ *    one config (a standalone `field`, the exported config schema, an
+ *    extension's fields) parse a dotted pointer as they did before;
+ *  - a `summary` naming a path. The roll-up sits on the parent and is in the
+ *    parent's currency (D6, amended), whose code field is the roll-up's own
+ *    sibling, so it names that field in one segment;
+ *  - segment 1 is no declared field of this object;
+ *  - segment 1 is a `lookup` (the ruling names `master_detail` only) or any
+ *    other non-`master_detail` field.
+ *
+ * Segment 2 lives on the object segment 1 references, which this object does
+ * not hold: `defineStack`'s cross-reference pass judges it where the stack
+ * holds both (`collectRecordCurrencyPathErrors`, stack.zod.ts), and the
+ * registry judges it at runtime registration.
+ */
+function refuseDishonestRecordCurrencyPath(
+  objectName: string,
+  name: string,
+  field: { type?: unknown } | null,
+  target: string,
+  map: Record<string, { type?: unknown; reference?: unknown } | null>,
+  path: (string | number)[],
+  ctx: z.RefinementCtx,
+): void {
+  const segments = target.split('.');
+  const at = `\`${name}.currencyConfig.currencyField\` names \`${target}\``;
+  // The spelling: exactly two field machine names. Judged here and not on
+  // `CurrencyConfigSchema`, so a standalone field, the exported config schema
+  // and an extension's fields accept a dotted pointer exactly as before the
+  // amendment, and this card refuses nothing they parsed (a widening only).
+  const shape =
+    'A `currencyField` path is `PARENT_FIELD.CODE_FIELD`: a `master_detail` field of this object, one dot, and the '
+    + 'code field on the parent object it references. It names one hop, so a child follows its own parent and no '
+    + 'further; to read a grandparent\'s code, give the parent its own code field and follow that.';
+  if (segments.length > 2) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, a path of ${segments.length} segments, and a path is two. ${shape}`,
+    });
+    return;
+  }
+  const bad = segments.filter((s) => !RECORD_CURRENCY_PATH_SEGMENT.test(s));
+  if (bad.length > 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, and `
+        + (bad.includes('') ? 'one of its two segments is empty' : `\`${bad[0]}\` is not a field's machine name (snake_case)`)
+        + `. ${shape}`,
+    });
+    return;
+  }
+  const [via, code] = segments as [string, string];
+  if (field?.type === 'summary') {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, a path, on a \`summary\` field of object \`${objectName}\`. A roll-up through a \`master_detail\` `
+        + 'totals children that follow THIS record\'s currency, so it is in the currency this object\'s own code field '
+        + `holds: name that field in one segment (\`currencyField: '${code}'\` if it is this object's code field).`,
+    });
+    return;
+  }
+  const masters = Object.keys(map).filter((k) => k !== name && (map[k] as { type?: unknown } | null)?.type === 'master_detail');
+  const candidates = masters.length > 0
+    ? `candidates: ${masters.map((m) => `\`${m}.${code}\``).join(', ')}.`
+    : 'the object has none; a child follows a parent only through a `master_detail` field.';
+  const remedy = 'A `currencyField` path starts at a `master_detail` field of this object, whose parent holds the code — '
+    + candidates;
+  const viaField = Object.prototype.hasOwnProperty.call(map, via) && via !== name ? map[via] : undefined;
+  if (viaField === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, but object \`${objectName}\` declares no other field \`${via}\`. ${remedy}`,
+    });
+    return;
+  }
+  if (viaField?.type !== 'master_detail') {
+    ctx.addIssue({
+      code: 'custom',
+      path,
+      message: `${at}, and \`${via}\` is a \`${String(viaField?.type)}\` field on object \`${objectName}\`. `
+        + (viaField?.type === 'lookup'
+          ? 'Only a `master_detail` carries a child to its parent\'s currency: a lookup may be blank, and the amount '
+            + `would then have no currency. Make \`${via}\` a \`master_detail\` field, or give \`${objectName}\` its own `
+            + 'code field. '
+          : '')
+        + remedy,
+    });
+  }
+}
+
+/** A `summary` field's `summaryOperations`, or `undefined` for any other field (or a roll-up with none). */
+function summaryRollupOf(field: unknown): { function?: unknown; object?: unknown; field?: unknown } | undefined {
+  if (field === null || typeof field !== 'object' || (field as { type?: unknown }).type !== 'summary') return undefined;
+  const ops = (field as { summaryOperations?: unknown }).summaryOperations;
+  return ops !== null && typeof ops === 'object' ? (ops as { function?: unknown; object?: unknown; field?: unknown }) : undefined;
+}
+
+/**
+ * [ADR-0144 D6, amended 2026-11-09 by #31743] The half of "a `summary` carries
+ * a currency only where one is admitted" that the summary's own object can
+ * see. Ruling A admits one roll-up in the parent's currency: "A `summary`
+ * rolled up through that same master_detail is single-currency by
+ * construction, and is admitted in the parent's currency"; every other
+ * roll-up keeps D6's first bullet. The refusal set is the spec seat's claim
+ * amend 1 on #31958 (record 6746006322), after measuring which modes a reader
+ * consumes on a summary:
+ *
+ *  - a `count` roll-up refuses every mode, `fixed` included. A count is a
+ *    number of rows, never an amount, so a currency on it is wrong whichever
+ *    reader sees it (the analytics layer relays both a `fixed` code and a
+ *    `record` pointer for any field type);
+ *  - `dynamic` is refused on every summary. No reader consumes it there (the
+ *    Console's roll-up faces read no `currencyConfig`, and the analytics layer
+ *    relays only `fixed` and `record`), so it declares a currency nothing
+ *    draws. An absent `currencyMode` parses as `dynamic`, so `{}` meets it too;
+ *  - `record` on a roll-up that reads no child amount (no `summaryOperations`)
+ *    is refused: it is not the admitted roll-up, whatever it names.
+ *
+ * `fixed` stays accepted on a `sum` / `min` / `max` / `avg` roll-up: the
+ * analytics layer reads its code (`assertMeasureCurrenciesCoherent` refuses a
+ * measure labelling it another currency), and a fixed roll-up over amounts in
+ * that one currency is honest. Whether a `record` roll-up is the admitted one
+ * needs the child object, so `defineStack`'s cross-reference pass judges it
+ * (`collectRecordCurrencyPathErrors`, stack.zod.ts).
+ *
+ * Judged on the authored object only, as the other currency doors are: a
+ * standalone `FieldSchema`, `CurrencyConfigSchema` and an extension's fields
+ * parse what they parsed before.
+ */
+function refuseUnadmittedSummaryCurrency(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  for (const [name, field] of Object.entries(fields as Record<string, unknown>)) {
+    if (field === null || typeof field !== 'object' || (field as { type?: unknown }).type !== 'summary') continue;
+    const config = (field as { currencyConfig?: unknown }).currencyConfig;
+    if (config === null || typeof config !== 'object') continue;
+    const mode = (config as { currencyMode?: unknown }).currencyMode ?? 'dynamic';
+    const ops = summaryRollupOf(field);
+    const at = `\`${name}\` is a \`summary\` field of object \`${objectName}\``;
+    const path = ['fields', name, 'currencyConfig'];
+    const admitted =
+      'A roll-up carries a currency in two cases only: `currencyMode: \'fixed\'` when every amount it reads is in that '
+      + 'one currency, and `currencyMode: \'record\'` naming this object\'s own code field when it rolls up, through a '
+      + '`master_detail`, child amounts whose `currencyField` follows this record through that very field '
+      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`).';
+    if (ops?.function === 'count') {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at} that counts child rows (\`function: 'count'\`) and declares \`currencyMode: '${String(mode)}'\`. `
+          + 'A count is a number of rows, never an amount, so it has no currency: delete `currencyConfig`. '
+          + admitted,
+      });
+      continue;
+    }
+    if (mode === 'dynamic') {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at} declaring \`currencyMode: 'dynamic'\` (an absent \`currencyMode\` is \`dynamic\`). No reader `
+          + 'draws a roll-up in the tenant default currency, so the declaration changes nothing: delete `currencyConfig`, '
+          + 'or declare the currency the amounts are in. ' + admitted,
+      });
+      continue;
+    }
+    if (mode === 'record' && (ops === undefined || typeof ops.object !== 'string' || typeof ops.field !== 'string')) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at} declaring \`currencyMode: 'record'\` with no \`summaryOperations\` naming a child amount, so it `
+          + 'rolls up no amount that could follow this record\'s currency: delete `currencyConfig`, or declare the '
+          + 'roll-up. ' + admitted,
+      });
+    }
+  }
+}
+
 /** The field types a `homeAmount.rateDate` pointer may name: a calendar date, with or without a time. */
 const HOME_AMOUNT_RATE_DATE_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
+
+/**
+ * The decimal places an exchange rate carries: twelve digits after the point
+ * (ruling 6469382727, "scale 12 — twelve digits after the decimal
+ * point, total precision 24"). It is the `scale` platform-objects declares on
+ * `sys_exchange_rate.rate` (`EXCHANGE_RATE_SCALE`); the spec cannot import
+ * that package, so the number is restated here and the ruling is the one
+ * source both cite.
+ *
+ * The floor a `homeAmount.rateField` may declare. The engine stores the rate
+ * row's own value in the rate field, never rounded, and every numeric column
+ * is the same exact decimal, so a declared `scale` there constrains no write
+ * (a `readonly` value is judged for its shape only) and reaches the display
+ * alone: a rate field at `scale: 4` would show 0.1389 for a stored
+ * 0.138912345678, and the shown rate would no longer reproduce the stored
+ * home amount. An UNDECLARED `scale` is not refused: on a `number` field it
+ * declares no fixed width (`resolveFieldScale` answers `undefined`), so the
+ * rate shows the digits it was stored with, all twelve.
+ */
+const HOME_AMOUNT_RATE_SCALE = 12;
 
 /**
  * [ADR-0144 D5] A `record`-mode amount's `currencyConfig.homeAmount` names
@@ -1976,7 +2253,9 @@ const HOME_AMOUNT_RATE_DATE_TYPES: ReadonlySet<string> = new Set(['date', 'datet
  *  - `rateDate` is not a declared `date` / `datetime` field;
  *  - `rateField` is not a declared `number` field, or is shared with an amount
  *    that names another code field or another document date (the two would
- *    store two different rates into one column);
+ *    store two different rates into one column), or declares a `scale` below
+ *    the rate's twelve decimals ({@link HOME_AMOUNT_RATE_SCALE}; an undeclared
+ *    `scale` is accepted, since it shows every stored digit);
  *  - the home field or the rate field is not marked platform-written. The
  *    engine writes both, so each declares `readonly: true` — the existing mark
  *    that drops every non-system write of the field from the payload — and no
@@ -1996,7 +2275,7 @@ function refuseDishonestHomeAmount(
   const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
   type HomeAmount = { field?: unknown; rateDate?: unknown; rateField?: unknown };
   type CurrencyConfigView = { currencyMode?: unknown; currencyField?: unknown; homeAmount?: HomeAmount };
-  type FieldView = { type?: unknown; readonly?: unknown; expression?: unknown; currencyConfig?: CurrencyConfigView } | null;
+  type FieldView = { type?: unknown; readonly?: unknown; expression?: unknown; scale?: unknown; currencyConfig?: CurrencyConfigView } | null;
   const map = fields as Record<string, FieldView>;
   const has = (name: string): boolean => Object.prototype.hasOwnProperty.call(map, name);
   const modeOf = (f: FieldView): unknown => f?.currencyConfig?.currencyMode ?? 'dynamic';
@@ -2116,6 +2395,12 @@ function refuseDishonestHomeAmount(
     }
 
     // `rateField` — a declared `number` sibling, shared only by amounts that store the same rate.
+    // Two amounts store the same rate when they convert from the same code on the same date, and a
+    // `currencyField` names its code by its spelling: a path `PARENT_FIELD.CODE_FIELD` (ADR-0144 D2,
+    // amended 2026-11-09) names the parent's code through that one `master_detail`, so it equals
+    // another pointer exactly when the spellings are equal. A path and a one-segment sibling never
+    // share (the child's own code and its parent's are two values), nor do two paths through two
+    // different `master_detail` fields (two parent rows).
     if (typeof home.rateField === 'string') {
       const target = home.rateField;
       const t = map[target];
@@ -2146,6 +2431,22 @@ function refuseDishonestHomeAmount(
         // sharer stores the same rate into the same, already judged, column.
         rateOwner.set(target, { amount: name, currencyField: config.currencyField, rateDate: home.rateDate });
         refuseUnlessPlatformWritten('rateField', target, 'the rate field');
+        // The rate is stored at twelve decimals whatever the field declares, so
+        // a narrower `scale` only rounds the rate a reader is shown (ruling
+        // 6469382727). Judged once per column, like the mark above.
+        const scale = t?.scale;
+        if (typeof scale === 'number' && scale < HOME_AMOUNT_RATE_SCALE) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [...base, 'rateField'],
+            message: `${at}.rateField\` names \`${target}\`, a \`number\` field declaring \`scale: ${scale}\`, below the `
+              + `${HOME_AMOUNT_RATE_SCALE} decimal places an exchange rate carries. The engine stores the rate it used `
+              + `with all ${HOME_AMOUNT_RATE_SCALE} decimals, so \`${target}\` would show it rounded to ${scale} and the `
+              + 'shown rate would not reproduce the stored home amount. Declare '
+              + `\`scale: ${HOME_AMOUNT_RATE_SCALE}\` (or more) on \`${target}\`, or delete its \`scale\` so the rate `
+              + 'shows every digit it was stored with.',
+          });
+        }
       }
     }
   }
@@ -2342,6 +2643,85 @@ function refuseDishonestLookupAutofill(
         return;
       }
       seen.add(target);
+    });
+  }
+}
+
+/** The field-key grammar (`FieldSchema.name`, `FieldNameKeySchema`). */
+const FIELD_KEY_GRAMMAR = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * [epic cloud#3652 ruling D3 「写进清单 renamedFrom」, under Q3
+ * 「默认拒绝，需显式映射（推荐）」] A field's `renamedFrom` lists the earlier
+ * keys of THAT field, so a package upgrade can carry the old column's data to
+ * it. Each entry must say one unambiguous thing about this object's history,
+ * which only the whole `fields` map can judge. Refused, one located issue per
+ * offending entry at `['fields', <field>, 'renamedFrom', <i>]`, naming the
+ * object, the field and the old key, when the entry:
+ *
+ *  - is the field's own key (a field is not renamed from itself);
+ *  - repeats an earlier entry of the same list;
+ *  - is a key another field of this object still declares (the old name is
+ *    still in use, so it cannot have been renamed away);
+ *  - is an old key an earlier field of this object already claims (two fields
+ *    cannot both inherit one column) — reported on the later claimant, naming
+ *    the first.
+ *
+ * Deliberately minimal (the card's list): the field-key grammar is judged by
+ * `FieldSchema` itself, and entries failing it are skipped here; whether the
+ * old column's type converts to the new field's type depends on the INSTALLED
+ * version, so the upgrade plan judges it, never this parse. Judged at parse,
+ * beside {@link refuseStageFieldWithoutKinds}, so every door — `defineStack`, a
+ * raw `.parse()`, the metadata save door — refuses it; the key is new, so no
+ * metadata at rest carries it.
+ */
+function refuseDishonestRenamedFrom(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const fieldMap = fields as Record<string, unknown>;
+  const claimedBy = new Map<string, string>();
+  const prescription =
+    '`renamedFrom` lists the keys this field had in earlier versions of the package: each once, never the '
+    + "field's own key, never a key another field of this object still declares, and never an old key another "
+    + 'field of this object also claims.';
+  for (const [fieldName, fieldDef] of Object.entries(fieldMap)) {
+    const list = (fieldDef as { renamedFrom?: unknown } | null)?.renamedFrom;
+    if (!Array.isArray(list)) continue;
+    const seen = new Set<string>();
+    list.forEach((entry: unknown, i: number) => {
+      if (typeof entry !== 'string' || !FIELD_KEY_GRAMMAR.test(entry)) return;
+      const refuse = (reason: string): void => {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['fields', fieldName, 'renamedFrom', i],
+          message:
+            `Field \`${fieldName}\` on object \`${objectName}\` declares \`renamedFrom\` entry '${entry}', `
+            + `${reason} ${prescription}`,
+        });
+      };
+      if (entry === fieldName) {
+        refuse("which is the field's own key: a field is not renamed from itself.");
+        return;
+      }
+      if (seen.has(entry)) {
+        refuse('which an earlier entry of the same list already names.');
+        return;
+      }
+      seen.add(entry);
+      if (Object.prototype.hasOwnProperty.call(fieldMap, entry)) {
+        refuse(`but object \`${objectName}\` still declares a field \`${entry}\`: that name is still in use, so no field was renamed away from it.`);
+        return;
+      }
+      const firstClaimant = claimedBy.get(entry);
+      if (firstClaimant !== undefined) {
+        refuse(`which field \`${firstClaimant}\` of the same object already claims: one old column cannot be carried to two fields.`);
+        return;
+      }
+      claimedBy.set(entry, fieldName);
     });
   }
 }
@@ -2608,6 +2988,17 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
  * derives its master from EXACTLY ONE `master_detail` field declared
  * `required: true`. The parse refuses the object otherwise — zero such fields,
  * or two or more — naming the object and the rule, at
+ *
+ * ⚠️ Amended by ruling A of #30905 (ADR-0055 §1 as amended): with no required
+ * one, the object's ONLY `master_detail`, declared `required: false`, is its
+ * master too, an OPTIONAL one — a detail row may name no master, and such a
+ * row is read by its owner and by View All on the detail. On the parsed map an
+ * omitted `required` is `false` (see below), so this refinement admits it as
+ * the optional master as well: the parse cannot tell the two spellings apart.
+ * The omission is caught where it is visible — `ObjectSchema.create()` forces
+ * it to `true`, the stored-row seams convert it to `true`, and `os lint`'s
+ * `relationship/master-detail-required` reports it at `error`. The rest of
+ * this docblock records the rule as first landed and reads with that change:
  * `['sharingModel']` (nothing to derive from) or `['fields']` (more than one
  * candidate), the same two locations `os lint` reports
  * `security-controlled-by-parent-no-relation` /
@@ -2638,7 +3029,9 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
  * refusal every door that parses meets.
  *
  * Read on the PARSED field map: `required` is `z.boolean().default(false)`, so
- * an omitted `required` here is `false` — and is refused. That is the builder's
+ * an omitted `required` here is `false` — and is refused. ⚠️ Since ruling A of
+ * #30905, `false` on the object's only `master_detail` is the optional master,
+ * so an omitted one is admitted as that (see above). That is the builder's
  * own contract seen from the other side: `ObjectSchema.create()` forces an
  * omitted `required` to `true` on every `master_detail` under this sharing
  * model ({@link forceCbpMasterDetailRequired}), so an object authored through
@@ -2654,7 +3047,9 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
  * diagnostic carrying this message (ADR-0087's 2026-07-31 addendum, "reads
  * diagnose, never drop"), and the save door refuses it with 422. The other
  * shapes are not converted:
- *   - an explicit `required: false` — the builder refuses it, too;
+ *   - an explicit `required: false` — the builder refuses it, too (⚠️ until
+ *     ruling A of #30905; on the object's only `master_detail` it is the
+ *     optional master now, accepted as stored);
  *   - two masters — choosing one is the pick §1 refuses;
  *   - a required `lookup` — turning it into a `master_detail` changes what
  *     deleting the master does to every row, and whether the object should
@@ -2777,10 +3172,12 @@ function refuseDuplicateActionNames(objectName: unknown, actions: unknown, ctx: 
 /**
  * The key grammar of an object's field map: a field name is lowercase
  * snake_case. ONE schema, read by every record keyed by a field name of an
- * object — `ObjectSchema.fields` and `ObjectExtensionSchema.fieldPatches`
- * (#29366) — so a key the field map can never hold is refused where it is
- * written, never accepted as a patch that no field can match. Declared above
- * `ObjectSchemaBase` for the order reason the block below gives.
+ * object — `ObjectSchema.fields`, `ObjectExtensionSchema.fieldPatches`
+ * (#29366) and `ObjectExtensionSchema.fields` (#29523) — so a key the field
+ * map can never hold is refused where it is written, never accepted as a
+ * patch that no field can match or as a field the target's own map would
+ * refuse. Declared above `ObjectSchemaBase` for the order reason the block
+ * below gives.
  */
 const FieldNameKeySchema = z.string().regex(/^[a-z_][a-z0-9_]*$/, {
   message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
@@ -3565,7 +3962,10 @@ const ObjectSchemaBase = strictObject(
    * master-detail relationship: its access is *derived* from the master record
    * — a user sees/edits a detail only if they can see/edit its master. The
    * object must declare exactly one required `master_detail` field identifying
-   * the master; the security layer auto-injects `masterFK IN (accessible master
+   * the master — or, with none, exactly one `master_detail` declared
+   * `required: false`, an optional master: a detail row that names no master is
+   * read by its owner (`owner_id`) and by View All on the detail (ADR-0055 §1
+   * and §2 as amended); the security layer auto-injects `masterFK IN (accessible master
    * ids)` on reads and requires master edit-access on by-id writes. No RLS policy
    * is authored — the inheritance is derived from the relationship.
    */
@@ -3905,6 +4305,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0144 D2] A `record`-mode amount's `currencyField` names a declared
   // ISO 4217 `text` sibling — the same door: only the object holds the map.
   refuseDishonestRecordCurrencyField(object.name, object.fields, ctx);
+  // [ADR-0144 D6, amended] A `summary` carries a currency only where one is
+  // admitted; the half its own object can see — same door.
+  refuseUnadmittedSummaryCurrency(object.name, object.fields, ctx);
   // [ADR-0144 D5] Its `homeAmount` names a `dynamic` currency home field, a
   // date and a number rate field, the two written ones `readonly` — same door.
   refuseDishonestHomeAmount(object.name, object.fields, ctx);
@@ -3919,15 +4322,20 @@ const ObjectSchemaBase = strictObject(
   // lifecycle `kind` — the same door: only the object knows which field is
   // its stage.
   refuseStageFieldWithoutKinds(object.name, object.stageField, object.fields, ctx);
+  // [cloud#3652 ruling D3] Each `renamedFrom` entry names one earlier key of
+  // its field — not its own, not a live sibling's, not one another field
+  // claims, once — the same door: only the object holds the field map.
+  refuseDishonestRenamedFrom(object.name, object.fields, ctx);
   // [#22211 ruling A] A read attachment names at least one leaf, and is not a
   // field: its block names may not repeat a declared field name.
   refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);
   // [#27069] A field group carrying `relatedList` is a body table: no field
   // joins it. See the helper's docblock.
   refuseFieldsInRelatedListGroups(object.fieldGroups, object.fields, ctx);
-  // [ADR-0055 §1 · #23100 ruling B] Exactly one required `master_detail`
-  // under `controlled_by_parent` — the one master relation the runtime derives
-  // access from. See the helper's docblock.
+  // [ADR-0055 §1 · #23100 ruling B, as amended by #30905 ruling A] Exactly one
+  // master `master_detail` under `controlled_by_parent` (the required one, or
+  // the only one declared `required: false`) — the one master relation the
+  // runtime derives access from. See the helper's docblock.
   refuseControlledByParentWithoutOneMaster(object.name, object.sharingModel, object.fields, ctx);
   // [ADR-0055 §3 amendment · ruling 6398566164] `sharing.controlledByParent.ownerMayEdit`
   // is read only on a `controlled_by_parent` detail. See the helper's docblock.
@@ -4267,8 +4675,17 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
 /**
  * [#9138 — commit 75b7c240a, maintainer ruling Direction 2 / ADR-0055] Under
  * `sharingModel: 'controlled_by_parent'` the builder FORCES `required: true`
- * on every `master_detail` reference, and REFUSES an explicit
- * `required: false` there, loudly.
+ * on every `master_detail` reference that OMITS `required`, and keeps an
+ * explicit `required: true` as written.
+ *
+ * ⚠️ Amended by ruling A of #30905 (ADR-0055 §1 as amended): an explicit
+ * `required: false` on the object's ONLY `master_detail` is no longer refused
+ * here (one beside another still is). It declares the OPTIONAL master
+ * — a detail row may name none, and such a row is read by its owner and by
+ * View All on the detail ({@link refuseControlledByParentWithoutOneMaster}
+ * judges whether it is the object's one master). The text below, down to the
+ * second bullet, records the rule as first landed; the force itself is
+ * unchanged: an omitted `required` still means required.
  *
  * Why: a `controlled_by_parent` detail's access is *derived* from its master
  * through that reference (the `sharingModel` docblock above already states
@@ -4290,7 +4707,10 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  *   `relationship/master-detail-required` already computes exactly this fix);
  * - explicit `required: false` → refused with a located error — the author
  *   wrote a contradiction, and silently flipping an explicitly authored value
- *   would hide it (ADR-0032 "no silent failure").
+ *   would hide it (ADR-0032 "no silent failure"). ⚠️ Retired by ruling A of
+ *   #30905 on the object's ONLY `master_detail`: it is the optional master
+ *   now, passed to the parse as written. Beside another `master_detail` it
+ *   is still refused here, with the message naming the other.
  *
  * `readonly` / `system` are not read here: the builder forces nothing about
  * them, and the parse it ends in refuses a one master carrying either
@@ -4302,12 +4722,13 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * {@link assertSystemDataIsWritable}, and deliberately NOT in raw
  * `.parse()`/`.safeParse()`: a parse must not rewrite what it reads. The force
  * is the builder's convenience, not the rule: the RULE — exactly one required
- * `master_detail` under this sharing model — is judged on the parse itself by
- * {@link refuseControlledByParentWithoutOneMaster} (#23100, maintainer ruling
- * B), so a raw parse of a `master_detail` without `required: true` is refused
- * rather than forced, and the security gate's fallbacks this paragraph used to
- * call "runtime tolerance" (any `master_detail`, then a required `lookup`) are
- * retired.
+ * `master_detail` under this sharing model, or (ADR-0055 §1 as amended,
+ * #30905 ruling A) its only `master_detail` as the optional master — is judged
+ * on the parse itself by {@link refuseControlledByParentWithoutOneMaster}
+ * (#23100, maintainer ruling B), so a raw parse is never forced (it reads an
+ * omitted `required` after its `false` default), and the security gate's
+ * fallbacks this paragraph used to call "runtime tolerance" (any
+ * `master_detail`, then a required `lookup`) are retired.
  *
  * Alias spellings (`isRequired` / `mandatory` / `notNull`) need no handling
  * here: `FieldSchema` is a `strictObject`, so those keys are refused at parse
@@ -4323,21 +4744,30 @@ function forceCbpMasterDetailRequired(
   if (sharingModel !== 'controlled_by_parent') return fields;
   if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return fields;
   let out: Record<string, unknown> | undefined;
-  for (const [fieldName, def] of Object.entries(fields as Record<string, unknown>)) {
-    if (!def || typeof def !== 'object' || Array.isArray(def)) continue;
+  const masterDetails = Object.entries(fields as Record<string, unknown>).filter(
+    ([, def]) =>
+      !!def && typeof def === 'object' && !Array.isArray(def)
+      && (def as Record<string, unknown>).type === 'master_detail',
+  );
+  for (const [fieldName, def] of masterDetails) {
     const field = def as Record<string, unknown>;
-    if (field.type !== 'master_detail') continue;
     if (field.required === true) continue;
+    // [ADR-0055 §1 as amended · #30905 ruling A] An explicit `required: false`
+    // on the object's ONLY `master_detail` is the optional master, kept as
+    // written. Beside another `master_detail` it is still the contradiction
+    // this builder refused before the ruling: that field is not the master
+    // (§1 keeps one), so it is a second parent, which §1 declares a `lookup`.
     if (field.required === false) {
+      if (masterDetails.length === 1) continue;
       const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : '<unnamed>';
+      const others = masterDetails.filter(([other]) => other !== fieldName).map(([other]) => `\`${other}\``);
       throw new Error(
         `ObjectSchema.create('${name}'): field \`${fieldName}\` declares \`required: false\` on a `
-        + "`master_detail` reference under `sharingModel: 'controlled_by_parent'` — a contradiction "
-        + 'with no honest reading. A controlled-by-parent detail derives ALL of its record '
-        + 'access from the master this field names (ADR-0055); a row allowed to omit the master FK '
-        + 'is unreadable by everyone (the derived filter `masterFK IN (accessible master ids)` '
-        + 'never matches null) and unwritable thereafter. Remove `required: false` (the builder '
-        + 'declares the reference required by construction), or if this object is not a '
+        + "`master_detail` reference under `sharingModel: 'controlled_by_parent'`, beside another "
+        + `\`master_detail\` (${others.join(', ')}). Only an object's ONLY \`master_detail\` may be `
+        + 'declared `required: false`, an optional master (ADR-0055 §1): beside another it names a '
+        + 'second parent, and a controlled-by-parent detail derives its access from one master. '
+        + 'Declare every parent other than the master as a `lookup`, or if this object is not a '
         + 'master-detail child, change its `sharingModel`.',
       );
     }
@@ -4472,11 +4902,10 @@ export const ObjectSchema = lazySchema(() => {
     // sibling assertions, rather than one error per seeded row at load time.
     assertReferenceViaSiblingDeclared(cfg.name, cfg.fields);
     // [#9138 — commit 75b7c240a, ruling Direction 2] A `controlled_by_parent` object's
-    // `master_detail` reference is forced `required: true` (an explicit
-    // `required: false` throws, loudly) so the unsafe shape cannot be newly
-    // declared. Raw `.parse()`/`.safeParse()` do not force it — they refuse a
-    // `controlled_by_parent` object without exactly one required
-    // `master_detail` instead (#23100 ruling B) — see the function's docblock.
+    // `master_detail` reference that omits `required` is forced `required: true`;
+    // an explicit `required: false` on its only `master_detail` is kept, the
+    // optional master (ruling A of #30905), and refused beside another. Raw `.parse()`/`.safeParse()` do not force it — they judge the
+    // object's one master instead (#23100 ruling B) — see the function's docblock.
     const forcedFields = forceCbpMasterDetailRequired(cfg.name, cfg.sharingModel, cfg.fields);
     const withDefaults = {
       ...cfg,
@@ -4954,8 +5383,10 @@ function fieldPatchesDescription(): string {
     '(`mergeObjectDefinitions`) after the additive merges, on every object read: a tenant\'s own text keeps ' +
     'winning, and between two extensions the higher `priority` wins. A patch naming a field or option value ' +
     'the target does not have is refused at install and by `os validate`; a field the same extension ' +
-    'replaces in `fields` is refused here. Example: `fieldPatches: { industry: { label: \'Sector\', ' +
-    'inlineHelpText: \'The market the account sells into\', options: { technology: { label: \'Tech\' } } } }`.'
+    'replaces in `fields` is refused here. An option of a field bound to a shared `picklist` is never ' +
+    'patchable: its labels are the picklist\'s, so only a field declaring its own `options` takes an option ' +
+    'patch. Example: `fieldPatches: { industry: { label: \'Sector\', inlineHelpText: \'The market the ' +
+    'account sells into\' }, type: { options: { customer: { label: \'Client\' } } } }`.'
   );
 }
 
@@ -4970,7 +5401,9 @@ function fieldPatchesDescription(): string {
  *   fields: { sales_stage: Field.select([...]) },
  *   // A base field's display properties only (ADR-0146 D10), applied by the
  *   // registry merge (`mergeObjectDefinitions`) — see `fieldPatches`.
- *   fieldPatches: { industry: { label: 'Sector', options: { technology: { label: 'Tech' } } } },
+ *   // Where `industry` is picklist-bound, as on HotCRM's `crm_account`, its options are not
+ *   // patchable (its display keys are); an option patch goes on a field declaring its own options.
+ *   fieldPatches: { industry: { label: 'Sector' }, type: { options: { customer: { label: 'Client' } } } },
  * }]
  * ```
  */
@@ -5035,11 +5468,33 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   extend: z.string().describe('Target object name (FQN) to extend'),
   
   /**
-   * Fields to merge into the target object (additive). `__proto__` is refused
-   * on the raw input, as on `ObjectSchema.fields`: zod's record parser skips
-   * it, so the save door would store a key the registered extension lacks.
+   * Fields to merge into the target object (additive). Each record key is a
+   * field name, judged by the field map's own key grammar
+   * ({@link FieldNameKeySchema}, as `ObjectSchema.fields`): the fields land in
+   * the target's field map, so a key that map would refuse is refused here,
+   * where it is written. `__proto__` is refused on the raw input, as on
+   * `ObjectSchema.fields`: zod's record parser skips it, so the save door
+   * would store a key the registered extension lacks.
    */
-  fields: refuseRecordProtoKey(z.record(z.string(), FieldSchema), 'fields').optional().describe('Fields to add/override'),
+  fields: refuseRecordProtoKey(z.record(FieldNameKeySchema, FieldSchema, {
+    // [#29523] Keyed by the field map's own key grammar: a key no field name
+    // can be (`Region Code`, `region-code`) is refused here, where it is
+    // written, instead of parsing and being merged into the target's map.
+    error: (issue) => {
+      if (issue.code === 'invalid_key') {
+        return `\`${String(issue.input)}\` cannot be a field name: an extension's \`fields\` is keyed by the ` +
+          'name of each field it adds to the extended object, lowercase snake_case such as `region_code` ' +
+          '(`region_code__c` in a customization package), the key grammar of an object\'s own `fields`, ' +
+          'never by its label.';
+      }
+      return undefined;
+    },
+  }), 'fields')
+    .optional()
+    .describe(
+      'Fields to add/override, keyed by field name (lowercase snake_case, the key grammar of an object\'s ' +
+      '`fields`).',
+    ),
 
   /**
    * [ADR-0146 D10, second rule] Per-field display patch of the target's own

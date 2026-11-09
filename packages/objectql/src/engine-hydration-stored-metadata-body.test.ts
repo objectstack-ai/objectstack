@@ -187,9 +187,17 @@ for (const family of STORED_METADATA_BODY_OBJECTS) {
         const holding = await failure(engine.insert('probe_detail', { hdr: 'm1' }, { context }));
         const control = await failure(engine.insert('probe_detail', { hdr: 'm2' }, { context }));
         expect(holding).toMatchObject({ code: 'VALIDATION_FAILED' });
-        expect(holding?.message).toContain("reads 'parent'");
-        // The verdict does not depend on the row: the bit the body would decide is not served.
-        expect(control).toEqual(holding);
+        if (context === MEMBER) {
+          // [#29029] A member's write names a header its read door does not
+          // return: the reference check answers, before the record's rules,
+          // alike for either header.
+          expect(holding?.message).toBe(`hdr: no ${family} record has id "m1"`);
+          expect(control).toEqual({ ...holding, message: `hdr: no ${family} record has id "m2"` });
+        } else {
+          expect(holding?.message).toContain("reads 'parent'");
+          // The verdict does not depend on the row: the bit the body would decide is not served.
+          expect(control).toEqual(holding);
+        }
         servesNothing([holding, control]);
         expect(familyBodyReads()).toHaveLength(0);
       });

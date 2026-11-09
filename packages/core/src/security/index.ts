@@ -165,6 +165,11 @@ export {
   API_KEY_REVOKED_CODE,
   API_KEY_LIFECYCLE_REFUSAL_STATUS,
   apiKeyLifecyclePolicySourceOf,
+  // [ADR-0151 D4] The one signing-expiry rule both mint doors apply.
+  readRequestedApiKeyExpiry,
+  signApiKeyExpiry,
+  type ApiKeyExpiryRefusal,
+  type ApiKeyExpiryCeilingRefusal,
   ApiKeyLifecycleRefusalError,
   isApiKeyLifecycleRefusalError,
   type ApiKeyLifecyclePolicySource,
@@ -176,6 +181,29 @@ export {
   type ApiKeyRefusalReason,
   type TenancyPostureSource,
 } from './api-key.js';
+
+// [#31821] Where a credential use came from: the client facts the
+// `credential_use` ledger row records, carried from the key-admission seam's
+// (and plugin-auth's OAuth) stamp write to plugin-audit's stamp hook.
+// [#31898] `credentialUseClientFor` is the one place a door's facts meet the
+// client-address trust rule; every key-admitting door hands its facts through it.
+export {
+  credentialUseClientFor,
+  credentialUseClientOf,
+  currentCredentialUseClient,
+  runWithCredentialUseClient,
+  transportPeerAddressOf,
+  userAgentOf,
+  type ClientAddressAuthority,
+  type CredentialUseClient,
+  type CredentialUseClientAbsence,
+  type CredentialUseClientInput,
+  type CredentialUseDoorFacts,
+} from './credential-use-client.js';
+
+// The one "does this user's ban hold" predicate: the key-admission seam and
+// plugin-auth's session-shaped refusals all ask it.
+export { isUserBanInForce, USER_BAN_FIELDS, type UserBanFields } from './user-ban.js';
 
 // [#16013] The ONE try/catch CLASSIFICATION every admission seam performs on
 // the `tenancy` read that feeds `effectiveTenancyPosture` above -- branded
@@ -201,6 +229,20 @@ export {
   type RequestAdmission,
 } from './request-execution-context.js';
 
+// The ONE own-row delete door (`DELETE <route>` removes one row, only the
+// caller's own): read as the caller, check the owner column, remove as the
+// system attributed to the caller. Each object supplies its door descriptor.
+export {
+  ownRowDeleteCallerResolver,
+  registerOwnRowDeleteRoute,
+  removeOwnRow,
+  type OwnRowDeleteCallerSources,
+  type OwnRowDeleteDoor,
+  type OwnRowDeleteEngine,
+  type OwnRowDeleteRoutesDeps,
+  type OwnRowDeleteWords,
+} from './own-row-delete-routes.js';
+
 // [commit 6a180e42d] The LOUD failure an unreachable permission store raises, and the
 // brand predicate a fail-closed `catch` uses to re-raise it instead of
 // degrading an outage into a capability denial. Ruled 2026-08-30.
@@ -216,6 +258,9 @@ export {
 export {
   resolveAuthzContext,
   resolveUserAuthzGrants,
+  // [ADR-0151 D1] Is a `sys_user` row an AI service account? The one reading
+  // the resolver applies, for a gate that reads a holder's row itself.
+  isAgentAccountRow,
   // [#10348] The ONE id-shaped platform-admin predicate (ADR-0068 D2). Every
   // surface that only knows a user id asks this instead of re-reading
   // `sys_*_permission_set` — the prohibition resolve-authz-context.ts states.
@@ -290,6 +335,11 @@ export {
   type SystemWriteRefusalReason,
 } from './system-write-organization.js';
 
+// [ADR-0131 D9 / D13] The tenancy-scope predicate, its fallback column and the
+// federated-schema test: the engine's (`@objectstack/objectql` re-exports these
+// same bindings) and the import runner's match lookup.
+export { DEFAULT_TENANT_FIELD, isFederatedObject, resolveTenantFieldName } from './tenant-field.js';
+
 // [ADR-0138 D4] The located refusal an anonymous request meets where it needs
 // an organization the deployment cannot resolve for it — a standard-catalog
 // code (`NOT_IMPLEMENTED`), naming the missing site binding (D5).
@@ -310,6 +360,8 @@ export {
   buildEffectiveObjectPermissions,
   // [#28877] The map's disabled-package accessor over an engine registry.
   registryObjectPackageDisabled,
+  // [#30370] The map's external-write-gate accessor over an engine.
+  engineExternalWriteForbidden,
   foldWildcardSuperUser,
   clampManagedObjectWrites,
   seedSuperUserRestrictedObjects,
@@ -328,6 +380,11 @@ export {
   type FieldPermissionEntryLike,
   type EffectiveFieldPermissionsInputSet,
 } from './effective-object-permissions.js';
+
+// [#30237] The lifecycle-verb → row-level-security operation mapping
+// (transfer/restore → update, purge → delete), read by plugin-security and
+// plugin-sharing alike.
+export { LIFECYCLE_VERB_RLS_OPERATION, rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 
 // Commit f586f1a89 (maintainer ruling 2026-08-08, Option A) — the SINGLE ExecutionContext
 // assembly shared by every transport entry point, with the anonymous face as
@@ -408,6 +465,13 @@ export {
   type SecurityCatalogSources,
   type SecurityCatalogEntry,
   type SecurityCatalogReader,
+  // ADR-0150 D3/D4/D7 — permission sets by (package, name), the resolver handed in.
+  resolveCatalogReference,
+  // ADR-0150 D8 — a stored reference read by its package column (R1, R3).
+  storedPermissionSetScope,
+  type SecurityCatalogPackageScopedRegistry,
+  type SecurityCatalogReferenceScope,
+  type SecurityCatalogResolution,
 } from './security-catalog.js';
 
 // ADR-0131 D3/D4/D10 — the junction rows turned into the `permissionSets` each
@@ -516,6 +580,38 @@ export {
   markFlowWriteReferenceCheck,
   keepsFlowWriteReferenceCheck,
 } from './flow-write-reference-check.js';
+
+// The mark a service verb's own write carries for one reference to a record
+// the same call authorized and created. Set by service-storage's
+// file-attachments writer, read by objectql's write-time reference check.
+export {
+  VOUCHED_REFERENCES,
+  vouchForReference,
+  isVouchedReference,
+  withoutVouchedReferences,
+  type VouchedReference,
+} from './vouched-reference.js';
+
+// #30205 — a banned user's open work: the per-object counts, the optional bulk
+// hand-over (both read and written as the caller), and the ban-in-force
+// predicate objectql's write-time reference check refuses a new assignment by.
+export {
+  USER_ASSIGNED_WORK_FIELD_CAP,
+  USER_WORK_TRANSFER_ROW_CAP,
+  USER_WORK_FAILURE_SAMPLE,
+  userAssignedWorkFields,
+  countUserAssignedWork,
+  transferUserAssignedWork,
+  UserWorkTransferRefusal,
+  type UserAssignedWorkField,
+  type UserWorkEngine,
+  type UserAssignedWorkCount,
+  type UserAssignedWorkSummary,
+  type UserWorkFailureDescriber,
+  type UserWorkTransferFailure,
+  type UserWorkTransferOutcome,
+  type UserWorkTransferReport,
+} from './user-assigned-work.js';
 
 // Ruling of record 6355206139 — the EXTERNAL rung's OWD seam: plugin-security
 // stamps whether a held grant's RLS speaks, plugin-sharing floors the OWD.

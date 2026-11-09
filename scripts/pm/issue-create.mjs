@@ -64,6 +64,20 @@
  * instead of the fleet's — and a second card if the run then executes
  * (`fleet-write/dispatch.mjs`'s no-run conformance pins every sender to this).
  *
+ * ## A retired lane alias is written as its lane
+ *
+ * A `--label` naming a retired lane spelling (`domain:engine`, `domain:services`,
+ * `domain:cli`, `domain:rest`) is sent as `domain:server`, on either transport,
+ * and the dry run and the read-back line say so — `rewriteRetiredLaneLabels`
+ * (`fleet-write/dispatch.mjs`) over the one alias map. ⛔ A rewrite, never a
+ * refusal: no card is held back for its label.
+ *
+ * ## The kind rule
+ *
+ * A `--label` the kind rule forbids on an issue (`pm:awaiting-merge`, any case)
+ * is refused as usage (exit 2), on a dry run too, with the rule quoted —
+ * `refuseKindLabels` (`label-write.mjs`), the one rule every label door asks.
+ *
  * ## Read-back
  *
  * After a 201 the card is fetched again and its title compared. A mismatch is
@@ -94,9 +108,9 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, SEAT_SIGNATURE_SHAPE, proxyRearmPlan, resolveSweepRepo, signatureRefusal } from './check-half-states.mjs';
-import { EXIT_UNCONFIRMED, exitForResult, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
+import { EXIT_UNCONFIRMED, exitForResult, matchRunAnnotations, packRequest, parseRelayAnnotation, relayAnnotationMessage, resolveRoute, retiredLaneRewriteLine, rewriteRetiredLaneLabels, sendFleetWrite, unconfirmedText } from './fleet-write/dispatch.mjs';
 import { refusalText as relayRefusalText } from './fleet-write/validate.mjs';
-import { classifyHttp } from './label-write.mjs';
+import { KIND_ISSUE, KIND_RULE_AWAITING_MERGE_PR_ONLY, classifyHttp, refuseKindLabels } from './label-write.mjs';
 import { EXIT_WRITE_PACE_REFUSED, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from './write-pace.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -214,12 +228,17 @@ export function planFrom(opts, { read = (p) => readFileSync(p, 'utf8'), env = pr
     }
   }
 
-  const labels = dedupe(opts.labels);
+  // A retired lane alias is written as its lane (header): a rewrite, never a refusal.
+  const lanes = rewriteRetiredLaneLabels(dedupe(opts.labels));
+  const labels = lanes.labels;
+  // The kind rule (label-write.mjs), asked of a new card's labels before any write, dry run included.
+  const wrongKind = refuseKindLabels({ kind: KIND_ISSUE, add: labels, ref: 'the new card' });
+  if (wrongKind) errors.push(wrongKind);
   const assignees = dedupe(opts.assignees);
   const payload = { title: title ?? '', body: body ?? '' };
   if (labels.length) payload.labels = labels;
   if (assignees.length) payload.assignees = assignees;
-  return { ok: errors.length === 0, errors, repo, payload };
+  return { ok: errors.length === 0, errors, repo, payload, laneRewrites: lanes.rewrites };
 }
 
 /** What `--dry-run` prints: the whole request, nothing sent. */
@@ -229,6 +248,7 @@ export function dryRunText(plan) {
     `  POST /repos/${plan.repo}/issues`,
     `  title     : ${plan.payload.title}`,
     `  labels    : ${plan.payload.labels?.join(', ') ?? '(none)'}`,
+    ...(plan.laneRewrites ?? []).map((r) => `  rewritten : ${retiredLaneRewriteLine(r)}`),
     `  assignees : ${plan.payload.assignees?.join(', ') ?? '(none)'}`,
     `  body      : ${plan.payload.body.length} chars, ${plan.payload.body.split('\n').length} line(s)`,
   ].join('\n');
@@ -395,7 +415,8 @@ export async function createIssue(plan, deps = {}) {
     lines.push(`✗ issue-create: read-back of #${number} disagrees — title ${JSON.stringify(gotTitle)}, wanted ${JSON.stringify(plan.payload.title)}.`);
     return { exitCode: EXIT_READ_BACK_MISMATCH, number, url, author, lines };
   }
-  lines.push(`  read-back: #${number} title matches; state ${back.json.state ?? '?'}; labels ${(back.json.labels ?? []).map((l) => l?.name ?? l).join(', ') || '(none)'}.`);
+  const rewritten = (plan.laneRewrites ?? []).map(retiredLaneRewriteLine);
+  lines.push(`  read-back: #${number} title matches; state ${back.json.state ?? '?'}; labels ${(back.json.labels ?? []).map((l) => l?.name ?? l).join(', ') || '(none)'}${rewritten.length ? ` (${rewritten.join('; ')})` : ''}.`);
   return { exitCode: EXIT_OK, number, url, author, lines, transport: route.transport, relay };
 }
 
@@ -434,12 +455,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the payload: title trimmed to one line, labels and assignees de-duplicated, nothing invented': 5,
   "the signature: a card body opens with the seat's signature line, or the plan is refused before any request": 8,
   'the transport: a fake platform, and what each answer does to the exit code': 9,
-  'dry-run: no request leaves, and the plan is printed': 3,
+  'dry-run: no request leaves, and the plan is printed': 4,
   'the wiring: both halves around the one POST, on the write verb only': 4,
   'the relay transport: ONE dispatch carrying the create, the card found by title since the dispatch, and an accepted dispatch with no run UNCONFIRMED under auto too — never the direct POST': 9,
+  'the retired lane aliases: a domain:engine / services / cli / rest --label is sent as domain:server on either transport, the dry run and the read-back say so, a live domain:* label passes untouched, and nothing is refused': 8,
   "the relay annotation: the number the relay run's annotation carries is read first — the card read back at it with NO list; absent, the title finds it as before; the read-back still judges the annotated card": 5,
 });
-const SELF_TEST_BATTERY_FLOOR = 8;
+const SELF_TEST_BATTERY_FLOOR = 9;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -602,6 +624,33 @@ export async function selfTest() {
       t('no token is exit 3 before any request, naming with-fleet.sh', [noToken.exitCode, noToken.lines[0].includes('with-fleet.sh')], [EXIT_PREREQUISITE, true]);
     }
 
+    // ── retired lane aliases ────────────────────────────────────────────────
+    battery('the retired lane aliases: a domain:engine / services / cli / rest --label is sent as domain:server on either transport, the dry run and the read-back say so, a live domain:* label passes untouched, and nothing is refused');
+    {
+      const lanePlan = (...labels) => planFrom(parseArgs(['--repo', 'o/r', '--title-file', 'title.txt', '--body-file', 'body.md', ...labels.flatMap((l) => ['--label', l])]), { read, env });
+      t('each retired spelling is sent as domain:server, and the plan stays ok', ['domain:engine', 'domain:services', 'domain:cli', 'domain:rest'].map((l) => [lanePlan(l).ok, lanePlan(l).payload.labels.join(), lanePlan(l).laneRewrites.map((r) => r.from).join()]), [[true, 'domain:server', 'domain:engine'], [true, 'domain:server', 'domain:services'], [true, 'domain:server', 'domain:cli'], [true, 'domain:server', 'domain:rest']]);
+      t('beside domain:server the alias collapses into it, order kept for the rest', lanePlan('pm:queue', 'domain:engine', 'domain:server').payload.labels, ['pm:queue', 'domain:server']);
+      t('control: a live domain:* label and a non-lane label pass untouched, no rewrite row', [lanePlan('domain:spec', 'pm:queue').payload.labels, lanePlan('domain:spec', 'pm:queue').laneRewrites], [['domain:spec', 'pm:queue'], []]);
+      t('the dry run names the rewrite beside the labels it will send', dryRunText(lanePlan('domain:engine')).split('\n').filter((l) => l.includes('domain:')), ['  labels    : domain:server', '  rewritten : label domain:engine → domain:server (retired alias)']);
+      const engine = lanePlan('domain:engine', 'pm:queue');
+      const laneAnswers = { ...happy, 'GET /repos/o/r/issues/12': { status: 200, json: { number: 12, title: engine.payload.title, state: 'open', labels: [{ name: 'domain:server' }, { name: 'pm:queue' }] } } };
+      const direct = await drive(laneAnswers, { plan: engine });
+      t('direct: the POST carries domain:server, exit 0', [direct.exitCode, direct.seen[0].body.labels], [EXIT_OK, ['domain:server', 'pm:queue']]);
+      t('…and the read-back line says the rewrite', direct.lines.some((l) => l.startsWith('  read-back:') && l.includes('labels domain:server, pm:queue (label domain:engine → domain:server (retired alias)).')), true, direct.lines.join(' | '));
+      const plainBack = await drive(happy);
+      t('control: a plan with no alias reads back with no rewrite words', plainBack.lines.some((l) => l.includes('retired alias')), false);
+      const relayed = [];
+      const relaySend = async (payload) => {
+        relayed.push(payload);
+        return { ok: true, state: 'success', run: { id: 1, url: 'https://github.test/run/1' }, annotations: { rows: [{ action: 1, op: 'issue_create', number: 12, url: 'https://github.test/objectstack-ai/objectstack/issues/12' }] } };
+      };
+      const ORG = 'objectstack-ai/objectstack';
+      const orgEngine = planFrom(parseArgs(['--repo', ORG, '--title-file', 'title.txt', '--body-file', 'body.md', '--label', 'domain:engine', '--label', 'pm:queue']), { read, env });
+      const orgAnswers = { [`GET /repos/${ORG}/issues/12`]: { status: 200, json: { number: 12, title: orgEngine.payload.title, state: 'open', labels: [{ name: 'domain:server' }, { name: 'pm:queue' }] } } };
+      const viaRelay = await drive(orgAnswers, { plan: orgEngine, route: { requested: 'dispatch', transport: 'dispatch', reason: 'self-test: dispatch', error: null, session: 'session_01ABCDEFGHJKMNPQRSTVWXYZ' }, send: relaySend });
+      t('relay: the ONE dispatch carries domain:server, and the read-back line says the rewrite', [viaRelay.exitCode, relayed[0]?.actions?.[0]?.labels, viaRelay.lines.some((l) => l.startsWith('  read-back:') && l.includes('(retired alias)'))], [EXIT_OK, ['domain:server', 'pm:queue'], true], viaRelay.lines.join(' | '));
+    }
+
     // ── dry-run ─────────────────────────────────────────────────────────────
     battery('dry-run: no request leaves, and the plan is printed');
     {
@@ -613,6 +662,11 @@ export async function selfTest() {
       t('--dry-run exits 0 and prints the request it did not send', [spawned.status, spawned.stdout.includes('NOTHING was sent') && spawned.stdout.includes('POST /repos/o/r/issues')], [0, true], spawned.stderr.slice(-300));
       t('…and the throttle recorded nothing: a dry run makes no write', existsSync(join(dir, 'dry-pace.jsonl')), false);
       t('a refused plan is usage, printed, and nothing is sent', spawnSync(process.execPath, [SELF_PATH, '--dry-run', '--repo', 'o/r', '--title', 'x'], { encoding: 'utf8', env: { ...process.env, HTTPS_PROXY: '', https_proxy: '' } }).status, EXIT_USAGE);
+      const kindCli = spawnSync(process.execPath, [SELF_PATH, '--dry-run', '--repo', 'o/r', '--title', 'Dry', '--body-file', join(dir, 'b.md'), '--label', 'PM:AWAITING-MERGE'], {
+        encoding: 'utf8',
+        env: { ...process.env, OS_PM_WRITE_PACE_FILE: join(dir, 'kind-pace.jsonl'), GITHUB_TOKEN: TOKEN_FIXTURE, GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '' },
+      });
+      t('⛔ a PR-only label (PM:AWAITING-MERGE, any case) is refused on a dry run too — usage, the rule quoted, nothing printed as sent, nothing paced', [kindCli.status, kindCli.stderr.includes(KIND_RULE_AWAITING_MERGE_PR_ONLY), kindCli.stdout.includes('NOTHING was sent'), existsSync(join(dir, 'kind-pace.jsonl'))], [EXIT_USAGE, true, false, false], kindCli.stderr.slice(-300));
     }
 
     // ── the relay transport ─────────────────────────────────────────────────

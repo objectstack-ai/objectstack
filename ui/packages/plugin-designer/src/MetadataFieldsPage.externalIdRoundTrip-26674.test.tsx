@@ -36,6 +36,16 @@ vi.mock('@object-ui/plugin-form', async (importOriginal) => ({
 import { MetadataFieldsPage } from './MetadataFieldsPage';
 
 /**
+ * objectstack#30786 — the page takes its edit base off the layered read
+ * (`GET …/layers`, `overlay ?? code`), not the served item read, so this double
+ * answers that read: the item it used to serve becomes the `code` layer (and
+ * `effective`), beside the same envelope carriers.
+ */
+function servedAsLayers({ item, ...carriers }: { item: unknown } & Record<string, unknown>) {
+  return { ...carriers, code: item, overlay: null, effective: item };
+}
+
+/**
  * `code` is the field the author edits; `sku` carries the flag on a field the
  * author never opens; `title` is the control with no flag at all.
  */
@@ -77,7 +87,7 @@ function realClient(): MetadataClient {
         puts.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
         return json({ success: true, name: 'probe_widget' });
       }
-      if (/\/meta\/object\/probe_widget(\?|$)/.test(url)) return json(OBJECT_ENVELOPE);
+      if (/\/meta\/object\/probe_widget\/layers(\?|$)/.test(url)) return json(servedAsLayers(OBJECT_ENVELOPE));
       return json({ items: [] });
     }) as unknown as typeof fetch,
   });

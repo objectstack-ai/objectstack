@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo, type ComponentProps } from 'react';
 import { useParams } from 'react-router-dom';
 import { DashboardRenderer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider, notifyDataChanged } from '@object-ui/react';
-import { useOpenRecordList } from './useOpenRecordList.js';
+import { useRecordListDrillNavigation } from './useOpenRecordList.js';
 import { toast } from 'sonner';
 import type { ActionDef, ActionContext, ActionResult } from '@object-ui/core';
 import {
@@ -37,6 +37,8 @@ import { useAdapter } from '../providers/AdapterProvider.js';
 import { useBundledItem } from '../providers/bundledReads.js';
 import { readDashboardWidgetObjects } from '../console/appObjectScope.js';
 import { useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
+import { DeploymentNotice } from '../console/deployment-notice/DeploymentNotice.js';
+import { useInSetupApp } from '../console/setupApp.js';
 
 /**
  * One refresh of this dashboard's data: the `onRefresh` handed to
@@ -97,8 +99,10 @@ type DashboardRefreshState = Parameters<
 
 export function DashboardView({ dataSource }: { dataSource?: any }) {
   // Drill "escape hatch": lets the drill drawers open an object's full list page.
-  const openRecordList = useOpenRecordList();
+  const drillNavigation = useRecordListDrillNavigation();
   const { dashboardName } = useParams<{ dashboardName: string }>();
+  // Setup's own System Overview (`platform-objects`' `system_overview`).
+  const isSystemOverview = useInSetupApp() && dashboardName === 'system_overview';
   const { showDebug } = useMetadataInspector();
   const adapter = useAdapter();
   const { t } = useObjectTranslation();
@@ -377,10 +381,14 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
         )}
       />
 
+      {/* objectstack#30120 — Setup's System Overview opens on the deployment
+          notice: administrators, production only. */}
+      {isSystemOverview && <DeploymentNotice placement="system-overview" />}
+
       {/* ── Main area ────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex flex-col sm:flex-row relative">
          <div className="flex-1 min-w-0 overflow-auto p-2 sm:p-4 md:p-6">
-            <DrillNavigationProvider value={{ openRecordList }}>
+            <DrillNavigationProvider value={drillNavigation}>
               {/* `localized`: this document is the `/meta` read's, already
                   translated for this language, so the renderer draws its
                   title, description and sub-caption as served (objectui#11295). */}

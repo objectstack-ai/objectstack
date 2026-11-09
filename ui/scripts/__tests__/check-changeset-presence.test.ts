@@ -914,6 +914,7 @@ describe('a missing input is a failure, never a silent pass', () => {
     expect(run.status).toBe(1);
     expect(run.output).toMatch(/SHALLOW/);
     expect(run.output).toMatch(/fetch-depth: 0/);
+    expect(run.output).toContain("Fetch this commit's history and the base branch");
   });
 
   it('FAILS when .changeset/ does not exist', () => {

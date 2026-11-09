@@ -441,17 +441,28 @@ async function modulesReachingTheSeam(
  * `build` script went 189s → 87s. For scale, `tsc --noEmit` over the whole
  * package peaked at 1103 MB live on 8cdbe0c6e5.
  *
- * NOT BYTE-STABLE: this pass does not emit the same bytes twice. TypeScript
- * prints union members, and the members of object types derived from them, in
- * type-creation order, and that order follows emit order. Three runs of one
- * commit gave three different trees, and rollup's content-hashed chunk names
- * moved with them. The one-program pass also reorders top-level statements
- * and `import`/`export` specifiers, and names one shared chunk after a
- * different module (`data-engine` → `analytics.zod`). Normalise all of those
- * (sort union and property-only type-literal members, statements and
- * specifiers; strip chunk hashes; pair chunks by content), and the unpatched
- * and patched trees are the same tree: 130 files, 0 differing. ⇒ Compare two
- * declaration trees in that order-insensitive form, never by a byte digest.
+ * BYTE-STABLE FOR ONE TREE, ORDER-SENSITIVE ACROSS TREES. TypeScript prints
+ * union members, and the members of object types derived from them, in
+ * type-creation order, and in one shared program that order follows emit
+ * order. The bundled rollup-plugin-dts emitted each file when rollup
+ * transformed it, in the order rollup's async loads happened to finish, so
+ * two builds of one commit wrote different bytes and chunk names (18 of 134
+ * files on 1f13eb31, #30061). The same `patches/tsup@8.5.1.patch` now emits
+ * every source file once, in the program's own file order, before rollup
+ * reads any of them. Two builds of one tree are byte-identical, chunk names
+ * included, and `scripts/dts-emit-order.pin.test.ts` pins that.
+ *
+ * The order is still the PROGRAM's. A change that moves the program's file
+ * order (an entry added or reordered, an import moved, a module split in two)
+ * can reorder members in files it never touched. The one-program pass also
+ * reordered top-level statements and `import`/`export` specifiers against the
+ * per-entry programs, and named one shared chunk after a different module
+ * (`data-engine` → `analytics.zod`). Normalise all of those (sort union and
+ * property-only type-literal members, statements and specifiers; strip chunk
+ * hashes; pair chunks by content), and the unpatched and patched trees are the
+ * same tree: 130 files, 0 differing. ⇒ Compare the declaration trees of two
+ * DIFFERENT sources in that order-insensitive form, never by a byte digest; a
+ * byte digest answers only "same source, same bytes?".
  *
  * If this pass starts failing with `ERR_WORKER_OUT_OF_MEMORY`, the live type
  * graph has outgrown 6144 — that is a loud, actionable failure and the point of

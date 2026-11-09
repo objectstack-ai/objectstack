@@ -72,8 +72,8 @@ vi.mock('@object-ui/i18n', async (importActual) => ({
   }),
 }));
 
-vi.mock('@object-ui/providers', async (importActual) => ({
-  ...(await importActual<typeof import('@object-ui/providers')>()),
+vi.mock('@object-ui/fields', async (importActual) => ({
+  ...(await importActual<typeof import('@object-ui/fields')>()),
   useUpload: () => ({ upload: vi.fn() }),
 }));
 

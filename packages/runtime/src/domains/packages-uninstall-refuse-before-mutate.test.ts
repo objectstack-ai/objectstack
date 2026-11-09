@@ -67,6 +67,9 @@ import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';
 import { loadDisabledPackageIds, setPackageDisabled } from '../package-state-store.js';
+// Paid during collection, not inside a case's clock: the package-state store's
+// `standalone-stack.ts` loads it lazily.
+import '@objectstack/metadata';
 
 const PKG = 'com.acme.crm';
 /** `PKG`'s paired customization package (ADR-0146 D3): the id `customizationPackageId` derives. */
@@ -311,7 +314,8 @@ describe('[ADR-0131 D6] DELETE /packages/:id names no organization, whoever the 
             const answer = await r.call('DELETE', who, `/packages/${PKG}`);
             expect(answer.status).toBe(200);
             expect(answer.body?.data).toMatchObject({ packageId: PKG, success: true, registryRemoved: true });
-            expect(r.deleteRequests).toEqual([{ packageId: PKG }]);
+            // [#31023] The signed-in operator is the actor; still no organization.
+            expect(r.deleteRequests).toEqual([{ packageId: PKG, actor: 'u_admin' }]);
             expect(await observed(r)).toEqual({
                 detailStatus: 404,
                 listed: false,

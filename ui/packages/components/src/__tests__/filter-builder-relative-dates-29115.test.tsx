@@ -60,13 +60,16 @@ const EN_PRESET_LABELS: Record<string, string> = {
   last_week: 'Last week',
   this_month: 'This month',
   last_month: 'Last month',
+  next_month: 'Next month',
   this_quarter: 'This quarter',
   last_quarter: 'Last quarter',
+  next_quarter: 'Next quarter',
   this_year: 'This year',
   last_year: 'Last year',
   last_7_days: 'Last 7 days',
   last_30_days: 'Last 30 days',
   last_90_days: 'Last 90 days',
+  next_30_days: 'Next 30 days',
 };
 
 function renderRow(condition: Record<string, unknown>, wrap?: (node: React.ReactNode) => React.ReactNode) {
@@ -145,7 +148,7 @@ describe('the reverse lookup reads the spec table', () => {
 });
 
 describe('between on a date row offers the spec presets and stores the macro window', () => {
-  it('lists the 13 presets in spec order, then Custom…', async () => {
+  it('lists the spec presets in spec order, then Custom…', async () => {
     renderRow({ field: 'close_date', operator: 'between', value: [] });
     const options = await openOptions(relativeTrigger('close_date')!);
     expect(options.map((o) => o.textContent)).toEqual([

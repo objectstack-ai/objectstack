@@ -155,6 +155,11 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
     { id: 'bu_east', name: 'east', parent_business_unit_id: 'bu_hq' },
   ], SYS);
   await engine.insert('sys_business_unit_member', [{ id: 'bum_target', user_id: TARGET, business_unit_id: 'bu_east' }], SYS);
+  // The target is a member of the organization the delegate's session names, so
+  // a grant written in it names a holder the organization holds.
+  await engine.insert('sys_member', [
+    { id: 'mem_target_default', user_id: TARGET, organization_id: 'org_default', role: 'member', created_at: new Date().toISOString() },
+  ], SYS);
   await engine.insert('sys_permission_set', [
     { id: 'ps_plain', name: 'qa_plain', label: 'Plain', active: true },
     { id: 'ps_oa', name: 'organization_admin', label: 'Organization admin', active: true },
@@ -202,7 +207,10 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
 
 const CALLERS = {
   'a tenant-level admin': { userId: ADMIN, positions: [], permissions: ['qa_tenant_admin'] },
-  'a scoped delegate': { userId: DELEGATE_USER, positions: [], permissions: ['qa_delegate'] },
+  // A delegated scope covers units of the active organization only (ADR-0123
+  // D2): the delegate's session carries the Default Organization the fixture
+  // rows were stamped with, as every `single` session does (ADR-0131 C1).
+  'a scoped delegate': { userId: DELEGATE_USER, positions: [], permissions: ['qa_delegate'], tenantId: 'org_default' },
 } as const;
 
 /** Each grant table, and a row on it every caller above may write. */
@@ -320,4 +328,79 @@ describe('granted_by — the integrity audit files a granter that resolves to no
       expect(integrityWarnings(warn)).toHaveLength(1);
     });
   }
+});
+
+/**
+ * [ADR-0150 D8 R1] `permission_set_package` names which holder's set a grant
+ * confers, so it is held to the same standard as `granted_by`, over the same
+ * real engine and real `SecurityPlugin` (its write seam included):
+ *
+ *  - a NON-SYSTEM update that writes the column alone — a tenant-level admin's
+ *    and a scoped delegate's, both of whom may edit the grant table — never
+ *    moves it: the update strip drops the value (the default), or the write is
+ *    refused whole under `strictReadonlyWrites`;
+ *  - a NON-SYSTEM insert that carries the column has it replaced by the write
+ *    seam's answer (the seam's own pin: "R1: a writer's own package value is
+ *    replaced by the rule's answer — a system writer's too", in
+ *    `stored-permission-set-package-backfill.test.ts`; measured here again at
+ *    this door);
+ *  - only a SYSTEM writer — the boot backfill, the operator's reviewed
+ *    `os migrate stored-references bind` — writes it alone.
+ */
+describe('[ADR-0150 D8 R1] permission_set_package — only a system writer writes it alone', () => {
+  const QA_PKG = 'com.objectstack.qa.granted-by';
+  const FORGED = 'com.example.forged';
+  const BOUND = 'com.example.reviewed';
+  const GRANT = 'sys_user_permission_set';
+
+  /** {@link boot}, with the bare-name holders sealed, as `kernel:bootstrapped` leaves them. */
+  async function sealed(): Promise<Rig> {
+    const rig = await boot();
+    (rig.engine.registry as unknown as { sealBareNameHolders(): unknown }).sealBareNameHolders();
+    return rig;
+  }
+  async function storedPackage(engine: ObjectQL, id: unknown): Promise<unknown> {
+    const row = (await engine.findOne(GRANT, { where: { id }, context: { isSystem: true } } as never)) as any;
+    expect(row, `${GRANT}#${String(id)} was not stored`).toBeTruthy();
+    return row.permission_set_package ?? null;
+  }
+
+  it('control: a system insert is stamped with the one package holder of its set', async () => {
+    const { engine } = await sealed();
+    const created: any = await engine.insert(GRANT, TABLES[GRANT](), SYS);
+    expect(await storedPackage(engine, created.id)).toBe(QA_PKG);
+  });
+
+  for (const [who, caller] of Object.entries(CALLERS)) {
+    it(`${who} updating the column alone leaves it as stored (the update strip)`, async () => {
+      const { engine } = await sealed();
+      const created: any = await engine.insert(GRANT, TABLES[GRANT](), SYS);
+      await engine.update(GRANT, { permission_set_package: FORGED }, { where: { id: created.id }, context: { ...caller } } as never);
+      expect(await storedPackage(engine, created.id)).toBe(QA_PKG);
+    });
+
+    it(`${who} updating the column alone under strictReadonlyWrites is refused whole, and the column is unchanged`, async () => {
+      const { engine } = await sealed();
+      const created: any = await engine.insert(GRANT, TABLES[GRANT](), SYS);
+      const err: any = await engine
+        .update(GRANT, { permission_set_package: FORGED }, { where: { id: created.id }, context: { ...caller }, strictReadonlyWrites: true } as never)
+        .catch((e: unknown) => e);
+      expect(err?.code, String(err?.message ?? err)).toBe('ERR_READONLY_FIELD_REJECTED');
+      expect(String(err.message)).toContain('permission_set_package');
+      expect(await storedPackage(engine, created.id)).toBe(QA_PKG);
+    });
+
+    it(`${who} inserting a grant that carries the column stores the seam's answer, not the payload's`, async () => {
+      const { engine } = await sealed();
+      const created: any = await engine.insert(GRANT, TABLES[GRANT]({ permission_set_package: FORGED }), { context: { ...caller } } as never);
+      expect(await storedPackage(engine, created.id)).toBe(QA_PKG);
+    });
+  }
+
+  it('a system update writing the column alone — the backfill\'s and the reviewed bind\'s write — lands as written', async () => {
+    const { engine } = await sealed();
+    const created: any = await engine.insert(GRANT, TABLES[GRANT](), SYS);
+    await engine.update(GRANT, { permission_set_package: BOUND }, { where: { id: created.id }, context: { isSystem: true } } as never);
+    expect(await storedPackage(engine, created.id)).toBe(BOUND);
+  });
 });

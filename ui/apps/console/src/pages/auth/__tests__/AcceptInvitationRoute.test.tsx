@@ -345,12 +345,12 @@ describe('objectui#3811 — console routes DefaultAcceptInvitationPage', () => {
     renderRoute({ lang: 'zh' });
     await screen.findByTestId('accept-invitation-page');
 
-    const zh = builtInLocales.zh.organization.accept as Record<string, string>;
+    const zh = builtInLocales['zh-Hans'].organization.accept as Record<string, string>;
     expect(zh.accept).toBe('接受邀请');
     expect(screen.getByRole('button', { name: zh.accept })).toBeInTheDocument();
     expect(screen.getByText(zh.organization)).toBeInTheDocument();
     expect(screen.getByText(zh.expiresAt)).toBeInTheDocument();
     // The pack that used to serve this screen's other half is gone entirely.
-    expect((builtInLocales.zh as Record<string, unknown>).acceptInvitation).toBeUndefined();
+    expect((builtInLocales['zh-Hans'] as Record<string, unknown>).acceptInvitation).toBeUndefined();
   });
 });

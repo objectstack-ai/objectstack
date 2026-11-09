@@ -88,6 +88,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Acceso a IA",
         help: "Indica si este usuario dispone de una plaza de IA. La plaza otorga la capacidad `ai_seat`, que da acceso a los asistentes de IA de la aplicación (build y ask). El número de usuarios que pueden tenerla está limitado por las plazas que incluye su licencia."
       },
+      principal_kind: {
+        label: "Tipo de principal",
+        help: "Indica si este usuario es una persona o una cuenta de servicio de IA. Una cuenta de servicio de IA nunca inicia sesión y actúa solo mediante sus propias claves de API. Se fija al crear el usuario y no cambia nunca.",
+        options: {
+          human: "Persona",
+          agent: "Cuenta de servicio de IA"
+        }
+      },
+      accountable_user_id: {
+        label: "Responsable",
+        help: "En una cuenta de servicio de IA, la persona responsable de ella. Vacío en una persona. Los permisos del responsable nunca pasan a la cuenta."
+      },
       image: {
         label: "Imagen de perfil"
       },
@@ -159,7 +171,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Bloquear usuario",
-        description: "¿Bloquear a este usuario? Cerrará sesión y no podrá volver a iniciarla hasta que se desbloquee.",
+        description: "¿Bloquear a este usuario? Cerrará sesión, no podrá volver a iniciarla y sus claves de API se rechazarán hasta que se desbloquee, al igual que sus tokens de acceso OAuth y sus renovaciones de token. Las claves vuelven a funcionar tras el desbloqueo.",
         successMessage: "Usuario bloqueado",
         params: {
           banReason: {
@@ -252,6 +264,43 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Cerrar",
           fields: {
             entries: "Administradores de la plataforma"
+          }
+        }
+      },
+      register_service_account: {
+        label: "Registrar cuenta de servicio de IA",
+        description: "Registra una cuenta de servicio de IA en esta organización: una identidad propia para un agente que funciona sin una persona y que actúa solo mediante las claves de API creadas para ella. No puede hacer nada hasta que se le concedan conjuntos de permisos, y nunca tiene acceso de administrador.",
+        successMessage: "Cuenta de servicio de IA registrada",
+        params: {
+          name: {
+            label: "Nombre",
+            helpText: "Qué es el agente y para qué sirve. Con este nombre se reconoce la cuenta en la lista de usuarios y en el registro de auditoría."
+          },
+          ownerId: {
+            label: "Responsable",
+            helpText: "La persona responsable de esta cuenta, miembro de esta organización. Déjalo vacío para ser tú el responsable."
+          }
+        }
+      },
+      create_service_account_key: {
+        label: "Crear clave de API",
+        description: "Crea una clave de API para esta cuenta de servicio de IA. La clave actúa como la cuenta, con los permisos propios de la cuenta, en la organización de la cuenta.",
+        params: {
+          name: {
+            label: "Nombre de la clave"
+          },
+          expires_at: {
+            label: "Caduca el",
+            helpText: "Déjelo vacío para usar la duración predeterminada de la clave definida en Configuración → Autenticación → Claves de API (90 días si no se ha cambiado). Una fecha posterior a la duración máxima de la clave definida allí se rechaza."
+          }
+        },
+        resultDialog: {
+          title: "Clave de API creada",
+          description: "Copia la clave ahora: solo se muestra una vez y no se puede recuperar. Si se filtra, revócala y crea una nueva.",
+          acknowledge: "He guardado la clave",
+          fields: {
+            key: "Clave de API",
+            expires_at: "Caduca el"
           }
         }
       },
@@ -369,7 +418,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "Motivo de la revocación",
-        help: "Por qué se revocó la sesión (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, admin_password_reset, …)."
+        help: "Por qué se revocó la sesión (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
       },
       active_organization_id: {
         label: "Organización activa"
@@ -556,8 +605,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         help: "Metadatos de la organización serializados en JSON."
       },
       require_mfa: {
-        label: "Exigir autenticación multifactor",
-        help: "Si es true, todos los miembros de esta organización deben registrar una aplicación de autenticación para acceder a los datos."
+        label: "Exigir autenticación multifactor (retirado)",
+        help: "Retirado. Define el requisito multifactor de esta organización en Ajustes → Política de acceso. Un valor que estaba activado aquí se trasladó allí como «Todos» y se borró."
       },
       timezone: {
         label: "Zona horaria",
@@ -633,6 +682,20 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Abandonar organización",
         confirmText: "¿Abandonar esta organización? Perderá el acceso a sus entornos y miembros.",
         successMessage: "Ha abandonado la organización"
+      }
+    },
+    _sections: {
+      identity: {
+        label: "Identidad"
+      },
+      branding: {
+        label: "Marca"
+      },
+      configuration: {
+        label: "Configuración"
+      },
+      group_structure: {
+        label: "Estructura del grupo"
       }
     }
   },
@@ -1146,9 +1209,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo de la revocación",
-        help: "Se registra cuando el restablecimiento forzado de la contraseña por parte de un administrador revocó esta clave. Solo un administrador de la plataforma puede restaurar una clave así; su propietario crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave revocada desde la lista de claves de API.",
+        help: "Por qué se revocó la clave, cuando eso decide quién puede restaurarla. Restablecimiento forzado de la contraseña por un administrador: solo un administrador de la plataforma puede restaurar la clave. Fin de la pertenencia a la organización: el propietario dejó la organización y nadie puede restaurar la clave; un miembro crea una nueva. Suspendida por un administrador: un administrador de la plataforma revocó una clave que no es suya, y solo un administrador de la plataforma puede restaurarla. Se borra cuando la clave se restaura. Vacío para una clave que su propietario revocó desde la lista de claves de API.",
         options: {
-          admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador"
+          admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador",
+          organization_membership_ended: "Fin de la pertenencia a la organización",
+          administrator_suspended: "Suspendida por un administrador"
         }
       },
       key: {
@@ -1859,6 +1924,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Actualizado el"
+      },
+      last_used_at: {
+        label: "Último uso",
+        help: "Inicio de la hora más reciente en la que el cliente hizo una llamada MCP verificada con este consentimiento; vacío si no se ha registrado ninguna"
       }
     }
   },
@@ -2029,6 +2098,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Configuración SAML",
         help: "JSON: entryPoint, cert, identifierFormat, mapeo (gestionado por better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Permitir inicio de sesión iniciado por el IdP",
+        help: "Acepta un inicio de sesión que empieza en el proveedor de identidad (una respuesta SAML no solicitada o una devolución de llamada OIDC sin state) en lugar de en este sistema. Desactivado de forma predeterminada: una respuesta SAML iniciada por el IdP no está vinculada a ninguna solicitud hecha por este sistema. Cámbielo con «Editar opciones de inicio de sesión»."
+      },
+      allow_jit: {
+        label: "Permitir aprovisionamiento just-in-time",
+        help: "Con la política de audiencia solo por invitación, crea una cuenta para quien inicia sesión a través de este proveedor sin cuenta ni invitación. Desactivado de forma predeterminada: esa persona es rechazada. Las demás políticas aprovisionan como antes. Cámbielo con «Editar opciones de inicio de sesión»."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuario que registró este proveedor"
@@ -2095,6 +2172,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             label: "Mapeo: reclamo de nombre",
             helpText: "Opcional. Reclamo asignado al nombre visible. Valor predeterminado: «name».",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "Mapeo: reclamo de grupos",
+            helpText: "Opcional. Reclamo que contiene los grupos del usuario, p. ej. «groups». Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para no asignar grupos.",
+            placeholder: "groups"
           }
         }
       },
@@ -2125,6 +2207,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             label: "Formato de NameID",
             helpText: "Opcional. Formato de NameID SAML solicitado. Por defecto, el formato configurado en el IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "Mapeo: atributo de grupos",
+            helpText: "Opcional. Atributo de la aserción que contiene los grupos del usuario. Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para no asignar grupos.",
+            placeholder: "groups"
           }
         }
       },
@@ -2149,6 +2236,39 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Eliminar proveedor SSO",
         description: "¿Eliminar este proveedor SSO? Los usuarios de su dominio ya no podrán iniciar sesión a través de él.",
         successMessage: "Proveedor SSO eliminado"
+      },
+      edit_sso_sign_in_options: {
+        label: "Editar opciones de inicio de sesión",
+        successMessage: "Opciones de inicio de sesión guardadas"
+      },
+      show_sso_groups_claim: {
+        label: "Mostrar reclamo de grupos",
+        resultDialog: {
+          title: "Reclamo de grupos",
+          description: "El reclamo OIDC o el atributo SAML del que este proveedor lee los grupos del usuario en cada inicio de sesión. Vacío significa que el proveedor no asigna grupos. Cámbielo con «Editar reclamo de grupos».",
+          acknowledge: "Hecho",
+          fields: {
+            groupsClaim: "Reclamo de grupos"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "Editar reclamo de grupos",
+        params: {
+          groupsClaim: {
+            label: "Reclamo de grupos",
+            helpText: "El reclamo OIDC o el atributo SAML que contiene los grupos del usuario. Cada inicio de sesión concede los conjuntos de permisos asignados a esos grupos. Déjelo en blanco para eliminarlo: el proveedor dejará de asignar grupos.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "Reclamo de grupos guardado",
+          description: "El reclamo de grupos que este proveedor lee ahora en cada inicio de sesión. Vacío significa que no se asignan grupos.",
+          acknowledge: "Hecho",
+          fields: {
+            groupsClaim: "Reclamo de grupos"
+          }
+        }
       }
     }
   },
@@ -2263,6 +2383,49 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       all: {
         label: "Todas"
+      }
+    },
+    _actions: {
+      mint_scim_credential: {
+        label: "Emitir credencial",
+        description: "Emite una credencial de portador para una conexión SCIM. Entrégala al IdP como token SCIM; solo se muestra una vez.",
+        params: {
+          connectionId: {
+            label: "ID de conexión",
+            helpText: "Conexión SCIM que autentica esta credencial, p. ej., «okta-prod». Máximo 246 caracteres. Para rotarla, emite una segunda credencial para la misma conexión, cambia el IdP a ella y después revoca la anterior."
+          },
+          label: {
+            label: "Etiqueta",
+            helpText: "Opcional. Un nombre para esta credencial, p. ej., «rotation 2026-Q3»."
+          },
+          organizationId: {
+            label: "Organización",
+            helpText: "Opcional. La organización propietaria de la conexión. Déjalo vacío para usar la organización predeterminada."
+          },
+          provisioningDomainId: {
+            label: "Dominio de aprovisionamiento",
+            helpText: "Opcional. El límite que recibe los usuarios y grupos aprovisionados. Déjalo vacío para usar el ID de conexión."
+          },
+          expiresAt: {
+            label: "Caduca el",
+            helpText: "Opcional. Pasado este momento, la credencial se rechaza. Déjalo vacío para una credencial que no caduca."
+          }
+        },
+        resultDialog: {
+          title: "Credencial SCIM emitida",
+          description: "Copia el token ahora: solo se muestra una vez y no se puede recuperar. Pégalo en el IdP como token de portador SCIM. Si se filtra, revócalo y emite uno nuevo.",
+          acknowledge: "He guardado el token",
+          fields: {
+            token: "Token de portador",
+            connectionId: "ID de conexión",
+            expiresAt: "Caduca el"
+          }
+        }
+      },
+      revoke_scim_credential: {
+        label: "Revocar credencial",
+        confirmText: "¿Revocar esta credencial SCIM? El IdP que la usa se rechaza a partir de su siguiente solicitud. No se puede deshacer: para restablecer el aprovisionamiento, emite una credencial nueva.",
+        successMessage: "Credencial SCIM revocada"
       }
     }
   },
@@ -2575,6 +2738,55 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_idp_group_mapping: {
+    label: "Asignación de grupo de IdP",
+    pluralLabel: "Asignaciones de grupo de IdP",
+    description: "Asigna un grupo del proveedor de identidad al conjunto de permisos que se concede a sus miembros",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Tipo de origen",
+        help: "Qué envía el grupo: una conexión SCIM o un proveedor SSO al iniciar sesión.",
+        options: {
+          scim: "Conexión SCIM",
+          sso: "Proveedor SSO"
+        }
+      },
+      source_id: {
+        label: "ID de origen",
+        help: "El ID de la conexión SCIM o del proveedor SSO por el que llega el grupo, p. ej. \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "ID externo del grupo",
+        help: "El externalId del grupo tal como lo envía el proveedor de identidad. Indique este o el nombre visible, no ambos."
+      },
+      group_display_name: {
+        label: "Nombre visible del grupo",
+        help: "El displayName del grupo, con coincidencia exacta. Se usa cuando la asignación no indica un ID externo."
+      },
+      permission_set: {
+        label: "Conjunto de permisos",
+        help: "El conjunto de permisos que se concede a un miembro del grupo. Se rechazan los conjuntos de administrador."
+      },
+      organization_id: {
+        label: "Organización",
+        help: "La organización en la que se concede: la organización propietaria de la conexión SCIM o del proveedor SSO."
+      },
+      created_at: {
+        label: "Creado el"
+      },
+      updated_at: {
+        label: "Actualizado el"
+      }
+    },
+    _views: {
+      all: {
+        label: "Todos"
+      }
+    }
+  },
   sys_notification: {
     label: "Notificación",
     pluralLabel: "Notificaciones",
@@ -2777,6 +2989,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       name: {
         label: "Nombre",
         help: "Identificador snake_case con puntos (p. ej. auth.password_reset)."
+      },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
       },
       label: {
         label: "Nombre visible",
@@ -3388,7 +3604,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       namespace: {
         label: "Espacio de nombres",
-        help: "Espacio de nombres del manifiesto (p. ej. mail, branding, feature_flags)."
+        help: "Espacio de nombres del manifiesto (p. ej. mail, branding, storage)."
       },
       key: {
         label: "Clave",
@@ -3443,6 +3659,54 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       all_settings: {
         label: "Todos"
+      }
+    }
+  },
+  sys_platform_setting: {
+    label: "Platform Setting",
+    pluralLabel: "Platform Settings",
+    description: "Deployment-wide settings values: the global rung of the settings cascade.",
+    fields: {
+      id: {
+        label: "Setting ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      },
+      namespace: {
+        label: "Namespace",
+        help: "Manifest namespace (e.g. mail, storage, ai)."
+      },
+      key: {
+        label: "Key",
+        help: "Specifier key inside the namespace (snake_case)."
+      },
+      value: {
+        label: "Value",
+        help: "JSON-encoded value. Null when encrypted=true (see value_enc)."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "When true, the value is stored encrypted-at-rest in value_enc; value column is null."
+      },
+      locked: {
+        label: "Locked",
+        help: "When true, tenant and user rows cannot override this value; writes against those scopes return 409."
+      },
+      locked_reason: {
+        label: "Lock Reason",
+        help: "Human-readable explanation surfaced in the UI tooltip when locked=true."
+      },
+      value_enc: {
+        label: "Encrypted Value",
+        help: "Handle of the sys_secret row holding the ciphertext. Set only when encrypted=true."
+      },
+      updated_by: {
+        label: "Updated By",
+        help: "Last actor who wrote this row through the settings service."
       }
     }
   },
@@ -3570,6 +3834,84 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     _views: {
       recent: {
         label: "Recientes"
+      }
+    }
+  },
+  sys_platform_setting_audit: {
+    label: "Platform Setting Audit Entry",
+    pluralLabel: "Platform Setting Audit",
+    description: "Append-only audit trail for SettingsService mutations of global-scope keys.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      created_at: {
+        label: "Created At",
+        help: "When the mutation was recorded."
+      },
+      namespace: {
+        label: "Namespace"
+      },
+      key: {
+        label: "Key"
+      },
+      scope: {
+        label: "Scope",
+        help: "Cascade layer the row was written to — always the global rung here.",
+        options: {
+          global: "Global"
+        }
+      },
+      action: {
+        label: "Action",
+        help: "Mutation kind.",
+        options: {
+          set: "Set",
+          reset: "Reset",
+          lock: "Lock",
+          unlock: "Unlock",
+          rotate: "Rotate"
+        }
+      },
+      actor_id: {
+        label: "Actor",
+        help: "User who performed the mutation; null for system jobs."
+      },
+      source: {
+        label: "Source",
+        help: "Mutation entry-point.",
+        options: {
+          ui: "UI",
+          api: "API",
+          migration: "Migration",
+          import: "Import",
+          system: "System"
+        }
+      },
+      reason: {
+        label: "Reason",
+        help: "Free-text justification provided by the actor (optional)."
+      },
+      old_hash: {
+        label: "Old Hash",
+        help: "Digest of the previous value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null when previously unset, or for a secret with no keyed digest."
+      },
+      new_hash: {
+        label: "New Hash",
+        help: "Digest of the new value, never the plaintext: sha256: hex for a plain value, the keyed hmac-sha256: digest for a secret. Null on reset, or for a secret with no keyed digest."
+      },
+      encrypted: {
+        label: "Encrypted",
+        help: "True when the field carries secret material (rotation is interesting)."
+      },
+      request_id: {
+        label: "Request ID",
+        help: "Correlates with sys_audit_log / tracing."
+      }
+    },
+    _views: {
+      recent: {
+        label: "Recent"
       }
     }
   },

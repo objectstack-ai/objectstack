@@ -221,6 +221,22 @@ describe('[ADR-0126 §6 wall 3] security.accessUpgradeCheck, as SecurityPlugin r
     }]);
   });
 
+  it('an edit deny is reported against a customer set whose edit grant reads, and not against a stored one without read, which edits nothing', async () => {
+    const check = await boot({
+      customerSets: [
+        { name: 'cust_deal_editor', label: 'Deal editor', _provenance: 'org', objects: { u2_deal: { allowRead: true, allowEdit: true } } },
+        // An object permission that edits a record also reads it: a stored set
+        // granting edit without read grants no edit, so no edit deny is missing.
+        { name: 'cust_deal_blind_editor', label: 'Deal editor, no read', _provenance: 'org', objects: { u2_deal: { allowEdit: true } } },
+      ],
+    });
+    const report = findings(await ask(check, V1, { setFields: { 'u2_deal.amount': { readable: true, editable: false } } }));
+    expect(report.uncoveredDenies).toEqual([{
+      managedSet: V1.set, packageId: VENDOR, customerSet: 'cust_deal_editor', object: 'u2_deal',
+      fields: [{ field: 'u2_deal.amount', denies: 'edit' }],
+    }]);
+  });
+
   it('a finding that predates the upgrade is not the upgrade\'s: the answer is clean', async () => {
     const check = await boot({ ledger: [{ type: 'permission', name: 'gone_set', packageId: 'com.other.pkg', active: false }] });
     expect(await ask(check, V1)).toEqual({ outcome: 'clean' });

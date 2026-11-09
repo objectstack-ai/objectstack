@@ -48,6 +48,11 @@
  * `rejectCredentialAggregation` was not that package's first load. The
  * published build bundles both files into one, where the cycle does not
  * exist.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { EngineAggregateOptions, EngineCountOptions, QueryAST } from '@objectstack/spec/data';
@@ -162,7 +167,47 @@ export async function count(
    return opCtx.result as number;
 }
 
-/** The body of `ObjectQL#rejectCredentialAggregation`; the method's docblock there is its contract. */
+/**
+ * Fail-closed guard (ADR-0100 / #3171 / #7922): refuse to aggregate over a
+ * field whose value is withheld on the generic read path. Such fields reach
+ * this guard through **two independent collectors**, and it needs both:
+ *
+ *  - {@link collectCredentialFields} — keyed by field TYPE (`secret` /
+ *    `password`). A GROUP BY / MIN / MAX / array_agg over such a column would
+ *    surface the stored `secret:<id>` ref or the password value.
+ *  - {@link collectInternalReadFields} — keyed by the `internal: true` FLAG
+ *    (#7728). ADR-0100's third credential channel is a one-way hash living in
+ *    an ordinary `text` column, which no type-keyed collector can ever reach;
+ *    the flag is that channel's opt-in declaration. Without this half the
+ *    guard had the same type-vs-flag blind spot #7728 fixed on the read path:
+ *    a flagged column was omitted from `find`/`findOne` yet freely groupable
+ *    here, so the flag's promise ("never returned on the generic data path")
+ *    stopped at the edge of `aggregate()`.
+ *
+ * Post-hoc masking is not available on this path — the value is already a
+ * group key by the time there is a row, and masking group keys corrupts the
+ * result. So we reject instead.
+ *
+ * Neither collector carries a `managedBy` exemption, so the union does not
+ * acquire one, deliberately. Read-masking exempts `password` on better-auth
+ * objects so login reads still see the stored value; *aggregating* a
+ * credential is never legitimate, least of all on an identity table, where it
+ * is an inference oracle over hashes.
+ *
+ * Only the two output-bearing positions on `EngineAggregateOptions` carry
+ * field names: `aggregations[].field` (skip COUNT(*) — undefined or '*') and
+ * `groupBy[]` (a string, or a `{ field }` bucket object).
+ *
+ * The refusal carries the ADR-0112 envelope — `INVALID_FIELD` / 400, located
+ * at the object and the field(s) named. It used to be a bare `Error` with no
+ * `code` or `status`, so a 400-class author refusal reached the data door
+ * 500-shaped (`INTERNAL_ERROR`, an undeclared fault). The code matches the
+ * analytics door's own refusal of an `internal: true` member and the engine's
+ * structured-JSON group-by refusal: the verdict is about the NAME being a
+ * field that is never returned on a generic data exit, which `INVALID_FIELD`
+ * is the catalog member for. The envelope now binds the `secret` / `password`
+ * case too, which shared the bare `Error`.
+ */
 export function rejectCredentialAggregation(
   this: Pick<CountAggregateHost, '_registry'>,
   object: string,

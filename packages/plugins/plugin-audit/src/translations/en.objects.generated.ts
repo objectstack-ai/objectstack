@@ -18,7 +18,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "Audit Log",
     pluralLabel: "Audit Logs",
-    description: "Immutable audit trail for platform events",
+    description: "Audit trail of platform events. Rows are written only by the platform and are read-only through the data API and in Setup.",
     fields: {
       created_at: {
         label: "Timestamp"
@@ -37,8 +37,13 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           account_locked: "Account Locked",
           config_change: "Config Change",
           import: "Import",
+          export: "Export",
           platform_admin_standing_change: "Platform Admin Standing Change",
-          action_invocation: "Action Invocation"
+          action_invocation: "Action Invocation",
+          package_uninstall: "Package Uninstall",
+          package_unmanaged_import: "Package Unmanaged Import",
+          credential_use: "Credential Use",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {
@@ -113,9 +118,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_activity: {
-    label: "Activity",
-    pluralLabel: "Activities",
-    description: "Recent activity stream entries (lightweight, denormalized)",
+    label: "Activity Feed",
+    pluralLabel: "Activity Feed",
+    description: "What people did to records recently, newest first: who created, changed or deleted what. Entries are kept for 14 days.",
     fields: {
       id: {
         label: "Activity ID"
@@ -192,6 +197,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       milestone_key: {
         label: "Milestone Key",
         help: "For a fired activity milestone, one sorted, comma-joined key of every field the object's activityMilestones declaration watched when it fired; NULL for every other row. Stamped by the platform at write time and never served: the read rule compares it with the current declaration."
+      }
+    },
+    _views: {
+      recent: {
+        label: "Recent activity",
+        emptyState: {
+          title: "No recent activity",
+          message: "Changes people make to records appear here, newest first."
+        }
+      },
+      all: {
+        label: "All entries"
       }
     }
   },

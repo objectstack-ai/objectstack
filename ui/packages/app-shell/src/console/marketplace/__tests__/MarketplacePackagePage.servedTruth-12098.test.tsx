@@ -120,6 +120,7 @@ vi.mock('../marketplaceApi', () => ({
   purgeSampleData: async () => ({ ok: true }),
   reseedLocalSampleData: async () => ({ ok: true }),
   purgeLocalSampleData: async () => ({ ok: true }),
+  countLocalSampleData: async () => null,
 }));
 
 // Mounts its own read of the runtime; here it only marks WHEN it mounts.
@@ -276,6 +277,8 @@ describe('install-local reads hotLoaded (objectui#12098)', () => {
     await bootConsole({ installLocal: true });
     await renderPage();
     fireEvent.click(await screen.findByRole('button', { name: '«marketplace.action.install»' }));
+    // objectstack#30325 — Install opens the confirm; its Install installs.
+    fireEvent.click(await screen.findByTestId('install-preview-confirm'));
   }
 
   it('a 200 with hotLoaded: false says the app loads at the next restart, and refreshes no app list', async () => {

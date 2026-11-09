@@ -9,7 +9,7 @@
  *
  * ## The defect, measured rather than supposed
  *
- * `scripts/pm/ci-failure.mjs --self-test` printed a line of prose that NAMES a
+ * A PM tool's `--self-test` (a tool since deleted) printed a line of prose that NAMES a
  * workflow-command token, inside backticks, as documentation of what the tool
  * anchors on. The runner does not know the token is being quoted. It parsed it
  * and minted a real annotation:
@@ -341,7 +341,7 @@ function main() {
   if (candidates.length === 0) {
     refuse(
       'not one of the self-tests CI runs even MENTIONS a workflow-command token, which this tree ' +
-        'contradicts (`scripts/pm/ci-failure.mjs` documents what it anchors on). The prefilter is ' +
+        'contradicts (`scripts/ci/lane-verdict.mjs` mints the annotations it reports). The prefilter is ' +
         'broken, and a broken prefilter reads exactly like a clean tree (#4690).',
     );
   }
@@ -430,7 +430,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'current form, line start only': 3,
   'innocent output': 4,
   'prefilter reads CODE, never prose': 5,
-  'end to end on the real defect site': 5,
+  'end to end on a real self-test that prints workflow-command prose': 7,
   'the population is imported, never re-walked': 9,
   'the scripts/ population is declared here': 6,
 });
@@ -526,10 +526,14 @@ function selfTest() {
     'a script with no token at all selected',
   );
 
-  // ── End to end: the real tree's real defect site, run for real ───────────
-  battery('end to end on the real defect site');
+  // ── End to end: a real self-test CI runs, run for real ──────────────────
+  // The original defect site is deleted. `lane-verdict.mjs` stands in for it:
+  // its code mints `::error::`, so the prefilter selects it, and its self-test
+  // PRINTS prose naming that token mid-line, which is exactly the shape the
+  // scan must read as innocent.
+  battery('end to end on a real self-test that prints workflow-command prose');
   {
-    const target = 'scripts/pm/ci-failure.mjs';
+    const target = 'scripts/ci/lane-verdict.mjs';
     const source = existsSync(join(ROOT, target)) ? readFileSync(join(ROOT, target), 'utf8') : null;
     ok(source !== null, `${target} is missing, so the end-to-end case verified nothing`);
     ok(source !== null && isCandidate(target, source), `${target} is no longer selected by the prefilter — the end-to-end case below would run nothing`);
@@ -537,6 +541,13 @@ function selfTest() {
     ok(r.spawnError === null, `${target} --self-test could not be spawned: ${r.spawnError}`);
     ok(r.bytes > 0, `${target} --self-test printed nothing, so nothing was scanned`);
     ok(scanOutput(r.output).length === 0, `${target} --self-test still prints a line the runner would parse — this is the #11886 defect, live`);
+    // N1: the clean scan above is vacuous on token-free output, so the output
+    // must still CARRY the mid-line token the scan is meant to read as innocent.
+    const midLine = new RegExp(`^[ \\t]*[^\\s:][^\\n]*?${COLONS}[A-Za-z][\\w-]*[^\\n]*?${COLONS}`, 'm');
+    ok(midLine.test(r.output), `${target} --self-test no longer prints a mid-line workflow-command token, so the clean scan above passed vacuously`);
+    // N2: the specimen must be one this gate's real sweep runs, not a file only this case reads.
+    const population = collectPopulation();
+    ok(population.refusal === null && population.population.includes(target), `${target} is not in the collected population, so the end-to-end case scans a script the sweep never runs`);
   }
 
   // ── The population is the sibling gate's, and this file takes no walk (#15414) ──
@@ -766,7 +777,7 @@ function selfTest() {
   console.log(
     'check-self-test-workflow-commands --self-test: both measured parse rules pinned (legacy form ' +
       'anywhere in a line, current form only at line start), the innocent-output and Perl-namespace ' +
-      'cases, the comment mask in both directions, one end-to-end run of the real defect site, and the ' +
+      'cases, the comment mask in both directions, one end-to-end run of a real self-test that prints workflow-command prose, and the ' +
       'imported population held against the live tree with no second walk taken here, and the '
       + 'scripts/ population this gate declares to the dispatch derivation held set-equal to that walk' +
       ` — ${declaredBatteries.length} declared batteries, ${totalCases} cases registered, every battery` +

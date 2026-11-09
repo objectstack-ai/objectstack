@@ -108,8 +108,7 @@ import {
   extractHookBodyWriteSet,
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
-import { buildReadonlyIndex, READONLY_WHEN_STRIP_SCOPE } from './validate-readonly-flow-writes.js';
-import { recordsOf } from './object-graph.js';
+import { buildReadonlyIndex, buildServedReadonlyIndex, READONLY_WHEN_STRIP_SCOPE } from './validate-readonly-flow-writes.js';
 
 export type ReadonlyActionWriteSeverity = 'warning';
 
@@ -264,7 +263,9 @@ export function validateReadonlyActionWrites(stack: AnyRec): ReadonlyActionWrite
     );
     if (writes.length === 0) continue;
 
-    roIndex ??= buildReadonlyIndex(recordsOf(stack.objects));
+    // [#30471] The readonly index reads the objects as served
+    // (`buildServedReadonlyIndex`).
+    roIndex ??= buildServedReadonlyIndex(stack);
 
     const where = `action "${site.name}" > body`;
     const reported = new Set<string>();

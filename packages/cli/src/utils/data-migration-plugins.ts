@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { resolveStorageCapabilityArg, resolveStorageLocalRootEnv } from '../commands/serve.js';
-import { oneShotSettingsPlugin } from './one-shot-settings.js';
+import { oneShotSettingsPlugins } from './one-shot-settings.js';
 
 /**
  * The plugins a gated data migration boots with.
@@ -33,7 +33,7 @@ import { oneShotSettingsPlugin } from './one-shot-settings.js';
  *    swap the adapter out from under the root the operator named.
  */
 export async function buildDataMigrationPlugins(
-  opts: { storage?: boolean; automation?: boolean; audit?: boolean } = {},
+  opts: { storage?: boolean; automation?: boolean; audit?: boolean; settings?: boolean } = {},
 ): Promise<unknown[]> {
   const plugins: unknown[] = [];
   const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
@@ -82,10 +82,23 @@ export async function buildDataMigrationPlugins(
     const { AutomationServicePlugin } = await import('@objectstack/service-automation');
     plugins.push(new AutomationServicePlugin({ armRuntime: false, suspendedRunStore: 'memory' }));
   }
+  if (opts.settings === true && opts.storage !== true) {
+    // [ADR-0144 D4, D5] `os migrate recompute-home-amounts` projects stored
+    // rows as a write does, and a write reads each organization's home
+    // currency and timezone (`localization.currency` / `.timezone`) from the
+    // settings service; without it every organization reads as having no home
+    // currency. The one-shot composition, as the storage arm below takes it.
+    plugins.push(...await oneShotSettingsPlugins());
+  }
   if (opts.storage === true) {
+    // [#31007] Not optional any more where it refuses: a refusal of the crypto
+    // composition (a declared provider this run cannot read) is the run's
+    // answer, never a reason to boot on without the settings service.
+    const { HostCryptoProviderRefusal } = await import('../commands/serve.js');
     try {
-      plugins.push(await oneShotSettingsPlugin());
-    } catch {
+      plugins.push(...await oneShotSettingsPlugins());
+    } catch (error) {
+      if (error instanceof HostCryptoProviderRefusal) throw error;
       // optional — without it, constructor/env-driven storage config still applies
     }
     const { StorageServicePlugin } = await import('@objectstack/service-storage');

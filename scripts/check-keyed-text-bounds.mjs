@@ -219,13 +219,14 @@
  * an unboundable column may only be keyed by a UNIQUE index.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 import { blank, maskComments, maskCommentsAndLiterals, scanSource } from './js-comment-mask.mjs';
+import { readSqlDriverSource } from './sql-driver-split-source.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -244,7 +245,7 @@ import { blank, maskComments, maskCommentsAndLiterals, scanSource } from './js-c
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the emitter-derived family': 3,
+  'the emitter-derived family': 6,
   'the detector FIRES': 15,
   'the detector STAYS SILENT': 8,
   'refusals: the shapes it will not guess at': 11,
@@ -330,7 +331,11 @@ const EXPECTED_TEXT_FAMILY = [
   'code', 'html', 'markdown', 'qrcode', 'richtext', 'signature', 'text', 'textarea',
 ];
 
-/** Where the emitter's answer is read from. */
+/**
+ * Where the emitter's answer is read from: `SqlDriver`, read as one text through
+ * `sql-driver-split-source.mjs` (each codemod stub's body from the facet module
+ * it moved to, #30147).
+ */
 const EMITTER_FILE = join('packages', 'drivers', 'driver-sql', 'src', 'sql-driver.ts');
 
 /**
@@ -629,11 +634,17 @@ function lineAt(starts, offset) {
  * extraction that cannot find its anchor is a refusal, never an empty set.
  */
 export function readTextFamilyFromEmitter(root) {
+  // `SqlDriver` as one text: the codemod moved `varcharColumnChars`' body to a
+  // facet module and left a one-call stub here, so each stub's body is read
+  // where it moved (#30147). A stub that reader cannot follow is a refusal.
   let source;
   try {
-    source = readFileSync(join(root, EMITTER_FILE), 'utf8');
-  } catch {
-    return { error: `cannot read ${EMITTER_FILE} -- the emitter this gate reads its text family from.` };
+    source = readSqlDriverSource(join(root, dirname(EMITTER_FILE))).text;
+  } catch (error) {
+    if (error?.code === 'ENOENT' && !existsSync(join(root, EMITTER_FILE))) {
+      return { error: `cannot read ${EMITTER_FILE} -- the emitter this gate reads its text family from.` };
+    }
+    return { error: `cannot read the emitter's text out of ${EMITTER_FILE}: ${error?.message ?? error}` };
   }
   const { struct, masked } = project(source);
   const anchor = struct.indexOf(EMITTER_ANCHOR);
@@ -1467,6 +1478,30 @@ export function selfTest() {
     t('a type LEAVING the emitter\'s keyed-text arm is reported, not absorbed',
       movedFamily.fatal === undefined && familyProblem(movedFamily.family) !== null,
       JSON.stringify(movedFamily.family));
+
+    // The facade form (#30147): the codemod leaves `varcharColumnChars` on the
+    // class as a one-call stub and moves its body to a facet module. The family
+    // is read through the stub, and a stub that cannot be followed refuses.
+    const facetRel = join(dirname(EMITTER_FILE), 'sql-driver-column-creation.ts');
+    const splitHost = (ret) => 'export class SqlDriver {\n'
+      + '  protected varcharColumnChars(field: any, keyed?: { unique: boolean }): number | null {\n'
+      + '    // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).\n'
+      + `    ${ret}\n`
+      + '  }\n}\n';
+    const stubCall = 'return ColumnCreationFacet.varcharColumnChars.call(columnCreationHost.of(this), field, keyed);';
+    const facetModule = (cls) => `export class ${cls} {\n`
+      + EMITTER_STUB.replace('protected varcharColumnChars(', 'static varcharColumnChars(this: any, ') + '}\n';
+    const object = { 'packages/p/src/a.object.ts': objectFile(`{ name: 'o', fields: {}, indexes: [] }`) };
+    const split = run({ ...object, [facetRel]: facetModule('ColumnCreationFacet') }, { emitter: splitHost(stubCall) });
+    t('the facade form: the family is read through the stub, from the facet module the body moved to',
+      split.fatal === undefined && familyProblem(split.family) === null, JSON.stringify(split.fatal ?? split.family));
+    const lostFacet = run({ ...object, [facetRel]: facetModule('OtherFacet') }, { emitter: splitHost(stubCall) });
+    t('a stub naming a facet the module does not declare REFUSES rather than reading the stub',
+      lostFacet.fatal !== undefined && /declares no class ColumnCreationFacet/.test(lostFacet.fatal), lostFacet.fatal);
+    const oddStub = run({ ...object, [facetRel]: facetModule('ColumnCreationFacet') },
+      { emitter: splitHost('return varcharColumnChars(field, keyed);') });
+    t('a marked stub of any other shape REFUSES rather than reading the stub',
+      oddStub.fatal !== undefined && /is not one `return <X>Facet\.<m>…` stub/.test(oddStub.fatal), oddStub.fatal);
 
     // ── the detector FIRES ────────────────────────────────────────────────
     battery('the detector FIRES');

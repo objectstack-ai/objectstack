@@ -57,12 +57,15 @@ interface Recorded { object: string; data: Record<string, unknown> }
 function makeQl(row: Record<string, unknown>, opts: { failUpdate?: boolean } = {}) {
   const updates: Recorded[] = [];
   const rows: any[] = [{ id: KEY_ID, key: hashApiKey(RAW), prefix: 'osk_lifecycl', user_id: OWNER, revoked: false, ...row }];
+  // The key's owner exists: an API key authenticates only as an owner who exists.
+  const tables: Record<string, any[]> = { sys_api_key: rows, sys_user: [{ id: OWNER }] };
   const ql = {
     updates,
     find: async (object: string, findOpts: any) => {
-      if (object !== 'sys_api_key') return [];
+      const table = tables[object];
+      if (!table) return [];
       const where = findOpts?.where ?? {};
-      const matched = rows.filter((r) => Object.entries(where).every(([k, v]) => {
+      const matched = table.filter((r) => Object.entries(where).every(([k, v]) => {
         if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         return r[k] === v;
       }));
@@ -347,5 +350,40 @@ describe('[#23944] the revoked refusal agrees with the declared restore action',
     expect(resetMessage).not.toMatch(/owner/i);
     expect(resetMessage).toContain('POST /api/v1/keys');
     expect(plainMessage).toMatch(/Its owner or a platform administrator can restore it/);
+  });
+
+  it('a key revoked because its owner\'s membership ended names no restorer, only the new-key road', async () => {
+    // `revoked_reason: organization_membership_ended` is written by the host
+    // that removed the owner, and plugin-auth's restore door refuses every
+    // user-context restore on that reason, a platform administrator's
+    // included. The text follows the door: it offers no restore anyone could
+    // make. Code, status and every carried field stay those of any revoked key.
+    const ended = await resolveApiKeyAdmission(
+      makeQl({ revoked: true, revoked_reason: 'organization_membership_ended' }), headers(), NOW, undefined, undefined, policy(),
+    );
+
+    expect(ended.outcome === 'lifecycle' && ended.refusal).toMatchObject({ code: 'API_KEY_REVOKED', keyId: KEY_ID, userId: OWNER });
+    const endedMessage = ended.outcome === 'lifecycle' ? ended.refusal.message : '';
+    expect(endedMessage).toMatch(/membership in the organization ended, and it cannot be restored/);
+    expect(endedMessage).not.toMatch(/can restore it/);
+    expect(endedMessage).toContain('POST /api/v1/keys');
+  });
+
+  it('a key a platform administrator suspended names a platform administrator as its only restorer', async () => {
+    // `revoked_reason: administrator_suspended` is stamped by plugin-auth's
+    // restore guard when a platform administrator revokes a key they do not
+    // own, or written by a host that stops a key itself, and the restore door
+    // refuses the owner on that reason. The text follows the door. Code,
+    // status and every carried field stay those of any revoked key.
+    const suspended = await resolveApiKeyAdmission(
+      makeQl({ revoked: true, revoked_reason: 'administrator_suspended' }), headers(), NOW, undefined, undefined, policy(),
+    );
+
+    expect(suspended.outcome === 'lifecycle' && suspended.refusal).toMatchObject({ code: 'API_KEY_REVOKED', keyId: KEY_ID, userId: OWNER });
+    const suspendedMessage = suspended.outcome === 'lifecycle' ? suspended.refusal.message : '';
+    expect(suspendedMessage).toMatch(/was suspended by a platform administrator\. Only a platform administrator can restore it/);
+    expect(suspendedMessage).not.toMatch(/owner/i);
+    expect(suspendedMessage).toContain('Restore API Key');
+    expect(suspendedMessage).toContain('POST /api/v1/keys');
   });
 });

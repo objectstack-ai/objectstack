@@ -14,6 +14,9 @@
  *  - `[org-admin]` / `[platform-admin]` an administrator cannot hand their own
  *    preference to another user either, and a member's preference is not
  *    theirs to reach by id (`404`, the object's own-row scope);
+ *  - `[member-create]` a member cannot create a preference in another member's
+ *    name: the object's row scope refuses the create, before any hook, and
+ *    nothing is stored;
  *  - `[control]` an update that echoes the stored owner saves, and the owner
  *    reads, lists and updates their own preferences as before.
  *
@@ -119,6 +122,14 @@ describe('sys_user_preference over REST: a preference\'s owner is fixed when it 
     expect(r.status, await r.clone().text()).toBe(404);
     expect(errorCodeOf(await r.json())).toBe('RECORD_NOT_FOUND');
     expect(await storedOwner(row.id)).toBe(aliceId);
+  });
+
+  it('[member-create] cannot create a preference in another member\'s name: 403, nothing stored', async () => {
+    const key = 'ui.owner_fixed.planted';
+    const r = await stack.apiAs(bobTok, 'POST', `/data/${OBJ}`, { user_id: aliceId, key, value: ['planted'] });
+    expect(r.status, await r.clone().text()).toBe(403);
+    expect(errorCodeOf(await r.json())).toBe('PERMISSION_DENIED');
+    expect(await ql.findOne(OBJ, { where: { key }, context: SYS })).toBeFalsy();
   });
 
   it('[control] an update that echoes the stored owner saves', async () => {

@@ -80,6 +80,17 @@ const helperMerge = vi.fn((ctx: any, datasets: readonly unknown[]): unknown[] =>
     return list;
 });
 
+/**
+ * [#30281] The seed-locale producer's stand-ins. Its rungs (the organization's
+ * setting, the user's language, the app's default) are pinned where they live,
+ * `packages/runtime/src/app-plugin.seed-locale-producer.test.ts`; here the
+ * question each door ASKS and the answer reaching the loader are the subject,
+ * so the stand-ins record the question and answer what the test says.
+ */
+let localeAnswer: (question: any) => Promise<{ locale: string; source: string } | undefined> = async () => undefined;
+const localeQuestions: any[] = [];
+const appDefaultBodies: unknown[] = [];
+
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
         async load(request: any) { loadCalls.push(request); return seedResult; }
@@ -87,6 +98,15 @@ vi.mock('@objectstack/runtime', () => ({
     recordSeedOutcome: vi.fn(),
     get mergeSeedDatasets() { return helpersPresent ? helperMerge : undefined; },
     get registerSeedReplayerOnce() { return helpersPresent ? helperRegisterOnce : undefined; },
+    resolveSeedLocaleForLoad: async (host: unknown, question: any) => {
+        localeQuestions.push({ host, ...question });
+        return localeAnswer(question);
+    },
+    appDefaultSeedLocale: (body: any) => {
+        appDefaultBodies.push(body);
+        return body?.i18n?.defaultLocale;
+    },
+    describeSeedLocale: (resolved: any) => String(resolved?.locale ?? 'none'),
 }));
 // Only the seed-request parse is stubbed; every other export stays the real one,
 // because `@objectstack/core` reads `@objectstack/spec/data` values at module load
@@ -421,5 +441,194 @@ describe('#9070 — install-local registers the per-org seed replayer, not just 
                 String(c[0]).includes('seed-replayer: objectql/metadata unavailable'),
             ),
         ).toBe(true);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#30281] The install paths pick seed datasets by the organization's locale
+// (maintainer ruling A, 2026-11-05). The install, the reseed, the rehydrate heal
+// and this file's replayer each hand the loader a `config.locale`: the
+// organization's Localization setting when somebody set one, else the
+// installing (or founding) user's `sys_user.locale`, else the package's own
+// declared `i18n.defaultLocale`. The rung logic and the loader's row filtering
+// are pinned in `packages/runtime` (`app-plugin.seed-locale-producer.test.ts`,
+// `seed-loader-locale-scope.test.ts`); these pin what each door of THIS plugin
+// asks and what reaches the loader.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A package shipping one demo catalogue per market, beside an unscoped dataset. */
+const LOCALE_MANIFEST = {
+    id: 'app.test.saas',
+    version: '1.0.0',
+    i18n: { defaultLocale: 'en-US' },
+    objects: [
+        { name: 'saas_account', fields: { name: { type: 'text' } } },
+        { name: 'saas_product', fields: { name: { type: 'text' } } },
+    ],
+    data: [
+        { object: 'saas_account', records: [{ name: 'Acme' }] },
+        { object: 'saas_product', locale: ['en-US'], records: [{ name: 'Professional' }] },
+        { object: 'saas_product', locale: ['zh-CN'], records: [{ name: '专业版' }] },
+    ],
+};
+
+describe('#30281 — the install paths seed for the organization\'s locale', () => {
+    beforeEach(() => {
+        localeQuestions.length = 0;
+        appDefaultBodies.length = 0;
+        localeAnswer = async () => undefined;
+    });
+
+    /** A harness whose session acts in `activeOrg` as user `admin`. */
+    function localeHarness(activeOrg: string | undefined, posture = 'isolated') {
+        const rawApp = makeRawApp();
+        const services: Record<string, any> = SERVICES();
+        services.auth = {
+            api: { getSession: async () => ({ user: { id: 'admin' }, session: activeOrg ? { activeOrganizationId: activeOrg } : {} }) },
+        };
+        const harness = makeCtx(rawApp, services, posture);
+        return { rawApp, harness };
+    }
+
+    async function startPlugin(harness: ReturnType<typeof makeCtx>) {
+        const plugin = new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: dir });
+        await plugin.start(harness.ctx as any);
+        await harness.fire();
+        return plugin;
+    }
+
+    const install = (rawApp: any, manifest: any = LOCALE_MANIFEST) =>
+        rawApp.routes.get('POST /api/v1/marketplace/install-local')!(makeC({ manifest }));
+
+    /** The question minus the host, which is asserted separately. */
+    const asked = (i: number) => {
+        const { host: _host, ...question } = localeQuestions[i];
+        return question;
+    };
+
+    it('install asks for the installing organization and user, with the package\'s default, and loads what it answers', async () => {
+        localeAnswer = async (q) => (q.organizationId === 'org_zh' ? { locale: 'zh-CN', source: 'organization-setting' } : undefined);
+        const { rawApp, harness } = localeHarness('org_zh');
+        await startPlugin(harness);
+
+        const res = await install(rawApp);
+
+        expect(res.payload?.success).toBe(true);
+        expect(localeQuestions).toHaveLength(1);
+        expect(localeQuestions[0].host).toBe(harness.ctx);
+        expect(asked(0)).toEqual({
+            seeds: LOCALE_MANIFEST.data,
+            organizationId: 'org_zh',
+            userId: 'admin',
+            appDefaultLocale: 'en-US',
+        });
+        expect(loadCalls).toHaveLength(1);
+        expect(loadCalls[0].config).toMatchObject({ organizationId: 'org_zh', locale: 'zh-CN' });
+    });
+
+    it('reseed asks again for the same organization and the reseeding user — the answer as it stands now', async () => {
+        localeAnswer = async () => ({ locale: 'zh-CN', source: 'organization-setting' });
+        const { rawApp, harness } = localeHarness('org_zh');
+        await startPlugin(harness);
+        await install(rawApp);
+        loadCalls = [];
+        localeAnswer = async () => ({ locale: 'en-US', source: 'organization-setting' });
+
+        const c = makeC({});
+        const res = await rawApp.routes.get('POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data')!({
+            ...c,
+            req: { ...c.req, param: (k: string) => (k === 'manifestId' ? LOCALE_MANIFEST.id : undefined) },
+        });
+
+        expect(res.status).toBe(200);
+        expect(asked(1)).toEqual({
+            seeds: LOCALE_MANIFEST.data,
+            organizationId: 'org_zh',
+            userId: 'admin',
+            appDefaultLocale: 'en-US',
+        });
+        expect(loadCalls).toHaveLength(1);
+        expect(loadCalls[0].config).toMatchObject({ organizationId: 'org_zh', locale: 'en-US' });
+    });
+
+    it('the rehydrate heal asks with no organization and no user — nobody started it — and the package\'s default', async () => {
+        localeAnswer = async () => ({ locale: 'zh-CN', source: 'organization-setting' });
+        new LocalManifestSource(dir).write({
+            packageId: 'pkg_saas',
+            versionId: 'pkgv_saas',
+            manifestId: LOCALE_MANIFEST.id,
+            version: LOCALE_MANIFEST.version,
+            manifest: LOCALE_MANIFEST,
+            installedAt: '2026-01-01T00:00:00.000Z',
+            installedBy: 'admin',
+            withSampleData: true,
+        } as any);
+        const { harness } = localeHarness(undefined, 'single');
+
+        await startPlugin(harness);
+
+        expect(localeQuestions).toHaveLength(1);
+        expect(asked(0)).toEqual({
+            seeds: LOCALE_MANIFEST.data,
+            organizationId: undefined,
+            userId: undefined,
+            appDefaultLocale: 'en-US',
+        });
+        expect(loadCalls).toHaveLength(1);
+        expect(loadCalls[0].config.locale).toBe('zh-CN');
+    });
+
+    it('the replayer asks per organization — two organizations, two locales, one process', async () => {
+        localeAnswer = async (q) => ({ locale: q.organizationId === 'org_zh' ? 'zh-CN' : 'en-US', source: 'organization-setting' });
+        const { rawApp, harness } = localeHarness(undefined);
+        await startPlugin(harness);
+        await install(rawApp); // walled, no active organization: merged, not seeded
+        expect(loadCalls).toHaveLength(0);
+
+        const replayer = harness.peek('seed-replayer') as (id: string, o?: { userId?: string }) => Promise<any>;
+        await replayer('org_zh');
+        await replayer('org_en');
+
+        expect(loadCalls.map((r) => [r.config.organizationId, r.config.locale])).toEqual([
+            ['org_zh', 'zh-CN'],
+            ['org_en', 'en-US'],
+        ]);
+    });
+
+    it('the replayer passes the founder on, and asks no app default: the shared list is every package\'s', async () => {
+        const { rawApp, harness } = localeHarness(undefined);
+        await startPlugin(harness);
+        await install(rawApp);
+
+        const replayer = harness.peek('seed-replayer') as (id: string, o?: { userId?: string }) => Promise<any>;
+        await replayer('org_new', { userId: 'usr_founder' });
+
+        expect(asked(0)).toEqual({
+            seeds: LOCALE_MANIFEST.data,
+            organizationId: 'org_new',
+            userId: 'usr_founder',
+            appDefaultLocale: undefined,
+        });
+    });
+
+    it('no answer ⇒ no `locale` key at all: the loader\'s unrestricted spelling', async () => {
+        const { rawApp, harness } = localeHarness('org_new');
+        await startPlugin(harness);
+
+        await install(rawApp);
+
+        expect('locale' in loadCalls[0].config).toBe(false);
+    });
+
+    it('a locale read that fails seeds nothing and says why in the install summary', async () => {
+        localeAnswer = async () => { throw new Error('settings backend down'); };
+        const { rawApp, harness } = localeHarness('org_zh');
+        await startPlugin(harness);
+
+        const res = await install(rawApp);
+
+        expect(res.payload?.success).toBe(true);
+        expect(loadCalls).toHaveLength(0);
+        expect(JSON.stringify(res.payload)).toContain('settings backend down');
     });
 });

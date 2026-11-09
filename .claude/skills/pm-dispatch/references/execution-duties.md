@@ -9,7 +9,8 @@
 - 席改标:卡余项实测路径整落本席包树 ⇒ 本席改 `domain:*`,审计评论列路径与新旧标同笔。
 - 席改标限未派发卡;带 `needs-user-decision`、open `Blocked-by:` 或 `security` 的 ⛔ 不改,仍问分诊。
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
-- 维护者裁决逐字引入派发词裁决分区作约束,无则写明无裁决。
+- 写裁决区前 grep 申报文件面(源码与测试)的 `ruling`、`Ruling-ref`、`maintainer`、`⛔`。
+- 本卡与命中所引裁决逐字入区(id+原句)作约束;零命中才写无裁决,命中无裁决写命中数。
 - 派发前做前提过时检查,裁决同罪,三面都查:动作面、卡引用面、工作项面。
 - 动作面:`git log --oneline -20 -- <paths>`。
 - 卡引用面:裁决/卡片点名的每张 issue 逐个读当前 open/closed/assignee。
@@ -17,6 +18,8 @@
 - 工作项面:卡片、裁决与分诊评论列的工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
 - `batch` 等待不填槽,四态见 SKILL.md 该行;同批独立按文件面不相交判,⛔ 不按包或 check 名。
 - 软顶:本席已验收等人批的 Tier H PR 逾 5 ⇒ 停派 Tier H,S/非受管照常,轮报列积压;两周复测。
+- 每轮按现 head 核本席终局四件套 PR:席位记录/`pm:awaiting-merge`/请审/终版速读,缺件同轮补。
+- 四件读数器:本地 `node scripts/pm/check-half-states.mjs` H43/H48 只读受管 H;超行无受管 PR 自读。
 - single-writer 路径 = `SINGLE_CLAIM_PATHS` 所枚举;共享其它路径是普通并发,后落地方解冲突。
 - 第 N 单派发前读 `scripts/pm/os-verify-lock.sh --status`:到达深度 ≥ `LOCK_DEPTH_HOLD`(= 2)即等。
 - 到达深度 = `queue N:` 行数 + 1(待派 dev 的运行算作到达);`state:` holder 与 `parked` 行不计。
@@ -50,6 +53,8 @@
 - 开放 = 未派发(无 `pm:dispatched`、无 assignee);在飞的 P0/P1 不挡任何候选,只余取卡全序。
 - 取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序。
 - 标签序:`priority:p0` > `pm:blocking` > 功能点位次 > `target:` 板上项 > p1 > p2 > p3 > 无级。
+- 云车道企业版卡:取卡序 = `cloud/ROADMAP.md` 的档位与行序,⛔ 席位不在单卡上另调顺序。
+- 改序即改该表,由维护者或代其改并链裁决;改法见其「Maintaining this file」,⛔ 不抄表行。
 - `pm:blocking` 级内先按解锁扇出(从 `Blocked-by:` 反向索引现算,⛔ 扇出数不落标签)。
 - 全序每级现读/现算,零逐卡维护;无级/缺 `Path:` 轮报记分诊缺口。
 - 同级先非车队卡(作者非 `Bot` 且首行非席位签名),再 `Bug`、卡龄;⛔ 不升级、不越 p0。
@@ -60,14 +65,14 @@
 - ③ 新卡预读:复现、查重查询与命中数、一行 `Suggested-grade: p<n> · <理由>`;⛔ 不写级标签。
 - ④ 本车道 `finding` 卡补缺的 `reach:` 或复现,或写明为何不合三类。
 - ⛔ 不静默等分诊:敲信箱键(`project-forms.md`);报「等分诊」须引所敲评论 id,引不出即未问。
+- 缺审计评论当轮敲 `Request: triage · #n · first-touch audit`,分诊空席敲总监,⛔ 不改报维护者。
 
 ## 认领(先认领后动工)
 
 - 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
-- 卡 assignee 归 PM,dev 恒不写;PR ⛔ 不派席位账号;在飞 PR 读 `head:claude/` 开 PR 正文点名的卡。
-- 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。
+- 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即一笔释放:`Release:`+回 `pm:queue`+清 assignee。
 - `Release:` 行点名已落与余项;余项整落 `ui/**` 外他席树 ⇒ 点名其改标,拆分加 `pm:retriage`。
-- 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
+- 派发原子对一笔 `label-write`:① `--assign` @me 加 `pm:dispatched` 摘 `pm:queue`,`--comment-file` 带②。
 - step ① 之后获得 assignee 的直接弃出本批。
 - ② 认领评论照抄 SKILL.md 模板:`Branch:`、`Clause-②:`、`Metadata-protocol:` 各占一行且行首。
 - 条款②入队闸门只读认领评论且只读行首键:句中提及与另发评论皆读不到,卡即不可读。
@@ -98,7 +103,7 @@
 - 下限档给机械卡(正确性由门禁农场机械判定)。
 - 默认判断档给 M/L、裁决实施与任何带设计判断的卡;拿不准就升一档。
 - 上限 = 契约复审档(`CONTRACT_REVIEW_TIER`),给最重协议/流程/编排卡,按卡取用非新默认。
-- 强制条款①:凡改协议语义面或 `docs/adr/**` 的卡一律契约复审档;后者 effort 下限 `xhigh`。
+- 强制条款①:改协议语义面或 `docs/adr/**` 即契约复审档;ADR 修订常设令 `xhigh`,新裁决除外。
 - 协议语义面 = 本 `SKILL.md`、决策框架拷贝所在文件、`.claude/agents/os-dev.md` 与 `skills/**`。
 - 仅 `references/**` 面、或治理面上一行级机械文本改动的卡,降为默认判断档施工。
 - `skills/**`(随 `npx skills add` 发运)与 `docs/adr/**` ⛔ 无一行级豁免,逐行判机械不作数。
@@ -117,15 +122,15 @@
 - 自审随面定档:仅申报面车道席作 `TIER_DEFAULT` 记录;余面未达档 ⛔ 不自审,起隔离子代理。
 - 降档出口两条:额度耗尽豁免(达档实测不可用才落默认判断档,⛔ 不再往下)与主动预降。
 - 额度墙只向下(降档或降并发)⛔ 永不向上;临时偏离记座位贴带结束条件,逐次巡检重读。
-- 降档的档位与理由记入认领评论 Container & model 行;档位逐次派发显式传参,永不省略。
-- effort 按卡难度定、与档位并列,写进 Container & model 行与派发令,派发显式传参,⛔ 不留空。
-- S 机械 `medium`;M `high`(默认);L/XL/`security`/p1/契约复核/四轴分析 `xhigh`;`max` 凭点名或常设令。
-- 解析顺序、pin 语义与允许名单回退陷阱以 os-dev 定义 frontmatter 注释为权威。
+- effort 按卡难度定,与档位、降档理由写进 Container & model 行与派发令,显式传参,⛔ 不留空。
+- S 机械 `medium`;M `high`(默认);L/XL/security/p1/契约复核/四轴分析/ADR `xhigh`;`max` 凭点名/常设令。
 - 分诊 suggestion 行是输入不是决定,不采纳给理由。
 - 派发词只带增量,⛔ 不整段贴卡正文;dev 自读全文与评论、自查完整(`dispatch-runbook.md`)。
 - 派发词引卡片的精确断言(schema 臂、判据、原文)一律逐字,⛔ 不释义转述。
 - 三分区:裁决(不可重裁)/ PM 机制假设(须实测,鼓励证伪)/ PM 建议的路线(可选,实测优先)。
-- 凡我觉得可以这样的一律降到第三区;⛔ 不把假设写成裁决。
+- 凡我觉得可以这样的一律降到第三区,第三区 ⛔ 不与裁决区相左;⛔ 不把假设写成裁决。
+- 认为裁决该动 ⇒ 令中写明,派发前送复核线程,⛔ 不经 dev 转。
+- 须复述所载裁决的 spec 散文 ⇒ 栅栏点名 `packages/spec/src/**` 散文在范围,⛔ 不整片禁。
 - 标准非协商条款 ⛔ 不抄进派发词:hook 已机械强制段与 os-dev.md 已载通用段砍掉。
 - ⛔ 不砍卡类特有约束:ADR 类 draft-only、tier 推导引用、棘轮实况、释义纪律。
 - 终报要求随派发词带一句:只收机器可核字段(gates / line_budget / deviations / files_changed)。
@@ -133,8 +138,7 @@
 - ⛔ GitHub MCP 写:`create_pull_request`、`update_pull_request`、`issue_write`、`add_issue_comment` 等。
 - 多仓项目线程不加载仓 `settings.json` deny,此行即唯一防线;两数 = 写预算与 `mcp_calls`。
 - 清单、路径、行号在派发那一刻从树上取,⛔ 不从卡片/上次派发/记忆抄。
-- 门禁清单取 `dispatch-gates --commands --repo 仓` 逐条跑,退出码先落盘,`--ran` 对账;被拒即手推。
-- 点名单是线索不是规格,dev 对实际改动重取补跑;行级断言转述前必须自己重验。
+- 建包单:派发令点名目录与 npm 名,dev 动笔前先测同类包先例;命名规则见 AGENTS.md 角色表。
 - 派发令里关于代码的危害断言必须有读数(点名 call site / 路径 / 迁移)。
 - 搬自任何工件(含己文)本轮未亲测计数/零命中/文件面:重测或注「未验证」点名来源。
 - PM 测不了的危害 ⇒ 写成给 dev 的问题,⛔ 不写成栅栏;人工地板栅栏关于流程,免测量。
@@ -167,7 +171,6 @@
 - `mode:cloud` 的 ~2h 静默是本轮收集边界(记 `blocked` 移步下轮),也不是判死。
 - 报告末句是意图不是结果 = 停摆非完成:当刻 SendMessage 续派,⛔ 不读作交付、不判死。
 - 停摆 ⇒ 立刻 SendMessage 附前台执行姿态句,⛔ 不等任何静默阈值(阈值是给没有回答的)。
-- 通知重放先算身份再读内容:与已验收那份同身份 ⇒ 记重放即结束。
 - 直接验收兜底:(a) draft PR 在且 CI 全绿 + (b) 探活确认已死或 ≥2h 无推送 + (c) 报告未达。
 - 三条件全立 ⇒ 直接按 PR 验收,复核判据不减;先探活后翻 ready。
 - 舰队级死因(全账号断粮)下取 (a)+(c) 照常收口,PR body 就是报告。
@@ -176,13 +179,10 @@
 
 - 你是记录在案的复核人:对 GitHub 核验,⛔ 不对报告的自述核验。
 - 逐项判据展开在 `references/review-checklist.md`,每份报告对着它过。
-- 报告或复核见涉 cloud ⇒ 整卡 `Release:`+`pm:retriage` 转 cloud 车道,读点留卡;⛔ 不拆半边。
-- 改到已有 `.changeset/*.md` 的 PR ⛔ 不打 `skip-changeset`;确认取同 head 达档 PASS 或维护者原话。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。
 - 超派发预算或小功能大扩写 ⇒ REWORK,⛔ 不因已经写好了放行。
 - 判决 ACCEPT:PR 评论 `## 席位核对`,清单结论+抽查读数+偏差,⛔ 不复述其叙事;卡留指针行。
-- `mcp_calls` 点名写工具(`settings.json` deny 清单 + `update_pull_request`)⇒ 拒收,⛔ 不带注放行。
 - 判决 REWORK:逐项反馈,同认领重派;补丁轮优先 SendMessage 续派原 dev;最多 2 轮,第三次升级。
 - 判决 ESCALATE:见〈升级与决策〉;熔断任一命中亦判,PR 暂停,答复前 ⛔ 不派下一轮。
 - 熔断三条:独立安全复审连续 2 轮不过;diff 超首次复核规模 2 倍;上轮修复引入新 HIGH。

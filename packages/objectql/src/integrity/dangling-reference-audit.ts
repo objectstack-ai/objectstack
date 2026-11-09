@@ -441,7 +441,7 @@ interface AuditableField {
  * recovery: consumer-side tolerance of a read that should never have been
  * issued is the direction Prime Directive #12 rules against.
  *
- * ## Why PROVENANCE and not `external != null`
+ * ## Why PROVENANCE and not `isFederatedObject`
  *
  * A federated object MAY declare a real remote `organization_id` (or any other
  * anchor name) — the author vouches for that column, it is genuinely there, and
@@ -458,7 +458,7 @@ function auditableReferenceFields(obj: AuditableObject): AuditableField[] {
   const fields = obj?.fields;
   if (!fields || typeof fields !== 'object') return [];
   // Empty for every object the platform provisions storage for — the common
-  // case pays one `external == null` test per object and nothing else.
+  // case pays one `platformProvisionsStorage` test per object and nothing else.
   const phantom = new Set(unprovisionedInjectedColumns(obj));
   const out: AuditableField[] = [];
   for (const [name, def] of Object.entries(fields)) {

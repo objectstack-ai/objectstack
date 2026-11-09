@@ -335,18 +335,39 @@ shell; the bridge contract is owned by the mobile app (`docs/HYBRID-SHELL.md`,
   connection in the shell: it calls `event.waitUntil()` with the promise its optional
   `onConnectionRemoved` returns (unregister the device's push token under the page's
   own session), or with one already resolved when the option is omitted.
+- Push registration belongs to the page, under its own session: the shell holds no
+  API credential. `nativeGetPushToken()` resolves the token (the first call shows the
+  OS permission prompt, so call it after a meaningful screen, not during sign-in).
+  `installId`, a string on shells that carry it and `null` off the configured
+  server's origin, is the `deviceId` to register with; a shell that rotates the
+  token dispatches `NATIVE_PUSH_TOKEN_CHANGED_EVENT`
+  (`objectstack-native:pushTokenChanged`, announced as `has('pushTokenChanged')`)
+  with the new `NativePushToken` as `detail`, held until the page posts `ready()`.
+  Both are optional: feature-detect them.
 - `ready()` means "the page has painted its own UI", which may be a loading fallback,
   such as an auth guard's spinner while the session is read. The shell lifts its
   loading cover on it, so the cover hands over to that spinner instead of staying up
   through the session round-trip.
 - `nativeGetPushToken`, `nativeHaptic`, `nativeOpenExternal`, `nativeNavigate`,
-  `nativeResetServer` and `nativeShowConnectionSwitcher` check `has(capability)` and
-  that the method exists before calling. They never throw: each resolves
-  `{ status: 'unavailable' }` without the capability, `{ status: 'ok', value }` on
-  success, or `{ status: 'failed', code, message }` when the shell refuses the call.
+  `nativeResetServer`, `nativeShowConnectionSwitcher`, `nativeGetAppLock`,
+  `nativeOpenAppLockSettings`, `nativePickImage`, `nativeOpenFile` and `nativeShare`
+  check `has(capability)` and that the method exists before calling. They never
+  throw: each resolves `{ status: 'unavailable' }` without the capability,
+  `{ status: 'ok', value }` on success, or `{ status: 'failed', code, message }` when the shell refuses the call.
+- Files cross the bridge as base64 bytes, never as a URL, up to
+  `NATIVE_FILE_MAX_BYTES` (8 MiB): `fileFromNativeFile` turns what `nativePickImage`
+  resolves into an uploadable `File`, and `nativeFileFromBlob` turns bytes the page
+  fetched with its own session into what `nativeOpenFile` takes.
 - `nativeHostCan(host, method)` is that same check, for a control that picks its
   native or web path before it renders (the header's organization button opens the
   shell's switcher this way).
+- `nativeGetAppLock()` reads the shell's app lock, `{ enabled, timeoutSeconds }`
+  (`0` locks as soon as the app leaves the foreground), and
+  `nativeOpenAppLockSettings()` opens the shell's native settings screen for it. Both
+  are read-only for the page: the lock changes only on that screen, behind
+  biometrics, and no bridge method writes it. No event announces a change, so read it
+  again whenever the page is shown (the Console's profile page re-reads on mount, on
+  `visibilitychange` back to visible and on window `focus`).
 
 ```tsx
 import { nativeHaptic } from '@object-ui/mobile';

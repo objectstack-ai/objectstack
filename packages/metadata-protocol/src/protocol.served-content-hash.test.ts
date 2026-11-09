@@ -37,6 +37,8 @@
  * it, the write stamps it, and a row WITH a `checksum` is judged as before.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {

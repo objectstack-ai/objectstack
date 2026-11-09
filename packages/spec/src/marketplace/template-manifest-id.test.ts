@@ -26,8 +26,6 @@ import { TemplateManifestSchema } from './template-manifest.zod';
 /** A template manifest that is valid except for whatever a case changes. */
 function templateManifest(overrides: Record<string, unknown> = {}) {
   return {
-    name: 'blank',
-    specVersion: '^6.0.0',
     displayName: 'Blank Starter',
     ...overrides,
   };
@@ -69,7 +67,7 @@ describe('TemplateManifestSchema relaxes manifestId to optional', () => {
   });
 
   it('relaxes manifestId ONLY — the other required keys are untouched', () => {
-    const result = TemplateManifestSchema.safeParse({ name: 'blank', specVersion: '^6.0.0' });
+    const result = TemplateManifestSchema.safeParse({ namespace: 'blank' });
     expect(result.success).toBe(false);
     const paths = result.success ? [] : result.error.issues.map((i) => i.path.join('.'));
     expect(paths).toContain('displayName');

@@ -205,6 +205,12 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../plugins/plugin-hono-server/src/index.ts'),
       },
       {
+        // #29891: `email-send-display-name.test.ts` drives the send door over
+        // the real `EmailServicePlugin`; the fix it pins lives in that source.
+        find: /^@objectstack\/plugin-email$/,
+        replacement: path.resolve(__dirname, '../plugins/plugin-email/src/index.ts'),
+      },
+      {
         find: /^@objectstack\/service-datasource$/,
         replacement: path.resolve(__dirname, '../services/service-datasource/src/index.ts'),
       },

@@ -75,7 +75,7 @@ describe('Setup → Datasources reads engine.datasource.* (objectui#13460)', () 
       'engine.datasource.new',
       'engine.datasource.empty',
       'engine.datasource.statusOk',
-      'engine.datasource.schemaModeManaged',
+      'engine.datasource.schemaModeExternal',
       'engine.datasource.create',
     ]) {
       const zh = t(key, ZH);
@@ -114,7 +114,8 @@ describe('Setup → Datasources reads engine.datasource.* (objectui#13460)', () 
     expect(within(dialog).getByText(t('engine.datasource.newDescription', ZH))).toBeTruthy();
     expect(within(dialog).getByText(`${t('engine.datasource.name', ZH)} *`)).toBeTruthy();
     expect(within(dialog).getByText(t('engine.datasource.schemaMode', ZH))).toBeTruthy();
-    expect(within(dialog).getByText(t('engine.datasource.schemaModeManaged', ZH))).toBeTruthy();
+    // A new datasource starts on External (objectstack#30327).
+    expect(within(dialog).getByText(t('engine.datasource.schemaModeExternal', ZH))).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: t('engine.datasource.create', ZH) })).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: t('engine.cancel', ZH) })).toBeTruthy();
   });

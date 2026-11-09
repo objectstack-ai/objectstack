@@ -37,7 +37,7 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES, isCodeArtifactBody } from 
 // sources, each read from its owner: the pair's id and a pair's base
 // (`@objectstack/spec/kernel`, the one spelling of the suffix), and the
 // activation ledger's one reader (`@objectstack/core`).
-import { customizationBasePackageId, customizationPackageId } from '@objectstack/spec/kernel';
+import { customizationBasePackageId } from '@objectstack/spec/kernel';
 import { listPackageMetadataActivations, METADATA_ACTIVATION_TABLE } from '@objectstack/core';
 import type { GetPackageCustomizationsResponse } from '@objectstack/spec/api';
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate, asked by
@@ -57,19 +57,30 @@ import {
     isProtocolIncompatibleError,
     protocolIncompatibleAnswer,
     type InstalledDependencyRecord,
+    // [ADR-0146 D3 · ruling record 6691022506] The pair of a package, looked up
+    // through the App that carries it, over the engine registry's manifests.
+    installedManifestsOf,
+    pairOf,
+    pairsOf,
+    type InstalledPackageSource,
 } from '@objectstack/metadata-core';
 // [#7560] ADR-0070's read-only-package rule — the SAME predicate the metadata
 // authoring path asks before refusing a write INTO a platform package
 // (`saveMetaItem` → `WRITABLE_PACKAGE_REQUIRED`). Imported, never re-spelled:
 // this defect existed precisely because the lifecycle routes had no copy of it,
 // and a second copy would be the next place it drifts.
-import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from '@objectstack/metadata-protocol';
+import { isWritablePackage, READ_ONLY_PACKAGE_SCOPES, refuseNamespaceObjectNameClashes } from '@objectstack/metadata-protocol';
 // [ADR-0146 D3] The pair-shaped-id predicate the install primitive asks — asked
-// at `POST /packages` too, ahead of both its install limbs.
-import { customizationPairManifestRefusal } from '@objectstack/metadata-protocol';
+// at `POST /packages` too, ahead of both its install limbs; and, the same way,
+// its [ADR-0029 D7] refusal of a runtime-created package's navigation contributions.
+import { customizationPairManifestRefusal, runtimeNavigationContributionsRefusal } from '@objectstack/metadata-protocol';
 // [#28117] The one reader of a manifest's declared dependency ids (ADR-0141),
 // shared with the registry's co-owner gate.
 import { declaredDependencyIds } from '@objectstack/core';
+// [#28914, ADR-0141 D5] The one sorter of installed packages by their declared
+// dependencies: the order a boot hydrates them in is the order the
+// whole-deployment export lists them in.
+import { orderHydrationBatch } from '@objectstack/core';
 // [#9960] The uninstall seam's DECLARED shapes, from the same producer and for
 // the same reason as the predicate above: this door reached `deletePackage`
 // through `protocol` and routinely sent two keys — `organizationId`
@@ -93,7 +104,8 @@ import type { MetadataProtocol, PackageProtocol } from '@objectstack/spec/api';
 // a second copy of `metadata-protocol`'s `applySeedBodies`, and a second
 // private restatement of "when may a caught sentence be quoted" is where the
 // two copies start answering differently.
-import { clientFacingFailureText, seedRequestValidationError } from '@objectstack/metadata-protocol';
+import { clientFacingFailureText, seedAppliedLanded, seedLoadPartialWrites, seedRequestValidationError } from '@objectstack/metadata-protocol';
+import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 // [#15591] The DECLARED removal of our OWN read-time annotations, imported
 // from the list that defines them (`METADATA_READ_DECORATIONS`) rather than
 // re-spelled here. `applyPublishedSeeds` below re-parses a SERVED document, and
@@ -146,7 +158,11 @@ import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@obj
 // defect (#6928) this module exists to stop anyone writing again.
 import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
+// [#30962] The host seam for the same state: a store a host registers as the
+// `package-state-store` service replaces the file at every door below.
+import { asPackageStateStore, PACKAGE_STATE_STORE_SERVICE, PACKAGE_STATE_UNINSTALL_CLEANUP } from '../package-state-host-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
+import { refuseMultiReplicaPackageChange } from '../multi-replica-package-refusal.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
 // [#19328] The install door's DECLARED body contract, asked whole at
@@ -162,6 +178,16 @@ import {
     PackageInstallRequestSchema,
     PublishPackageDraftsRequestSchema,
 } from '@objectstack/spec/api';
+// [#28640 ruling ③A] The export names each connector map the served read
+// withheld: the declaration of that list, and the redactor that decided it.
+import { PackageExportManifestSchema, type PackageExportManifest } from '@objectstack/spec/api';
+import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
+// [#30379 ruling A] The disable door's dependent-rule scan reads a rule's
+// fields with the platform's one member reader, the reader the rule validator
+// asks before it refuses a write (`readsRecordColumn`), and judges a hop with
+// the spec's one reference arbiter: never a second parser.
+import { analyzeRelationshipTraversals } from '@objectstack/formula';
+import { referenceTargetOf } from '@objectstack/spec/data';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -217,7 +243,7 @@ import {
  * handle took any spelling at all.
  */
 export type PackagesDomainProtocol =
-    Partial<Pick<MetadataProtocol, 'getMetaItem' | 'getMetaItems' | 'saveMetaItem'>>
+    Partial<Pick<MetadataProtocol, 'getMetaItem' | 'getMetaItems' | 'getMetaTypes' | 'saveMetaItem'>>
     & Partial<Pick<PackageProtocol, 'installPackage'>>
     & {
         /** Declared by the producer (`@objectstack/metadata-protocol`), #9960. */
@@ -239,6 +265,12 @@ export type PackagesDomainProtocol =
          * producer's own signature as above.
          */
         getMetaItemsPerPackage?: ObjectStackProtocolImplementation['getMetaItemsPerPackage'];
+        /**
+         * [#28640 ruling ③A] The by-name execution read the export asks for a
+         * DECISION only (which connector maps the served read withheld), typed
+         * from the producer's own signature.
+         */
+        getMetaItemForExecution?: ObjectStackProtocolImplementation['getMetaItemForExecution'];
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         publishPackageDrafts?(request: any): Promise<any>;
         discardPackageDrafts?(request: any): Promise<any>;
@@ -383,7 +415,8 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  * doors, so attribution cannot drift from authorization. [#28414] Every
  * package door that stamps history or a commit reads it: `publish-drafts`
  * (and its app re-save), `discard-drafts`, `commits/:commitId/revert`,
- * `rollback`, `adopt-orphans` and `duplicate`. A body `actor` is ignored, not
+ * `rollback`, `adopt-orphans` and `duplicate`, and [#31023] the package
+ * `DELETE`, whose verb credits each metadata delete. A body `actor` is ignored, not
  * refused, so a client still sending one keeps working and is recorded as
  * itself. No caller acts on behalf of another identity through these doors
  * (measured: the console and the SDK send none, the CLI calls none); one that
@@ -632,19 +665,21 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
  *     `capability`, the code-only types) is refused at the save door naming
  *     the route that type has ("new similar", the switch), and a locked item
  *     `ITEM_LOCKED` naming the lock (ADR-0010 §3.3);
- *   - a package the ensure door cannot pair — no namespace, a pair namespace
- *     another package owns, a version that is not SemVer — is refused there,
+ *   - a package the ensure door cannot pair — a kernel package, no namespace,
+ *     a pair namespace another package owns, a version that is not SemVer — is
+ *     refused there,
  *     naming why (ADR-0146 D3).
  * Both refusals name their own reason, so the sentence names the door rather
  * than a list of types or package shapes that could drift from them.
  *
- * An id the pairing rule derives no pair for (`customizationPackageId`,
- * `@objectstack/spec/kernel`) gets the sentence without a pair id: the ensure
- * door answers that id with the reason it has none.
+ * An id the pair lookup derives no pair for (`pairOf`,
+ * `@objectstack/metadata-core`, over the engine registry's installed
+ * manifests) gets the sentence without a pair id: the ensure door answers that
+ * id with the reason it has none.
  */
-function customizeInPairRemedy(id: string): string {
+function customizeInPairRemedy(id: string, engine: unknown): string {
     const ensure = `POST /api/v1/packages/${id}/ensure-customization`;
-    const pair = customizationPackageId(id);
+    const pair = pairOf(id, installedManifestsOf((engine as { registry?: InstalledPackageSource } | null | undefined)?.registry));
     if (!pair.ok) {
         return `customize what it ships in its paired customization package (ADR-0146 D3): ${ensure} answers `
             + 'that package, or why this one has none.';
@@ -653,6 +688,25 @@ function customizeInPairRemedy(id: string): string {
         + `then save the item there (?package=${pair.value}), declaring overrides: { package: '${id}', basedOn } `
         + `to replace an item '${id}' ships. A type that takes no override, or a locked item, is refused naming its `
         + 'route or the lock; a package that cannot have a pair is refused at that door, naming why.';
+}
+
+/**
+ * [ADR-0150 D6, child K] The objects a `POST /packages/:id/publish` would make
+ * live: those the metadata service holds under the package — the membership
+ * `publishPackage` collects (`packageId`, `package`, or the `_packageId`
+ * stamp). `[]` when the metadata service cannot list.
+ */
+async function packageObjectNames(metadataService: unknown, packageId: string): Promise<string[]> {
+    const list = (metadataService as { list?: (type: string) => Promise<unknown[]> } | null)?.list;
+    if (typeof list !== 'function') return [];
+    const objects = await list.call(metadataService, 'object');
+    const names: string[] = [];
+    for (const item of Array.isArray(objects) ? objects : []) {
+        const meta = item as { name?: unknown; packageId?: unknown; package?: unknown; _packageId?: unknown } | null;
+        if (!meta || (meta.packageId !== packageId && meta.package !== packageId && meta._packageId !== packageId)) continue;
+        if (typeof meta.name === 'string' && meta.name !== '') names.push(meta.name);
+    }
+    return names;
 }
 
 function requireWritablePackage(
@@ -669,7 +723,7 @@ function requireWritablePackage(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
             + `the deployment, not over this API — ${action} a package you own, or `
-            + customizeInPairRemedy(id),
+            + customizeInPairRemedy(id, engine),
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
@@ -738,6 +792,112 @@ interface PackageRowRegistryHost {
 }
 
 /**
+ * [#30962] A host's package-state store refused a write (or its lookup
+ * faulted). Raised by {@link writePackageState} only for a HOST store: the
+ * file's own failure is rethrown as it is, so the file default's handling
+ * stays exactly what it was.
+ */
+class HostPackageStateRefusal extends Error {
+    constructor(readonly packageId: string, cause: unknown) {
+        super((cause as Error)?.message ?? String(cause));
+        this.name = 'HostPackageStateRefusal';
+    }
+}
+
+/**
+ * [#30962] Write `packageId`'s disabled flag to this environment's package-state
+ * store: the host's when one is registered as the `package-state-store`
+ * service (`../package-state-host-store.ts`), the file under `OS_HOME`
+ * otherwise. Resolved through the CLASSIFIED lookup, so a host store whose
+ * factory throws refuses the write instead of reading as "no host store" and
+ * landing the write in a file nobody reads.
+ */
+async function writePackageState(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    packageId: string,
+    disabled: boolean,
+): Promise<void> {
+    let host;
+    try {
+        host = asPackageStateStore(await deps.resolveServiceOrLoud(context, PACKAGE_STATE_STORE_SERVICE));
+    } catch (err) {
+        throw new HostPackageStateRefusal(packageId, err);
+    }
+    if (!host) {
+        setPackageDisabled(context?.environmentId, packageId, disabled);
+        return;
+    }
+    try {
+        await host.setPackageDisabled(context?.environmentId, packageId, disabled);
+    } catch (err) {
+        throw new HostPackageStateRefusal(packageId, err);
+    }
+}
+
+/**
+ * [#30962, cloud#3636 ruling acceptance line 1] The enable and disable doors'
+ * answer to a host store that refused: nothing changed in memory (the doors
+ * write BEFORE they switch the package), so the door says so, and that the
+ * same request can be retried, instead of answering a switch the store does
+ * not hold. The standard `SERVICE_UNAVAILABLE`: the store, not the request,
+ * is what failed.
+ */
+function hostPackageStateRefused(
+    deps: DomainHandlerDeps,
+    refusal: HostPackageStateRefusal,
+    verb: 'enabled' | 'disabled',
+): HttpDispatcherResult {
+    return {
+        handled: true,
+        response: deps.error(
+            `Package '${refusal.packageId}' was not ${verb}: the package-state store refused to record it, so `
+            + `nothing changed. Retry once the store accepts writes. (${refusal.message})`,
+            503,
+            { code: 'SERVICE_UNAVAILABLE' },
+        ),
+    };
+}
+
+/**
+ * [#30962] {@link writePackageState} for the doors whose package change has
+ * ALREADY landed when they write (install, delete): the request is not undone
+ * over the state store. A host store's refusal is logged at `error` here, once
+ * per failed write, naming what is not durable; the file's failure is rethrown
+ * to the caller's existing `warn`, unchanged.
+ */
+async function writePackageStateAfterChange(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    packageId: string,
+    disabled: boolean,
+): Promise<void> {
+    try {
+        await writePackageState(deps, context, packageId, disabled);
+    } catch (err) {
+        if (!(err instanceof HostPackageStateRefusal)) throw err;
+        console.error(
+            `[handlePackages] the package-state store refused to record package '${packageId}' as `
+            + `${disabled ? 'disabled' : 'enabled'}: this process serves it that way, but the next boot reads the `
+            + `store and will not. Switch it again once the store accepts writes. (${err.message})`,
+        );
+    }
+}
+
+/**
+ * [#30377] An enable of a disabled package recomputes the roll-up summaries the
+ * package adds to other packages' objects by extension (`ObjectQL`'s
+ * `onPackageEnabled` listener; the child writes made during the disable
+ * recomputed nothing). The enable doors answer once that recompute has
+ * settled, so the first read after the answer serves current values. An
+ * engine without the member (a test double) answers at once, as before.
+ */
+async function summaryRefreshSettled(engine: unknown): Promise<void> {
+    const host = engine as { summaryRefreshSettled?: () => Promise<void> } | null | undefined;
+    if (typeof host?.summaryRefreshSettled === 'function') await host.summaryRefreshSettled();
+}
+
+/**
  * [#28318] The disable door's verdict on `id`: `PATCH /packages/:id/disable`
  * accepts the package (as far as the PACKAGE goes) exactly when this answers
  * `true` — a writable base ({@link isWritablePackage}) or a module of an
@@ -752,6 +912,614 @@ interface PackageRowRegistryHost {
  */
 function isDisableablePackage(engine: unknown, id: string | undefined): boolean {
     return (id !== undefined && isDisableableAppModule(engine, id)) || isWritablePackage(engine, id);
+}
+
+/**
+ * [#30379 ruling A, ADR-0141 Open items 4] The code `PATCH /packages/:id/disable`
+ * answers, with `409`, while a validation rule of any enabled package (declared
+ * dependent or not, an app's `.custom` pair included) reads a field the package
+ * adds through `objectExtensions` ({@link readDisableDependentRules}). [#30999]
+ * `DELETE /packages/:id` answers it too, on the same verdict: an uninstall
+ * withdraws those fields as a disable withholds them. Registered
+ * under `@objectstack/runtime` in `ERROR_CODE_LEDGER` (#30724); asserted by value.
+ * The refusal carries the code and a message naming every rule, and no
+ * `error.details` beyond the code: a machine-readable shape for the
+ * package · object · rule triples would be a `packages/spec` contract first.
+ * Held as its wire pair, the shape `check:error-status-conformance` reads.
+ */
+const PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE = { code: 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE', status: 409 } as const;
+
+/**
+ * One validation rule a disable would leave reading a field it withholds: the
+ * package that serves the rule, the object the rule is declared on, the rule's
+ * name, and the withheld fields it reads (`FIELD`, or `REF.FIELD` for a read
+ * one hop through a reference field of the rule's object).
+ */
+export interface DisableDependentRule {
+    packageId: string;
+    object: string;
+    rule: string;
+    fields: string[];
+}
+
+/**
+ * [#31232] The name the dependent-rule verdict is registered under on the
+ * protocol's pre-uninstall guard registry (`registerUninstallGuard`).
+ */
+export const PACKAGE_DEPENDENT_RULES_UNINSTALL_GUARD = 'runtime.package-dependent-rules';
+
+/** The protocols this process registered the dependent-rule guard on — once each. */
+const DEPENDENT_RULES_GUARD_REGISTERED = new WeakSet<object>();
+
+/**
+ * [#31232] The refusal an uninstall of `packageId` answers while an active
+ * validation rule of another enabled package reads a field the package adds
+ * through `objectExtensions`: the disable door's verdict
+ * ({@link readDisableDependentRules}) and sentence
+ * ({@link disableDependentRulesMessage}, in its uninstall form) under an
+ * uninstall lead, as the wire pair `409`
+ * `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`. `undefined` when no rule
+ * depends. Pure over `registry`. The one refusal both the uninstall verb's
+ * guard and `DELETE /packages/:id` answer.
+ */
+export function packageUninstallDependentRulesRefusal(
+    registry: unknown,
+    packageId: string,
+): { code: string; status: number; message: string } | undefined {
+    const dependents = readDisableDependentRules(registry, packageId);
+    if (dependents.length === 0) return undefined;
+    return {
+        code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code,
+        status: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
+        message: disableDependentRulesMessage(`Package '${packageId}' cannot be uninstalled`, dependents, { operation: 'uninstall' }),
+    };
+}
+
+/**
+ * [#31232, ADR-0141 Open items 4] Register, once per kernel, the dependent-rule
+ * verdict as a pre-uninstall guard on the protocol
+ * ({@link PACKAGE_DEPENDENT_RULES_UNINSTALL_GUARD}, `registerUninstallGuard`),
+ * so the uninstall verb itself (`deletePackage`) refuses, before it reads or
+ * moves anything, an uninstall that would withdraw a field an active
+ * validation rule of another enabled package reads
+ * ({@link packageUninstallDependentRulesRefusal}). Once withdrawn, the rule
+ * cannot be evaluated and fails closed, so every write to its object would be
+ * refused with no package left to re-enable.
+ *
+ * Through the guard registry because every in-process caller of the verb (a
+ * host's own uninstall tool, install-local's pair-install undo, the
+ * unmanaged-import rollback) reaches it there, not only the package door:
+ * `@objectstack/metadata-protocol` does not know the schema registry's fold the
+ * verdict reads, and must not import this package. The mirror of
+ * `ensurePackageStateUninstallCleanup`, which registers the after-half.
+ *
+ * The registry is the engine's, resolved when the guard is asked, as the
+ * boot's withheld-field report resolves it. A kernel with no protocol, or a
+ * protocol without the guard registry, registers nothing, and its verb
+ * uninstalls as before.
+ */
+export function ensureDependentRulesUninstallGuard(ctx: { getService<T = unknown>(name: string): T }): void {
+    let protocol: { registerUninstallGuard?: (name: string, guard: (args: { packageId: string }) => { code: string; status: number; message: string } | undefined) => void } | undefined;
+    try { protocol = ctx.getService<any>('protocol'); } catch { return; }
+    if (!protocol || typeof protocol.registerUninstallGuard !== 'function') return;
+    if (DEPENDENT_RULES_GUARD_REGISTERED.has(protocol)) return;
+    DEPENDENT_RULES_GUARD_REGISTERED.add(protocol);
+    protocol.registerUninstallGuard(PACKAGE_DEPENDENT_RULES_UNINSTALL_GUARD, ({ packageId }) => {
+        let registry: unknown;
+        try { registry = ctx.getService<{ registry?: unknown }>('objectql')?.registry; } catch { registry = undefined; }
+        return packageUninstallDependentRulesRefusal(registry, packageId);
+    });
+}
+
+/** The fields one validation rule reads: on its own object, and one hop through a reference field. */
+interface RuleFieldReads {
+    readonly own: Set<string>;
+    readonly hops: Map<string, Set<string>>;
+}
+
+/**
+ * The CEL source of a rule's predicate slot, or `undefined` when it is not CEL:
+ * the dialect is checked, not assumed (a bare string is CEL by the envelope's
+ * own default), as the rule validator reads the slot it evaluates.
+ */
+function celSourceOfRuleSlot(slot: unknown): string | undefined {
+    if (typeof slot === 'string') return slot.trim() ? slot : undefined;
+    if (!slot || typeof slot !== 'object') return undefined;
+    const { dialect, source } = slot as { dialect?: unknown; source?: unknown };
+    if (dialect !== undefined && dialect !== 'cel') return undefined;
+    return typeof source === 'string' && source.trim() ? source : undefined;
+}
+
+/**
+ * Fold what `rule` reads into `reads`, at any `conditional` depth.
+ *
+ *  - A predicate (`script` / `cross_field` `condition`, a `conditional`'s
+ *    `when`) is read with `analyzeRelationshipTraversals` (`@objectstack/formula`)
+ *    over both roots the evaluator binds, `record` and `previous`: every member
+ *    of the root is a read of that column (the rule validator's own reading,
+ *    `readsRecordColumn`), and a `record.REF.FIELD` read is also a hop the
+ *    engine hydrates from REF's target. A `previous` hop is never hydrated, so
+ *    it reads only its own column. A source that does not parse reads nothing
+ *    here: such a rule already refuses every write, whatever is enabled.
+ *  - A `state_machine` / `format` / `json_schema` rule reads the one `field` it
+ *    names. A `cross_field` rule's `fields` list is advisory (only its first
+ *    entry labels the violation), so its `condition` is what it reads.
+ */
+function addRuleFieldReads(rule: unknown, reads: RuleFieldReads, depth: number): void {
+    if (!rule || typeof rule !== 'object' || depth > 8) return;
+    const r = rule as { type?: unknown; condition?: unknown; when?: unknown; field?: unknown; then?: unknown; otherwise?: unknown };
+    const addPredicate = (slot: unknown): void => {
+        const source = celSourceOfRuleSlot(slot);
+        if (!source) return;
+        for (const root of ['record', 'previous'] as const) {
+            const analysis = analyzeRelationshipTraversals(source, root);
+            if (!analysis) continue;
+            for (const field of analysis.bareFields) reads.own.add(field);
+            for (const field of analysis.multiHopFields) reads.own.add(field);
+            for (const [field, related] of analysis.traversals) {
+                reads.own.add(field);
+                if (root !== 'record') continue;
+                let hop = reads.hops.get(field);
+                if (!hop) reads.hops.set(field, (hop = new Set()));
+                for (const name of related) hop.add(name);
+            }
+        }
+    };
+    if (r.type === 'script' || r.type === 'cross_field') addPredicate(r.condition);
+    if ((r.type === 'state_machine' || r.type === 'format' || r.type === 'json_schema') && typeof r.field === 'string') {
+        reads.own.add(r.field);
+    }
+    if (r.type === 'conditional') {
+        addPredicate(r.when);
+        addRuleFieldReads(r.then, reads, depth + 1);
+        addRuleFieldReads(r.otherwise, reads, depth + 1);
+    }
+}
+
+/** The field names a contribution body declares (`fields` keys holding a definition). */
+function declaredFieldNamesOf(body: unknown): string[] {
+    const fields = (body as { fields?: unknown } | null | undefined)?.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+    return Object.keys(fields).filter((name) => {
+        const def = (fields as Record<string, unknown>)[name];
+        return !!def && typeof def === 'object' && !Array.isArray(def);
+    });
+}
+
+/** The validation rules a contribution body declares. */
+function declaredRulesOf(body: unknown): Array<{ name?: unknown; active?: unknown }> {
+    const rules = (body as { validations?: unknown } | null | undefined)?.validations;
+    return Array.isArray(rules) ? rules.filter((rule) => !!rule && typeof rule === 'object') : [];
+}
+
+/**
+ * [#30379 ruling A, ADR-0141 Open items 4] The validation rules that would read
+ * a field the disable of `packageId` withholds, while the package that serves
+ * each rule stays enabled: any enabled package, declared dependent or not (no
+ * `manifest.dependencies` entry is read), an app's `.custom` pair included.
+ * `PATCH /packages/:id/disable` refuses while this is
+ * not empty: a disabled package's `objectExtensions` fields are withheld from
+ * the served object (`SchemaRegistry.resolveObject`), and a rule that reads a
+ * field its object no longer serves cannot be evaluated, so every write to that
+ * object would be refused for as long as the package stays off.
+ *
+ * ## What the disable withholds
+ *
+ * Per object the package extends: the fields its `extend` contributions add
+ * that neither the owner's own declaration nor an extension that stays served
+ * also declares. The registry's reading of a withheld member
+ * (`withholdDisabledExtensions`), asked of the state the disable would leave:
+ * the package's own extensions and every already-disabled package's leave the
+ * fold; everything else stays.
+ *
+ * ## Which rules are judged
+ *
+ * The rules the served object would carry once the disable lands, of every
+ * severity, on every object whose owner is enabled and is not the package
+ * itself (a disabled owner's object is refused whole, so no write reaches its
+ * rules), read off the registry's own fold
+ * (`getAllObjects(undefined, { withoutExtensionsOf })`), never re-assembled
+ * here:
+ *
+ *  - ONE rule per name, the copy the fold serves: a later layer's rule replaces
+ *    an earlier one of its name (`mergeValidationsByName`);
+ *  - with a tenant overlay's `message` and `active` on it (ADR-0029 D9.2a): a
+ *    packaged rule the tenant switched off through the overlay is off;
+ *  - from the base layer (the tenant overlay when one is registered, the owner
+ *    otherwise) and each `extend` contribution of any enabled package other
+ *    than this one, declared dependent or not, an app's `<base>.custom` pair
+ *    (where tenant-written rules live) included; less the rules the disable
+ *    withholds with the fields, which it also takes off a base that carries a
+ *    copy of them.
+ *
+ * Each rule is named after the LAST layer in fold order that declares its name
+ * (the layer its text comes from; a tenant overlay by that name). A rule
+ * switched off (`active: false`) reads nothing: switching the rule off is one
+ * of the remedies the refusal names. Formula fields are not judged: a formula
+ * over a withheld field answers `null`, never a refused write.
+ *
+ * A rule reads a withheld field when it names it on its own object, or names
+ * it one hop through a reference field whose target is an object the package
+ * extends ({@link addRuleFieldReads}).
+ *
+ * Ordered by package, object and rule. Empty for a package already disabled
+ * (the disable withholds nothing more) and for one that extends nothing.
+ *
+ * ## On the package entry
+ *
+ * Exported as `readPackageDisableDependents` from `@objectstack/runtime`, with
+ * {@link disableDependentRulesMessage} as `formatPackageDisableDependents`, so
+ * a host door that takes a package out of service another way (a control
+ * plane's per-install disable, a soft-disable uninstall) asks the scan this
+ * door asks and answers the sentence it answers, instead of a second copy of
+ * either. Pure over `registry`: it reads the registry and writes nothing, so
+ * a host asks it BEFORE its own write, as this door does.
+ */
+export function readDisableDependentRules(registry: any, packageId: string): DisableDependentRule[] {
+    if (typeof registry?.getObjectContributors !== 'function' || typeof registry?.getAllObjects !== 'function') return [];
+    const disabled = (id: unknown): boolean =>
+        typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(id);
+    if (disabled(packageId)) return [];
+
+    type Contributor = { packageId?: unknown; ownership?: unknown; definition?: unknown };
+    const leaves = (c: Contributor): boolean =>
+        c.ownership === 'extend' && (c.packageId === packageId || disabled(c.packageId));
+
+    const names: string[] = [];
+    for (const object of registry.getAllObjects() as Array<{ name?: unknown }>) {
+        if (typeof object?.name === 'string') names.push(object.name);
+    }
+
+    // Object → the fields the disable withholds from it; and the rules the fold
+    // takes off its base layer once the disable lands, on every object.
+    const withheldFields = new Map<string, Set<string>>();
+    const withheldRules = new Map<string, Set<string>>();
+    for (const name of names) {
+        const contributors = registry.getObjectContributors(name) as Contributor[];
+        const own = contributors.filter((c) => c.ownership === 'extend' && c.packageId === packageId);
+        const kept = contributors.filter((c) => !leaves(c));
+        const keptFields = new Set<string>();
+        const keptRules = new Set<string>();
+        for (const c of kept) {
+            if (c.ownership !== 'own' && c.ownership !== 'extend') continue;
+            for (const field of declaredFieldNamesOf(c.definition)) keptFields.add(field);
+            for (const rule of declaredRulesOf(c.definition)) if (typeof rule.name === 'string') keptRules.add(rule.name);
+        }
+        // The fields THIS disable withholds: the package's own additions. A field
+        // only an already-disabled package adds is withheld already, whatever
+        // this disable does.
+        const fields = new Set<string>();
+        for (const c of own) {
+            for (const field of declaredFieldNamesOf(c.definition)) if (!keptFields.has(field)) fields.add(field);
+        }
+        // The rules the fold would withhold once the disable lands — every
+        // leaving extension's, as the fold takes them off a base that carries them.
+        const rules = new Set<string>();
+        for (const c of contributors.filter(leaves)) {
+            for (const rule of declaredRulesOf(c.definition)) {
+                if (typeof rule.name === 'string' && !keptRules.has(rule.name)) rules.add(rule.name);
+            }
+        }
+        if (fields.size > 0) withheldFields.set(name, fields);
+        if (rules.size > 0) withheldRules.set(name, rules);
+    }
+    if (withheldFields.size === 0) return [];
+
+    // [#30379 contract review, must-fix 1] Every object as the served fold will
+    // serve it once the disable lands: `getAllObjects`' own fold with this
+    // package's `extend` contributions left out (an already-disabled package's
+    // are withheld on every fold), so a rule is judged ONCE per name, from the
+    // copy that wins (`mergeValidationsByName`), carrying the tenant overlay's
+    // `message` and `active` (`tenantRuleSettingsOf` / `withPackagedOwnerRules`).
+    // The one step a left-out fold does not take, a disable does: a base that
+    // carries a copy of a rule only the leaving extensions add has it taken off
+    // (`withoutWithheldMembers`), so those names are dropped below.
+    const after = new Map<string, { fields?: Record<string, unknown>; validations?: unknown }>();
+    for (const object of registry.getAllObjects(undefined, { withoutExtensionsOf: packageId }) as Array<{ name?: unknown }>) {
+        if (typeof object?.name === 'string') after.set(object.name, object as { fields?: Record<string, unknown>; validations?: unknown });
+    }
+
+    const dependents: DisableDependentRule[] = [];
+    for (const name of names) {
+        const contributors = registry.getObjectContributors(name) as Contributor[];
+        const owner = contributors.find((c) => c.ownership === 'own');
+        if (!owner || owner.packageId === packageId || disabled(owner.packageId)) continue;
+        const served = after.get(name);
+        if (!served) continue;
+        const base = contributors.find((c) => c.ownership === 'overlay') ?? owner;
+        const servedFields = served.fields ?? {};
+        const ownWithheld = withheldFields.get(name);
+        const rulesWithheld = withheldRules.get(name) ?? new Set<string>();
+
+        // The layer each served rule's text comes from: the LAST layer, in fold
+        // order (the base, then each kept `extend` contribution), that declares
+        // a rule of its name — the copy `mergeValidationsByName` serves.
+        const layerOf = new Map<string, Contributor>();
+        for (const layer of [base, ...contributors.filter((c) => c.ownership === 'extend' && !leaves(c))]) {
+            for (const rule of declaredRulesOf(layer.definition)) {
+                if (typeof rule.name === 'string') layerOf.set(rule.name, layer);
+            }
+        }
+
+        for (const rule of declaredRulesOf(served)) {
+            if (rule.active === false || typeof rule.name !== 'string' || rulesWithheld.has(rule.name)) continue;
+            const reads: RuleFieldReads = { own: new Set(), hops: new Map() };
+            addRuleFieldReads(rule, reads, 0);
+            const hit: string[] = [];
+            if (ownWithheld) for (const field of reads.own) if (ownWithheld.has(field)) hit.push(field);
+            for (const [ref, related] of reads.hops) {
+                const target = referenceTargetOf(servedFields[ref]);
+                const targetWithheld = target === undefined ? undefined : withheldFields.get(target);
+                if (!targetWithheld) continue;
+                for (const field of related) if (targetWithheld.has(field)) hit.push(`${ref}.${field}`);
+            }
+            if (hit.length === 0) continue;
+            dependents.push({
+                packageId: ruleLayerLabel(layerOf.get(rule.name) ?? base),
+                object: name,
+                rule: rule.name,
+                fields: [...new Set(hit)].sort(),
+            });
+        }
+    }
+    return dependents.sort((a, b) => a.packageId.localeCompare(b.packageId)
+        || a.object.localeCompare(b.object)
+        || a.rule.localeCompare(b.rule));
+}
+
+/**
+ * The name a served rule's layer goes by in the refusal: its package, or, for
+ * a tenant overlay (whose `packageId` is the provenance it was saved under, when
+ * there is one), the overlay itself — never a placeholder.
+ */
+function ruleLayerLabel(layer: { packageId?: unknown; ownership?: unknown }): string {
+    const pkg = typeof layer.packageId === 'string' && layer.packageId !== '' ? layer.packageId : undefined;
+    if (layer.ownership === 'overlay') return pkg === undefined ? 'tenant overlay' : `tenant overlay of ${pkg}`;
+    return pkg ?? (layer.ownership === 'own' ? 'unpackaged object' : 'unpackaged extension');
+}
+
+/**
+ * The sentence a dependent-rule refusal carries: `lead` (what was refused),
+ * then every rule as `package · object · rule (reads FIELD, …)`, then the remedy.
+ * Exported as `formatPackageDisableDependents` from `@objectstack/runtime`
+ * beside {@link readDisableDependentRules}; a host door answers it with `409`
+ * `PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE`, as this door does.
+ *
+ * [#30999] `operation` names what was refused, so the sentence says what that
+ * operation would do and which remedy keeps the field served: a disable
+ * (the default) would withhold the fields and is avoided by keeping the
+ * package enabled; an uninstall would withdraw them and is avoided by keeping
+ * the package installed. The default's bytes are the disable door's, unchanged.
+ */
+export function disableDependentRulesMessage(
+    lead: string,
+    dependents: readonly DisableDependentRule[],
+    { operation = 'disable' }: { operation?: 'disable' | 'uninstall' } = {},
+): string {
+    const one = dependents.length === 1;
+    const listed = dependents
+        .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
+        .join('; ');
+    const [effect, kept] = operation === 'uninstall'
+        ? ['which the uninstall would withdraw', 'or keep the package installed.']
+        : ['which the disable would withhold', 'or keep the package enabled.'];
+    return `${lead}: ${one
+        ? 'an active validation rule reads a field'
+        : `${dependents.length} active validation rules read fields`} it adds through objectExtensions, `
+        + `${effect} — ${listed}. Switch off or change ${one ? 'that rule' : 'those rules'} first, `
+        + kept;
+}
+
+/**
+ * One validation rule an enable would put into service reading a field that
+ * stays withheld: {@link DisableDependentRule}, plus the disabled packages that
+ * add the fields it reads (`withheldBy`), whose enable is the other remedy.
+ */
+export interface EnableDependentRule extends DisableDependentRule {
+    withheldBy: string[];
+}
+
+/**
+ * The rules a served fold carries that read a field the fold withholds, on
+ * every object whose owner `isOff` does not name (a disabled owner's object is
+ * refused whole, so no write reaches its rules). `served` is the registry's
+ * own fold for the state being judged; a field is withheld from an object
+ * when the storage fold (`getStorageObject`: every `extend` contribution, a
+ * disabled package's included) declares it and `served` does not, which is
+ * the registry's own reading of a withheld member, never re-assembled here.
+ * Each rule is judged as {@link readDisableDependentRules} judges one: the
+ * served copy (one per name, a tenant overlay's `active` on it), its reads by
+ * {@link addRuleFieldReads}, named after the last layer in fold order that
+ * declares its name.
+ */
+function readWithheldFieldReaders(
+    registry: any,
+    served: ReadonlyMap<string, { fields?: Record<string, unknown>; validations?: unknown }>,
+    isOff: (packageId: unknown) => boolean,
+): EnableDependentRule[] {
+    type Contributor = { packageId?: unknown; ownership?: unknown; definition?: unknown };
+    const withheldCache = new Map<string, Set<string>>();
+    const withheldOf = (object: string): Set<string> => {
+        let withheld = withheldCache.get(object);
+        if (withheld) return withheld;
+        withheld = new Set<string>();
+        const storage = registry.getStorageObject(object) as { fields?: Record<string, unknown> } | undefined;
+        const servedFields = served.get(object)?.fields ?? {};
+        for (const field of Object.keys(storage?.fields ?? {})) if (!(field in servedFields)) withheld.add(field);
+        withheldCache.set(object, withheld);
+        return withheld;
+    };
+    /** The disabled packages whose `extend` contributions to `object` add `field`. */
+    const addersOf = (object: string, field: string): string[] =>
+        (registry.getObjectContributors(object) as Contributor[])
+            .filter((c) => c.ownership === 'extend' && isOff(c.packageId) && typeof c.packageId === 'string')
+            .filter((c) => declaredFieldNamesOf(c.definition).includes(field))
+            .map((c) => c.packageId as string);
+
+    const readers: EnableDependentRule[] = [];
+    for (const [name, object] of served) {
+        const contributors = registry.getObjectContributors(name) as Contributor[];
+        const owner = contributors.find((c) => c.ownership === 'own');
+        if (!owner || isOff(owner.packageId)) continue;
+        const base = contributors.find((c) => c.ownership === 'overlay') ?? owner;
+        const layerOf = new Map<string, Contributor>();
+        for (const layer of [base, ...contributors.filter((c) => c.ownership === 'extend' && !isOff(c.packageId))]) {
+            for (const rule of declaredRulesOf(layer.definition)) {
+                if (typeof rule.name === 'string') layerOf.set(rule.name, layer);
+            }
+        }
+        const servedFields = object.fields ?? {};
+        for (const rule of declaredRulesOf(object)) {
+            if (rule.active === false || typeof rule.name !== 'string') continue;
+            const reads: RuleFieldReads = { own: new Set(), hops: new Map() };
+            addRuleFieldReads(rule, reads, 0);
+            const hit: string[] = [];
+            const withheldBy = new Set<string>();
+            const ownWithheld = withheldOf(name);
+            for (const field of reads.own) {
+                if (!ownWithheld.has(field)) continue;
+                hit.push(field);
+                for (const adder of addersOf(name, field)) withheldBy.add(adder);
+            }
+            for (const [ref, related] of reads.hops) {
+                const target = referenceTargetOf(servedFields[ref]);
+                if (target === undefined || !served.has(target)) continue;
+                const targetWithheld = withheldOf(target);
+                for (const field of related) {
+                    if (!targetWithheld.has(field)) continue;
+                    hit.push(`${ref}.${field}`);
+                    for (const adder of addersOf(target, field)) withheldBy.add(adder);
+                }
+            }
+            if (hit.length === 0) continue;
+            readers.push({
+                packageId: ruleLayerLabel(layerOf.get(rule.name) ?? base),
+                object: name,
+                rule: rule.name,
+                fields: [...new Set(hit)].sort(),
+                withheldBy: [...withheldBy].sort(),
+            });
+        }
+    }
+    return readers;
+}
+
+/** Every object of a fold, by name. */
+function foldByName(objects: unknown): Map<string, { fields?: Record<string, unknown>; validations?: unknown }> {
+    const byName = new Map<string, { fields?: Record<string, unknown>; validations?: unknown }>();
+    for (const object of (Array.isArray(objects) ? objects : []) as Array<{ name?: unknown }>) {
+        if (typeof object?.name === 'string') byName.set(object.name, object as { fields?: Record<string, unknown>; validations?: unknown });
+    }
+    return byName;
+}
+
+/**
+ * [#30756, the mirror of #30379 ruling A] The validation rules the enable of
+ * `packageId` would put into service reading a field that stays withheld:
+ * `PATCH /packages/:id/enable` (and the install door's `enableOnInstall: true`
+ * on an overwrite of a disabled row) refuses while this is not empty, because
+ * the rule validator fails closed on a field its object does not serve, so
+ * every write to that object would be refused from the moment of the enable.
+ *
+ * Judged on the fold the enable would leave, the registry's own
+ * (`getAllObjects(undefined, { asEnabled })`: this package's `extend`
+ * contributions folded in, every other disabled package's withheld), against
+ * the fold served now (`getAllObjects()`): a rule counts only when it reads a
+ * withheld field AFTER the enable and did not already BEFORE it, so an enable
+ * is never refused over a rule it does not bring into service. That covers the
+ * package's own `extend` rules (and a rule of its name that replaces a served
+ * one), the rules on the objects it owns, which come into service with them
+ * (other enabled packages' included), and nothing the tenant switched off
+ * through an overlay (`active: false` reads nothing, as on the disable side).
+ * A field the package itself adds stops being withheld, so a rule reading it
+ * is no dependent.
+ *
+ * Empty for a package that is not disabled (its enable changes no fold).
+ * Ordered by package, object and rule.
+ */
+function readEnableDependentRules(registry: any, packageId: string): EnableDependentRule[] {
+    if (typeof registry?.getObjectContributors !== 'function'
+        || typeof registry?.getAllObjects !== 'function'
+        || typeof registry?.getStorageObject !== 'function'
+        || typeof registry?.isPackageDisabled !== 'function') return [];
+    if (!registry.isPackageDisabled(packageId)) return [];
+    const offNow = (id: unknown): boolean => registry.isPackageDisabled(id);
+    const offAfter = (id: unknown): boolean => id !== packageId && registry.isPackageDisabled(id);
+
+    const after = readWithheldFieldReaders(registry, foldByName(registry.getAllObjects(undefined, { asEnabled: packageId })), offAfter);
+    if (after.length === 0) return [];
+    const keyOf = (d: DisableDependentRule): string => `${d.object}\u0000${d.rule}\u0000${d.fields.join(',')}`;
+    const before = new Set(readWithheldFieldReaders(registry, foldByName(registry.getAllObjects()), offNow).map(keyOf));
+    return after
+        .filter((d) => !before.has(keyOf(d)))
+        .sort((a, b) => a.packageId.localeCompare(b.packageId)
+            || a.object.localeCompare(b.object)
+            || a.rule.localeCompare(b.rule));
+}
+
+/**
+ * [#30756] The served state the enable door now refuses to enter, read as it
+ * stands: every active rule served right now that reads a field a disabled
+ * package withholds, on an object whose owner is enabled. Empty when no package
+ * is disabled. The boot reads it once its registry is complete
+ * (`AppPlugin`, `kernel:bootstrapped`): the environment's state file records
+ * only disables, so a reading package that boots enabled beside a disabled
+ * field package (a release that added the rule, or a state file written
+ * before the enable door judged this) lands here without passing any door.
+ * Ordered by package, object and rule.
+ */
+export function readServedWithheldFieldReaders(registry: any): EnableDependentRule[] {
+    if (typeof registry?.getObjectContributors !== 'function'
+        || typeof registry?.getAllObjects !== 'function'
+        || typeof registry?.getStorageObject !== 'function'
+        || typeof registry?.isPackageDisabled !== 'function'
+        || typeof registry?.getAllPackages !== 'function') return [];
+    const off = (id: unknown): boolean => registry.isPackageDisabled(id);
+    const packages = registry.getAllPackages() as Array<{ manifest?: { id?: unknown } }>;
+    if (!packages.some((pkg) => off(pkg?.manifest?.id))) return [];
+    return readWithheldFieldReaders(registry, foldByName(registry.getAllObjects()), off)
+        .sort((a, b) => a.packageId.localeCompare(b.packageId)
+            || a.object.localeCompare(b.object)
+            || a.rule.localeCompare(b.rule));
+}
+
+/**
+ * The boot's one sentence for {@link readServedWithheldFieldReaders}: what every
+ * write to the named objects now answers, every rule, and the remedies.
+ */
+export function servedWithheldFieldReadersMessage(readers: readonly EnableDependentRule[]): string {
+    const one = readers.length === 1;
+    const listed = readers
+        .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
+        .join('; ');
+    const objects = [...new Set(readers.map((d) => d.object))].sort();
+    const adders = [...new Set(readers.flatMap((d) => d.withheldBy))].sort();
+    return `${one ? 'An active validation rule reads a field' : `${readers.length} active validation rules read fields`} `
+        + `that a disabled package adds through objectExtensions, so every write to ${objects.join(', ')} is refused `
+        + `(400 VALIDATION_FAILED) until this is resolved — ${listed}. Switch off or change ${one ? 'that rule' : 'those rules'}, `
+        + `disable the package that serves ${one ? 'it' : 'them'}, or enable `
+        + `${adders.length === 0 ? 'the package that adds the field' : adders.map((id) => `'${id}'`).join(', ')}.`;
+}
+
+/**
+ * The sentence an enable-side dependent-rule refusal carries: `lead` (what was
+ * refused), then every rule as `package · object · rule (reads FIELD, …)`, then
+ * the two remedies, the second naming the disabled packages that add the fields.
+ */
+function enableDependentRulesMessage(lead: string, dependents: readonly EnableDependentRule[]): string {
+    const one = dependents.length === 1;
+    const listed = dependents
+        .map((d) => `${d.packageId} · ${d.object} · ${d.rule} (reads ${d.fields.join(', ')})`)
+        .join('; ');
+    const adders = [...new Set(dependents.flatMap((d) => d.withheldBy))].sort();
+    const enableFirst = adders.length === 0
+        ? 'enable the package that adds the field first'
+        : `enable ${adders.map((id) => `'${id}'`).join(', ')} first`;
+    return `${lead}: ${one
+        ? 'an active validation rule the enable would serve reads a field'
+        : `${dependents.length} active validation rules the enable would serve read fields`} that a disabled package adds `
+        + `through objectExtensions, which ${one ? 'stays' : 'stay'} withheld — ${listed}. `
+        + `Switch off or change ${one ? 'that rule' : 'those rules'} first, or ${enableFirst}.`;
 }
 
 /**
@@ -850,7 +1618,7 @@ function requireDuplicableSource(
             + `(provided by code or an installed app), and duplicate clones a writable base's `
             + `stored metadata rows. A code package's metadata is delivered as code, so there are `
             + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
-            + `Duplicate a base you own, or ${customizeInPairRemedy(id)} `
+            + `Duplicate a base you own, or ${customizeInPairRemedy(id, engine)} `
             + `For an editable copy of the whole package, install it unmanaged instead `
             + `(installMode 'unmanaged'), where its manifest's installModes permits that.`,
             422,
@@ -1466,6 +2234,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, 'Installing a package');
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, 'Installing a package');
+            if (oneReplica) return oneReplica;
             // [#26857] Recognition first, over the measured closed set, ahead of
             // the body parse and the registry read.
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_INSTALL_QUERY_PARAMS); if (queryRefused) return queryRefused;
@@ -1655,6 +2427,17 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     response: deps.error(installBodyRefusal(body, declaredBody.error.issues), 400),
                 };
             }
+            // [#30072] ADR-0029 D7 — a package created here cannot contribute
+            // navigation: neither limb below registers a contribution (only a
+            // code package's `registerApp` does), so the key would be stored,
+            // answered `201` and never shown. The primitive's own predicate,
+            // asked here so the no-protocol fallback is judged too; ⛔ never a
+            // second copy of the rule. After the whole-body verdict, ahead of
+            // the 409: a request-shape refusal never depends on server state.
+            const navRefusal = runtimeNavigationContributionsRefusal(manifest);
+            if (navRefusal !== undefined) {
+                return { handled: true, response: deps.error(navRefusal, 400) };
+            }
             // Every option below is read off the PARSED request, and only when
             // the body arrived in the wrapped form — the one form that declares
             // options. The bare branch has none to read: it refused them above.
@@ -1717,6 +2500,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // mode is stored as sent — unchanged by this gate, and not a class
             // this door answers for.)
             const settings = request?.settings;
+            // [#30379 delta review, must-fix 3] Whether this install OVERWRITES a
+            // row that is enabled right now, read before either limb writes. Only
+            // then can `enableOnInstall: false` withhold a field a rule is served
+            // against; a fresh install (or a reinstall after a delete) and an
+            // overwrite of a disabled row withhold nothing served, so they honour
+            // `false` exactly as #18877 rules.
+            const overwritesEnabledRow = (registry.getPackage(pkgId) as { enabled?: unknown } | undefined)?.enabled === true;
             let pkg: any;
             const protocolSvc = await resolveProtocol(deps, _context).catch(() => null);
             try {
@@ -1829,12 +2619,50 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // declaration carries no `.default()` for the key, so absence
             // survives the parse and is read as absence.
             const requestedEnabled = request?.enableOnInstall;
+            let installLifecycleRefusal: string | undefined;
             if (requestedEnabled === true) {
-                const enabled = registry.enablePackage(pkgId);
-                if (enabled) pkg = enabled;
+                // [#30756] The same refusal as `PATCH /packages/:id/enable`,
+                // asked of the state the install just left: only an overwrite
+                // of a DISABLED row reaches it (the scan is empty for a package
+                // that is not disabled). The install itself has landed, so the
+                // package stays DISABLED (the row and the state file below
+                // follow `pkg.enabled`) and the door answers the refusal
+                // instead of a 201 that claims an enable.
+                const dependents = readEnableDependentRules(registry, pkgId);
+                if (dependents.length > 0) {
+                    installLifecycleRefusal = enableDependentRulesMessage(
+                        `Package '${pkgId}' was installed and stays disabled: \`enableOnInstall: true\` cannot enable it`,
+                        dependents,
+                    );
+                } else {
+                    const enabled = registry.enablePackage(pkgId);
+                    if (enabled) pkg = enabled;
+                    await summaryRefreshSettled(qlService);
+                }
             } else if (requestedEnabled === false) {
-                const disabled = registry.disablePackage(pkgId);
-                if (disabled) pkg = disabled;
+                // [#30379 ruling A, contract review should-fix] The same refusal
+                // as `PATCH /packages/:id/disable`, asked of the state the
+                // install just left: an overwrite of an enabled package that
+                // asks to come back disabled would withhold its extension
+                // fields from rules that stay active, and every write to their
+                // objects would be refused. The install itself has landed, so
+                // the package stays ENABLED (the row, the registry and the
+                // state file below all follow `pkg.enabled`) and the door
+                // answers the refusal instead of a 201 that claims a disable.
+                // [delta review, must-fix 3] Asked ONLY on an overwrite of a row
+                // that was enabled before this install: a fresh install, a
+                // reinstall after a delete and an overwrite of a disabled row
+                // withhold nothing served, and land disabled as asked.
+                const dependents = overwritesEnabledRow ? readDisableDependentRules(registry, pkgId) : [];
+                if (dependents.length > 0) {
+                    installLifecycleRefusal = disableDependentRulesMessage(
+                        `Package '${pkgId}' was installed and stays enabled: \`enableOnInstall: false\` cannot disable it`,
+                        dependents,
+                    );
+                } else {
+                    const disabled = registry.disablePackage(pkgId);
+                    if (disabled) pkg = disabled;
+                }
             }
             // ⭐ The DURABLE half, and it follows THE ROW THIS DOOR RETURNED —
             // never the request's intent. Written unconditionally rather than
@@ -1873,14 +2701,26 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // explicit action left there. #18058's «每一次 install 都持久化它返回
             // 的状态» is unchanged; what changed is which state that is.
             //
-            // Same best-effort try/catch as `PATCH /packages/:id/enable` below:
-            // the in-memory install already succeeded, so a state-file failure
-            // must not turn a 201 into a 500.
+            // Best-effort: the in-memory install already succeeded, so a
+            // state-store failure must not turn a 201 into a 500. [#30962] A
+            // host store's refusal is logged at `error` instead
+            // (`writePackageStateAfterChange`); only the enable and disable
+            // doors, which write before they switch, answer it.
             const rowDisabled = pkg?.enabled === false;
             try {
-                setPackageDisabled(_context?.environmentId, pkgId, rowDisabled);
+                await writePackageStateAfterChange(deps, _context, pkgId, rowDisabled);
             } catch (err) {
                 console.warn('[handlePackages] failed to persist enableOnInstall', { id: pkgId, disabled: rowDisabled, error: (err as Error)?.message });
+            }
+            if (installLifecycleRefusal !== undefined) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        installLifecycleRefusal,
+                        PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
+                        { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
+                    ),
+                };
             }
             const res = deps.success(pkg);
             res.status = 201;
@@ -1894,14 +2734,46 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Enabling package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Enabling package "${id}"`);
+            if (oneReplica) return oneReplica;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
-            const pkg = registry.enablePackage(id);
-            if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            // [#30962] The state store FIRST, the registry second: a host store
+            // that refuses leaves the package exactly as it was, and the door
+            // answers the refusal (`hostPackageStateRefused`). The file keeps
+            // its best-effort `warn`, as before.
+            if (!registry.getPackage(id)) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            // [#30756, the mirror of #30379 ruling A] A rule the enable would
+            // put into service that reads a field a disabled package withholds
+            // refuses the enable: the rule validator fails closed on a field its
+            // object does not serve, so every write to that object would be
+            // refused for as long as the field's package stays off. Asked
+            // BEFORE the state write and `enablePackage`, so a refused enable
+            // leaves the row, the served objects and the environment's stored
+            // state exactly as they were. Same code and wire pair as the
+            // disable door: the refused state is the same one, a disabled
+            // package's withheld field under an active rule.
+            const dependents = readEnableDependentRules(registry, id);
+            if (dependents.length > 0) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        enableDependentRulesMessage(`Package '${id}' cannot be enabled`, dependents),
+                        PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
+                        { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
+                    ),
+                };
+            }
             try {
-                setPackageDisabled(_context?.environmentId, id, false);
+                await writePackageState(deps, _context, id, false);
             } catch (err) {
+                if (err instanceof HostPackageStateRefusal) return hostPackageStateRefused(deps, err, 'enabled');
                 console.warn('[handlePackages] failed to persist enable state', { id, error: (err as Error)?.message });
             }
+            const pkg = registry.enablePackage(id);
+            if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            await summaryRefreshSettled(qlService);
             return { handled: true, response: deps.success(pkg) };
         }
 
@@ -1912,6 +2784,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Disabling package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Disabling package "${id}"`);
+            if (oneReplica) return oneReplica;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#7560] ADR-0070: a platform package is not the operator's to
             // switch off. BEFORE `disablePackage`, and before
@@ -1928,13 +2804,39 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 ? null
                 : requireWritablePackage(deps, qlService, id, 'disable');
             if (readOnly) return readOnly;
-            const pkg = registry.disablePackage(id);
-            if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            // [#30379 ruling A, ADR-0141 Open items 4] An enabled dependent
+            // refuses the disable: a validation rule of any enabled package
+            // (declared dependent or not, an app's `.custom` pair included)
+            // that reads a field this package adds through `objectExtensions`
+            // would refuse every write to its object once the field is
+            // withheld. Asked after the read-only check and BEFORE
+            // `disablePackage` and `setPackageDisabled`, so a refused disable
+            // leaves the row, the served objects and the environment's state
+            // file exactly as they were. The message names every rule; the
+            // refusal carries no `error.details` beyond the code.
+            const dependents = readDisableDependentRules(registry, id);
+            if (dependents.length > 0) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        disableDependentRulesMessage(`Package '${id}' cannot be disabled`, dependents),
+                        PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.status,
+                        { code: PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE.code },
+                    ),
+                };
+            }
+            // [#30962] The state store FIRST, the registry second, exactly as
+            // the enable door above: a host store that refuses leaves the
+            // package enabled and served, and the door answers the refusal.
+            if (!registry.getPackage(id)) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             try {
-                setPackageDisabled(_context?.environmentId, id, true);
+                await writePackageState(deps, _context, id, true);
             } catch (err) {
+                if (err instanceof HostPackageStateRefusal) return hostPackageStateRefused(deps, err, 'disabled');
                 console.warn('[handlePackages] failed to persist disable state', { id, error: (err as Error)?.message });
             }
+            const pkg = registry.disablePackage(id);
+            if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
             return { handled: true, response: deps.success(pkg) };
         }
 
@@ -1958,6 +2860,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const readOnly = requireWritablePackage(deps, qlService, id, 'publish'); if (readOnly) return readOnly;
             const metadataService = await deps.getService(_context, CoreServiceName.enum.metadata);
             if (metadataService && typeof (metadataService as any).publishPackage === 'function') {
+                // [ADR-0150 D6, child K] A namespace never equals an object
+                // name: every object this publish makes live is judged against
+                // the installed packages' namespaces and its own package's
+                // `NS_custom` BEFORE `publishPackage` runs — the protocol's
+                // publish doors' judge and envelope (`NAMESPACE_CONFLICT` /
+                // 422). The metadata service has no manifest, so the refusal is
+                // this door's, as `WRITABLE_PACKAGE_REQUIRED` above is.
+                try {
+                    refuseNamespaceObjectNameClashes(qlService, await packageObjectNames(metadataService, id), id);
+                } catch (e) {
+                    return { handled: true, response: deps.errorFromThrown(e, 422) };
+                }
                 const result = await (metadataService as any).publishPackage(id, body || {});
                 return { handled: true, response: deps.success(result) };
             }
@@ -2111,9 +3025,24 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                             (deps.logger ?? console).warn(
                                 `[handlePackages] seed apply failed: ${e?.message ?? e}`,
                             );
+                            // [#30429] A load that threw mid-batch still reports
+                            // what it wrote, read off the error exactly as
+                            // `metadata-protocol`'s catch reads it: the counts
+                            // (finished datasets plus the one that threw), the
+                            // object that stopped it, and `landed` for the
+                            // datasets that finished, through the same
+                            // projection. No reading (no load ran) means nothing
+                            // was written: zero counts, `landed` absent.
+                            const written = seedLoadPartialWrites(e);
+                            const failure = clientFacingFailureText(e, 'seed apply failed');
                             (result as any).seedApplied = {
                                 success: false,
-                                error: clientFacingFailureText(e, 'seed apply failed'),
+                                inserted: written?.inserted ?? 0,
+                                updated: written?.updated ?? 0,
+                                error: written?.failedObject
+                                    ? `seed apply stopped at the seed for object '${written.failedObject}': ${failure}`
+                                    : failure,
+                                ...(written ? { landed: seedAppliedLanded(written.finished) } : {}),
                                 // [#10524] The declared 422's structured
                                 // findings ride beside the headline `error` —
                                 // `seedRequestValidationError`'s message is a
@@ -2570,6 +3499,23 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             return { handled: true, response: deps.error('Metadata service not available', 503) };
         }
 
+        // GET /packages/export → [#28914] the deployment's whole ontology as
+        // installable packages, in one read (`PackageExportBundleSchema`).
+        // Matched here, ahead of `GET /packages/:id`: `export` is never a
+        // package id (`MANIFEST_ID_PATTERN` needs two dot-separated segments),
+        // so the path shadows no package. See {@link assemblePackageExportBundle}.
+        if (parts.length === 1 && parts[0] === 'export' && m === 'GET') {
+            // The per-package export's read gate, asked before anything is read.
+            const denied = requireReadCapability(deps, _context); if (denied) return denied;
+            // Closed query set: the door reads none, so a parameter is a
+            // request it would otherwise answer as if it had been honoured.
+            const unknownQuery = unknownQueryParamRefusalMessage(query, []);
+            if (unknownQuery !== undefined) {
+                return { handled: true, response: deps.error(unknownQuery, 400, { code: 'VALIDATION_ERROR' }) };
+            }
+            return { handled: true, response: await assemblePackageExportBundle(deps, registry, _context) };
+        }
+
         // GET /packages/:id/export → assemble a portable manifest from
         // sys_metadata overlay rows bound to this package (offline export).
         if (parts.length === 2 && parts[1] === 'export' && m === 'GET') {
@@ -2684,6 +3630,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Duplicating package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Duplicating package "${id}"`);
+            if (oneReplica) return oneReplica;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.duplicatePackage !== 'function') {
@@ -2727,6 +3677,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Ensuring the customization package of "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Ensuring the customization package of "${id}"`);
+            if (oneReplica) return oneReplica;
             // AGENTS.md route rule 5: the measured closed query set is EMPTY —
             // the door reads the path and the session, no query parameter.
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
@@ -2828,6 +3782,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Updating package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Updating package "${id}"`);
+            if (oneReplica) return oneReplica;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#24705] ADR-0070 D2: the manifest of a package the deployment
             // ships is the deployment's, so this door refuses it with the
@@ -2926,6 +3884,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Deleting package "${id}"`);
             if (walled) return walled;
+            // [cloud#3814 D1] Declared replicas on the Redis driver: this change
+            // would reach the serving replica only. Refused before anything is written.
+            const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Deleting package "${id}"`);
+            if (oneReplica) return oneReplica;
             // [#26857] `?keepdata=true` is not `keepData`: refused here, before
             // anything is deleted, rather than read as absent (drop the tables).
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_DELETE_QUERY_PARAMS); if (queryRefused) return queryRefused;
@@ -2939,6 +3901,38 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // listing (and with it every object the package registers) until
             // the next restart.
             const readOnly = requireWritablePackage(deps, qlService, id, 'delete'); if (readOnly) return readOnly;
+            // [#30999, ADR-0141 Open items 4] The uninstall withdraws the
+            // package's `objectExtensions` fields from the served objects just
+            // as a disable withholds them, so it asks the disable door's
+            // verdict ({@link readDisableDependentRules}, never a second copy):
+            // while an active validation rule of any enabled package reads one
+            // of those fields, every write to the rule's object would be
+            // refused once the package is gone, with no package left to
+            // re-enable. Refused with the disable door's code and sentence
+            // ({@link disableDependentRulesMessage}, in its uninstall form) under an uninstall lead,
+            // BEFORE the protocol is resolved and `deletePackage`, the
+            // registry withdrawal and the disable-record clear below, so a
+            // refused uninstall leaves the stored rows, the running registry
+            // and the environment's state exactly as they were. A package
+            // already disabled withholds its fields already: the verdict is
+            // empty and the uninstall proceeds as before.
+            //
+            // [#31232] Through {@link packageUninstallDependentRulesRefusal},
+            // the ONE refusal the uninstall verb's guard answers too
+            // (`ensureDependentRulesUninstallGuard`), so this door and every
+            // in-process caller of `deletePackage` answer the same code and
+            // the same words. Asked here as well, before the protocol is
+            // resolved, because a host whose protocol has no `deletePackage`,
+            // or that registered no guard, uninstalls through the registry
+            // below; with a guard registered, this answer comes first and the
+            // verb's guard is not reached on this path.
+            const dependentRefusal = packageUninstallDependentRulesRefusal(registry, id);
+            if (dependentRefusal) {
+                return {
+                    handled: true,
+                    response: deps.error(dependentRefusal.message, dependentRefusal.status, { code: dependentRefusal.code }),
+                };
+            }
             const protocol = await resolveProtocol(deps, _context);
             const persists = Boolean(protocol && typeof protocol.deletePackage === 'function');
 
@@ -2988,12 +3982,21 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             //
             // [#20492] `protocol` is the one resolved above, before the registry
             // was touched.
+            //
+            // [#31023, ADR-0146 D1] The actor is the request's authenticated
+            // user, resolved as every sibling package write door resolves it
+            // (`resolvePackageWriteActor`), so each metadata delete the verb
+            // performs is credited to that user in `sys_audit_log` and
+            // `sys_metadata_history`. A caller with no user id sends no
+            // `actor`, and the deletes stay unattributed, as before.
             if (protocol && typeof protocol.deletePackage === 'function') {
                 try {
                     const keepData = query?.keepData === 'true' || query?.keepData === '1';
+                    const actor = resolvePackageWriteActor(_context);
                     persisted = await protocol.deletePackage({
                         packageId: id,
                         ...(keepData ? { keepData: true } : {}),
+                        ...(actor ? { actor } : {}),
                     });
                 } catch (e: any) {
                     // [#21276] Nothing was touched on this path: the registry
@@ -3053,12 +4056,24 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // whenever its stored row is gone, even if the running registry
             // refused the withdrawal above.
             //
-            // Same best-effort try/catch as the install and PATCH arms above:
-            // the uninstall itself already happened, so a state-file failure
-            // must not turn it into a 500.
-            if (persists ? existed : registryRemoved) {
+            // Same best-effort try/catch as the install arm above: the
+            // uninstall itself already happened, so a state-store failure must
+            // not turn it into a 500.
+            //
+            // [#31023] The verb clears the record itself when the runtime's
+            // uninstall cleanup is registered on its protocol
+            // (`ensurePackageStateUninstallCleanup`, from `AppPlugin.start`),
+            // so every in-process caller of `deletePackage` gets the clear,
+            // not only this door; its outcome rides on `persisted.cleanups`.
+            // The verb runs its cleanups for every id it is asked to
+            // uninstall, so with it a 404 here clears a record naming an id
+            // that is neither installed nor stored. This door writes the
+            // record only when the verb did not: a host with no persisted
+            // half, or a protocol on a kernel that registered no such cleanup.
+            const verbClearedState = persisted?.cleanups?.some((c) => c?.name === PACKAGE_STATE_UNINSTALL_CLEANUP) === true;
+            if (!verbClearedState && (persists ? existed : registryRemoved)) {
                 try {
-                    setPackageDisabled(_context?.environmentId, id, false);
+                    await writePackageStateAfterChange(deps, _context, id, false);
                 } catch (err) {
                     console.warn('[handlePackages] failed to clear persisted disable state on delete', { id, error: (err as Error)?.message });
                 }
@@ -3186,16 +4201,19 @@ async function readPackageCustomizations(
 ): Promise<GetPackageCustomizationsResponse> {
     const overrides = await listServedOverrides({ packageId: baseId });
 
-    const pair = customizationPackageId(baseId);
     const registry = ql?.registry;
+    // [#29594, ADR-0146 D3 merge question 12] Every pair of the base: the
+    // App's pair, then the per-package pair an earlier version created for it.
+    const pairs = pairsOf(baseId, installedManifestsOf(registry));
     type Extension = GetPackageCustomizationsResponse['extensions'][number];
     const extensions: Extension[] = [];
-    if (pair.ok && typeof registry?.getAllObjects === 'function') {
-        for (const object of registry.getAllObjects(pair.value) as Array<{ name?: unknown }>) {
+    const pairIdsToRead = typeof registry?.getAllObjects === 'function' ? pairs : [];
+    for (const pairId of pairIdsToRead) {
+        for (const object of registry.getAllObjects(pairId) as Array<{ name?: unknown }>) {
             const name = object?.name;
             if (typeof name !== 'string' || registry.getObjectOwner(name)?.packageId !== baseId) continue;
             for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
-                if (contributor.packageId !== pair.value || contributor.ownership !== 'extend') continue;
+                if (contributor.packageId !== pairId || contributor.ownership !== 'extend') continue;
                 const body = contributor.definition ?? {};
                 for (const field of Object.keys(body.fields ?? {})) extensions.push({ object: name, kind: 'field', name: field });
                 for (const rule of Array.isArray(body.validations) ? body.validations : []) {
@@ -3230,7 +4248,7 @@ async function readPackageCustomizations(
         .map((row) => ({ type: row.metadataType, name: row.name }))
         .sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
 
-    const contributions = readBaseContributions(baseId, pair.ok ? pair.value : undefined, registry);
+    const contributions = readBaseContributions(baseId, pairs, registry);
 
     return {
         packageId: baseId,
@@ -3251,7 +4269,8 @@ async function readPackageCustomizations(
  * [#28722, ADR-0029 D7 as amended by ADR-0146 D3] The `contributions` of
  * `GET /packages/:id/customizations`: every field and flow a package other than
  * the base `baseId` and its pair `pairId` contributes to an object the base
- * OWNS (`getObjectOwner`), each entry naming that package. Read from the two
+ * OWNS (`getObjectOwner`), and every navigation item such a package contributes
+ * to an app the base owns, each entry naming that package. Read from the three
  * registries that already record the contributor, never inferred:
  *
  *  - **field** — the object registry's `extend` contributors of the object, as
@@ -3259,43 +4278,58 @@ async function readPackageCustomizations(
  *    `definition` is its extension body as declared, so its `fields` keys ARE
  *    the fields it adds, and its `packageId` is the package that declared it.
  *    One entry per contributor and field, so two packages adding a field of
- *    one name are two entries.
+ *    one name are two entries. A disabled package's contributor is skipped
+ *    (`isPackageDisabled`), as the served object's fold withholds it.
  *  - **flow** — the metadata registry's flows (`listItems('flow')`, which
  *    already leaves a disabled package's out), whose `start` node's
  *    `config.objectName` is a base-owned object, attributed to the package
  *    stamp the registration put on it (its `_packageId`).
+ *  - **nav** — [#27928, ruling 6566915346 letter E] the navigation-contribution
+ *    registry (`getAppNavContributions`), the one the served app's fold
+ *    (`applyNavContributions`) reads, for every app registered under the base
+ *    (`listItems('app', baseId)`, which already leaves a disabled base's app
+ *    out: nothing is served to contribute to). One entry per item of a
+ *    contribution's `items` that declares an `id`, naming the contribution's
+ *    `group` when it targets one; a contributed group's children ride inside
+ *    it, as the fold folds them. A disabled package's contributions are
+ *    skipped by the fold's own predicate (`isPackageDisabled`, #28117), so the
+ *    list and the served navigation agree. No key is read from or written to
+ *    any nav item.
  *
- * Both kinds ask ONE question of their stamp, {@link codePackageOf}: is it a
+ * Every kind asks ONE question of its stamp, {@link codePackageOf}: is it a
  * code package's ({@link isCodeArtifactBody}: not the package-less
  * `sys_metadata` sentinel, not a tenant-authored body), and neither the base
  * nor its pair? Only where the stamp is read differs: the contributor's
- * `packageId` beside its `definition`, or the flow's own `_packageId`. An item
- * authored in this environment is the environment's, not a package's, and is
- * not listed, whichever kind it is.
+ * `packageId` beside its `definition`, the flow's own `_packageId`, or the
+ * nav contribution's `packageId`. An item authored in this environment is the
+ * environment's, not a package's, and is not listed, whichever kind it is.
  *
- * Ordered by object, kind, name and package.
+ * Ordered as the member declares: the `field` and `flow` entries first, by
+ * object, kind, name and package; then the `nav` entries, by app, group (an
+ * entry with no group first), name and package.
  */
 function readBaseContributions(
     baseId: string,
-    pairId: string | undefined,
+    pairIds: readonly string[],
     registry: any,
 ): GetPackageCustomizationsResponse['contributions'] {
-    // The `field` and `flow` entries: the `nav` kind is declared in the spec
-    // ahead of this producer (#27928) and is not listed here yet (#28722).
-    type Contribution = Exclude<GetPackageCustomizationsResponse['contributions'][number], { kind: 'nav' }>;
-    const contributions: Contribution[] = [];
-    if (typeof registry?.getAllObjects !== 'function') return contributions;
+    type Contribution = GetPackageCustomizationsResponse['contributions'][number];
+    type ObjectContribution = Exclude<Contribution, { kind: 'nav' }>;
+    type NavContribution = Extract<Contribution, { kind: 'nav' }>;
+    const contributions: ObjectContribution[] = [];
+    const navs: NavContribution[] = [];
     // The one stamp reading both kinds share: the package `packageId` names
     // when `body` is a code package's item and the package is neither the base
-    // nor its pair; `undefined` otherwise.
+    // nor one of its pairs ([#29594] the App's pair, or the per-package pair
+    // an earlier version created for it); `undefined` otherwise.
     const codePackageOf = (packageId: unknown, body: unknown): string | undefined => {
-        if (typeof packageId !== 'string' || packageId === baseId || packageId === pairId) return undefined;
+        if (typeof packageId !== 'string' || packageId === baseId || pairIds.includes(packageId)) return undefined;
         const stamped = { _packageId: packageId, _provenance: (body as { _provenance?: unknown } | null | undefined)?._provenance };
         return isCodeArtifactBody(stamped) ? packageId : undefined;
     };
 
     const owned = new Set<string>();
-    for (const object of registry.getAllObjects(baseId) as Array<{ name?: unknown }>) {
+    for (const object of (typeof registry?.getAllObjects === 'function' ? registry.getAllObjects(baseId) : []) as Array<{ name?: unknown }>) {
         const name = object?.name;
         if (typeof name === 'string' && registry.getObjectOwner(name)?.packageId === baseId) owned.add(name);
     }
@@ -3303,6 +4337,10 @@ function readBaseContributions(
     for (const name of owned) {
         for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
             if (contributor.ownership !== 'extend') continue;
+            // A disabled package's extension is withheld from the served object
+            // (`SchemaRegistry.resolveObject`), so its fields are not listed:
+            // the fold's own predicate, asked as the `nav` loop below asks it.
+            if (typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(contributor.packageId)) continue;
             const packageId = codePackageOf(contributor.packageId, contributor.definition);
             if (packageId === undefined) continue;
             for (const field of Object.keys(contributor.definition?.fields ?? {})) {
@@ -3324,11 +4362,39 @@ function readBaseContributions(
         }
     }
 
+    if (typeof registry?.listItems === 'function' && typeof registry.getAppNavContributions === 'function') {
+        const apps = new Set<string>();
+        for (const app of registry.listItems('app', baseId) as Array<{ name?: unknown }>) {
+            if (typeof app?.name === 'string') apps.add(app.name);
+        }
+        for (const app of apps) {
+            for (const contribution of registry.getAppNavContributions(app) as Array<{ packageId?: unknown; group?: unknown; items?: unknown }>) {
+                // [#28117] The fold's own predicate, asked per read as the fold asks it.
+                if (typeof registry.isPackageDisabled === 'function' && registry.isPackageDisabled(contribution.packageId)) continue;
+                const packageId = codePackageOf(contribution.packageId, undefined);
+                if (packageId === undefined) continue;
+                // The fold targets a group only when one is named (`if (c.group)`).
+                const group = typeof contribution.group === 'string' && contribution.group !== '' ? contribution.group : undefined;
+                for (const item of Array.isArray(contribution.items) ? contribution.items : []) {
+                    const id = (item as { id?: unknown } | null | undefined)?.id;
+                    if (typeof id !== 'string' || id === '') continue;
+                    navs.push({ kind: 'nav', app, ...(group !== undefined ? { group } : {}), name: id, packageId });
+                }
+            }
+        }
+    }
+
     const kindOrder = { field: 0, flow: 1 } as const;
-    return contributions.sort((a, b) => a.object.localeCompare(b.object)
+    contributions.sort((a, b) => a.object.localeCompare(b.object)
         || kindOrder[a.kind] - kindOrder[b.kind]
         || a.name.localeCompare(b.name)
         || a.packageId.localeCompare(b.packageId));
+    navs.sort((a, b) => a.app.localeCompare(b.app)
+        || Number(a.group !== undefined) - Number(b.group !== undefined)
+        || (a.group ?? '').localeCompare(b.group ?? '')
+        || a.name.localeCompare(b.name)
+        || a.packageId.localeCompare(b.packageId));
+    return [...contributions, ...navs];
 }
 
 /**
@@ -3376,6 +4442,92 @@ function ownDocumentsOf(items: any[], type: string, packageId: string, registry:
         out.push(artifact);
     }
     return out;
+}
+
+/**
+ * [#29872, ADR-0146 D8 item 3 / D10] The `objectExtensions` entries of
+ * `packageId` that its `object_extension` `items` do not already carry: each
+ * `'extend'` contribution the registry holds for the package
+ * (`SchemaRegistry.getObjectExtensionsOf`), whose target no item names. Those
+ * are the extensions a manifest's `objectExtensions` registered
+ * (`ObjectQL.registerApp`, which files no item): a package installed through
+ * install-local, or a code package. Without them the package's export carried
+ * none of its extensions, so a deployment restored from an export lost the
+ * fields on its next export.
+ *
+ * A registry that cannot answer (a double predating the method) adds none,
+ * as before. ⛔ Never the owner's: an extension is exported once, by the
+ * package that contributes it; the owner's export carries its object without
+ * it (the per-package layer's `onlyExtensionsOf`).
+ */
+function registeredExtensionsOf(items: readonly any[], packageId: string, registry: any): any[] {
+    if (typeof registry?.getObjectExtensionsOf !== 'function') return [];
+    const named = new Set(items.map((it) => (it as { extend?: unknown } | null)?.extend));
+    const registered = registry.getObjectExtensionsOf(packageId);
+    return (Array.isArray(registered) ? registered : []).filter((ext: { extend?: unknown }) => !named.has(ext?.extend));
+}
+
+/**
+ * [#29760] Whether this runtime serves metadata type `type` (the canonical
+ * singular): whether its live type vocabulary lists it under either spelling
+ * (`getMetaTypes`, the one accessor that answers "which types exist here" for
+ * the `/meta` listing too; each listed name folded through
+ * `PLURAL_TO_SINGULAR`, as its other callers fold it). The question
+ * {@link assemblePackageManifest} asks only after a per-type read threw, to
+ * tell the one throw it may skip, a type this runtime does not serve, from a
+ * failed read of a type it does.
+ *
+ * Fail closed: a protocol that brings no `getMetaTypes`, or whose vocabulary
+ * cannot be read, has not shown the type unknown, so the type counts as served
+ * and its failed read refuses the export. ⛔ The listing's own failure is not
+ * reported: the refusal carries the read's failure, which is the one asked
+ * about.
+ */
+async function runtimeServesMetadataType(protocol: PackagesDomainProtocol, type: string): Promise<boolean> {
+    if (typeof protocol.getMetaTypes !== 'function') return true;
+    let types: unknown;
+    try {
+        types = (await protocol.getMetaTypes())?.types;
+    } catch {
+        return true;
+    }
+    if (!Array.isArray(types)) return true;
+    // The listing spells each type as its source stores it, singular or
+    // plural; folded to the singular the export loop asks with.
+    return types.some((listed) => typeof listed === 'string' && (PLURAL_TO_SINGULAR[listed] ?? listed) === type);
+}
+
+/**
+ * [#29760] The refusal of a package export one of whose per-type reads failed,
+ * for a type this runtime serves ({@link runtimeServesMetadataType}). The
+ * export is the package's whole content or no answer (the exit right, and the
+ * whole-or-absent rule of `PackageExportBundleSchema`, whose entries this
+ * function's caller produces): an export without the type's collection reads
+ * complete, and a reinstall from it lands without the type, telling nobody.
+ *
+ * The route's refusal family is kept, not a new code minted: the read's own
+ * declared `status` / `statusCode` and string `code` ride on unchanged (a `503`
+ * stays a `503`), so the door's `errorFromThrown(e, 500)` answers what it
+ * answered for the read's throw everywhere else, and an undeclared throw is
+ * its `500`. The sentence names the package and the type, and quotes the
+ * read's own message only where ADR-0112's disclosure rule lets a caught
+ * sentence be quoted ({@link clientFacingFailureText}); the read's error stays
+ * on `cause` for the server-side record.
+ */
+function packageExportTypeReadRefusal(packageId: string, type: string, cause: unknown): Error {
+    const quoted = clientFacingFailureText(cause, '');
+    const err: Error & { status?: number; code?: string; cause?: unknown } = new Error(
+        `Reading the '${type}' items of package '${packageId}' failed, so its export is refused `
+        + `rather than answered without them${quoted ? `: ${quoted}` : '.'}`,
+    );
+    err.cause = cause;
+    const thrown = cause as { status?: unknown; statusCode?: unknown; code?: unknown } | null | undefined;
+    const status = typeof thrown?.status === 'number' ? thrown.status
+        : typeof thrown?.statusCode === 'number' ? thrown.statusCode
+        : undefined;
+    if (status !== undefined) err.status = status;
+    if (typeof thrown?.code === 'string' && thrown.code !== '') err.code = thrown.code;
+    return err;
 }
 
 async function assemblePackageManifest(
@@ -3442,9 +4594,13 @@ context: HttpProtocolContext,
                 ? await protocol.getMetaItemsPerPackage({ type: singular, packageId })
                 : await protocol.getMetaItems({ type: singular, packageId });
             items = Array.isArray(res?.items) ? res.items : [];
-        } catch {
-            // Unknown/unsupported type for this runtime — skip.
-            continue;
+        } catch (e) {
+            // [#29760] Only a type this runtime does not serve is skipped. A
+            // failed read of a type it serves refuses the export, naming the
+            // package and the type: an export without that collection reads
+            // complete and is not (see {@link packageExportTypeReadRefusal}).
+            if (!(await runtimeServesMetadataType(protocol, singular))) continue;
+            throw packageExportTypeReadRefusal(packageId, singular, e);
         }
         // [#29563, ADR-0146 D8 item 3] …and, from that layer, never an item
         // that declares it overrides THIS package: that is the pair's
@@ -3473,6 +4629,16 @@ context: HttpProtocolContext,
         // `registerApp` filled, which the bare-slot copy never reaches), the
         // same body the layer serves for the name while no override is live.
         if (perPackageLayer) items = ownDocumentsOf(items, singular, packageId, registry);
+        // [#29872, ADR-0146 D8 item 3] …and a package's `objectExtensions` are
+        // every extension it contributes, however it was installed. The layer
+        // lists only the `object_extension` items (the stored rows the `/meta`
+        // doors write); a manifest's `objectExtensions` (a package installed
+        // through install-local, or a code package) are registered as the
+        // package's `'extend'` contributors with no item, so they are read back
+        // from the registry ({@link registeredExtensionsOf}). An item of the
+        // same target is the one exported: it is the stored body the registry's
+        // contribution was registered from.
+        if (plural === EXTENSIONS_KEY) items = [...items, ...registeredExtensionsOf(items, packageId, registry)];
         if (items.length === 0) continue;
         // [#5320] `views` is partitioned rather than dumped: the registry's
         // ADR-0017 dual-read returns the container AND its expanded per-view
@@ -3529,7 +4695,126 @@ context: HttpProtocolContext,
     if (namespace !== undefined && namespace !== null) manifest.namespace = namespace;
     const dependencies = pkg?.manifest?.dependencies;
     if (dependencies !== undefined && dependencies !== null) manifest.dependencies = { ...dependencies };
+    // [#28640 ruling ③A] Every connector map the served read withheld whole,
+    // named so an import can tell an incomplete map from one never written.
+    // Omitted, not emptied, when nothing was withheld.
+    const withheldMaps = await withheldConnectorMaps(protocol, packageId, manifest.connectors);
+    if (withheldMaps.length > 0) manifest.withheldMaps = withheldMaps;
     return manifest;
+}
+
+/** One entry of {@link PackageExportManifestSchema}'s `withheldMaps`. */
+type WithheldMap = NonNullable<PackageExportManifest['withheldMaps']>[number];
+
+/**
+ * [#28640 ruling ③A] The `withheldMaps` of an export: each header or
+ * environment-variable map of an exported connector that the served read
+ * withheld whole, as `{ type: 'connector', name, path }`, in the order the
+ * connectors are exported and, within one, the order the declaration lists
+ * the positions.
+ *
+ * The export writes SERVED items, so a withheld map is simply absent from the
+ * item, and an absence there cannot be told from a map never written. So the
+ * verdict is read where the redaction is decided: each exported connector's
+ * stored body, read on the protocol's by-name EXECUTION face
+ * (`getMetaItemForExecution`), is handed to the same `connector` redactor the
+ * served read ran, and every position it reports withheld that the
+ * declaration names is listed. Only that decision leaves this function, never
+ * a byte of the stored body: a position, and no header or variable name.
+ *
+ * A connector cannot be replaced by a declared override (`connector` is not an
+ * overridable type, ADR-0146 D2), so the by-name read under the package's id
+ * reads the item the per-package list served.
+ *
+ * ⛔ No verdict is guessed. A protocol without the execution face, or an
+ * exported connector the face answers no body for, is a failure: an export
+ * that writes this key promises that its absence means nothing was withheld.
+ */
+async function withheldConnectorMaps(
+    protocol: Pick<PackagesDomainProtocol, 'getMetaItemForExecution'>,
+    packageId: string,
+    connectors: unknown,
+): Promise<WithheldMap[]> {
+    if (!Array.isArray(connectors) || connectors.length === 0) return [];
+    const redact = getMetadataTypeRedactor('connector');
+    if (!redact) {
+        throw new Error(`[packages] export of '${packageId}': no 'connector' redactor is registered, so the export cannot name the connector maps the served read withheld.`);
+    }
+    if (typeof protocol.getMetaItemForExecution !== 'function') {
+        throw new Error(`[packages] export of '${packageId}': the metadata protocol has no execution read (getMetaItemForExecution), so the export cannot name the connector maps the served read withheld.`);
+    }
+    const positions: readonly WithheldMap['path'][] = PackageExportManifestSchema.shape.withheldMaps.unwrap().element.shape.path.options;
+    const withheld: WithheldMap[] = [];
+    for (const connector of connectors) {
+        const name = (connector as { name?: unknown } | null)?.name;
+        if (typeof name !== 'string') continue;
+        const stored = (await protocol.getMetaItemForExecution({ type: 'connector', name, packageId }))?.item;
+        if (!stored || typeof stored !== 'object') {
+            throw new Error(`[packages] export of '${packageId}': the execution read answered no body for connector '${name}', so the export cannot say whether its maps were withheld.`);
+        }
+        const { redactedKeys } = redact(stored as Record<string, unknown>);
+        for (const path of positions) {
+            if (redactedKeys.includes(path)) withheld.push({ type: 'connector', name, path });
+        }
+    }
+    return withheld;
+}
+
+/**
+ * [#28914] The answer of `GET /packages/export`: every package whose registry
+ * row's `source` is not `code`, enabled or not, each once, dependencies first,
+ * each entry exactly what `GET /packages/:id/export` answers for it
+ * ({@link assemblePackageManifest}, the one producer: ⛔ no item is assembled,
+ * cleaned or redacted a second way here). `PackageExportBundleSchema` is the
+ * contract; its docblock argues each rule.
+ *
+ *  - **Which packages.** A `code` row is registered by the deployment's own
+ *    code and travels with it, never with the bundle; the row's `source` is the
+ *    one key that says so (⛔ not `manifest.scope`, not `writable`).
+ *  - **Order.** ADR-0141 D5's, through the boot's own sorter
+ *    ({@link orderHydrationBatch}) over each row's declared dependency ids
+ *    ({@link declaredDependencyIds}): a `.custom` pair comes after its base,
+ *    and a cycle keeps the registry's listing order among its members.
+ *  - **Whole or absent.** A package whose export cannot be assembled fails the
+ *    read, naming that package; ⛔ never a bundle that silently lacks one.
+ */
+async function assemblePackageExportBundle(
+deps: DomainHandlerDeps,
+registry: any,
+context: HttpProtocolContext,
+): Promise<NonNullable<HttpDispatcherResult['response']>> {
+    const rows: any[] = Array.isArray(registry.getAllPackages?.()) ? registry.getAllPackages() : [];
+    const seen = new Set<string>();
+    const nodes: Array<{ item: string; label: string; packageIds: string[]; declaredIds: string[] }> = [];
+    for (const row of rows) {
+        if (row?.source === 'code') continue;
+        const id = row?.manifest?.id ?? row?.id;
+        if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
+        seen.add(id);
+        nodes.push({ item: id, label: id, packageIds: [id], declaredIds: declaredDependencyIds(row?.manifest) });
+    }
+    const packages: Record<string, any>[] = [];
+    for (const id of orderHydrationBatch(nodes).ordered) {
+        let manifest: Record<string, any> | null;
+        try {
+            manifest = await assemblePackageManifest(deps, id, registry, context);
+        } catch (e: any) {
+            const answer: any = deps.errorFromThrown(e, 500);
+            const error = answer?.body?.error;
+            if (error && typeof error.message === 'string') {
+                error.message = `The export of package '${id}' could not be assembled, so no bundle is answered: ${error.message}`;
+            }
+            return answer;
+        }
+        if (!manifest) {
+            return deps.error(
+                `The export of package '${id}' could not be assembled (the metadata protocol answered nothing for it), so no bundle is answered.`,
+                500,
+            );
+        }
+        packages.push(manifest);
+    }
+    return deps.success({ packages });
 }
 
 /**
@@ -3548,7 +4833,7 @@ async function applyPublishedSeeds(
 deps: DomainHandlerDeps,
 names: string[],
 _context: HttpProtocolContext,
-): Promise<{ success: boolean; inserted?: number; updated?: number; errors?: unknown[]; error?: string }> {
+): Promise<{ success: boolean; inserted?: number; updated?: number; errors?: unknown[]; error?: string; landed?: SeedAppliedLandedParsed[] }> {
     // [#4127] `protocol` keeps its `any` — no written contract, so this is where
     // the ledger honestly ends. `metadata` and `ql` are both evidenced now,
     // `objectql` as of batch 3: it is the same instance the `data` slot holds.
@@ -3672,7 +4957,8 @@ _context: HttpProtocolContext,
     const parsedRequest = SeedLoaderRequestSchema.safeParse({
         seeds: datasets,
         config: {
-            defaultMode: 'upsert',
+            // [#30081] No mode of its own: each seed's `mode` is the spec
+            // default (`ignore`, create-only) unless the seed declares one.
             multiPass: true,
         },
     });
@@ -3683,5 +4969,9 @@ _context: HttpProtocolContext,
         inserted: r.summary.totalInserted,
         updated: r.summary.totalUpdated,
         errors: [...readErrors, ...(r.errors ?? [])],
+        // [#30348] The same per-object split (created vs matched, capped) the
+        // in-protocol apply reports — one projection, imported, so the
+        // receipt's two producers cannot disagree about which rows landed.
+        landed: seedAppliedLanded(r.results),
     };
 }

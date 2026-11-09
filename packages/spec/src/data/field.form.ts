@@ -78,8 +78,8 @@ export const fieldForm = defineForm({
         // #19992 — the help text follows the key's describe ("Total digits")
         // and the object designer's quick-add row (`object.form.ts`): the old
         // "Decimal places (e.g., 2 for $10.50)" taught the one reading the
-        // contract refuses. A currency's decimal places are its ISO 4217 minor
-        // unit and are declared nowhere.
+        // contract refuses. A currency's decimal places are its CLDR fraction
+        // digits and are declared nowhere.
         { field: 'precision', visibleWhen: "data.type == 'currency' || data.type == 'number'", helpText: 'Total digits' },
         { field: 'scale', visibleWhen: "data.type == 'number'", helpText: 'Number of decimal digits' },
         // `useGrouping` is shown once it is enforced (ruling 5916202706: offer
@@ -218,6 +218,14 @@ export const fieldForm = defineForm({
         // their translation exactly as they are today. The two branches are
         // mutually exclusive, so no author ever sees both spellings at once.
         //
+        // `user` shares the `lookup` branch (#29415): since #29253 a declared
+        // `deleteBehavior` on a `user` field takes effect when the user is
+        // deleted, with all three outcomes legal, so the designer offers the
+        // key it honours. A `user` field has NO default — declaring nothing
+        // keeps it out of the delete walk — so the control writes a value only
+        // when the author picks one; the enum's advertised `default` is a
+        // `lookup` fact the select does not prefill.
+        //
         // `helpText` is identical on both — they share one i18n key
         // (`metadataForms.field.fields.deleteBehavior`), so divergent text would
         // collide silently.
@@ -232,7 +240,7 @@ export const fieldForm = defineForm({
         // target is always `sys_user`), which is why this row is not grouped
         // under that one's visibility.
         { field: 'referenceNameVisible', label: 'Show Name When Unreadable', visibleWhen: "data.type in ['lookup','user']", helpText: "Lets a reader of this record see the referenced record's name, as plain text with no link, even when they may not open that record. Nothing else of it is shown, and a field-level rule on the name still holds (the name then reads Record # and the id). Unset: such a reference shows as a restricted record." },
-        { field: 'deleteBehavior', visibleWhen: "data.type == 'lookup'", helpText: 'What happens when referenced record is deleted' },
+        { field: 'deleteBehavior', visibleWhen: "data.type in ['lookup','user']", helpText: 'What happens when referenced record is deleted' },
         { field: 'deleteBehavior', type: 'select', visibleWhen: "data.type == 'master_detail'", helpText: 'What happens when referenced record is deleted', options: [
           { label: 'Cascade (delete children)', value: 'cascade' },
           { label: 'Restrict (block the delete)', value: 'restrict' },

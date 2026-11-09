@@ -51,9 +51,9 @@
  *   registration could part from it. The getter reads the field the handler
  *   read, when it read it: slice 2's batch shape, unbound, per the seat's
  *   provider ruling (no shipped provider reads `this`).
- * - `resolveProtocol` is a METHOD, handed over as a closure that calls it on
- *   the server at call time, so a test double or spy set on the server is
- *   still the one the body reaches.
+ * - `resolveProtocol` and [#30218] `resolveRequestEnvironmentId` are METHODS,
+ *   each handed over as a closure that calls it on the server at call time, so
+ *   a test double or spy set on the server is still the one the body reaches.
  *
  * The inner method's head declares the bindings every `/meta` group reads and
  * hands them over as ONE parameter, {@link MetaRouteScope}, built once there;
@@ -94,6 +94,7 @@ import { wiredEngineOrLoud, type RestServer } from './rest-server.js';
 export interface MetaObjectStateRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly objectQLProvider: RestServer['objectQLProvider'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveProtocol: RestServer['resolveProtocol'];
 }
 
@@ -186,9 +187,13 @@ export function registerMetaObjectStateRoute(this: MetaObjectStateRouteHost, sco
                 // which the seam's declared type cannot prevent — reaches the
                 // same answer as one that rejects (commit add6a1b1c) instead of
                 // escaping past a `.catch` that never came into existence.
+                //
+                // [#30218] Asked for the REQUEST's environment, through the
+                // shared resolver, so a hosted environment's object is judged
+                // by its own engine's registry, not the host kernel's.
                 const ql = await wiredEngineOrLoud(
                     Boolean(this.objectQLProvider),
-                    () => this.objectQLProvider!(environmentId),
+                    async () => this.objectQLProvider!(await this.resolveRequestEnvironmentId(environmentId, req)),
                 );
                 // [#7557, #24210] The registry is a resolution reader and
                 // keeps serving a disabled package's object, so this API

@@ -7,6 +7,7 @@
  */
 
 import { isInlineExcludedFieldType, isMaskedFieldType } from '@object-ui/fields';
+import { isExpressionComputedField } from '@object-ui/core';
 
 /**
  * Field types the PLATFORM computes — the value is machine-owned and no user
@@ -77,6 +78,22 @@ export function isComputedFieldType(
     TEXTUAL_REF_FALLBACK_TYPES.has(viewFieldType as string) ||
     TEXTUAL_REF_FALLBACK_TYPES.has(objectFieldType as string)
   );
+}
+
+/**
+ * The detail EDIT gate's computed question, asked of the object field itself:
+ * {@link isComputedFieldType}'s type union, OR the object field carries an
+ * `expression` (`isExpressionComputedField`, objectstack#31759). A stored
+ * field with an `expression` is computed by the engine on every write, so a
+ * typed value never stands, whatever its type. The one helper the details
+ * body, the highlight strip and the path stage call, so the three cannot
+ * drift. Narrow-only like the type union: it can only lock a field.
+ */
+export function isComputedDetailField(
+  viewFieldType: unknown,
+  objectDefField: { type?: unknown; expression?: unknown } | null | undefined,
+): boolean {
+  return isComputedFieldType(viewFieldType, objectDefField?.type) || isExpressionComputedField(objectDefField);
 }
 
 /**

@@ -69,6 +69,11 @@
  * other module this one imports, so the evaluation order of every module is
  * what it was. The published build bundles both files into one, where the
  * cycle does not exist.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import type { ServiceObject } from '@objectstack/spec/data';
@@ -120,7 +125,65 @@ function cascadeReachOf(set: CascadeDeleteSet, object: string, id: unknown): Map
   return reach;
 }
 
-/** The body of `ObjectQL#referenceProbeFilter`; the method's docblock there is its contract. */
+/**
+ * [#9362] The dependents probe's `where`, spelled for the KIND of reference
+ * field it is aimed at.
+ *
+ * A single-valued `lookup` / `master_detail` stores a scalar foreign key, and
+ * bare equality is the right question about it. A MULTI-VALUED reference
+ * field stores an ARRAY, and every SQL backend in this repo puts that array
+ * in a JSON TEXT column. [#18408] Which of the two a field is, is
+ * {@link declaredMultiValued} — the one predicate the storage side asks
+ * (#17469) — ⛔ never a raw `field.multiple`: `master_detail` and `tree` are
+ * outside `MULTI_CAPABLE_TYPES`, so the flag on one of those buys a JSON
+ * column from nobody, and aiming `$contains` at the scalar column the driver
+ * really built is the mirror image of the defect below.
+ *
+ * Aiming bare equality at a multi-valued column compares
+ * the whole serialization (`["a","b"]`) against one id, which can never hold;
+ * `driver-sql` refuses the spelling outright (`INVALID_FILTER` / 400, #7398),
+ * and that refusal is correct and stays. Until this method existed the probe
+ * built bare equality for both kinds, so every object pointed at by any
+ * registered `multiple: true` lookup had its delete refused with a 400 — on
+ * the stock showcase, `showcase_account`, with an EMPTY dependent table:
+ * the fault is schema-driven, not data-driven, because the probe runs per
+ * DECLARED relation.
+ *
+ * The multi-value spelling is `$contains`, which is what the refusal itself
+ * prescribes and the one membership spelling every driver here answers. On a
+ * column the driver holds declared multi-valued it asks MEMBERSHIP, as
+ * `FILTER_OPERATORS`' `$contains` docblock (`@objectstack/spec`) declares for
+ * a JSON-stored column: `driver-sql` (and `driver-sqlite-wasm` and the local
+ * `driver-turso`, which extend it) compiles a per-dialect membership
+ * construct, `driver-memory` a mingo `$elemMatch`, and `driver-mongodb` the
+ * same `$elemMatch`. No public filter surface is widened: `$contains` is
+ * already declared, and this is the only construction site that changes.
+ *
+ * Membership answers EXACTLY on a well-formed slot, but a backend that does
+ * not hold the declaration (a table it was never told about) answers the
+ * SUBSTRING reading instead, which is a SUPERSET: with ids `acc_1` and
+ * `acc_10`, a row holding `acc_10` also matches a probe for `acc_1`. That is
+ * why the caller still narrows the rows exactly through
+ * {@link ObjectQL.storedReferenceIncludes} — over-matching here would make
+ * `cascade` DELETE and `set_null` clear rows that never referenced this
+ * record, which is worse than the 400 being fixed. The pushdown's only job is
+ * to keep the probe from reading the whole table.
+ *
+ * ⚠️ Membership is array-only on every backend that answers it, so a slot
+ * holding an off-shape bare scalar (the write door never stores one, it wraps
+ * a scalar; out-of-band data can) is not matched by the pushdown, and the
+ * scalar arm of {@link ObjectQL.storedReferenceIncludes} never sees that row.
+ *
+ * The `$or` limb covers the other direction — a FALSE NEGATIVE, which on an
+ * integrity guard is the fail-OPEN that #8895 ruled out. An id needing JSON
+ * escaping (a quote, a backslash) appears in the serialized text in its
+ * ESCAPED form, so a backend answering the substring reading over that text
+ * would miss the row for the raw id; a membership test, and a document or
+ * in-memory backend, compares the element itself and needs the RAW form. Both
+ * are asked whenever they differ, and the exact narrowing discards whatever
+ * the extra limb over-matched. Identical for an ordinary id, which is every
+ * id this engine generates.
+ */
 export function referenceProbeFilter(
   fieldName: string,
   fdef: { type?: unknown; multiple?: unknown },
@@ -141,7 +204,48 @@ export function referenceProbeFilter(
   };
 }
 
-/** The body of `ObjectQL#recordReferenceCheckElevation`; the method's docblock there is its contract. */
+/**
+ * [#12166, ruling constraint 3] File the reference-check elevation, BOTH
+ * halves: `triggeredBy` = the operator who asked for the delete,
+ * `executedAs: 'system'` = the identity the check actually ran under.
+ *
+ * ## Why a record exists at all
+ *
+ * The elevation is the whole of what this card changed, and an elevation
+ * nobody can see afterwards is the thing a security reviewer has no way to
+ * audit. The ruling names the Salesforce/Dataverse ledger shape for exactly
+ * this reason: a platform-executed integrity action is attributable to the
+ * human who triggered it, not laundered into "system did something".
+ *
+ * ## Why the LOGGER and not a `sys_audit_log` row
+ *
+ * Stated plainly, because a narrow audit edge has to be visible to be honest
+ * (`read-audit.ts` takes the same posture about its own narrowing):
+ *
+ * The elevated operation is a READ, and `plugin-audit`'s read writer declares
+ * — and pins — that a system-elevated read produces NO row, deliberately:
+ * those are the platform reading for its own bookkeeping, and recording them
+ * would bury the human views that ledger exists to make findable. Minting a
+ * row here would either contradict that declared boundary or require the
+ * engine to reach into a plugin it does not depend on. The engine's logger is
+ * the channel it owns, and it is where the reporting deployment read the
+ * defect in the first place — the issue's evidence is a server log line.
+ *
+ * So: this is a LOG record, at `info`, and the honest limit of it is that a
+ * deployment which does not retain engine logs retains no trace. A durable
+ * `sys_audit_log` row for the elevation is a follow-up that belongs to
+ * plugin-audit, which owns that row shape.
+ *
+ * `debug` was not an option: a record that is off by default in production is
+ * not an audit record.
+ *
+ * ⛔ The record names the referenced OBJECT and the relation FIELD — declared
+ * metadata — and never a row id, a field value, or a count. Constraint 2
+ * governs what the CALLER is told; this is the server-side ledger and could
+ * defensibly say more, but saying more here is how a count reaches a support
+ * transcript, and the two surfaces are kept on one rule so neither has to be
+ * re-audited alone.
+ */
 export function recordReferenceCheckElevation(
   this: Pick<DeleteCascadeHost, 'logger'>,
   object: string,
@@ -247,7 +351,35 @@ export function collectCascadeDeleteObjects(
   return named;
 }
 
-/** The body of `ObjectQL#collectCascadeDeleteSet`; the method's docblock there is its contract. */
+/**
+ * [#22305] Phase 1 of {@link cascadeDeleteRelations}: every record a by-id
+ * delete of `object`/`id` removes, the root included, collected READ-ONLY.
+ *
+ * Breadth-first across every relation whose resolved behaviour is
+ * `cascade`, read through the walk's own two readings — which relations
+ * point at an object ({@link cascadeRelationBehavior}) and which rows
+ * reference a record ({@link probeReferencingRows}: system identity, the
+ * same filter, the same missing-table and multi-value handling) — so the
+ * two phases cannot disagree about which rows a cascade reaches. A record
+ * already in the set is not expanded again, so a cycle in the data (a
+ * self-reference, two objects cascading into each other) terminates.
+ *
+ * The cost is one extra probe per CASCADING relation per member, since the
+ * walk probes those relations again as it deletes. `restrict` and
+ * `set_null` relations are not read here. Every probe here is an elevated
+ * read, so it files its #12166 record before it runs, through the
+ * once-per-record ledger the walk shares ({@link fileReferenceCheckElevation}).
+ *
+ * [#24964] …except for {@link inspectCascadeDelete}, which passes
+ * `fileElevations: false`: that record says "read as system FOR THE DELETE
+ * of" the record, and an inspection deletes nothing, so filing it there would
+ * put a delete that never happened in the log. The reads are the same.
+ *
+ * [#27004] From a root SET, level by level: the records found at one depth
+ * are probed together, per object and per relation, through
+ * {@link probeReferencingRowsOfSet}. The set and its edges are the ones the
+ * record-by-record walk collected.
+ */
 export async function collectCascadeDeleteSet(
   this: Pick<DeleteCascadeHost, 'cascadeRelationBehavior' | 'fileReferenceCheckElevation' | 'probeReferencingRowsOfSet'>,
   object: string,
@@ -312,7 +444,38 @@ export async function collectCascadeDeleteSet(
   return set;
 }
 
-/** The body of `ObjectQL#refuseRestrictsInsideOwnCascade`; the method's docblock there is its contract. */
+/**
+ * [#26718] Before the cascade writes anything: refuse the delete when an
+ * AUTHORED `restrict` is held by a row the cascade would remove only because
+ * the record that restrict protects is removed.
+ *
+ * The deleting walk judges a `restrict` against rows OUTSIDE the cascade set
+ * alone (#22305), and a row inside it was exempt whatever put it there. That
+ * exemption is right for a row the cascade reaches through ANOTHER record (a
+ * contract and the contact it restricts, both details of the account being
+ * deleted: the account's delete removes both, and neither is left dangling).
+ * It was wrong for a row reached THROUGH the very record it protects: a child
+ * holding a `master_detail` and a `restrict` lookup to the same parent is in
+ * that parent's set by its own master_detail, so the restrict was never
+ * asked and the cascade deleted the child — the record the author declared
+ * undeletable. A grandchild under that parent holding the restrict is the
+ * same case one level down.
+ *
+ * So for every member, every relation whose RESOLVED behaviour is `restrict`
+ * ({@link cascadeRelationBehavior}, an authored `restrict` on a lookup,
+ * tree or master_detail) is probed here when its object has a member in the
+ * reach of that member ({@link cascadeReachOf}); a referencing row in the
+ * reach refuses with the walk's own `DELETE_RESTRICTED`
+ * ({@link deleteRestrictedError}). Every restrict is judged before the
+ * first cascade, so the outcome no longer depends on the order the fields or
+ * objects are declared in, and nothing has been written when it refuses.
+ *
+ * ⛔ The required-lookup escalation (`set_null` on a required field read as
+ * `restrict`) is not judged here: it restricts because a required reference
+ * cannot be CLEARED, and a row the cascade deletes is never cleared. It keeps
+ * the #22305 rule. Neither does this replace the walk's judgement of rows
+ * outside the set, which is unchanged.
+ */
 export async function refuseRestrictsInsideOwnCascade(
   this: Pick<DeleteCascadeHost, 'cascadeRelationBehavior' | 'fileReferenceCheckElevation' | 'probeReferencingRowsOfSet' | 'deleteRestrictedError' | 'referenceProbeFilter'>,
   cascadeSet: CascadeDeleteSet,
@@ -396,7 +559,13 @@ export async function refuseRestrictsInsideOwnCascade(
   }
 }
 
-/** The body of `ObjectQL#deleteRestrictedError`; the method's docblock there is its contract. */
+/**
+ * The `DELETE_RESTRICTED` refusal of deleting `object`/`id` because
+ * `dependents` of `childName` reference it via `fieldName`. One builder for
+ * the deleting walk ({@link walkReferencingRelations}) and the judgement
+ * before it ({@link refuseRestrictsInsideOwnCascade}), so the two answer one
+ * envelope.
+ */
 export async function deleteRestrictedError(
   this: Pick<DeleteCascadeHost, 'validationMessageContext' | 'dependentCountIsDisclosable' | 'objectDisplayLabel'>,
   args: {

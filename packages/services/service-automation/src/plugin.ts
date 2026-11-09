@@ -3,6 +3,7 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
+import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
     Connector,
@@ -20,7 +21,10 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import type { MetadataMutationEvent, SysMetadataEngine } from '@objectstack/metadata-protocol';
 import { SysMetadataRepository, shadowedStoredRowsOf } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
-import type { AutomationEngineOptions, FlowHistorySource, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+import type { AutomationEngineOptions, FlowHistorySource, FlowNameResolver, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+// [ADR-0150 D3] The ONE package-scoped resolver, read through its exports only
+// — never a second implementation of the rule in this package.
+import { resolvePackageScopedName } from '@objectstack/objectql';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
@@ -67,6 +71,8 @@ import {
 } from './connector-credentials.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
+import { connectorNameResolver, packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
+import type { PackageScopedRefusal, PackageScopedRegistry } from '@objectstack/objectql';
 import { createConnectorRequestSigner } from './request-signing/index.js';
 import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
 import {
@@ -115,6 +121,17 @@ import {
     type SuspendedRunStoreEngine,
 } from './suspended-run-store.js';
 import { ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
+import {
+    backfillStoredReferencePackagesAtBoot,
+    storedReferenceHolderOf,
+    type StoredReferenceBackfillEngine,
+    type StoredReferenceType,
+} from './stored-reference-package-backfill.js';
+import {
+    logFlowDispatchRekey,
+    rekeyFlowDispatchesByPackage,
+    type FlowDispatchRekeyEngine,
+} from './flow-dispatch-key-package-backfill.js';
 import {
     pullConnectorSource,
     type ConnectorPullOptions,
@@ -578,6 +595,101 @@ export function nonHostDeclaringPackageOf(
     const name = (entry as { name?: unknown }).name;
     const declaration = typeof name === 'string' ? readers.registeredDeclaration!(name, stamp) : undefined;
     return declaresSameProviderBinding(entry, declaration, stamp) ? undefined : { packageId: stamp, why: 'stored' };
+}
+
+/**
+ * The package registry ObjectQL serves, read where it is used, or `undefined`
+ * when the host serves no ObjectQL: the installed manifests the customization
+ * pair lookup reads (`installedManifestsOf`). Without one, no package is
+ * installed, and every package is its own App. Absent is read the way this
+ * plugin's other optional `objectql` reads it (`flowHistoryReader`, the
+ * suspended-run store): a `getService` that throws is no service, whichever
+ * kernel spelled the refusal.
+ */
+function objectqlRegistryOf(ctx: PluginContext): InstalledPackageSource | undefined {
+    try {
+        return ctx.getService<{ registry?: InstalledPackageSource }>('objectql')?.registry;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * How long the dispatch ledger waits for the boot's re-key of its keys before
+ * it answers anyway (`ObjectStoreFlowDispatchStore.holdUntil`). The re-key
+ * reads one page per 500 rows of a 30-day ledger, so it finishes in seconds;
+ * the bound only keeps a re-key that never finishes from stopping every
+ * scheduled flow.
+ */
+const DISPATCH_REKEY_HOLD_MS = 120_000;
+
+/**
+ * [ADR-0150 D8 rows R8, R9, R10 and R11] At `kernel:bootstrapped`, once the
+ * registry's bare-name holders are sealed, the automation service's stored
+ * references gain the package that holds the item they name: paused runs,
+ * flow credentials and connector connections get their package column
+ * (`stored-reference-package-backfill.ts`), and dispatch keys inside
+ * retention get their scoped copy (`flow-dispatch-key-package-backfill.ts`).
+ * Each asks the one D3 rule with no caller — a flow through
+ * `AutomationEngine.flowHolder`, a connector through the same resolver the
+ * connector reader uses — so a row records WHICH item it belongs to (D4).
+ *
+ * The dispatch ledger is held from here until that run has finished, so a
+ * trigger's first claim after an upgrade reads the re-keyed rows. A kernel
+ * that dispatches no boot-phase hook runs neither pass and holds nothing:
+ * the triggers' transition read still treats a bare-shape claim as the same
+ * window's. Never fails the boot.
+ */
+function registerStoredReferenceBackfill(
+    ctx: PluginContext,
+    engine: AutomationEngine,
+    dataEngine: unknown,
+    dispatchStore: ObjectStoreFlowDispatchStore,
+): void {
+    if (!kernelDispatchesBootPhaseHooks(ctx)) return;
+    let release: () => void = () => {};
+    const rekeyed = new Promise<void>((resolve) => { release = resolve; });
+    dispatchStore.holdUntil(rekeyed, DISPATCH_REKEY_HOLD_MS, () => {
+        ctx.logger.warn(
+            `[automation] the boot's re-key of sys_flow_dispatch keys had not finished after ${DISPATCH_REKEY_HOLD_MS / 1000}s — ` +
+                'dispatch claims proceed now; a window claimed under its bare key before the upgrade is still read as claimed.',
+        );
+    });
+    const connectorHolder = connectorNameResolver(ctx);
+    const holderOf = (type: StoredReferenceType, name: string) =>
+        storedReferenceHolderOf(type === 'flow' ? engine.flowHolder(name) : connectorHolder(name, null));
+    ctx.hook('kernel:bootstrapped', async () => {
+        try {
+            const registry = objectqlRegistryOf(ctx) as { bareNameHoldersAreSealed?: boolean; getObject?(name: string): unknown } | undefined;
+            if (registry?.bareNameHoldersAreSealed !== true) return;
+            const carries = (object: string): boolean => {
+                try {
+                    return Boolean(registry.getObject?.(object));
+                } catch {
+                    return false; // a registry that cannot answer is not an answer
+                }
+            };
+            await backfillStoredReferencePackagesAtBoot(dataEngine as StoredReferenceBackfillEngine, carries, holderOf, ctx.logger);
+            if (carries('sys_flow_dispatch')) {
+                try {
+                    const report = await rekeyFlowDispatchesByPackage(dataEngine as FlowDispatchRekeyEngine, (flow) => holderOf('flow', flow));
+                    logFlowDispatchRekey(report, ctx.logger);
+                } catch (err) {
+                    ctx.logger.warn(
+                        '[automation] the sys_flow_dispatch re-key did not finish: keys claimed before the upgrade keep their bare ' +
+                            'shape, every trigger still reads them as the same window\'s claim, and the next boot tries again.',
+                        { error: err instanceof Error ? err.message : String(err) },
+                    );
+                }
+            }
+        } catch (err) {
+            ctx.logger.warn('[automation] the stored-reference package backfill did not run — it is tried again at the next boot', {
+                error: err instanceof Error ? err.message : String(err),
+            });
+        } finally {
+            release();
+        }
+    });
 }
 
 /**
@@ -1121,6 +1233,32 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
         }
         if (typeof protocol?.packagedArtifactOwner !== 'function') return undefined;
         return protocol.packagedArtifactOwner({ type: 'flow', name });
+    };
+}
+
+/**
+ * [ADR-0150 D3] The engine's reader over the one package-scoped resolver:
+ * `resolvePackageScopedName` from `@objectstack/objectql`, asked of the
+ * registry ObjectQL serves, for the `flow` type. See
+ * `AutomationEngine.setFlowNameResolver` for the two seams that read it.
+ *
+ * Resolved at QUESTION time, never at boot, for {@link packagedFlowReader}'s
+ * reason. A composition with no ObjectQL — or whose registry offers none of
+ * the package-scoped reads — has no registry to ask, so the answer is
+ * `undefined` and the engine's own flow map answers as before: no item is
+ * named that the engine does not hold, and nothing is guessed.
+ */
+export function flowNameResolver(ctx: Pick<PluginContext, 'getService'>): FlowNameResolver {
+    return (name, callerPackageId) => {
+        let registry: PackageScopedRegistry | undefined;
+        try {
+            // The same slice reader the connector reconcile asks (E5's `packageScopedRegistryOf`).
+            registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
+        } catch {
+            return undefined;
+        }
+        if (!registry) return undefined;
+        return resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId });
     };
 }
 
@@ -1709,6 +1847,7 @@ export class AutomationServicePlugin implements Plugin {
             set: (request) => this.setConnectorCredential(ctx, request),
             clear: (request) => this.clearConnectorCredential(ctx, request),
             attachClusterPubSub: (pubsub, nodeId) => this.attachCredentialClusterPubSub(ctx, pubsub, nodeId),
+            resyncFromCluster: () => this.resyncCredentialClusterPubSub(ctx),
         });
 
         // [ADR-0015 D7] The connector credential source: a datasource that
@@ -1742,6 +1881,16 @@ export class AutomationServicePlugin implements Plugin {
         // its locked-base verdict reads — never the stamps on a definition.
         // See `packagedFlowReader`.
         this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
+
+        // [ADR-0150 D3] Which item a bare flow name means, for a caller of a
+        // package or of none, is the one package-scoped resolver's answer over
+        // the ObjectQL registry, read at question time. See `flowNameResolver`.
+        this.engine.setFlowNameResolver(flowNameResolver(ctx));
+
+        // [ADR-0150 D3, epic #31527 child E5] Which declared connector instance
+        // a flow's bare `connectorConfig.connectorId` means is the same
+        // resolver's answer for the flow's package. See `connectorNameResolver`.
+        this.engine.setConnectorNameResolver(connectorNameResolver(ctx));
 
         // [#28405] A waiting run resumes on the flow body it started on, read
         // back from the metadata history once the flow was republished. See
@@ -1912,7 +2061,12 @@ export class AutomationServicePlugin implements Plugin {
                     // registration, so `runObjectRegistered` vouches for both
                     // tables. Without it the engine's claim() degrades to
                     // in-process dedup and says so once.
-                    this.engine.setFlowDispatchStore(new ObjectStoreFlowDispatchStore(dataEngine));
+                    const dispatchStore = new ObjectStoreFlowDispatchStore(dataEngine);
+                    // [ADR-0150 D8 rows R8–R11] The stored references gain their
+                    // package at `kernel:bootstrapped`; the ledger is held until
+                    // its keys are re-keyed. See {@link registerStoredReferenceBackfill}.
+                    registerStoredReferenceBackfill(ctx, this.engine, dataEngine, dispatchStore);
+                    this.engine.setFlowDispatchStore(dispatchStore);
                     ctx.logger.info('[Automation] Flow-dispatch idempotency ledger enabled (sys_flow_dispatch)');
                     // [ADR-0126 §4/§7.2] The packaged-flow activation ledger.
                     // Without it, `toggleFlow` degrades to an in-process flip
@@ -2075,6 +2229,8 @@ export class AutomationServicePlugin implements Plugin {
                         // (`resolveAuthzContext` copies it off this same
                         // resolution), derived once there and never here.
                         ...(grants.posture ? { posture: grants.posture } : {}),
+                        // [ADR-0151 D3] An AI service account runs as an agent.
+                        ...(grants.principalKind ? { principalKind: grants.principalKind } : {}),
                         ...(tenantId ? { tenantId } : {}),
                     };
                 });
@@ -2189,7 +2345,7 @@ export class AutomationServicePlugin implements Plugin {
                 const def = entry.definition as { name?: string };
                 if (!def?.name) continue;
                 try {
-                    this.engine.registerFlow(entry.name, def as never);
+                    this.engine.registerFlow(entry.name, def as never, entry.contender);
                     this.syncedFlowNames.add(entry.name);
                     // The receipt, so the shadowed contender is observable at all.
                     if (entry.shadowing) this.engine.recordFlowShadowing(entry.shadowing);
@@ -2569,6 +2725,31 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
+     * [ADR-0150 D3] The refusal of every enabled provider-bound declared
+     * connector name that resolves to no single holder, read over the ObjectQL
+     * registry ({@link refusedConnectorNames}). A composition with no registry
+     * has no package coordinate to resolve against, and refuses nothing here.
+     */
+    private refusedDeclaredConnectorNames(ctx: PluginContext, declared: readonly unknown[]): Map<string, PackageScopedRefusal> {
+        let registry: PackageScopedRegistry | undefined;
+        try {
+            registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
+        } catch {
+            registry = undefined; // no registry service
+        }
+        if (!registry) return new Map();
+        const names: string[] = [];
+        for (const raw of declared) {
+            const entry = raw as DeclaredConnectorItem;
+            if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
+            if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
+            if (entry.enabled === false) continue;
+            names.push(entry.name);
+        }
+        return refusedConnectorNames(registry, names);
+    }
+
+    /**
      * [#28534] The readers {@link nonHostDeclaringPackageOf} judges a
      * connector entry's origin with, off the `objectql` engine the declared
      * items are listed out of ({@link readDeclaredConnectorItems}): its package
@@ -2875,6 +3056,16 @@ export class AutomationServicePlugin implements Plugin {
             ctx.logger.error(msg, undefined, cause === undefined ? undefined : describeThrownForLog(cause));
         };
 
+        // [ADR-0150 D3, epic #31527 child E5] A declared name that resolves to
+        // no single holder (two packages declare it) is refused, naming every
+        // candidate, and never materialized: no instance is picked by list
+        // order ({@link refusedConnectorNames}).
+        const refusedNames = this.refusedDeclaredConnectorNames(ctx, declared);
+        for (const [name, refusal] of refusedNames) {
+            const stored = declared.some((raw) => (raw as DeclaredConnectorItem)?.name === name && storedEntry(raw));
+            fail(`[Automation] connector instance '${name}' is not materialized: ${refusal.message}`, undefined, stored);
+        }
+
         // Build the desired set: enabled provider-bound instances, keyed by name.
         // A descriptor (no `provider`) or an `enabled: false` instance is not
         // desired — if we materialized it before, it is torn down below.
@@ -2885,6 +3076,7 @@ export class AutomationServicePlugin implements Plugin {
             if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
             const bound = entry as DeclaredConnectorItem & { name: string; provider: string };
             if (bound.enabled === false) continue;
+            if (refusedNames.has(bound.name)) continue;
             // [#28713] Held until every plugin has started ({@link holdStoredEntries}).
             if (this.holdStoredEntries && storedEntry(bound)) {
                 this.storedEntriesHeld = true;
@@ -4747,6 +4939,22 @@ export class AutomationServicePlugin implements Plugin {
         return () => this.detachCredentialClusterPubSub();
     }
 
+    /**
+     * The `cluster.resync` answer for the credential lane: the reconcile a
+     * peer's signal runs, once, because which references changed during the
+     * outage is what the lost signals carried. A no-op until a transport is
+     * attached. A failure is the caller's to log (the bridge does).
+     */
+    private async resyncCredentialClusterPubSub(ctx: PluginContext): Promise<void> {
+        const cluster = this.credentialCluster;
+        if (!cluster) return;
+        ctx.logger.info(
+            `[Automation] the cluster connection returned after an outage; reconciling the connectors on node '${cluster.nodeId}' `
+                + 'in case a peer wrote a connector credential meanwhile.',
+        );
+        await this.materializeDeclaredConnectors(ctx, { fatal: false });
+    }
+
     /** [#27428] Tear down the credential cluster wiring. Safe to call multiple times. */
     private detachCredentialClusterPubSub(): void {
         const current = this.credentialCluster;
@@ -5220,10 +5428,20 @@ export class AutomationServicePlugin implements Plugin {
      */
     private resolveFlowContenders(ctx: PluginContext, items: readonly unknown[]) {
         const engine = this.engine;
+        // [ADR-0150 D3] The same reader `init()` attaches to the engine
+        // (`setFlowNameResolver`), asked for a caller with no package — the
+        // question `registerFlow` asks — so the collision warning says a name
+        // is refused exactly when the engine refuses it.
+        const resolver = flowNameResolver(ctx);
         return resolveFlowPrecedence(
             items,
             ctx.logger,
             engine ? (name) => engine.packagedFlowOwner(name) : undefined,
+            installedManifestsOf(objectqlRegistryOf(ctx)),
+            (name) => {
+                const resolution = resolver(name, null);
+                return resolution?.status === 'refused' ? resolution.message : undefined;
+            },
         );
     }
 
@@ -5277,7 +5495,7 @@ export class AutomationServicePlugin implements Plugin {
                 continue;
             }
             try {
-                this.engine.registerFlow(entry.name, entry.definition as never);
+                this.engine.registerFlow(entry.name, entry.definition as never, entry.contender);
                 resynced++;
             } catch (err) {
                 // #5048 — see ./thrown-cause-diagnostics.ts.
@@ -5353,7 +5571,7 @@ export class AutomationServicePlugin implements Plugin {
         // re-binding the body the boot pull armed is safe.
         for (const entry of this.resolveFlowContenders(ctx, defs)) {
             try {
-                this.engine.registerFlow(entry.name, entry.definition as never);
+                this.engine.registerFlow(entry.name, entry.definition as never, entry.contender);
                 this.syncedFlowNames.add(entry.name);
                 bound++;
             } catch (err) {
@@ -5538,7 +5756,7 @@ export class AutomationServicePlugin implements Plugin {
             const held = await engine.getFlow(name);
             if (held && holdsFlowDefinition(engine, name, held, entry.definition)) continue;
             try {
-                engine.registerFlow(name, entry.definition as never);
+                engine.registerFlow(name, entry.definition as never, entry.contender);
                 this.mutationArmedFlows.set(name, stableStringify(entry.definition));
                 armed.push(name);
             } catch (err) {

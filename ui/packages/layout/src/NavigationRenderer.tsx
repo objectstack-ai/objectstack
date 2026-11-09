@@ -236,6 +236,44 @@ export type NavLabelTarget =
 export type NavTargetLabelResolver = (target: NavLabelTarget) => string | undefined;
 
 /**
+ * What a navigation entry that names no `icon` draws instead: the icon of the
+ * object it opens. An `object` entry opens an object's list (a `viewName`
+ * picks the list, not the object), so the object page's own icon is the one
+ * that says which list the row leads to. Every other entry keeps the
+ * renderer's generic icon.
+ */
+export type NavIconTarget = { kind: 'object'; objectName: string };
+
+/**
+ * Answers the icon name the target declares in the host's metadata (the object
+ * schema's `icon`), or `undefined` when it declares none or is not loaded.
+ * Asked on every render and nothing is stored, like
+ * {@link NavTargetLabelResolver}; without it an entry with no `icon` keeps the
+ * generic icon.
+ */
+export type NavTargetIconResolver = (target: NavIconTarget) => string | undefined;
+
+/**
+ * The icon name a navigation entry draws: its own `icon` when it names one,
+ * else, for an `object` entry, the icon its object declares
+ * ({@link NavTargetIconResolver}), else `undefined`, which
+ * {@link resolveIcon} draws as the generic icon. An authored `icon` always
+ * wins.
+ */
+export function resolveNavItemIcon(
+  item: NavigationItem,
+  targetIcon?: NavTargetIconResolver,
+): string | undefined {
+  if (item.type === 'separator') return undefined;
+  if (typeof item.icon === 'string' && item.icon.trim() !== '') return item.icon;
+  if (item.type === 'object' && item.objectName && targetIcon) {
+    const icon = targetIcon({ kind: 'object', objectName: item.objectName });
+    if (typeof icon === 'string' && icon.trim() !== '') return icon;
+  }
+  return undefined;
+}
+
+/**
  * What a host's per-entry control is told about the row it sits in
  * (objectui#12427, {@link NavigationRendererProps.renderItemAction}).
  */
@@ -396,6 +434,14 @@ export interface NavigationRendererProps {
    * See {@link NavTargetLabelResolver} and {@link resolveNavItemLabel}.
    */
   resolveTargetLabel?: NavTargetLabelResolver;
+
+  /**
+   * Resolver for the icon an `object` entry with NO `icon` draws: the icon its
+   * object declares, read from the host's metadata at render time. Consulted
+   * ONLY for an absent `icon`; an authored icon is never replaced. See
+   * {@link NavTargetIconResolver} and {@link resolveNavItemIcon}.
+   */
+  resolveTargetIcon?: NavTargetIconResolver;
 
   // RETIRED (`9c60144b5`): `resolveGroupLabel` / `resolveItemLabel`, the two
   // id-keyed label resolvers. They were unreachable by construction: they sat
@@ -1481,6 +1527,7 @@ interface NavRowProps {
   onPinToggle?: (itemId: string, pinned: boolean, item?: NavigationItem, basePath?: string) => void;
   renderItemAction?: NavigationRendererProps['renderItemAction'];
   resolveTargetLabel?: NavTargetLabelResolver;
+  resolveTargetIcon?: NavTargetIconResolver;
   locale?: string;
   t?: NavigationRendererProps['t'];
   templateContext?: NavTemplateContext;
@@ -1652,6 +1699,7 @@ function NavigationItemRenderer({
   row,
   inList = true,
   resolveTargetLabel,
+  resolveTargetIcon,
   locale,
   t: tProp,
   templateContext,
@@ -1678,6 +1726,7 @@ function NavigationItemRenderer({
    */
   inList?: boolean;
   resolveTargetLabel?: NavTargetLabelResolver;
+  resolveTargetIcon?: NavTargetIconResolver;
   locale?: string;
   t?: (key: string, options?: any) => string;
   templateContext?: NavTemplateContext;
@@ -1751,6 +1800,7 @@ function NavigationItemRenderer({
       onPinToggle,
       renderItemAction,
       resolveTargetLabel,
+      resolveTargetIcon,
       locale,
       t: tProp,
       templateContext,
@@ -1874,7 +1924,9 @@ function NavigationItemRenderer({
   }
 
   // --- Leaf items (every entry that navigates: object / dashboard / page / report / url / component / doc) ---
-  const Icon = resolveIcon(item.icon);
+  // An `object` entry with no `icon` draws its object's icon, so each list in
+  // the menu is told apart the way its own page header shows it.
+  const Icon = resolveIcon(resolveNavItemIcon(item, resolveTargetIcon));
   const { href, external } = resolveHref(item, basePath, templateContext);
   const isActive = activeNavId !== null && item.id === activeNavId;
   const itemLabel = resolveNavItemLabel(item, tProp, resolveTargetLabel, locale);
@@ -1993,6 +2045,7 @@ export function NavigationRenderer({
   pinnedOrder,
   onPinnedReorder,
   resolveTargetLabel,
+  resolveTargetIcon,
   locale,
   t: tProp,
   templateContext,
@@ -2051,6 +2104,7 @@ export function NavigationRenderer({
     onPinToggle,
     renderItemAction,
     resolveTargetLabel,
+    resolveTargetIcon,
     locale,
     t: tProp,
     templateContext,

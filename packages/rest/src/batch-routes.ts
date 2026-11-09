@@ -81,6 +81,7 @@ export interface BatchRouteHost {
     readonly routeManager: RestServer['routeManager'];
     readonly protocol: RestServer['protocol'];
     readonly objectQLProvider: RestServer['objectQLProvider'];
+    resolveRequestEnvironmentId: RestServer['resolveRequestEnvironmentId'];
     resolveProtocol: RestServer['resolveProtocol'];
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
@@ -233,9 +234,17 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 // provider SYNCHRONOUSLY, so a host wiring a non-`async`
                 // provider — which the seam's declared type cannot prevent —
                 // reaches the same answer as one that rejects (commit add6a1b1c).
+                //
+                // [#30218] The engine is the REQUEST's environment's, through
+                // the shared resolver: the scoped param, else the host's
+                // resolver for a hostname-routed request. The raw `undefined`
+                // of the unscoped mount, and a provider that ignored the id,
+                // opened a hosted environment's transaction on the host
+                // kernel's engine while the create ops went to the
+                // environment's protocol.
                 const ql = await wiredEngineOrLoud(
                     Boolean(this.objectQLProvider),
-                    () => this.objectQLProvider!(environmentId),
+                    async () => this.objectQLProvider!(await this.resolveRequestEnvironmentId(environmentId, req)),
                 );
                 if (!ql || typeof ql.transaction !== 'function') {
                     // Typed like every other 501 on this server (clone/search,

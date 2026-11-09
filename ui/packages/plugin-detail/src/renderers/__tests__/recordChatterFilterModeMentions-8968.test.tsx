@@ -113,6 +113,9 @@ const ITEMS: FeedItem[] = [
     actor: 'Grace',
     createdAt: '2026-01-03T00:00:00.000Z',
     fieldChanges: [{ field: 'stage', fieldLabel: 'Stage', oldValue: 'New', newValue: 'Won' }],
+    // A field change is read from the audit log, the one producer of
+    // `fieldChanges`; `changes_only` holds those only (objectstack#30074).
+    source: 'sys_audit_log',
   },
   { id: 't-1', type: 'task', actor: 'Ada', body: 'Follow up call', createdAt: '2026-01-04T00:00:00.000Z' },
   { id: 'c-2', type: 'comment', actor: 'Grace', body: 'Later comment', createdAt: '2026-01-05T00:00:00.000Z' },

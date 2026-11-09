@@ -42,12 +42,14 @@
  *    one fails the boot, with its remedy), and `serve`'s production warning
  *    about a local storage root.
  *
- * What lives in the provider's own package, and why: the `email` and `sms`
- * arguments are read by `resolveEmailCapabilityArg` (`@objectstack/plugin-email`)
- * and `resolveSmsCapabilityArg` (`@objectstack/service-sms`). Each refuses
- * exactly the configurations its package's transports cannot build, so it reads
- * that package's transport vocabulary — and both packages depend on this one,
- * so this package cannot import them. {@link resolveCapabilityArgument} reads
+ * What lives in the provider's own package, and why: the `email`, `sms` and
+ * `push` arguments are read by `resolveEmailCapabilityArg`
+ * (`@objectstack/plugin-email`), `resolveSmsCapabilityArg`
+ * (`@objectstack/service-sms`) and `resolvePushCapabilityArg`
+ * (`@objectstack/service-push`). Each refuses exactly the configurations its
+ * package's transports cannot build, so it reads that package's transport
+ * vocabulary — and all three packages depend on this one, so this package
+ * cannot import them. {@link resolveCapabilityArgument} reads
  * each reader from the module the provider is constructed from, which every
  * boot has already loaded to reach the provider's class.
  *
@@ -139,14 +141,14 @@ export function resolveServedCapabilities(
 
 /** What {@link resolveCapabilityArgument} reads to build one provider's argument. */
 export interface CapabilityArgumentInput {
-  /** The stack being booted: its `analyticsCubes` (or `cubes`), `email`, `sms` and `appName` are read. */
+  /** The stack being booted: its `analyticsCubes` (or `cubes`), `email`, `sms`, `push` and `appName` are read. */
   readonly stack: unknown;
   /** The app's root — the directory holding its `objectstack.config.ts` — handed to `automation`. */
   readonly packageRoot: string;
   /**
    * The module the provider is constructed from. Its own configuration reader
-   * is read from it for `email` and `sms` (see the module header); required
-   * for those two tokens.
+   * is read from it for `email`, `sms` and `push` (see the module header);
+   * required for those three tokens.
    */
   readonly providerModule?: Readonly<Record<string, unknown>>;
   /** The environment the mail and SMS readers read. Defaults to `process.env`. */
@@ -200,6 +202,10 @@ function providerReader<A extends unknown[]>(
  *  - `sms`: the SMS provider's options from `stack.sms` and `OS_SMS_*` —
  *    `resolveSmsCapabilityArg`, read off the provider module. It THROWS on a
  *    provider tag no transport can deliver through.
+ *  - `push`: `{ config }` from `stack.push`, parsed by `PushServiceConfigSchema`
+ *    — `resolvePushCapabilityArg`, read off the provider module. It THROWS on
+ *    the relay transport (an absent key reads as it), which nothing sends yet,
+ *    and on a configuration the schema refuses, an inline secret included.
  *  - `storage`: the local adapter at {@link resolveStorageLocalRootEnv}'s root,
  *    else `.objectstack/data/uploads` ({@link resolveStorageCapabilityArg}).
  *  - any other token: no argument.
@@ -224,6 +230,10 @@ export function resolveCapabilityArgument(token: string, input: CapabilityArgume
   if (token === 'sms') {
     const read = providerReader<[unknown, unknown]>(token, input, 'resolveSmsCapabilityArg');
     return { argument: read(stack.sms ?? {}, env).options };
+  }
+  if (token === 'push') {
+    const read = providerReader<[unknown]>(token, input, 'resolvePushCapabilityArg');
+    return { argument: read(stack.push ?? {}).options };
   }
   if (token === 'storage') {
     const storage = resolveStorageCapabilityArg(resolveStorageLocalRootEnv());

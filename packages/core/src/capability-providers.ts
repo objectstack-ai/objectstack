@@ -197,6 +197,16 @@ export const CAPABILITY_PROVIDERS: Readonly<Record<string, CapabilitySpec>> = {
     export: 'SmsServicePlugin',
     identities: ['com.objectstack.service.sms', 'SmsServicePlugin'],
   },
+  push: {
+    // Mobile push (ADR-0012 §4, §6): registers the kernel's `push` service
+    // (APNs and FCM), which the messaging `push` channel delivers through.
+    // Built from the stack's `push` key by `resolvePushCapabilityArg`, which
+    // refuses the not-yet-served relay transport (and an absent key, which
+    // reads as it) at boot. Requested, never always-on.
+    pkg: '@objectstack/service-push',
+    export: 'PushServicePlugin',
+    identities: ['com.objectstack.service.push', 'PushServicePlugin'],
+  },
   sharing: {
     pkg: '@objectstack/plugin-sharing',
     export: 'SharingServicePlugin',

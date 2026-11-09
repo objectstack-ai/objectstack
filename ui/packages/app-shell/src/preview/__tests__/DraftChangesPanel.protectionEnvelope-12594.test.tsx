@@ -100,17 +100,20 @@ describe('DraftChangesPanel — the protection envelope never lists as authored 
     expect(ENVELOPE_KEYS).toContain('_lock');
   });
 
-  it("lists no envelope key on a NEW object's drill-in, and still lists the authored keys", async () => {
+  // objectstack#29704 — a NEW item lists no key list, so the authored-key
+  // control runs on an UPDATE: a published body without the envelope against a
+  // draft wearing all of it.
+  it("lists no envelope key on an object's drill-in, and still lists the authored keys", async () => {
     mockRoutes(
       'object',
       'crmext_visit',
-      { name: 'crmext_visit', label: 'Visit', fields: { subject: { type: 'text' } }, ...ENVELOPE },
-      null,
+      { name: 'crmext_visit', label: 'Site visit', fields: { subject: { type: 'text' } }, ...ENVELOPE },
+      { name: 'crmext_visit', label: 'Visit', fields: {} },
     );
     await openEntryDetail();
 
     // CONTROL: the authored key and the field are listed, so the diff ran.
-    await waitFor(() => expect(renderedRows()).toContain('+ Label'));
+    await waitFor(() => expect(renderedRows()).toContain('~ Label'), { timeout: 4000 });
     expect(renderedRows()).toContain('+ subject');
 
     const text = screen.getByTestId('draft-entry-detail').textContent ?? '';
@@ -120,11 +123,16 @@ describe('DraftChangesPanel — the protection envelope never lists as authored 
   it('still lists a declared underscore key that is not in the envelope', async () => {
     // `_unpublished` is declared by `AppSchema`, beside the envelope it spreads.
     expect(ENVELOPE_KEYS).not.toContain('_unpublished');
-    mockRoutes('app', 'crmext_app', { name: 'crmext_app', label: 'CRM', _unpublished: true, ...ENVELOPE }, null);
+    mockRoutes(
+      'app',
+      'crmext_app',
+      { name: 'crmext_app', label: 'CRM app', _unpublished: true, ...ENVELOPE },
+      { name: 'crmext_app', label: 'CRM' },
+    );
     await openEntryDetail();
 
-    await waitFor(() => expect(renderedRows()).toContain('+ _unpublished'));
-    expect(renderedRows()).toContain('+ Label');
+    await waitFor(() => expect(renderedRows()).toContain('+ _unpublished'), { timeout: 4000 });
+    expect(renderedRows()).toContain('~ Label');
     const text = screen.getByTestId('draft-entry-detail').textContent ?? '';
     for (const key of ENVELOPE_KEYS) expect(text).not.toContain(key);
   });

@@ -8,7 +8,7 @@
 
 /**
  * objectui#10355 — a computed `currency` cell in the line-item grid is STORED
- * at its currency's ISO 4217 minor unit and SHOWN in that currency.
+ * at its currency's CLDR fraction digits and SHOWN in that currency.
  *
  * `computeRow` rounded a computed currency column to `scale ?? 2`: it read the
  * `scale` that ruling B (objectstack-ai/objectstack#19629) retired from the

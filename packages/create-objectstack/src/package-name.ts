@@ -9,7 +9,7 @@
 // ----------------------------------
 // The resolved project name — the `[name]` argument, or the current
 // directory's basename when there is none — is written verbatim into
-// `package.json` `name` and `objectstack.manifest.json` `name`. A display-style
+// `package.json` `name`. A display-style
 // name (`My App!`, `MyApp`) used to land there unchecked: `validate` and
 // `build` pass on such a project, and the first refusal came from npm itself,
 // at `npm publish`, far from its cause.

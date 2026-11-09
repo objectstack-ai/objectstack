@@ -50,7 +50,7 @@ const result = FlowSchema.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never gates; a base's upgrade plan reads it only as advice. |
 
 ### Nested Shape: `Flow.variables[number]`
 
@@ -61,7 +61,7 @@ const result = FlowSchema.parse(data);
 | **isInput** | `boolean` | optional (default: `false`) | Is input parameter |
 | **isOutput** | `boolean` | optional (default: `false`) | Is output parameter |
 | **defaultValue** | `any` | optional | Value bound at run start when no parameter supplies one — this is what makes a declared variable always bound. An explicitly supplied param wins, including `false` and `null`; the boundary is `params[name] !== undefined`. |
-| **objectName** | `string` | optional | [planned] Declares this input a record reference: its value is the id of one record of the named object (the object's snake_case name, e.g. `crm_account`). Only on an input (`isInput: true`). The contract: every door that starts the flow by name (the trigger route, an action of type flow over REST and MCP run_action, a declared endpoint of type flow) loads a declared input from this object in the caller's own scope before the run exists; an id the caller cannot read there is refused 404 RECORD_NOT_FOUND, and a value that is not an id is refused 400 VALIDATION_FAILED naming the input. No door applies it yet: today the key is parsed and checked, and a start with an id the caller cannot read still runs. An input without this declaration is judged as a record only where the flow's own definition reads it as a record id. `type` stays the data type: the variable holds the id the caller sent. |
+| **objectName** | `string` | optional | Declares this input a record reference: its value is the id of one record of the named object (the object's snake_case name, e.g. `crm_account`). Only on an input (`isInput: true`). The contract: every door that starts the flow by name (the trigger route, an action of type flow over REST and MCP run_action, a declared endpoint of type flow) loads a declared input from this object in the caller's own scope before the run exists; an id the caller cannot read there is refused 404 RECORD_NOT_FOUND, and a value that is not an id is refused 400 naming the input. The load is added beside any read the flow's own definition makes of the input, never in place of one. An input without this declaration is judged as a record only where the flow's own definition reads it as a record id. `type` stays the data type: the variable holds the id the caller sent. |
 
 ### Nested Shape: `Flow.nodes[number]`
 
@@ -114,7 +114,7 @@ const result = FlowSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
-| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
+| **basedOn** | `string` | ✅ | Recorded, never a gate: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. One reader, as advice: a base's upgrade plan lists an override whose `basedOn` is not the installed base version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended). |
 
 
 ---
@@ -231,7 +231,7 @@ const result = FlowSchema.parse(data);
 | **isInput** | `boolean` | optional (default: `false`) | Is input parameter |
 | **isOutput** | `boolean` | optional (default: `false`) | Is output parameter |
 | **defaultValue** | `any` | optional | Value bound at run start when no parameter supplies one — this is what makes a declared variable always bound. An explicitly supplied param wins, including `false` and `null`; the boundary is `params[name] !== undefined`. |
-| **objectName** | `string` | optional | [planned] Declares this input a record reference: its value is the id of one record of the named object (the object's snake_case name, e.g. `crm_account`). Only on an input (`isInput: true`). The contract: every door that starts the flow by name (the trigger route, an action of type flow over REST and MCP run_action, a declared endpoint of type flow) loads a declared input from this object in the caller's own scope before the run exists; an id the caller cannot read there is refused 404 RECORD_NOT_FOUND, and a value that is not an id is refused 400 VALIDATION_FAILED naming the input. No door applies it yet: today the key is parsed and checked, and a start with an id the caller cannot read still runs. An input without this declaration is judged as a record only where the flow's own definition reads it as a record id. `type` stays the data type: the variable holds the id the caller sent. |
+| **objectName** | `string` | optional | Declares this input a record reference: its value is the id of one record of the named object (the object's snake_case name, e.g. `crm_account`). Only on an input (`isInput: true`). The contract: every door that starts the flow by name (the trigger route, an action of type flow over REST and MCP run_action, a declared endpoint of type flow) loads a declared input from this object in the caller's own scope before the run exists; an id the caller cannot read there is refused 404 RECORD_NOT_FOUND, and a value that is not an id is refused 400 naming the input. The load is added beside any read the flow's own definition makes of the input, never in place of one. An input without this declaration is judged as a record only where the flow's own definition reads it as a record id. `type` stays the data type: the variable holds the id the caller sent. |
 
 
 ---
@@ -275,7 +275,7 @@ const result = FlowSchema.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
-| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never gates; a base's upgrade plan reads it only as advice. |
 
 
 ---

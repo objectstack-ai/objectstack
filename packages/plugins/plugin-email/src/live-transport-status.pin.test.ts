@@ -11,7 +11,15 @@ import { describe, it, expect, vi } from 'vitest';
 import { EmailServicePlugin } from './email-plugin.js';
 import { EmailService, LogTransport } from './email-service.js';
 import { SmtpTransport } from './transports/smtp.js';
-import { describeLiveMailTransport, type LiveMailTransportStatus } from './live-transport-status.js';
+import {
+  describeLiveMailTransport,
+  mailDeliveryCopy,
+  MAIL_DELIVERY_COPY,
+  type LiveMailTransportStatus,
+  type MailDeliveryCopy,
+  type MailDeliveryCopyLocale,
+} from './live-transport-status.js';
+import { PLATFORM_LOCALE_TAGS, type PlatformLocaleTag } from '@objectstack/spec/system';
 
 vi.mock('nodemailer', () => {
   const createTransport = vi.fn(() => ({ sendMail: vi.fn(), close: vi.fn() }));
@@ -117,5 +125,61 @@ describe('EmailServicePlugin — the statement Setup → Email makes', () => {
     expect(service.isConfigured()).toBe(true);
     expect(after?.bannerSeverity).toBe('info');
     expect(after?.label).toBe('Mail is delivered through SMTP (smtp.saved.test:587)');
+  });
+});
+
+// Setup → Email's words carry every language on the platform locale table, and
+// a caller's code finds its own language's entry: `zh-TW` the Traditional one
+// (never the Simplified), a stored alias its table language, anything else
+// English.
+describe('Setup → Email copy carries the eleven platform languages', () => {
+  const KEY_OF_TAG: Record<PlatformLocaleTag, MailDeliveryCopyLocale> = {
+    en: 'en', 'zh-Hans': 'zh-CN', 'zh-Hant': 'zh-Hant', es: 'es-ES', ar: 'ar', fr: 'fr',
+    'pt-BR': 'pt-BR', ru: 'ru', de: 'de', ja: 'ja-JP', ko: 'ko',
+  };
+  const KEYS = PLATFORM_LOCALE_TAGS.map((tag) => KEY_OF_TAG[tag]);
+  /** Every sentence of an entry, its functions called with sample arguments. */
+  const sentences = (copy: MailDeliveryCopy): Record<string, string> => ({
+    hostTransport: copy.hostTransport,
+    noMailLabel: copy.noMailLabel,
+    noMailText: copy.noMailText,
+    deliveredLabel: copy.deliveredLabel('Resend'),
+    deliveredText: copy.deliveredText('Resend'),
+    testSent: copy.testSent('admin@example.test', 'resend', 'msg_1'),
+    testSentLive: copy.testSent('admin@example.test', undefined, 'msg_1'),
+    testFailed: copy.testFailed('resend', 'refused'),
+    testFailedLive: copy.testFailed(undefined, 'refused'),
+    testLoggedLive: copy.testLoggedLive,
+    testLoggedForm: copy.testLoggedForm('Resend'),
+  });
+
+  it('has exactly one entry per platform locale table language', () => {
+    expect(Object.keys(MAIL_DELIVERY_COPY).sort()).toEqual([...KEYS].sort());
+    expect(KEYS).toHaveLength(11);
+  });
+
+  it('every entry carries every sentence, written in its own language (no English fill)', () => {
+    const en = sentences(MAIL_DELIVERY_COPY.en);
+    for (const key of KEYS) {
+      for (const [field, text] of Object.entries(sentences(MAIL_DELIVERY_COPY[key]))) {
+        expect(text.trim(), `${key}.${field}`).not.toBe('');
+        if (key !== 'en') expect(text, `${key}.${field}`).not.toBe(en[field]);
+      }
+    }
+  });
+
+  it('each table tag and stored alias is served its own language; zh-TW never the Simplified entry', () => {
+    for (const tag of PLATFORM_LOCALE_TAGS) expect(mailDeliveryCopy(tag), tag).toBe(MAIL_DELIVERY_COPY[KEY_OF_TAG[tag]]);
+    for (const [code, key] of [
+      ['zh-TW', 'zh-Hant'], ['zh-HK', 'zh-Hant'], ['zh-CN', 'zh-CN'], ['zh', 'zh-CN'],
+      ['ja-JP', 'ja-JP'], ['es-ES', 'es-ES'], ['pt', 'pt-BR'], ['en-US', 'en'], ['fr-CA', 'fr'],
+    ] as const) {
+      expect(mailDeliveryCopy(code), code).toBe(MAIL_DELIVERY_COPY[key]);
+    }
+    expect(mailDeliveryCopy('zh-TW')).not.toBe(MAIL_DELIVERY_COPY['zh-CN']);
+  });
+
+  it('a code naming no language here, or none at all, is served English', () => {
+    for (const code of ['xx', 'sw-KE', undefined]) expect(mailDeliveryCopy(code), String(code)).toBe(MAIL_DELIVERY_COPY.en);
   });
 });

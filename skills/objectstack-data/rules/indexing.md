@@ -1,6 +1,6 @@
 # Index Strategy
 
-Guide for creating efficient database indexes in ObjectStack.
+The two blocks holding ❌ keys are left unmarked: `check:skill-examples` would refuse them.
 
 ## Default Behavior
 
@@ -34,13 +34,16 @@ and it is the whole surface *because* it is all the driver materializes:
 
 ## Syntax
 
+<!-- os:check -->
 ```typescript
-indexes: [
+import type { ObjectIndex } from '@objectstack/spec/data';
+
+const indexes: ObjectIndex[] = [
   { fields: ['status', 'created_at'] },                // plain composite
   { fields: ['email'], unique: 'organization' },       // unique per org
   { fields: ['hostname'], unique: 'global' },          // unique platform-wide
   { name: 'idx_acct_status', fields: ['status'] },     // custom name
-]
+];
 ```
 
 ## Unique scope — always state it (ADR-0120)
@@ -83,8 +86,11 @@ Notes an author has to know:
 
 ### Composite Index (Multi-Column)
 
+<!-- os:check -->
 ```typescript
-indexes: [
+import type { ObjectIndex } from '@objectstack/spec/data';
+
+const indexes: ObjectIndex[] = [
   // Most specific first (status), then sort key
   { fields: ['status', 'created_at'] },
 
@@ -92,13 +98,16 @@ indexes: [
   // - WHERE status = 'active'
   // - WHERE status = 'active' ORDER BY created_at DESC
   // - WHERE status = 'active' AND created_at > '2026-01-01'
-]
+];
 ```
 
 ### Unique Index
 
+<!-- os:check -->
 ```typescript
-indexes: [
+import type { ObjectIndex } from '@objectstack/spec/data';
+
+const indexes: ObjectIndex[] = [
   // Single column, one holder per organization
   { fields: ['email'], unique: 'organization' },
 
@@ -108,7 +117,7 @@ indexes: [
 
   // Single column, one holder across the whole installation
   { fields: ['hostname'], unique: 'global' },
-]
+];
 ```
 
 ## Incorrect vs Correct
@@ -125,12 +134,15 @@ indexes: [
 
 ### ✅ Correct — Declare Only What the Driver Materializes
 
+<!-- os:check -->
 ```typescript
-indexes: [
+import type { ObjectIndex } from '@objectstack/spec/data';
+
+const indexes: ObjectIndex[] = [
   { fields: ['status'] },                         // ✅ unique: false is the default
   { fields: ['email'], unique: 'organization' },  // ✅ the scope is required
   { fields: ['description', 'notes'] },           // ✅ plain index; see below for full-text
-]
+];
 ```
 
 ### Composite index order
@@ -184,11 +196,14 @@ uniqueness.
 
 ObjectStack auto-generates index names. To specify custom names:
 
+<!-- os:check -->
 ```typescript
-{
+import type { ObjectIndex } from '@objectstack/spec/data';
+
+const index: ObjectIndex = {
   name: 'idx_account_status_created',  // Custom name
   fields: ['status', 'created_at'],
-}
+};
 ```
 
 **Auto-generated pattern:** `idx_{object}_{field1}_{field2}_{...}`
@@ -197,20 +212,32 @@ ObjectStack auto-generates index names. To specify custom names:
 
 ### Filter by Status + Sort by Date
 
+<!-- os:check -->
 ```typescript
+import type { ObjectIndex } from '@objectstack/spec/data';
+
 // Query: WHERE status = 'active' ORDER BY created_at DESC LIMIT 50
-indexes: [
+const indexes: ObjectIndex[] = [
   { fields: ['status', 'created_at'] },
-]
+];
 ```
 
 ### Multi-Tenant Queries
 
+The tenant column is `organization_id`, injected by `systemFields.tenant` — not a
+field you declare (an index naming an undeclared `tenant_id` is refused). On a
+multi-tenant host the platform adds its single-column index. A non-unique
+composite may lead with it; a unique one says `unique: 'organization'` instead
+(above):
+
+<!-- os:check -->
 ```typescript
-// Query: WHERE tenant_id = X AND ...
-indexes: [
-  { fields: ['tenant_id', 'status', 'created_at'] },
-]
+import type { ObjectIndex } from '@objectstack/spec/data';
+
+// Query: WHERE organization_id = X AND ...
+const indexes: ObjectIndex[] = [
+  { fields: ['organization_id', 'status', 'created_at'] },
+];
 ```
 
 ### Text Search / Containment / Geospatial
@@ -220,11 +247,14 @@ is **not** declarable — see "Access methods and partial indexes" above. Declar
 the plain index if the column is also filtered or sorted normally, and create
 the specialised one from a database-layer migration on the dialect you run.
 
+<!-- os:check -->
 ```typescript
+import type { ObjectIndex } from '@objectstack/spec/data';
+
 // Declaration: plain, portable, and all the driver can build
-indexes: [
+const indexes: ObjectIndex[] = [
   { fields: ['description'] },   // text search: add a fulltext/GIN index in a migration
   { fields: ['tags'] },          // containment (tags @> [...]): GIN, in a migration
   { fields: ['location'] },      // ST_DWithin(...): GIST, in a migration
-]
+];
 ```

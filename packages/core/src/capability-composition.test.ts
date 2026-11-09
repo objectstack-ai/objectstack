@@ -143,6 +143,32 @@ describe('resolveCapabilityArgument — what each provider is constructed with',
     expect(calls).toEqual([['email', {}, env, undefined]]);
   });
 
+  it('`push` is built by resolvePushCapabilityArg off its provider module, from the stack\'s push key alone', () => {
+    const calls: unknown[][] = [];
+    const providerModule = {
+      resolvePushCapabilityArg: (...args: unknown[]) => {
+        calls.push(args);
+        return { options: { config: { built: 'push' } } };
+      },
+    };
+    const push = { transport: 'direct', fcm: { projectId: 'p', credentialRef: 'FCM' } };
+    expect(resolveCapabilityArgument('push', { stack: { push }, packageRoot: '/app', providerModule, env: { OS_X: '1' } }).argument)
+      .toEqual({ config: { built: 'push' } });
+    // The stack's key only: no environment carries push configuration.
+    expect(calls).toEqual([[push]]);
+    // An absent key is read as `{}` — the reader decides (it refuses the relay that reads as), never skipped.
+    calls.length = 0;
+    resolveCapabilityArgument('push', { stack: {}, packageRoot: '/app', providerModule });
+    expect(calls).toEqual([[{}]]);
+    // A reader's refusal reaches the boot unchanged.
+    const refusing = { resolvePushCapabilityArg: () => { throw new Error('relay not served'); } };
+    expect(() => resolveCapabilityArgument('push', { stack: {}, packageRoot: '/app', providerModule: refusing }))
+      .toThrow('relay not served');
+    expect(() => resolveCapabilityArgument('push', { stack: {}, packageRoot: '/app', providerModule: {} })).toThrow(
+      /@objectstack\/service-push does not export resolvePushCapabilityArg/,
+    );
+  });
+
   it('a provider module without its reader is refused by name, never built with defaults', () => {
     expect(() => resolveCapabilityArgument('email', { stack: {}, packageRoot: '/app', providerModule: {} })).toThrow(
       /does not export resolveEmailCapabilityArg/,

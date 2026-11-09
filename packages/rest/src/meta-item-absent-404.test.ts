@@ -245,7 +245,9 @@ describe('[#18066] §2 — the #8013 partition survives, in both directions', ()
         expect(res.statusCode).toBe(403);
         expect(res.body?.error?.code).toBe('PERMISSION_DENIED');
         expect(res.body?.success).toBe(false);
-        expect(res.body?.error?.message).toContain('finance');
+        // [#30126 row 12] The catalog's `permission_denied`, which names no app.
+        expect(res.body?.error?.message).toBe(
+            'You do not have permission to perform this action. Contact your administrator if you need access.');
         expect(res.body?.item).toBeUndefined();
         expect(JSON.stringify(res.body ?? {})).not.toContain('invoice');
 

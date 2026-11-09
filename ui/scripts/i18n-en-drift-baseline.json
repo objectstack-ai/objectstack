@@ -3,7 +3,7 @@
     "Waivers for scripts/check-i18n-en-drift.mjs (objectui#3650): an en string changed and one",
     "or more of the nine translation packs deliberately did not follow it.",
     "",
-    "Shape:  \"<dotted key>\": { \"en\": \"<the NEW en text, verbatim>\", \"reason\": \"…\", \"issue\": \"objectui#1234\" }",
+    "Shape:  \"<dotted key>\": { \"en\": \"<the NEW en text, verbatim>\", \"reason\": \"…\", \"issue\": \"objectstack#1234\" } (objectui#1234 for entries that predate the ui tree's move into this repo)",
     "",
     "This file ships EMPTY and holds no backlog, unlike scripts/i18n-call-site-key-baseline.json.",
     "That gate measures a STATE (keys missing from en today), so it could inventory the debt. This",
@@ -34,7 +34,12 @@
     "objectui#8834 (packages/app-shell/src/views/metadata-admin/i18n.ts). Same shape, same expiry rule,",
     "same ceiling discipline -- separate map because each section is validated against the en values of",
     "its own population, and a designer key is not a pack key. Keys are prefixed with their table, e.g.",
-    "\"ENGINE_STRINGS.engine.directory.title\". It ships EMPTY and holds no backlog either."
+    "\"ENGINE_STRINGS.engine.directory.title\". It ships EMPTY and holds no backlog either.",
+    "",
+    "Its first seven entries (objectstack#29729) are the one-word-per-state convergence in Studio's",
+    "flow run status: en moved Off/Disabled to 'Switched off' and On/Enabled to 'Switched on', the",
+    "word the landing, the ledger switch and the Setup page already used. zh already read 已停用 /",
+    "已启用 for every one of them, so there was nothing for it to follow."
   ],
 
   "waivers": {
@@ -70,5 +75,41 @@
     }
   },
 
-  "designerWaivers": {}
+  "designerWaivers": {
+    "ENGINE_STRINGS.engine.studio.auto.on": {
+      "en": "Switched on",
+      "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已启用’ here, so it had nothing to follow.",
+      "issue": "objectstack#29729"
+    },
+    "ENGINE_STRINGS.engine.studio.auto.off": {
+      "en": "Switched off",
+      "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已停用’ here, so it had nothing to follow.",
+      "issue": "objectstack#29729"
+    },
+    "ENGINE_STRINGS.engine.studio.auto.offTitle": {
+      "en": "Switched off — will not run",
+      "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已停用 — 不会运行’ here, so it had nothing to follow.",
+      "issue": "objectstack#29729"
+    },
+    "ENGINE_STRINGS.engine.studio.auto.enabled": {
+      "en": "Switched on",
+      "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已启用’ here, so it had nothing to follow.",
+      "issue": "objectstack#29729"
+    },
+    "ENGINE_STRINGS.engine.studio.auto.disabled": {
+      "en": "Switched off",
+      "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已停用’ here, so it had nothing to follow.",
+      "issue": "objectstack#29729"
+    },
+    "ENGINE_STRINGS.engine.studio.auto.enabledToast": {
+      "en": "Switched on — publish to apply",
+      "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已设为启用 — 发布后生效’ here, so it had nothing to follow.",
+      "issue": "objectstack#29729"
+    },
+    "ENGINE_STRINGS.engine.studio.auto.disabledToast": {
+      "en": "Switched off — publish to apply",
+      "reason": "One word per state in Studio (objectstack#29729): en now says the landing's and the ledger switch's word. zh already read ‘已设为停用 — 发布后生效’ here, so it had nothing to follow.",
+      "issue": "objectstack#29729"
+    }
+  }
 }

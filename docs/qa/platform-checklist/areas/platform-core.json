@@ -609,7 +609,7 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -631,10 +631,10 @@
       "steps": [
         "as admin, GET /api/v1/meta/app?id=setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
         "GET /api/v1/meta/app with NO query first and record the names actually served — a stock boot answers exactly showcase_app, setup, account. Then GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups). ⚠️ GET /api/v1/meta/app?id=studio answers 200 {\"items\":[]} on every stock boot and that is the expected result (knownGap): record the absence as an assertion and move on — do NOT install @objectstack/studio to make the step runnable",
-        "as admin, hand-walk each destination in each app. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
-        "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form — the 11 namespaces of a stock single-posture boot, localization/company/branding/auth/mail/sms/storage/ai/knowledge/lifecycle/feature_flags: the nav_settings_* entries of packages/platform-objects/src/apps/setup-nav.contributions.ts, plus nav_settings_branding, which packages/services/service-settings/src/settings-service-plugin.ts contributes only where no organization wall stands, and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user from Users and confirm the user page's Preferences and Linked Accounts tabs render that user's rows",
+        "as admin, hand-walk each destination in each app. At a window narrower than 1416 px (1280 px included) the console folds the sidebar to its icon rail, and Setup and Account open that way (ui/packages/app-shell/src/layout/consoleSidebarRail.ts CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, objectstack#27593; QA run #29877 met it at 1280 px): press the sidebar toggle at the app bar's left edge (Ctrl/⌘+B) to unfold it before expanding any group. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
+        "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form — the 10 namespaces of a stock single-posture boot, localization/company/branding/auth/mail/sms/storage/ai/knowledge/lifecycle: the nav_settings_* entries of packages/platform-objects/src/apps/setup-nav.contributions.ts, plus nav_settings_branding, which packages/services/service-settings/src/settings-service-plugin.ts contributes only where no organization wall stands, and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user from Users and confirm the user page's Preferences and Linked Accounts tabs render that user's rows",
         "Studio detail is NOT walked from here — the app is not registered on a stock boot (knownGap), so there is no merged nav to render. Its metadata:resource lists and component surfaces (App Builder, All Metadata Types, Packages, API Console, Flow Runs, Public Forms) are reached through the console surface at /_console/studio/<pkg>/<pillar> and are covered by area studio-authoring. What THIS item asserts about Studio is the absence itself, per clause 6",
-        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (nav_account_approvals, the approvals:inbox component, served as …/component/approvals/inbox — the Approvals Inbox, not the sys_approval_request grid; account.app.ts), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 50 Setup destinations for the admin on a stock single-org showcase boot, as QA run #28545 read them at eeec88d1 (GET /api/v1/meta/app leaves, which match the nav source minus its gates; 48 re-measured at 3fd80337 for #28338, QA run #27481 read 44 and 8, QA run #24557 read 42 at 5b14b7f3, 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
+        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (nav_account_approvals, the approvals:inbox component, served as …/component/approvals/inbox — the Approvals Inbox, not the sys_approval_request grid; account.app.ts), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 46 Setup destinations for the admin on a stock single-org showcase boot, as QA run #29877 read them at 589049b0 and a fresh showcase boot re-read them at 232d3bb5ef (GET /api/v1/meta/app leaves, which match the nav source minus its gates). Since QA run #28545's reading Setup's Packaged automation page retired under ADR-0146 D11, leaving Packaged Actions (nav_packaged_actions, automation:packaged-actions; #28785), and its unfiltered Packages entry moved to Studio (#29547) (47 for #28927, 50 at eeec88d1 for QA run #28545, 48 re-measured at 3fd80337 for #28338, QA run #27481 read 44 and 8, QA run #24557 read 42 at 5b14b7f3, 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
         "sign in as the plain member: attempt to open Setup (app name setup) — capture the app-level refusal (App.requiredPermissions setup.access); open Account (declares no requiredPermissions) — capture it opening. Studio is not part of this comparison: it is absent for EVERY persona including the admin, so a member failing to reach it proves nothing about the gate (the same reasoning #7544 applied to nav_jwks)",
         "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
@@ -761,6 +761,12 @@
           "date": "2026-11-01",
           "change": "Two QA run #28545 (W3-C1R) findings. negative[3], stale since #27507: the member's settings route no longer renders inside the app shell it was opened from. AppContent.tsx holds a Setup pseudo-route until Setup's access verdict, then draws the 'You don't have access to this app' screen above the layout, with no shell; the page never mounts, so the wire half is driven directly (GET /api/settings/NAMESPACE, 403 SETTINGS_FORBIDDEN, kept as the scored part). Counts: steps[4] lists the 11 namespaces a stock boot serves (sms and lifecycle added; setup-nav.contributions.ts plus the unwalled-only branding entry), and steps[5] carries #28545's 50 Setup and 8 Account destinations, which stay 'recount from the payload each run'. The namespace list is read from source; the 50 is #28545's live reading. No clause weakened. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-04",
+          "change": "steps[2] and steps[5] corrected, two QA run #29877 (W5-P0, at 589049b0) findings parked in comment 6600018008 on #27377 that #29906 did not carry; revision 7's steps[2]/[5] row is an older, different fix. steps[5]: Setup serves 46 destinations (Account 8), not 50; Packaged automation retired under ADR-0146 D11 (#28785) and the unfiltered Packages entry left Setup (#29547). steps[2]: below 1416 px, 1280 px included, Setup and Account open on the icon rail (consoleSidebarRail.ts CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH), so the walk unfolds the sidebar before it expands groups. The 46 / 8 re-read on a fresh showcase boot at base 232d3bb5ef (GET /api/v1/meta/app?id=setup / ?id=account, groups excluded); the rail threshold read from source, not driven live. No clause changed",
+          "ref": "#30129"
         }
       ]
     },
@@ -779,7 +785,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the 11 open-framework settings namespaces a stock boot serves: the 10 in builtinSettingsManifests (packages/services/service-settings/src/manifests: localization, company, branding, auth, mail, sms, storage, ai, knowledge, feature_flags) PLUS lifecycle (5 specifiers), which is NOT in that aggregate — ObjectQLPlugin registers it at kernel:ready whenever a SettingsService is present (packages/objectql/src/lifecycle/lifecycle-settings.ts). Enumerating only the manifests directory undercounts by one",
+          "the 10 open-framework settings namespaces a stock boot serves: the 9 in builtinSettingsManifests (packages/services/service-settings/src/manifests: localization, company, branding, auth, mail, sms, storage, ai, knowledge) PLUS lifecycle (5 specifiers), which is NOT in that aggregate — ObjectQLPlugin registers it at kernel:ready whenever a SettingsService is present (packages/objectql/src/lifecycle/lifecycle-settings.ts). Enumerating only the manifests directory undercounts by one",
           "the settings service wired with a data engine so it swaps from in-memory to the sys_setting table, and with the sys_secret store + auditWriter (SettingsServicePlugin binds these on kernel:ready; the showcase stack mounts the engine)"
         ],
         "knownGaps": [
@@ -787,7 +793,7 @@
         ]
       },
       "steps": [
-        "as admin, GET /api/settings — capture the visible manifests (the 11 open-framework namespaces above; the route is the SettingsService REST surface in settings-routes.ts)",
+        "as admin, GET /api/settings — capture the visible manifests (the 10 open-framework namespaces above; the route is the SettingsService REST surface in settings-routes.ts)",
         "pick localization (an OBSERVABLE-CONSUMER namespace — packages/core/src/security/resolve-authz-context.ts reads localization.timezone/locale/currency onto ExecutionContext). GET /api/settings/localization — capture {manifest, values}; note the timezone value and its source. On an `os dev --seed-admin` boot the dev seed has ALREADY written the host's zone (UTC in these containers) at tenant scope (packages/plugins/plugin-auth/src/auth-plugin.ts, #23175), so source reads 'tenant' before any PUT; only a boot without the dev seed starts at 'default'",
         "change it: PUT /api/settings/localization { timezone: 'Asia/Tokyo' }; re-read GET /api/settings/localization and confirm the value persists and source is the scope, 'tenant' (localization scope is 'tenant'): on a dev-seeded boot the source already read 'tenant', so the value is what round-trips; on an unseeded boot the source flips from 'default'. For the console badge (steps[5]) pick a localization key the dev seed did NOT write (e.g. default_country), so its source starts at 'default'",
         "prove EFFECT (not just the saved form): re-derive an ExecutionContext-dependent output and confirm it now resolves against the saved zone, not UTC. Two stock consumers serve: GET /api/v1/auth/me/localization (the resolved timezone the session carries), and a datetime the console renders — e.g. showcase_field_zoo's f_datetime on its record page, which shifts by exactly the zone offset. ⛔ The analytics date bucket has no stock observable (the only date-typed time dimension is due_date, and the seeded admin holds no export grant), so do not reach for it. If no localization effect is observable at all, fall back to branding.workspace_name visible in the console shell — but never tick effect off the form alone",
@@ -876,7 +882,7 @@
           "evidence": "the two 401 bodies"
         },
         {
-          "clause": "each of the 11 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
+          "clause": "each of the 10 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
           "oracle": "api",
           "verify": "one GET per variant in variants[]; each returns {manifest, values} with the manifest's specifiers",
           "evidence": "the per-namespace responses"
@@ -901,8 +907,7 @@
         "sms",
         "storage",
         "ai",
-        "knowledge",
-        "feature_flags"
+        "knowledge"
       ],
       "traps": ["stale-console-bundle", "dispatcher-vs-hono-route"],
       "source": [
@@ -941,7 +946,7 @@
       "title": "Package lifecycle: disable stops serving, enable restores, uninstall de-registers, commits grow per publish and revert restores the prior published shape",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -960,7 +965,7 @@
         "disable: PATCH /api/v1/packages/:id/disable → capture; then GET /api/v1/data/<probe_object> and the probe routes → now 404/403 (stopped serving); /meta/app no longer lists its nav",
         "enable: PATCH /api/v1/packages/:id/enable → capture; the object/nav/routes serve again (restore)",
         "commits grow per publish: GET /api/v1/packages/:id/commits before and after a second publish — the list grows by exactly one entry; capture both listings",
-        "revert restores the prior published shape: change the probe (e.g. add a field) and publish, then POST /api/v1/packages/:id/commits/:commitId/revert (or POST /api/v1/packages/:id/revert) → GET the /published shape and confirm it is back to the prior commit",
+        "revert restores the prior published shape: change the probe (e.g. add a field) and publish, then POST /api/v1/packages/:id/commits/:commitId/revert (or POST /api/v1/packages/:id/revert) → GET /api/v1/meta/TYPE/NAME of the changed item and confirm it is back to the prior commit (there is no package-level published read: GET /api/v1/packages/ID/published answers 404 ENDPOINT_NOT_FOUND)",
         "uninstall: DELETE /api/v1/packages/:id → capture; GET /api/v1/meta no longer lists the probe object/kinds and GET /api/v1/packages no longer lists the package",
         "both-sides deny: attempt PATCH /disable and DELETE against a READ-ONLY code package (a platform package or the showcase's own) → refused server-side (ADR-0070); capture the refusal"
       ],
@@ -990,15 +995,15 @@
           "evidence": "the two commit listings"
         },
         {
-          "clause": "revert RESTORES the prior published shape: POST /packages/:id/commits/:commitId/revert (or /revert) returns the published metadata to the prior commit, and a subsequent /published read matches the pre-change shape",
+          "clause": "revert RESTORES the prior published shape: POST /packages/:id/commits/:commitId/revert (or /revert) returns the published metadata to the prior commit, and a subsequent GET /api/v1/meta/TYPE/NAME read matches the pre-change shape",
           "oracle": "api",
-          "verify": "the pre-change /published read equals the post-revert /published read",
-          "evidence": "the pre/post published reads"
+          "verify": "the pre-change GET /api/v1/meta/TYPE/NAME read equals the post-revert one",
+          "evidence": "the pre/post meta reads"
         },
         {
-          "clause": "the disabled package's surface is gone from the console — its nav entry is absent and a stale deep-link to its object shows a named not-found inside the shell, never a dead white page",
+          "clause": "the disabled package's surface is gone from the console — its nav entry is absent and a stale deep-link to its object shows a named not-found state, not a white page (the app-level one is a full-screen named state, 'This app can't be opened')",
           "oracle": "screenshot",
-          "verify": "screenshot the console after disable (nav absent), then open BOTH stale deep-link shapes captured before the disable — the probe object's list, /_console/apps/APP/OBJECT, and one of its records, /_console/apps/APP/OBJECT/record/ID, APP being the probe app — and screenshot each: each shows a named not-found inside the shell",
+          "verify": "screenshot the console after disable (nav absent), then open BOTH stale deep-link shapes captured before the disable — the probe object's list, /_console/apps/APP/OBJECT, and one of its records, /_console/apps/APP/OBJECT/record/ID, APP being the probe app — and screenshot each: each shows a named not-found state, not a white page",
           "evidence": "the nav screenshot + one screenshot per deep-link shape"
         },
         {
@@ -1039,6 +1044,12 @@
           "date": "2026-10-31",
           "change": "steps[0] names the spellings the probe drafts need and acceptance[5].verify names both deep-link shapes. Checklist-accuracy finding of QA run #27441 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): steps[0]'s \"nav entry\" did not say it is an app item, nor that the probe object needs the package namespace prefix (validateObjectNamespacePrefix) or which values sharingModel takes (OWDModel); acceptance[5] named one stale deep-link where the console routes two, the object list and the record (ui/packages/app-shell/src/console/AppContent.tsx). The clauses are unchanged. Re-read at 3fd80337",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-08",
+          "change": "steps[5] and acceptance[4] compare GET /api/v1/meta/TYPE/NAME before and after the revert: GET /api/v1/packages/ID/published answers 404 ENDPOINT_NOT_FOUND. acceptance[5] asks for a named not-found state, not a white page: the app-level not-found is a full-screen named state ('This app can't be opened'). Checklist-accuracy findings of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },
@@ -1573,7 +1584,7 @@
       "title": "The package manifest is enforced at the install boundary: an incompatible `engines` range is refused before the registry write, the namespace gate holds ownership, and a namespace-less runtime package has one derived",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1657,7 +1668,7 @@
       ],
       "source": [
         "packages/metadata-core/src/protocol-handshake.ts#resolveDeclaredRange — resolveDeclaredRange (protocol → platform → legacy engine.objectstack); rangeAdmitsMajor (null = unrecognized, admit-with-warning); checkProtocolCompat (the OS_PROTOCOL_INCOMPATIBLE diagnostic and its migrateCommand); assertProtocolCompat (the four arms: ok silent, no-range warn, unparsed-range warn, incompatible throw)",
-        "packages/metadata-protocol/src/protocol.ts#assertProtocolCompat — namespace derivation for namespace-less runtime packages, then assertProtocolCompat(manifest) BEFORE registry.installPackage",
+        "packages/metadata-protocol/src/protocol-package-install.ts#installPackage — namespace derivation for namespace-less runtime packages, then assertProtocolCompat(manifest) (declared in packages/metadata-core/src/protocol-handshake.ts) BEFORE registry.installPackage",
         "packages/objectql/src/registry.ts#NamespaceConflictError — the ADR-0048 install-time namespace gate (shareable exemption, same-package exclusion, OS_METADATA_COLLISION=warn downgrade); NamespaceConflictError",
         "ADR-0087 (metadata protocol upgrade contract) D1 · ADR-0048 (cross-package metadata collision) · ADR-0025 §3.10 #3 (protocol-first precedence)",
         "content/docs/releases/v15.mdx — 'ADR-0087 completed (#2972)': the handshake on boot-time durable rehydration and on code-defined AppPlugin loads, plus the objectstack lint nudge",
@@ -1711,6 +1722,12 @@
           "date": "2026-10-31",
           "change": "steps[2] gains the AHEAD probe and acceptance[1] scopes migrateCommand to its direction. Checklist-accuracy finding of QA run #27392 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): acceptance[1] said the refusal always carries a `migrate meta --from` command, but since #26480 checkProtocolCompat (packages/metadata-core/src/protocol-handshake.ts) leaves migrateCommand out when the declared target major is above the runtime's and names the upgrade remedy instead. The run drove that leg off-clause (^19, >18, engines.platform ^19 and legacy ^19.0.0 on an 18 runtime: 422 OS_PROTOCOL_INCOMPATIBLE, no migrateCommand). The older-direction clause is unchanged. Re-read at 3fd80337",
           "ref": "#27392"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-04",
+          "change": "source[1] re-pointed: its anchor, assertProtocolCompat on packages/metadata-protocol/src/protocol.ts, no longer resolves (the install path moved to protocol-package-install.ts#installPackage, which calls assertProtocolCompat from metadata-core), and scripts/check-platform-checklist.mjs refused the area file at base f68b47ca. Carried by #29906 because that PR edits this file. No clause changed",
+          "ref": "#29906"
         }
       ]
     },
@@ -1851,7 +1868,7 @@
         "app": "showcase",
         "requires": [
           "a boot on its own port and file DB (-d file:/tmp/<run>/data.db) WITH direct sqlite access to that file between boots: the object declares apiMethods ['get','list'], so REST can never stage the org-row and duplicate-row probes — same scratch-DB class of fixture platform-core.interrupted-migration-boot-report uses. On a stock boot no 'cloud' datasource is registered, so the table rides the global default driver and lives in the run's own file DB",
-          "the shipped switches as row producers: the flow toggle (POST /api/v1/automation/showcase_task_completed/toggle), the action activation door (POST /api/v1/actions/_activation/showcase_task/showcase_mark_done), and the security catalog activation door POST /api/v1/security/_activation/:type/:name for :type position, permission, sharing_rule and webhook — the door also switches queue and assignment_rule (ADR-0142 D1/D5), but the stock showcase declares neither (examples/app-showcase/src/coverage.ts records both as not yet demonstrated), so no stock switch writes those two (packages/runtime/src/domains/catalog-activation.ts — e.g. position legal, permission set showcase_auditor, the declared sharing rule share_new_inquiries_with_field_ops and the declared webhook showcase_task_changed (examples/app-showcase/src/automation/webhooks/index.ts, shipped isActive false); ⛔ never admin_full_access, which the last-admin guard refuses to switch off). Their own door contracts belong to automation.packaged-flow-disable-durable, api-backend.packaged-action-disabled-dispatch and access-security.security-catalog-activation-and-clone-doors — this item owns the ROWS they leave behind"
+          "the shipped switches as row producers: the flow toggle (POST /api/v1/automation/showcase_task_completed/toggle), the action activation door (POST /api/v1/actions/_activation/showcase_task/showcase_mark_done), and the security catalog activation door POST /api/v1/security/_activation/:type/:name for :type position, permission, sharing_rule and webhook — the door also switches queue and assignment_rule (ADR-0142 D1/D5), but the stock showcase declares neither (examples/app-showcase/src/coverage.ts records both as not yet demonstrated), so no stock switch writes those two (packages/runtime/src/domains/catalog-activation.ts — e.g. position legal, permission set showcase_auditor, the declared sharing rule showcase_share_new_inquiries_with_field_ops and the declared webhook showcase_task_changed (examples/app-showcase/src/automation/webhooks/index.ts, shipped isActive false); ⛔ never admin_full_access, which the last-admin guard refuses to switch off). Their own door contracts belong to automation.packaged-flow-disable-durable, api-backend.packaged-action-disabled-dispatch and access-security.security-catalog-activation-and-clone-doors — this item owns the ROWS they leave behind"
         ],
         "knownGaps": [
           "metadata_type is an untyped Field.text (maxLength 100) with three writer sites and eight values in the tree — 'flow' (packages/services/service-automation/src/flow-activation-store.ts), 'action' (packages/objectql/src/action-activation.ts), and 'position' / 'permission' / 'sharing_rule' / 'webhook' / 'queue' / 'assignment_rule' (packages/runtime/src/domains/catalog-activation.ts, which constructs the shared store with the path's :type and closes that :type to exactly those six in CATALOG_ACTIVATION_SUBJECTS — sharing_rule since ADR-0131 D6, webhook since ADR-0131 D2/D6 put a stack-declared webhook under regime C, queue and assignment_rule since ADR-0142 D1/D5 gave a declared ownership queue and a declared assignment rule a switch). There is NO spec enum to pin: the variants below are enumerated BY HAND and deliberately carry no enumSource, so a further writer (ADR-0126 §8 pre-charts tool/skill) lands without failing any ratchet. Re-derive the writer list (grep the METADATA_TYPE literals and every `new ObjectStoreMetadataActivationStore(` call site) before scoring the scope wall, and bump this item's variants when a new writer ships — revision 3 is that bump for the catalog door, revision 5 the one for its sharing_rule :type, revision 8 the one for its webhook :type, revision 9 the one for its queue and assignment_rule :types",
@@ -1859,7 +1876,7 @@
         ]
       },
       "steps": [
-        "boot on its own port with that file DB; as admin flip EVERY shipped switch off — the flow toggle (showcase_task_completed), the action flip (showcase_mark_done), and the catalog door for one position, one permission set, one declared sharing rule and the declared webhook (POST /api/v1/security/_activation/position/legal, /permission/showcase_auditor, /sharing_rule/share_new_inquiries_with_field_ops and /webhook/showcase_task_changed, body {\"enabled\": false} — the webhook ships isActive false, so its switch-off writes a row and changes no delivery); capture the six 200s",
+        "boot on its own port with that file DB; as admin flip EVERY shipped switch off — the flow toggle (showcase_task_completed), the action flip (showcase_mark_done), and the catalog door for one position, one permission set, one declared sharing rule and the declared webhook (POST /api/v1/security/_activation/position/showcase_legal, /permission/showcase_auditor, /sharing_rule/showcase_share_new_inquiries_with_field_ops and /webhook/showcase_task_changed, body {\"enabled\": false} — the webhook ships isActive false, so its switch-off writes a row and changes no delivery); capture the six 200s",
         "read the ledger through the open read path: GET /api/v1/data/sys_metadata_activation — capture every row; each carries the four declared ledger columns (metadata_type, name, package_id, active) beside the driver's id and the injected audit family, and NO tenant column: organization_id is ABSENT from the row's key set, never present-and-NULL on it. ⛔ Assert the KEY SET, never a value read — a value assertion of the shape `row.organization_id ?? null` is `null` for a column that does not exist, so it passes while measuring nothing (the dogfood pin was inverted into a key-set assertion for exactly this reason)",
         "scope wall sweep: the distinct metadata_type set over ALL rows is exactly {'flow','action','position','permission','sharing_rule','webhook'} — the six values steps[0]'s stock switches write. The wall itself is eight values: those six plus 'queue' and 'assignment_rule', which the same catalog door writes for a declared queue or assignment rule (ADR-0142 D1/D5), and the stock showcase declares neither. Any other value (hook/capability/tool/skill/…) is a FAIL of the model, not a coverage discovery: hooks are code-only by ADR-0126 §3 amendment ruling 1 (no ledger row, no disable switch), and a capability is code-only on the regime with no switch (catalog-activation.ts CATALOG_ACTIVATION_SUBJECTS). Then probe the door's own wall: POST /api/v1/security/_activation/capability/showcase.export_data {\"enabled\": false} answers 400 naming the six types it switches (position, permission, sharing_rule, webhook, queue, assignment_rule), and POST /api/v1/security/_activation/position/everyone {\"enabled\": false} answers 400 (an audience anchor) — re-read the ledger: neither left a row. Position and permission rows are no longer foreign here: ADR-0131 D3 moved the on/off switch of a position and of a permission set off the catalog row into this ledger (regime C as ADR-0131 D6 amends ADR-0126 §3; readDisabledCatalogNames in packages/core/src/security/resolve-authz-context.ts reads these two types and never the row's active column), which supersedes the 2026-08-26 #12159 ruling that a packaged permission set rides its kind's own active field. sharing_rule rows are not foreign either: ADR-0131 D6 charts a package-declared sharing rule under regime C, and the same door writes its row (packages/runtime/src/domains/catalog-activation.ts, CATALOG_ACTIVATION_SUBJECTS) — an organization-authored sys_sharing_rule row keeps its own switch and writes none. webhook rows are not foreign either: ADR-0131 D2/D6 put a stack-declared webhook (defineStack({ webhooks })) under regime C, the same door writes its row (CATALOG_ACTIVATION_SUBJECTS, WEBHOOK_ACTIVATION_SUBJECT), and plugin-webhooks reads it back (packages/plugins/plugin-webhooks/src/declared-webhooks.ts#readWebhookActivation) — an organization-authored sys_webhook row keeps its own active field and writes none",
         "write-refusal probes, all three verbs: POST /api/v1/data/sys_metadata_activation {metadata_type:'action',name:'qa_probe',package_id:'qa',active:false}, PATCH /api/v1/data/sys_metadata_activation/<existing id> {active:true}, DELETE /api/v1/data/sys_metadata_activation/<existing id> — each answers 405 naming the refused operation and the allowed set; re-read confirms every row unchanged",
@@ -2057,7 +2074,7 @@
         "examples/app-showcase/src/data/extensions/account.extension.ts#AccountExtension (AccountExtension — the shipped fixture, priority 210)",
         "packages/objectql/src/registry.ts#mergeObjectDefinitions (mergeObjectDefinitions — additive fields fold, the spread) + vicinity via engine: packages/objectql/src/engine.ts#registerApp (the objectExtensions loop registering 'extend' contributors — re-pointed #18104: objectExtensions is read off the manifest here, a member access; the loop this item means runs inside registerApp, which this file declares)",
         "packages/spec/src/data/object.zod.ts#ObjectExtensionSchema (ObjectExtensionSchema — what an extension may carry, the #4001 silently-dropped history, 'Fields to add/override', priority wins-on-conflict; defineObjectExtension)",
-        "packages/metadata-protocol/src/protocol.ts#refusal (the NOT_OVERRIDABLE refusal: a packaged item is sealed by its managed package, ADR-0131 D6)",
+        "packages/metadata-protocol/src/protocol-write-gates.ts#refusal (the NOT_OVERRIDABLE refusal: a packaged item is sealed by its managed package, ADR-0131 D6)",
         "packages/plugins/plugin-auth/src/managed-extension-fields.ts + managed-extension-fields.test.ts (the build-time collision gate — better-auth-managed objects ONLY; adopted by ADR-0126 §3 as Regime E prior art, NOT a generic gate)",
         "docs/adr/0126-packaged-metadata-customization-model.md §2-§3 (Regime E: additive contributions at package grain, base never edited, install-grain not per-org)",
         "content/docs/capabilities/integrations.mdx + content/docs/build-without-code.mdx (the E1 docs claim this item grounds)",
@@ -2551,10 +2568,10 @@
     },
     {
       "id": "platform-core.url-overlay-contract",
-      "title": "Reserved URL params (ADR-0054 C3): recordId drawer and form overlay push so Back closes them, tab/palette/shortcuts replace so Back never pages through chrome, formObject/formLink pre-link a child create, ?tab cold-loads, the from trail keeps a clickable path back, and a recordId+recordObject mismatch fails closed",
+      "title": "Reserved URL params (ADR-0054 C3): recordId drawer and form overlay push so Back closes them, record tabs push one entry on leaving Overview and replace after it, palette/shortcuts replace so Back never pages through chrome, formObject/formLink pre-link a child create, ?related cold-loads a record tab, the from trail keeps a clickable path back, and a recordId+recordObject mismatch fails closed",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2571,7 +2588,7 @@
         "record drawer: on an object list, open a record that renders in the drawer — the URL gains ?recordId=<id> as a PUSHED entry; press browser Back — the drawer closes and the list is still there (one history entry consumed, no page change)",
         "form overlay create: trigger a create that uses the global overlay — ?form=new pushes; fill nothing; Back closes the overlay; re-open and confirm ?form=<recordId> (edit) behaves the same",
         "child pre-link: from a parent record, create a subtable child via the overlay — capture ?form=new&formObject=<childObject>&formLink=<fkField>:<parentId>; the FK field arrives pre-linked to the parent; RELOAD the URL cold — the pre-link survives (refresh-safe by construction: the state is the URL)",
-        "tab cold-load: copy a record URL, append ?tab=related (or a related:<child> value), open in a fresh tab — the detail lands on that tab; now switch tabs in-page several times and press Back ONCE — you leave the record (or close the prior overlay), you do NOT step back through tab selections (tab REPLACEs)",
+        "tab cold-load: copy a showcase account record URL, append ?related=showcase_contact.account, open in a fresh tab (a cold load lands on that tab); switch tabs several times and press Back once: you return to the record's Overview in one step, never back through tab selections",
         "palette/shortcuts chrome: open ?palette=1 and ?shortcuts=1 overlays, close them, and confirm Back never replays them (replace semantics — useUrlOverlay defaults to replace)",
         "drill trail: from a record, drill into a related record by FOLLOWING the link's href (open it as a page): a plain click on a lookup or related-record link opens the record in the peek drawer and adds no from=, while the href carries the from= trail (recordPath in ui/packages/app-shell/src/views/RelatedRecordActionsBridge.tsx; the drawer's open-as-full-page builds the same trail, expandedRecordPath in recordDrawerStack.tsx). The drilled page's URL carries from=…; the drilled record shows an inline '← PARENT' back link above its body (the top bar draws no record crumb since objectui#12461 — objectui packages/app-shell/src/views/RecordDetailView.tsx), and clicking it navigates to the parent, whose own back link carries the rest of the trail",
         "cross-object refusal (#4292): take a real record id of object A; navigate to /forms/<formName>?recordId=<idOfA>&recordObject=<objectB> — the route renders an ERROR state; capture the network: NO /data/ read was issued for the mismatched pair (the refusal precedes the read, so nothing is read and nothing can be written); control: the same URL with the AGREEING recordObject loads and prefills normally",
@@ -2585,13 +2602,13 @@
           "evidence": "the before/Back screenshot pairs with URLs"
         },
         {
-          "clause": "passive/chrome state REPLACEs: tab switches, the palette and the shortcuts dialog never stack history — one Back after N tab switches leaves the page rather than stepping through selections",
+          "clause": "record tabs and chrome never stack history: tab switches add at most one entry (the first leave of Overview); palette and shortcuts add none — one Back after N tab switches returns to the record's Overview rather than stepping through selections",
           "oracle": "screenshot",
-          "verify": "N in-page tab switches + palette/shortcuts open-close, then a single Back — the resulting location proves no chrome entry was on the stack",
+          "verify": "N in-page tab switches + palette/shortcuts open-close, then a single Back — the resulting location (the record's Overview) proves at most the one tab entry and no chrome entry was on the stack",
           "evidence": "the switch sequence + the post-Back location"
         },
         {
-          "clause": "?tab cold-loads: a fresh navigation to <record>?tab=<value> lands directly on that tab (URL-addressable state, not just an in-page echo)",
+          "clause": "?related=OBJECT.FIELD cold-loads the tab: a fresh navigation to <record>?related=<object>.<field> lands directly on that related tab (URL-addressable state, not just an in-page echo)",
           "oracle": "screenshot",
           "verify": "fresh-tab open of the copied URL shows the named tab active",
           "evidence": "the cold-load screenshot"
@@ -2616,7 +2633,7 @@
         }
       ],
       "negative": [
-        "Back paging through tab switches or re-opening the palette is a FAIL of the push-vs-replace rule — the registry's own table states which params push and which replace",
+        "Back paging through tab switches (any entry beyond the one the first leave of Overview pushes) or re-opening the palette is a FAIL of the push-vs-replace rule — the registry's own table states which params push and which replace",
         "a mismatched recordObject EDITING the same-id row of the wrong object is the silent-wrong-write #4292 closed — any /data read or write on the mismatch is a FAIL even if an error eventually renders",
         "a page-scoped param reusing a reserved name (a view that repurposes ?recordId or ?form) is a contract violation — capture and file, the registry exists to make this a review-time offence",
         "drawer/overlay state that survives only in memory (a cold reload of the captured URL losing the overlay or the pre-link) breaks URL-addressable state — FAIL"
@@ -2656,6 +2673,12 @@
           "date": "2026-10-31",
           "change": "steps[5] says how to drive the drill. Checklist-accuracy finding of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): a plain click on a lookup or related link opens the record peek drawer with no from=, and the trail lives on the link's href, so a runner who clicked saw no from= on the URL. acceptance[4] is unchanged. Re-read at 3fd80337",
           "ref": "#27438"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-08",
+          "change": "steps[3], acceptance[1] (clause, verify), acceptance[2].clause and negative[0] re-pointed from ?tab= to ?related=, plus the title (an accepted extension in the same item, so it does not contradict the clauses). Stale-spec finding of QA run #31486 (subject 0647dabb, rule R-2): the record page addresses its tabs with ?related=OBJECT.FIELD (RECORD_RELATED_ENLARGE_PARAM in ui/packages/app-shell/src/urlParams.ts; RecordDetailView.tsx openEnlargedRelated/closeEnlargedRelated). Leaving Overview pushes one history entry, moving between tabs replaces it, and Back, Esc or Overview return to the record in one step, so one Back after N switches lands on Overview, not off the page. ?tab= is not read on a columns record page; it still syncs a page that declares its own tabs (withPageTabsUrlSync), which this item does not drive. The capability holds; only the parameter and the one-entry push changed. Re-read at 4894cfe1",
+          "ref": "#31498"
         }
       ]
     },
@@ -2779,7 +2802,7 @@
       "title": "Shell-hard-coded Administration targets + the retired System hub: every Administration target URL resolves to a real page (no RouteNotFound, no RecordDetailView for an object named 'system'), /apps/:app/system lands on the settings hub in one hop and every hub entry resolves, the five legacy system/* URLs redirect (users and organizations to their object routes, roles, positions and permissions to Studio's All metadata catalog in its environment scope), and a member's shell offers no Administration entry",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2799,7 +2822,7 @@
       "steps": [
         "as admin, enumerate the Administration target list from source — UnifiedSidebar's adminItems: sys-settings → /apps/setup/system, sys-apps → …/system/apps, sys-marketplace → …/system/marketplace, sys-datasources → /apps/setup/metadata/datasource, sys-users → …/system/users, sys-orgs → …/system/organizations, sys-roles → …/system/roles, sys-config → …/system/settings (8 entries: sys-objects left with #28818, ADR-0146 D1 — Setup carries no metadata editor or catalog; sys-datasources keeps the canonical /metadata/datasource route, #3660, and stays in Setup, the one metadata type D1 keeps there). No sidebar renders this list at the pin (see knownGaps), so it is walked as URLs",
         "navigate to EVERY target URL directly: each lands on a real page — screenshot first, then assert no RouteNotFound, no 'No Apps Configured' empty state, and above all no RecordDetailView rendering for an object literally named 'system' (the historical failure: short words fell through to the record-id tail — objectui#3655's two measured landings)",
-        "open /apps/setup/system: it redirects in ONE hop to /apps/setup/system/settings (SystemLandingRedirect — the SystemHubPage card wall, its cards and count badges, was retired by objectui#3743, carried out in objectui#10507), where SettingsHub lists the settings manifests the server returns for this user; click every hub entry the same way. The ungated bare system/ai-approvals route is ai.console-ai-surface-gating's subject, not this walk's",
+        "open /apps/setup/system: besides the console's app-id canonicalisation hop, which rewrites the alias /apps/setup/… to the package-id address /apps/com.objectstack.setup/… (canonicalAppPathname, ui/packages/app-shell/src/utils/appRoute.ts, #26183), it redirects in ONE hop to …/system/settings (SystemLandingRedirect — the SystemHubPage card wall, its cards and count badges, was retired by objectui#3743, carried out in objectui#10507), where SettingsHub lists the settings manifests the server returns for this user; click every hub entry the same way. The ungated bare system/ai-approvals route is ai.console-ai-surface-gating's subject, not this walk's",
         "legacy redirects: navigate directly to /apps/setup/system/users, …/organizations, …/roles, …/positions, …/permissions. users and organizations redirect to their object routes per the #3655 map (users→sys_user, organizations→sys_organization list). roles, positions and permissions redirect in ONE hop to Studio's All metadata catalog in its environment scope (SystemCatalogRedirect → setupMetadataStudioPath, ADR-0146 D1, #28818; positions and permission sets are registry items, ADR-0131 D3): roles→/studio/~all/metadata/position?scope=environment [ADR-0090 D3 rename — 'Roles' and 'Positions' are one surface], positions→the same, permissions→/studio/~all/metadata/permission?scope=environment [#3655 decision A: the permission-set surface]. Each landing page renders",
         "as the plain member, open /home and one app: the shell offers no Administration entry anywhere — /home has no sidebar (HomeLayout omits it) and the top-bar Help menu offers documentation only; the server-side half (Setup app refusal for the member) is platform-core.builtin-apps-nav-render clause 2/3 — cross-reference, do not re-score here"
       ],
@@ -2813,19 +2836,19 @@
         {
           "clause": "every Settings-hub entry reached from /apps/:app/system (which redirects in one hop to /system/settings) resolves to a live page.",
           "oracle": "screenshot",
-          "verify": "the navigation trace for /apps/setup/system shows the single redirect to …/system/settings; then a per-entry walk of SettingsHub's entries, screenshot before DOM",
+          "verify": "the navigation trace for /apps/setup/system shows the single redirect to …/system/settings, beside the app-id canonicalisation hop to /apps/com.objectstack.setup/… (canonicalAppPathname: a change of address, not a stop on another page); then a per-entry walk of SettingsHub's entries, screenshot before DOM",
           "evidence": "the redirect trace + the per-entry verdict table"
         },
         {
           "clause": "the five legacy system/* URLs redirect and land on rendering pages — bookmarks and the URLs the retired hub once emitted keep working. users and organizations land on their object routes (sys_user, the sys_organization list — the #3655 map). roles and positions land in ONE hop on Studio's All metadata catalog at /studio/~all/metadata/position?scope=environment (the ADR-0090 rename, one surface under two vocabularies), and permissions at /studio/~all/metadata/permission?scope=environment (decision A: rules-and-assignments is layer 2) — Studio's catalog since #28818 (ADR-0146 D1: Setup carries no metadata catalog), never the sys_position / sys_permission_set object routes (ADR-0131 D3: positions and permission sets are registry items)",
           "oracle": "network",
-          "verify": "the navigation trace per legacy URL shows the redirect target: the object route for users and organizations, /studio/~all/metadata/TYPE?scope=environment for roles, positions and permissions, reached without a stop on any /apps/setup/metadata/… URL; the landing renders. QA run #28981 measured exactly these landings at 7fa9873f. A roles, positions or permissions URL landing on the Setup catalog (/apps/setup/metadata/TYPE) or on the sys_position / sys_permission_set object route is a pre-#28818 shape, so suspect the stale-console-bundle trap before scoring it",
+          "verify": "the navigation trace per legacy URL shows the redirect target: the object route for users and organizations, /studio/~all/metadata/TYPE?scope=environment for roles, positions and permissions, reached without a stop on any /apps/setup/metadata/… URL (the app-id canonicalisation hop to /apps/com.objectstack.setup/… may come first, canonicalAppPathname); the landing renders. QA run #28981 measured exactly these landings at 7fa9873f. A roles, positions or permissions URL landing on the Setup catalog (/apps/setup/metadata/TYPE) or on the sys_position / sys_permission_set object route is a pre-#28818 shape, so suspect the stale-console-bundle trap before scoring it",
           "evidence": "the five redirect traces + landings"
         },
         {
-          "clause": "a member's shell offers no Administration entry anywhere (no /home sidebar — HomeLayout omits it; the Help menu offers documentation entries, Keyboard shortcuts and About — nothing that administers); the server refusal is proven by the builtin-apps item.",
+          "clause": "a member's shell offers no Administration entry anywhere (no /home sidebar — HomeLayout omits it; the Help menu offers documentation entries and About, plus Keyboard shortcuts inside an app — nothing that administers); the server refusal is proven by the builtin-apps item.",
           "oracle": "dom",
-          "verify": "the member's /home and one app shell, in the member's own session (wrong-persona): screenshot, then DOM — no Administration entry in any chrome region, and the Help menu lists documentation entries, Keyboard shortcuts and About and no administration entry (objectui packages/app-shell/src/layout/AppHeader.tsx at the console pin)",
+          "verify": "the member's /home and one app shell, in the member's own session (wrong-persona): screenshot, then DOM — no Administration entry in any chrome region, and the Help menu lists documentation entries and About — on /home exactly All documentation, Online documentation, About, and inside an app also the app's own docs entry and Keyboard shortcuts, which AppHeader.tsx draws only in an app — and no administration entry (objectui packages/app-shell/src/layout/AppHeader.tsx at the console pin)",
           "evidence": "the member screenshots + DOM excerpt"
         }
       ],
@@ -2878,6 +2901,12 @@
           "date": "2026-11-02",
           "change": "Re-pointed to main after N-28 (#28818, ADR-0146 D1). Measured input: QA run #28981 (18.3.0 wave 4, 7fa9873f; card note 6571282495), which failed acceptance[2] as stale spec: /apps/setup/system/roles, /positions and /permissions land in one hop on /_console/studio/~all/metadata/position?scope=environment and …/permission?scope=environment, and the routing pins (AppContent.systemHubRoutes, legacyRedirects) assert the Studio landing. Re-read at base dfbe34d887: acceptance[2] and steps[3] name the Studio landing; the Administration count is read from source, per the seat's ruling — UnifiedSidebar adminItems has 8 entries (sys-objects removed by #28818), so steps[0], acceptance[0] and fixtures.knownGaps[1] say 8, and the title names Studio's catalog; source[0]–[2] re-point to ui/ paths and SystemCatalogRedirect's Studio target. No clause weakened",
           "ref": "#28579"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-04",
+          "change": "steps[2], acceptance[1].verify, acceptance[2].verify and acceptance[3] corrected from QA run #29890 (W5-FAIL, at 589049b0): the console rewrites the alias /apps/setup to /apps/com.objectstack.setup (canonicalAppPathname, #26183), a hop the traces show beside the one redirect, and the Help menu offers Keyboard shortcuts only inside an app (on /home: All documentation, Online documentation, About). Read at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     },
@@ -3036,10 +3065,10 @@
     },
     {
       "id": "platform-core.seed-mode-matrix",
-      "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` is DECLARED delete-all-then-insert but IMPLEMENTED as bare insert (no caller clears the table): the posture is recorded, never ticked as scoped deletion",
+      "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` inserts and deletes nothing, DECLARED and IMPLEMENTED alike (no caller clears the table): its posture is scored as bare insert, never ticked as scoped deletion",
       "since": "v15",
       "status": "active",
-      "revision": 6,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -3056,18 +3085,18 @@
         ]
       },
       "steps": [
-        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — a draft without one is accepted, but its publish is refused (publish-drafts answers outcome 'refused', failed[0] code INVALID_METADATA, rule security-owd-unset) and so is an active save (422 INVALID_METADATA, rule security-owd-unset)) into the writable package and publish, named with that package's namespace prefix: NS_SHORT, where NS is the package manifest's namespace, which a package created without one derives from its id's last segment (com.objectstack.qa.seedmodes gives seedmodes; packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId). An unprefixed draft is accepted, and its publish is refused 422 NAMESPACE_PREFIX with the spelling to use (packages/spec/src/kernel/namespace-prefix.ts#validateObjectNamespacePrefix, ADR-0129 D2); note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
+        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — a draft without one is accepted, but its publish is refused (publish-drafts answers outcome 'refused', failed[0] code INVALID_METADATA, rule security-owd-unset) and so is an active save (422 INVALID_METADATA, rule security-owd-unset)) into the writable package and publish, named with that package's namespace prefix: NS_SHORT, where NS is the package manifest's namespace, which a package created without one derives from its id's last segment (com.objectstack.qa.seedmodes gives seedmodes; packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId). An unprefixed draft is accepted, and its publish is refused 422 NAMESPACE_PREFIX with the spelling to use (packages/spec/src/kernel/namespace-prefix.ts#validateObjectNamespacePrefix, ADR-0129 D2); the refusal fails the whole publish-drafts batch (outcome 'refused', publishedCount 0), so every healthy draft beside it stays unpublished too; note `externalId` defaults to 'name' and `defaultMode` to 'ignore' (SeedLoaderRequestSchema)",
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
         "INSERT: seed draft (mode insert) re-declaring A → a SECOND A-named row appears (no matching in insert mode); record the duplication; if the object declares a unique key on the natural key instead, record the refusal — either shape is the mode's real contract",
-        "REPLACE (expected-posture probe): add one row F by hand through /api/v1/data (a row the seed does NOT declare); publish a seed draft (mode replace) declaring only G → capture what happens to F. At head: F SURVIVES and G is inserted — the loader's replace case is bare insert with the comment 'caller should have cleared the table', and NO caller in the tree clears anything. Record the declared-vs-implemented gap; do NOT tick 'replace scoped to its own object' (there is no deletion to scope) and do NOT file F's survival as data loss (it is the opposite)",
+        "REPLACE (expected-posture probe): add one row F by hand through /api/v1/data (a row the seed does NOT declare); publish a seed draft (mode replace) declaring only G → capture what happens to F. At head: F SURVIVES and G is inserted — the loader's replace case is bare insert with the comment 'caller should have cleared the table', and NO caller in the tree clears anything, which is what SeedMode now declares for replace ('deleting nothing: for a cache table the caller cleared'). Score F's survival as the declared posture; do NOT tick 'replace scoped to its own object' (there is no deletion to scope) and do NOT file F's survival as data loss (it is the opposite)",
         "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because steps 2–4 rewrote A's rows (update mode set A to a2, insert mode added a second A-named row), so it re-converges them to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
         "teardown: the writable package's own delete, or discard the run's own DB"
       ],
       "acceptance": [
         {
-          "clause": "upsert (the default) matches on externalId and does exactly create-or-update: unmatched rows insert, matched-and-different rows update IN PLACE (id stable), matched-and-identical rows SKIP as no-op replays — comparison covering only seed-declared fields so runtime edits to other columns never block the skip",
+          "clause": "upsert (declared explicitly: ignore is the default since PR #30152) matches on externalId and does exactly create-or-update: unmatched rows insert, matched-and-different rows update IN PLACE (id stable), matched-and-identical rows SKIP as no-op replays — comparison covering only seed-declared fields so runtime edits to other columns never block the skip",
           "oracle": "api",
           "verify": "the id/value table across the two upsert publishes from step 1; ids stable, values as authored, A untouched on the replay",
           "evidence": "the before/after row reads keyed by id"
@@ -3091,13 +3120,13 @@
           "evidence": "the post-insert row listing (or the refusal body)"
         },
         {
-          "clause": "EXPECTED POSTURE (declared ≠ implemented): `replace` is documented 'Delete ALL records in object then insert (Dangerous)' but the implementation is bare insert — writeRecord's replace arm inserts with the comment 'caller should have cleared the table' and NO caller anywhere clears it, so pre-existing rows SURVIVE a replace-mode publish. The run records this gap (a checklist-accuracy/product finding routed through the sweep's anchor, not re-filed per run); it must NOT tick a 'replace deletes only its own object's rows' claim — no deletion exists to scope. If a future head implements the clear, this clause is stale: revise, and then ALSO prove the deletion is scoped to the seed's own object before trusting it",
+          "clause": "EXPECTED POSTURE (declared = implemented): `replace` inserts every record with no match and deletes nothing. SeedMode's replace member declares 'Insert every record, no match, deleting nothing: for a cache table the caller cleared', SeedSchema's mode description says replace 'does the same and deletes nothing: it is for a table the caller cleared', and writeRecord's replace arm is that bare insert (its comment 'caller should have cleared the table'; NO caller anywhere clears it), so pre-existing rows SURVIVE a replace-mode publish. F's survival is the declared behaviour: neither a gap to record nor data loss to file; the run must NOT tick a 'replace deletes only its own object's rows' claim — no deletion exists to scope. If a future head implements a clear (in the loader or in a caller), this clause is stale: revise, and then ALSO prove the deletion is scoped to the seed's own object before trusting it",
           "oracle": "api",
           "verify": "F (undeclared, hand-inserted) still present after the replace publish; G inserted; grep evidence: the only 'replace' write arm is the insert in seed-loader.ts's writeRecord, and decideWriteAction (the batched mirror) routes replace to insert — cite the symbols, never a line number",
           "evidence": "F's surviving read + G's read + the source excerpt"
         },
         {
-          "clause": "the mode vocabulary is the spec's own five and the resolution seam is one line: dataset.mode || config.defaultMode ('upsert'), through the single SeedLoaderService every path shares (boot, publish, dispatcher) — the enumSource pin fails this item when a sixth mode lands",
+          "clause": "the mode vocabulary is the spec's own five and the resolution seam is one line: dataset.mode || config.defaultMode ('ignore'), through the single SeedLoaderService every path shares (boot, publish, dispatcher) — the enumSource pin fails this item when a sixth mode lands",
           "oracle": "build",
           "verify": "SeedMode members at seed.zod.ts; the resolution at metadata-protocol/src/seed-loader.ts; the runtime re-export shim proving one implementation",
           "evidence": "the three source excerpts"
@@ -3110,8 +3139,8 @@
       "variants": [
         "mode insert — no matching, always writes (duplicates on replay unless the object's own unique constraint refuses)",
         "mode update — matched rows only; unmatched skipped, never created",
-        "mode upsert — create-or-update on externalId with no-op-replay skip (the default)",
-        "mode replace — DECLARED clear-then-insert, IMPLEMENTED bare insert (the expected-posture clause)",
+        "mode upsert — create-or-update on externalId with no-op-replay skip",
+        "mode replace — bare insert, no matching, nothing deleted: DECLARED and IMPLEMENTED alike (the expected-posture clause)",
         "mode ignore — insert-if-absent; existing rows never rewritten"
       ],
       "enumSource": {
@@ -3121,9 +3150,9 @@
       },
       "traps": ["destructive-in-place", "seed-data-thin", "silent-coercion"],
       "source": [
-        "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — the five modes with their declared semantics, incl. replace's 'Delete ALL records … Dangerous' claim)",
+        "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — the five modes with their declared semantics, incl. replace's 'Insert every record, no match, deleting nothing: for a cache table the caller cleared'), (SeedSchema's mode description — replace 'does the same and deletes nothing: it is for a table the caller cleared')",
         "packages/metadata-protocol/src/seed-loader.ts#writeRecord (mode = dataset.mode || config.defaultMode), (existing-records preload for upsert/update/ignore ONLY — insert/replace never match), (writeRecord per-mode switch; the replace arm's bare insert + 'caller should have cleared the table' comment), (decideWriteAction — the batched mirror, replace → insert),+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
-        "packages/spec/src/data/seed-loader.zod.ts#defaultMode (defaultMode default 'upsert')",
+        "packages/spec/src/data/seed-loader.zod.ts#defaultMode (defaultMode is SeedSchema.shape.mode, default 'ignore')",
         "packages/metadata-protocol/src/protocol.ts#applySeedBodies+ (applySeedBodies — published seed bodies materialize through the same loader; failures returned, never thrown, surfaced as seedApplied)",
         "packages/runtime/src/seed-loader.ts#SeedLoaderService (the MOVED shim — one SeedLoaderService for every path)",
         "packages/spec/src/kernel/metadata-plugin.zod.ts#allowRuntimeCreate (seed: allowRuntimeCreate true — the scratch-draft fixture path)",
@@ -3165,6 +3194,18 @@
           "date": "2026-10-28",
           "change": "fixtures.requires[0] names the earlier refusal. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, manual api set, at 756220c4; wave anchor #25807, slice B): a body name that mismatches the URL answered 400 VALIDATION_ERROR before the strict schema's 422 unrecognized_keys could. Measured live by that run; the requirement (no body name) is unchanged. No clause changed",
           "ref": "#25807"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-07",
+          "change": "title, steps[5], acceptance[4].clause, variants[3] and source[0] re-worded: replace is now declared = implemented. #31099 (PR #31135) rewrote SeedMode's replace member and SeedSchema's mode description to what the loader does (insert every record, no match, deleting nothing), so the clause's 'declared ≠ implemented' posture went false and source[0] quoted the old delete-all-then-insert wording, which seed.zod.ts no longer holds. Read at base 658d84f5: seed.zod.ts SeedMode and SeedSchema mode describe text (no delete-all wording left), seed-loader.ts writeRecord's replace arm (bare insert, comment 'caller should have cleared the table') and decideWriteAction (replace routes to insert), and no other replace arm on the seed path (packages/cli/src/commands/diff.ts only words a plan line). The probe and its verdicts are unchanged: F survives, G is inserted, nothing is ticked as scoped deletion",
+          "ref": "#31140"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-08",
+          "change": "steps[0], acceptance[0].clause and acceptance[5].clause re-pointed to the ignore default, plus variants[2] and source[2] (an accepted extension in the same item, so it does not contradict the clauses). Stale-spec finding of QA run #31486 (subject 0647dabb, rule R-1, acceptance[5]): PR #30152 made a seed create-only by default, an omitted mode is ignore. Read at 4894cfe1: packages/spec/src/data/seed.zod.ts SeedSchema mode is SeedMode.default('ignore'); seed-loader.zod.ts SeedLoaderConfigSchema defaultMode is SeedSchema.shape.mode; the seam in packages/metadata-protocol/src/seed-loader.ts writeRecord is unchanged (dataset.mode || config.defaultMode). steps[0] also carries the run's note that an unprefixed draft fails the whole publish-drafts batch (outcome 'refused', publishedCount 0; protocol.ts publishPackageDrafts pre-flight). Every probe step declares its mode, so no verdict moves",
+          "ref": "#31497"
         }
       ]
     },
@@ -3309,7 +3350,7 @@
       "title": "The settings audit trail keeps no fingerprint of a secret-valued setting that a reader can match offline: both ledgers record the platform's keyed digest or none, never the value or an unkeyed hash, so a caller who can only read the audit rows learns that the secret changed and nothing about its value",
       "since": "v17",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3391,7 +3432,7 @@
       },
       "source": [
         "packages/services/service-settings/src/settings-service.ts#secretAuditDigest (one helper supplies a secret write's fingerprint on both write branches, the sys_secret path and the legacy inline-adapter path: the provider's keyedDigest, or null with a once-per-key warn; never the adapter's unkeyed digest)",
-        "packages/services/service-settings/src/config-change-audit.ts#CONFIG_CHANGE_ACTION (the sys_audit_log config_change row: object_name sys_setting, new_value carries namespace/key/scope/digest, never the value; null on a reset)",
+        "packages/services/service-settings/src/config-change-audit.ts#CONFIG_CHANGE_ACTION (the sys_audit_log config_change row: object_name sys_setting, or sys_platform_setting for a global value; new_value carries namespace/key/scope/digest, null on a reset, and old_value the same shape for the value the stored row held before, null when it held none; a secret-valued key's sides carry the masked digest and never the value, while a non-secret key's also carry the value readable)",
         "packages/spec/src/contracts/crypto-provider.ts#keyedDigest (the contract text: a secret's audit fingerprint comes from keyedDigest and never from digest; with no keyed digest the trail records none)",
         "packages/services/service-settings/src/manifests/mail.manifest.ts (mail.api_key: type password, encrypted: true)",
         "#21792 (the maintainer ruling: secret-valued settings are fingerprinted with the keyed digest, never an unkeyed one; non-secret settings unchanged) · PR #21809 (the fix)",
@@ -3427,6 +3468,12 @@
           "date": "2026-10-27",
           "change": "steps[3] and [6], acceptance[1].clause, [4] (clause, verify), negative[0] and automated.ref re-pointed: a non-secret setting's audit digest is now the SHA-256 the sys_setting_audit / sys_platform_setting_audit columns declare, spelled 'sha256:' + 64 hex (crypto-adapter.ts settingAuditDigest), no longer the adapter's FNV-1a 32 ('fnv32:'). The step-7 control computes the algorithm the service now writes, so it can still prove the offline search would find an unkeyed digest. Not loosened: the secret search keeps the FNV-1a 32 as a second net, so a secret row carrying either unkeyed form still fails",
           "ref": "#26465"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-06",
+          "change": "source[1] re-pointed: the config_change row now records the before (old_value) and the after readable for a non-secret key, as ADR-0007 Audit & history decides, so 'never the value' holds for secret-valued keys only. No clause changed: every clause here scores the secret key mail.api_key, whose rows still carry the masked keyed digest and never the value, on both sides",
+          "ref": "#30923"
         }
       ]
     },
@@ -4035,6 +4082,114 @@
           "date": "2026-11-02",
           "change": "steps[0], acceptance[0], [1] and [2] corrected, assertion defects measured in the slice 3 run (base 128681f4): the console first rewrites /apps/setup and /apps/showcase_app to their canonical app segments, a hop of its own that the routing pin's stubbed app list does not make (typed with the canonical segment, each metadata URL reaches Studio in one hop); a package leg's object item opens its Data pillar (areaItemPillarPath, ADR-0146 D1), so the ?package landing is followed by that pillar; ?review=1 is carried by the redirect and dropped by the item page once it opens the draft review; and acceptance[2] named the jsdom stub test ids, now Setup's real Datasources page and metadata-edit-datasource. The run scored acceptance[1] FAIL against revision 1 for the pillar hop. acceptance[0] and [3]'s cross-package landing (/studio/~all/metadata/TYPE) is unchanged: the run found the area's list rewriting it to one package's leg, a product finding in FOLLOW-UPS §15",
           "ref": "#28579"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.package-export-round-trip",
+      "title": "A deployment's whole ontology exports in one read and installs again on a fresh boot: GET /api/v1/packages/export answers every package the deployment's code does not register, once each and dependencies first, each entry equal to that package's own export, and os package export writes them as installable directories",
+      "since": "v18.3",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (the seeded admin, holding studio.access): the reader of the export and the installer on the target boot",
+        "a member holding neither studio.access nor setup.access (the refusal leg, in its own context)",
+        "anonymous (no session): the 401 leg"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "TWO boots, each from its own scratch copy of the showcase on its own port and DB (dogfood §0): install-local writes .objectstack/installed-packages/ under the server's working directory, so two boots on one tree would share the installed set (RUNNER environment facts on install isolation). The source boot holds the fixture below; the target boot starts stock and receives the export",
+          "the source's ontology, the table of QA run #29870: (a) an authored package with an object, a flow and a connector whose auth carries a header or env map, written with POST /api/v1/packages, ?package= drafts and POST …/publish-drafts; (b) the showcase's pair, from POST /api/v1/packages/com.example.showcase/ensure-customization, holding an object_extension that adds a __c field; (c) one package installed through POST /api/v1/marketplace/install-local; (d) a second authored package that depends on (a), published and then disabled",
+          "the CLI on PATH (os) for the export and install legs, pointed at each boot with --url"
+        ]
+      },
+      "steps": [
+        "on the source boot, as the admin: GET /api/v1/packages and note each package's registry source and dependencies; then GET /api/v1/packages/export and record the order of data.packages and each entry's manifest id",
+        "for each entry, GET /api/v1/packages/ID/export and compare it with the entry byte for byte; then call client.packages.exportAll() (packages/client) and compare its bundle with the read",
+        "read (a)'s entry: find the connector's header / env map absent and named in withheldMaps, and search the whole bundle text for the header's name and value",
+        "read (d)'s entry (the disabled package): its objects and fields are present",
+        "os package export --out DIR against the source; list DIR and compare each NN-ID/objectstack.json with its entry; then run it again into the same DIR and record the exit code and that nothing changed",
+        "on the target boot, install each directory in the numbered order with os package install DIR/NN-ID/objectstack.json (or POST /api/v1/marketplace/install-local with the file): record each answer, the server log lines it writes, and then read every object, field, flow, connector and pair extension the source served",
+        "GET /api/v1/packages/export on the target and compare it with the source's read",
+        "negative pass: GET /api/v1/packages/export?x=1 as the admin; the read as the member; the read with no session; and on a third fresh boot install (d)'s directory before (a)'s"
+      ],
+      "acceptance": [
+        {
+          "clause": "as a holder of studio.access or setup.access, GET /api/v1/packages/export answers every package whose registry row is not source: 'code' exactly once, a disabled one included, dependencies first: a pair after its base when both are listed, and the pair of a code base (com.example.showcase.custom) exported alone",
+          "oracle": "api",
+          "verify": "data.packages holds one entry per non-code package of GET /api/v1/packages, no code package and no duplicate; each package comes after every package it declares as a dependency (assemblePackageExportBundle orders them with orderHydrationBatch)",
+          "evidence": "the package list beside the bundle order"
+        },
+        {
+          "clause": "each entry equals GET /api/v1/packages/:id/export for that package, byte for byte, and client.packages.exportAll() returns the same bundle",
+          "oracle": "api",
+          "verify": "per entry, the serialized entry equals the per-package read; the client call's bundle equals the HTTP read",
+          "evidence": "one line per package: equal or the first difference"
+        },
+        {
+          "clause": "a connector's header or env map is absent from its entry and named in that entry's withheldMaps, by position only: no header name or value appears anywhere in the bundle text",
+          "oracle": "api",
+          "verify": "(a)'s entry carries withheldMaps naming the map's position and the connector keeps no copy of the map; a text search of the whole bundle for the header's name and its value finds neither (withheldConnectorMaps, packages/runtime/src/domains/packages.ts)",
+          "evidence": "the withheldMaps list and the two search results"
+        },
+        {
+          "clause": "a disabled package's entry carries its own items. Fixed: #29871 (closed), where a disabled package exported as an empty shell",
+          "oracle": "api",
+          "verify": "(d)'s entry lists the objects and fields the package held before it was disabled (the registry read keeps a disabled package's items, includeDisabledPackages, packages/objectql/src/registry.ts); an entry with no items is a regression of #29871",
+          "evidence": "(d)'s entry beside its pre-disable read"
+        },
+        {
+          "clause": "os package export --out DIR writes one NN-ID/objectstack.json per entry, numbered in the read's order, each equal to its entry",
+          "oracle": "build",
+          "verify": "DIR holds exactly one directory per entry, named NN-ID with NN its zero-padded place in data.packages, and each objectstack.json equals that entry (packages/cli/src/commands/package/export.ts)",
+          "evidence": "the DIR listing and one equality line per file"
+        },
+        {
+          "clause": "on a fresh boot, installing each directory in order (os package install or POST /api/v1/marketplace/install-local) answers 200, serves every object, field, flow, connector and pair extension the source served, names each withheld map in its answer, and logs one WARN per package that has them",
+          "oracle": "api",
+          "verify": "each install answers 200; the target serves every item the source served; each answer for a package with withheld maps names them (judgeWithheldMaps, packages/cloud-connection/src/marketplace-install-local-plugin.ts) and the log holds one WARN line for that package; the CLI install prints them too (#29873)",
+          "evidence": "the install answers, the WARN lines and the target reads"
+        },
+        {
+          "clause": "the target's GET /api/v1/packages/export equals the source's apart from withheldMaps. Fixed: #29872 (closed), where an exported pair lost the extension fields of a package installed through install-local on the second hop",
+          "oracle": "api",
+          "verify": "the two bundles are equal once withheldMaps is set aside, the pair's object_extension and its __c field included (assemblePackageManifest reads a package's extensions from the registry, registeredExtensionsOf, packages/runtime/src/domains/packages.ts); a pair entry without its extension is a regression of #29872",
+          "evidence": "the diff of the two bundles"
+        }
+      ],
+      "negative": [
+        "any query parameter on GET /api/v1/packages/export answers 400 VALIDATION_ERROR naming it",
+        "a member holding neither studio.access nor setup.access is refused 403 PERMISSION_DENIED",
+        "an anonymous read answers 401",
+        "os package export --out DIR into a directory that already holds files exits 1 and writes nothing",
+        "installing an entry before the package it depends on answers 422 DEPENDENCY_MISSING"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "wrong-persona",
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "Partial pins, none of which drives two booted deployments: packages/runtime/src/domains/packages-export-bundle.test.ts (the bundle through the dispatcher over a stub protocol: acceptance[0] and [1] in-process), packages/runtime/src/domains/packages-export-disabled-package.integration.test.ts (acceptance[3], #29871), packages/objectql/src/registry-extension-field-patches.test.ts and packages/runtime/src/domains/packages-export-base-showcase-boot.integration.test.ts (acceptance[6], #29872), packages/cli/test/package-export.test.ts (acceptance[4] and the --out refusal), and the dogfood set packages/qa/dogfood/test/package-export-bundle-round-trip.dogfood.test.ts, export-withheld-connector-maps.dogfood.test.ts and package-export-reinstall-custom-pair.dogfood.test.ts (acceptance[2], [5] and [6] on one deployment). The two-boot round trip is the run's leg"
+      },
+      "source": [
+        "packages/runtime/src/domains/packages.ts#assemblePackageExportBundle (GET /packages/export: every non-code package, dependencies first), packages/runtime/src/domains/packages.ts#assemblePackageManifest (each entry, as GET /packages/:id/export answers it), packages/runtime/src/domains/packages.ts#withheldConnectorMaps",
+        "packages/spec/src/api/package-lifecycle.zod.ts#PackageExportBundleSchema, packages/spec/src/api/package-lifecycle.zod.ts#PackageExportManifestSchema",
+        "packages/cli/src/commands/package/export.ts (os package export --out DIR: NN-ID/objectstack.json, refuses a non-empty DIR)",
+        "packages/cloud-connection/src/marketplace-install-local-plugin.ts#judgeWithheldMaps (the install answer and its WARN line)",
+        "packages/client/src/index.ts (packages.exportAll)",
+        "#29755 (GET /packages/export), #29746 (withheldMaps), #29871 and #29872 (fixed), #29873 (the CLI install names withheld maps); QA run #29870 (W5-EXPORT, at 589049b0)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-04",
+          "change": "new item from QA run #29870 (W5-EXPORT, at 589049b0), proposed by #29906 part D: no item covered GET /api/v1/packages/export (#29755), withheldMaps (#29746) or os package export. Acceptance[3] and [6] were proposed as failing (#29871, #29872); both cards are closed fixed at base f68b47ca, so the clauses state the fixed behaviour and name the card each regression would reopen. Read from source at base f68b47ca",
+          "ref": "#29906"
         }
       ]
     }

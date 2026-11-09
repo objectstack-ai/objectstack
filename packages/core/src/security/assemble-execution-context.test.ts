@@ -473,6 +473,22 @@ describe('#6216 — the field set is CLOSED', () => {
     expect(decided).toEqual(schemaFields);
   });
 
+  it('permissionSetAddresses is decided but not yet filled: no envelope carries the key (ADR-0150 D3)', () => {
+    const base = { localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined } as const;
+    const human = assembleExecutionContext({ ...base, authz: HUMAN_FULL, oauth: undefined });
+    const agent = assembleExecutionContext({
+      ...base,
+      authz: HUMAN_FULL,
+      oauth: { userId: 'u1', scopes: ['data:read'], clientId: 'cli1', scopePermissions: ['agent_data_read'], delegatesActions: false },
+    });
+    const guest = assembleExecutionContextOrGuest({ ...base, authz: ANONYMOUS, oauth: undefined });
+    expect(ENTRY_EXECUTION_CONTEXT_FIELDS).toContain('permissionSetAddresses');
+    for (const ctx of [human, agent, guest]) {
+      expect(ctx).toBeDefined();
+      expect(Object.keys(ctx!)).not.toContain('permissionSetAddresses');
+    }
+  });
+
   it('no field is decided twice', () => {
     const decided = [...ENTRY_EXECUTION_CONTEXT_FIELDS, ...NON_ENTRY_FIELDS];
     expect(new Set(decided).size).toBe(decided.length);
@@ -589,5 +605,122 @@ describe('ruling 6355206139 — the resolver’s audience stamp rides the envelo
     expect(Object.keys(assemble(HUMAN_FULL))).not.toContain('audience');
     expect(Object.keys(assemble(ANONYMOUS))).not.toContain('audience');
     expect(Object.keys(assemble({ ...ANONYMOUS, audience: 'external' }))).not.toContain('audience');
+  });
+});
+
+// The guest envelope is the ONLY thing that tells a downstream create hook an
+// anonymous request is a caller at all. Create hooks such as `sys_attachment`'s
+// and `sys_comment`'s keep a bare-kernel carve-out — no hook session means an
+// internal, context-less engine call, skipped before any user check — and the
+// engine builds that session from the envelope's caller fields
+// (`buildSession`, objectql `engine-execution-plumbing.ts`), which does not
+// read `principalKind`. So the anonymous principal must stay identified by a
+// field that survives that hop, whatever else the face resolved or withheld.
+// objectql's own suite pins the hop itself; this pin holds the envelope end.
+describe('a guest request is a named caller, never an empty context', () => {
+  const GUEST_SHAPES: Array<[string, ResolvedAuthzContext]> = [
+    // The minimum: no session, no key, no guest anchor grants — nothing but
+    // the fact that someone asked.
+    ['no tenant, no grants, no token', ANONYMOUS],
+    // A face that serves the guest resolves the anchor's grants in the
+    // organization ADR-0138 D4 derives; the identification must not depend on it.
+    ['guest anchor grants in an organization', baseAuthz({ tenantId: 'org1', permissions: ['task.read'] })],
+  ];
+
+  for (const [name, authz] of GUEST_SHAPES) {
+    it(`an anonymous request keeps the guest position on its envelope (${name}), so create hooks see a caller`, () => {
+      const ctx = assembleExecutionContextOrGuest({
+        authz,
+        oauth: undefined,
+        // Everything a face could pass for an anonymous request, so a later
+        // change that strips more of it cannot strip the identification too.
+        localization: { timezone: 'Asia/Shanghai', locale: 'zh-CN', currency: 'CNY' },
+        requestLocale: 'en-US',
+        accessToken: undefined,
+        authGate: undefined,
+      });
+      expect(ctx.userId).toBeUndefined();
+      expect(ctx.isSystem).toBe(false);
+      expect(ctx.positions).toEqual(['guest']);
+    });
+  }
+});
+
+describe('impersonatedBy — the administrator of an impersonation session, carried as attribution only', () => {
+  const IMPERSONATED: ResolvedAuthzContext = { ...HUMAN_MINIMAL, impersonatedBy: 'u_admin' };
+  const assembly = (authz: ResolvedAuthzContext) => ({
+    authz, oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined,
+  });
+
+  it('both entries carry it, beside a subject that stays the impersonated user', () => {
+    for (const ctx of [assembleExecutionContext(assembly(IMPERSONATED)), assembleExecutionContextOrGuest(assembly(IMPERSONATED))]) {
+      expect(ctx?.impersonatedBy).toBe('u_admin');
+      expect(ctx?.userId).toBe(HUMAN_MINIMAL.userId);
+      expect(ctx?.positions).toEqual(HUMAN_MINIMAL.positions);
+      expect(ExecutionContextSchema.parse(ctx).impersonatedBy).toBe('u_admin');
+    }
+  });
+
+  it('is absent for the user\'s own session and never on a guest envelope', () => {
+    expect('impersonatedBy' in assembleExecutionContext(assembly(HUMAN_MINIMAL))!).toBe(false);
+    const guest = assembleExecutionContextOrGuest(assembly({ ...ANONYMOUS, impersonatedBy: 'u_admin' }));
+    expect(guest?.principalKind).toBe('guest');
+    expect('impersonatedBy' in guest!).toBe(false);
+  });
+});
+
+describe('[ADR-0151 D3] an AI service account is an agent principal of its own: no onBehalfOf, no system permission', () => {
+  const ACCOUNT = baseAuthz({
+    userId: 'u_bot',
+    tenantId: 'org1',
+    principalKind: 'agent',
+    positions: ['org_member'],
+    permissions: ['crm_lead_reader'],
+    // What the resolver never hands an account; the assembler withholds it anyway.
+    systemPermissions: ['manage_users'],
+    org_user_ids: ['u_bot', 'u2'],
+    accessible_org_ids: ['org1'],
+  });
+
+  it('stamps principalKind agent, keeps userId the account and its own grants, and carries no onBehalfOf, performer or system permission', () => {
+    const ctx = assembleExecutionContext({ authz: ACCOUNT, oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined })!;
+    expect(ctx.userId).toBe('u_bot');
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.permissions).toEqual(['crm_lead_reader']);
+    expect(ctx.systemPermissions).toEqual([]);
+    expect(ctx.isSystem).toBe(false);
+    for (const key of ['onBehalfOf', 'performedBy', 'oauthScopes']) expect(Object.keys(ctx)).not.toContain(key);
+  });
+
+  it('takes precedence over an OAuth arm: an account is never re-read as a person an OAuth client acts for', () => {
+    const ctx = assembleExecutionContext({
+      authz: ACCOUNT,
+      oauth: { userId: 'u_bot', scopes: ['data:read'], clientId: 'cli1', scopePermissions: ['mcp_agent_data_read'], delegatesActions: true },
+      localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined,
+    })!;
+    expect(ctx.principalKind).toBe('agent');
+    expect(ctx.onBehalfOf).toBeUndefined();
+    expect(ctx.performedBy).toBeUndefined();
+    expect(ctx.permissions).toEqual(['crm_lead_reader']);
+    expect(ctx.systemPermissions).toEqual([]);
+  });
+
+  it('CONTROL: an OAuth-delegated agent keeps today\'s shape, and a person\'s envelope is unchanged', () => {
+    const delegated = assembleExecutionContext({
+      authz: HUMAN_FULL,
+      oauth: { userId: 'u1', scopes: ['data:read', 'actions:execute'], clientId: 'cli1', scopePermissions: ['mcp_agent_data_read'], delegatesActions: true },
+      localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined,
+    })!;
+    expect(delegated.principalKind).toBe('agent');
+    expect(delegated.userId).toBe('u1');
+    expect(delegated.onBehalfOf).toEqual({ userId: 'u1', principalKind: 'human' });
+    expect(delegated.performedBy).toEqual({ clientId: 'cli1' });
+    expect(delegated.permissions).toEqual(['mcp_agent_data_read']);
+    expect(delegated.systemPermissions).toEqual(HUMAN_FULL.systemPermissions);
+
+    const person = assembleExecutionContext({ authz: HUMAN_FULL, oauth: undefined, localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined })!;
+    expect(person.principalKind).toBe('human');
+    expect(person.systemPermissions).toEqual(HUMAN_FULL.systemPermissions);
+    expect(person.onBehalfOf).toBeUndefined();
   });
 });

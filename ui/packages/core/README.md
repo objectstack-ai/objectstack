@@ -96,7 +96,7 @@ const script = createServerActionHandler({
   fetch: myAuthenticatedFetch,          // your auth wrapper (Bearer/cookies/...)
   baseUrl: 'https://api.example.com',   // '' or omitted = same-origin
   resolveObject: () => currentObject,   // fallback when the action has no objectName
-  onRefresh: () => refetchData(),       // called per the action's refreshAfter
+  onRefresh: () => refetchData(),       // called per refreshAfter, and after every operation: 'update'
 })
 
 // Registered handlers beat the built-in executors:

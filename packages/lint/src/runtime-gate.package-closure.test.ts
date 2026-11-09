@@ -28,6 +28,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  datasetBoundObjectNames,
   narrowObjectsToPackageClosure,
   runRuntimeAuthoringRules,
   type RuntimePackageScope,
@@ -641,5 +642,136 @@ describe('the dataset door under a package closure, and the shared prescription 
     expect(flow.hint).toBe(`${clause}set config.objectName to an object inside that closure`);
     expect(view.hint).toBe(`${clause}bind the view to an object inside that closure`);
     expect(dataset.hint).toBe(`${clause}point it at an object inside that closure`);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #30005 — a dashboard or report on ANOTHER package's dataset, under a closure.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('a dataset outside the closure: its filter keys are judged against its object (#30005)', () => {
+  /**
+   * The filer's shape: a runtime package (`OWN`, which declares no dependency
+   * on the showcase) builds on `showcase_task_metrics`, a dataset the showcase
+   * package ships over its own `showcase_task`. `datasets` is never narrowed,
+   * so the binding resolves; before this card the object fell out of the
+   * closure and both filter-key rules took their "object absent" skip.
+   */
+  const SHOWCASE = 'com.example.showcase';
+  const objects = [
+    ...packagedTenant(2),
+    obj('showcase_task', SHOWCASE, {
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        status: { type: 'select', label: 'Status', options: [{ label: 'Done', value: 'done' }] },
+        estimate_hours: { type: 'number', label: 'Estimate' },
+      },
+    }),
+  ];
+  const datasets = [
+    {
+      name: 'showcase_task_metrics',
+      label: 'Task Metrics',
+      object: 'showcase_task',
+      _packageId: SHOWCASE,
+      dimensions: [{ name: 'status', label: 'Status', field: 'status', type: 'string' }],
+      measures: [
+        { name: 'task_count', label: 'Tasks', aggregate: 'count' },
+        { name: 'est_hours', label: 'Estimated Hours', aggregate: 'sum', field: 'estimate_hours' },
+      ],
+    },
+  ];
+  const context = { objects, datasets };
+  const board = (filter: AnyRec): AnyRec => ({
+    name: 'runtime_ops_board',
+    label: 'Runtime Ops',
+    widgets: [
+      { id: 'tasks', type: 'metric', title: 'Tasks', dataset: 'showcase_task_metrics', values: ['task_count'], filter },
+    ],
+  });
+  const report = (runtimeFilter: AnyRec): AnyRec => ({
+    name: 'runtime_task_report',
+    label: 'Runtime Tasks',
+    type: 'summary',
+    dataset: 'showcase_task_metrics',
+    rows: ['status'],
+    values: ['est_hours'],
+    runtimeFilter,
+  });
+  const gate = (type: string, item: AnyRec, scope: RuntimePackageScope | undefined = SCOPE) =>
+    runRuntimeAuthoringRules({ type, item, context, ...(scope ? { packageScope: scope } : {}) });
+  const at = (fs: AnyRec[]) => fs.map((f) => [f.rule, f.path]);
+
+  it('⭐ LIT — the filer\'s repro: a widget key the dataset\'s object lacks is REFUSED at the widget path', () => {
+    const result = gate('dashboard', board({ no_such_field: 'x' }));
+    expect(at(result.errors)).toEqual([
+      ['widget-filter-field-unknown', 'dashboards[0].widgets[0].filter.no_such_field'],
+    ]);
+    expect(result.errors[0]!.severity).toBe('error');
+  });
+
+  it('⭐ LIT — the same key on a report `runtimeFilter` is REFUSED at its path', () => {
+    const result = gate('report', report({ no_such_field: 'x' }));
+    expect(at(result.errors)).toEqual([
+      ['report-filter-field-unknown', 'reports[0].runtimeFilter.no_such_field'],
+    ]);
+  });
+
+  it('⭐ LIT — a joined block on that dataset: the block key and the container key are both judged', () => {
+    const joined = {
+      name: 'runtime_joined',
+      label: 'Joined',
+      type: 'joined',
+      runtimeFilter: { nope: 1 },
+      blocks: [
+        { name: 'b1', type: 'summary', dataset: 'showcase_task_metrics', rows: ['status'], values: ['est_hours'], runtimeFilter: { also_nope: 1 } },
+      ],
+    };
+    expect(at(gate('report', joined).errors)).toEqual([
+      ['report-filter-field-unknown', 'reports[0].runtimeFilter.nope'],
+      ['report-filter-field-unknown', 'reports[0].blocks[0].runtimeFilter.also_nope'],
+    ]);
+  });
+
+  it('⭐ CONTROL — a key the dataset door binds still publishes, on the widget and on the report', () => {
+    for (const filter of [{ status: 'done' }, { estimate_hours: { $gte: 1 } }, { created_at: { $gte: '{today}' } }]) {
+      expect(gate('dashboard', board(filter)).errors, JSON.stringify(filter)).toEqual([]);
+      expect(gate('report', report(filter)).errors, JSON.stringify(filter)).toEqual([]);
+    }
+  });
+
+  it('the scoped verdict is now the whole-collection one — the closure no longer hides the finding', () => {
+    for (const [type, item] of [['dashboard', board({ no_such_field: 'x' })], ['report', report({ no_such_field: 'x' })]] as const) {
+      expect(verdict(gate(type, item))).toEqual(verdict(gate(type, item, undefined)));
+      expect(verdict(gate(type, item))).toHaveLength(1);
+    }
+  });
+
+  it('a dataset that resolves to nothing re-admits nothing — `widget-dataset-unknown` keeps the typo', () => {
+    const dangling = { ...board({ no_such_field: 'x' }) };
+    dangling.widgets = [{ ...dangling.widgets[0], dataset: 'no_such_dataset' }];
+    expect(gate('dashboard', dangling).errors.map((f) => f.rule)).toEqual(['widget-dataset-unknown']);
+  });
+
+  it('DARK — only a dashboard or report re-admits: a flow or a list view outside the closure is still refused', () => {
+    // Limb 5 is keyed on the written TYPE. A flow trigger and a list view name
+    // their object directly, and the closure's verdict on them is the ruling's.
+    const flow = gate('flow', flowOn('on_task', 'showcase_task'));
+    expect(flow.errors.map((f) => f.rule)).toContain('flow-trigger-unknown-object');
+    const view = listViewOn('showcase_task', ['name']);
+    view.chart = { chartType: 'bar', dataset: 'showcase_task_metrics', dimensions: ['status'], values: ['task_count'] };
+    expect(gate('view', view).errors.map((f) => f.rule)).toContain('list-view-object-outside-closure');
+  });
+
+  it('the public `narrowObjectsToPackageClosure` stays the four-limb closure — limb 5 is the write\'s', () => {
+    const names = (narrowObjectsToPackageClosure(objects, SCOPE) as AnyRec[]).map((o) => o.name);
+    expect(names).not.toContain('showcase_task');
+  });
+
+  it('datasetBoundObjectNames reads the two bound positions and nothing else', () => {
+    expect([...datasetBoundObjectNames('dashboard', board({}), datasets)]).toEqual(['showcase_task']);
+    expect([...datasetBoundObjectNames('report', report({}), datasets)]).toEqual(['showcase_task']);
+    expect(datasetBoundObjectNames('view', { chart: { dataset: 'showcase_task_metrics' } }, datasets).size).toBe(0);
+    expect(datasetBoundObjectNames('dashboard', board({}), undefined).size).toBe(0);
   });
 });

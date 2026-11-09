@@ -26,7 +26,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { ObjectKernel, hashApiKey } from '@objectstack/core';
+import { ObjectKernel, currentCredentialUseClient, hashApiKey } from '@objectstack/core';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import type { SettingsContext } from './settings-service.types.js';
 
@@ -72,7 +72,13 @@ class MockHttp implements IHttpServer {
   getInstance() { return null; }
 }
 
-async function bootPlugin(postures: Record<string, Array<{ code: string; message: string }>>) {
+/** [#31898] What the door's key stamp saw, and what the trust rule was handed. */
+interface ClientProbe {
+  establish: (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => string | undefined;
+  stamps: unknown[];
+}
+
+async function bootPlugin(postures: Record<string, Array<{ code: string; message: string }>>, probe?: ClientProbe) {
   const http = new MockHttp();
   const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as any);
   const keyHash = hashApiKey(KEY);
@@ -81,13 +87,19 @@ async function bootPlugin(postures: Record<string, Array<{ code: string; message
     auth: {
       api: { getSession: async () => undefined },
       resolveUserAuthGates: async (userId: string) => postures[userId] ?? [],
+      ...(probe ? { resolveClientAddress: probe.establish } : {}),
     },
     objectql: {
       find: async (object: string, q: any) => (
         object === 'sys_api_key' && q?.where?.key === keyHash
           ? [{ id: 'key_1', key: keyHash, user_id: OWNER, revoked: false, scopes: '[]' }]
-          : []
+          // The key's owner exists: an API key authenticates only as an owner who exists.
+          : object === 'sys_user' && q?.where?.id === OWNER
+            ? [{ id: OWNER }]
+            : []
       ),
+      // [#31898] The key's use stamp: what plugin-audit's hook reads, read here.
+      ...(probe ? { update: async () => { probe.stamps.push(currentCredentialUseClient() ?? null); return {}; } } : {}),
     },
   };
   let readyHook: (() => Promise<void>) | undefined;
@@ -159,5 +171,36 @@ describe('settings family — a key answers as its owner\'s session does (#23287
     const again = await contextFromRequest(keyRequest);
     expect(again.userId).toBe(OWNER);
     expect('authGate' in again).toBe(false);
+  });
+});
+
+/**
+ * [#31898] The settings door hands where the request came from to the key's
+ * use stamp: the transport's peer and the headers go to the auth service's
+ * trust rule, and the address it establishes is what the `credential_use` row
+ * records, with the user agent. The door reads no forwarded header itself.
+ */
+describe('[#31898] the settings door hands its client facts to the key\'s use stamp', () => {
+  it('the stamp runs with the address the trust rule established from the peer, and the user agent', async () => {
+    const handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }> = [];
+    const probe: ClientProbe = {
+      establish: (transport) => {
+        handed.push(transport);
+        return '203.0.113.7';
+      },
+      stamps: [],
+    };
+    const { contextFromRequest } = await bootPlugin({}, probe);
+    const context = await contextFromRequest({
+      headers: { 'x-api-key': KEY, 'user-agent': 'ci-agent/3.1', 'x-forwarded-for': '198.51.100.9' },
+      remoteAddress: '10.0.0.5',
+      method: 'GET',
+      path: '/',
+    } as unknown as IHttpRequest);
+    expect(context.userId).toBe(OWNER);
+    expect(handed).toHaveLength(1);
+    expect(handed[0].remoteAddress).toBe('10.0.0.5');
+    expect(handed[0].headers?.['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe('198.51.100.9');
+    expect(probe.stamps).toEqual([{ ipAddress: '203.0.113.7', userAgent: 'ci-agent/3.1' }]);
   });
 });

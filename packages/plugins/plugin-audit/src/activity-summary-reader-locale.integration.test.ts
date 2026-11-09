@@ -161,8 +161,13 @@ describe('sys_activity summary — rendered in the reader\'s language (#26167)',
     expect((await summaries(reader('zh')))[0]).toBe('创建了 合同 "NDA"');
   });
 
+  it('a regional reader locale reads its platform-table pack (`fr-FR` reads the `fr` pack, #30512)', async () => {
+    expect((await summaries(reader('fr-FR')))[0]).toBe('A créé Contract « NDA »');
+  });
+
   it('a reader locale with no template keeps the stored sentence', async () => {
-    expect((await summaries(reader('fr-FR')))[0]).toBe('Created Contract "NDA"');
+    // Italian is not a platform-table language, so no pack carries the template.
+    expect((await summaries(reader('it-IT')))[0]).toBe('Created Contract "NDA"');
   });
 
   it('serves the code to no caller but the system, and composes when only `summary` is projected', async () => {

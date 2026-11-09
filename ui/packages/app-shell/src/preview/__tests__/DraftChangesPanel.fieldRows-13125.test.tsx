@@ -203,10 +203,20 @@ const TICKET_PUBLISHED = {
     __search: SEARCH_COMPANION_DEF,
   },
 };
+// The draft also carries the columns the platform stamps on, which the
+// published body predates: two it keeps (rows of the generated group) and one
+// it injects and hides (dropped) — the hidden-column guard on an UPDATE, where
+// the group is drawn (objectstack#29704: a NEW item draws none).
 const TICKET_DRAFT = {
   name: 'crm_ticket',
   label: 'Ticket',
-  fields: { subject: { type: 'text', label: 'Subject' }, __search: SEARCH_COMPANION_DEF },
+  fields: {
+    subject: { type: 'text', label: 'Subject' },
+    owner_id: VISIT_DRAFT.fields.owner_id,
+    created_at: CREATED_AT_DEF,
+    owning_business_unit_id: OWNING_BUSINESS_UNIT_DEF,
+    __search: SEARCH_COMPANION_DEF,
+  },
 };
 
 function stubServer() {
@@ -262,10 +272,10 @@ describe('the drill-in of a NEW object (objectui#13125)', () => {
     expect(text).not.toContain(SEARCH_COMPANION_DEF.label);
     expect(text).not.toContain(OWNING_BUSINESS_UNIT_DEF.label);
     fieldRow(detail, '+ Internal Note');
-    // The two system controls are in the detail, behind the generated group's toggle.
-    fireEvent.click(within(detail).getByTestId('draft-generated-toggle'));
-    for (const label of ['Owner', 'Created At']) fieldRow(detail, `+ ${label}`);
-    for (const name of HIDDEN_SYSTEM) expect(detail.textContent ?? '').not.toContain(name);
+    // objectstack#29704 — a NEW object draws no generated group: the two system
+    // controls are the platform's, and are not listed at all.
+    expect(within(detail).queryByTestId('draft-generated-toggle')).toBeNull();
+    for (const label of ['Owner', 'Created At']) expect(text).not.toContain(label);
   });
 
   it('CONTROL: a field with no label reads as its name alone, once, in monospace', async () => {
@@ -291,5 +301,17 @@ describe('the drill-in of an UPDATE (objectui#13125)', () => {
     const removed = fieldRow(detail, '− Legacy Code');
     expect(within(removed).getByText('legacy_code')).toHaveClass('font-mono');
     expect(detail.textContent ?? '').not.toContain('__search');
+  });
+
+  it('lists no injected-and-hidden column in the generated group, and lists the system controls there', async () => {
+    const detail = await expandRow('Ticket');
+    const text = detail.textContent ?? '';
+    for (const name of HIDDEN_SYSTEM) expect(text).not.toContain(name);
+    expect(text).not.toContain(OWNING_BUSINESS_UNIT_DEF.label);
+    // The two system controls are in the detail, behind the generated group's toggle.
+    fireEvent.click(within(detail).getByTestId('draft-generated-toggle'));
+    for (const label of ['Owner', 'Created At']) fieldRow(detail, `+ ${label}`);
+    for (const name of HIDDEN_SYSTEM) expect(detail.textContent ?? '').not.toContain(name);
+    expect(detail.textContent ?? '').not.toContain(SEARCH_COMPANION_DEF.label);
   });
 });

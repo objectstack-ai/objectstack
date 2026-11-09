@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/core",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "license": "Apache-2.0",
   "description": "Microkernel Core for ObjectStack",
   "type": "module",
@@ -39,7 +39,6 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/refd-timer-testkit": "workspace:*",
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
@@ -47,6 +46,7 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
+    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "zod": "^4.6.6"

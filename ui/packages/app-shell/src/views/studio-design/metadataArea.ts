@@ -117,18 +117,34 @@ export function areaItemPillarPath(input: {
 export const AREA_FORM_EDITOR_TYPES: readonly string[] = ['email_template', 'translation'];
 
 /**
+ * objectstack#30064 (ADR-0146 D2) — the types whose item opens the same editor
+ * on a READ-ONLY package only, where it is the item's Customize door: an
+ * analytics dataset, which no pillar designs. The editor mounts the type's
+ * registered designer (`DatasetDefaultInspector`) and preview. On a writable
+ * package the generic item page stays the dataset's editor, as on Setup's.
+ * `overridable` in the spec's classification.
+ */
+export const AREA_CUSTOMIZE_EDITOR_TYPES: readonly string[] = ['dataset'];
+
+/**
  * Whether an item of the area opens the form editor rather than the generic
- * item page: a form-editor type on a package's leg, under the same exceptions
- * as {@link areaItemPillarPath} (the cross-package leg and the environment
- * scope name no package to write, and `?review=1` opens the generic page's
- * draft review).
+ * item page: a form-editor type, or on a read-only package a customize-editor
+ * type, on a package's leg, under the same exceptions as
+ * {@link areaItemPillarPath} (the cross-package leg and the environment scope
+ * name no package to write, and `?review=1` opens the generic page's draft
+ * review).
  */
 export function areaItemOpensFormEditor(input: {
   packageId: string | null;
   type: string;
   search: URLSearchParams;
+  /** The package is read-only (the area's gate). */
+  readOnly?: boolean;
 }): boolean {
-  if (!AREA_FORM_EDITOR_TYPES.includes(input.type) || !input.packageId) return false;
+  const opens =
+    AREA_FORM_EDITOR_TYPES.includes(input.type) ||
+    (input.readOnly === true && AREA_CUSTOMIZE_EDITOR_TYPES.includes(input.type));
+  if (!opens || !input.packageId) return false;
   if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return false;
   return input.search.get('review') !== '1';
 }

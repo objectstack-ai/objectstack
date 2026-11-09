@@ -8,7 +8,8 @@
 // The count is of rows the caller could read, and of no other: it equals the
 // sum of the separate list reads it stands for, asked as the same member (the
 // spec's timeline table), and the activity's `updated` rows step aside once a
-// field change is counted. A refused ledger read counting no field change is
+// field change is counted, as do its `created` rows paired with a `create`
+// ledger write (#30343: one action is one entry). A refused ledger read counting no field change is
 // pinned at the route (`record-page-routes.test.ts`): on this boot the
 // platform's member floor reads the ledger rows of a record the member reads.
 
@@ -17,7 +18,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema, type PermissionSet } from '@objectstack/spec/security';
-import { RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES, RecordPageResponseSchema } from '@objectstack/spec/api';
+import { RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES, RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES, RecordPageResponseSchema } from '@objectstack/spec/api';
 import { commentsFixtureStack, cmtFixtureBaselineSet } from './fixtures/comments-fixture.js';
 import { armedWhen, assertArmed } from './armed.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
@@ -119,9 +120,23 @@ describe('[#28737] the timeline part counts the 动态 stream the caller could r
     const changes = (await totalAs(token, 'sys_audit_log', { ...ofRecord, action: { $in: ['create', 'update', 'delete'] } })) ?? 0;
     const drawn = await totalAs(token, 'sys_activity', { ...ofRecord, type: { $nin: [...RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES] } });
     const updates = await totalAs(token, 'sys_activity', { ...ofRecord, type: 'updated' });
+    // A create (a delete) steps aside as often as both sources hold one.
+    let paired = 0;
+    for (const action of ['create', 'delete'] as const) {
+      const rows = (await totalAs(token, 'sys_activity', { ...ofRecord, type: RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES[action] })) ?? 0;
+      const writes = (await totalAs(token, 'sys_audit_log', { ...ofRecord, action })) ?? 0;
+      paired += Math.min(rows, writes);
+    }
     expect(comments, 'the comment read answers').not.toBeNull();
     expect(drawn, 'the activity read answers').not.toBeNull();
-    return { comments: comments!, changes, drawn: drawn!, updates: updates!, total: comments! + changes + drawn! - (changes > 0 ? updates! : 0) };
+    return {
+      comments: comments!,
+      changes,
+      drawn: drawn!,
+      updates: updates!,
+      paired,
+      total: comments! + changes + drawn! - (changes > 0 ? updates! + paired : 0),
+    };
   };
   const timelineAs = async (token: string) => {
     const res = await stack.apiAs(token, 'POST', `/data/cmt_open/${recordId}/page`, { timeline: ALL_SOURCES });
@@ -135,6 +150,8 @@ describe('[#28737] the timeline part counts the 动态 stream the caller could r
     expect(expected.comments).toBe(3);
     expect(expected.changes).toBeGreaterThanOrEqual(3);
     expect(expected.updates).toBe(2);
+    // The record's one create is written to both sources and counts once.
+    expect(expected.paired).toBe(1);
     expect(await timelineAs(authorTok)).toEqual({ total: expected.total });
   }, 60_000);
 

@@ -16,7 +16,7 @@ import {
   isExitSignal,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
-import { oneShotSettingsPlugin, resolveExistingDataKey } from '../../utils/one-shot-settings.js';
+import { oneShotCrypto, type OneShotCrypto } from '../../utils/one-shot-settings.js';
 import { absentTableReads, secretUnionReadView } from '../../utils/absent-table-reads.js';
 import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
@@ -53,17 +53,27 @@ import { readDeclaredDatasources } from './orphans.js';
  *
  * ## The key
  *
- * Rows open only under the key that sealed them, so the provider is resolved
- * from a key that ALREADY exists: `OS_SECRET_KEY`, `OS_DEV_CRYPTO_KEY`, or the
- * persisted key file, the way every host resolves it. It is constructed in the
- * strict posture and with the auto-key opt-in withheld, whatever `NODE_ENV`
- * says, so this command never mints a key: a minted key can open nothing that
- * is stored. It is resolved before the boot and handed to the settings
- * service the boot composes, so no provider in this run mints a key. No key is
- * a refusal, before any row is opened. The provider is `LocalCryptoProvider`,
- * the one every in-tree host constructs, and both halves — the key and the
- * settings service — come from `utils/one-shot-settings.ts`, the one
- * composition every one-shot command shares.
+ * Rows open only under the provider that sealed them, so this run seals and
+ * opens with the one `os serve` seals with on this host, chosen by `serve`'s
+ * own function (`utils/one-shot-settings.ts`, `oneShotCrypto`, the one
+ * composition every one-shot command shares):
+ *
+ *  - a plugin of the host config that declares the crypto provider is booted,
+ *    and the provider it registers re-wraps the rows. ⛔ If it cannot boot, or
+ *    registers none, the run refuses naming it and writes nothing: a re-seal
+ *    under any other key would be a downgrade, and nothing it sealed opens
+ *    under one anyway (#31007);
+ *  - two declaring plugins, or a host config that cannot be read, are refused
+ *    before the boot;
+ *  - otherwise the local provider over a key that ALREADY exists:
+ *    `OS_SECRET_KEY`, `OS_DEV_CRYPTO_KEY`, or the persisted key file, the way
+ *    every host resolves it. It is constructed in the strict posture and with
+ *    the auto-key opt-in withheld, whatever `NODE_ENV` says, so this command
+ *    never mints a key: a minted key can open nothing that is stored. No key
+ *    is a refusal, before any row is opened.
+ *
+ * The provider is composed before the boot and handed to the settings service
+ * the boot composes, so no provider in this run mints a key.
  */
 export default class SecretRewrap extends Command {
   static override description =
@@ -149,12 +159,23 @@ export default class SecretRewrap extends Command {
     const { ciphertextDerivationStatus } = await import('@objectstack/service-settings');
     const { PlatformObjectsPlugin } = await import('@objectstack/platform-objects/plugin');
 
-    // ── The provider, resolved BEFORE the boot, from a key that already exists ──
-    // The strict posture never mints a key, and the auto-key opt-in is
-    // withheld. A missing key is refused only once the plan has a row to open,
-    // so a run with nothing to open still reports.
-    const dataKey = await resolveExistingDataKey();
-    const { provider, unavailable: keyUnavailable } = dataKey;
+    // ── The provider `os serve` seals with, composed BEFORE the boot ─────────
+    // A declared provider is booted with this run; otherwise the local one, in
+    // the strict posture that never mints a key, with the auto-key opt-in
+    // withheld. A missing local key is refused only once the plan has a row to
+    // open, so a run with nothing to open still reports. Two declaring plugins,
+    // or a host config that cannot be read, are refused here, before any boot.
+    let crypto: OneShotCrypto;
+    try {
+      crypto = await oneShotCrypto();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (json) { await emitJson({ error: 'crypto_provider_refused', message }, 1, { compact: true }); return; }
+      printError(message);
+      this.exit(1);
+      return;
+    }
+    const keyUnavailable = crypto.key?.unavailable ?? null;
 
     let stack;
     try {
@@ -169,21 +190,39 @@ export default class SecretRewrap extends Command {
         // default would mint a key file, and the next run would then resolve a
         // key under which nothing stored opens. With no key, it is handed one
         // that refuses every call. Nothing in this one-shot boot reads a
-        // setting's value.
+        // setting's value. A declared provider's plugin boots here too.
         extraPlugins: [
           new PlatformObjectsPlugin(),
-          await oneShotSettingsPlugin(dataKey),
+          ...crypto.plugins,
         ],
         // The dry run boots READ-ONLY, the boot `os migrate plan` takes.
         // `--apply` keeps the plain boot: it writes rows.
         ...(flags.apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      // [#31007] A boot that fails with a declared provider in it may be that
+      // provider failing: the refusal names it either way, and nothing was
+      // opened or written.
+      const cause = error instanceof Error ? error.message : String(error);
+      const message = crypto.declaredBy && !cause.includes(`'${crypto.declaredBy}'`)
+        ? `${cause} (This run boots the crypto provider plugin '${crypto.declaredBy}' the host config declares, `
+          + 'and re-wraps nothing without it. Nothing was opened or written.)'
+        : cause;
       if (json) { await emitJson({ error: 'boot_failed', message }, 1, { compact: true }); return; }
       printError(message);
       this.exit(1);
       return;
+    }
+
+    // [#31007] The provider the boot chose, confirmed as `serve` confirms it.
+    // A refusal is held until the plan has a row to open, like a missing key.
+    let provider: OneShotCrypto['provider'] | null = null;
+    let providerRefusal: string | null = null;
+    try {
+      crypto.provider.confirm();
+      provider = crypto.provider;
+    } catch (error) {
+      providerRefusal = error instanceof Error ? error.message : String(error);
     }
 
     try {
@@ -290,8 +329,16 @@ export default class SecretRewrap extends Command {
         return;
       }
 
-      // ── A row to open needs a key that already existed before this run ───
-      if (plan.attempts > 0 && !provider) {
+      // ── A row to open needs the deployment's provider ────────────────────
+      if (plan.attempts > 0 && providerRefusal !== null) {
+        if (json) { await emitJson({ error: 'crypto_provider_refused', message: providerRefusal }, 1, { compact: true }); return; }
+        printError(providerRefusal);
+        this.exit(1);
+        return;
+      }
+
+      // ── …or a local key that already existed before this run ─────────────
+      if (plan.attempts > 0 && (!provider || keyUnavailable !== null)) {
         const message =
           'Refusing to re-wrap: no existing data key was found (OS_SECRET_KEY, OS_DEV_CRYPTO_KEY or the '
           + 'persisted key file), and a key minted now could open nothing that is stored. Run this with '
@@ -324,7 +371,7 @@ export default class SecretRewrap extends Command {
         mode,
         plan,
         result,
-        keySource: plan.attempts > 0 ? provider?.keySource ?? null : null,
+        keySource: plan.attempts > 0 ? keySourceOf(crypto) : null,
       });
       const exitCode = flags.apply && rewrapUnfinished(result) ? 1 : 0;
 
@@ -350,6 +397,15 @@ export default class SecretRewrap extends Command {
       await stack.shutdown();
     }
   }
+}
+
+/**
+ * What the report names as the key's source: the declaring plugin's provider,
+ * or the local key's channel. Never key material.
+ */
+function keySourceOf(crypto: OneShotCrypto): string | null {
+  if (crypto.declaredBy !== null) return `crypto provider '${crypto.declaredBy}'`;
+  return crypto.key?.provider?.keySource ?? null;
 }
 
 async function confirm(question: string): Promise<boolean> {

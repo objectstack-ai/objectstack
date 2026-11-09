@@ -427,6 +427,13 @@ export function useObjectLabel() {
     /**
      * Resolve translated dashboard label, falling back to dashboardDef.label.
      * Convention: `{ns}.dashboards.{dashboardName}.label`.
+     *
+     * The catalog key wins over `{label}`: this is the lookup for text NO
+     * server translated. A caller holding a document a `/meta` read (or the
+     * app bundle) served draws its `label` as given and asks this only when
+     * the document carries none, because the server already translated it,
+     * by the label order for an overridden item (objectstack#30244); passing
+     * a served label here re-applies the base package's translation over it.
      */
     dashboardLabel: (dashboardDef: { name: string; label?: string }) =>
       resolve(dashboardSuffixes(dashboardDef.name, 'label'), dashboardDef.label ?? dashboardDef.name),
@@ -477,14 +484,16 @@ export function useObjectLabel() {
 
     /**
      * Resolve translated page label, falling back to pageDef.label.
-     * Convention: `{ns}.pages.{pageName}.label`.
+     * Convention: `{ns}.pages.{pageName}.label`. See `dashboardLabel` for the
+     * served-label rule.
      */
     pageLabel: (pageDef: { name: string; label?: string }) =>
       resolve(pageSuffixes(pageDef.name, 'label'), pageDef.label ?? pageDef.name),
 
     /**
      * Resolve translated report label, falling back to reportDef.label.
-     * Convention: `{ns}.reports.{reportName}.label`.
+     * Convention: `{ns}.reports.{reportName}.label`. See `dashboardLabel` for
+     * the served-label rule.
      */
     reportLabel: (reportDef: { name: string; label?: string }) =>
       resolve(reportSuffixes(reportDef.name, 'label'), reportDef.label ?? reportDef.name),

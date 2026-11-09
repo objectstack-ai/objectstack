@@ -108,26 +108,38 @@ const PAGE_FIELDS = Object.fromEntries(
   Array.from({ length: RECORD_SURFACE_PAGE_THRESHOLD + 1 }, (_, i) => [`f${i}`, { type: 'text', label: `F${i}` }]),
 );
 
-const OBJECTS = [
-  { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: PAGE_FIELDS },
-  { name: 'showcase_note', label: 'Note', fields: PAGE_FIELDS },
-];
+/**
+ * The object definitions as the server serves them in each language: a
+ * `zh-CN` session holds the `zh-CN` answer (objectstack#30390).
+ */
+const OBJECTS = {
+  en: [
+    { name: 'showcase_project', label: 'Project', pluralLabel: 'Projects', fields: PAGE_FIELDS },
+    { name: 'showcase_note', label: 'Note', fields: PAGE_FIELDS },
+  ],
+  'zh-CN': [
+    { name: 'showcase_project', label: '项目', pluralLabel: '项目清单', fields: PAGE_FIELDS },
+    { name: 'showcase_note', label: 'Note', fields: PAGE_FIELDS },
+  ],
+};
 
 const APPS = [{ name: 'crm', label: 'CRM', isDefault: true, navigation: [] }];
 
-// One value for the whole run: the record route's effects key on these
-// members, and a fresh value per render would re-run them without end.
-const METADATA = {
+// One value per language for the whole run: the record route's effects key
+// on these members, and a fresh value per render would re-run them without end.
+const metadataOf = (objects: unknown[]) => ({
   apps: APPS,
-  objects: OBJECTS,
+  objects,
   loading: false,
   ensureType: undefined,
   error: null,
   refresh: async () => {},
-};
+});
+const METADATA = { en: metadataOf(OBJECTS.en), 'zh-CN': metadataOf(OBJECTS['zh-CN']) };
+const session = { lang: 'en' as keyof typeof METADATA };
 vi.mock('../../providers/MetadataProvider', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useMetadata: () => METADATA,
+  useMetadata: () => METADATA[session.lang],
 }));
 
 const ACTION_RUNNER = { execute: () => {}, runner: { registerHandler: () => {}, getContext: () => ({}) } };
@@ -155,6 +167,7 @@ afterEach(cleanup);
 
 /** Create a record of `objectName` from its list; the way-back label its page receives. */
 async function originAfterCreate(lang: Lang, objectName: string): Promise<string> {
+  session.lang = lang;
   const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
   // The instance really booted in the language under test.
   expect(i18n.language).toBe(lang);

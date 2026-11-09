@@ -21,6 +21,7 @@ import {
   useRecordContext,
   useResolvedFilter,
   useSafeFieldLabel,
+  useSettledSchema,
   useRelatedRecordActions,
   type ElementDataSourceMapping,
   type RelatedRowActionDef,
@@ -32,11 +33,13 @@ import {
   columnIdentity,
   elementDataSourceBlock,
   resolveAffordance,
+  servedObjectPluralLabel,
   type ElementDataSourceConfig,
 } from '@object-ui/core';
 import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
-import { RelatedListCompactContext } from '../relatedListCompact';
+import { RecordBodyTablesContext, RelatedListCompactContext } from '../relatedListCompact';
+import { relatedCardId } from '../synth/relatedArrangement';
 import { useRecordAriaProps } from './recordComponentAria';
 import { ParentRecordBinding } from './recordBinding';
 import { RelatedListStackSlot } from '../RelatedListEmptyFold';
@@ -226,23 +229,42 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
   const { language } = useObjectTranslation();
   // A panel of the record page's related column (the fold rule below).
   const panel = React.useContext(RelatedListCompactContext);
+  // The record page's body tables (the fold rule below).
+  const bodyTableIds = React.useContext(RecordBodyTablesContext);
 
   const objectName = schema.objectName;
+
+  // The related object's SERVED definition (objectstack#30486) — the very
+  // read `RelatedList` below makes for its columns (same key, same data
+  // source, so the adapter's metadata cache answers both), taken here for
+  // the object's name.
+  const { def: relatedObjectDef } = useSettledSchema<{ label?: unknown; pluralLabel?: unknown }>(
+    objectName ?? '',
+    ctx?.dataSource,
+  );
 
   // Resolve a human-friendly title:
   //   1. authored `schema.title` wins — via pickLocalized so inline-i18n
   //      shapes (`{ en, 'zh-CN' }`) resolve instead of rendering "[object Object]"
-  //   2. translated object PLURAL label via i18n (key `objects.{name}.pluralLabel`),
-  //      else the translated label (key `objects.{name}.label`) — the block
+  //   2. the related object's list name by the served-object-label rule
+  //      (`servedObjectPluralLabel`, `@object-ui/core`): its served
+  //      `pluralLabel`, else its served `label`, drawn as given — the server
+  //      translated both for the session, a `.custom` rename included — and
+  //      only with neither served, the client bundle's plural (key
+  //      `objects.{name}.pluralLabel`, else `objects.{name}.label`). The block
   //      lists the related object's records, so it is named as that object's
   //      list page is (objectui#11733)
-  //   3. humanized objectName (e.g. `opportunity_quote` → "Opportunity Quote")
+  //   3. humanized objectName (e.g. `opportunity_quote` → "Opportunity Quote"),
+  //      the bundle lookup's own last resort
   //   4. literal `'Related'` as final fallback
-  const resolvedObjectLabel = objectName && 'objectPluralLabel' in i18n
-    ? i18n.objectPluralLabel({ name: objectName, label: humanizeLabel(objectName) })
-    : objectName
-      ? humanizeLabel(objectName)
-      : '';
+  const resolvedObjectLabel = objectName
+    ? servedObjectPluralLabel(
+        { name: objectName, label: relatedObjectDef?.label, pluralLabel: relatedObjectDef?.pluralLabel },
+        language,
+        'objectPluralLabel' in i18n ? i18n.objectPluralLabel : (def) => def.label,
+        humanizeLabel(objectName),
+      )
+    : '';
   const title = pickLocalized(schema.title, language) || resolvedObjectLabel || 'Related';
 
   const perms = usePermissions();
@@ -612,8 +634,16 @@ const RecordRelatedListBody: React.FC<RecordRelatedListRendererProps> = ({
    * toolbar actions or an authoring notice keep the list's own row. A panel
    * of the related column folds with its `add` and its actions too: the
    * panel line's 展开 brings it back with them (objectstack#27524, Target 2).
+   * A BODY table of the record page (objectstack#29944) never folds: it is a
+   * section of the record, not a member of a related-list stack, so an empty
+   * one keeps its header where its siblings keep theirs.
    */
+  const bodyTable =
+    !panel &&
+    typeof schema.relationshipField === 'string' &&
+    bodyTableIds.has(relatedCardId(objectName, schema.relationshipField));
   const foldable =
+    !bodyTable &&
     !showActionRefusals &&
     !showUnservedActions &&
     (panel || (!schema.add && !(toolbarActions && toolbarActions.length > 0)));

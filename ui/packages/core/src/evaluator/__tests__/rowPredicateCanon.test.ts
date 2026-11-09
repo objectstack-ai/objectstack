@@ -33,10 +33,10 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import * as core from '../index.js';
 import {
   detectNonCanonicalRowSpelling,
-  ROW_PREDICATE_CANONICAL_ROOT,
   evalRowPredicate,
   partitionRowsByPredicate,
 } from '../index.js';
+import { ROW_PREDICATE_CANONICAL_ROOT } from '../rowPredicateCanon.js';
 
 const row = { status: 'in_review', amount: 10 };
 const other = { status: 'draft', amount: 1 };
@@ -165,7 +165,9 @@ describe('[#5741] `evalRowPredicate` — the row is bound as `record.*` only', (
     expect('warnNonCanonicalRowSpelling' in core).toBe(false);
     expect('resetRowPredicateCanonWarnings' in core).toBe(false);
     expect(typeof core.detectNonCanonicalRowSpelling).toBe('function');
-    expect(core.ROW_PREDICATE_CANONICAL_ROOT).toBe('record');
+    // The canonical-root constant stays in the module, off the barrel
+    // (objectstack#25921: zero consumers outside the package).
+    expect('ROW_PREDICATE_CANONICAL_ROOT' in core).toBe(false);
   });
 
   it('`partitionRowsByPredicate`: `record.*` still partitions; a retired spelling excludes EVERY row', () => {

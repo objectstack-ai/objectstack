@@ -87,7 +87,8 @@ export interface BulkActionItems {
 export function useBulkActionItems(input: {
   selectedRows: any[];
   actions: string[] | undefined;
-  actionDefs?: BulkActionDef[];
+  /** Read, never mutated: `resolveBulkActions` hands its fold over as a readonly list. */
+  actionDefs?: readonly BulkActionDef[];
   objectFields?: unknown;
 }): BulkActionItems {
   const { selectedRows, actions, actionDefs, objectFields } = input;

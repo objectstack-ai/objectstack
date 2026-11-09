@@ -6,7 +6,7 @@ import { countryOptionLabels } from '../manifests/company.manifest.js';
 /**
  * English (en) — built-in settings manifest translations.
  *
- * Mirrors literals in `manifests/{mail,branding,feature-flags,storage}.manifest.ts`.
+ * Mirrors literals in `manifests/{mail,branding,storage}.manifest.ts`.
  * Keeping them explicit here lets the resolver chain (locale → fallback → literal)
  * always have at least an English entry to fall back to.
  */
@@ -50,7 +50,10 @@ export const en: PlatformTranslationData = {
         smtp_password: { label: 'Password' },
         api_key: { label: 'API key' },
         from_email: { label: 'From email', help: 'Example: no-reply@example.com' },
-        from_name: { label: 'From name' },
+        from_name: {
+          label: 'From name',
+          help: 'Leave empty to use the product name (Branding), or the name this deployment was set up with.',
+        },
         queue_delivery: {
           label: 'Durable queue delivery',
           help: 'Hand each message to the job queue instead of sending it inline, so a failed delivery is '
@@ -172,7 +175,10 @@ export const en: PlatformTranslationData = {
         },
       },
       keys: {
-        email_password_enabled: { label: 'Enable email/password login' },
+        email_password_enabled: {
+          label: 'Enable email/password login',
+          confirmOffText: 'People who sign in with a password will need another way in.',
+        },
         signup_enabled: {
           label: 'Allow email sign-up',
           help: 'Opens the email-and-password sign-up form. Who it admits is decided by the Self-registration audience below: under Invitation only, only an address holding a pending invitation; under Allowlisted email domains, the allowlisted domains and invited addresses; under Open, anyone. Off closes the form under every audience, invitations included.',
@@ -222,25 +228,23 @@ export const en: PlatformTranslationData = {
       },
     },
 
-    feature_flags: {
-      title: 'Feature Flags',
-      description: 'Toggle experimental and beta features for this organization.',
+    access_policy: {
+      title: 'Access policy',
+      description: 'This organization\'s sign-in restrictions. The deployment\'s authentication settings always apply; these can only add to them.',
       groups: {
-        productivity: { title: 'Productivity' },
-        collaboration: { title: 'Collaboration' },
+        network: { title: 'Network', description: 'Where members of this organization may sign in from.' },
+        sessions: { title: 'Sessions', description: 'How long a member\'s session stays valid. Each limit can only be shorter than the deployment\'s.' },
+        multi_factor: { title: 'Multi-factor', description: 'Who in this organization must protect their account with an authenticator app (TOTP).' },
       },
       keys: {
-        ai_enabled: {
-          label: 'AI Assistant',
-          help: 'Enables the in-app AI assistant panel.',
+        allowed_ip_ranges: { label: 'Allowed IP ranges' },
+        session_idle_timeout_minutes: { label: 'Idle timeout (minutes)' },
+        session_absolute_max_hours: { label: 'Absolute session lifetime (hours)' },
+        max_concurrent_sessions_per_user: { label: 'Max concurrent sessions per user' },
+        mfa_required: {
+          label: 'Require multi-factor authentication',
+          options: { off: 'Off', administrators: 'Administrators', everyone: 'Everyone' },
         },
-        kanban_swimlanes: { label: 'Kanban swimlanes' },
-        realtime_cursors: { label: 'Realtime cursors' },
-        inline_comments: { label: 'Inline comments' },
-      },
-      banners: {
-        beta_notice: { title: 'Heads up',
-          text: 'Beta features may change without notice. A feature set in the server configuration is locked on or off for the whole deployment and cannot be changed here.' },
       },
     },
 

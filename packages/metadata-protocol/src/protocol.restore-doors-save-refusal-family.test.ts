@@ -9,7 +9,8 @@
  * default record page of an object, an `external` object binding on a managed
  * datasource (both halves of the pair), an object `datasource` that names no
  * datasource (#26724), a permission-set grant on an object that does not
- * exist (#28990), a keyed seed whose `externalId` names no field of its
+ * exist (#28990), a field bound to a picklist no loaded package declares
+ * (#29898), a keyed seed whose `externalId` names no field of its
  * object (#28952), a `runAs: 'system'` flow an anonymous
  * endpoint names, the shared runtime authoring rules, and the authoring gate a
  * domain plugin registers. Measured on `origin/main` `5801a4f2c` before this
@@ -99,6 +100,8 @@ function makeStubEngine() {
     const drivers = new Set<string>();
     /** The engine's registered objects, by name (empty unless a case stages one). */
     const objects = new Map<string, unknown>();
+    /** [#29898] The picklists the registry resolves, by name (empty unless a case stages one). */
+    const picklists = new Set<string>();
     let nextId = 0;
     let commit: unknown = null;
 
@@ -193,6 +196,7 @@ function makeStubEngine() {
             getItem: (type: string, name: string) => registered.get(type)?.get(name),
             getAllObjects: () => [],
             getObject: (name: string) => objects.get(name),
+            resolvePicklistOptions: (name: string) => (picklists.has(name) ? [{ value: 'gold', label: 'Gold' }] : undefined),
             getPackage: () => undefined,
             getArtifactItem: () => undefined,
             isPackageDisabled: () => false,
@@ -205,6 +209,7 @@ function makeStubEngine() {
         registered,
         drivers,
         objects,
+        picklists,
         serveCommit: (c: unknown) => { commit = c; },
     };
 }
@@ -530,6 +535,31 @@ pinBothDoors({
 });
 
 pinBothDoors({
+    title: 'an object restored with a field bound to a picklist no loaded package declares now (unknownPicklistBindingSaveRefusal)',
+    type: 'object',
+    name: 'qa_deal',
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        h.picklists.add('qa_tier');
+        const deal = (fields: Record<string, unknown>, label = 'Deal') => ({
+            name: 'qa_deal', label, sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' }, ...fields },
+        });
+        await h.protocol.saveMetaItem({ type: 'object', name: 'qa_deal', item: deal({ tier: { type: 'select', label: 'Tier', picklist: 'qa_tier' } }) });
+        // v2 drops the field (a destructive change, so `force`).
+        await h.protocol.saveMetaItem({ type: 'object', name: 'qa_deal', item: deal({}), force: true });
+        await h.protocol.saveMetaItem({ type: 'object', name: 'qa_deal', item: deal({}, 'Deal v3') });
+        // The list v1 was bound to is gone, and the object holds no binding to it now.
+        h.picklists.delete('qa_tier');
+        return { refused: 1, accepted: 2 };
+    },
+    expectDetail: (error) => {
+        expect(error.issues).toEqual([expect.objectContaining({ path: 'fields.tier.picklist', code: 'custom' })]);
+        expect(error.issues[0].message.startsWith("Field 'qa_deal.tier' is bound to picklist 'qa_tier', which no loaded package declares")).toBe(true);
+    },
+});
+
+pinBothDoors({
     title: 'a seed restored keyed on a field its object no longer has (seedExternalIdSaveRefusal)',
     type: 'seed',
     name: 'wh_order_seed',
@@ -590,4 +620,57 @@ pinBothDoors({
         return { refused: 1, accepted: 2 };
     },
     expectDetail: (error) => expect(error.message).toBe('refused in state active'),
+});
+
+// ─── [#29696] A flow version stored in a legacy ADR-0087 D2 spelling ─────────
+//
+// The restore doors judge a flow version the way both publish doors judge a
+// stored flow draft (#29557): the runtime authoring rules read it in its
+// D2-converted spelling (`storedFlowVerdictBody`), and the version is restored
+// as stored. Measured on `origin/main` `0eb97fa4` before the fix: a version in
+// the legacy `get_record` `config.filters` spelling, which the save door, the
+// publish doors and the engine all accept, was refused at both restore doors
+// (422 `INVALID_METADATA`, `expression-invalid` at `config.filters`).
+
+const LEGACY_FLOW = 'acme_fetch';
+/** start → get_record → end, the match map spelled under `filterKey`; `brokenEdge` adds a conditional edge whose CEL does not parse. */
+const fetchFlow = (label: string, filterKey: 'filters' | 'filter', brokenEdge = false) => ({
+    name: LEGACY_FLOW,
+    label,
+    type: 'autolaunched',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'fetch', type: 'get_record', label: 'Fetch', config: { objectName: 'acme_deal', [filterKey]: { name: 'Acme' }, outputVariable: 'deal' } },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+        { id: 'e1', source: 'start', target: 'fetch' },
+        brokenEdge
+            ? { id: 'e2', source: 'fetch', target: 'end', type: 'conditional', condition: 'record.name ==' }
+            : { id: 'e2', source: 'fetch', target: 'end' },
+    ],
+});
+
+pinBothDoors({
+    title: '[#29696] a flow version in a legacy D2 spelling is judged converted: restored as stored, and refused only where its converted spelling is',
+    type: 'flow',
+    name: LEGACY_FLOW,
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        await h.protocol.saveMetaItem({ type: 'flow', name: LEGACY_FLOW, item: fetchFlow('v1', 'filter') });
+        await h.protocol.saveMetaItem({ type: 'flow', name: LEGACY_FLOW, item: fetchFlow('v2', 'filter') });
+        await h.protocol.saveMetaItem({ type: 'flow', name: LEGACY_FLOW, item: fetchFlow('v3', 'filter') });
+        // Both versions as rows at rest in the legacy spelling; v2 also
+        // carries an edge the rules refuse in any spelling.
+        rewriteHistory(h, 'flow', LEGACY_FLOW, 1, () => fetchFlow('v1', 'filters'));
+        rewriteHistory(h, 'flow', LEGACY_FLOW, 2, () => fetchFlow('v2', 'filters', true));
+        return { refused: 2, accepted: 1 };
+    },
+    // Refused on the edge alone: nothing is reported at the legacy spelling.
+    expectDetail: (error) => {
+        const rules = (error.issues ?? []).map((i: { rule?: string }) => i.rule);
+        expect(rules).toContain('expression-invalid');
+        expect(JSON.stringify(error.issues)).not.toContain('filters');
+    },
 });

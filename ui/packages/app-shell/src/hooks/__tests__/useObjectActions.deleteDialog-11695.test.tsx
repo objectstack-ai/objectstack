@@ -50,10 +50,18 @@ vi.mock('sonner', () => ({
 
 import { useObjectActions } from '../useObjectActions';
 import { ActionConfirmDialog, type ConfirmDialogState } from '../../views/ActionConfirmDialog';
+import { toast } from 'sonner';
+import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
 
 type Pack = {
+  actions: { undo: string };
+  recycleBin: { refusal: Record<string, string> };
   objectActions: {
     deleteConfirm: string;
+    deleteConfirmQuestion: string;
+    deletedNamed: string;
+    restoredNamed: string;
+    restoreFailed: string;
     deleteConfirmTitle: string;
     deleteConfirmButton: string;
     bulkDeleteConfirmTitle_other: string;
@@ -62,7 +70,7 @@ type Pack = {
 };
 const PACKS = {
   en: builtInLocales.en as unknown as Pack,
-  zh: builtInLocales.zh as unknown as Pack,
+  zh: builtInLocales['zh-Hans'] as unknown as Pack,
 };
 
 const fill = (template: string, vars: Record<string, string | number>) =>
@@ -139,7 +147,10 @@ describe.each(['en', 'zh'] as const)('console list Delete in %s (objectui#11695)
     // The named subject itself, independent of the template's words.
     expect(within(dialog).getByRole('heading')).toHaveTextContent('QA Widget 0');
     expect(within(dialog).getByRole('heading')).not.toHaveTextContent(pack.actionConfirm.title);
-    expect(within(dialog).getByText(pack.objectActions.deleteConfirm)).toBeInTheDocument();
+    // A business object's delete goes to the recycle bin (objectstack#30239):
+    // the question alone, never "cannot be undone".
+    expect(within(dialog).getByText(pack.objectActions.deleteConfirmQuestion)).toBeInTheDocument();
+    expect(within(dialog).queryByText(pack.objectActions.deleteConfirm)).toBeNull();
 
     const confirm = within(dialog).getByRole('button', { name: pack.objectActions.deleteConfirmButton });
     expect(confirm.className).toContain('bg-destructive');
@@ -175,5 +186,116 @@ describe.each(['en', 'zh'] as const)('console list Delete in %s (objectui#11695)
     const confirm = within(dialog).getByRole('button', { name: pack.actionConfirm.confirm });
     expect(confirm.className).toContain('bg-primary');
     expect(confirm.className).not.toContain('bg-destructive');
+  });
+});
+
+/**
+ * objectstack#30239 (ADR-0148) — the list's one-record Delete offers Undo on
+ * its toast when the delete wrote a recycle-bin entry and the caller holds
+ * `allowRestoreOwnDeleted` on the object (the effective map, served by
+ * `/auth/me/permissions`). Real chain: `useObjectActions`, the core, the
+ * shipped packs, a real `MePermissionsProvider`; sonner is the one stand-in.
+ */
+
+function grants(objects: Record<string, Record<string, boolean>>): MePermissionsResponse {
+  return {
+    authenticated: true,
+    userId: 'u1',
+    tenantId: null,
+    positions: [],
+    permissionSets: [],
+    objects,
+    fields: {},
+    hasAnyQueue: false,
+  } as MePermissionsResponse;
+}
+
+function mountBin(
+  language: keyof typeof PACKS,
+  permissions: MePermissionsResponse,
+  opts: { entryId?: string; restoreError?: unknown } = {},
+) {
+  const dataSource = {
+    delete: vi.fn(async (_r: string, _id: string, o?: { onRecycleBinEntry?: (id: string) => void }) => {
+      if (opts.entryId) o?.onRecycleBinEntry?.(opts.entryId);
+      return true;
+    }),
+    create: vi.fn(),
+    findOne: vi.fn(),
+    restoreRecycleBinEntry: vi.fn(async () => {
+      if (opts.restoreError) throw opts.restoreError;
+      return { entryId: opts.entryId };
+    }),
+  };
+  render(
+    <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
+      <MePermissionsProvider initialPermissions={permissions}>
+        <MemoryRouter initialEntries={['/apps/crm/crm_product']}>
+          <ListDeleteHarness dataSource={dataSource as any} />
+        </MemoryRouter>
+      </MePermissionsProvider>
+    </I18nProvider>,
+  );
+  return dataSource;
+}
+
+async function confirmRowDelete(pack: Pack) {
+  fireEvent.click(screen.getByText('row-delete'));
+  const dialog = await screen.findByRole('alertdialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: pack.objectActions.deleteConfirmButton }));
+}
+
+const MAY_RESTORE = grants({ crm_product: { allowRead: true, allowDelete: true, allowRestoreOwnDeleted: true } });
+const MAY_NOT_RESTORE = grants({ crm_product: { allowRead: true, allowDelete: true } });
+
+describe.each(['en', 'zh'] as const)('console list Delete undo in %s (objectstack#30239)', (language) => {
+  const pack = PACKS[language];
+  const deleted = fill(pack.objectActions.deletedNamed, { label: 'Product', name: 'QA Widget 0' });
+
+  it('round trip: Undo restores the entry the delete wrote, never re-creates, and names the record', async () => {
+    const dataSource = mountBin(language, MAY_RESTORE, { entryId: 'rb1' });
+    await confirmRowDelete(pack);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    const [message, data] = (toast.success as any).mock.calls[0];
+    expect(message).toBe(deleted);
+    expect(data.action.label).toBe(pack.actions.undo);
+
+    data.action.onClick();
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+    expect(dataSource.restoreRecycleBinEntry).toHaveBeenCalledWith('crm_product', 'rb1');
+    expect(dataSource.create).not.toHaveBeenCalled();
+    expect((toast.success as any).mock.calls[1]).toEqual([
+      fill(pack.objectActions.restoredNamed, { label: 'Product', name: 'QA Widget 0' }),
+    ]);
+  });
+
+  it('a refused undo reads the refusal sentence in the session language', async () => {
+    const refusal = Object.assign(new Error('raw server text'), {
+      code: 'RESTORE_UNIQUE_VALUE_TAKEN',
+      details: { object: 'crm_product', recordId: 'p1', field: 'product_name' },
+    });
+    mountBin(language, MAY_RESTORE, { entryId: 'rb1', restoreError: refusal });
+    await confirmRowDelete(pack);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    (toast.success as any).mock.calls[0][1].action.onClick();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(toast.error).toHaveBeenCalledWith(fill(pack.objectActions.restoreFailed, { label: 'Product' }), {
+      description: fill(pack.recycleBin.refusal.uniqueValueTaken, { field: 'product_name' }),
+    });
+  });
+
+  it('control: without allowRestoreOwnDeleted the toast is today\'s, and no entry id is asked for', async () => {
+    const dataSource = mountBin(language, MAY_NOT_RESTORE, { entryId: 'rb1' });
+    await confirmRowDelete(pack);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect((toast.success as any).mock.calls[0]).toEqual([deleted]);
+    expect(dataSource.delete.mock.calls).toEqual([['crm_product', 'p1']]);
+  });
+
+  it('control: an answer with no recycle-bin entry keeps today\'s toast', async () => {
+    mountBin(language, MAY_RESTORE, {});
+    await confirmRowDelete(pack);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect((toast.success as any).mock.calls[0]).toEqual([deleted]);
   });
 });

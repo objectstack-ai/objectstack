@@ -9,7 +9,7 @@ export const entry: SemanticMigration = {
     + '`number`, `percent`, `rating`, `slider` and `formula` is untouched',
   replacement: 'no `scale` on a currency field. DELETE the key — that is the whole migration: a '
     + 'currency amount\'s decimal places are its currency\'s, not a field setting. The currency\'s '
-    + 'ISO 4217 minor unit decides how the amount displays, and the field\'s write allowance stays '
+    + 'CLDR fraction digits decide how the amount displays, and the field\'s write allowance stays '
     + 'unconstrained — a currency write is accepted with the decimals it carries, as it always was '
     + 'on a currency field that declared no `scale`. ⛔ Nothing replaces the key: do not re-declare '
     + 'its value under any other key.',
@@ -18,8 +18,8 @@ export const entry: SemanticMigration = {
     + 'type, and the ruling of 2026-09-24 (option 乙 — a currency\'s decimal places are the '
     + 'currency\'s, not a setting) words the remedy. On a currency field the '
     + 'key was three-faced: the metadata-admin field designer offered it as stored metadata, the '
-    + 'amount\'s cell never read it (fraction digits come from the currency\'s ISO 4217 minor '
-    + 'unit), and the record validator\'s `max_scale` branch still refused writes carrying more '
+    + 'amount\'s cell never read it (fraction digits come from the currency\'s CLDR fraction-digit '
+    + 'count), and the record validator\'s `max_scale` branch still refused writes carrying more '
     + 'decimals — so an author who set it bought a narrower write contract and no visible change. '
     + '`FieldSchema` now refuses the key on `currency` at parse, and the validator stops reading it '
     + 'for the type in the same release, so a stored declaration narrows nothing either. ⛔ No '
@@ -40,7 +40,7 @@ export const entry: SemanticMigration = {
     'Every field in the stack parses: `ObjectSchema.parse()` / `objectstack validate` report no '
     + 'issue on a `scale` path of a `currency` field. A currency field that carried `scale` no '
     + 'longer declares it, and a diff of the field shows that one line deleted and no key added. '
-    + 'Its amount\'s cell renders the currency\'s ISO 4217 minor-unit digits, as before, and a '
+    + 'Its amount\'s cell renders the currency\'s CLDR fraction digits, as before, and a '
     + 'write with more decimals than the old `scale` is accepted where it was refused with '
     + '`max_scale`; `number` / `percent` / `rating` / `slider` fields keep their `scale` and '
     + 'still refuse over-scale writes.',

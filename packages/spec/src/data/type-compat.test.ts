@@ -260,7 +260,7 @@ describe('canonicalizeSqlType — Object.prototype fall-through', () => {
   // the union declares but `DIALECT_ALIASES` does not populate, which fall
   // through to the base map and must answer just as safely.
   const DIALECTS: readonly SqlDialect[] = [
-    'postgres', 'mysql', 'sqlite', 'snowflake', 'bigquery', 'mongo', 'odata',
+    'postgres', 'mysql', 'sqlite', 'snowflake', 'bigquery', 'mongo', 'odata', 'oracle',
   ];
 
   // The declared return type is a private union, so the pin names it here.
@@ -322,5 +322,162 @@ describe('canonicalizeSqlType — Object.prototype fall-through', () => {
     expect(canonicalizeSqlType('numeric(10,2)')).toBe('decimal');
     expect(canonicalizeSqlType('timestamptz', 'postgres')).toBe('datetime');
     expect(canonicalizeSqlType('objectid', 'mongo')).toBe('text');
+  });
+});
+
+describe('the oracle dialect (ADR-0015 §4.6)', () => {
+  it('maps the parameter-free names ALL_TAB_COLUMNS reports', () => {
+    for (const t of ['VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR', 'CLOB', 'NCLOB', 'LONG']) {
+      expect(canonicalizeSqlType(t, 'oracle'), t).toBe('text');
+    }
+    expect(canonicalizeSqlType('VARCHAR2(255)', 'oracle')).toBe('text');
+    expect(canonicalizeSqlType('BINARY_FLOAT', 'oracle')).toBe('float');
+    expect(canonicalizeSqlType('BINARY_DOUBLE', 'oracle')).toBe('float');
+    expect(canonicalizeSqlType('FLOAT(126)', 'oracle')).toBe('float');
+    expect(canonicalizeSqlType('TIMESTAMP(6)', 'oracle')).toBe('datetime');
+    expect(canonicalizeSqlType('TIMESTAMP(6) WITH TIME ZONE', 'oracle')).toBe('datetime');
+    expect(canonicalizeSqlType('TIMESTAMP(6) WITH LOCAL TIME ZONE', 'oracle')).toBe('datetime');
+    expect(canonicalizeSqlType('TIMESTAMP WITH LOCAL TIME ZONE', 'oracle')).toBe('datetime');
+    expect(canonicalizeSqlType('BLOB', 'oracle')).toBe('binary');
+    expect(canonicalizeSqlType('LONG RAW', 'oracle')).toBe('binary');
+    expect(canonicalizeSqlType('BOOLEAN', 'oracle')).toBe('boolean');
+    expect(canonicalizeSqlType('JSON', 'oracle')).toBe('json');
+  });
+
+  it('reads DATE as a date-time: a date field over it is lossy, a datetime field exact', () => {
+    expect(canonicalizeSqlType('DATE', 'oracle')).toBe('datetime');
+    expect(suggestFieldTypeForSqlType('DATE', 'oracle')).toBe('datetime');
+    expect(isCompatible('DATE', 'datetime', 'oracle')).toBe(true);
+    expect(isCompatible('DATE', 'date', 'oracle')).toBe('lossy');
+    // Without the dialect the same spelling is a calendar date — the arm is
+    // what changes the answer.
+    expect(canonicalizeSqlType('DATE')).toBe('date');
+  });
+
+  it('decides NUMBER by its scale (integral or not) and its precision (width)', () => {
+    // Bare NUMBER: a floating decimal.
+    expect(canonicalizeSqlType('NUMBER', 'oracle')).toBe('decimal');
+    // Scale > 0: fractions.
+    expect(canonicalizeSqlType('NUMBER(10,2)', 'oracle')).toBe('decimal');
+    expect(canonicalizeSqlType('NUMBER(*,2)', 'oracle')).toBe('decimal');
+    // Scale 0 (written or implied): integral, width by precision.
+    expect(canonicalizeSqlType('NUMBER(1)', 'oracle')).toBe('integer');
+    expect(canonicalizeSqlType('NUMBER(9,0)', 'oracle')).toBe('integer');
+    expect(canonicalizeSqlType('NUMBER(10)', 'oracle')).toBe('bigint');
+    expect(canonicalizeSqlType('NUMBER(18,0)', 'oracle')).toBe('bigint');
+    expect(canonicalizeSqlType('NUMBER(38,0)', 'oracle')).toBe('bigint');
+    // Oracle's INTEGER / INT / SMALLINT are NUMBER(*,0).
+    expect(canonicalizeSqlType('NUMBER(*,0)', 'oracle')).toBe('bigint');
+    // A negative scale rounds left of the point: still integral, p − s digits.
+    expect(canonicalizeSqlType('NUMBER(7,-2)', 'oracle')).toBe('integer');
+    expect(canonicalizeSqlType('NUMBER(8,-2)', 'oracle')).toBe('bigint');
+    // The dialect is what reads the parameters; the base map does not.
+    expect(canonicalizeSqlType('NUMBER(10)')).toBe('decimal');
+  });
+
+  it('lets an integral NUMBER foreign key back a lookup, and never a fractional one', () => {
+    expect(isCompatible('NUMBER(10)', 'lookup', 'oracle')).toBe(true);
+    expect(isCompatible('NUMBER(*,0)', 'lookup', 'oracle')).toBe(true);
+    expect(isCompatible('NUMBER', 'lookup', 'oracle')).toBe(false);
+    expect(isCompatible('NUMBER(12,2)', 'lookup', 'oracle')).toBe(false);
+  });
+
+  it('judges a NUMBER(1) / CHAR(1) flag column by the matrix instead of coercing it', () => {
+    // Pre-23ai Oracle has no BOOLEAN; flags are NUMBER(1) or CHAR(1).
+    expect(isCompatible('NUMBER(1)', 'boolean', 'oracle')).toBe('lossy');
+    expect(isCompatible('CHAR(1)', 'boolean', 'oracle')).toBe(false);
+    expect(isCompatible('BOOLEAN', 'boolean', 'oracle')).toBe(true);
+    expect(suggestFieldTypeForSqlType('NUMBER(1)', 'oracle')).toBe('number');
+  });
+
+  it('reads RAW(16) as a UUID and every other RAW width as binary', () => {
+    expect(canonicalizeSqlType('RAW(16)', 'oracle')).toBe('uuid');
+    // The driver filters, writes and keys a RAW(16) column by the UUID string
+    // it reads (HEXTORAW), so a reference field over it is exact on oracle...
+    for (const field of ['lookup', 'master_detail', 'user'] as const) {
+      expect(isCompatible('RAW(16)', field, 'oracle'), field).toBe(true);
+    }
+    // ...and a text field stays flagged for review: its pattern operators
+    // match the column's hex text, not the string it reads.
+    expect(isCompatible('RAW(16)', 'text', 'oracle')).toBe('lossy');
+    expect(suggestFieldTypeForSqlType('RAW(16)', 'oracle')).toBe('text');
+    // The demotion names its field types; a type the uuid row does not pair
+    // exactly is not promoted by it.
+    expect(isCompatible('RAW(16)', 'number', 'oracle')).toBe(false);
+    // Other dialects' uuid columns keep their exact pairings.
+    expect(isCompatible('uuid', 'lookup', 'postgres')).toBe(true);
+    expect(canonicalizeSqlType('RAW(32)', 'oracle')).toBe('binary');
+    expect(canonicalizeSqlType('RAW', 'oracle')).toBe('binary');
+  });
+
+  it('leaves what it does not model unknown, so a draft flags it for review', () => {
+    expect(canonicalizeSqlType('INTERVAL DAY(2) TO SECOND(6)', 'oracle')).toBe('unknown');
+    expect(canonicalizeSqlType('XMLTYPE', 'oracle')).toBe('unknown');
+    expect(canonicalizeSqlType('SDO_GEOMETRY', 'oracle')).toBe('unknown');
+    // Parameters it cannot read fall back to the bare-NUMBER answer, never to
+    // an integral one it cannot prove.
+    expect(canonicalizeSqlType('NUMBER(x)', 'oracle')).toBe('decimal');
+  });
+});
+
+describe('the mssql dialect (SQL Server federation)', () => {
+  // Every name the card lists, as INFORMATION_SCHEMA.COLUMNS.DATA_TYPE spells it.
+  const EXPECTED: Record<string, string> = {
+    nvarchar: 'text', nchar: 'text', ntext: 'text', xml: 'text',
+    bit: 'boolean',
+    tinyint: 'integer', smallint: 'integer', int: 'integer', bigint: 'bigint',
+    decimal: 'decimal', numeric: 'decimal', money: 'decimal',
+    float: 'float', real: 'float',
+    date: 'date', time: 'time',
+    datetime: 'datetime', datetime2: 'datetime', smalldatetime: 'datetime', datetimeoffset: 'datetime',
+    uniqueidentifier: 'uuid', varbinary: 'binary',
+  };
+
+  it('maps every SQL Server type the federation reads onto its canonical type', () => {
+    for (const [raw, canonical] of Object.entries(EXPECTED)) {
+      expect(canonicalizeSqlType(raw, 'mssql'), raw).toBe(canonical);
+    }
+  });
+
+  it('strips the `(max)` length the way it strips a number', () => {
+    expect(canonicalizeSqlType('nvarchar(max)', 'mssql')).toBe('text');
+    expect(canonicalizeSqlType('varbinary(max)', 'mssql')).toBe('binary');
+    expect(canonicalizeSqlType('datetime2(7)', 'mssql')).toBe('datetime');
+  });
+
+  it('reads `timestamp` as the rowversion binary it is on SQL Server, never as a date-time', () => {
+    expect(canonicalizeSqlType('timestamp', 'mssql')).toBe('binary');
+    expect(canonicalizeSqlType('rowversion', 'mssql')).toBe('binary');
+    expect(isCompatible('timestamp', 'datetime', 'mssql')).toBe(false);
+    // CONTROL: the shared base map still reads it as a date-time elsewhere.
+    expect(canonicalizeSqlType('timestamp', 'postgres')).toBe('datetime');
+  });
+
+  it('suggests the field types a drafted SQL Server object gets', () => {
+    expect(suggestFieldTypeForSqlType('bit', 'mssql')).toBe('boolean');
+    expect(suggestFieldTypeForSqlType('datetimeoffset', 'mssql')).toBe('datetime');
+    expect(suggestFieldTypeForSqlType('uniqueidentifier', 'mssql')).toBe('text');
+    expect(suggestFieldTypeForSqlType('money', 'mssql')).toBe('number');
+    expect(isCompatible('uniqueidentifier', 'lookup', 'mssql')).toBe(true);
+    expect(isCompatible('int', 'lookup', 'mssql')).toBe(true);
+  });
+
+  it('lets an nvarchar column back a json or multi-value field, lossy, on mssql only', () => {
+    for (const fieldType of ['json', 'tags', 'multiselect'] as const) {
+      expect(isCompatible('nvarchar(max)', fieldType, 'mssql'), fieldType).toBe('lossy');
+      expect(isCompatible('nvarchar', fieldType, 'mssql'), fieldType).toBe('lossy');
+      // CONTROL: the pairing is the dialect's, not the base map's.
+      expect(isCompatible('varchar', fieldType, 'postgres'), fieldType).toBe(false);
+      expect(isCompatible('nvarchar(max)', fieldType), fieldType).toBe(false);
+    }
+    // Never suggested: an nvarchar column still drafts as text.
+    expect(suggestFieldTypeForSqlType('nvarchar(max)', 'mssql')).toBe('text');
+    expect(isCompatible('int', 'json', 'mssql')).toBe(false);
+  });
+
+  it('leaves the types with no field type unknown, so a draft flags them', () => {
+    for (const raw of ['sql_variant', 'hierarchyid', 'geography', 'geometry']) {
+      expect(canonicalizeSqlType(raw, 'mssql'), raw).toBe('unknown');
+    }
   });
 });

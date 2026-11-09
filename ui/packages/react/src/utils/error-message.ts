@@ -21,7 +21,7 @@
  * real reason (e.g. a row-level-security denial) instead of swallowing it.
  */
 
-import { isApiAccessDeniedError } from '@object-ui/core';
+import { isApiAccessDeniedError, isExternalWriteRefusal } from '@object-ui/core';
 import { errorCodeIs } from '@object-ui/types';
 import type { ApiError } from '@objectstack/spec/api';
 
@@ -173,6 +173,13 @@ export function delegationScopeMessage(err: unknown): string | null {
   }
   return extractWriteErrorMessage(err);
 }
+
+/**
+ * `@object-ui/core`'s `isExternalWriteRefusal`, beside the other write-refusal
+ * readers: a write the object's external datasource does not admit
+ * (`EXTERNAL_WRITE_FORBIDDEN`). Ask it before {@link isPermissionError}.
+ */
+export { isExternalWriteRefusal };
 
 /** The ADR-0112 code a write answers (409) when a unique index refuses it. */
 const UNIQUE_VIOLATION = 'UNIQUE_VIOLATION';
@@ -386,4 +393,55 @@ export function classifyLoadError(err: unknown): LoadErrorKind {
   // (objectstack#4121) and an unsupported `$`-parameter, both as 400.
   if (status === 400 || REJECTED_REQUEST_CODES.has(code)) return 'rejected';
   return 'network';
+}
+
+/** What {@link answeredLoadFailure} answers: the server's own words for a failed read. */
+export interface AnsweredLoadFailure {
+  /** The machine code the server named (`OBJECT_NOT_FOUND`), or `null` when it named none. */
+  code: string | null;
+  /** The server's sentence, cleaned as {@link extractWriteErrorMessage} cleans it. */
+  message: string;
+}
+
+/**
+ * The server's code and sentence for a failed data READ, or `null` when no
+ * server answered (objectstack#29704).
+ *
+ * {@link classifyLoadError} folds every failure it has no special verdict for
+ * into `'network'`, so a 404 `OBJECT_NOT_FOUND` or a 500 the server explained
+ * in words used to be shown as "check your connection and try again" — advice
+ * about a request that had, in fact, been answered. This is the one rule the
+ * list page, the record page, the app page and the related list share for
+ * telling the two apart:
+ *
+ *  - **Answered** = the error carries a numeric `httpStatus` / `status` /
+ *    `statusCode`, or its message carries `HTTP <three digits>` — the same
+ *    status read {@link classifyLoadError} makes. A request that got no answer
+ *    (a dropped connection, a CORS failure) carries neither, and its message is
+ *    the browser's prose, not the server's, so it answers `null` and the caller
+ *    keeps its network sentence.
+ *  - **Sentence** from {@link extractWriteErrorMessage} (structured body first,
+ *    then the message, with machine prefixes stripped; a wrapped `{ error: {
+ *    code, message } }` body under `details` first); **code** from the
+ *    error's `code`, else the body's (`details.code`).
+ *
+ * It returns text, never a verdict: callers still decide by kind which
+ * surfaces may show it (a refused read keeps its fixed no-access sentence).
+ */
+export function answeredLoadFailure(err: unknown): AnsweredLoadFailure | null {
+  if (!err || typeof err !== 'object') return null;
+  const e = err as Record<string, any>;
+  const numeric = [e.httpStatus, e.status, e.statusCode].some((s) => typeof s === 'number');
+  const answered = numeric || /HTTP \d{3}\b/.test(String(e.message ?? ''));
+  if (!answered) return null;
+  // The wrapped envelope (`{ error: { code, message } }`) when a transport
+  // parked the whole body under `details` without lifting it.
+  const envelope =
+    e.details?.error && typeof e.details.error === 'object' ? (e.details.error as Record<string, unknown>) : null;
+  const message =
+    (typeof envelope?.message === 'string' ? extractWriteErrorMessage(envelope.message) : null)
+    ?? extractWriteErrorMessage(err);
+  if (!message) return null;
+  const code = firstString(e.code, envelope?.code, e.details?.code);
+  return { code: code ? code.trim() : null, message };
 }

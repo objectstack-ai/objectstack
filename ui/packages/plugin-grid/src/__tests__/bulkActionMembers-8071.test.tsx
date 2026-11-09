@@ -76,12 +76,13 @@
  * pass without ever reaching the bar.
  */
 
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ObjectGrid } from '../ObjectGrid';
+import { resetUndeclaredActionNamesWarnings } from '../undeclaredActionNames';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider } from '@object-ui/react';
 
@@ -177,6 +178,9 @@ function bulkDefWarnings(warn: ConsoleSpy): string[] {
     .filter((line: string) => line.includes('bulkActionDefs'));
 }
 
+// The warning is said once per message per module; each row starts unwarned.
+beforeEach(() => resetUndeclaredActionNamesWarnings());
+
 describe('object-grid `bulkActions` members are BARE ACTION NAMES (objectui#8071)', () => {
   it('1. a name member is resolved against `objectDef.actions` and promoted', async () => {
     await renderAndSelectAll({ bulkActions: ['approve'] });
@@ -199,16 +203,30 @@ describe('object-grid `bulkActions` members are BARE ACTION NAMES (objectui#8071
     }
   });
 
-  it('3. a name matching no declared action still reaches the bar, by name', async () => {
-    // Not a hole: `resolveBulkActions` keeps unresolved names so a consumer's
-    // `runner.registerHandler('<name>', …)` stays reachable. Pinned because it
-    // is the one case where the member is read as a name AND stays one — which
-    // is what makes row 1's promotion an observable event rather than the only
-    // path a string could take.
-    await renderAndSelectAll({ bulkActions: ['no_such_action'] });
-    expect(await screen.findByTestId('bulk-action-no_such_action')).toHaveTextContent(
-      'No Such Action',
-    );
+  it('3. a name matching no declared action draws NOTHING, and says so once (objectstack#30169)', async () => {
+    // Trigger objectstack#30169: an action a disabled package withholds leaves
+    // the served object, so its bare name matched nothing — and this row used
+    // to pin that the bar still drew it by humanized name ("No Such Action"),
+    // a button whose click toasted "not executable". The spec says the member
+    // "names an action the object declares"; one that does not draws nothing.
+    // The declared sibling keeps the bar up, so the absence is observed on a
+    // rendered bar, not on a missing one.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await renderAndSelectAll({ bulkActions: ['approve', 'no_such_action'] });
+      await screen.findByTestId('bulk-action-approve');
+      expect(renderedBulkActionIds()).toEqual(['bulk-action-approve']);
+      expect(screen.queryByText('No Such Action')).not.toBeInTheDocument();
+      // The drop is not silent: one development warning, naming the member.
+      const named = () =>
+        warn.mock.calls
+          .map((args: unknown[]) => String(args[0]))
+          .filter((line: string) => line.includes('ObjectGrid bulkActions'));
+      await waitFor(() => expect(named()).toHaveLength(1));
+      expect(named()[0]).toContain("'no_such_action'");
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

@@ -138,10 +138,14 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + 'zero-config first-user promotion mints, owned by the Default Organization (see '
       + '`sys_organization`). [ADR-0131 D4] The grant holds its set BY '
       + 'NAME (`permission_set`): a grant that names nothing confers nothing, and its '
-      + '`permission_set_id` is not read here.',
+      + '`permission_set_id` is not read here. [ADR-0150 D8 R1] Its `permission_set_package` names '
+      + 'which holder\'s set that name is: a set column reads that package\'s definition and no other, '
+      + 'so a column naming a package that does not hold the set confers neither the set nor the '
+      + 'standing; a null column resolves the name with no caller, as before.',
     columns: [
       'user_id',
       'permission_set',
+      'permission_set_package',
       'organization_id',
       'organizationId',
       'valid_from',
@@ -200,12 +204,17 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       + 'reachable writes, and neither touches a grant table. `banned` stays absent from the '
       + 'column list because the resolver still never reads it; the guard watches the ban/delete '
       + 'WRITE SHAPES on this table for its own reasons, which is a different question from what '
-      + 'this resolver consumes.',
+      + 'this resolver consumes. [ADR-0151 D3] `principal_kind` (read in either spelling) is read '
+      + 'too: a row of kind `agent` — an AI service account — confers NO standing through either '
+      + 'anchor, whatever it holds. The kind is born with the row and immutable for every caller, '
+      + 'so no write moves a person\'s row to `agent`.',
     columns: [
       'id',
       'email',
       'email_verified',
       'ai_access',
+      'principal_kind',
+      'principalKind',
     ],
   },
 

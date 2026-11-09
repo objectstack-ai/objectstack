@@ -4,7 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note. #31328 (2026-11-08) — §4.6 names the `oracle` vocabulary, with how `NUMBER(p,s)` and `RAW(16)` are read, and its federation-only scope; §5.1 gains the federation-only arm of the DDL gate. #31327 (2026-11-08) — a second federation-only driver, SQL Server (`mssql`): §4.6 names the `mssql` vocabulary and its one dialect-only lossy rule, and the two dialects' lossy moves share one table; §5.1's federation-only arm names both drivers. #31592 (2026-11-09) — §4.6: with the `HEXTORAW` bind of #31390 on `main`, an Oracle `RAW(16)` column backs a `lookup`, `master_detail` or `user` field exactly again; only its `text` pairing stays `'lossy'`.
 
 > **Amendment note D7 (2026-10-29, ruling 6486136301, letter A) — a second credential channel.**
 > §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
@@ -39,6 +39,9 @@
 > environment hosting several organizations is outside S1: there a no-organization read is
 > refused, never answered from an arbitrary organization's grant. Not taken: a second auth block
 > on the datasource (two grants per vendor that drift), and a static key for OAuth sources.
+> *(Amended 2026-11-03, see the note under §10: in such an environment, whose rows an external
+> object serves — one organization's or every organization's — is the object's own declaration,
+> and an object that makes none is refused at boot rather than read as shared.)*
 
 > **Amendment note (2026-10-27, ADR-0143) — attribution only, no decision changes.** ADR-0018,
 > ADR-0022, ADR-0023, ADR-0024 and ADR-0097 put OAuth2 refresh and per-tenant connection lifecycle
@@ -412,13 +415,40 @@ A pure module `packages/spec/src/data/type-compat.ts` maps SQL types
 (`text`, `varchar`, `numeric(10,2)`, `timestamptz`, `jsonb`, …) to
 ObjectStack field types, and exposes `isCompatible(remoteSqlType,
 fieldType): boolean | 'lossy'`. The matrix is dialect-aware
-(`postgres`, `mysql`, `sqlite`, `snowflake`, `bigquery`, `mongo`, `odata`). New
-dialects extend the matrix; the matrix is unit-tested independently. `mongo` and
-`odata` are the two vocabularies that are not SQL: `DIALECT_ALIASES.mongo` maps
-BSON type names, and `DIALECT_ALIASES.odata` maps the EDM primitive types an
-OData service's `$metadata` declares, except `Edm.Duration` and the
-`Edm.Geography*` / `Edm.Geometry*` families, which it leaves unmapped so a draft
-flags them for review.
+(`postgres`, `mysql`, `sqlite`, `snowflake`, `bigquery`, `mongo`, `odata`,
+`oracle`, `mssql`). New dialects extend the matrix; the matrix is unit-tested
+independently. `mongo` and `odata` are the two vocabularies that are not SQL:
+`DIALECT_ALIASES.mongo` maps BSON type names, and `DIALECT_ALIASES.odata` maps
+the EDM primitive types an OData service's `$metadata` declares, except
+`Edm.Duration` and the `Edm.Geography*` / `Edm.Geometry*` families, which it
+leaves unmapped so a draft flags them for review.
+
+`oracle` is the one dialect whose type PARAMETERS change the answer, so they are
+read before the matrix strips them (SQL Server's `(max)` length does not: an
+`nvarchar(max)` is text like any `nvarchar`). A `NUMBER` with scale > 0 is `decimal`; an
+integral `NUMBER(p)` / `NUMBER(p,0)` (a negative scale counts its `p − s`
+digits) is `integer` up to nine digits and `bigint` beyond, `NUMBER(*,0)` —
+Oracle's `INTEGER` — included; a bare `NUMBER` is `decimal`. `RAW(16)` is
+`uuid`, any other `RAW` `binary`. The driver reads it as a UUID string and binds
+that string back through `HEXTORAW` for a comparison, a write and a by-id key
+(#31390), so a `lookup`, `master_detail` or `user` field over it is exact; a
+`text` field over it stays `'lossy'` on `oracle`, because its pattern operators
+match the column's hex text, not the string it reads. `DATE` carries a time of day, so it is
+`datetime`. A pre-23ai flag column (`NUMBER(1)` / `CHAR(1)`) is judged as the
+integer or text it is, never coerced to `boolean`. The `oracle` and `mssql` driver ids
+serve federation only: a datasource naming either with `schemaMode: 'managed'`
+is refused at authoring, because the SQL driver models those databases for reads
+and the double-opt-in write path only and emits no DDL for them, so a managed
+sync would have nothing to send.
+
+`mssql` is SQL Server: `DIALECT_ALIASES.mssql` reads `INFORMATION_SCHEMA` type
+names, and maps `timestamp` to binary, because on SQL Server it is the
+`rowversion` counter and not a date-time. A dialect moves a pairing to
+`'lossy'` in one table, `DIALECT_LOSSY_RULES`, and only ever toward `'lossy'`:
+`oracle` demotes the exact `text` pairing of `uuid` (above), and `mssql` adds one, a
+text column backing a `json`, `tags` or `multiselect` field, because SQL Server
+keeps JSON in `nvarchar(max)` and the SQL driver stores those fields there as
+JSON text (#31327).
 
 ---
 
@@ -448,6 +478,20 @@ if (datasource.schemaMode !== 'managed') {
 and `packages/drivers/driver-sql/src/sql-driver.ts` (current `createTable` / `alterTable` call sites) gain a
 guard at the top. The `applyMigrations` implementation (forthcoming
 in `service-migration` per ADR-0008) also calls this guard.
+
+**Federation-only dialects** (#31328) — a second arm, after the
+`schemaMode` check. A driver row §4.6 marks federation-only (`oracle`, `mssql`) has no
+schema-emission path at all, so a DDL operation that passes the check above
+(the driver runs `managed`) is still refused on that knex client, with
+`UnsupportedDialectEmissionError`, reason `'federation-only'` (code
+`SQL_DIALECT_EMISSION_UNSUPPORTED`, HTTP 501). Authoring already refuses a
+`managed` datasource on such a driver (§4.6); this arm is the driver-layer
+floor for a `SqlDriver` that reaches DDL without passing that check (one
+constructed directly, say), and it names the supported clients and the `schemaMode: 'external'`
+fix. A non-managed datasource on either driver meets the first arm, as every
+other driver does, so DDL on a federation-only driver is refused in every mode.
+No boot host offers such a driver as the platform database either: the
+selection tables are built without its row (#31327).
 
 ### 5.2 Gate 2 — Boot validation (runtime layer)
 
@@ -782,6 +826,9 @@ managed Postgres for low-latency joins.
 - **Tenant scope**: a `Datasource` is environment-scoped (per ADR-0006
   v4). It is not organisation-overlay-customisable; admins of one
   environment cannot see another environment's external datasources.
+  *(Amended 2026-11-03, see the note below: the datasource's scope is the
+  environment; each external OBJECT's organization scope is its own
+  declaration, owed under a walled tenancy posture.)*
 - **Permissions**: ACLs apply unchanged. A new optional convenience —
   `Datasource.external.requirePermission?: string` — lets admins gate
   the entire datasource behind a single role without writing per-object
@@ -790,6 +837,44 @@ managed Postgres for low-latency joins.
   Postgres logical decoding), the `realtime` service may opt-in;
   otherwise federated objects fall back to poll-based change feeds.
   This is out of scope for v1.
+
+> **Amendment note (2026-11-03 — maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a);
+> `plugin-security/src/external-organization-scope.ts`) — under a walled tenancy posture every
+> external object states its organization scope.** The platform provisions no storage for an
+> external object, so the `organization_id` the registry injects into its schema is a column the
+> remote may not carry, and whose rows the object serves — one organization's or every
+> organization's — is a fact only its author knows. Under the `isolated` and `group` postures
+> (ADR-0105 D1) the object therefore states it, in one of three ways:
+>
+> - its own `organization_id` field — the remote rows carry the organization column and the driver
+>   returns it; a remote column of another name is mapped onto it with
+>   `external.columnMap: { <remote column>: 'organization_id' }`. The Layer 0 wall (ADR-0095 D1)
+>   keys on it, and the engine's floor (`external-driver-floor.ts`) re-applies the predicate to
+>   whatever the driver answered, so a driver that ignores `where` stays walled and a row without
+>   the column reads to no one;
+> - `tenancy: { enabled: false }` — the object is shared by every organization;
+> - `systemFields: { tenant: false }` — the same opt-out, spelled on the system fields. These two
+>   are the wall's own opt-out clauses and the only ones; the whole-block `systemFields: false` is in
+>   neither (the registry's recorded reading) and states nothing.
+>
+> An external object registered by the time the boot completes that states none is refused BY
+> NAME from `SecurityPlugin`'s `kernel:ready` handler, beside the ADR-0131 D5 refusal, naming the
+> three ways out. One registered after the boot (Studio, a runtime datasource) that states none is
+> DENIED by the Layer 0 verdict (`computeTenantLayer0Verdict` answers `deny`: zero rows on every
+> read, every write refused) and the plugin says so once — the shape the owner anchor takes when no
+> owner is provable. Neither door reads an unstated scope as "shared": an unstated scope is a
+> configuration defect and fails toward isolation. `tenancy.tenantField` naming a column other
+> than `organization_id` is closed the same way on an external object — the wall keys on
+> `organization_id` alone, and a declared tenant field is read only by storage the platform
+> provisions — so it is refused at boot and denied after it, with `external.columnMap` onto
+> `organization_id` or `tenancy: { enabled: false }` as the remedy. The `single` posture enforces no
+> wall, owes no declaration and is unchanged. Not taken: reading an unstated scope as shared under
+> a wall (the state this note replaces: the wall stood down on an external object whose anchor
+> was the registry's, so its rows answered to every organization), and enforcing a declared
+> `tenantField` on an external object (a second wall column would need the verdict schema and the
+> deny sentinel to carry it; `columnMap` already reaches the one column the wall reads). The
+> reference test is `packages/runtime/src/plugin-driver-external-object.spike.test.ts`, block (h);
+> the upgrade entry is the ADR-0087 D3 semantic `external-object-organization-scope-declared`.
 
 > **Amendment note (2026-10-31, #28208 — ruling 6525963988 on #27687, option 5; the failure text and
 > the collision claim as PR #28325 left them) — a third credential route, for a datasource defined

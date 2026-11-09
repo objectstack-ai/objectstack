@@ -42,6 +42,10 @@ import {
     ensureNotificationPreferenceIdentityIndex,
     resolveNotificationPreferenceIndexSeam,
 } from './migrations/notification-preference-identity-index.js';
+import {
+    ensureActivationLedgerPackagelessIndex,
+    resolveActivationLedgerIndexSeam,
+} from './migrations/activation-ledger-packageless-index.js';
 import { createRecordedBySentinelPlan } from './migrations/recorded-by-sentinel.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
@@ -357,6 +361,23 @@ export function assembleMetadataProtocol(
                     } catch (e: unknown) {
                         ctx.logger.warn(
                             '[metadata-protocol] notification preference index migration skipped — the NULL-safe index that allows one admin-global default (an empty User) per topic and channel in an organization was not ensured this boot',
+                            { error: e instanceof Error ? e.message : String(e) },
+                        );
+                    }
+                    // `sys_metadata_activation`'s one row per (metadata_type, name)
+                    // among the rows that name no package (ADR-0150 D4): the
+                    // declared key gained the NULL-distinct `package_id`, so the
+                    // environment's own items need an index of their own. Unlike
+                    // its siblings it ADDS an index and replaces none. Same seam,
+                    // same gate, own try/catch.
+                    try {
+                        const seam = resolveActivationLedgerIndexSeam(ql);
+                        await ensureActivationLedgerPackagelessIndex(seam?.exec, ctx.logger, {
+                            client: seam?.client,
+                        });
+                    } catch (e: unknown) {
+                        ctx.logger.warn(
+                            '[metadata-protocol] activation ledger index migration skipped — the index that keeps one row per (metadata_type, name) among rows naming no package was not ensured this boot',
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }

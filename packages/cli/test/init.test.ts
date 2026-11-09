@@ -516,3 +516,13 @@ describe('detectPackageManager', () => {
     expect(detectPackageManager({ npm_config_user_agent: 'npm/10.0.0 node/v22.0.0 linux x64' })).toBe('npm');
   });
 });
+
+// The `app` scaffold is the deployable one, so it ships the dev loop's cloud
+// step as `deploy` — the same command `os dev`'s `d` key runs and the
+// create-objectstack template ships (its own pin holds that half).
+describe('app scaffold ships a deploy script', () => {
+  it('renders `deploy: objectstack deploy` into the app package.json', () => {
+    const pkgJson = renderScaffoldPackageJson('my-app', TEMPLATES.app);
+    expect((pkgJson.scripts as Record<string, string>).deploy).toBe('objectstack deploy');
+  });
+});

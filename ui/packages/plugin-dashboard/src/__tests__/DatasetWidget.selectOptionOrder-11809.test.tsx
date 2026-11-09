@@ -127,6 +127,7 @@ const datasetOf = (rows: Array<Record<string, unknown>>) => ({
     fields: FIELDS,
     object: 'showcase_task',
     dimensionFields: { status: 'status', priority: 'priority', area: 'area' },
+    drillScopes: { task_count: {} },
     drillRawRows: rows,
   })),
 });

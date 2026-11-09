@@ -6,7 +6,8 @@
  * statements from the position-catalog refusal to the end of `start()`. In the
  * order they stand, it registers the `sys_user_position` catalog refusal and
  * the grant-holder membership refusal on the engine, the permission-set name
- * hooks, the platform bootstrap on `kernel:ready` (the managed-object write
+ * hooks, the agent ceiling grant refusal, the platform bootstrap on
+ * `kernel:ready` (the managed-object write
  * denies, the platform-admin bootstrap, the permission-door registrations and
  * the audience-binding sync), the boot reports on `kernel:bootstrapped`, the
  * middleware that replays the bootstrap after a qualifying write, the
@@ -50,7 +51,11 @@ import type { SecurityPlugin } from './security-plugin.js';
 import { POSITION_ASSIGNMENT_OBJECT, createPositionCatalogRefusal } from './position-catalog-refusal.js';
 import { registerGrantHolderMembershipRefusal } from './grant-holder-membership-refusal.js';
 import { registerGrantPermissionSetNameHooks } from './grant-permission-set-name.js';
+import { registerPermissionSetPackageStamp } from './stored-permission-set-package-stamp.js';
+import { registerAgentCeilingGrantRefusal } from './agent-ceiling-grant-refusal.js';
+import { registerAgentAccountGrantRefusal } from './agent-account-grant-refusal.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
+import { backfillStoredPermissionSetPackagesAtBoot } from './stored-permission-set-package-backfill.js';
 import {
   reportAccessUpgrade,
   SHARING_RULES_SERVICE,
@@ -126,6 +131,31 @@ export function registerStartHooks(
         'permission set the security catalog does not hold is NOT refused',
     );
   }
+  // [ADR-0150 D8 R1/R3] Every write naming a permission set in a grant or a
+  // suggestion stamps `permission_set_package` with the set's holder, by the
+  // boot backfill's one rule, once the holders are sealed — the column the
+  // readers resolve the row by. Engine hooks; see
+  // `stored-permission-set-package-stamp.ts`.
+  if (!registerPermissionSetPackageStamp(ql)) {
+    ctx.logger.warn(
+      '[security] the ObjectQL engine exposes no hook registry — a grant or suggestion written now names no ' +
+        'permission-set package until the next boot binds it',
+    );
+  }
+  // [ADR-0090 D10] A `sys_user_permission_set` row is a person's grant, and an
+  // agent ceiling set is not a person's set: a non-system write that would
+  // store one is refused (`400 VALIDATION_FAILED`, `invalid_value` at
+  // `permission_set`), for every caller. Engine hooks; see
+  // `agent-ceiling-grant-refusal.ts`.
+  registerAgentCeilingGrantRefusal(ql, ctx.logger);
+  // [ADR-0151 D3] An AI service account is never assigned a set above the
+  // agent ceiling: a non-system `sys_user_permission_set` or
+  // `sys_user_position` write that would give an account a set carrying View
+  // All, Modify All, the destructive class, a system permission or an admin
+  // scope is refused by the set's name (`400 VALIDATION_FAILED`,
+  // `invalid_value`). The clamp at evaluation is the guarantee; this is the
+  // early answer. Engine hooks; see `agent-account-grant-refusal.ts`.
+  registerAgentAccountGrantRefusal(ql, ctx.logger);
 
   // [ADR-0131 D3, C3 stage 8] No data-door write-through and no walled
   // catalog data-door refusal is registered: the catalog objects are
@@ -330,6 +360,18 @@ export function registerStartHooks(
   // would judge a catalog that is still being filled. See `catalog-reference-report.ts`.
   if (typeof (ctx as any).hook === 'function') {
     (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
+      // [ADR-0150 D8 rows R1, R3] Grants and audience-binding suggestions
+      // gain the package that holds the permission set they name, from its one
+      // package holder; the ambiguous set is reported, never bound. Runs
+      // once the bare-name holders are sealed, and never fails the boot. See
+      // `stored-permission-set-package-backfill.ts`.
+      try {
+        await backfillStoredPermissionSetPackagesAtBoot(ql as any, (ql as any)?.registry, ctx.logger);
+      } catch (e) {
+        ctx.logger.warn('[security] the permission-set package backfill did not run — it is tried again at the next boot', {
+          error: (e as Error)?.message,
+        });
+      }
       try {
         await reportCatalogReferences(ql as any, {
           catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),

@@ -82,7 +82,7 @@ predicate/schema/binding mistakes that fail silently at runtime), and `os dev --
 | `os dev [package]` | | Start development mode with hot reload |
 | `os serve [config]` | | Start the ObjectStack server with plugin auto-detection |
 | `os db clean` | | Reclaim SQLite free space with a one-time `VACUUM` (ADR-0057) |
-| `os db orphans` | | Report detail rows whose required master-detail master does not exist; delete them only with `--delete` |
+| `os db orphans` | | Report detail rows whose master-detail reference names a master that does not exist; delete them only with `--delete` |
 
 #### `os init`
 
@@ -165,6 +165,17 @@ Starts development mode. Three usage shapes:
 1. **With local source** (`objectstack.config.ts` in cwd) — auto-compiles to `dist/objectstack.json` if missing, then delegates to `os serve --dev`.
 2. **With a pre-built artifact** (`--artifact <path|url>`) — skips auto-compile and boots the artifact directly. No `objectstack.config.ts` needed in cwd. Useful for *trying out a published app in dev mode without cloning its source.*
 3. **Monorepo root** (cwd has `pnpm-workspace.yaml`) — orchestrates `pnpm -r dev` across packages.
+
+Once the local server is up, `os dev` in an interactive terminal offers
+**`d` to deploy**: it runs [`os deploy`](#os-deploy) in the same terminal. When
+the target is ObjectOS Cloud and you are not logged in, the same key runs
+`os cloud login` first. When the target is a runtime
+[`os environments use-runtime`](#deploy-to-a-self-hosted-runtime) remembered, the
+key deploys there and asks for no cloud login. On a self-hosted runtime an
+upgrade that would rename or retype a stored field without declaring it asks
+"Deploy anyway?" in the same terminal (see
+[To a self-hosted runtime](#to-a-self-hosted-runtime)); answering no deploys
+nothing. Saving a file never deploys.
 
 ```bash
 os dev                     # Auto-compile cwd config, then start
@@ -440,8 +451,11 @@ os db clean --database file:./data/app.db        # explicit target
 
 #### `os db orphans`
 
-Reports the detail rows whose **required** `master_detail` master does not exist, and —
-only behind `--delete` — deletes them. **Report-only by default: without `--delete` it
+Reports the detail rows whose `master_detail` master does not exist, and — only behind
+`--delete` — deletes them. The master is a **required** `master_detail`, or the
+**optional** master of a `controlled_by_parent` object (its one `master_detail`, declared
+`required: false`); a row whose optional master is empty names no master, is valid, and
+is never listed. **Report-only by default: without `--delete` it
 writes no row or table and creates no file.** It is never run for you; nothing on any
 boot, upgrade, migrate or lifecycle path invokes it.
 
@@ -454,7 +468,7 @@ where an operator acts on that report.
 The report lists each orphan's object, record id, field and missing master id, and the
 deeper detail rows its delete removes with it (the master-detail's own cascade). It
 also names, without ever deleting them, the dangling references on those objects that
-are not a required master-detail, and counts the references whose target could not be
+are not on such a master, and counts the references whose target could not be
 checked at all: unknown is not missing, and none of those rows is listed or deleted.
 
 ```bash
@@ -556,7 +570,7 @@ os start
 | `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `:memory:` / `libsql://` / `postgres://` / `mongodb://` |
 | `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` when the URL is ambiguous |
 | `--database-auth-token <token>` | `OS_DATABASE_AUTH_TOKEN` | Auth token for libsql/Turso |
-| `--auth-secret <secret>` | `OS_AUTH_SECRET` / `AUTH_SECRET` | Secret for `@objectstack/plugin-auth`. If neither the flag nor the env var is set, `os start` **auto-generates one** and persists it at `<home>/auth-secret` |
+| `--auth-secret <secret>` | `OS_AUTH_SECRET` / `AUTH_SECRET` | Secret for `@objectstack/plugin-auth`. If neither the flag nor the env var is set, `os start` **auto-generates one** and persists it at `<home>/auth-secret` — except on a deployment that declares several replicas (`OS_EXPECT_MULTI_NODE=true` / `OS_CLUSTER_REPLICAS` > 1) over the redis cluster driver, where it refuses to start and names the variable |
 | `--home <dir>` | `OS_HOME` | Home directory for persistent state (default `<cwd>/.objectstack` when an `objectstack.config.ts` is present, otherwise `~/.objectstack`) |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
 | `-p, --port <port>` | `OS_PORT` / `PORT` | Listen port (default `3000`). **Production fails loudly if the port is busy** — see note below. |
@@ -608,7 +622,12 @@ as the project's **default** datasource it is refused at boot the same way.
 `AUTH_SECRET` env > a secret **auto-generated and persisted** at `<home>/auth-secret`
 on first run — so `/api/v1/auth/*` (login/register) and the Console's login flow work
 out of the box, without any manual secret provisioning. Set the env var (or flag)
-explicitly when you deploy across multiple nodes or want to rotate the secret.
+explicitly when you deploy across multiple nodes or want to rotate the secret: the same
+value on every replica. A start that declares several replicas
+(`OS_EXPECT_MULTI_NODE=true` / `OS_CLUSTER_REPLICAS` > 1) over the redis cluster driver
+does not generate one: without the variable it exits 1 on one line naming
+`OS_AUTH_SECRET` and how to generate it (`openssl rand -hex 32`), because each replica
+would otherwise mint its own and a session signed on one would be refused on the others.
 
 <Callout type="info">
 **`os start` vs `os serve`:** `os serve` boots from `objectstack.config.ts` (TypeScript source).
@@ -771,7 +790,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (63)...
+  → Running author-time rules (64)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -1105,6 +1124,7 @@ written.
 | `os migrate meta --stored --apply` | **Refuses** likewise — it rewrites `sys_metadata` rows, and a live process saving metadata is exactly the collision |
 | `os migrate security-catalog-overlays --apply` | **Refuses** likewise — it deletes `sys_metadata` rows, and a live process saving metadata is exactly the collision |
 | `os migrate packageless-overlays --apply` | **Refuses** likewise — it moves `sys_metadata` rows into each base's pair |
+| `os migrate stored-references bind` | **Refuses** likewise — it writes one row's package column |
 
 The check applies to SQLite only: Postgres and MySQL take their own server-side
 locks. Only same-user processes are visible without elevated privileges, and a
@@ -1303,9 +1323,13 @@ where the data lives.
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
+| `os migrate stored-expressions` | Fill a stored computed field (a non-formula field declaring `expression`) on the rows stored before the field was declared, which hold `NULL` until each is next written; the boot warns, naming the field, when a sample of rows holds such a `NULL`. `--changed` also recomputes values an edited expression no longer gives. Rows an expression cannot compute while they hold a value are listed, never written. No flag; idempotent |
 | `os migrate blank-single-values` | Rewrite the empty strings (`''`) still stored on optional single-value option, reference and file columns to `null`, the form a cleared value is stored in today, so `$empty` finds those rows. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-single-values) |
+| `os migrate blank-multi-values` | Rewrite the empty lists (`[]`) and empty strings (`''`) still stored on optional multi-value columns to `null`, the form a cleared value is stored in today, so rows cleared before and after read alike. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-multi-values) |
 | `os migrate option-codes` | Rewrite option values still stored as a number, a boolean or SQLite `"N.0"` text (rows written before option fields stored the code string) to that code string, so filters, reads and unique keys see one value. Values it cannot decide are listed, never rewritten. No flag; idempotent. See [below](#os-migrate-option-codes) |
+| `os migrate text-scalars` | Rewrite numbers and booleans still stored raw on text fields (rows written before text fields stored the string) to that string, so filters, reads and unique keys see one value. SQLite `"N.0"` text it cannot decide is listed, never rewritten. No flag; idempotent. See [below](#os-migrate-text-scalars) |
 | `os migrate record-currency-codes` | Write the currency code you give into the rows of a record-mode currency field that hold an amount and no code, the rows stored before the field was switched to `currencyMode: 'record'`. The code is never derived. No flag; idempotent. See [below](#os-migrate-record-currency-codes) |
+| `os migrate recompute-home-amounts` | Recompute the home-currency amounts a record-mode currency field stores, at the exchange rates in force now, after a rate is corrected or added. Reports the rows that change and lists, without writing, the rows it cannot convert. No flag; idempotent. See [below](#os-migrate-recompute-home-amounts) |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
@@ -1314,7 +1338,8 @@ where the data lives.
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
-| `os migrate packageless-overlays` | List the package-less view, dashboard, report, translation and email-template rows stored over a name exactly one installed package ships — the customizations Setup saved before ADR-0146 D11 closed that write — and with `--apply` move each into that package's paired `<base>.custom` (created when absent) as a declared override, `basedOn` the base's installed version; the package-less row is deleted only after the moved one reads back as served. A name no package ships is environment metadata and is not touched; a name several packages ship, or one the pair already holds a row of, is listed and left with the reason. Takes `serve`'s `--preset` and `--dev`. Idempotent: a second run moves nothing. Run it once after upgrading |
+| `os migrate packageless-overlays` | List the package-less view, dashboard, report, translation and email-template rows stored over a name exactly one installed package ships — the customizations Setup saved before ADR-0146 D11 closed that write — and with `--apply` move each into that package's paired `<base>.custom` (created when absent) as a declared override, `basedOn` the base's installed version; the package-less row is deleted only after the moved one reads back as served. A name no package ships is environment metadata and is not touched; a name several packages ship, or one the pair already holds a row of, is listed and left with the reason. So is a view container (`list`, `listViews`, `form`, `formViews`): only a single view declares an override, so it is listed `cannot_declare` and never attempted, with the way out — save each of its views into the pair as a single view, then delete the container row. Takes `serve`'s `--preset` and `--dev`. Idempotent: a second run moves nothing. Run it once after upgrading |
+| `os migrate stored-references` | List the stored references the upgrade left naming no package because the one resolution rule (ADR-0150 D3) refuses them: a user's permission-set assignment, an audience-binding suggestion, a managed sharing rule, a queue membership, an open approval request, a paused flow run, a flow credential, a flow dispatch key, a connector connection, an assignment cursor or a legacy email template whose name more than one package holds, each with its row id and every candidate by its qualified address (`namespace/name`). A suggestion a package wrote naming an environment-authored permission set, or one held only outside the package's declared dependencies, is listed with the fix and is never bindable. Also lists the packaged fields whose picklist the rule refuses (served with no options) and the names two packages held before the one-holder rule. Read-only, and `--json` prints the same bytes on every run. A table this composition does not carry (automation, approvals) is named, not skipped: compose as `os serve` does, with `--preset`/`--dev`. Then `os migrate stored-references bind --table T --id ID --package P` writes the package you chose into that one row: it asks the rule again first and refuses, writing nothing, when the row is already bound, now resolves on its own, or the package is no longer a candidate (a stale report). Each bind leaves a `sys_audit_log` row; a second run writes nothing. Confirm with `--yes` |
 | `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions, and the rows blocking the boot-time NULL-safe index tightenings — a read-only inventory as JSON on stdout. Renumbers nothing and writes no row and no schema; run it before the boot-time tenancy repair, which overwrites part of the evidence |
 
 **The boot itself writes no row and no schema you did not ask for.** Each of these commands boots
@@ -1530,6 +1555,29 @@ column and a text-like column are never touched. Idempotent: a second run
 finds nothing and writes nothing, and re-running until it reports zero is the
 verification, so it records no flag.
 
+#### `os migrate blank-multi-values`
+
+Clearing an optional multi-value field (`multiselect`, `checkboxes`, `tags`,
+or a `select`, `radio`, `lookup`, `user`, `file` or `image` field with
+`multiple: true`) stores `null`. Rows cleared before that rule landed still
+hold an empty list or an empty string, so a filter on `null`, a grouping and
+the value a read returns all tell them apart from rows cleared since, and
+`$empty: true` does not find the empty string.
+
+```bash
+os migrate blank-multi-values                  # Dry run: counts per object and column, writes no rows
+os migrate blank-multi-values --apply          # Rewrite [] and '' to null (prompts)
+os migrate blank-multi-values --apply --yes --json   # CI / scripts
+os migrate blank-multi-values --object account       # Restrict to one object (repeatable)
+```
+
+The columns are the ones the write door itself stores a cleared value as
+`null` on, so the two never disagree. A `required` column, a `readonly`
+column (its empty list is a value the platform stamped) and a single-value
+column are never touched, nor is a list that holds anything. Idempotent: a
+second run finds nothing and writes nothing, and re-running until it reports
+zero is the verification, so it records no flag.
+
 #### `os migrate option-codes`
 
 A number or a boolean written to a `select`, `radio`, `multiselect`,
@@ -1557,6 +1605,32 @@ declares. A row that would collide with a unique value already stored is
 listed as a failure and the walk goes on. Idempotent: re-running until it
 reports nothing to rewrite is the verification, so it records no flag.
 
+#### `os migrate text-scalars`
+
+A number or a boolean written to a text field (`text`, `textarea`, `email`,
+`url`, `phone`, `password`, `markdown`, `html`, `richtext`, `code`,
+`signature`, `qrcode`) is stored as its string: `42` as `"42"`, `true` as
+`"true"`. Rows written before that rule keep the form the database stored: the
+raw number or boolean on driver-memory with persistence, the text `"42.0"`,
+`"1.0"` or `"0.0"` on SQLite. A filter on `"42"` does not find those rows, a
+read hands back the old form, and a unique field admits a new `"42"` beside an
+old `42` or `"42.0"`.
+
+```bash
+os migrate text-scalars                  # Dry run: counts per object and field, writes no rows
+os migrate text-scalars --apply          # Rewrite the raw numbers and booleans (prompts)
+os migrate text-scalars --apply --yes --json   # CI / scripts
+os migrate text-scalars --object account       # Restrict to one object (repeatable)
+```
+
+A raw number or boolean becomes its string. A SQLite `"42.0"` on a text field
+is listed per object and field and left as stored, for you to fix by hand: a
+text field declares no values, so it may be an old number or text someone
+typed. A row whose rewrite the write door refuses (a unique value already
+stored, or a string the field's format no longer admits) is listed as a
+failure, left whole, and the walk goes on. Idempotent: re-running until it
+reports nothing to rewrite is the verification, so it records no flag.
+
 #### `os migrate record-currency-codes`
 
 Switching an existing currency field to `currencyMode: 'record'` leaves every row
@@ -1570,6 +1644,7 @@ covers the switch). This command writes the code into those rows.
 ```bash
 os migrate record-currency-codes --object opportunity --field amount --code USD          # Dry run: counts the rows, writes none
 os migrate record-currency-codes --object opportunity --field amount --code USD --apply  # Write the code (prompts)
+os migrate record-currency-codes --object opportunity --field amount --code EUR --org org_emea --apply   # One organization
 os migrate record-currency-codes --object opportunity --field amount --code USD --apply --yes --json   # CI / scripts
 ```
 
@@ -1580,6 +1655,21 @@ the field had under `fixed`, from the organization's `localization.currency`, or
 anything else. A row that holds a code is never touched, whatever the code, and a row
 with no amount owes none. If the stored amounts are in more than one currency, split
 them with your own writes first: nothing here can tell those rows apart.
+
+**One organization at a time.** Each organization has its own home currency, so one
+code is right for the rows of at most the organizations that use it. `--org <id>` fills
+only that organization's rows: the walk and every write run as that organization, and
+the walk filters on each row's own `organization_id`. When the object's rows belong to
+**more than one organization** and you give neither `--org` nor `--all-organizations`,
+the run (a dry run as well as `--apply`) is refused with `VALIDATION_ERROR` / 400 and
+exit 1 before any row is written, and the refusal lists each organization's codeless
+row count; under `--json` they are in its `organizations` array. Re-run with `--org`
+once per organization, each with the code its rows are in. `--all-organizations` is
+the explicit way to write the one code into every organization's codeless rows, and
+the report then counts each organization apart. `--org` and `--all-organizations`
+together are a usage error. When the rows belong to one organization (or name none),
+the run behaves as it always did. The command never reads an organization's
+`localization.currency` to pick a code for you.
 
 **A bad `--code` is refused before anything is opened.** A code that is not an
 uppercase ISO 4217 code (`usd`, `EURO`) is refused with `INVALID_FIELD` / 400 and
@@ -1593,6 +1683,106 @@ write rule and the code field's `valueDomain` judge it, and it is audited. Idemp
 every write turns a blank code into a code, so a second run finds nothing to write.
 Re-running until the report says zero *is* the verification, which is why this
 command records no flag.
+
+A walk that reaches `--max-records` stops there: the report says `truncated: true`, the
+text says the walk is incomplete, and the command never prints "nothing to backfill"
+for rows it did not examine. Re-run without the cap to finish.
+
+**Without shell access, use the route.** An organization admin on a hosted deployment
+cannot reach its database from a shell. The same backfill is exposed over HTTP, for the
+rows of **the caller's current organization only**:
+
+```http
+POST /api/v1/meta/_migrate-record-currency-codes
+Content-Type: application/json
+
+{ "object": "opportunity", "field": "amount", "code": "USD", "apply": true }
+```
+
+or from the SDK:
+
+```ts
+const preview = await client.meta.migrateRecordCurrencyCodes({ object: 'opportunity', field: 'amount', code: 'USD' });
+const result  = await client.meta.migrateRecordCurrencyCodes({ object: 'opportunity', field: 'amount', code: 'USD', apply: true });
+```
+
+It answers `{ "success": true, "data": … }` with, as `data`, the report this command
+prints under `--json` (its `report` member), and
+takes the same posture: **preview unless `apply` is literally `true`**. It is the
+`--org` run for the caller's current organization: there is no environment-wide form,
+and the body takes no organization (`organizationId` or `allOrganizations` in it is
+refused with `VALIDATION_ERROR` / 400, as is any other key outside `object`, `field`,
+`code` and `apply`). A request with no current organization is refused `403`. It
+requires the `setup.write` capability in that organization and answers `403`
+otherwise; the code, field and object refusals are the command's. It is mounted with
+the other maintenance routes, so `metadata.endpoints.maintenance: false` takes it away.
+There is no Setup button for it yet: that is separate UI work.
+
+#### `os migrate recompute-home-amounts`
+
+A record-mode amount that declares a home amount is converted into the organization's home
+currency when it is written, and stored with the rate it used
+([Currency fields](/docs/data-modeling/currency#converting-into-the-home-currency)). A rate
+row corrected or added later does not rewrite what was stored. This command does, after a
+report.
+
+```bash
+os migrate recompute-home-amounts --object invoice                               # Dry run: reports, writes none
+os migrate recompute-home-amounts --object invoice --since 2026-01-01            # Documents dated on or after Jan 1 only
+os migrate recompute-home-amounts --object invoice --org org_emea                # One organization's rows only
+os migrate recompute-home-amounts --object invoice --field amount --apply        # Write (prompts)
+os migrate recompute-home-amounts --object invoice --apply --yes --json          # CI / scripts
+```
+
+**The write's own numbers.** Each stored row is projected exactly as a write projects it:
+the rate row with the latest effective date on or before the document date, in the row's
+own organization; the amount divided by the rate in exact decimal arithmetic, rounded once
+to the home currency's decimal places; rate `1` for an amount in the home currency; and a
+`datetime` document date read as its day in the organization's timezone. An applied row is
+written through the engine, which converts it again, so it holds what a fresh write of the
+row would store. Each organization converts into its own home currency at its own rates,
+and the report counts each organization apart.
+
+**What is written.** Only rows whose stored home amount or rate differs, and in them only
+the home and rate fields: `updated_at` keeps its stored value. Because each one is an
+ordinary write of the home field, whatever reads that field moves with it, as it would for
+a fresh write: stored formulas, parent summaries, and, where audit capture is installed
+(it is in the command's own boot), one per-row `sys_audit_log` `update` row for each row
+rewritten. ⚠️ Since `updated_at` does not move, a consumer that syncs incrementally by
+`updated_at` does not see a recomputed row; resync the object, or the rows the report
+lists. (`os migrate record-currency-codes` does move `updated_at`.) `--field` limits the run to
+one amount; without it, every amount of the object that declares a home amount is
+recomputed. `--since YYYY-MM-DD` keeps the rows whose **document date** (the field
+`homeAmount.rateDate` names, the date that picks the rate) is on or after that day, a
+`datetime` read as its day in the organization's timezone; a row with no document date is
+outside every `--since` window. `--org <id>` limits the run to one organization's rows,
+read and written as that organization; without it the run covers every organization,
+each in its own home currency, and is never refused for that (it writes no value you
+chose). A malformed `--since` is refused with `VALIDATION_FAILED` /
+400 before the database is opened; an object the deployment does not declare
+(`OBJECT_NOT_FOUND`), or one or a `--field` that declares no home amount (`INVALID_FIELD`),
+is refused after the boot and before any row is read.
+
+**Rows it cannot convert are listed and skipped**, each with its reason, and never written:
+
+| Reason | The row | Fix, then re-run |
+|:---|:---|:---|
+| `rate_missing` | No rate for its currency is in force on its document date (the report names both). | Add the rate. |
+| `code_blank` | An amount with no currency code: stored before the field switched to record mode. | [`os migrate record-currency-codes`](#os-migrate-record-currency-codes) with `--org`, once per organization, each with the code its rows are in; the report's `code_blank` count per organization says which ones owe codes. |
+| `document_date_blank` | A foreign-currency amount with no document date. | Fill the document date. |
+| `home_currency_unset` | Its organization has no `localization.currency`. | Set **Localization → Default currency**. |
+| `unconvertible` | A code, amount or document date the write itself refuses. | Correct the value. |
+
+A skipped row keeps whatever it stored, so a total over the home field leaves it out (a
+`sum` skips an empty home amount silently). That gap stays visible: the command exits 1,
+on a dry run and on an apply, for as long as any row is listed, and an applied run's
+run-level `sys_audit_log` entry (one per run beside the per-row rows, no record,
+`action: update`, `metadata.event: home_amount.recompute`) records the counts per
+organization and reason and every skipped row. A run that an unexpected error stops
+partway still writes that entry, marked `aborted` with the counts it reached, before the
+command fails. A walk cut short by `--max-records` also exits 1: rows past the bound were
+not looked at. Idempotent: re-running until it lists nothing and changes nothing *is* the
+verification, which is why it records no flag.
 
 #### `os migrate comment-reactions`
 
@@ -1812,6 +2002,15 @@ os migrate organization-ownership --apply --plan-file plan.json --backup-taken
 os migrate organization-ownership --dev …                    # boot as `os serve --dev` does
 ```
 
+- **Run it with the auth secret the deployment serves with.** The ceremony
+  composes the security plugin only when an auth secret resolves
+  (`OS_AUTH_SECRET`), as `os serve` does; without it the apply can stop at its
+  `authored-conversion` step. A deployment `os start` serves with the secret
+  it generated keeps that secret in `<home>/auth-secret`, and its refusal names
+  both commands with it exported:
+  `OS_AUTH_SECRET="$(cat <home>/auth-secret)" os migrate organization-ownership …`.
+  `--dev` composes the plugin as a development boot does.
+
 - **The plan writes nothing.** Per table it lists the fate (column dropped,
   mirror rows deleted, owner attributed, rows reported), the row counts, and the
   rows whose owner cannot be derived. It refuses to plan a table it cannot read.
@@ -1956,7 +2155,7 @@ can produce, because both supply a live one.
 | Types with no repository write path (`agent`) | Their write path records no history and would force a draft live — a half-write is worse than leaving the row to the read path |
 | Rows that still fail the current schema after conversion | That is a genuine contract violation, not chain-owned history. The write path's rejection is correct; fix the row in Studio |
 | A site the conversion chain leaves as stored because no lossless rewrite exists — above all a page filter carrying `$and` / `$or` / `$not` | Flattening a combinator changes which rows the page selects, so it is never done. Each site is printed as a `TODO` line under its row — path, block, and what blocks the rewrite — whatever the row's outcome; a row with nothing but TODOs is reported `skipped`. It does not fail the run, since no run of this pass can clear it: rewrite each site by hand |
-| A stored shape protocol 18 refuses and no conversion rewrites — a `controlled_by_parent` object without exactly one required `master_detail` (two masters, none, a required `lookup` only, an explicit `required: false`), a view bound to the retired view-level API data source or a page component whose `data` prop binds it (`object-grid`, `object-map`, `object-gantt`, `object-tree`), a flow value slot carrying a `{…}` token (a `get_record` / `update_record` / `delete_record` filter operand among them) | Each would need a choice only its owner can make — which master, which page, what an absent value should do — so it is never rewritten. Each site is printed as a `TODO` line under its row, naming the step-18 entry that refuses it, the object, view, page component or flow node, and the owner's choices; a binding's request headers are withheld. Until it is rewritten by hand, the row is refused: an object registers but derives no master, a view registers under `[metadata_spec_invalid]`, a page still loads, its next save is refused at the metadata save door (422), and `os validate`, `os build` and `os lint` refuse the binding in source, and a flow is not registered |
+| A stored shape protocol 18 refuses and no conversion rewrites — a `controlled_by_parent` object without exactly one master, which is one `master_detail` declared `required: true` or, with none, its only `master_detail` declared `required: false` (two masters, none, a required `lookup` only; an explicit `required: false` on the only `master_detail` is that optional master, admitted by `cbp-optional-master-admitted` and not listed), a view bound to the retired view-level API data source or a page component whose `data` prop binds it (`object-grid`, `object-map`, `object-gantt`, `object-tree`), a flow value slot carrying a `{…}` token (a `get_record` / `update_record` / `delete_record` filter operand among them) | Each would need a choice only its owner can make — which master, which page, what an absent value should do — so it is never rewritten. Each site is printed as a `TODO` line under its row, naming the step-18 entry that refuses it, the object, view, page component or flow node, and the owner's choices; a binding's request headers are withheld. Until it is rewritten by hand, the row is refused: an object registers but derives no master, a view registers under `[metadata_spec_invalid]`, a page still loads, its next save is refused at the metadata save door (422), and `os validate`, `os build` and `os lint` refuse the binding in source, and a flow is not registered |
 | Any other site `registerFlow` refuses in a stored flow the parse accepts — a text slot's template hole, a decision's `mode`, a malformed predicate, a plugin node's undeclared config key, an `api` flow with no secret | The flow's own definition is wrong, and no conversion rewrites it. Each site is printed as a `TODO registerFlow` line under its row, in the words `registerFlow` refuses it with; a site already listed under a step-18 entry is not repeated. Until it is fixed, the flow is not registered at boot and never runs. A flow the parse itself refuses is reported among the rows that could not be rewritten, in the parse's words |
 
 **One thing it lists and never writes: decision nodes that changed meaning at
@@ -2242,6 +2441,8 @@ os g dashboard sales                          # Generate a dashboard
 os g app sales --object customer              # Generate an app whose navigation opens Customer
 os g skill lead_qual                          # Generate an AI skill
 os g picklist industry                        # Generate a shared option list select fields name
+os g permission sales_user --object customer  # Generate a permission set that grants Customer
+os g dataset customer_metrics --object customer  # Generate a dataset dashboard widgets bind to
 
 os g action escalate --object customer --flow customer_changed_flow  # Name the flow when there are several
 os g object task -d lib/                      # Override target directory
@@ -2260,6 +2461,8 @@ os g object task --dry-run                    # Preview without writing
 | `app` | `src/apps/` | `NAME.app.ts` | `apps` | Application navigation |
 | `skill` | `src/skills/` | `NAME.skill.ts` | `skills` | AI skill — the ADR-0063 extension primitive |
 | `picklist` | `src/picklists/` | `NAME.picklist.ts` | `picklists` | Shared option list that select fields reference by name |
+| `permission` | `src/security/` | `NAME.permission.ts` | `permissions` | Permission set: what a signed-in user may do with an object |
+| `dataset` | `src/datasets/` | `NAME.dataset.ts` | `datasets` | Analytics dataset: the dimensions and measures dashboard widgets bind to |
 
 <Callout type="info" title="Why generated files carry a type infix">
 Every scaffold is written as `NAME.TYPE.ts`, and the infix is read from the
@@ -2313,12 +2516,12 @@ the rules a JSON Schema can express and names the rest under
 **Options:**
 - `-d, --dir <directory>` — Override target directory
 - `--dry-run` — Preview without writing files
-- `--object <object>` — The object a `flow`, `action` or `app` binds; default: the stack's only object
+- `--object <object>` — The object a `flow`, `action`, `app`, `permission` or `dataset` binds; default: the stack's only object
 - `--flow <flow>` — The flow an `action` runs; default: the stack's only flow
 
 **What it does:**
-1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it, and resolves every object or flow the scaffold binds against the stack that config loads (see above)
-2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; a `picklist` declared with `definePicklist({ … })`, which a select field names with `Field.select({ picklist: 'NAME' })` in place of its own `options`, and which the server resolves into that field's `options`; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
+1. For a type that names an object (`object`, `view`, `action`, `flow`, `app`, `permission`, `dataset`), reads `manifest.namespace` from the project config (`objectstack.config.ts`, `.js` or `.mjs`) and prefixes the object name with it, and resolves every object or flow the scaffold binds against the stack that config loads (see above)
+2. Creates the TypeScript file — an `object` declared with `ObjectSchema.create({ … })`, the same shape the `os init` templates write; a `skill` declared with `defineSkill({ … })`; a `picklist` declared with `definePicklist({ … })`, which a select field names with `Field.select({ picklist: 'NAME' })` in place of its own `options`, and which the server resolves into that field's `options`; a `permission` set declared with `definePermissionSet({ … })`, granting the bound object; a `dataset` declared with `defineDataset({ … })` over the bound object, with a record-count measure; the other types as typed literals (`UI.View`, `UI.Action`, `Automation.Flow`, `UI.Dashboard`, `UI.App`)
 3. Creates or updates the barrel `index.ts` in the target directory
 4. Shows a hint to run `objectstack validate`
 
@@ -2519,10 +2722,11 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    reported inconclusive, never proven.
    With `--parent-write-reach`, another fresh boot proves ADR-0055's write rule
    for every object declared `controlled_by_parent` (exactly one
-   `master_detail` field names its master): editing, deleting or creating a
-   detail is admitted exactly when the caller holds that verb on the detail's
-   object **and** can edit its master. The first half is read from the
-   server's effective permissions for the caller (`/auth/me/permissions`); the
+   `master_detail` field names its master, required or optional): editing,
+   deleting or creating a detail is admitted exactly when the caller holds
+   that verb on the detail's object **and** can edit its master. The first
+   half is read from the server's effective permissions for the caller
+   (`/auth/me/permissions`); the
    second is measured, by an empty update of the master as the caller, which
    runs every write gate the master has — for a master that is itself
    controlled by its parent, the gate above it too. The writes go through the
@@ -2539,9 +2743,15 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    answer disagrees fails the run, and so does a persona that could not be
    provisioned; a refusal that is not the platform's `403 PERMISSION_DENIED`
    naming the detail and the operation (a rule, a hook's own code, a refusal
-   on another object) is reported inconclusive, never proven. An object
-   with two `master_detail` fields, none, or a chain at the write gate's depth
-   bound is reported `excluded`. A detail two levels below its root master (a
+   on another object) is reported inconclusive, never proven. For an optional
+   master (its only `master_detail` declared `required: false`) the run also
+   proves the records that name no master: such a record is its owner's, so
+   its edit or delete is admitted exactly when the caller holds that verb on
+   the detail's object **and** owns the record (`owner_id`) or holds Modify All
+   on that object, and a create that names no master exactly when the caller
+   holds create on it; a null-master record the persona cannot read is not
+   probed. An object with two `master_detail` fields, none, or a chain at the
+   write gate's depth bound is reported `excluded`. A detail two levels below its root master (a
    line under a quote under an account) is answered the same way: its write is
    admitted exactly when the caller holds the verb on the detail and may update
    the middle master directly, which also needs edit access to the root, and
@@ -2556,12 +2766,12 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    measure of a bound widget that is a count, a sum, or a derived measure over
    those, fixture rows are written through the seed door
    on every preset's first and last day and the day either side (never after
-   today), stamped at UTC noon, owned by the caller and holding every column
+   today, except a forward preset's own edges, which are future days), stamped at UTC noon, owned by the caller and holding every column
    the widget's own filter, the dataset's filter and the measure's filter
    compare (the smallest record first, every synthesized field if the seed
    door refuses it), and read back. The widget is then asked through
    `POST /analytics/dataset/query` as the signed-in admin with no window and
-   under each of the 13 presets, before and after the fixtures. A preset is
+   under each preset, before and after the fixtures. A preset is
    handed as the spec's `{date-macro}` window for it
    (`{ $gte: '{7_days_ago}', $lte: '{today}' }` for `last_7_days`, `{ $gte: '{month_start}', $lte: '{month_end}' }` for
    `this_month`), ANDed with the widget's filter, and the server resolves the
@@ -2881,7 +3091,9 @@ os cloud login --email me@acme.com --password secret   # CI
 Like `os login`, in an interactive terminal it uses the browser-based device
 flow: it prints a one-time verification URL and polls until you approve. If
 cloud credentials already exist it exits successfully with "Already logged in";
-pass `--force` to re-authenticate.
+pass `--force` to re-authenticate. Re-authenticating to the same control plane
+as the same account keeps the active environment recorded in `cloud.json`; a
+different control plane or account starts without one.
 
 ##### `os cloud login --json` is NDJSON — the same exception as `os login`
 
@@ -2931,6 +3143,7 @@ spells them, so one consumer reads both commands.
 | `os environments create` | Provision a new environment. With `--activate` (the default) the new environment becomes the active one, recorded in `~/.objectstack/cloud.json` as well when the control plane it talked to is the one `os cloud login` recorded — so [`os package publish --install`](#os-package-publish) can install into it with no `switch` in between |
 | `os environments switch <id>` | Set the active environment for later CLI calls. Recorded in `~/.objectstack/cloud.json` as well when the control plane it talked to is the one `os cloud login` recorded, so [`os package publish --install`](#os-package-publish) can use it |
 | `os environments bind <id>` | Bind a compiled local artifact to an existing environment |
+| `os environments use-runtime <url> --token <key>` | Make a self-hosted runtime the deploy target instead of an ObjectOS Cloud environment — see [Deploy to a self-hosted runtime](#deploy-to-a-self-hosted-runtime) |
 
 #### Create an environment from a local artifact
 
@@ -2957,6 +3170,219 @@ os environments bind <environment-id> --artifact ./dist/objectstack.json --build
 is reserved for the server-side reseed endpoint; use it only when that endpoint
 is available in your deployment.
 
+#### Deploy to a self-hosted runtime
+
+`os environments use-runtime` remembers a runtime you operate — ObjectStack's
+Docker image, Community or Enterprise — as the deploy target, so
+[`os deploy`](#to-a-self-hosted-runtime), the `d` key in [`os dev`](#os-dev) and
+[`os package install`](#os-package-install) stop asking for its URL and key.
+
+```bash
+os environments use-runtime http://localhost:8080 --token osk_…
+OS_RUNTIME_TOKEN=osk_… os environments use-runtime https://objectos.example.com
+os environments use-runtime --forget          # deploy to ObjectOS Cloud again
+```
+
+The key is an API key the runtime issued (its **Setup → API Keys**); `-t, --token`
+reads `OS_RUNTIME_TOKEN`. The URL is the runtime's http(s) base URL, with no query
+or fragment. Before anything is written, the key is tried on the runtime's
+install-local endpoint (`GET /api/v1/marketplace/install-local`, which answers
+only an authenticated caller): a key the runtime rejects (`401` / `403`), a
+runtime that does not serve the endpoint (`404`), or one that cannot be reached
+is refused, naming why, and nothing is recorded. `--no-verify` records it anyway,
+for a container that is not up yet.
+
+The URL and key are stored in `~/.objectstack/cloud.json` (mode `0600`), the file
+`os cloud login` writes, as their own record: no cloud request reads the key, and
+it is sent only to that runtime's URL. `os cloud logout` keeps the record, and so
+does a new `os cloud login`.
+
+Whichever of `use-runtime` and `os environments switch` ran last is the target
+`os deploy` uses. `os environments switch <id>`, when it records the environment
+in `cloud.json` (see the table above), makes ObjectOS Cloud the target again and
+keeps the remembered runtime, so `os package install` still falls back to it.
+`--forget` drops the record.
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `url` (positional) | — | Base URL of the self-hosted runtime (e.g. `http://localhost:8080`) |
+| `-t, --token <key>` | `OS_RUNTIME_TOKEN` | An API key the runtime issued; sent only to this runtime |
+| `--no-verify` | — | Record the runtime without trying the key on it first |
+| `--forget` | — | Forget the remembered runtime; ObjectOS Cloud is the deploy target again. Takes no `url` |
+
+### Deploy
+
+#### `os deploy`
+
+Puts the app in the current directory on your ObjectOS Cloud environment, with
+no flags (or on a [self-hosted runtime](#to-a-self-hosted-runtime) you made the
+target). It builds the app (the compile [`os build`](#os-compile) runs),
+publishes it as `<manifest.version>-dev.<YYYYMMDDHHMMSS>` — a UTC semver
+pre-release, so deploying again never needs a version bump — installs that
+version into your organization's environment, and waits until the environment
+serves it. Scaffolded projects run it as `npm run deploy`, and
+[`os dev`](#os-dev) runs it when you press `d`.
+
+```bash
+os cloud login                   # once per machine
+os deploy
+os deploy --env env_abc123       # your account reaches several environments
+os deploy --no-wait              # return once the install is recorded
+```
+
+The environment is resolved exactly as
+[`os package publish --install`](#os-package-publish) resolves it: `--env`,
+then the active environment for this control plane, then your organization's
+only environment. Every refusal comes before anything is written: not logged
+in, no environment to name, a failed build (its errors are printed), or a
+`manifest.version` that is not semver. A build the environment itself reports
+as failed prints the environment's reason and exits `1`; so does a wait that
+times out, naming what it waited for. An environment rebuilds only when it gets
+a request, so while it waits the command sends it one on every poll. A failing
+build is reported only after three failed rounds in a row, so it can read as
+still building for a few minutes before the reason appears. On a control plane
+that does not yet report which version an environment serves, the command says
+so and does not claim the new version is live.
+
+There is no deploy on save: on ObjectOS Cloud your organization's environment
+is its production, so a deploy is always a deliberate act.
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to deploy into (default: the active one for this control plane, then your organization's only one) |
+| `--no-wait` | — | Return once the install is recorded |
+| `--wait-timeout <seconds>` | — | How long to wait for the environment to serve the new version (default `600`) |
+| `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
+| `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
+| `--confirm-global-uniques` | — | Self-hosted target only: confirm the app's installation-wide `unique` constraints are genuinely platform-wide when the runtime's refusal asks (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
+| `--confirm-access-upgrade <token>` | — | Self-hosted target only: confirm the upgrade's access findings with the finding-set token the runtime's refusal printed (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
+| `--confirm-upgrade <token>` | — | Self-hosted target only: confirm the upgrade's schema findings (a suspected rename, a type change that is not safe) with the finding-set token the runtime's refusal printed (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
+| `--dry-run` | — | Self-hosted target only: build, print the upgrade plan, say whether the install would stop for a confirmation, and install nothing. Refused when the target is ObjectOS Cloud |
+| `--json` | — | Self-hosted target only: print one JSON document on stdout (see below); progress goes to stderr. Refused when the target is ObjectOS Cloud; the document then says so (`target: cloud`, `result: failed`) |
+
+`os package publish` stays the command for a **release**: it publishes the
+version the manifest declares, with `--install` optional.
+
+##### To a self-hosted runtime
+
+When [`os environments use-runtime`](#deploy-to-a-self-hosted-runtime) made a
+self-hosted runtime the active target, `os deploy` with no flags deploys there
+instead; `--env` still names an ObjectOS Cloud environment and deploys to it.
+There is no catalog and no version to mint: the build is sent inline to the
+runtime's install-local endpoint by [`os package install`](#os-package-install),
+run in the same process with the remembered URL and key, so its refusals and
+answers are the ones printed.
+
+1. **Build** — the same compile as above. A failed build prints its errors, and
+   nothing is installed.
+2. **Dry run** — the runtime's upgrade plan of the installed version against this
+   build is printed, grouped by change: objects and fields added and removed,
+   renames declared with `renamedFrom` (`old → new`), suspected renames, type
+   changes, and seed datasets with their mode. Nothing is installed. A runtime that
+   refuses it, or does not serve install-local, stops the deploy with exit `1`. A
+   runtime that predates the dry run ignores it and installs: the command says so
+   and exits `1`. With `--dry-run` the deploy stops here and exits `0`, after saying
+   whether the install would stop for a confirmation and on which findings.
+3. **Install** — with `--confirm-global-uniques`, `--confirm-access-upgrade` and
+   `--confirm-upgrade` passed through. A plan with only additions and declared
+   renames installs without a question. The endpoint's refusals
+   (installation-wide uniques to confirm on an `isolated` runtime, an access
+   upgrade to confirm, a schema upgrade to confirm, a package the running kernel
+   cannot register, …) stop the deploy with exit `1`, and the retry they print
+   names `os deploy`: `os deploy --confirm-global-uniques` for installation-wide
+   uniques, `os deploy --confirm-access-upgrade <token>` for access findings, or
+   `os deploy --confirm-upgrade <token>` for schema findings. A schema upgrade
+   stop (an undeclared suspected rename, a type change that is not safe) also
+   names the other way forward: declare the old key in the new field's
+   `renamedFrom` and rebuild. There is no rename flag; a rename is declared in the
+   package.
+   - **On a terminal** (stdin and stdout both interactive, so also under the `d`
+     key), the schema upgrade stop asks `Deploy anyway, accepting each finding as
+     listed? [y/N]`. Yes installs again with the refusal's own finding-set token;
+     anything else deploys nothing and exits `1`. Only the schema upgrade stop
+     asks. Off a terminal, or with `--json`, nothing is asked.
+4. **Live** — install-local registers the package in the running kernel before it
+   answers, so the answer is the verdict: `hotLoaded` prints `Live: … now serves …`
+   and exits `0`. A package the runtime recorded but its running kernel could not
+   load is not live: the command prints that it loads when the runtime restarts
+   and exits `1`.
+
+The `d` key in [`os dev`](#os-dev) runs the same `os deploy`, so it deploys to the
+runtime too and asks for no cloud login.
+
+With `--json`, stdout carries one JSON document and every progress line goes to
+stderr. A refusal or a failure exits `1`; a dry run or a live install exits `0`.
+
+| Key | Value |
+|---|---|
+| `target` | `runtime` (or `cloud` when the flag is refused there) |
+| `url` | The runtime's URL |
+| `result` | `planned` (`--dry-run`), `installed`, `refused` or `failed` |
+| `package` | `{ manifestId, version, installedVersion }` from the dry run |
+| `plan`, `environment` | The runtime's dry-run reading, verbatim |
+| `wouldStop` | The schema findings the install would ask to confirm, previewed from the plan (`[]`: none; `null`: not read) |
+| `refusal` | The runtime's refusal, verbatim: `{ status, code, message, details }` |
+| `confirm` | `os deploy --confirm-upgrade <token>` when the refusal is a schema upgrade stop |
+| `error` | What stopped the deploy, when something did |
+
+```bash
+os deploy --dry-run              # the plan, and whether the install would stop; nothing installed
+os deploy --json | jq .result    # one document on stdout
+```
+
+### MCP
+
+#### `os mcp connect`
+
+Registers your environment's MCP server with your MCP client in one command. The
+client then runs the environment's own OAuth: on first use it follows the
+server's OAuth discovery, registers itself, and your browser shows the
+environment's sign-in and consent.
+
+```bash
+os mcp connect
+os mcp connect --print                     # print the endpoint and the `claude mcp add` line, run nothing
+os mcp connect --env env_abc123            # your account reaches several environments
+os mcp connect --url http://localhost:3000 # a self-hosted or local server
+```
+
+The ObjectOS Cloud environment is resolved exactly as [`os deploy`](#os-deploy)
+resolves it: `--env`, then the active environment for this control plane, then
+your organization's only environment; none or several is refused, naming
+`--env`. A self-hosted runtime `os environments use-runtime` remembered is not
+consulted; name it with `--url`. Its MCP URL is the environment's address, read
+from the control plane, plus `/api/v1/mcp`, and the server is registered under
+the environment's own name (its slug, else its display name, else its id,
+lower-cased with every run of other characters turned into one `-`), so several
+environments can be registered side by side. `--url` skips ObjectOS Cloud: it
+takes the base URL of a self-hosted or local server (the command adds
+`/api/v1/mcp` itself and refuses a URL that already ends in it) and registers it
+as `objectstack`, the name `os dev`'s banner gives it. `--name` overrides either
+name.
+
+For Claude Code — the only `--client` value, and the default — the command runs
+`claude mcp add --transport http NAME URL`. `--print` prints the endpoint and that
+line and runs nothing, which is also how to connect any other client: add the
+endpoint as a remote HTTP MCP server in its settings. Then, in Claude Code, run
+`/mcp` and authenticate the server. If `claude` is not on your `PATH`, or
+`claude mcp add` fails (for a name already registered, `claude mcp remove NAME` or
+pick another `--name`), the command exits non-zero.
+
+**No token is stored.** The command hands the client the URL alone and writes no
+token into a client config. `-t, --token` (or the `os cloud login` session) is
+used only to find the environment and is never handed to the client. To revoke
+the grant, use the environment's console: **Account → Connect an AI Assistant**.
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to connect to (default: the active one for this control plane, then your organization's only one) |
+| `--url <url>` | — | Base URL of a self-hosted or local server; skips ObjectOS Cloud |
+| `--name <name>` | — | Server name in the client: letters, digits, `-` and `_` (default: the environment's name; `objectstack` with `--url`) |
+| `--client <client>` | — | `claude-code`, the default and only value |
+| `--print` | — | Print the endpoint and the command that registers it; run nothing |
+| `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
+| `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token, used only to find the environment; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
+
 ### Packages
 
 The two commands that move a compiled app onto a platform. They target
@@ -2968,6 +3394,7 @@ runtime**.
 |---------|----------|-------------|
 | `os package publish [artifact]` | ObjectOS Cloud | Upload a compiled artifact as a versioned package in your organization |
 | `os package install <package>` | A running runtime | Install a package into a live kernel, from that runtime's catalog or from a local artifact |
+| `os package export` | A running runtime | Export the deployment's whole ontology as installable packages, one directory per package, in install order |
 
 For which one to reach for and the preview patterns around them, see
 [Publish & preview](/docs/deployment/publish-and-preview). This section is the
@@ -3008,6 +3435,14 @@ resolves an install target by bare id, with no name or short-id rescue. A value
 written by an older CLI into `credentials.json` is copied across once, and only
 when both files' `url`s agree.
 
+With neither `--env` nor an active environment, `--install` asks the control
+plane for your organization's environments and uses the only one, printing
+which; archived and platform environments are not counted. On ObjectOS Cloud
+every organization has exactly one environment, so this is the usual case.
+None, several, or a list that cannot be read is a refusal: the command exits
+`1` before it registers the package or publishes a version, and lists the
+candidates with how to pass `--env`.
+
 **Options:**
 
 | Flag | Env equivalent | Purpose |
@@ -3019,11 +3454,10 @@ when both files' `url`s agree.
 | `-v, --version <semver>` | — | Version to publish. Default: `artifact.manifest.version`, else `0.0.0-dev.` + a timestamp |
 | `--display-name <name>` | — | Name shown in the Marketplace (default `artifact.manifest.name`) |
 | `--description <text>` | — | Short package description |
-| `--category <slug>` | — | Marketplace category slug (`crm`, `hr`, `devtools`, …) |
 | `--visibility <level>` | — | `org` (installable across your organization) · `private` (explicit grants only) · `marketplace` (public after review). Omitted: not sent, so the control plane decides — an existing package keeps its visibility, a new one gets the control plane's default (`org` on ObjectOS Cloud) |
 | `--org <id>` | `OS_ORG_ID` | `owner_org_id`. Required with a bearer key in service mode; ignored in user mode |
-| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) — or `os environments create --activate` — recorded **for this control plane** in `~/.objectstack/cloud.json` |
-| `--install` | — | Auto-install into `--env` after publishing. With no `--env`, no `$OS_ENVIRONMENT_ID` and no active environment for this control plane, it reports that and publishes without installing |
+| `--env <id>` | `OS_ENVIRONMENT_ID` | Environment to install the new version into. Defaults to the environment [`os environments switch`](#cloud-environments) — or `os environments create --activate` — recorded **for this control plane** in `~/.objectstack/cloud.json`, then to your organization's only environment |
+| `--install` | — | Install the new version after publishing, into `--env` or the environment it defaults to. With no environment to name — none, several, or a list the control plane would not give — it exits `1` **before publishing anything**, naming how to pass one |
 | `--seed-sample-data` | — | Include sample data in that auto-install |
 | `--pre-release` | — | Mark the version as a pre-release (also inferred — see below) |
 | `--submit` | — | Submit the new version for marketplace review. Needs the package's visibility to be `marketplace` (already stored, or set with `--visibility marketplace`) and a complete listing |
@@ -3055,9 +3489,19 @@ and rebuild.
 
 **`objectstack.manifest.json` supplies the listing fields.** When that file is
 present in the working directory, publish reads `manifestId`, `displayName`,
-`description`, `category`, `tags`, `iconUrl`, `homepageUrl`, `license`,
-`readmePath` and a `translations` map from it, so a listing need not be retyped
-as flags on every publish. **CLI flags always win.** `tags` has no flag and is
+`description`, `tags`, `iconUrl`, `homepageUrl`, `license`, `readmePath`, a
+`translations` map and the marketplace facets — `businessFunctions`,
+`industries`, `solutionType` and `maturity` — from it, so a listing need not be
+retyped as flags on every publish. **CLI flags always win.** Each facet is
+checked against the spec's schema before anything is sent, and a declared
+`solutionType` against the built artifact: a `template` needs the `unmanaged`
+install mode, a `connector` a declared connector. The retired `category` — in
+the file, or as `--category` — is refused before any network call, with the
+facets that replace the value it held, and so is a `visibility` in the file
+(pass `--visibility`) and a `publisher` in the file (the platform assigns the
+trust tier from your credentials). The retired `name`, `specVersion`, `skills`,
+`scaffold` and `isStarter`, which never changed what publish sent, are named in
+a warning for deletion. `tags` has no flag and is
 sent as written: the control plane judges the list, and a refusal is its 400,
 printed as it is. A top-level `tagline` is used only as the description, when
 neither `--description` nor the file's `description` gives one; otherwise it is
@@ -3096,7 +3540,7 @@ Two modes, chosen by the shape of the argument:
 
 ```bash
 # catalog mode — the TARGET runtime resolves the version from its own catalog
-os package install com.acme.crm --version 1.2.0 --runtime https://app.example.com
+os package install com.acme.crm --version 1.2.0 --url https://app.example.com
 
 # air-gapped mode — the artifact is read locally and sent inline; no catalog, works offline
 os package install ./dist/objectstack.json
@@ -3109,22 +3553,30 @@ catalog id that happens to match a file in the working directory is installed
 from that file instead.
 
 **The credential is the *runtime* identity, not your cloud login.** The target
-runtime authenticates the call with its own session, so `--email` / `--password`
-(or `OS_RUNTIME_EMAIL` / `OS_RUNTIME_PASSWORD`) name an account **on that
-runtime**. A `401` means exactly that, and the command says so; `os cloud login`
+runtime authenticates the call itself: pass a token it issued (`-t, --token`, or
+`OS_RUNTIME_TOKEN`), or `--email` / `--password` (or `OS_RUNTIME_EMAIL` /
+`OS_RUNTIME_PASSWORD`) for an account **on that runtime** — one or the other,
+not both. A `401` means exactly that, and the command says so; `os cloud login`
 credentials do not apply here.
+
+The server and the credential are spelled as in `os package export` and the
+other server-talking commands: `-u, --url` and `-t, --token`. `-r, --runtime`
+is gone with no alias, so a script that passes it is refused as an unknown flag;
+write `-u URL` instead.
 
 **Options:**
 
 | Flag | Env equivalent | Purpose |
 |---|---|---|
 | `package` (positional, required) | — | Package manifest id (`com.acme.crm`) **or** a path to a compiled artifact JSON |
-| `-r, --runtime <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default `http://localhost:3000`) |
+| `-u, --url <url>` | `OS_RUNTIME_URL` | Base URL of the runtime to install **into** (default: the runtime [`os environments use-runtime`](#deploy-to-a-self-hosted-runtime) remembered, else `http://localhost:3000`) |
 | `-v, --version <semver>` | — | Version to install in catalog mode (default `latest`). Air-gapped mode takes the version from the artifact |
+| `-t, --token <token>` | `OS_RUNTIME_TOKEN` | A token the target runtime issued (an API key); instead of `--email` / `--password`. Default: the key `os environments use-runtime` remembered, when the URL is that runtime's and no `--email` / `--password` is given |
 | `--email <email>` | `OS_RUNTIME_EMAIL` | Account email on the target runtime |
 | `--password <password>` | `OS_RUNTIME_PASSWORD` | Account password on the target runtime |
 | `--confirm-global-uniques` | — | Affirm this app's installation-wide `unique` constraints are genuinely platform-wide — see below |
 | `--confirm-access-upgrade <token>` | — | Confirm an upgrade's access findings with the finding-set token the runtime's refusal printed — see below |
+| `--confirm-upgrade <token>` | — | Confirm an upgrade's schema findings (a suspected rename, a type change that is not safe) with the finding-set token the runtime's refusal printed — see below |
 | `--timeout <ms>` | `OS_CLOUD_TIMEOUT_MS` | HTTP timeout in milliseconds, default `120000`. `0` disables it |
 
 **`--confirm-global-uniques` answers a stop; it does not force one past.**
@@ -3156,11 +3608,78 @@ and the upgrade stops again with the new set; the confirmation is recorded in
 the install's ledger entry. Under `group` and `isolated` only the platform
 operator reaches this check. A fresh install is never checked.
 
+**`--confirm-upgrade <token>` confirms exactly the schema findings it names.**
+Upgrading an installed package stops with `SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`
+when the new version would change a stored field in a way the schema sync does
+not carry: a field removed while another is added with no `renamedFrom` linking
+them (if it is a rename, the new field starts empty and the values stay in the
+old column), or a type change that keeps or drops a stored column
+(`needs_confirm` or `destructive`). It also stops when the runtime cannot read
+its record of the installed version, since nothing could be compared. Nothing is
+installed. The command prints each finding and the exact retry, carrying the
+finding set's token. If a field was renamed, declare its old key in the new
+field's `renamedFrom` and rebuild instead: the upgrade then carries the old
+column's values to the new key, and the answer lists each carried rename; a
+rename the runtime cannot carry is refused by name before anything changes. As with `--confirm-access-upgrade`, the token stops matching once the
+findings change, and the confirmation is recorded in the install's ledger entry.
+A type change on a field that had no stored column, a removed field and a seed
+data change are never refused; `--dry-run` lists them. `os deploy` passes
+`--confirm-upgrade` through to a self-hosted runtime. A fresh install is never
+checked.
+
 A `404` means the target runtime does not mount `MarketplaceInstallLocalPlugin`
 (from `@objectstack/cloud-connection`). The endpoint is opt-in, so a runtime
 composed without it will not accept installs.
 
 In catalog mode, a runtime connected to an ObjectOS Cloud account presents its connection credential to the cloud catalog — see [Cloud Connection](/docs/deployment/cloud-connection).
+
+#### `os package export`
+
+Takes a running deployment's whole ontology out as packages you can install on
+any runtime, the open Apache-2.0 one included. One read,
+`GET /api/v1/packages/export`, answers every installed package the deployment's
+own code does not register: the marketplace and authored packages, each base's
+`.custom` customization package among them. Each comes exactly as
+`GET /api/v1/packages/:id/export` answers it, with the namespace and
+dependencies it was installed with, and dependencies come first, so a `.custom`
+package follows its base. A package registered by the deployment's own code
+(`defineStack()`, a plugin, the platform) is not exported: it travels with that
+code.
+
+```bash
+os package export --out ./ontology --url https://acme.example.com
+# ./ontology/01-com.acme.crm/objectstack.json
+# ./ontology/02-com.acme.crm.custom/objectstack.json
+# ./ontology/03-com.acme.billing/objectstack.json
+
+# on the target runtime, in the numbered order:
+os package install ./ontology/01-com.acme.crm/objectstack.json
+os package install ./ontology/02-com.acme.crm.custom/objectstack.json
+os package install ./ontology/03-com.acme.billing/objectstack.json
+```
+
+Each file is one package's export, installable as it stands with
+[`os package install`](#os-package-install). Install them in the numbered order;
+the command prints that order too, and never re-sorts what the read answered.
+
+- **No secret leaves.** Credential positions are withheld, as on every served
+  metadata read, and a connector's `auth.credentialRef` stays the reference it
+  is: fill the secret it names on the target runtime.
+- **No enabled state.** Every package installs enabled, including one that was
+  switched off where it was exported.
+- **Whole or nothing.** A package whose export cannot be assembled fails the
+  read, and the command prints the runtime's refusal, which names the package,
+  and writes nothing. It refuses an `--out` directory that already holds files.
+- **Who can export.** The same callers who can read a single package's export:
+  `studio.access` or `setup.access`.
+
+**Options:**
+
+| Flag | Env equivalent | Purpose |
+|---|---|---|
+| `-o, --out <dir>` | — | Directory to write into (default `./objectstack-export`); created, and refused when it already holds files |
+| `-u, --url <url>` | `OS_CLOUD_URL` | Server URL of the deployment to export (default: the stored `os login` session's, else `http://localhost:3000`) |
+| `-t, --token <token>` | `OS_TOKEN` | Authentication token (default: the stored `os login` session's) |
 
 ## Configuration
 

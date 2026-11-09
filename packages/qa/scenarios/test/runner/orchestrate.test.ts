@@ -1,0 +1,1053 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * The runner end to end on the real `crm_account_with_contacts` card, with
+ * the three outside worlds replaced: the project (a fake scaffold whose
+ * "build" writes a fixture artifact), the booted app (an in-memory data
+ * door), and the model (a replay driver whose operation turns also apply the
+ * write they describe to the in-memory door, as the MCP door would).
+ *
+ * What it pins is the card's acceptance: one record per card with both modes
+ * side by side, and a degraded build and a leaking answer each SHOWING UP in
+ * the scorecard. And the names: every project is in the card's own namespace
+ * (`democrm`), and a build naming any non-object item without that prefix
+ * fails its Build half.
+ */
+
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { describe, expect, it } from 'vitest';
+
+import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
+import { truthFigures } from '../../src/score/index.js';
+import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
+import { RecordedDriver, RecordingDriver, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo } from '../../src/runner/driver.js';
+import { namespacedScenario } from '../../src/runner/namespace.js';
+import { runCard, seedApp, type ProjectOps } from '../../src/runner/orchestrate.js';
+import { cardScorecard, renderScorecard, runRecord } from '../../src/runner/scorecard.js';
+import type { PackageSource } from '../../src/runner/packages.js';
+import type { ParsedTurn } from '../../src/runner/transcript.js';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PUBLISHED: PackageSource = { source: 'published', versions: ['18.3.0'] };
+const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/crm_account_with_contacts.json');
+const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+
+function load(file = CARD_FILE): LoadedScenario {
+  const { card, refusals } = loadScenarioFile(file, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
+  return card;
+}
+
+// ── The built artifact the fake `objectstack build` writes ──────────────────
+
+const select = (values: string[]) => ({ type: 'select', options: values.map((value) => ({ value, label: value })) });
+
+const NS = 'democrm';
+
+function artifact(opts: { degraded?: boolean; iterated?: boolean; ns?: string; bareItems?: boolean } = {}) {
+  const ns = opts.ns ?? NS;
+  const n = (name: string) => `${ns}_${name}`;
+  const objects: unknown[] = [
+    { name: n('account'), fields: { name: { type: 'text' }, industry: select(['tech', 'retail']), owner: { type: 'text' } } },
+  ];
+  if (!opts.degraded) {
+    const action = (name: string, confirm = false) => ({ name, ai: { exposed: true, ...(confirm ? { requiresConfirmation: true } : {}) } });
+    objects.push({
+      name: n('contact'),
+      fields: { full_name: { type: 'text' }, email: { type: 'email' }, account: { type: 'lookup', reference: n('account') } },
+      actions: [action(n('create_contact')), action(n('reassign_contact')), action(n('delete_contact'), true)],
+    });
+  }
+  if (opts.iterated) {
+    objects.push({ name: n('opportunity'), fields: { stage: select(['a', 'b', 'c', 'd']), account: { type: 'lookup', reference: n('account') } } });
+  }
+  return {
+    manifest: { id: `com.example.${ns}`, namespace: ns },
+    objects,
+    permissions: [
+      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      { name: n('partner_user'), objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
+    ],
+    // A build that names a view and a dashboard bare: the objects are prefixed (defineStack insists), these are not.
+    ...(opts.bareItems ? { views: [{ name: 'all_accounts', object: n('account') }], dashboards: [{ name: 'overview', widgets: [] }] } : {}),
+  };
+}
+
+// ── The fake project lifecycle ──────────────────────────────────────────────
+
+interface FakeProject {
+  phase: 'scaffolded' | 'built' | 'iterated';
+}
+
+function fakeOps(app: () => FakeApp, opts: { degradedBuild?: boolean; bareItems?: boolean; declares?: string } = {}): ProjectOps & { projects: Map<string, FakeProject>; scaffolded: string[] } {
+  const projects = new Map<string, FakeProject>();
+  const scaffolded: string[] = [];
+  const ok = (command: string) => ({ command, exit: 0, tail: '', ms: 1 });
+  return {
+    projects,
+    scaffolded,
+    async scaffold(name, under) {
+      const dir = `${under}/${name}`;
+      scaffolded.push(dir);
+      projects.set(dir, { phase: 'scaffolded' });
+      return { dir, result: ok(`create-objectstack ${name}`) };
+    },
+    async os(dir, args) {
+      const degraded = opts.degradedBuild && projects.get(dir)!.phase === 'built';
+      return { command: `npx objectstack ${args.join(' ')}`, exit: degraded && args[0] === 'validate' ? 1 : 0, tail: '', ms: 1 };
+    },
+    readArtifact(dir) {
+      const p = projects.get(dir)!;
+      if (p.phase === 'scaffolded') return undefined;
+      return artifact({ degraded: opts.degradedBuild && p.phase === 'built', iterated: p.phase === 'iterated', ...(opts.bareItems ? { bareItems: true } : {}) });
+    },
+    async boot() {
+      return { url: 'http://fake', stop: async () => {}, log: () => '' };
+    },
+    harness: () => app(),
+    // As create-objectstack does: the namespace is the project name, unless a test says otherwise.
+    namespace: (dir) => opts.declares ?? dir.slice(dir.lastIndexOf('/') + 1),
+  };
+}
+
+// ── The fake booted app ─────────────────────────────────────────────────────
+
+class FakeApp implements AppHarness {
+  readonly baseUrl = 'http://fake';
+  readonly mcpUrl = 'http://fake/api/v1/mcp';
+  rows: Record<string, Array<Record<string, unknown>>> = {};
+  audit: Record<string, string> = {};
+  installed: Record<string, unknown> | undefined;
+  installAnswer: HttpAnswer = { ok: true, status: 200, body: {} };
+  grants: string[] = [];
+  /** What a fresh environment already serves without any prefix (measured: `setup`, `admin_full_access`, …). */
+  platform: Record<string, unknown[]> = { apps: [{ name: 'setup' }], permissions: [{ name: 'admin_full_access', objects: {} }] };
+  async signInAdmin() {}
+  adminUserId() {
+    return 'u-admin';
+  }
+  organizationId() {
+    return 'org';
+  }
+  async createPersona(persona: string, permissionSet: string): Promise<PersonaAccount> {
+    this.grants.push(permissionSet);
+    return { persona, userId: `u-${persona}`, email: `${persona}@scenario.test`, apiKey: `key-${persona}`, permissionSet: { name: permissionSet, assigned: true } };
+  }
+  async adminApiKey() {
+    return 'key-admin';
+  }
+  async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    (this.rows[object] ??= []).push({ ...row });
+    return { ok: true, status: 200, body: {} };
+  }
+  async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+    const row = (this.rows[object] ?? []).find((r) => r.id === id);
+    if (!row) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: `no ${object} ${id}` };
+    Object.assign(row, patch);
+    return { ok: true, status: 200, body: {} };
+  }
+  async listRows(object: string) {
+    return { ok: true, status: 200, body: {}, rows: (this.rows[object] ?? []).map((r) => ({ ...r })) };
+  }
+  async auditActorUserId(_object: string, recordId: string) {
+    return this.audit[recordId] ?? null;
+  }
+  async installUnmanaged(manifest: Record<string, unknown>) {
+    this.installed = manifest;
+    return this.installAnswer;
+  }
+  async metadataAsArtifact(collections: readonly string[]) {
+    const src = (this.installed ?? {}) as Record<string, unknown[]>;
+    const out: Record<string, unknown[]> = {};
+    for (const c of collections) out[c] = [...(this.platform[c] ?? []), ...(src[c] ?? [])];
+    return out;
+  }
+  /** Every MCP call the runner made itself (the probes), with the key it sent. */
+  toolCalls: Array<{ apiKey: string; tool: string; args: Record<string, unknown> }> = [];
+  /** A broken app: its write door stores the invalid write instead of refusing it. */
+  storesInvalidWrites = false;
+  async callTool(apiKey: string, tool: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+    this.toolCalls.push({ apiKey, tool, args });
+    // A faithful app: the partner may not edit an account (the card's overstep), and the bad email fails validation.
+    if (args.objectName === 'democrm_account') return { output: JSON.stringify({ error: { code: 'PERMISSION_DENIED', status: 403 } }, null, 2), isError: true };
+    if (!this.storesInvalidWrites) return { output: JSON.stringify({ error: { code: 'VALIDATION_FAILED', status: 400 } }, null, 2), isError: true };
+    const { objectName, recordId, data } = args as { objectName: string; recordId?: string; data: Record<string, unknown> };
+    const rows = (this.rows[objectName] ??= []);
+    if (recordId !== undefined) Object.assign(rows.find((r) => r.id === recordId)!, data);
+    else rows.push({ id: `probe-${rows.length}`, ...data });
+    return { output: JSON.stringify({ id: recordId ?? `probe-${rows.length - 1}` }), isError: false };
+  }
+}
+
+// ── The scripted model ──────────────────────────────────────────────────────
+
+const turn = (replyText: string, toolCalls: ParsedTurn['toolCalls'] = []): ParsedTurn => ({ replyText, toolCalls, meta: { resultSubtype: 'success' } });
+
+/** A truthful answer, built from the loader's computed truth — so the test grades the runner, not the fixture. */
+function truthfulAnswer(scenario: LoadedScenario, question: string, persona?: string): string {
+  const q = scenario.card.run.questions.find((x) => x.id === question)!;
+  const truth = persona ? scenario.personaTruths[q.id]![persona]! : scenario.truths[q.id]!;
+  if (truth.kind === 'withheld' || truth.kind === 'unanswerable') return 'I cannot answer that: it is not available to you.';
+  const figures = truthFigures(truth, q.object, 'x').map((f) => `${f.label.replace(/^x\[?|\]$/g, '') || 'total'}: ${f.value}`);
+  return `${figures.join(', ')}\nSource: ${q.object}`;
+}
+
+class ScriptedDriver implements AgentDriver {
+  readonly seen: string[] = [];
+  /** The tier each authoring task carried, by step key: what sizes the live driver's turn cap. */
+  readonly tiers: Record<string, string> = {};
+  private readonly scenario: LoadedScenario;
+  constructor(
+    scenario: LoadedScenario,
+    private readonly ops: ReturnType<typeof fakeOps>,
+    private readonly app: () => FakeApp,
+    private readonly leak: { question: string; persona: string } | undefined,
+    /** The agent catches a validation operation's bad value itself and writes nothing (#30883 item 2). */
+    private readonly preValidates = false,
+    /** What an authoring turn answers instead of finishing, per `mode/phase` (`scratch/build`): a turn, or a throw. */
+    private readonly authorAs: Readonly<Record<string, ParsedTurn | Error>> = {},
+  ) {
+    this.scenario = namespacedScenario(scenario);
+  }
+  info(): DriverInfo {
+    return { driver: 'recorded', version: 'scripted test replay', apiBilled: false };
+  }
+  async author(task: AuthorTask) {
+    this.seen.push(stepKey(task));
+    this.tiers[stepKey(task)] = task.tier;
+    const instead = this.authorAs[`${task.mode}/${task.phase}`];
+    if (instead instanceof Error) throw instead;
+    if (instead) return { turn: instead };
+    if (task.mode === 'scratch') this.ops.projects.get(task.cwd)!.phase = task.phase === 'build' ? 'built' : 'iterated';
+    if (task.mode === 'template') {
+      const app = this.app();
+      const objects = (app.installed!.objects as unknown[]) ?? [];
+      app.installed = { ...app.installed!, objects: [...objects, ...artifact({ iterated: true }).objects.slice(2)] };
+    }
+    return { turn: turn('Done.') };
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    this.seen.push(stepKey(task));
+    const app = this.app();
+    if (this.leak && task.step === this.leak.question && task.persona === this.leak.persona) {
+      // The agent read the hidden column and repeated it.
+      return turn(`${truthfulAnswer(this.scenario, task.step, task.persona)}\nana@acme.test`, [
+        { name: 'query_records', rawName: 'mcp__app__query_records', input: { objectName: 'contact', fields: ['email'] }, output: '{"records":[{"email":"ana@acme.test"}]}' },
+      ]);
+    }
+    const op = this.scenario.card.run.operations.find((o) => o.id === task.step);
+    if (!op) return turn(truthfulAnswer(this.scenario, task.step, task.persona));
+    // An operation: behave as the card says a good agent behaves, applying the write to the fake door.
+    const rows = (app.rows[op.object] ??= []);
+    if (op.outcome.kind === 'applied') {
+      if (op.kind === 'create') rows.push({ id: `new-${op.id}`, ...op.values });
+      if (op.kind === 'update') Object.assign(rows.find((r) => r.id === op.target)!, op.values);
+      app.audit[op.target ?? `new-${op.id}`] = `u-${op.actingAs}`;
+      return turn('Done.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: '{"ok":true}' }]);
+    }
+    if (this.preValidates && op.outcome.kind === 'refused' && op.outcome.code === 'VALIDATION_FAILED') {
+      return turn(`"${String(op.values?.email)}" is not a valid email address, so I have not saved the contact. Could you give me the full address?`);
+    }
+    if (op.outcome.kind === 'refused') {
+      return turn('That was refused.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: JSON.stringify({ error: { code: op.outcome.code } }), isError: true }]);
+    }
+    return turn('This cannot be undone — do you want me to delete it? Please confirm.');
+  }
+}
+
+function setup<A extends FakeApp = FakeApp>(
+  opts: {
+    degradedBuild?: boolean;
+    leak?: { question: string; persona: string };
+    bareItems?: boolean;
+    declares?: string;
+    app?: () => A;
+    preValidates?: boolean;
+    authorAs?: Record<string, ParsedTurn | Error>;
+  } = {},
+) {
+  const scenario = load();
+  const fresh = opts.app ?? (() => new FakeApp() as A);
+  let current = fresh();
+  const apps: A[] = [];
+  const getApp = () => current;
+  const ops = fakeOps(getApp, opts);
+  const boot = ops.boot.bind(ops);
+  ops.boot = async (dir) => {
+    current = fresh();
+    apps.push(current);
+    return boot(dir);
+  };
+  const driver = new ScriptedDriver(scenario, ops, getApp, opts.leak, opts.preValidates, opts.authorAs);
+  return { scenario, ops, driver, apps };
+}
+
+const ADMIN = { email: 'admin@objectos.ai', password: 'admin123' };
+
+describe('runCard — the crm card, both modes, a clean agent', () => {
+  it('scores every half, both modes side by side, with real question and operation counts', async () => {
+    const { scenario, ops, driver } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN });
+    const sc = cardScorecard(run);
+
+    expect(run.counts).toEqual({ questions: 8, questionTurns: 9, operations: 5, personas: 2 });
+    const [scratch, template] = sc.modes;
+    expect(scratch!.first.build).toMatchObject({ degraded: false, failedCommands: [] });
+    expect(scratch!.first.build!.passed).toBe(scratch!.first.build!.total);
+    expect(scratch!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(scratch!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
+    expect(scratch!.iterate!.build!.degraded).toBe(false);
+    expect(scratch!.iterate!.changeSize).toBe(1); // the opportunity object
+    expect(scratch!.iterate!.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+
+    expect(template!.skipped).toBeUndefined();
+    expect(run.modes[1]!.template).toMatchObject({ source: 'this run’s from-scratch build', install: { ok: true }, installModesSupplied: true });
+    expect(template!.iterate!.changeSize).toBe(1);
+    expect(template!.iterate!.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(template!.iterate!.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
+
+    // Every step went through the driver under its own replay key.
+    expect(driver.seen).toContain('crm_account_with_contacts/scratch/run/account_count/sdr');
+    expect(driver.seen).toContain('crm_account_with_contacts/template/iterate-run/remove_ben/sdr');
+    expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/account_count/-'); // persona-scoped: asked as its personas
+
+    const record = runRecord({ run: 'r', date: '2026-11-05', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const results = record.results as Array<{ id: string; verdict: string }>;
+    expect(results.find((r) => r.id === 'crm_account_with_contacts.scratch.run-operations')!.verdict).toBe('pass');
+    expect(results.find((r) => r.id === 'crm_account_with_contacts.template.build')!.verdict).toBe('not-run'); // template mode builds nothing first
+    expect(renderScorecard(sc)).toContain('| Run-问数 | 9/9 | — |');
+    expect(renderScorecard(sc)).toContain('| Seed | 8/8 | — |'); // every row loaded: no warning
+  });
+
+  it('seeds ownership from the persona handles: Acme and Bitworks are owned by the sdr user, Shopwell by the admin', async () => {
+    const { scenario, ops, driver, apps } = setup();
+    await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const accounts = apps[0]!.rows.democrm_account!;
+    expect(accounts.filter((r) => r.owner_id === 'u-sdr').map((r) => r.id)).toEqual(['ac1', 'ac3']);
+    expect(accounts.find((r) => r.id === 'ac2')!.owner_id).toBe('u-admin');
+  });
+});
+
+/**
+ * The data door of a faithful build: `account.owner` is a user lookup and
+ * `contact.account` a lookup to account, and the door refuses a value naming
+ * no such record, as the first live run's app did (`VALIDATION_FAILED ·
+ * Account Owner: no sys_user record has id "u_sam"`). Built from the card in
+ * the repo, not from that run's recording, which this container does not hold.
+ */
+class UserLookupApp extends FakeApp {
+  readonly users = new Set(['u-admin']);
+  override async createPersona(persona: string, permissionSet: string): Promise<PersonaAccount> {
+    const acct = await super.createPersona(persona, permissionSet);
+    this.users.add(acct.userId);
+    return acct;
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    const refuse = (message: string): HttpAnswer => ({ ok: false, status: 400, body: { error: message, code: 'VALIDATION_FAILED' }, code: 'VALIDATION_FAILED', message });
+    for (const userField of ['owner', 'owner_id']) {
+      const v = row[userField];
+      if (object === 'democrm_account' && v !== undefined && !this.users.has(String(v))) return refuse(`Account Owner: no sys_user record has id "${String(v)}"`);
+    }
+    if (object === 'democrm_contact' && row.account !== null && !(this.rows.democrm_account ?? []).some((a) => a.id === row.account)) {
+      return refuse(`Account: no democrm_account record has id "${String(row.account)}"`);
+    }
+    return super.insertRow(object, row);
+  }
+}
+
+describe('runCard — the seed against a build whose owner field is a user lookup', () => {
+  it('the double refuses the handle the old seed sent, so it can fail', async () => {
+    const app = new UserLookupApp();
+    expect(await app.insertRow('democrm_account', { id: 'ac1', name: 'Acme', industry: 'tech', owner: 'u_sam', owner_id: 'u-admin' })).toMatchObject({ ok: false, code: 'VALIDATION_FAILED' });
+    expect(await app.insertRow('democrm_contact', { id: 'ct1', account: 'ac1' })).toMatchObject({ ok: false, code: 'VALIDATION_FAILED' });
+  });
+
+  it('loads all 8 rows: the owner field carries the persona user id, and a handle no persona holds is the admin', async () => {
+    const { scenario, ops, driver, apps } = setup({ app: () => new UserLookupApp() });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const seed = run.modes[0]!.run!.seed;
+    expect(seed).toEqual({ inserted: 8, refused: [], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] }); // the record lists the field it rewrote
+    const owners = Object.fromEntries(apps[0]!.rows.democrm_account!.map((r) => [r.id, [r.owner, r.owner_id]]));
+    expect(owners).toEqual({ ac1: ['u-sdr', 'u-sdr'], ac2: ['u-admin', 'u-admin'], ac3: ['u-sdr', 'u-sdr'] });
+    expect(apps[0]!.rows.democrm_contact!.map((r) => r.id)).toEqual(['ct1', 'ct2', 'ct3', 'ct4', 'ct5', 'new-add_contact']); // the five seeded, then the sdr's add
+    expect(apps[0]!.rows.democrm_contact!.find((r) => r.id === 'ct1')!.owner_id).toBeUndefined(); // a path scope (`account.owner`) owns nothing
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 }); // every write found its seeded target
+  });
+});
+
+describe('runCard — the card’s own namespace, demo + code', () => {
+  it('scaffolds the project as democrm and reads the card relative to it; the template host is hostcrm', async () => {
+    const { scenario, ops, driver, apps } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
+    const sc = cardScorecard(run);
+    expect(ops.scaffolded).toEqual(['crm-account-with-contacts-scratch/democrm', 'crm-account-with-contacts-template/hostcrm']);
+    expect(Object.keys(apps[0]!.rows).sort()).toEqual(['democrm_account', 'democrm_contact']);
+    expect(apps[0]!.grants).toEqual(['democrm_sdr', 'democrm_partner_user']);
+    expect(run.modes[0]!.run!.personas.map((p) => p.permissionSet.name)).toEqual(['democrm_sdr', 'democrm_partner_user']);
+    expect(sc.modes[0]!.first.build!.degraded).toBe(false);
+    expect(run.modes[0]!.build!.score!.naming).toEqual([]);
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
+    // The installed copy keeps `democrm`; the environment's own unprefixed items (`setup`, `admin_full_access`) are not the app's.
+    expect(apps[1]!.installed!.namespace).toBe('democrm');
+    expect(sc.modes[1]!.iterate!.build!.degraded).toBe(false);
+    expect(run.modes[1]!.iterate!.build.score!.naming).toEqual([]);
+  });
+
+  it('a project whose scaffold declares another namespace is skipped, never read against it', async () => {
+    const { scenario, ops, driver } = setup({ declares: 'crm_account_w' });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    expect(run.modes[0]!.skipped).toMatch(/declares namespace `crm_account_w`, not the card's `democrm`/);
+    expect(driver.seen).toEqual([]);
+  });
+
+  it('a supplied template declaring another namespace is skipped, never installed', async () => {
+    const { scenario, ops, driver } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['template'], admin: ADMIN, templateArtifact: artifact({ ns: 'crm' }) });
+    expect(run.modes[0]!.skipped).toMatch(/template declares namespace `crm`, not the card's `democrm`/);
+    expect(ops.scaffolded).toEqual([]);
+  });
+
+  it('a build naming a view bare fails its Build half, and is never verified; its bare dashboard is no finding (ADR-0150)', async () => {
+    const { scenario, ops, driver } = setup({ bareItems: true });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
+    const sc = cardScorecard(run);
+    expect(run.modes[0]!.build!.score!.expect.checks.every((c) => c.pass)).toBe(true); // every expected name is there…
+    expect(run.modes[0]!.build!.score!.naming.map((c) => c.check)).toEqual(['bare-name:view:all_accounts']);
+    expect(sc.modes[0]!.first.build!.degraded).toBe(true); // …and the build still fails
+    expect(sc.modes[1]!.skipped).toMatch(/no verified build/);
+    expect(sc.modes[0]!.findings).toEqual([
+      expect.stringMatching(/^build: bare item name view all_accounts \(.*`democrm_<short>`/),
+      expect.stringMatching(/^iterate build: bare item name view all_accounts /),
+    ]);
+    expect(renderScorecard(sc)).toContain('- scratch finding: build: bare item name view all_accounts');
+  });
+});
+
+describe('runCard — the acceptance: a degraded build and a leaking answer each show up', () => {
+  it('a degraded build (validate fails, an expected object missing) is flagged, and template mode is skipped for want of a verified build', async () => {
+    const { scenario, ops, driver } = setup({ degradedBuild: true });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
+    const sc = cardScorecard(run);
+    const build = sc.modes[0]!.first.build!;
+    expect(build.degraded).toBe(true);
+    expect(build.failedCommands).toEqual(['validate']);
+    expect(build.passed).toBeLessThan(build.total);
+    expect(sc.modes[1]!.skipped).toMatch(/no verified build/);
+    expect(renderScorecard(sc)).toMatch(/\| Build \| \d+\/\d+ ⚠ degraded \(failed: validate\)/);
+  });
+
+  it('an answer that reads and repeats a hidden field is counted as leaking even though its figures are right', async () => {
+    const { scenario, ops, driver } = setup({ leak: { question: 'contacts_per_account', persona: 'sdr' } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 8, total: 9, leaks: 1, notMeasured: 0 });
+    const q = run.modes[0]!.run!.questions.find((x) => x.question === 'contacts_per_account' && x.persona === 'sdr')!;
+    expect(q.grade!.correct).toBe(true);
+    expect(q.grade!.leaks.length).toBeGreaterThan(0);
+    expect(renderScorecard(sc)).toContain('8/9 ⚠ 1 leaking');
+  });
+
+  it('an unmanaged install the door refuses is a finding, never worked around', async () => {
+    const { scenario, ops, driver } = setup();
+    const harness = ops.harness;
+    ops.harness = (url) => {
+      const app = harness(url) as FakeApp;
+      app.installAnswer = { ok: false, status: 422, body: {}, code: 'UNCOPYABLE', message: 'code has no metadata form' };
+      return app;
+    };
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
+    const template = run.modes[1]!;
+    expect(template.template!.install).toMatchObject({ ok: false, code: 'UNCOPYABLE' });
+    expect(template.findings[0]).toMatch(/unmanaged install refused: 422 UNCOPYABLE/);
+    expect(template.iterate).toBeUndefined();
+  });
+});
+
+describe('runCard — the validation operation is probed by the runner itself (#30883 item 2, ruled B)', () => {
+  const badEmail = (run: Awaited<ReturnType<typeof runCard>>) => run.modes[0]!.run!.operations.find((o) => o.operation === 'contact_bad_email')!;
+  const failing = (o: { grade?: { checks: Array<{ check: string; pass: boolean }> } }) => o.grade!.checks.filter((c) => !c.pass).map((c) => c.check);
+
+  it('sends the declared write once, after the turn, as the acting persona through its MCP door; a validating app passes it', async () => {
+    const { scenario, ops, driver, apps } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(apps[0]!.toolCalls).toEqual([
+      { apiKey: 'key-partner_user', tool: 'create_record', args: { objectName: 'democrm_contact', data: { full_name: 'Gil Ray', email: 'gil at acme' } } },
+      // The card's permission overstep is probed the same way (#31145 item 4).
+      { apiKey: 'key-partner_user', tool: 'update_record', args: { objectName: 'democrm_account', recordId: 'ac1', data: { industry: 'retail' } } },
+    ]);
+    const op = badEmail(run);
+    expect(op.observation!.probe).toEqual({ answer: { kind: 'refused', code: 'VALIDATION_FAILED', status: 400 }, writes: 0 });
+    expect([op.grade!.pass, op.error]).toEqual([true, undefined]);
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
+  });
+
+  it('an agent that catches the bad value and asks for a correction passes; an app that stores the probe fails on the platform half alone', async () => {
+    const good = setup({ preValidates: true });
+    const op = badEmail(await runCard(good.scenario, good.driver, good.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }));
+    expect([op.observation!.answer, op.observation!.writes, op.observation!.withheld, op.grade!.pass]).toEqual([{ kind: 'refused', code: '(no write attempted)' }, 0, true, true]);
+
+    const broken = setup({ preValidates: true, app: () => Object.assign(new FakeApp(), { storesInvalidWrites: true }) });
+    const run = await runCard(broken.scenario, broken.driver, broken.ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    expect(failing(badEmail(run))).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    expect(broken.apps[0]!.rows.democrm_contact!.filter((r) => r.email === 'gil at acme')).toHaveLength(1); // the probe's own row
+    expect(cardScorecard(run).modes[0]!.first.operations).toEqual({ passed: 4, total: 5, notMeasured: 0 });
+  });
+
+  it('a probe the door never answered leaves the platform half not observed, and the operation says why', async () => {
+    class DownApp extends FakeApp {
+      override async callTool(): Promise<ToolAnswer> {
+        throw new Error('tools/call create_record: 502');
+      }
+    }
+    const { scenario, ops, driver } = setup({ app: () => new DownApp() });
+    const op = badEmail(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }));
+    expect(op.error).toBe('probe: tools/call create_record: 502');
+    expect(failing(op)).toEqual(['platform:refused:VALIDATION_FAILED', 'platform:no-write']);
+    expect(op.grade!.checks.find((c) => c.check === 'platform:no-write')).toEqual({ check: 'platform:no-write', pass: false, detail: 'not observed' });
+  });
+});
+
+/** A data door that refuses the seed rows it is told to, as a build whose validation rejects them would. */
+class RefusingApp extends FakeApp {
+  constructor(private readonly refuse: ReadonlySet<string>) {
+    super();
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    if (this.refuse.has(`${object}/${String(row.id)}`)) {
+      return { ok: false, status: 400, body: {}, code: 'VALIDATION_FAILED', message: `${object} ${String(row.id)} refused` };
+    }
+    return super.insertRow(object, row);
+  }
+}
+
+class ThrowingApp extends RefusingApp {
+  constructor(private readonly throwAt: string) {
+    super(new Set(['democrm_account/ac2']));
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    if (`${object}/${String(row.id)}` === this.throwAt) throw new Error('connection reset while seeding');
+    return super.insertRow(object, row);
+  }
+}
+
+describe('runCard — a seed insert that throws keeps the partial tally in the record', () => {
+  it('ac1 and ac3 inserted, ac2 refused, then ct1 throws: the half records exactly that next to its error', async () => {
+    const { scenario, ops, driver } = setup({ app: () => new ThrowingApp('democrm_contact/ct1') });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const half = run.modes[0]!.run!;
+    expect(half.error).toContain('connection reset while seeding');
+    expect(half.seed).toEqual({ inserted: 2, refused: [{ object: 'democrm_account', id: 'ac2', code: 'VALIDATION_FAILED', message: 'democrm_account ac2 refused' }], handlesAsAdmin: ['u_tia'], rewritten: ['democrm_account.owner'] });
+    expect(half.questions).toEqual([]);
+    expect(cardScorecard(run).modes[0]!.first.seed).toEqual({ inserted: 2, total: 3, refused: 1 }); // total counts the rows the tally reached
+  });
+});
+
+describe('runCard — a refused seed row makes what reads it not measured, never a fail', () => {
+  it('shows ⚠ seed: 1 refused, leaves only the turns whose answer ct4 feeds unasked and unscored, and grades the rest as usual', async () => {
+    const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_contact/ct4'])) });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const half = run.modes[0]!.run!;
+    expect(half.seed).toMatchObject({ inserted: 7, refused: [{ object: 'democrm_contact', id: 'ct4', code: 'VALIDATION_FAILED' }] });
+
+    // Only the turns whose expected answer ct4 (the one unattached contact) feeds are out; the other contact
+    // questions, `contacts_per_account` as `sdr` among them (its scope never reads ct4), are asked and graded.
+    const out = half.questions.filter((q) => q.notMeasured).map((q) => `${q.question}/${q.persona ?? '-'}`);
+    expect(out).toEqual(['unattached_contacts/-', 'contacts_by_industry/-']);
+    expect(half.questions.find((q) => q.notMeasured)!.notMeasured).toBe('seed: its expected answer changes without democrm_contact ct4, which the app refused');
+    expect(half.questions.filter((q) => q.notMeasured).every((q) => q.grade === undefined && q.turn === undefined)).toBe(true);
+    expect(driver.seen).not.toContain('crm_account_with_contacts/scratch/run/unattached_contacts/-');
+    expect(driver.seen).toContain('crm_account_with_contacts/scratch/run/contacts_per_account/sdr');
+    expect(half.operations.filter((o) => o.notMeasured)).toEqual([]); // no operation names ct4
+
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.seed).toEqual({ inserted: 7, total: 8, refused: 1 });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 7, total: 7, leaks: 0, notMeasured: 2 });
+    expect(sc.modes[0]!.first.operations).toEqual({ passed: 5, total: 5, notMeasured: 0 });
+    const table = renderScorecard(sc);
+    expect(table).toContain('| Seed | 7/8 ⚠ seed: 1 refused |');
+    expect(table).toContain('| Run-问数 | 7/7 · 2 not measured |');
+    const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const ask = (record.results as Array<{ id: string; verdict: string; notes: string }>).find((r) => r.id === 'crm_account_with_contacts.scratch.run-ask')!;
+    expect(ask).toMatchObject({ verdict: 'pass', notes: '7/7 · 2 not measured' });
+  });
+
+  it('an operation whose target hangs off a refused row is not run; a turn no refused row feeds is still asked; a half with nothing measured is not-run, not fail', async () => {
+    const { scenario, ops, driver } = setup({ app: () => new RefusingApp(new Set(['democrm_account/ac1', 'democrm_account/ac2', 'democrm_account/ac3'])) });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false });
+    const half = run.modes[0]!.run!;
+    expect(half.seed.inserted).toBe(5); // the double does not cascade; the runner still takes the contacts out
+    expect(half.operations.filter((o) => !o.notMeasured).map((o) => o.operation)).toEqual(['contact_bad_email']);
+    // Only the turns no account feeds stay measured: ct4 (unattached) is still the one unattached contact, an
+    // unanswerable question stays unanswerable, and a persona that may not read accounts still declines.
+    expect(half.questions.filter((q) => !q.notMeasured).map((q) => `${q.question}/${q.persona ?? '-'}`)).toEqual(['unattached_contacts/-', 'account_count/partner_user', 'acme_revenue/-']);
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 3, total: 3, leaks: 0, notMeasured: 6 });
+    expect(renderScorecard(sc)).toContain('| Seed | 5/8 ⚠ seed: 3 refused |');
+    const record = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+    const verdict = (r: typeof record, id: string) => (r.results as Array<{ id: string; verdict: string }>).find((x) => x.id === id)!.verdict;
+    expect(verdict(record, 'crm_account_with_contacts.scratch.run-ask')).toBe('pass');
+    expect(verdict(record, 'crm_account_with_contacts.scratch.run-operations')).toBe('pass');
+    // The same half with every turn not measured is not-run, never fail.
+    const none = structuredClone(run);
+    none.modes[0]!.run!.questions = half.questions.map((q) => ({ question: q.question, persona: q.persona, notMeasured: 'seed: its expected answer changes without democrm_account ac1, which the app refused' }));
+    expect(cardScorecard(none).modes[0]!.first.ask).toEqual({ passed: 0, total: 0, leaks: 0, notMeasured: 9 });
+    const noneRecord = runRecord({ run: 'r', date: '2026-11-06', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, none);
+    expect(verdict(noneRecord, 'crm_account_with_contacts.scratch.run-ask')).toBe('not-run');
+  });
+});
+
+// ── An authoring turn that does not finish ──────────────────────────────────
+
+/** A build author turn the runner's own timeout killed, as the live driver records one. */
+const KILLED: ParsedTurn = {
+  replyText: '',
+  toolCalls: [],
+  meta: { resultSubtype: 'no-result(exit 143)', process: { elapsedMs: 3_600_000, exit: 143, timedOut: true, timeoutMs: 3_600_000, stderrTail: 'terminated' } },
+};
+const CRASHED: ParsedTurn = {
+  replyText: '',
+  toolCalls: [],
+  meta: { resultSubtype: 'no-result(exit 1)', process: { elapsedMs: 900, exit: 1, timedOut: false, timeoutMs: 3_600_000, stderrTail: 'Error: could not start a session' } },
+};
+/** A build author turn that reached its turn cap: the CLI's own `error_max_turns` result line, the cap on its process. */
+const OUT_OF_TURNS: ParsedTurn = {
+  replyText: '',
+  toolCalls: [],
+  meta: { resultSubtype: 'error_max_turns', numTurns: 80, process: { elapsedMs: 1_414_000, exit: 1, timedOut: false, timeoutMs: 3_600_000, maxTurns: 80 } },
+};
+
+describe('runCard — an authoring turn that does not finish leaves its build not measured, never a degraded score', () => {
+  const results = (run: Awaited<ReturnType<typeof runCard>>, driver: ScriptedDriver) =>
+    Object.fromEntries(
+      (runRecord({ run: 'r', date: '2026-11-07', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run).results as Array<{ id: string; verdict: string; notes: string }>).map((r) => [
+        r.id.replace('crm_account_with_contacts.', ''),
+        `${r.verdict} · ${r.notes}`,
+      ]),
+    );
+
+  it('a build author turn the timeout killed: no command, score, seed, Run or iterate runs on it, and the scorecard says why', async () => {
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/build': KILLED } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+    expect(scratch.build).toEqual({
+      commands: [],
+      score: null,
+      notMeasured: 'author timed out after 60 min',
+      author: { resultSubtype: 'no-result(exit 143)', toolCalls: 0, elapsedMs: 3_600_000, exit: 143, timedOut: true, stderrTail: 'terminated' },
+    });
+    expect([scratch.run, scratch.iterate]).toEqual([undefined, undefined]);
+    expect(driver.seen).toEqual(['crm_account_with_contacts/scratch/build/author/-']);
+
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.build).toMatchObject({ passed: 0, total: 0, degraded: false, notMeasuredReason: 'author timed out after 60 min' });
+    expect(sc.modes[1]!.skipped).toMatch(/no verified build/);
+    const table = renderScorecard(sc);
+    expect(table).toContain('| Build | not measured: author timed out after 60 min | skipped |');
+    expect(table).toContain('| Build · author | no-result(exit 143) · 60m 00s | skipped |');
+    expect(results(run, driver)).toMatchObject({
+      'scratch.build': 'not-run · not measured: author timed out after 60 min',
+      'scratch.run-ask': 'not-run · not run: the build was not measured (author timed out after 60 min)',
+      'scratch.iterate-build': 'not-run · not run: the build was not measured (author timed out after 60 min)',
+      'scratch.iterate-run-operations': 'not-run · not run: the build was not measured (author timed out after 60 min)',
+    });
+  });
+
+  it('a build author turn that failed, answered a usage limit, or never ran: not measured, with its exit, stderr tail or error, and no iterate turn', async () => {
+    const failed = setup({ authorAs: { 'scratch/build': CRASHED } });
+    const f = (await runCard(failed.scenario, failed.driver, failed.ops, { modes: ['scratch'], admin: ADMIN })).modes[0]!;
+    expect(f.build).toMatchObject({ notMeasured: 'author turn failed: no-result(exit 1)', author: { exit: 1, stderrTail: 'Error: could not start a session', elapsedMs: 900 } });
+    expect(f.build!.author!.timedOut).toBeUndefined();
+    expect([f.run, f.iterate, failed.driver.seen]).toEqual([undefined, undefined, ['crm_account_with_contacts/scratch/build/author/-']]);
+
+    const limited = setup({ authorAs: { 'scratch/build': { replyText: 'usage limit reached', toolCalls: [], meta: { resultSubtype: 'success', isError: true } } } });
+    const l = (await runCard(limited.scenario, limited.driver, limited.ops, { modes: ['scratch'], admin: ADMIN })).modes[0]!;
+    expect([l.build!.notMeasured, l.build!.author!.isError, l.iterate]).toEqual(['author turn failed: success (is_error)', true, undefined]);
+
+    const thrown = setup({ authorAs: { 'scratch/build': new Error('no recorded turn for `x`') } });
+    const tRun = await runCard(thrown.scenario, thrown.driver, thrown.ops, { modes: ['scratch'], admin: ADMIN });
+    expect(tRun.modes[0]!.build).toEqual({ commands: [], score: null, error: 'author: no recorded turn for `x`', notMeasured: 'author turn failed: no recorded turn for `x`' });
+    expect(renderScorecard(cardScorecard(tRun))).toContain('| Build · author | — |');
+  });
+
+  it('an iterate author turn the timeout killed: the first halves stand, the iterate build is not measured, and its Run half is not run', async () => {
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/iterate': KILLED } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.build).toMatchObject({ degraded: false, failedCommands: [] });
+    expect(sc.modes[0]!.first.ask).toEqual({ passed: 9, total: 9, leaks: 0, notMeasured: 0 });
+    expect(run.modes[0]!.iterate).toEqual({ build: expect.objectContaining({ notMeasured: 'author timed out after 60 min', commands: [] }) });
+    expect(driver.seen.filter((k) => k.includes('/iterate-run/'))).toEqual([]);
+    expect(renderScorecard(sc)).toContain('| Iterate · Build | not measured: author timed out after 60 min |');
+    expect(results(run, driver)).toMatchObject({
+      'scratch.run-ask': 'pass · 9/9',
+      'scratch.iterate-run-ask': 'not-run · not run: the iterate build was not measured (author timed out after 60 min)',
+    });
+  });
+
+  it('template mode: an iterate author turn that failed is not measured, scored on nothing, and its Run half is not run', async () => {
+    const { scenario, ops, driver } = setup({ authorAs: { 'template/iterate': CRASHED } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
+    const template = run.modes[1]!;
+    expect(template.template!.install.ok).toBe(true);
+    expect(template.iterate).toEqual({ build: expect.objectContaining({ notMeasured: 'author turn failed: no-result(exit 1)', score: null }) });
+    expect(driver.seen.filter((k) => k.startsWith('crm_account_with_contacts/template/iterate-run/'))).toEqual([]);
+  });
+
+  it('a build author turn that ran out of turns: not measured as before, and the author row and the written record show the turns it took of its cap', async () => {
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/build': OUT_OF_TURNS } });
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+    expect([scratch.build!.notMeasured, scratch.build!.author!.numTurns, scratch.build!.author!.maxTurns]).toEqual(['author turn failed: error_max_turns', 80, 80]);
+    expect([scratch.run, scratch.iterate]).toEqual([undefined, undefined]);
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.build!.author).toEqual({ resultSubtype: 'error_max_turns', numTurns: 80, maxTurns: 80, elapsedMs: 1_414_000 });
+    expect(renderScorecard(sc)).toContain('| Build · author | error_max_turns · 80/80 turns · 23m 34s |');
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    expect([written.cardRun.modes[0].build.author.maxTurns, written.scorecard.modes[0].first.build.author.maxTurns]).toEqual([80, 80]);
+  });
+
+  it('an iterate author turn killed before any result line: its row shows the cap with the count unknown', async () => {
+    const killedUnderCap: ParsedTurn = { ...KILLED, meta: { ...KILLED.meta, process: { ...KILLED.meta.process!, maxTurns: 80 } } };
+    const { scenario, ops, driver } = setup({ authorAs: { 'scratch/iterate': killedUnderCap } });
+    const table = renderScorecard(cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN })));
+    expect(table).toContain('| Iterate · author | no-result(exit 143) · ?/80 turns · 60m 00s |');
+    expect(table).toContain('| Build · author | success · elapsed not recorded |'); // a turn with neither a count nor a cap shows neither
+  });
+});
+
+// ── The card's tier reaches every authoring turn ────────────────────────────
+
+describe('runCard — every authoring turn carries the card’s tier to the driver, which sizes the live turn cap by it', () => {
+  it('a control card: the scratch build, the scratch iterate and the template iterate each carry `control`', async () => {
+    const { scenario, ops, driver } = setup();
+    await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN });
+    expect(scenario.card.tier).toBe('control');
+    expect(driver.tiers).toEqual({
+      'crm_account_with_contacts/scratch/build/author/-': 'control',
+      'crm_account_with_contacts/scratch/iterate/author/-': 'control',
+      'crm_account_with_contacts/template/iterate/author/-': 'control',
+    });
+  });
+});
+
+// ── The seed through a reference cycle (requisition_to_receipt) ─────────────
+
+const RTR_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/requisition_to_receipt.json');
+
+/**
+ * The data door of a build that checks reference integrity, as the live
+ * mid-tier runs' apps did (`VALIDATION_FAILED · Manager: no
+ * demopurchase_employee record has id "e13"`): a lookup value must name a row
+ * already in, and a `required` lookup must hold one — on insert and on update.
+ */
+class ReferentialApp extends FakeApp {
+  constructor(
+    private readonly lookups: ReadonlyArray<{ object: string; field: string; to: string }>,
+    private readonly required: ReadonlySet<string> = new Set(),
+  ) {
+    super();
+  }
+  private refusal(object: string, values: Record<string, unknown>, whole: boolean): HttpAnswer | undefined {
+    for (const l of this.lookups) {
+      if (l.object !== object || (!whole && !(l.field in values))) continue;
+      const v = values[l.field];
+      const message =
+        v === undefined || v === null
+          ? this.required.has(`${object}.${l.field}`) ? `${l.field} is required` : undefined
+          : (this.rows[l.to] ?? []).some((r) => r.id === v) ? undefined : `${l.field}: no ${l.to} record has id "${String(v)}"`;
+      if (message) return { ok: false, status: 400, body: { error: message, code: 'VALIDATION_FAILED' }, code: 'VALIDATION_FAILED', message };
+    }
+    return undefined;
+  }
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    return this.refusal(object, row, true) ?? super.insertRow(object, row);
+  }
+  override async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+    return this.refusal(object, patch, false) ?? super.updateRow(object, id, patch);
+  }
+}
+
+describe('seedApp — the requisition_to_receipt seed loads whole through its department ↔ employee cycle', () => {
+  const rtr = namespacedScenario(load(RTR_FILE));
+  const lookups = rtr.card.expect.lookups!;
+  const rows = Object.values(rtr.card.run.seed).reduce((n, r) => n + r.length, 0);
+
+  it('the double refuses a lookup naming a row not in yet, so the object-by-object load fails on it', async () => {
+    const app = new ReferentialApp(lookups);
+    expect(await app.insertRow('demopurchase_employee', { id: 'e01', department: 'dep_sales' })).toMatchObject({ ok: false, code: 'VALIDATION_FAILED' });
+    expect(await app.insertRow('demopurchase_department', { id: 'dep_sales', manager: 'e13' })).toMatchObject({ ok: false, message: 'manager: no demopurchase_employee record has id "e13"' });
+  });
+
+  it('loads all 637 rows: departments first with their manager left out, then the five managers set in a second pass', async () => {
+    const app = new ReferentialApp(lookups);
+    const seed = await seedApp(rtr, app, []);
+    expect(rows).toBe(637);
+    expect(seed).toEqual({ inserted: 637, refused: [], secondPass: { 'demopurchase_department.manager': 5 } });
+    expect(Object.fromEntries(app.rows.demopurchase_department!.map((d) => [d.id, d.manager]))).toEqual(
+      Object.fromEntries(rtr.card.run.seed.demopurchase_department!.map((d) => [d.id, d.manager])),
+    );
+  });
+
+  it('a build that made the manager required: employees go in first, and their department is set in the second pass', async () => {
+    const required = new Set(['demopurchase_department.manager']);
+    const seed = await seedApp(rtr, new ReferentialApp(lookups, required), [], undefined, required);
+    expect(seed).toEqual({ inserted: 637, refused: [], secondPass: { 'demopurchase_employee.department': 18 } });
+  });
+
+  it('a second-pass update the app refuses moves the row from inserted to refused, naming the lookup', async () => {
+    class NoManagers extends ReferentialApp {
+      override async updateRow(object: string, id: string, patch: Record<string, unknown>): Promise<HttpAnswer> {
+        if (id === 'dep_fin') return { ok: false, status: 403, body: {}, code: 'PERMISSION_DENIED', message: 'manager is read-only' };
+        return super.updateRow(object, id, patch);
+      }
+    }
+    const seed = await seedApp(rtr, new NoManagers(lookups), []);
+    expect(seed).toEqual({
+      inserted: 636,
+      refused: [{ object: 'demopurchase_department', id: 'dep_fin', fields: ['manager'], code: 'PERMISSION_DENIED', message: 'manager is read-only' }],
+      secondPass: { 'demopurchase_department.manager': 4 },
+    });
+  });
+});
+
+const DESK_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json');
+
+/** One account per persona of `scenario`, as `FakeApp.createPersona` mints them (`u-<persona>`). */
+function accountsOf(scenario: LoadedScenario): PersonaAccount[] {
+  return scenario.card.run.personas.map((p) => ({ persona: p.id, userId: `u-${p.id}`, email: `${p.id}@scenario.test`, apiKey: `key-${p.id}`, permissionSet: { name: `x_${p.id}`, assigned: true } }));
+}
+
+/** `owner_id` → how many rows of `object` the seed loaded with it (`-` for none: the inserter keeps the row). */
+function ownerTally(app: FakeApp, object: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of app.rows[object] ?? []) out[String(r.owner_id ?? '-')] = (out[String(r.owner_id ?? '-')] ?? 0) + 1;
+  return out;
+}
+
+describe('seedApp — the service_desk seed owns a row only by a person it names (personas[].record)', () => {
+  const desk = namespacedScenario(load(DESK_FILE));
+  const seeded = async () => {
+    const app = new FakeApp();
+    const seed = await seedApp(desk, app, accountsOf(desk));
+    return { app, seed };
+  };
+
+  it('no public comment is the portal customer’s: a comment is owned only by the agent who wrote it (`author`)', async () => {
+    const { app } = await seeded();
+    const comments = app.rows.demohelpdesk_ticket_comment!;
+    expect(comments.filter((c) => c.visibility === 'public')).toHaveLength(237);
+    expect(comments.filter((c) => c.owner_id === 'u-portal_customer')).toEqual([]); // was 237, 197 of them on other customers’ tickets
+    expect(ownerTally(app, 'demohelpdesk_ticket_comment')).toEqual({ 'u-support_agent': 15, '-': comments.length - 15 });
+    expect(comments.filter((c) => c.owner_id === 'u-support_agent').every((c) => c.author === 'a02')).toBe(true);
+  });
+
+  it('a ticket naming two persons goes to the first in run.personas order; a group names nobody', async () => {
+    const { app } = await seeded();
+    const tickets = Object.fromEntries(app.rows.demohelpdesk_ticket!.map((t) => [t.id, t.owner_id]));
+    expect(tickets.t009).toBe('u-support_agent'); // assignee a02 (support_agent) and customer cus_03 (portal_customer)
+    expect(tickets.t008).toBe('u-portal_customer'); // customer cus_03; its group grp_tech is no person
+    expect(ownerTally(app, 'demohelpdesk_ticket')).toEqual({ 'u-support_agent': 15, 'u-portal_customer': 15, '-': app.rows.demohelpdesk_ticket!.length - 30 });
+    expect(app.rows.demohelpdesk_ticket!.filter((t) => t.owner_id === 'u-team_lead')).toEqual([]); // was 78, through `group`
+  });
+
+  it('each person row is its persona’s, with that persona’s user in its `user` field; no other row carries one', async () => {
+    const { app } = await seeded();
+    const person = (object: string, id: string) => app.rows[object]!.find((r) => r.id === id)!;
+    expect(person('demohelpdesk_customer', 'cus_03')).toMatchObject({ owner_id: 'u-portal_customer', user: 'u-portal_customer' });
+    expect(person('demohelpdesk_agent', 'a02')).toMatchObject({ owner_id: 'u-support_agent', user: 'u-support_agent' });
+    expect(person('demohelpdesk_agent', 'a04')).toMatchObject({ owner_id: 'u-team_lead', user: 'u-team_lead' });
+    const withUser = Object.values(app.rows).flat().filter((r) => r.user !== undefined).map((r) => r.id);
+    expect(withUser.sort()).toEqual(['a02', 'a04', 'cus_03']);
+    expect(ownerTally(app, 'demohelpdesk_agent')).toEqual({ 'u-support_agent': 1, 'u-team_lead': 1, '-': app.rows.demohelpdesk_agent!.length - 2 }); // was 4 to team_lead, through `group`
+  });
+
+  it('without persona accounts (the gallery’s screenshot boot) no row is owned and no `user` field is set', async () => {
+    const app = new FakeApp();
+    await seedApp(desk, app, []);
+    expect(Object.values(app.rows).flat().filter((r) => r.owner_id !== undefined || r.user !== undefined)).toEqual([]);
+  });
+
+  it('a department lookup names nobody, its manager does: requisition_to_receipt’s dep_sales is the dept_manager’s (e13)', async () => {
+    const rtr = namespacedScenario(load(RTR_FILE));
+    const app = new FakeApp();
+    await seedApp(rtr, app, accountsOf(rtr));
+    expect(app.rows.demopurchase_department!.find((d) => d.id === 'dep_sales')!.owner_id).toBe('u-dept_manager');
+    expect(app.rows.demopurchase_employee!.filter((e) => e.department === 'dep_sales' && e.owner_id !== undefined).map((e) => e.id)).toEqual(['e02', 'e13']); // only the two person rows (requester e02, dept_manager e13), never by `department`
+  });
+});
+
+describe('runCard — a build that makes both sides of a reference cycle required is a Build finding naming the cycle', () => {
+  const original = load(RTR_FILE);
+  const card = namespacedScenario(original).card;
+
+  /** An artifact carrying every object the card expects, each with its declared lookups, `required` where asked. */
+  const rtrArtifact = (required: ReadonlySet<string>) => ({
+    manifest: { id: 'com.example.demopurchase', namespace: 'demopurchase' },
+    objects: card.expect.objects.map((name) => ({
+      name,
+      fields: Object.fromEntries(
+        (card.expect.lookups ?? []).filter((l) => l.object === name).map((l) => [l.field, { type: 'lookup', reference: l.to, ...(required.has(`${name}.${l.field}`) ? { required: true } : {}) }]),
+      ),
+    })),
+  });
+
+  function run(required: ReadonlySet<string>) {
+    const apps: ReferentialApp[] = [];
+    const ops: ProjectOps = {
+      async scaffold(name, under) {
+        return { dir: `${under}/${name}`, result: { command: 'create-objectstack', exit: 0, tail: '', ms: 1 } };
+      },
+      async os(_dir, args) {
+        return { command: `npx objectstack ${args.join(' ')}`, exit: 0, tail: '', ms: 1 };
+      },
+      readArtifact: () => rtrArtifact(required),
+      async boot() {
+        return { url: 'http://fake', stop: async () => {}, log: () => '' };
+      },
+      harness: () => {
+        const app = new ReferentialApp(card.expect.lookups!, required);
+        apps.push(app);
+        return app;
+      },
+      namespace: (dir) => dir.slice(dir.lastIndexOf('/') + 1),
+    };
+    const tiers: string[] = [];
+    const quiet: AgentDriver = {
+      info: () => ({ driver: 'recorded', version: 'quiet test replay', apiBilled: false }),
+      author: async (task) => {
+        tiers.push(`${task.phase}: ${task.tier}`);
+        return { turn: turn('Done.') };
+      },
+      ask: async () => turn('I cannot tell from here.'),
+    };
+    return runCard(original, quiet, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false }).then((r) => ({ run: r, apps, tiers }));
+  }
+
+  it('a starter card’s build and iterate authoring turns each carry `starter` to the driver', async () => {
+    const { tiers } = await run(new Set(['demopurchase_employee.department']));
+    expect(original.card.tier).toBe('starter');
+    expect(tiers).toEqual(['build: starter', 'iterate: starter']);
+  });
+
+  it('both sides required: the finding names the cycle, and the seed is still sent so the record holds the app’s own refusals', async () => {
+    const { run: r } = await run(new Set(['demopurchase_department.manager', 'demopurchase_employee.department']));
+    const cycle = [
+      { object: 'demopurchase_department', field: 'manager', to: 'demopurchase_employee' },
+      { object: 'demopurchase_employee', field: 'department', to: 'demopurchase_department' },
+    ];
+    expect(r.modes[0]!.build!.requiredCycles).toEqual([cycle]);
+    const sc = cardScorecard(r);
+    const finding =
+      'the reference cycle `demopurchase_department.manager` → `demopurchase_employee`, `demopurchase_employee.department` → `demopurchase_department` ' +
+      'is required on every side, so the seed cannot load it (at least one side of a reference cycle must be optional)';
+    expect(sc.modes[0]!.findings).toEqual([`build: ${finding}`, `iterate build: ${finding}`]);
+    expect(renderScorecard(sc)).toContain(`- scratch finding: build: ${finding}`);
+    const seed = r.modes[0]!.run!.seed;
+    expect(seed.refused.filter((x) => x.object === 'demopurchase_department').map((x) => x.message)).toEqual(Array(5).fill('manager is required'));
+    expect(seed.inserted).toBe(card.run.seed.demopurchase_supplier!.length); // only what hangs off neither side
+  });
+
+  it('one side optional: no finding, and the whole seed loads', async () => {
+    const { run: r } = await run(new Set(['demopurchase_employee.department']));
+    expect(r.modes[0]!.build!.requiredCycles).toBeUndefined();
+    const sc = cardScorecard(r);
+    expect(sc.modes[0]!.findings).toEqual([]);
+    expect(sc.modes[0]!.first.seed).toEqual({ inserted: 637, total: 637, refused: 0 });
+    expect(renderScorecard(sc)).toContain('| Seed | 637/637 |');
+  });
+});
+
+// ── The model each turn was served ──────────────────────────────────────────
+
+/**
+ * A driver that answers as `inner` does, each turn stamped as the live driver
+ * stamps it: the model it asked for (`meta.process.requestedModel`, the
+ * `--model` it was given) and the model the stream says it was served
+ * (`meta.model`). `fallback` names the steps the session answered on another
+ * model than the one asked for.
+ */
+class ServedModels implements AgentDriver {
+  constructor(
+    private readonly inner: AgentDriver,
+    private readonly fallback: ReadonlySet<string>,
+  ) {}
+  info(): DriverInfo {
+    return { ...this.inner.info(), authorModel: 'opus', askModel: 'sonnet' };
+  }
+  private stamp(t: ParsedTurn, requestedModel: string, model: string): ParsedTurn {
+    return { ...t, meta: { ...t.meta, model, process: { elapsedMs: 1_000, exit: 0, timedOut: false, timeoutMs: 60_000, maxTurns: 12, requestedModel } } };
+  }
+  async author(task: AuthorTask) {
+    const r = await this.inner.author(task);
+    return { ...r, turn: this.stamp(r.turn, 'opus', 'claude-opus-4-1-20250805') };
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    return this.stamp(await this.inner.ask(task), 'sonnet', this.fallback.has(task.step) ? 'claude-opus-5-5' : 'claude-sonnet-4-5-20250929');
+  }
+}
+
+describe('runCard — every turn states the model it was served, and a mismatch with the requested model shows up', () => {
+  it('the record carries the served and requested model per turn, the scorecard counts them per half, and a replay of the recording re-reads both', async () => {
+    const { scenario, ops, driver: scripted } = setup();
+    const fellBack = scenario.card.run.questions[0]!.id;
+    const driver = new RecordingDriver(new ServedModels(scripted, new Set([fellBack])));
+    const run = await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN });
+    const scratch = run.modes[0]!;
+
+    // Per turn, in the run itself: the author turns asked for and got opus; the persona turns asked for sonnet.
+    expect(scratch.build!.author).toMatchObject({ model: 'claude-opus-4-1-20250805', requestedModel: 'opus' });
+    expect(scratch.build!.author!.modelMismatch).toBeUndefined();
+    const turns = [...scratch.run!.questions, ...scratch.run!.operations, ...scratch.iterate!.run!.questions, ...scratch.iterate!.run!.operations];
+    const mismatched = turns.filter((x) => x.turn!.modelMismatch);
+    expect(mismatched.length).toBeGreaterThan(0);
+    expect(mismatched.every((x) => 'question' in x && x.question === fellBack && x.turn!.model === 'claude-opus-5-5' && x.turn!.requestedModel === 'sonnet')).toBe(true);
+    expect(turns.filter((x) => !x.turn!.modelMismatch).every((x) => x.turn!.model === 'claude-sonnet-4-5-20250929')).toBe(true);
+    const firstFellBack = scratch.run!.questions.filter((q) => q.question === fellBack).length;
+    const firstTurns = scratch.run!.questions.length + scratch.run!.operations.length;
+
+    // The scorecard: the author rows name the served model, the Run rows count the persona turns per served model.
+    const sc = cardScorecard(run);
+    expect(sc.modes[0]!.first.models).toEqual({
+      served: { 'claude-sonnet-4-5-20250929': firstTurns - firstFellBack, 'claude-opus-5-5': firstFellBack },
+      requested: ['sonnet'],
+      mismatched: firstFellBack,
+    });
+    const table = renderScorecard(sc);
+    expect(table).toContain(' · claude-opus-4-1-20250805 |'); // the build's author row
+    expect(table).toContain(`| Run · model | claude-sonnet-4-5-20250929 ×${firstTurns - firstFellBack}, claude-opus-5-5 ×${firstFellBack} ⚠ ${firstFellBack} not sonnet |`);
+    expect(table).toMatch(/\| Iterate · Run · model \| claude-sonnet-4-5-20250929 ×\d+, claude-opus-5-5 ×\d+ ⚠ \d+ not sonnet \|/);
+
+    // The written record: the driver's requested models, every turn's served model, the mismatch.
+    const written = JSON.parse(JSON.stringify(runRecord({ run: 'r', date: '2026-11-07', packages: PUBLISHED, driver: driver.info(), runner: 'test', evidenceDir: '/tmp' }, run)));
+    expect(written.env.driver).toMatchObject({ authorModel: 'opus', askModel: 'sonnet' });
+    const writtenQuestion = written.cardRun.modes[0].run.questions.find((q: { question: string }) => q.question === fellBack);
+    expect(writtenQuestion.turn).toMatchObject({ model: 'claude-opus-5-5', requestedModel: 'sonnet', modelMismatch: true });
+    expect(written.scorecard.modes[0].first.models.mismatched).toBe(firstFellBack);
+
+    // The recording keeps both names on every turn, so a replay (`--driver recorded:F`) re-reads them as the run saw them.
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-served-model-'));
+    try {
+      driver.save(join(dir, 'rec.json'));
+      const replay = RecordedDriver.fromFile(join(dir, 'rec.json'));
+      const persona = scenario.card.run.questions[0]!.personas?.[0];
+      const again = await replay.ask({ card: run.card, mode: 'scratch', phase: 'run', step: fellBack, ...(persona ? { persona } : {}), prompt: '', mcp: { url: '', apiKey: '' } });
+      expect([again.meta.model, again.meta.process?.requestedModel]).toEqual(['claude-opus-5-5', 'sonnet']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('turns that named no model and asked for none leave the model rows empty, as before', async () => {
+    const { scenario, ops, driver } = setup();
+    const sc = cardScorecard(await runCard(scenario, driver, ops, { modes: ['scratch'], admin: ADMIN }));
+    expect(sc.modes[0]!.first.models).toEqual({ served: { '(not reported)': 14 }, requested: [], mismatched: 0 });
+    const table = renderScorecard(sc);
+    expect(table).toContain('| Run · model | — |');
+    expect(table).toContain('| Build · author | success · elapsed not recorded |');
+  });
+});

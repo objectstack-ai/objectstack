@@ -25,18 +25,32 @@
  * base asks the ensure door for the pair first (`StudioBaseCustomization`).
  *
  * Items another package contributes to the base (fields extending its
- * objects, flows on its objects, ADR-0029 D7 navigation entries) are not
- * drawn: no served read names the contributing package (objectstack#28722),
- * and the rail derives none.
+ * objects, flows on its objects, ADR-0029 D7 navigation entries) are drawn
+ * greyed and read-only, each with the contributing package
+ * ({@link ContributionMark}, {@link ContributedRailRow}), from the same read's
+ * `contributions` (objectstack#29786; the placement rules are
+ * `contributionRows.ts`'s). A click opens the contributing package.
  */
 
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { cn } from '@object-ui/components';
 import { Boxes } from 'lucide-react';
-import { customizationBasePackageId } from '@objectstack/spec/kernel';
+import { customizationBasePackageId, isCustomizationPackage } from '@objectstack/spec/kernel';
 import { tFormat } from '../metadata-admin/i18n.js';
+import { confirmUnsavedLeave } from '../../chrome/unsavedEdits.js';
 import { CustomizationMark, type PackageCustomizationsState } from './CustomizationMark.js';
 import { customizationMarkOf, type CustomizationMarkKind } from './customizationMarks.js';
+import { StudioRailRow } from './StudioRail.js';
+import {
+  contributedNavCountOf,
+  declaredNavTargetApps,
+  type ContributedElsewhere,
+  type ContributedNav,
+  type ContributedOnObject,
+} from './contributionRows.js';
+import type { ListedPackageManifest } from './packages-io.js';
+import { fetchPackageCustomizations, type PackageCustomizations } from './packageCustomizations-io.js';
 
 /** A rail row as the one-surface helpers read it. */
 export interface PairRailRow {
@@ -100,7 +114,11 @@ export function railCustomizationsOf(
   };
 }
 
-/** A row's mark in the rail's trailing slot, or nothing. */
+/**
+ * A row's mark in the rail's trailing slot, or nothing. Compact (one short
+ * word, no fill; the full text in its name and tooltip), so it never takes the
+ * row's label and never reads as a button.
+ */
 export function RailCustomizationMark({
   row,
   marks,
@@ -119,6 +137,7 @@ export function RailCustomizationMark({
       pairId={marks.pairId}
       locale={locale}
       className="ml-1"
+      compact
     />
   );
 }
@@ -258,4 +277,197 @@ export function foldCustomizationPairs<T extends { id: string }>(
  */
 export function customizationPairBaseOf(packageId: string | null): string | null {
   return packageId === null ? null : customizationBasePackageId(packageId);
+}
+
+/**
+ * objectstack#29786 — the chip that names the package an item was contributed
+ * by ("from HotCRM Service"). Muted, as the contributed row it sits on.
+ */
+export function ContributionMark({
+  packageName,
+  packageId,
+  locale,
+  className,
+}: {
+  packageName: string;
+  packageId: string;
+  locale: string;
+  className?: string;
+}): React.ReactElement {
+  return (
+    <span
+      data-testid="contribution-mark"
+      data-package={packageId}
+      title={tFormat('engine.studio.contributed.from', locale, { package: packageName })}
+      className={cn(
+        // Gives way to the item's name first.
+        'inline-flex h-[18px] min-w-0 max-w-[55%] shrink-[4] items-center rounded-[5px] bg-muted px-1.5 text-[11px] font-medium text-muted-foreground',
+        className,
+      )}
+    >
+      <span className="truncate">{tFormat('engine.studio.contributed.from', locale, { package: packageName })}</span>
+    </span>
+  );
+}
+
+/**
+ * The tooltip of a contributed item: what it is, who added it, and that it is
+ * changed there. A `nav` entry whose group the app does not declare says it
+ * is drawn at the top level, as the served navigation draws it.
+ */
+export function contributedItemTitle(
+  item: ContributedNav | ContributedOnObject,
+  locale: string,
+  undeclaredGroup: string | null = null,
+): string {
+  const vars = { name: item.name, package: item.packageName };
+  const said = tFormat(`engine.studio.contributed.${item.kind}Title`, locale, vars);
+  return undeclaredGroup === null
+    ? said
+    : `${said} ${tFormat('engine.studio.contributed.undeclaredGroup', locale, { group: undeclaredGroup })}`;
+}
+
+/**
+ * Open the contributing package's Studio at `path`: the one way a contributed
+ * row is acted on, since the base's surface cannot change it. Leaves through
+ * the shell's unsaved-edits seam, so a pillar holding unsaved work asks first.
+ */
+export function useOpenContributor(): (path: string) => void {
+  const navigate = useNavigate();
+  return React.useCallback((path: string) => confirmUnsavedLeave(() => navigate(path)), [navigate]);
+}
+
+/**
+ * One contributed item as a rail row: greyed, labelled with its package, and
+ * never a drag source or an editor's target. `onOpen` goes to the contributing
+ * package.
+ */
+export function ContributedRailRow({
+  item,
+  icon,
+  indent = false,
+  title,
+  onOpen,
+  locale,
+  testId,
+  label,
+}: {
+  item: ContributedNav | ContributedOnObject;
+  icon?: React.ReactNode;
+  indent?: boolean;
+  title: string;
+  onOpen: () => void;
+  locale: string;
+  testId?: string;
+  /**
+   * objectstack#29851 — the text the live app shows for the item, when a
+   * served read gives it. The row then leads with it and keeps the id as a
+   * muted second line; without it the id leads, as before.
+   */
+  label?: string;
+}): React.ReactElement {
+  const shown = label && label !== item.name ? label : null;
+  return (
+    <StudioRailRow
+      data-testid={testId ?? `contributed-${item.kind}-${item.name}`}
+      data-contributed={item.kind}
+      data-package={item.packageId}
+      indent={indent}
+      title={title}
+      onClick={onOpen}
+      icon={icon}
+      className="text-muted-foreground opacity-70"
+      // Two lines, so a narrow rail keeps both the id and the package legible.
+      wrap
+    >
+      <span className="flex min-w-0 flex-col items-start gap-0.5">
+        <span className="max-w-full truncate" data-testid="contributed-label">
+          {shown ?? item.name}
+        </span>
+        {shown !== null && (
+          <span className="max-w-full truncate font-mono text-[11px] text-muted-foreground" data-testid="contributed-id">
+            {item.name}
+          </span>
+        )}
+        <ContributionMark packageName={item.packageName} packageId={item.packageId} locale={locale} className="max-w-full" />
+      </span>
+    </StudioRailRow>
+  );
+}
+
+/**
+ * objectstack#29851 — what a package with no app of its own adds to other
+ * packages' apps, as the served reads show it, or `null` when they show
+ * nothing (today's "no app yet" text then stays).
+ *
+ * Asked only while `active` (the Interfaces pillar's no-app empty state) and
+ * only for a package whose listed manifest declares `navigationContributions`.
+ * `manifests` is the package list the Studio surface already read: no
+ * package-list request is sent here.
+ * Per declared target app, at most two reads:
+ *  1. the served app read (`GET /meta/app/:app`, through `readApp`), for the
+ *     app's owner (`_packageId`) — the declared app is an ADDRESS only;
+ *  2. the owner's customization read (`GET /packages/:owner/customizations`),
+ *     whose `contributions` are counted for this package and that app.
+ * A target that is missing, owned by this package, failing to read, or
+ * counting 0 (a disabled package's entries are not served) contributes
+ * nothing. ⛔ Nothing is drawn from the declaration itself.
+ */
+export function useContributedElsewhere(
+  packageId: string | null,
+  active: boolean,
+  manifests: ReadonlyMap<string, ListedPackageManifest> | null,
+  readApp: (name: string) => Promise<Record<string, unknown> | null>,
+): readonly ContributedElsewhere[] | null {
+  const [answer, setAnswer] = React.useState<{ id: string; found: readonly ContributedElsewhere[] | null } | null>(null);
+  // The newest reader, without re-asking when a caller passes a new closure.
+  const readAppRef = React.useRef(readApp);
+  React.useEffect(() => {
+    readAppRef.current = readApp;
+  });
+  React.useEffect(() => {
+    if (!active || !packageId || !manifests || isCustomizationPackage(packageId)) return;
+    let cancelled = false;
+    (async () => {
+      const apps = declaredNavTargetApps(manifests.get(packageId)?.manifest);
+      const reads = new Map<string, Promise<PackageCustomizations | null>>();
+      const found = await Promise.all(
+        apps.map(async (app): Promise<ContributedElsewhere | null> => {
+          const served = await readAppRef.current(app).catch(() => null);
+          const owner = served && typeof served._packageId === 'string' ? served._packageId : null;
+          if (!owner || owner === packageId || isCustomizationPackage(owner)) return null;
+          let read = reads.get(owner);
+          if (!read) {
+            read = fetchPackageCustomizations(owner).catch(() => null);
+            reads.set(owner, read);
+          }
+          const customizations = await read;
+          if (!customizations) return null;
+          const count = contributedNavCountOf(customizations, packageId, app);
+          if (count === 0) return null;
+          return { app, ownerId: owner, ownerName: manifests.get(owner)?.name ?? owner, count };
+        }),
+      );
+      if (cancelled) return;
+      const shown = found.filter((f): f is ContributedElsewhere => f !== null);
+      setAnswer({ id: packageId, found: shown.length > 0 ? shown : null });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [packageId, active, manifests]);
+  if (!active || !packageId || answer?.id !== packageId) return null;
+  return answer.found;
+}
+
+/**
+ * The sentence a contributor-only package's empty state says of one target:
+ * "It adds N navigation entries to OWNER's app."
+ */
+export function contributedElsewhereText(found: ContributedElsewhere, locale: string): string {
+  return tFormat(
+    found.count === 1 ? 'engine.studio.if.contributesOne' : 'engine.studio.if.contributesOther',
+    locale,
+    { count: found.count, package: found.ownerName },
+  );
 }

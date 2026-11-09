@@ -38,8 +38,9 @@
  * ⛔ Nothing here asserts `toThrow()`: the unrepaired family never threw — it
  * ANSWERED, with the ordinary signed-in answer. The claim is `status` + `code`.
  *
- * Routes are named by the service member their own work calls, read off a
- * served request below, never by a path typed here.
+ * Routes are named by the service member their own work calls (for the
+ * deployment notice's two, the door member), read off a served request below,
+ * never by a path typed here.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -47,6 +48,7 @@ import { isAuthGateAllowlisted, normalizeAuthGate, ObjectKernel, type AuthGate }
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { SETTINGS_ROUTE_LEDGER } from './settings-route-ledger.js';
 import type { SettingsContext } from './settings-service.types.js';
+import type { DeploymentNoticeDoor, DeploymentNoticeState } from './deployment-notice.js';
 
 // The producer half (part 4) reads the context the plugin's resolver builds,
 // captured through a PASS-THROUGH of the real registration, as
@@ -73,6 +75,19 @@ const { SettingsServicePlugin } = await import('./settings-service-plugin.js');
 type SettingsRoutesOptions = NonNullable<Parameters<typeof registerSettingsRoutes>[2]>;
 
 const NS = 'branding';
+
+/**
+ * [#30120] The deployment notice's two routes call a door, not the service.
+ * Each fixture below carries its door under this key, so `capture` mounts
+ * the routes with it, and the door's two members are census members like the
+ * service's.
+ */
+const NOTICE_DOOR = Symbol('deploymentNoticeDoor');
+const NOTICE: DeploymentNoticeState = {
+  production: true,
+  findings: [{ id: 'database_local_file', severity: 'high', variable: 'OS_DATABASE_URL', file: '/srv/app/.objectstack/data/app.db' }],
+  fingerprint: 'database_local_file',
+};
 
 /** The two postures plugin-auth's `customSession` enrichment writes. */
 const POSTURES: readonly AuthGate[] = [
@@ -113,7 +128,8 @@ function capture(service: unknown, opts: SettingsRoutesOptions = {}) {
     listen: async () => {},
     close: async () => {},
   };
-  registerSettingsRoutes(http as any, service as any, opts);
+  const deploymentNotice = (service as Record<symbol, DeploymentNoticeDoor | undefined>)[NOTICE_DOOR];
+  registerSettingsRoutes(http as any, service as any, { deploymentNotice, ...opts });
   return { routes, middleware };
 }
 
@@ -124,11 +140,22 @@ function capture(service: unknown, opts: SettingsRoutesOptions = {}) {
  */
 function untouchableService() {
   const calls: string[] = [];
+  const door: DeploymentNoticeDoor = {
+    read: async () => {
+      calls.push('deploymentNotice.read');
+      throw new Error('the deployment notice was read by a held session');
+    },
+    hide: async () => {
+      calls.push('deploymentNotice.hide');
+      throw new Error('the deployment notice was hidden by a held session');
+    },
+  };
   const service = new Proxy(
     {},
     {
       get(_target, prop) {
         if (prop === 'then') return undefined;
+        if (prop === NOTICE_DOOR) return door;
         return (..._args: unknown[]) => {
           calls.push(String(prop));
           throw new Error(`service.${String(prop)} was reached by a held session`);
@@ -164,6 +191,13 @@ function permissiveService() {
       seen.push({ member: 'runAction', ctx });
       return { ok: true };
     },
+    [NOTICE_DOOR]: {
+      read: async (ctx: SettingsContext) => { seen.push({ member: 'deploymentNotice.read', ctx }); return NOTICE; },
+      hide: async ({ context }: { context: SettingsContext }) => {
+        seen.push({ member: 'deploymentNotice.hide', ctx: context });
+        return { outcome: 'recorded' as const, state: NOTICE };
+      },
+    } satisfies DeploymentNoticeDoor,
   };
   return { service, seen };
 }
@@ -191,7 +225,8 @@ async function drive(route: Pick<Registered, 'verb' | 'path' | 'handler'>, heade
     {
       params: paramsFor(route.path),
       query: {},
-      body: route.verb === 'GET' ? undefined : { workspace_name: 'held-write' },
+      // `fingerprint` is the hide route's one field; the other routes ignore it.
+      body: route.verb === 'GET' ? undefined : { workspace_name: 'held-write', fingerprint: NOTICE.fingerprint },
       headers,
       method: route.verb,
       path: route.path,
@@ -237,15 +272,22 @@ function routeServedBy(member: string, service: unknown, opts: SettingsRoutesOpt
 }
 
 describe('the settings census — read off the registration', () => {
-  it('registers exactly four routes, the ledgered ones, each serving one distinct member', () => {
+  it('registers exactly six routes, the ledgered ones, each serving one distinct member', () => {
     const { routes, middleware } = capture(untouchableService().service);
-    // ⭐ A count, on purpose: a fifth route has to come through this file.
-    expect(routes).toHaveLength(4);
+    // ⭐ A count, on purpose: a seventh route has to come through this file.
+    expect(routes).toHaveLength(6);
     expect(routes.map((r) => `${r.verb} ${r.path}`).sort()).toEqual(
       SETTINGS_ROUTE_LEDGER.map((row) => row.route).sort(),
     );
-    expect(new Set(MEMBERS).size).toBe(4);
-    expect([...MEMBERS].sort()).toEqual(['getNamespace', 'listManifests', 'runAction', 'setMany']);
+    expect(new Set(MEMBERS).size).toBe(6);
+    expect([...MEMBERS].sort()).toEqual([
+      'deploymentNotice.hide',
+      'deploymentNotice.read',
+      'getNamespace',
+      'listManifests',
+      'runAction',
+      'setMany',
+    ]);
     // A preflight never reaches the door: no `OPTIONS` route, no middleware.
     expect(routes.every((r) => ['GET', 'PUT', 'POST'].includes(r.verb))).toBe(true);
     expect(middleware).toHaveLength(0);
@@ -279,7 +321,7 @@ describe('ADR-0069 door — a held session is refused 403 with the gate code on 
     const gate = POSTURES[1]!;
     const { service, calls } = untouchableService();
     const { routes } = capture(service, { basePath, contextFromRequest: () => held(gate) });
-    expect(routes).toHaveLength(4);
+    expect(routes).toHaveLength(6);
     for (const route of routes) expectGateRefusal(await drive(route), gate);
     expect(calls).toEqual([]);
   });
@@ -364,7 +406,7 @@ describe('ADR-0069 producer — SettingsServicePlugin carries the session postur
   for (const gate of POSTURES) {
     it(`a session held by ${gate.code} is refused 403 on every mounted route, one session read each`, async () => {
       const { http, reads } = await bootPlugin({ id: 'usr_held', authGate: gate });
-      expect(http.routes).toHaveLength(4);
+      expect(http.routes).toHaveLength(6);
       for (const route of http.routes) {
         const before = reads.length;
         expectGateRefusal(await drive(route, { cookie: SESSION_COOKIE }), gate);

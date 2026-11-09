@@ -15,6 +15,13 @@
  * real middleware: a caller bound to org X writes a reference to org Y's row,
  * once with that row `secret` and once `public`. The two must end identically,
  * the read must return nothing, and the org X control must reach the rule.
+ *
+ * [#29029] A write that is not a system write may name only a record its
+ * caller can read, and that reference check runs before the record's rules
+ * (ruling records 6573561091 and 6663849489): a reference to org Y's row, or to
+ * a user the caller cannot read, is answered the lookup's `reference_not_found`.
+ * The reads counted below are the rule's related reads alone — a read that
+ * selects a column the predicate names; the reference check reads `id` only.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -161,9 +168,11 @@ async function boot(kind: 'secret' | 'public', posture?: 'single' | 'group' | 'i
     { id: 'line_y', kind, organization_id: 'org_y' },
   ]);
   // The caller u_x and its peer u_x2 (org X); u_y belongs to org Y only.
+  // [#30205] u_x2's ban has expired: `banned` still reads true, which is what
+  // the rule reads, and the write's ban check (a ban in force) leaves it be.
   await table('sys_user').insert([
     { id: 'u_x', name: 'X', email: 'x@x.test', banned: false },
-    { id: 'u_x2', name: 'X2', email: 'x2@x.test', banned: true },
+    { id: 'u_x2', name: 'X2', email: 'x2@x.test', banned: true, ban_expires: '2020-01-01T00:00:00.000Z' },
     { id: 'u_y', name: 'Y', email: 'y@y.test', banned: kind === 'secret' },
   ]);
 
@@ -173,7 +182,9 @@ async function boot(kind: 'secret' | 'public', posture?: 'single' | 'group' | 'i
   const find = driver.find.bind(driver);
   vi.spyOn(driver, 'find').mockImplementation(async (object, ast, options) => {
     const rows = await find(object, ast, options);
-    if (object === 'qa_line') readsOfLine.push(rows as unknown[]);
+    const columns = (ast as { fields?: unknown[] }).fields;
+    const ruleRead = Array.isArray(columns) && columns.some((column) => column !== 'id');
+    if (object === 'qa_line' && ruleRead) readsOfLine.push(rows as unknown[]);
     if (object === 'sys_user') userColumnsRead.push(...((ast as { fields?: unknown[] }).fields ?? ['*']));
     return rows;
   });
@@ -303,12 +314,13 @@ describe('#18682 — under `isolated`, an org-less writer of an unwalled object 
 /**
  * `sys_user` has no tenant column, so no organization wall scopes the related
  * read; its own wall is the shipped `member_default` row-level security. A user
- * the caller's own read of `sys_user` does not return is NOT READABLE: the rule
- * faults loudly, is never evaluated on that user, and never reads its columns.
+ * the caller's own read of `sys_user` does not return may not be named
+ * (#29029): the write answers the field's `reference_not_found`, before the
+ * rule, which is never evaluated on that user and never reads its columns.
  */
-describe('#18682 — a related user the caller cannot read makes the rule fault loudly', () => {
+describe('#18682, #29029 — a user the caller cannot read cannot be named', () => {
   const PEERS = { ...CALLER, org_user_ids: ['u_x', 'u_x2'] };
-  const NOT_READABLE = "could not read 'sys_user'";
+  const NOT_READABLE = 'reviewer: no sys_user record has id "u_y"';
 
   it('CONTROL: the caller’s own read of sys_user returns org X’s users, never org Y’s', async () => {
     const h = await boot('secret', 'isolated');
@@ -379,12 +391,12 @@ describe('#18682 — a caller with no userId that is not system is bound like a 
     expect(secret.readsOfLine).toEqual([]);
   });
 
-  it('a user only org Y holds, under no wall: every door refuses, whatever its value — the write as not readable, the preview at its write gate', async () => {
+  it('a user only org Y holds, under no wall: every door refuses, whatever its value — the write on the reference check, the preview at its write gate', async () => {
     const banned = await observe('secret', 'u_y', PUBLIC_FORM('qa_review'), 'single', 'qa_review');
     const clear = await observe('public', 'u_y', PUBLIC_FORM('qa_review'), 'single', 'qa_review');
 
     expect(clear.seen).toEqual(banned.seen);
-    expect(banned.seen.refusal).toMatchObject({ code: 'VALIDATION_FAILED', message: expect.stringContaining("could not read 'sys_user'") });
+    expect(banned.seen.refusal).toMatchObject({ code: 'VALIDATION_FAILED', message: expect.stringContaining('reviewer: no sys_user record has id "u_y"') });
     expect(banned.seen.committed).toBe(0);
     // [#21079] The preview asks the engine's write gate before it reads anything
     // related. This grant context names a set the deployment does not register,

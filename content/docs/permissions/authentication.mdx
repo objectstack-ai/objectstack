@@ -289,6 +289,10 @@ const response = await fetch('http://localhost:3000/api/v1/auth/request-password
 });
 ```
 
+The request answers `{ status: true }` the same way for any address. The reset
+mail is sent after the response; a send that fails is logged on the server and
+never changes the answer.
+
 #### Reset Password with Token
 
 {/* os:check */}
@@ -298,10 +302,17 @@ const response = await fetch('http://localhost:3000/api/v1/auth/reset-password',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     token: 'reset-token-from-email',
-    password: 'newSecurePassword456'
+    newPassword: 'newSecurePassword456'
   })
 });
 ```
+
+A completed reset ends every existing session of the account — the emailed link
+and the phone OTP reset alike, the same as an administrator's forced reset — so
+the user signs in again with the new password. It is not a setting: the former
+`emailAndPassword.revokeSessionsOnPasswordReset` key is retired, and a
+configuration that still carries it, at any value, is refused at boot — delete
+the key.
 
 #### Setting a first local password
 
@@ -593,7 +604,7 @@ often before the account-level lock engages.
 
 | Setting | Effect |
 |---|---|
-| `mfa_required` | Require MFA org-wide (also settable per organization via `require_mfa`). |
+| `mfa_required` | Require MFA org-wide; saving it on also turns two-factor enrollment on, and the save is refused while `OS_AUTH_TWO_FACTOR=false` pins enrollment off. An organization can require it on its own (`require_mfa`) only while two-factor enrollment is on; a requirement stored while enrollment is off is not enforced, which `GET /api/v1/auth/config` reports as `features.twoFactor: false`. |
 | `mfa_grace_period_days` | Grace window for existing users to enroll. After it elapses, the session is allowed to sign in but **gated from data access** until TOTP is enrolled — the Console surfaces a remediation overlay that walks the user through enrollment. |
 
 ### Sessions
@@ -608,7 +619,7 @@ often before the account-level lock engages.
 
 | Setting | Effect |
 |---|---|
-| `allowed_ip_ranges` | Restrict authenticated access to one or more IPv4 CIDR ranges (or exact IPs). The address judged is the one the server establishes, by the same rule as the inbound rate limiter: `X-Forwarded-For` / `X-Real-IP` only when the stack declares `server.trustProxy`, the connection's peer address otherwise. Behind a reverse proxy, declare `server.trustProxy`, or the allow-list judges the proxy's own address. A request whose address cannot be established is refused with `403 IP_NOT_ALLOWED`, like one outside the ranges. `last_login_ip` records the same address. |
+| `allowed_ip_ranges` | Restrict authenticated access to one or more CIDR ranges or exact addresses, IPv4 or IPv6 (`203.0.113.0/24`, `2001:db8::/32`, `192.0.2.7`). An entry that is neither is refused when you save it. The address judged is the one the server establishes, by the same rule as the inbound rate limiter: `X-Forwarded-For` / `X-Real-IP` only when the stack declares `server.trustProxy`, the connection's peer address otherwise. Behind a reverse proxy, declare `server.trustProxy`, or the allow-list judges the proxy's own address. A request whose address cannot be established is refused with `403 IP_NOT_ALLOWED`, like one outside the ranges. `last_login_ip` records the same address. A save that leaves out your own address is refused, and clearing the field applies at once: see [Saving, clearing and lockout recovery](#saving-clearing-and-lockout-recovery). |
 
 > **How enforcement works.** Password expiry (an administrator-forced password
 > change included) and enforced MFA share a single *session-validation gate*.
@@ -638,6 +649,82 @@ often before the account-level lock engages.
 > administrator's included. This is why a non-compliant user can sign in but
 > can't read or change data, or administer the platform, until they fix the
 > issue.
+>
+> **An API key authenticates only as an owner who exists.** A key whose owner
+> has no user record is answered on every face that admits keys exactly as a
+> key that does not exist (the generic `401 UNAUTHENTICATED`), a session sent
+> beside it never answers for it, and the server logs the refused key's row id
+> and owner id. The remedy is a new key minted by an existing user; revoke the
+> old key in **Setup → API Keys**.
+
+#### Saving, clearing and lockout recovery
+
+These rules apply to `allowed_ip_ranges`.
+
+- **An entry the server cannot read is refused.** Each entry is an IPv4 or IPv6
+  address, or an address followed by `/` and a prefix length written in decimal
+  digits: one or two digits, from 0 to 32, for IPv4, and one to three digits, from
+  0 to 128, for IPv6. Any other entry is refused with `400 SETTINGS_VALIDATION`,
+  whatever address you save from, and nothing is stored. The field error names the
+  entries, also listed in `constraint.invalidEntries`. This check runs before the
+  address check below, on every write, including writes made inside the server. An
+  `allowedIpRanges` list the deployment declares in its own auth configuration is
+  held to the same rule and refused at startup. An entry the server cannot read
+  matches no address at sign-in. If a stored list or `OS_AUTH_ALLOWED_IP_RANGES`
+  already holds one, the server logs it at startup with the entry named, and only
+  the list's other entries admit anyone.
+- **A value that is not text is refused.** The field holds its entries as text, one
+  per line or comma-separated. A value written in another form, such as a JSON list,
+  a number or an object, names no list: through the API or by a write inside the
+  server, it is refused the same way, with `constraint: { type: 'textarea' }`, and
+  nothing is stored. A value of another
+  form stored before this check admits no address at sign-in, and the server logs
+  it at startup. Save the list as text, or clear it.
+- **A save that would lock you out is refused.** When you save the field, the server
+  checks the new list against the address your own request comes from. It finds that
+  address by the same rule as the gate (`server.trustProxy` decides whether the
+  forwarded headers count). If no entry matches it, the save is refused with
+  `400 SETTINGS_VALIDATION` and nothing is stored. The check sits on the settings
+  API save, `PUT /api/settings/auth`, which **Setup → Authentication** calls, so any
+  HTTP client gets the same answer. The message names your address, says the list
+  would refuse your own next sign-in, and asks you to add your address or its range,
+  or to save from an address the list matches. It ends with the recovery steps below.
+  It is written in your language (English, Chinese, Japanese or Spanish). The field
+  error in `details.fields` also carries your address as `constraint.clientAddress`.
+  If the server cannot establish your address at all, any non-empty list is refused,
+  because the gate would refuse you too. Only a change is checked: saving the list
+  already in force again is not refused. Writes made inside the server (boot, seed,
+  migrations) carry no request, so no address is checked for them.
+- **Setup shows your address before you save.** Under the field, **Setup →
+  Authentication** shows the address the server judges for your request, read from
+  `GET /api/v1/auth/admin/client-address` (platform administrators only), which
+  answers `{ clientAddress, trustProxy }`: the note says whether that address came
+  from the forwarded headers of a proxy the server trusts (`server.trustProxy`) or
+  from the connection itself, which behind a proxy it does not trust is the proxy's
+  own address, and when `clientAddress` is `null` it says instead that no non-empty
+  list can be saved.
+- **Clearing takes effect at once.** Empty the field and save. No restart is needed:
+  the gate goes back to the list the deployment itself declares (`allowedIpRanges` in
+  its auth configuration, for example set by an `auth:configure` handler), or to no
+  restriction when it declares none. A clear is never refused.
+- **If you are already locked out**, recover in four steps:
+  1. Start the server with `OS_AUTH_ALLOWED_IP_RANGES` set to an empty value
+     (`OS_AUTH_ALLOWED_IP_RANGES=`). Environment variables are read at startup, so a
+     restart is needed. An empty value is not the same as an unset variable: any
+     value that is set, the empty string included, is an env override in force. It
+     wins over the stored list, and an empty list means no restriction.
+  2. Sign in.
+  3. Clear the stored list: send `PUT /api/settings/auth` with
+     `{ "allowed_ip_ranges": null }`. While the variable is set the field is locked,
+     so **Setup → Authentication** shows it read-only and any other save to it is
+     refused with `409 SETTINGS_LOCKED`; a clear (`null`) is the one write the lock
+     lets through. It clears the stored value and changes nothing in force: the
+     answer still reads the empty value from the environment.
+  4. Remove the variable and restart. With the stored list cleared, nothing brings
+     it back: the gate applies the list the deployment declares, or no restriction.
+
+  Removing the variable without step 3 brings the stored list back at the next
+  restart, and locks you out again.
 
 ---
 
@@ -1079,6 +1166,47 @@ rows that resolve to a temporary password (all of them under `temporary`, only
 the unreachable ones under `auto`) — reveals the generated passwords once with a
 download, splitting files above 500 rows into batches automatically.
 
+#### SCIM Connection Credentials
+
+With SCIM enabled (`OS_SCIM_ENABLED=true`, or `plugins.scim`), an identity
+provider such as Okta or Entra ID provisions users through
+`/api/v1/auth/scim/v2/*` with a bearer credential the platform issues. Only a
+platform administrator mints or revokes one, through the same gate as the
+routes above; anyone else is refused `403 PERMISSION_DENIED` (`401` when
+signed out).
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/admin/scim/mint-credential \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $ADMIN_SESSION" \
+  -d '{ "connectionId": "okta-prod", "label": "rotation 2026-Q4" }'
+# → { success, data: { credentialId, connectionId, token, expiresAt } }
+```
+
+- `connectionId` (required) names the connection every provisioned resource
+  is scoped to: at most 246 characters, so the connection's audit actor
+  `svc:scim:<connectionId>` fits the audit log's 255. Optional: `label`, `expiresAt` (a future ISO date-time),
+  `provisioningDomainId`, and `organizationId` (the organization that owns the
+  credential row; the Default Organization when omitted).
+- The `token` is shown **once**, in this response only (`Cache-Control:
+  no-store`). Only a keyed one-way digest of it is stored; it is not readable
+  through the data API, the audit log or the logs afterwards. Paste it into the
+  identity provider's SCIM settings as the bearer token.
+- While SCIM is off the mint is refused `503 SERVICE_UNAVAILABLE`: a credential
+  nothing can verify is not issued.
+
+`POST /api/v1/auth/admin/scim/revoke-credential` with `{ "credentialId": "…" }`
+switches that credential off: the identity provider's next SCIM request with it
+is refused `401`. An unknown credential answers `404 RESOURCE_NOT_FOUND`, one
+already revoked `409 RESOURCE_CONFLICT`. Revocation works whether or not SCIM is
+on. To **rotate**, mint a second credential for the same `connectionId`, move
+the identity provider to it, then revoke the old one; both authenticate until
+you do. Each mint and each revoke writes one `sys_audit_log` row naming the
+administrator and the connection, never the credential.
+
+A connection's groups grant permission sets through the same group mappings an
+SSO provider's sign-in uses; see
+[Grant permission sets from IdP groups](/docs/permissions/sso#grant-permission-sets-from-idp-groups).
+
 ---
 
 ## Client Integration
@@ -1209,8 +1337,8 @@ All endpoints are available under `/api/v1/auth/*`:
 - `POST /api/v1/auth/admin/set-user-password` - Set/reset a user's password (also provisions a credential for SSO-onboarded users)
 - `POST /api/v1/auth/admin/import-users` - Bulk import users (CSV/JSON/XLSX; `auto` (default, per-row invite-or-temporary) / `invite` / `temporary` / `none` password policy; ≤500 rows, dry-run supported)
 - `POST /api/v1/auth/admin/unlock-user` - Clear a brute-force lockout early
-- `POST /api/v1/auth/admin/ban-user` - Ban a user (blocks sign-in and revokes live sessions)
-- `POST /api/v1/auth/admin/unban-user` - Lift a ban, restoring the account's ability to sign in
+- `POST /api/v1/auth/admin/ban-user` - Ban a user (blocks sign-in and revokes live sessions; the user's API keys are refused at every door while the ban holds; their OAuth access tokens are refused at the MCP endpoint and read as not valid at `/oauth2/userinfo` and `/oauth2/introspect`, and the token endpoint issues them no new token; a ban with an expiry stops binding once it expires. Neither the keys nor the OAuth tokens are revoked)
+- `POST /api/v1/auth/admin/unban-user` - Lift a ban, restoring the account's ability to sign in and its API keys (each key is still judged by its own lifecycle: a key left unused past the inactivity window during the ban answers as inactive, and needs replacing)
 
 #### Organization Membership (requires `plugins.organization`; platform-admin gated)
 

@@ -116,6 +116,18 @@ const TABLE: ReadonlyArray<readonly [unknown, string | undefined, string]> = [
   [{ en: 'Sales', 'zh-CN': '销售' }, 'zh', '销售'],
   [{ en: 'Sales', 'zh-CN': '销售' }, 'zh-TW', '销售'],
   [{ 'pt-BR': 'Vendas' }, 'pt-PT', 'Vendas'],
+  // …the first one in authoring order, for a language the table names once.
+  [{ 'pt-PT': 'Vendas (PT)', 'pt-BR': 'Vendas' }, 'pt', 'Vendas (PT)'],
+
+  // Limbs 2–3, script first (#30910): where the platform table splits the
+  // language by script, an entry of the session's own script wins, whatever
+  // the authoring order — on both sides, so the nav (spec resolver) and the
+  // plugin text (`pickLocalized`) of one zh-Hant session agree.
+  [{ en: 'Sales', 'zh-CN': '销售', 'zh-TW': '銷售' }, 'zh-Hant', '銷售'],
+  [{ en: 'Sales', 'zh-TW': '銷售', 'zh-CN': '销售' }, 'zh-Hans', '销售'],
+  [{ en: 'Sales', 'zh-Hans': '销售', 'zh-Hant': '銷售' }, 'zh-TW', '銷售'],
+  [{ en: 'Sales', zh: '销售', 'zh-HK': '銷售' }, 'zh-Hant', '銷售'],
+  [{ 'zh-TW': '銷售', 'zh-CN': '销售' }, 'zh', '销售'],
 
   // Limb 4 — `default` outranks `en`.
   [{ default: 'Default', en: 'English' }, 'fr', 'Default'],

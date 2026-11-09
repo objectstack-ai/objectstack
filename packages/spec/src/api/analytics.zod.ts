@@ -251,6 +251,21 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
       + 'dimension with a `field`; independent of `dimensionFields`. Absent on a cube '
       + 'query answer.',
     ),
+    drillScopes: z.record(z.string(), FilterConditionSchema).optional().describe(
+      'Drill-through sidecar per measure: each selected measure name to the list filter, on '
+      + 'the answer\'s `object`, that selects the records that measure aggregates: the '
+      + 'dataset\'s own `filter`, AND the measure\'s own `filter`, AND, for a measure over a '
+      + '`field`, that field holding a value (`{ "$null": false }`; both instants for a '
+      + 'duration measure), with each `{token}` resolved as the query resolved it; `{}` when '
+      + 'none of these applies. A drill lists the clicked bucket (`dimensionFields` / '
+      + '`drillRawRows` / `drillRawTotals`, `drillRanges`) AND the widget\'s own filter AND '
+      + 'this scope. A measure is left out when no list filter on `object` selects its records '
+      + '(a derived measure; a scope that names a relationship path such as `account.region`, '
+      + 'as a key or as a `$field` reference), and a measure left out offers no drill. Keyed '
+      + 'by measure name: a `__compare` column has no entry. Set on every dataset answer '
+      + '(`POST /analytics/dataset/query`) that has rows; absent on a cube query answer and '
+      + 'on a draft-preview answer.',
+    ),
   }),
 }));
 

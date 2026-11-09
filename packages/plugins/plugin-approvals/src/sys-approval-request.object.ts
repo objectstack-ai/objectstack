@@ -88,7 +88,7 @@ export const SysApprovalRequest = ObjectSchema.create({
   // search sweep, into a 403. A structured filter on the snapshot is
   // unchanged, for the readers the guard admits.
   searchableFields: [
-    'process_name', 'process_label', 'object_name', 'record_id', 'submitter_comment', 'status',
+    'process_name', 'process_package', 'process_label', 'object_name', 'record_id', 'submitter_comment', 'status',
     'cancel_reason', 'current_step', 'current_step_label', 'pending_approvers', 'pending_approver_labels',
     'flow_run_id', 'flow_node_id', 'node_config_json',
   ],
@@ -237,6 +237,23 @@ export const SysApprovalRequest = ObjectSchema.create({
       required: true,
       maxLength: 100,
       description: 'Origin of the request — `flow:<flowName|nodeId>` for node-driven approvals',
+      group: 'Target',
+    }),
+
+    // [ADR-0150 D8 row R7] The package that holds the flow `process_name`
+    // names (`flow:NAME`), beside the name (ADR-0126 §4: two facts, two
+    // columns). Backfilled at boot on OPEN requests only (`pending`, and
+    // `returned`, whose run waits in the revise window) from the flow's one
+    // package holder (`stored-process-package-backfill.ts`); a decided
+    // request stays as written. Empty for an environment-authored flow and
+    // for a name no single package holds. Nothing reads it yet and no writer
+    // stamps it. Width: the package-id class (`sys_metadata.package_id`).
+    process_package: Field.text({
+      label: 'Source Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here.',
       group: 'Target',
     }),
 

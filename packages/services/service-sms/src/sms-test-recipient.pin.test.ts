@@ -91,7 +91,7 @@ async function serve(users: UserRow[], opts: { userReadFails?: boolean; noEngine
   vi.stubGlobal('fetch', twilio);
 
   /** POST /api/settings/sms/test with the body the console sends. */
-  const pressSendTest = async (body: unknown) => {
+  const pressSendTest = async (body: unknown, headers: Record<string, string> = {}) => {
     const handler = http.routes.get('POST /api/settings/:namespace/:actionId');
     if (!handler) throw new Error('the settings action route is not mounted');
     const captured: { status: number; body: any } = { status: 200, body: undefined };
@@ -105,7 +105,7 @@ async function serve(users: UserRow[], opts: { userReadFails?: boolean; noEngine
       params: { namespace: 'sms', actionId: 'test' },
       query: {},
       body,
-      headers: {},
+      headers,
       method: 'POST',
       path: '/api/settings/sms/test',
     };
@@ -224,5 +224,45 @@ describe('served sms/test — the recipient refusals are admin copy', () => {
     expect(result.message).toMatch(/^No recipient — nothing was sent\./);
     expect(result.message).toContain('Sign in as an admin whose account has a phone number');
     adminCopy(result.message);
+  });
+});
+
+// The answer is the toast the administrator reads, so it is written in the
+// caller's display language (`Accept-Language`, else `?locale`), the way the
+// `mail/test` and `storage/test` answers are. Only the provider's own text
+// passes through untranslated.
+describe('served sms/test — answers in the caller\'s language', () => {
+  it('a sent test is reported in the Accept-Language language: zh-TW in Traditional Chinese', async () => {
+    const { twilio, pressSendTest } = await serve([{ id: ADMIN_ID, phone_number: ADMIN_PHONE }]);
+
+    const answer = await pressSendTest(TWILIO_DRAFT, { 'accept-language': 'zh-TW,zh;q=0.9' });
+
+    expect(answer.status).toBe(200);
+    expect(twilio).toHaveBeenCalledTimes(1);
+    expect(answer.body?.data).toMatchObject({ ok: true, severity: 'info' });
+    expect(answer.body?.data?.message).toMatch(/^測試簡訊已傳送至 \S+，經由 twilio（id=SM_test）。$/);
+  });
+
+  it.each([
+    ['fr', 'Votre compte n’a pas de numéro de téléphone'],
+    ['de-DE', 'Ihr Konto hat keine Telefonnummer'],
+    ['ko', '계정에 전화번호가 없고'],
+  ])('a refusal is written in %s, and nothing is sent', async (locale, opening) => {
+    const { twilio, pressSendTest } = await serve([{ id: ADMIN_ID, phone_number: null }]);
+
+    const answer = await pressSendTest(TWILIO_DRAFT, { 'accept-language': locale });
+
+    expect(answer.status).toBe(400);
+    expect(answer.body?.error?.code).toBe('SETTINGS_ACTION_FAILED');
+    expect(String(answer.body?.error?.details?.message).startsWith(opening)).toBe(true);
+    expect(twilio).not.toHaveBeenCalled();
+  });
+
+  it('control: with no language, or one off the platform locale table, the answer stays English', async () => {
+    for (const headers of [{}, { 'accept-language': 'sw-KE' }] as Array<Record<string, string>>) {
+      const { pressSendTest } = await serve([{ id: ADMIN_ID, phone_number: null }]);
+      const answer = await pressSendTest(TWILIO_DRAFT, headers);
+      expect(String(answer.body?.error?.details?.message).startsWith('Your account has no phone number')).toBe(true);
+    }
   });
 });

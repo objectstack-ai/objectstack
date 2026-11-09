@@ -41,6 +41,10 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // it is rendered from two packages. Adding a `detail.resizeDrawer` twin
   // would fork the translation and drift the two handles apart.
   'common.resizeDrawer': 'Resize drawer',
+  // objectstack#30334 — a stage write the object's external datasource does not
+  // admit (`stageRefusalLines`). The record form's key, not a `detail.*` twin:
+  // one refusal, one sentence on every surface. Byte-identical to the `en` pack.
+  'form.readOnlyExternalSource': 'This table is read-only. Its records come from an external data source that does not accept changes.',
   'detail.back': 'Back',
   'detail.edit': 'Edit',
   'detail.editInline': 'Edit',
@@ -98,6 +102,7 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'detail.copyToClipboard': 'Copy to clipboard',
   'detail.copied': 'Copied!',
   'detail.deleteConfirmation': 'Are you sure you want to delete this record? This cannot be undone.',
+  'detail.deleteConfirmQuestion': 'Are you sure you want to delete this record?',
   'detail.editRecord': 'Edit record',
   'detail.viewAll': 'View All',
   'detail.new': 'New',
@@ -323,6 +328,9 @@ export const DETAIL_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // because a provider-less host mounting `RelatedList` directly is exactly
   // the case with no per-component error boundary above it either.
   'view.malformedFilter': 'This view’s filter is malformed, so no records are shown: the {{subject}} condition cannot be applied.',
+  // The export doors' refusal sentence, shared with `ListView` and
+  // `ObjectGrid`. Byte-identical to the `en` pack.
+  'view.exportNotPermitted': 'You don’t have permission to export these records. Contact your administrator if you think you should be able to.',
 };
 
 /**

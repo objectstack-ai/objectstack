@@ -202,6 +202,8 @@ describe('opening an approval step tells each resolved approver, once (approval.
         title: 'Approval requested',
         body: `A decision on Deal ladder is waiting on you.`,
         actionUrl: `/system/approvals?request=${encodeURIComponent(row.id)}`,
+        // [#30509] The approval e-mail's link (relative: no public origin here).
+        approvalUrl: `/system/approvals?request=${encodeURIComponent(row.id)}`,
       });
       expect(e.source).toEqual({ object: 'sys_approval_request', id: row.id });
       expect(e.actorId).toBe('u_sub');

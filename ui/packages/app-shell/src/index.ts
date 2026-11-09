@@ -94,6 +94,15 @@ export {
 // (objectui#4109 / PR #4279), which is the "two readers of one prose contract"
 // shape #3367 / #3842 record. `./utils/appRoute` is the contract.
 export { resolveHostAppSegment, appRouteSegment, filterActiveApps } from './utils/index.js';
+// objectstack#29750 — the inbox's notification-link resolver, and the table of
+// console routes served outside an app. The console's native-shell navigate
+// listener and its unmatched-route guard host an app-relative push route
+// through the SAME resolver every inbox door uses, so a push tap and the inbox
+// row open the same screen; re-deriving either here would be a second reader
+// of one contract.
+export { resolveNotificationTarget } from './utils/index.js';
+export type { NotificationTarget } from './utils/index.js';
+export { CONSOLE_ROOT_SEGMENTS } from './utils/hostInConsolePath.js';
 // objectui#5178 — the Approval Center's timeline reads the same `via_override`
 // verdict the record page's approval panel does.
 export {
@@ -126,6 +135,12 @@ export { readEnvelopeFailureText } from './utils/apiErrorEnvelope.js';
 // point gates on (FAB, /ai routes, designer "Ask AI"). Server-pushed, no
 // build-time edition flag. See ./hooks/useAiSurface.
 export { useAiSurfaceEnabled } from './hooks/useAiSurface.js';
+
+// The sign-in page saves a language picked there as the person's own when
+// they have none, before it navigates away (objectstack#30399). The pick is
+// this module's page-load memory, so the sign-in host asks it here.
+export { hasSignInLanguagePick, saveSignInLanguagePick } from './hooks/useUserLocale.js';
+export type { SignInLanguagePickWriter } from './hooks/useUserLocale.js';
 
 // Layout chrome
 export {
@@ -291,13 +306,27 @@ export {
   InvitationGoneNotice,
   InvitationLinkHint,
   invitationArrivalCopy,
+  invitationIdOf,
   useInvitationArrival,
   useInvitationPreview,
   type InvitationArrival,
 } from './console/auth/invitationArrival.js';
+// Registering from an invitation link accepts that invitation and enters its
+// organization, on both register pages (#30125).
+export { useInvitationSignUpJoin, type InvitationSignUpJoin } from './console/auth/invitationSignUpJoin.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';
 export { HomePage as DefaultHomePage, HomePage } from './console/home/HomePage.js';
+// Whether the signed-in person has connected an AI assistant (or holds a
+// working API key), and where Connect an AI Assistant opens: the one read and
+// the one path the Connect page, Home's card and the first-run checklist share
+// (#30898, #30895).
+export {
+  useConnectedAccess,
+  type ConnectedAccess,
+  type ConnectedEntry,
+} from './console/connect/connectedAccess.js';
+export { connectAssistantPath } from './console/connect/connectAssistantPath.js';
 export { OrganizationsLayout as DefaultOrganizationsLayout } from './console/organizations/OrganizationsLayout.js';
 export { OrganizationsPage as DefaultOrganizationsPage } from './console/organizations/OrganizationsPage.js';
 
@@ -335,8 +364,10 @@ import './services/builtinComponents.js';
 // SDUI widget for the metadata-driven Cloud Connection page (cloud ADR-0008).
 import './console/cloud-connection/CloudConnectionPanel.js';
 import './console/connect/ConnectAgentWidget.js';
+import './console/connect/ManagedPersonAssistants.js';
+import './console/security/UserEffectiveAccess.js';
 // Generic product-page blocks — hero, stat, usage-bar, checklist, tile-grid
-// (objectui#12197).
+// (objectui#12197), and row-table (#31856).
 import './console/blocks/productBlocks.js';
 // SDUI widget for the Cloud welcome page's seeded workspace-timezone line (objectui#11930).
 import './console/home/CloudWorkspaceTimezoneNotice.js';

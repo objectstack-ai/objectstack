@@ -1261,8 +1261,8 @@ describe('#8361 — the create-side hatch clause reaches saveMetaItem', () => {
 
 describe('[#20910] the repository doors name a Regime C type\'s sanctioned path, from the one regime table', () => {
   const ADR_0126 = 'See docs/adr/0126-packaged-metadata-customization-model.md.';
-  const ACTION_SWITCH = 'Switch it off (POST /api/v1/actions/_activation/:object/:action, body {enabled: false}, '
-    + ':object = global for an object-less action; operator-only where one install serves several organizations).';
+  const ACTION_SWITCH = 'Switch it off (POST /api/v1/actions/_activation/:object_or_global/:action, body {enabled: false}; '
+    + 'operator-only where one install serves several organizations).';
   // The clone route is the catalog's clone door: the data route of the
   // `sys_permission_set` object retired with it (C3 stage 8).
   const PERMISSION_CLONE = 'Clone it under a new name to customize it (the "Clone" action on the permission set, '

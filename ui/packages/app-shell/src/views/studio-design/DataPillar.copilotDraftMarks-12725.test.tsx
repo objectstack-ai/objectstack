@@ -44,7 +44,8 @@ const mockClient = {
   save: vi.fn(async () => ({})),
   list: vi.fn(async (type: string) => (type === 'object' ? [{ name: 'showcase_task', label: 'Task' }] : [])),
   listDrafts: vi.fn(async () => []),
-  layered: vi.fn(async () => ({ effective: objectDef, code: objectDef })),
+  // objectstack#29793 — the stored draft is the layered read's `draft` layer.
+  layered: vi.fn(async () => ({ effective: objectDef, code: objectDef, draft: draftEnvelope?.item ?? null })),
   getDraft: vi.fn(async () => draftEnvelope),
   get: vi.fn(async () => null),
   withPreviewDrafts() {

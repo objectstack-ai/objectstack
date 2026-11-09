@@ -33,6 +33,7 @@
  * and the draft bar both pass it in), so i18next is the thing answering.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { renderHook } from '@testing-library/react';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -118,7 +119,7 @@ beforeEach(() => {
 
 describe('objectui#3546 slice six — the home namespace', () => {
   it('covers all ten packs and all five paths (guards the loops from emptying)', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(KEYS).toHaveLength(5);
     expect(new Set(KEYS).size).toBe(5);
     // The retired facet keys stay retired: no pack defines a `perm.facet` branch.
@@ -238,7 +239,7 @@ describe('objectui#3546 slice six — the home namespace', () => {
     // ru/ar restructure. Copying `en`'s "(s)" into ru is the mistake this pins.
     expect(at(builtInLocales.en, 'home.pendingDrafts.title')).toContain('change(s)');
     const MARKER = /\([\p{L}]{1,4}\)/u;
-    for (const lang of ['de', 'fr', 'es', 'pt'] as const) {
+    for (const lang of ['de', 'fr', 'es', 'pt-BR'] as const) {
       expect(
         MARKER.test(at(builtInLocales[lang], 'home.pendingDrafts.title') as string),
         `${lang} title lost its marker`,
@@ -248,7 +249,7 @@ describe('objectui#3546 slice six — the home namespace', () => {
         `${lang} publishedVerified should carry the same marker`,
       ).toBe(true);
     }
-    for (const lang of ['zh', 'ja', 'ko', 'ru'] as const) {
+    for (const lang of ['zh-Hans', 'zh-Hant', 'ja', 'ko', 'ru'] as const) {
       expect(
         MARKER.test(at(builtInLocales[lang], 'home.pendingDrafts.publishedVerified') as string),
         `${lang} publishedVerified imported a "(s)" marker it does not use`,
@@ -266,7 +267,7 @@ describe('objectui#3546 slice six — the home namespace', () => {
       // The em dash in `Published & verified — …` is U+2014 everywhere, except zh
       // which writes the doubled `——` its own pack used in the retired home.pendingDrafts.message.
       const verified = at(builtInLocales[lang], 'home.pendingDrafts.publishedVerified') as string;
-      expect(verified.includes(lang === 'zh' ? '——' : '—'), `${lang} publishedVerified dash`).toBe(true);
+      expect(verified.includes(lang === 'zh-Hans' || lang === 'zh-Hant' ? '——' : '—'), `${lang} publishedVerified dash`).toBe(true);
       expect(verified.includes('&'), `${lang} kept en's ampersand`).toBe(lang === 'en');
     }
   });
@@ -281,7 +282,7 @@ describe('objectui#3546 slice six — the home namespace', () => {
     expect(at(builtInLocales.ja, 'console.ai.usage.ariaLabel')).toBe('AI 使用状況: {{status}}');
     expect(at(builtInLocales.ja, 'home.pendingDrafts.capabilityWarn')).toContain('作成時チェック：');
     // zh writes fullwidth punctuation throughout.
-    expect(at(builtInLocales.zh, 'home.pendingDrafts.capabilityWarn')).toContain('编写检查：');
+    expect(at(builtInLocales['zh-Hans'], 'home.pendingDrafts.capabilityWarn')).toContain('编写检查：');
     // ko has no fullwidth colon anywhere in the pack.
     expect(at(builtInLocales.ko, 'home.pendingDrafts.capabilityWarn')).toContain('작성 검사: ');
     expect(at(builtInLocales.ko, 'home.pendingDrafts.capabilityWarn')).not.toContain('：');
@@ -349,7 +350,7 @@ describe('objectui#3546 slice six — the home namespace', () => {
       }
     });
 
-    it.each(['en', 'zh'] as const)('%s resolves every sampled key from the pack', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s resolves every sampled key from the pack', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       for (const [key, owner] of SAMPLE) {
         const value = result.current.t(key);

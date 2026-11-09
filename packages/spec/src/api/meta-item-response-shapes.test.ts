@@ -67,7 +67,13 @@ export type LockIsTheAdr0010Union = Assert< Eq< GetMetaItemResponse['lock'], Met
  * is a widening of the other, which is the fact that justifies a second path
  * instead of one stretched declaration.
  */
-export type LayeredCarriesNoItem = Assert< Eq< 'item' extends keyof GetMetaItemLayeredResponse ? true : false, false > >;
+/**
+ * #29855 — the pending draft is a declared layer: a consumer holding a
+ * `GetMetaItemLayeredResponse` reads `draft` without a cast.
+ */
+export type LayeredDeclaresDraft = Assert< Eq< 'draft' extends keyof GetMetaItemLayeredResponse ? true : false, true > >;
+
+export type LayeredCarriesNoItem =Assert< Eq< 'item' extends keyof GetMetaItemLayeredResponse ? true : false, false > >;
 export type PlainCarriesNoLayers = Assert< Eq< 'effective' extends keyof GetMetaItemResponse ? true : false, false > >;
 
 /**
@@ -195,6 +201,29 @@ describe('GetMetaItemLayeredResponseSchema — the three-layer projection', () =
     const { _diagnostics: _omitted, ...withoutDiagnostics } = LAYERED_BODY;
     const parsed = GetMetaItemLayeredResponseSchema.parse(withoutDiagnostics);
     expect(parsed._diagnostics).toBeUndefined();
+  });
+
+  it('[#29855] accepts the pending draft as a layer — an object, kept as stored', () => {
+    // The draft as authored: source labels, no injected platform columns. The
+    // schema must hand it through untouched, beside the published layers.
+    const draft = { name: 'customer', label: 'Customer (draft)', fields: { tier: { type: 'text', label: 'Tier' } } };
+    const parsed = GetMetaItemLayeredResponseSchema.parse({ ...LAYERED_BODY, draft });
+    expect(parsed.draft).toEqual(draft);
+    // The published layers are unaffected by a pending draft.
+    expect(parsed.overlay).toEqual({ label: 'Client' });
+    expect(parsed.effective).toEqual({ name: 'customer', label: 'Client' });
+  });
+
+  it('[#29855] accepts `draft: null` — no draft is pending', () => {
+    const parsed = GetMetaItemLayeredResponseSchema.parse({ ...LAYERED_BODY, draft: null });
+    expect(parsed).toHaveProperty('draft', null);
+  });
+
+  it('[#29855] still parses an answer without `draft` — an older server that does not serve the layer', () => {
+    // LAYERED_BODY carries no `draft` key: absence is "not served", not "no draft".
+    expect('draft' in LAYERED_BODY).toBe(false);
+    const parsed = GetMetaItemLayeredResponseSchema.parse(LAYERED_BODY);
+    expect(parsed).not.toHaveProperty('draft');
   });
 
   it('REQUIRES the four resolved verdicts — this path always sets them', () => {

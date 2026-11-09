@@ -15,6 +15,11 @@ export { recordNotFoundError } from './protocol.js';
 // still be quoted (a malformed seed body). Exporting is enabling-only — no
 // behaviour in this package changes.
 export { clientFacingFailureText, seedRequestValidationError } from './protocol.js';
+// [#30348] The `seedApplied.landed` projection (rows created vs matched, per
+// object, capped), exported for the same second producer: the runtime's
+// fallback seed apply reports on the same receipt, so it folds the loader's
+// ids through this one function instead of a copy.
+export { seedAppliedLanded, type SeedLandingResult } from './seed-applied-landed.js';
 // [#7823] The write-response half of the `internal: true` guarantee — THE
 // single helper every generic write ingress routes its response records
 // through (A-prime ruling, 2026-08-13). Tripwire-enforced; see the module
@@ -39,6 +44,10 @@ export { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type
 // exported for the doors outside this package — `os validate` and the
 // marketplace install — so every door that lets a field in asks one judgement.
 export { judgeExtensionFieldSuffix, extensionFieldSuffixRefusalError, objectBodyExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRule, type ExtensionFieldSuffixSubject } from './protocol-extension-field-suffix.js';
+// [ADR-0146 D10, second rule] An extension's `fields` entry re-declaring an
+// owner's field beyond the display-property whitelist: one judge, asked by the
+// save doors here and by `os validate` and the marketplace install outside.
+export { judgeRedeclaredOwnerFields, redeclaredFieldChanges, redeclaredOwnerFieldRefusalError, redeclaredOwnerFieldInstallMessage, type RedeclaredOwnerFieldRefusal, type RedeclaredOwnerFieldSubject, type ObjectOwnerDeclaration } from './protocol-extension-redeclared-owner-field.js';
 
 // The probe-first replacement's shared vocabulary: the raw-SQL seam type the
 // exported migrations below take, and the dialect classifier their reports
@@ -47,6 +56,20 @@ export { judgeExtensionFieldSuffix, extensionFieldSuffixRefusalError, objectBody
 // these two are not specific to it, so they are exported from their own module.
 export { classifyIndexFailure } from './migrations/partial-index-probe.js';
 export type { IndexExec } from './migrations/partial-index-probe.js';
+
+// [ADR-0150 D4] `sys_metadata_activation`'s one row per (metadata_type, name)
+// among the rows that name no package — a runtime index ADDED beside the
+// declared `(metadata_type, package_id, name)` key, which is NULL-distinct.
+export {
+    ensureActivationLedgerPackagelessIndex,
+    buildActivationLedgerPackagelessIndexSql,
+    buildActivationLedgerPackagelessDuplicateProbeSql,
+    ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME,
+} from './migrations/activation-ledger-packageless-index.js';
+export type {
+    EnsureActivationLedgerPackagelessIndexResult,
+    EnsureActivationLedgerPackagelessIndexStatus,
+} from './migrations/activation-ledger-packageless-index.js';
 
 // [#8629] `sys_setting`'s declared ROW IDENTITY, delivered as a runtime
 // NULL-safe UNIQUE migration — the `ensureOverlayIndex` paradigm again, for the
@@ -126,7 +149,7 @@ export type {
     SeedTenancySplit,
     SeedTenancyCollision,
 } from './migrations/seed-tenancy-backfill.js';
-export type { UninstallCleanup, UninstallCleanupOutcome, UninstallDeclared } from './protocol.js';
+export type { PackageUninstallRecord, UninstallCleanup, UninstallCleanupOutcome, UninstallDeclared, UninstallGuard, UninstallGuardRefusal } from './protocol.js';
 export { captureUninstallDeclared } from './protocol.js';
 // [#9960] The ONE declared shape of the `deletePackage` seam, exported so the
 // two consumers that speak it (`@objectstack/rest`'s direct-mount package
@@ -141,6 +164,9 @@ export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjecti
 // never trusted content (receipt re-reads `sys_metadata` locally).
 export { METADATA_MUTATION_CLUSTER_CHANNEL } from './protocol.js';
 export type { ClusterMetadataMutationPayload } from './protocol.js';
+// [#31722] What the lane's resync seam (`resyncMetadataMutationPubSub()`)
+// reports after a cluster outage.
+export type { MetadataMutationResyncReport } from './protocol.js';
 // [#10219] The per-item publish notification the host bridges to the
 // kernel-wide `metadata:reloaded` announce. Exported for the same reason its
 // mutation sibling is: the subscriber lives in another package.
@@ -232,6 +258,11 @@ export type { MetadataHostEngine } from './host-engine.js';
 // `@objectstack/runtime` (`PATCH /:id/disable`, `DELETE /:id`) both ask it, so
 // "which packages are read-only" has ONE definition rather than two that drift.
 export { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from './package-writability.js';
+export { refuseNamespaceObjectNameClashes } from './protocol-save-door-refusals.js';
+// [ADR-0150 D5, epic #31527 child G1] The qualified by-name path's reading:
+// the sub-resource literals that keep their route (`/meta/:type/:name/history`),
+// and the address shape `resolveMetaItemAddress` answers. Both transports read them.
+export { META_ITEM_SUBRESOURCE_SEGMENTS, type MetaItemAddress } from './protocol-exact-qualifier.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
 
 // [#28409, ADR-0146 D8 item 2] "Is this stored row the served override of base
@@ -249,6 +280,11 @@ export type { PackagelessOverlayCensus, PackagelessOverlayMigration } from './pr
 // read by the automation boot pull, which judges a flow override on the
 // column (`isServedOverrideRowOf`), ⛔ never on the body's `_packageId`.
 export { bindStoredRow, storedRowBindingOf } from './stored-row-binding.js';
+
+// [#31575, ADR-0150 D3] A package's declared dependency closure: the ONE
+// function the save door's write scope (`resolveWritePackageScope`) and
+// objectql's package-scoped name resolver both ask, so the two never disagree.
+export { packageDependencyClosure } from './protocol-write-package-scope.js';
 export { shadowedStoredRowsOf } from './stored-flow-slot.js';
 
 // [ADR-0131 D6] The `unmanaged` install mode's walled-posture refusal — the
@@ -263,7 +299,13 @@ export { unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
 // install primitive and the duplicate ask it; exported so `POST /packages`
 // (`@objectstack/runtime`) asks the same one ahead of both its install limbs,
 // its no-protocol fallback included, instead of keeping a second copy.
-export { customizationPairManifestRefusal } from './protocol-customization-package.js';
+export { customizationPairManifestRefusal, kernelPackageScope } from './protocol-customization-package.js';
+
+// [ADR-0029 D7] The refusal of `navigationContributions` on a package created
+// at runtime, whose install never registers them. The install primitive asks
+// it; exported so `POST /packages` (`@objectstack/runtime`) asks the same one
+// ahead of both its install limbs, its no-protocol fallback included.
+export { runtimeNavigationContributionsRefusal } from './protocol-package-install.js';
 
 // #4556 — the `sys_metadata_history.recorded_by` sentinel → NULL conversion,
 // as an ADR-0119 D2 migration plan. Run by `os migrate recorded-by`.
@@ -276,7 +318,14 @@ export {
 } from './migrations/recorded-by-sentinel.js';
 export type { SentinelHistoryRow } from './migrations/recorded-by-sentinel.js';
 
-export { SeedLoaderService, type SeedLoaderServiceOptions } from './seed-loader.js';
+export {
+  SeedLoaderService,
+  type SeedLoaderServiceOptions,
+  // [#30429] The runtime's fallback seed apply reads a thrown load's finished
+  // datasets through it, so its receipt reports `landed` as this package's does.
+  seedLoadPartialWrites,
+  type SeedLoadPartialWrites,
+} from './seed-loader.js';
 export { runBuildProbes } from './build-probes.js';
 export type {
   RuntimeBuildIssue,

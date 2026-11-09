@@ -225,6 +225,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'POST /api/v1/meta/_migrate-stored', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.migrateStored',
     authz: 'anonymous-deny-meta',
     note: 'ADR-0087 stored-row canonicalization, the route form of `os migrate meta --stored`: it rewrites stored `sys_metadata` rows in place to their canonical form; gated on `manage_metadata`, preview unless { apply: true }. DELIBERATELY UNBOUND — this row would name the schema, but the report\'s only named type, `StoredMigrationReport`, lives in `@objectstack/metadata-protocol` (unreachable from the spec/api namespace this field resolves against); a second declaration in spec would drift against the CLI rendering the same report. Answered BARE on this surface, enveloped on the dispatcher twin' },
+  // [ADR-0144, ruling 6670707546 item B] The tenant-admin twin of the CLI backfill.
+  { route: 'POST /api/v1/meta/_migrate-record-currency-codes', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.migrateRecordCurrencyCodes',
+    note: 'ADR-0144 record-currency code backfill, the route form of `os migrate record-currency-codes`: writes the one given code into the codeless rows of a record-mode amount in the CALLER\'S CURRENT ORGANIZATION only (no environment-wide form, no organization in the body); gated on `setup.write`, preview unless { apply: true }, behind `metadata.endpoints.maintenance`. DELIBERATELY UNBOUND for `migrateStored`\'s reason — the report\'s named type, `RecordCurrencyBackfillReport`, lives in `@objectstack/objectql`, unreachable from the spec/api namespace this field resolves against. REST-only: the dispatcher has no twin. Answered in the shared envelope, the report as `data`' },
   { route: 'GET /api/v1/meta/:type', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItems' },
   { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getReferences',
     responseSchema: 'FindReferencesToMetaResponseSchema',
@@ -235,7 +238,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // [#27627] The app metadata bundle — see meta-app-bundle-routes.ts.
   { route: 'GET /api/v1/meta/app/:appId/bundle', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getAppBundle',
     responseSchema: 'AppMetadataBundleResponseSchema',
-    note: 'The app metadata bundle: the app and the objects, views, pages and dashboards its navigation reaches (objects: navigation, then one hop of inbound relationships), each member the item chain\'s answer of its own GET /meta/:type/:name as the same caller (createMetaItemAnswer, the uncached arm\'s fetch), a refused member absent, a refused app the whole answer. Answers BARE, so the named schema is the whole body; per-caller weak ETag over the served body (the /meta reads\' shared validator), private, no-cache, 304 on If-None-Match. meta-app-bundle-routes.test.ts parses the body against the named schema on the mount' },
+    note: 'The app metadata bundle: the app and the objects, views, pages and dashboards its navigation reaches (objects: navigation plus one hop of inbound relationships, in object-list order), each member the item chain\'s answer of its own GET /meta/:type/:name as the same caller (createMetaItemAnswer, the uncached arm\'s fetch), a refused member absent, a refused app the whole answer. Answers BARE, so the named schema is the whole body; per-caller weak ETag over the served body (the /meta reads\' shared validator), private, no-cache, 304 on If-None-Match. meta-app-bundle-routes.test.ts parses the body against the named schema on the mount' },
   // [#5882] The three-layer diagnostic projection, promoted from the
   // `?layers=true` flag on the row below to a path of its own so that one path
   // answers one response shape. `responseSchema` is filled because this mount
@@ -257,6 +260,8 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItem',
     responseSchema: 'GetMetaItemResponseSchema',
     note: 'Answers BARE, so the named schema is the whole body. Filled now that meta-item-layered-route.test.ts parses BOTH branches of this mount (cached and uncached) against it — the uncached branch carries the ADR-0010 protection envelope this schema now declares, every key optional because the cached branch never publishes it' },
+  { route: 'GET /api/v1/meta/:type/:ns/:name', family: 'metadata', source: 'route-manager', disposition: 'server-only',
+    note: '[ADR-0150 D5] The qualified by-name read, answered by the `GET /api/v1/meta/:type/:name` handler itself (`meta-qualified-item-route.ts`): an installed namespace reads as `?package=` its holder (the exact qualifier: that package\'s item, or 409 `RESOURCE_CONFLICT` naming every holder), `_env` as the environment\'s own item (or 409). Registered LAST among the `/meta` routes so every literal three-segment sibling (`/history`, `/audit`, `/diff`, `/published`, `/references`, `/layers`, `/publish`, `/rollback`, `book/:name/tree`) keeps its route (ADR-0150 D5: a literal first); a literal last segment with no such route, or a middle segment that is no installed namespace, answers the host\'s unmatched 404 (`ENDPOINT_NOT_FOUND`) as before, and `?package=` beside it 400. server-only: the SDK reaches the same item by `meta.getItem(type, name, { packageId })`. Same answer as the dispatcher twin (`route-ledger.ts`). Pinned in `meta-qualified-item-route.test.ts`' },
   { route: 'PUT /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.saveItem',
     note: 'Gated on `manage_metadata` (ADR-0066 D1), same mechanism as POST /meta/_migrate-stored — a session alone is no longer enough. The write-side answer to ADR-0106 D1: a masked read PUT back verbatim used to delete the fields the caller could not see. The gate is the shared `metaWriteCapabilityVerdict`. The write names no organization and lands environment-wide (ADR-0131 D6); the org-scoped `manage_org_presentation` admission retired with it' },
   { route: 'DELETE /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.deleteItem',
@@ -386,6 +391,12 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/data/:object/export', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.export',
     note: 'file-stream response; the SDK returns the raw Response rather than a JSON envelope' },
 
+  // ── recycle bin (#30237, ADR-0148) ────────────────────────────────────────
+  { route: 'GET /api/v1/data/:object/recycle-bin', family: 'recycle-bin', source: 'route-manager', disposition: 'sdk', client: 'recycleBin.list' },
+  { route: 'DELETE /api/v1/data/:object/recycle-bin', family: 'recycle-bin', source: 'route-manager', disposition: 'sdk', client: 'recycleBin.empty' },
+  { route: 'POST /api/v1/data/:object/recycle-bin/:entryId/restore', family: 'recycle-bin', source: 'route-manager', disposition: 'sdk', client: 'recycleBin.restore' },
+  { route: 'DELETE /api/v1/data/:object/recycle-bin/:entryId', family: 'recycle-bin', source: 'route-manager', disposition: 'sdk', client: 'recycleBin.purge' },
+
   // ── search ────────────────────────────────────────────────────────────────
   // #13216 — the body's `pages` member (published-page hits) landed with the
   // command-palette page indexing; the note below describes it without the id
@@ -416,6 +427,10 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/security/my-delegable-scope', family: 'security-explain', source: 'route-manager', disposition: 'sdk', client: 'security.describeDelegableScope',
     note: "read half of the delegated-admin gate; strictly self-scoped (no target-user parameter), so a scoped-invitation picker can narrow to what the caller may actually delegate" },
 
+  // ── effective access (ADR-0090 D6/D12) ────────────────────────────────────
+  { route: 'GET /api/v1/security/users/:id/effective-access', family: 'security-explain', source: 'route-manager', disposition: 'sdk', client: 'security.describeEffectiveAccess',
+    note: "one user's effective permission sets with their origins; explain's caller gate in the service, an unknown id refused as a forbidden one" },
+
   // ── per-record shares ─────────────────────────────────────────────────────
   { route: 'GET /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.list' },
   { route: 'POST /api/v1/data/:object/:id/shares', family: 'record-shares', source: 'route-manager', disposition: 'sdk', client: 'shares.grant' },
@@ -437,6 +452,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'duplicate mount with the dispatcher /security domain' },
   { route: 'POST /api/v1/security/suggested-bindings/:id/reopen', family: 'security', source: 'route-manager', disposition: 'sdk', client: 'security.suggestedBindings.reopen',
     note: 'duplicate mount with the dispatcher /security domain' },
+  // ── a user's assigned work (#30205) ───────────────────────────────────────
+  { route: 'GET /api/v1/security/users/:id/assigned-work', family: 'user-work', source: 'route-manager', disposition: 'sdk', client: 'security.assignedWork.count' },
+  { route: 'POST /api/v1/security/users/:id/assigned-work/transfer', family: 'user-work', source: 'route-manager', disposition: 'sdk', client: 'security.assignedWork.transfer' },
   // RETIRED (ADR-0131 cutover): `POST /api/v1/security/permission-sets/:id/
   // discard-overlay` left with the "Discard Overlay" Setup action. No door
   // creates an environment overlay of a packaged permission set any more, and

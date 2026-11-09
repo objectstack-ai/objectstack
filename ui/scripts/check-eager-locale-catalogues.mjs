@@ -71,26 +71,30 @@ import { isEntrypoint } from './invoked-as.mjs';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Every language code `@object-ui/i18n` ships a catalogue for.
+ * Every language code `@object-ui/i18n` ships a catalogue for: the tags of the
+ * platform locale table (`PLATFORM_LOCALES` in `@objectstack/spec/system`), in
+ * its order, which the registry's `BUILT_IN_LANGUAGE_CODES` spreads
+ * (objectstack#30511).
  *
- * ⚠️ Duplicated from `BUILT_IN_LANGUAGE_CODES` in
- * `packages/i18n/src/locales/registry.ts` on purpose: this file must state its
+ * ⚠️ Written out here on purpose rather than imported: this file must state its
  * own population, or a code deleted from the registry would silently leave this
  * gate with nothing to look for and a green tick over it.
- * `scripts/__tests__/check-eager-locale-catalogues.test.ts` fails when the two
- * lists stop agreeing, which is the drift check a shared import cannot give.
+ * `scripts/__tests__/check-eager-locale-catalogues.test.ts` fails when this
+ * list, the table and the registry's loaders stop agreeing, which is the drift
+ * check a shared import cannot give.
  */
 export const BUILT_IN_LANGUAGE_CODES = Object.freeze([
   'en',
-  'zh',
+  'zh-Hans',
+  'zh-Hant',
+  'es',
+  'ar',
+  'fr',
+  'pt-BR',
+  'ru',
+  'de',
   'ja',
   'ko',
-  'de',
-  'fr',
-  'es',
-  'pt',
-  'ru',
-  'ar',
 ]);
 
 /**
@@ -102,7 +106,7 @@ export const ACTIVE_CATALOGUE = 'en';
 
 /**
  * The chunk-name prefix `apps/console/vite.config.ts` gives each catalogue's
- * `advancedChunks` group. Ten groups, ten single-module chunks; see that file
+ * `advancedChunks` group. One group per code, each a single-module chunk; see that file
  * for why it is not one group.
  */
 export const CATALOGUE_CHUNK_PREFIX = 'i18n-locale-';
@@ -111,7 +115,7 @@ const DIST_DIR = path.join(repoRoot, 'apps', 'console', 'dist');
 const REPORT_PATH = path.join(DIST_DIR, 'eager-closure.json');
 const ASSETS_DIR = path.join(DIST_DIR, 'assets');
 
-/** `i18n-locale-zh-Bx9f1.js` -> `zh`; anything else -> `null`. */
+/** `i18n-locale-zh-Hans` -> `zh-Hans`; anything else -> `null`. */
 export function catalogueCodeOfChunkName(name) {
   if (typeof name !== 'string' || !name.startsWith(CATALOGUE_CHUNK_PREFIX)) return null;
   const code = name.slice(CATALOGUE_CHUNK_PREFIX.length);
@@ -119,7 +123,7 @@ export function catalogueCodeOfChunkName(name) {
 }
 
 /**
- * `assets/i18n-locale-zh-Bx9f1.js` -> `zh`; anything else -> `null`.
+ * `assets/i18n-locale-zh-Hans-Bx9f1.js` -> `zh-Hans`; anything else -> `null`.
  *
  * ⛔ The hash segment is NOT constrained to hyphen-free text, and the premise
  * that it could be was measured false. Rolldown names a chunk with a

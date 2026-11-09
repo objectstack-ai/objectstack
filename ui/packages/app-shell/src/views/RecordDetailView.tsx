@@ -10,12 +10,13 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
-import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, extractWriteErrorMessage } from '@object-ui/react';
+import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLocalizer, usePageAssignment, isRecordPageOf, useMetadata, RecordContextProvider, SchemaRenderer, DiscussionContextProvider, HighlightFieldsProvider, InlineEditProvider, resolveApprovalLock, useGlobalUndo, useDataInvalidation, notifyDataChanged, subscribeDataChanges, dataChangeMatches, useRowPredicate, classifyLoadError, answeredLoadFailure, extractWriteErrorMessage, isExternalWriteRefusal } from '@object-ui/react';
+import type { AnsweredLoadFailure } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
@@ -29,6 +30,7 @@ import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './re
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
 import { ActionParamDialog, type ParamDialogState } from './ActionParamDialog.js';
+import { resolveParamDialogCompanion } from './actionDialogCompanion.js';
 import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
@@ -44,8 +46,10 @@ import {
   recordPageComments,
   recordPageRelatedLists,
   recordPageRequestOf,
+  recordPageStreamsRequestOf,
   recordPageTimeline,
   seedRecordPageReaders,
+  type RecordPageStreamsAsk,
 } from './recordPagePayload.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
@@ -56,6 +60,7 @@ import { modalTargetRefusalMessage } from '../utils/modalTargetDiagnostics.js';
 import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
+import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { findDeclaredApiAction, isSameOriginApiTarget, readApiActionDoorSuccess, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
@@ -65,6 +70,7 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 // Both sets are derived, not restated — see record-detail-system-fields.ts.
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
+import { placedHeaderActions } from '@object-ui/types';
 import type { ActionDef, ActionParamDef, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
@@ -82,7 +88,7 @@ import {
 // that import the app-shell barrel.
 import './record-approvals-renderer.js';
 import { getRecordDisplayName } from '../utils/index.js';
-import { parseAuditValue, collectAuditChanges, collectLookupIds, formatAuditValue } from '../utils/auditHistoryDisplay.js';
+import { parseAuditValue, collectAuditChanges, collectLookupIds, formatAuditValue, auditImpersonatorId } from '../utils/auditHistoryDisplay.js';
 import { useFavorites } from '../hooks/useFavorites.js';
 import {
   RECORD_RELATED_COLUMN_PREFERENCE,
@@ -91,7 +97,9 @@ import {
   useWorkspacePreference,
 } from '../utils/workspacePreference.js';
 import { shortcutKeycaps, useAdvertiseShortcut, type AdvertisedShortcut, type ShortcutChord, type ShortcutLabelTranslate } from '../chrome/advertisedShortcuts.js';
+import { nativeShare } from '@object-ui/mobile';
 import { useActionModal } from '../hooks/useActionModal.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { resolveCascadeDeleteLabels } from '../hooks/useObjectActions.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useObjectPresence } from '../hooks/useObjectPresence.js';
@@ -479,10 +487,15 @@ function activityWindowQuery(objectName: string, recordId: string) {
  * `sys_comment`, or they are account events rather than record activity).
  * Everything else comes back as an item, including a type nobody has mapped.
  */
-function activityRowsToFeedItems(rows: readonly any[], systemActorLabel: string): FeedItem[] {
+function activityRowsToFeedItems(
+  rows: readonly any[],
+  systemActorLabel: string,
+  impersonatedActorTemplate?: string,
+  unknownUserLabel?: string,
+): FeedItem[] {
   const mapped: FeedItem[] = [];
   for (const row of rows) {
-    const item = activityRowToFeedItem(row, systemActorLabel);
+    const item = activityRowToFeedItem(row, systemActorLabel, impersonatedActorTemplate, unknownUserLabel);
     if (item) mapped.push(item);
   }
   return mapped;
@@ -977,6 +990,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const notifyRecordChanged = useCallback(() => {
     if (objectName) notifyDataChanged({ objectName, recordId: pureRecordId || undefined });
   }, [objectName, pureRecordId]);
+  // objectstack#30337 — what `refreshAfter: true` refreshes: the spec's "refresh
+  // the view after execution", and on this page the view is the record AND its
+  // related lists. An action's target may write the CHILDREN (a team's Add
+  // Member writes a membership row), and the client cannot know which objects
+  // it wrote, so the page refreshes every child object it lists as well: their
+  // lists refetch and their counts (keyed on the child) re-count. Read through
+  // a ref because the child set is derived further down this component; one
+  // synchronous dispatch batch, so the record is still read once (the
+  // child-write subscription below and this record's own nonce bump together).
+  const pageChildObjectsRef = useRef<string[]>([]);
+  const notifyViewChanged = useCallback(() => {
+    notifyRecordChanged();
+    for (const child of pageChildObjectsRef.current) {
+      if (child !== objectName) notifyDataChanged({ objectName: child });
+    }
+  }, [notifyRecordChanged, objectName]);
   // Manual refresh (objectui#3460) — the producer for `RecordContext.refresh`,
   // which `page:header` turns into the ⟳ button at the end of the header row.
   //
@@ -1184,6 +1213,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [pageRecordStatus, setPageRecordStatus] = useState<
     'idle' | 'loading' | 'loaded' | 'missing' | 'accessEnded' | 'forbidden' | 'failed'
   >('idle');
+  // objectstack#29704 — the server's code and sentence for a `failed` read it
+  // ANSWERED (a 500 it explained), read by the list page's own rule
+  // (`answeredLoadFailure`). `null` = no answer, so the state keeps its
+  // "check your connection" sentence, which is only true of that case.
+  const [pageRecordFailure, setPageRecordFailure] = useState<AnsweredLoadFailure | null>(null);
   // The record-load effect's own `loadRecord`, for the `failed` state's Retry
   // (objectui#11902). Held so Retry re-runs THE read the page already makes —
   // same request, same cancellation guard — rather than a second read path.
@@ -1213,7 +1247,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
      */
     activityRows: number;
     timeline: boolean;
+    /**
+     * objectstack#30035 — the stream parts the open asked, as asked: the
+     * feed's re-read after a change to this record asks these again.
+     */
+    streams: RecordPageStreamsAsk;
   } | null>(null);
+  // objectstack#30035 — the feed's re-read of the streams the open asked, once
+  // this record changed after the open: one ask per record and invalidation
+  // count, joined by every later run of the feed effect at that count.
+  const feedStreamsReread = useRef<{ feedKey: string; generation: number; payload: Promise<RecordPagePayload | null> } | null>(null);
   // objectstack#26589 — the record this viewer just decided an approval on,
   // as `objectName` + `recordId`. A pending approver with no standing access
   // reads the record only while their step waits (objectstack#26180): the
@@ -1350,6 +1393,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // objectui#11902 — a rejection is never "not found": the adapter
           // answers a 404 by resolving `null` (the branch above). A refusal is
           // told apart by the shared classifier; anything else is a failed load.
+          setPageRecordFailure(answeredLoadFailure(err));
           setPageRecordStatus(classifyLoadError(err) === 'forbidden' ? 'forbidden' : 'failed');
         });
     };
@@ -1489,7 +1533,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // not read `overrideNotice` itself — it takes the envelope so the two
   // handlers on this seam cannot drift apart from each other, and so a reader
   // added here later has the key declared rather than reaching for a cast.
-  const paramCollectionHandler = useCallback((params: ActionParamDef[], action?: ConsoleActionDispatch, interpolate?: (text: string) => string, run?: Parameters<ParamCollectionHandler>[3]) => {
+  const paramCollectionHandler = useCallback((params: ActionParamDef[], action?: ConsoleActionDispatch, interpolate?: (text: string) => string, run?: Parameters<ParamCollectionHandler>[3], interpolateRead?: Parameters<ParamCollectionHandler>[4]) => {
     return new Promise<Record<string, any> | null>((resolve) => {
       // Related-list row actions retarget a CHILD object (e.g. sys_member rows
       // on an org record page) and stash the clicked row under
@@ -1559,6 +1603,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // The runner's `run`, as `useConsoleActionRuntime` forwards it: a
         // refused run keeps what the user typed (objectui#13161).
         run,
+        // The panel above the params, picked as `useConsoleActionRuntime`
+        // picks it (objectstack#30205).
+        // The action's declared `preflight` read joins the same slot
+        // (objectstack#31808): judged against the params the runner handed
+        // over, its URL filled by the runner's `interpolateRead`.
+        companion: resolveParamDialogCompanion(objForI18n, action?.name, row, {
+          preflight: action?.preflight,
+          params,
+          interpolateRead,
+        }),
       });
     });
   }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);
@@ -1666,7 +1720,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           if (!door.res.ok) return apiActionRefusalResult(door.res, door.json, `HTTP ${door.res.status}`, language);
           const answer = readApiActionDoorSuccess(door, `Action "${action.name}"`);
           if (!answer.ok) return { success: false, error: answer.error };
-          if (action.refreshAfter === true) notifyRecordChanged();
+          if (action.refreshAfter === true) notifyViewChanged();
           return { success: true, data: answer.data, reload: action.refreshAfter === true };
         }
 
@@ -1773,7 +1827,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           return apiActionRefusalResult(res, errBody, `HTTP ${res.status}`, language);
         }
         const data = await res.json().catch(() => ({}));
-        if (action.refreshAfter === true) notifyRecordChanged();
+        if (action.refreshAfter === true) notifyViewChanged();
         return { success: true, data, reload: action.refreshAfter === true };
       }
 
@@ -1869,7 +1923,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
       const shouldRefresh = action.refreshAfter === true;
       if (shouldRefresh) {
-        notifyRecordChanged();
+        notifyViewChanged();
       } else if (undo) {
         // Even when refreshAfter isn't set, reflect the change so the user sees
         // it (and the subsequent Undo) on the open record.
@@ -1968,7 +2022,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       if (judged.followUp?.kind === 'refusal') {
         setFlowRefusal({ open: true, title: action.label, message: judged.followUp.message });
       }
-      if (judged.refresh) notifyRecordChanged();
+      if (judged.refresh) notifyViewChanged();
       return judged.result;
     } catch (error) {
       return { success: false, error: (error as Error).message };
@@ -1989,8 +2043,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `action.recordId`; header/more actions carry none and use this page's id.
   // The env ref keeps the handler instance stable across renders (authFetch is
   // memoized once) while the thunks read the live record/object.
-  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyRecordChanged, t, navigate });
-  serverActionEnvRef.current = { objectName, pureRecordId, notifyRecordChanged, t, navigate };
+  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyViewChanged, t, navigate });
+  serverActionEnvRef.current = { objectName, pureRecordId, notifyViewChanged, t, navigate };
   const serverActionHandler = useMemo(
     () => createConsoleServerActionHandler({
       fetch: authFetch,
@@ -1999,7 +2053,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       resolveRecordId: (action) => ({
         recordId: (action as { recordId?: unknown }).recordId ?? serverActionEnvRef.current.pureRecordId ?? undefined,
       }),
-      onRefresh: () => serverActionEnvRef.current.notifyRecordChanged(),
+      onRefresh: () => serverActionEnvRef.current.notifyViewChanged(),
       // SPA route hop for a handler-returned `openIn: 'self'` — react-router's
       // own `navigate`, matching the shared console runtime.
       navigate: (url: string) => serverActionEnvRef.current.navigate(url),
@@ -2239,9 +2293,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // A related list is a list of the child's records, so the multi-FK
       // title it composes names it with the plural, as the single-FK title
       // below does (objectui#11733).
-      listLabel: (child) => objectPluralLabel({ name: child.name, label: child.label || child.name, pluralLabel: child.pluralLabel }),
+      listLabel: (child) => servedObjectPluralLabel(child, language, objectPluralLabel, child.name),
     }),
-    [objectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel],
+    [objectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel, language],
   );
 
   // [objectui#12244] A write to a CHILD re-reads this record, in place.
@@ -2278,6 +2332,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   );
   useEffect(() => {
     const childObjects = JSON.parse(relatedChildObjectsKey) as string[];
+    // What `notifyViewChanged` refreshes besides this record (objectstack#30337).
+    pageChildObjectsRef.current = childObjects;
     if (childObjects.length === 0) return;
     return subscribeDataChanges((change) => {
       if (childObjects.some((child) => dataChangeMatches(change, child))) {
@@ -2461,6 +2517,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       activity: plan.activity !== undefined,
       activityRows: plan.activity ?? 0,
       timeline: plan.timeline !== undefined,
+      streams: { discussion: plan.discussion, activity: plan.activity, timeline: plan.timeline },
     };
     seedRecordPageReaders({ payload, objectName, recordId: pureRecordId, principal: recordPagePrincipal, ...plan });
   }, [recordPagePlan, objectName, pureRecordId, dataSource, recordPagePrincipal]);
@@ -2754,7 +2811,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         $filter: { record_id: pureRecordId, object_name: objectDef.name },
         $orderby: { created_at: 'desc' },
         $top: 50,
-        $select: ['id', 'created_at', 'action', 'user_id', ...(hasActorColumn ? ['actor'] : []), 'old_value', 'new_value'],
+        $select: ['id', 'created_at', 'action', 'user_id', ...(hasActorColumn ? ['actor'] : []), 'old_value', 'new_value', 'metadata'],
       })
       .then(async (res: any) => {
         if (cancelled) return;
@@ -2762,10 +2819,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
         // 1) Resolve actor display names + avatars in a single batched call
         //    so the timeline never falls back to a raw UUID.
+        //    The administrator of an impersonation session rides the same
+        //    read: the writer records them as `metadata.impersonated_by`.
+        const impersonators = items.map((it) => auditImpersonatorId(it?.metadata));
         const userIds = Array.from(
           new Set(
-            items
-              .map((it) => it?.user_id)
+            [...items.map((it) => it?.user_id), ...impersonators]
               .filter((v): v is string => typeof v === 'string' && v.length > 0),
           ),
         );
@@ -2854,9 +2913,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             from: formatAuditValue(objectDef.fields?.[c.field], c.from, fmtCtx),
             to: formatAuditValue(objectDef.fields?.[c.field], c.to, fmtCtx),
           }));
+          // A write made from an impersonation session names the
+          // administrator beside the user: 「Dev Admin 代王工操作」.
+          const adminId = impersonators[idx];
+          const userName = u?.name ?? actorLabel;
+          const adminName = adminId
+            ? (userMap.get(adminId)?.name ?? t('detail.unknownUser', { defaultValue: 'Unknown' }))
+            : null;
           return {
             ...it,
-            user_name: u?.name ?? actorLabel,
+            user_name: adminName
+              ? composeImpersonatedActor(
+                  t('detail.impersonatedActor', { defaultValue: IMPERSONATED_ACTOR_FALLBACK, admin: '{{admin}}', user: '{{user}}' }),
+                  adminName,
+                  userName ?? t('detail.unknownUser', { defaultValue: 'Unknown' }),
+                )
+              : userName,
             user_avatar: u?.image ?? null,
             changes: changes.length > 0 ? changes : undefined,
           };
@@ -2867,7 +2939,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       .catch((err: any) => {
         if (cancelled) return;
         console.warn('[RecordDetailView] Failed to fetch sys_audit_log:', err);
-        setHistoryEntries([]);
+        // No answer, no field history: a refused (or failed) read holds
+        // nothing for the stream's 变更 chip, which `fieldHistoryShown`
+        // below withholds while the entries are `null`.
+        setHistoryEntries(null);
       })
       .finally(() => {
         if (!cancelled) setHistoryLoading(false);
@@ -2876,8 +2951,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `t` is identity-stable per language; `language` refires the effect on a
     // language switch so the translated values re-localize, and
     // `displayLocale` on a display-locale switch so the dates do.
+    // `recordInvalidationNonce` (objectstack#30035): a change to this record
+    // reads its field changes again, the 动态 stream's other source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataSource, pureRecordId, objectDef, historyEnabled, historyWanted, objects, language, displayLocale, tenantCurrency]);
+  }, [dataSource, pureRecordId, objectDef, historyEnabled, historyWanted, objects, language, displayLocale, tenantCurrency, recordInvalidationNonce]);
 
   // Fetch a directory of active users once per dataSource mount and expose
   // them as @-mention suggestions to the DiscussionContext. Capped at 50 to
@@ -3076,7 +3153,31 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     const retrying = feedRetryRef.current.get(threadId) ?? null;
     if (retrying) feedRetryRef.current.delete(threadId);
     const opened = recordPageRead.current;
-    const fromPage = !retrying && opened && opened.feedKey === threadId ? opened : null;
+    const openedHere = !retrying && opened && opened.feedKey === threadId ? opened : null;
+    // objectstack#30035 — a change to THIS record since the open (a save
+    // through the edit dialog, an action, an undo: `recordInvalidationNonce`
+    // re-runs this effect) leaves the open's payload stale, and the rows the
+    // change wrote are not in it. The streams the open asked are asked again,
+    // as asked, so the new rows AND the stream's count both come back from the
+    // server, read the way the open read them. The activity row a save writes
+    // exists before the save answers (the audit writer runs in the update's
+    // awaited `afterUpdate` hook), so this one ask after the change sees it:
+    // nothing polls. Every run at one invalidation count joins one ask.
+    const generation = recordPageGenerationRef.current;
+    let fromPage = openedHere;
+    if (openedHere && openedHere.generation !== generation) {
+      if (typeof dataSource.getRecordPage === 'function') {
+        const held = feedStreamsReread.current;
+        const payload = held && held.feedKey === threadId && held.generation === generation
+          ? held.payload
+          : dataSource.getRecordPage(objectName, pureRecordId, recordPageStreamsRequestOf(openedHere.streams));
+        feedStreamsReread.current = { feedKey: threadId, generation, payload };
+        fromPage = { ...openedHere, payload };
+      } else {
+        fromPage = null;
+      }
+    }
+    const rereading = fromPage !== null && fromPage !== openedHere;
     // The two reads below run in PARALLEL and are collected here so the
     // loading flag can close over BOTH of them — see the `allSettled` at the
     // end of this effect.
@@ -3281,13 +3382,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         recordVerdict('activity', 'answered');
         // objectstack#28737 — the payload asked only the 动态 panel's rows and
         // the record holds more: the 动态 tab reads the window when it opens.
-        const peek = !!fromPage?.activity
+        const answeredPeek = !!fromPage?.activity
           && fromPage.activityRows < RECORD_PAGE_ACTIVITY_ROWS
           && typeof res?.total === 'number'
           && res.total > (res?.data?.length ?? 0);
-        setActivityPeekByRecord(prev => ((prev[threadId] ?? false) === peek ? prev : { ...prev, [threadId]: peek }));
+        setActivityPeekByRecord(prev => {
+          const held = prev[threadId] ?? false;
+          // objectstack#30035 — a re-read after a change merges the newest
+          // rows into what the feed already holds: a feed that holds the
+          // window (the 动态 tab read it) still does, so it never asks it again.
+          const peek = rereading ? held && answeredPeek : answeredPeek;
+          return held === peek ? prev : { ...prev, [threadId]: peek };
+        });
         if (!res?.data?.length) return;
-        const mapped = activityRowsToFeedItems(res.data, t('detail.systemActor', { defaultValue: 'System' }));
+        const mapped = activityRowsToFeedItems(
+          res.data,
+          t('detail.systemActor', { defaultValue: 'System' }),
+          t('detail.impersonatedActor', { defaultValue: IMPERSONATED_ACTOR_FALLBACK, admin: '{{admin}}', user: '{{user}}' }),
+          t('detail.unknownUser', { defaultValue: 'Unknown' }),
+        );
         if (!mapped.length) return;
         // Merge by id into THIS record's slice (timeline events are
         // append-only); `mergeFeedRows` sorts by createdAt ascending so the
@@ -3313,7 +3426,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     });
 
     return () => { cancelled = true; };
-  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce]);
+    // objectstack#30035 — `recordInvalidationNonce`: a change to this record
+    // reads its feed again (#2269, refresh data in place), as it reads the
+    // record again in the record-load effect above.
+  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce, recordInvalidationNonce]);
 
   // objectstack#29188 — the load-failure notice's Retry: read this record's
   // FAILED feed reads again, and only those. The feed shows its loading state
@@ -3348,7 +3464,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // step to another record fills this one's slice, never the one on screen.
     Promise.resolve(dataSource.find('sys_activity', activityWindowQuery(objectName, pureRecordId)))
       .then((res: any) => {
-        const mapped = activityRowsToFeedItems(res?.data ?? [], t('detail.systemActor', { defaultValue: 'System' }));
+        const mapped = activityRowsToFeedItems(
+          res?.data ?? [],
+          t('detail.systemActor', { defaultValue: 'System' }),
+          t('detail.impersonatedActor', { defaultValue: IMPERSONATED_ACTOR_FALLBACK, admin: '{{admin}}', user: '{{user}}' }),
+          t('detail.unknownUser', { defaultValue: 'Unknown' }),
+        );
         if (!mapped.length) return;
         setFeedItemsByRecord(prev => ({
           ...prev,
@@ -3922,15 +4043,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `record_more` renders inside the header's ⋯ overflow menu (the spec's
     // "overflow menu under the More/⋯ button" location — PageHeaderRenderer
     // routes record_more-only actions into the overflow; #2358 trap 2).
+    // The set is `placedHeaderActions` (`@object-ui/types`): the ONE reader an
+    // authored `page:header` with `placedActions: true` reads too
+    // (objectstack#29951), so the synthesized header and such a page draw the
+    // same actions, an action another package places on the object included.
     const recordHeaderActions = (() => {
-      const seen = new Set<string>();
-      const base = (objectDef.actions || []).filter((a: any) => {
-        if (!a.locations?.includes('record_header') && !a.locations?.includes('record_more')) return false;
-        if (!a.name) return true;
-        if (seen.has(a.name)) return false;
-        seen.add(a.name);
-        return true;
-      }).map((a: any) => localizeActionTexts(objectDef.name, a));
+      const base = placedHeaderActions<any>(objectDef.actions as any[] | undefined)
+        .map((a: any) => localizeActionTexts(objectDef.name, a));
 
       // ⛔ No approval actions are injected here any more (objectui#3055).
       // They used to be two hand-written buttons (approve/reject only, no
@@ -4000,7 +4119,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // records, so it is named as that object's list page is (objectui#11733).
       const localizedTitle = titleOverride
         || (childObjectDef
-          ? objectPluralLabel({ name: childObjectDef.name, label: childObjectDef.label || childLabel, pluralLabel: childObjectDef.pluralLabel })
+          ? servedObjectPluralLabel(childObjectDef, language, objectPluralLabel, childLabel)
           : childLabel);
       return {
         title: localizedTitle,
@@ -4073,10 +4192,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the panel's headline is the pending one. (The decision actions no longer
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
-  }, [objectDef?.name, childRelations, t, objectPluralLabel, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  // objectstack#30344 — whether this record page shows the record's field
+  // history: the history gate, AND this reader's audit read answered. A read
+  // the server refuses (or that fails) answers nothing, so the stream offers
+  // no 变更 chip, as with history off (objectstack#30074); the chip joins
+  // the others once the read answers. Nothing waits on it: the page payload
+  // still asks the field changes by `historyEnabled`, and the server counts a
+  // refused ledger read as no field change (objectstack#28737).
+  const fieldHistoryShown = historyEnabled && historyEntries !== null;
   // objectstack#27055, Target 3 — the record's field changes, as feed items of
   // the timeline stream. `null` while there are none to give (no
-  // `trackHistory`, an authored page, the read not made or not landed).
+  // `trackHistory`, an authored page, the read not made, not landed or not
+  // answered).
   const timelineFieldChanges = useMemo(
     () =>
       historyEnabled && historyEntries
@@ -4132,7 +4260,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const phoneBackClass =
     'inline-flex min-h-[44px] min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   const phoneBack = phonePage ? (() => {
-    const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
+    const plural = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName;
     const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
     const label = parent
       ? parent.t || shortRecordId(parent.i)
@@ -4297,7 +4425,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           </div>
           <EmptyTitle>
             {t('empty.recordAccessDenied', {
-              object: objectLabel({ name: objectName!, label: objectDef?.label || objectName! }),
+              object: servedObjectLabel({ name: objectName!, label: objectDef?.label }, language, objectLabel, objectName!),
               defaultValue: 'You don’t have access to {{object}} records',
             })}
           </EmptyTitle>
@@ -4325,10 +4453,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             {t('empty.recordLoadFailed', { defaultValue: 'Couldn’t load this record' })}
           </EmptyTitle>
           <EmptyDescription>
-            {t('empty.recordLoadFailedDescription', {
+            {pageRecordFailure?.message ?? t('empty.recordLoadFailedDescription', {
               defaultValue: 'Something went wrong while loading it. Check your connection and try again.',
             })}
           </EmptyDescription>
+          {pageRecordFailure?.code ? (
+            <code
+              data-testid="record-load-failed-code"
+              className="mt-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
+            >
+              {pageRecordFailure.code}
+            </code>
+          ) : null}
           <div className="mt-4">
             <Button
               variant="outline"
@@ -4467,6 +4603,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       order: 110,
       component: 'action:menu',
       onClick: async () => {
+        // Inside the ObjectStack mobile shell, when it announces `share`: the
+        // OS share sheet through the shell, with this record's page link and
+        // its title (objectstack-ai/mobile `docs/HYBRID-SHELL.md`, "Files").
+        // Only the record URL crosses the bridge. A shell that refuses or
+        // fails the call, an older shell and a plain browser take the path
+        // below, unchanged.
+        const shared = await nativeShare({
+          url: window.location.href,
+          ...(document.title ? { text: document.title } : {}),
+        });
+        if (shared.status === 'ok') return;
         try {
           if ((navigator as any).share) {
             await (navigator as any).share({
@@ -4539,14 +4686,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           const deleteDeps = {
             objectName: objectName!,
             t,
-            label: objectLabel({ name: objectName!, label: objectDef?.label || objectName! }),
+            label: servedObjectLabel({ name: objectName!, label: objectDef?.label }, language, objectLabel, objectName!),
             objectDef,
           };
           const deleteTarget =
             (readablePageRecord as Record<string, unknown> | null | undefined) ?? { id: pureRecordId };
           // objectstack#28472 — and names the objects the delete cascades into.
           const cascadeLabels = await resolveCascadeDeleteLabels(dataSource, objectName!, (name) =>
-            objectLabel(objects.find((o: any) => o.name === name) ?? { name, label: name }));
+            servedObjectLabel(objects.find((o: any) => o.name === name) ?? { name }, language, objectLabel, name));
           const copy = recordDelete.confirmCopy({ ...deleteDeps, cascadeLabels }, { record: deleteTarget });
           // objectui#11001 — asked through this page's own confirm runtime,
           // the in-app `ActionConfirmDialog` the list view's delete asks
@@ -4561,13 +4708,45 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               destructive: true,
             }))
           ) return;
+          // ADR-0148 — the toast offers Undo when the delete wrote a
+          // recycle-bin entry and the caller may restore its own deletes on
+          // the object; the undo restores the entry and comes back here.
+          const restore = recycleBinRestoreOf(dataSource, objectName!, perms.effectiveObjects);
+          const baseAppUrl = appName ? `/apps/${appName}` : '';
+          const recordUrl = `${location.pathname}${location.search}`;
           try {
-            await dataSource.delete(objectName!, pureRecordId!);
-            toast.success(recordDelete.successText(deleteDeps, deleteTarget));
-            const baseAppUrl = appName ? `/apps/${appName}` : '';
+            let entryId: string | undefined;
+            if (restore) {
+              await dataSource.delete(objectName!, pureRecordId!, {
+                onRecycleBinEntry: (id: string) => {
+                  entryId = id;
+                },
+              });
+            } else {
+              await dataSource.delete(objectName!, pureRecordId!);
+            }
+            recordDelete.successToast(
+              {
+                ...deleteDeps,
+                toast,
+                restore,
+                refusalLabels: recycleBinRefusalLabelsOf(objectName!, objectDef, (name) =>
+                  servedObjectLabel(objects.find((o: any) => o.name === name) ?? { name }, language, objectLabel, name)),
+              },
+              deleteTarget,
+              entryId,
+              () => navigate(recordUrl),
+            );
             navigate(`${baseAppUrl}/${objectName}`, { replace: true });
           } catch (err: any) {
-            toast.error(err?.message || 'Delete failed');
+            // A delete the object's external datasource does not admit
+            // (ADR-0015, `EXTERNAL_WRITE_FORBIDDEN`) says the table is
+            // read-only, never the gate's diagnostic.
+            toast.error(
+              isExternalWriteRefusal(err)
+                ? t('form.readOnlyExternalSource')
+                : err?.message || 'Delete failed',
+            );
           }
         },
       } as any);
@@ -4719,14 +4898,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           return (
             <span key={`${index}:${entry.o}:${entry.i}`} className="flex min-w-0 items-center gap-1">
               <Link to={buildRecordTrailHref(appName ? `/apps/${appName}` : '', entry, pageTrail.slice(0, index))} className={crumbClass}>
-                {entryDef ? objectLabel(entryDef) : entry.o}{' '}
+                {entryDef ? servedObjectLabel(entryDef, language, objectLabel) : entry.o}{' '}
                 <span className="font-medium text-foreground">{entry.t || shortRecordId(entry.i)}</span>
               </Link>
               <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
             </span>
           );
         })}
-        <span className="truncate" aria-current="page">{objectDef ? objectLabel(objectDef) : objectName}</span>
+        <span className="truncate" aria-current="page">{objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName}</span>
       </nav>
     </>
   ) : (
@@ -4736,7 +4915,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       data-testid="record-page-crumb"
     >
       {(() => {
-        const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
+        const plural = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : objectName;
         const objectCrumbClass = cn(crumbClass, 'shrink-0');
         if (pageReturn.toList) {
           return (
@@ -4785,7 +4964,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         const entryDef = objectDefOf(entry.o);
         const face = (
           <>
-            {entryDef ? objectLabel(entryDef) : entry.o}{' '}
+            {entryDef ? servedObjectLabel(entryDef, language, objectLabel) : entry.o}{' '}
             <span className="font-medium text-foreground">{entry.t || shortRecordId(entry.i)}</span>
           </>
         );
@@ -4803,7 +4982,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           </span>
         );
       })}
-      <span className="shrink-0" aria-current="page">{objectDef ? objectLabel(objectDef) : objectName}</span>
+      <span className="shrink-0" aria-current="page">{objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName}</span>
     </nav>
   ) : null;
   const pageBar = embedded ? null : phonePage ? (
@@ -4970,6 +5149,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`. */}
         <RecordFieldChangesContext.Provider value={assignedPage ? null : timelineFieldChanges}>
+        {/* objectstack#30074 — whether this record shows its field history
+            (objectstack#30344: to this reader, whose audit read answered):
+            the stream offers its 变更 chip only while it does. */}
+        <RecordFieldHistoryContext.Provider value={fieldHistoryShown}>
         {/* objectstack#28737 — the whole stream's count, for the 动态 panel,
             its tab and the tab row's probe. */}
         <RecordTimelineTotalContext.Provider value={assignedPage ? null : timelineTotal}>
@@ -5247,6 +5430,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           {modalElement}
         </ActionProvider>
         </RecordTimelineTotalContext.Provider>
+        </RecordFieldHistoryContext.Provider>
         </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>

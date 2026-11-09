@@ -38,7 +38,16 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
-import { META_QUERY_ARITY_DOORS, assertFilterParamSuppliedOnce, repeatedQueryParamMessage } from '@objectstack/rest';
+import {
+    META_LIST_QUERY_PARAMS,
+    META_QUERY_ARITY_DOORS,
+    assertFilterParamSuppliedOnce,
+    repeatedQueryParamMessage,
+    unknownQueryParamRefusalMessage,
+} from '@objectstack/rest';
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case
+// (the source under test imports it lazily; `check:test-source-alias`).
+import '@objectstack/metadata';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const SCHEMA = {
@@ -123,9 +132,9 @@ function expectArityRefusal(answer: Answer, name: string, count = 2): void {
 describe('[#23214] /meta — the four arity doors, over the list both transports read', () => {
     it('declares exactly the doors and names RestServer refuses (the one list)', () => {
         expect(META_QUERY_ARITY_DOORS).toEqual({
-            list: ['package', 'preview', 'object', 'include', 'id'],
+            list: ['package', 'preview', 'object', 'include', 'id', 'names'],
             'book-tree': ['package'],
-            drafts: ['packageId', 'type'],
+            drafts: ['package', 'type'],
             state: ['from'],
         });
     });
@@ -158,7 +167,7 @@ describe('[#23214] /meta — the four arity doors, over the list both transports
 
         it('preserves one of each, handed to `listDrafts` as strings', async () => {
             const { dispatcher, protocol } = boot();
-            const answer = await get(dispatcher, '/meta/_drafts', { packageId: 'com.acme', type: ['view'] });
+            const answer = await get(dispatcher, '/meta/_drafts', { package: 'com.acme', type: ['view'] });
             expect(answer.status).toBe(200);
             expect(protocol.listDrafts).toHaveBeenCalledWith({ packageId: 'com.acme', type: 'view' });
         });
@@ -193,6 +202,51 @@ describe('[#23214] /meta — the four arity doors, over the list both transports
         it('leaves a name it does not declare alone (`locale` falls back to the default locale)', async () => {
             const { dispatcher } = boot();
             expect((await get(dispatcher, '/meta/view', { locale: ['en', 'fr'] })).status).toBe(200);
+        });
+
+        // [#29236] The list's closed query set, asked before arity, as
+        // `RestServer`'s list asks it (`metaListQueryRefusal`).
+        it('refuses a name outside the closed set with the located sentence, before any list read', async () => {
+            for (const name of ['name', 'ids', 'names[]']) {
+                const { dispatcher, protocol } = boot();
+                const answer = await get(dispatcher, '/meta/view', { [name]: 'task_grid' });
+                expect({ name, status: answer.status, code: answer.body?.error?.code, message: answer.body?.error?.message }).toEqual({
+                    name, status: 400, code: 'VALIDATION_ERROR',
+                    message: unknownQueryParamRefusalMessage({ [name]: 'task_grid' }, META_LIST_QUERY_PARAMS),
+                });
+                expect(protocol.getMetaItems).not.toHaveBeenCalled();
+            }
+        });
+
+        it('`?names=` narrows the list and is pushed down to the protocol read; `?locale=` still answers 200', async () => {
+            const named = boot();
+            const answer = await get(named.dispatcher, '/meta/view', { names: 'task_grid,nope' });
+            expect(answer.status).toBe(200);
+            // This protocol double ignores `names`: the chain's step holds the answer.
+            expect(answer.body?.data.map((v: any) => v.name)).toEqual(['task_grid']);
+            expect(named.protocol.getMetaItems.mock.calls[0][0]).toMatchObject({ type: 'view', names: ['task_grid', 'nope'] });
+
+            const localised = boot();
+            expect((await get(localised.dispatcher, '/meta/view', { locale: 'fr' })).status).toBe(200);
+            expect(localised.protocol.getMetaItems.mock.calls[0][0]).not.toHaveProperty('names');
+        });
+
+        it('refuses `?names=` on the `package` list (its items are keyed by id) before the protocol read', async () => {
+            for (const path of ['/meta/package']) {
+                const { dispatcher, protocol } = boot();
+                const answer = await get(dispatcher, path, { names: 'com.acme' });
+                expect({ path, status: answer.status, code: answer.body?.error?.code }).toEqual({ path, status: 400, code: 'VALIDATION_ERROR' });
+                expect(answer.body?.error?.message).toMatch(/^Query parameter 'names' is not served on the 'package' list: package items are keyed by id/);
+                expect(protocol.getMetaItems).not.toHaveBeenCalled();
+            }
+        });
+
+        it('refuses an EMPTY `names` with 400 VALIDATION_ERROR before the protocol read', async () => {
+            const { dispatcher, protocol } = boot();
+            const answer = await get(dispatcher, '/meta/view', { names: '' });
+            expect({ status: answer.status, code: answer.body?.error?.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+            expect(answer.body?.error?.message).toMatch(/^Query parameter 'names' names no item; got ""\./);
+            expect(protocol.getMetaItems).not.toHaveBeenCalled();
         });
     });
 
@@ -244,21 +298,22 @@ describe('[#23214] /meta — the four arity doors, over the list both transports
         });
     });
 
-    // The same class on `_drafts`' own filters: `?packageId[]=` / `?type[]=`
+    // The same class on `_drafts`' own filters: `?package[]=` / `?type[]=`
+    // (`?packageId[]=` before #31490 retired that spelling)
     // reached `listDrafts` as no package and no type, so the answer was every
     // draft. Refused at the door's arity step, with `RestServer`'s code and
     // sentence, before `listDrafts`.
-    describe('a BRACKETED `packageId` or `type` key on `_drafts`', () => {
-        const sentence = (key: string, param: string): string => (param === 'packageId'
-            ? `Query parameter '${key}' names no package; the 'packageId' filter takes exactly one package id, `
-                + `spelled ?packageId=ID. The list was not served: a bracketed 'packageId' key is not a filter. `
+    describe('a BRACKETED `package` or `type` key on `_drafts`', () => {
+        const sentence = (key: string, param: string): string => (param === 'package'
+            ? `Query parameter '${key}' names no package; the 'package' filter takes exactly one package id, `
+                + `spelled ?package=ID. The list was not served: a bracketed 'package' key is not a filter. `
                 + `Name one package, or leave the parameter out to list the drafts of every package.`
             : `Query parameter '${key}' names no metadata type; the 'type' filter takes exactly one metadata type, `
                 + `spelled ?type=TYPE. The list was not served: a bracketed 'type' key is not a filter. `
                 + `Name one metadata type, or leave the parameter out to list the drafts of every type.`);
 
         it.each([
-            ['packageId[]', 'packageId'], ['packageId[0]', 'packageId'],
+            ['package[]', 'package'], ['package[0]', 'package'],
             ['type[]', 'type'], ['type[0]', 'type'],
         ])('GET /meta/_drafts?%s=… is refused before `listDrafts`', async (key, param) => {
             const { dispatcher, protocol } = boot();
@@ -271,10 +326,10 @@ describe('[#23214] /meta — the four arity doors, over the list both transports
 
         it('beside the plain key it is refused too, and the plain spellings still narrow (control)', async () => {
             const { dispatcher, protocol } = boot();
-            expect((await get(dispatcher, '/meta/_drafts', { packageId: 'com.acme', 'packageId[]': 'com.other' })).status)
+            expect((await get(dispatcher, '/meta/_drafts', { package: 'com.acme', 'package[]': 'com.other' })).status)
                 .toBe(400);
             expect(protocol.listDrafts).not.toHaveBeenCalled();
-            expect((await get(dispatcher, '/meta/_drafts', { packageId: 'com.acme', type: 'view' })).status).toBe(200);
+            expect((await get(dispatcher, '/meta/_drafts', { package: 'com.acme', type: 'view' })).status).toBe(200);
             expect(protocol.listDrafts).toHaveBeenCalledWith({ packageId: 'com.acme', type: 'view' });
         });
     });

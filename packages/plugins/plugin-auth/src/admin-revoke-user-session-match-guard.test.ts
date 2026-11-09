@@ -144,11 +144,11 @@ const post = (manager: AuthManager, path: string, cookie?: string, body?: unknow
     }),
   );
 
-const signUp = (manager: AuthManager, email: string) => {
+const signUp = async (manager: AuthManager, email: string) => {
   // [#11739] default posture invite_only: fixture users beyond the first
   // enter through the invitation carve-out (see audience-gate-test-support).
-  inviteForAudienceGate(manager, email);
-  return post(manager, 'sign-up/email', undefined, { email, password: PASSWORD, name: 'AdminRevoke' });
+  const invitationId = await inviteForAudienceGate(manager, email);
+  return post(manager, 'sign-up/email', undefined, { email, password: PASSWORD, name: 'AdminRevoke', invitationId });
 };
 
 const signIn = (manager: AuthManager, email: string) =>
@@ -323,6 +323,64 @@ describe('#10069 — /admin/revoke-user-session refuses when the token identifie
     expect(res.status).toBe(400);
     const body: any = await res.json().catch(() => null);
     expect(body?.code).not.toBe(ADMIN_REVOKE_USER_SESSION_NOT_FOUND_CODE);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+/**
+ * The bearer lane. The global before-hook runs before better-auth folds an
+ * `Authorization: Bearer` token into the session cookie, so the guard resolves
+ * a caller signed in by bearer alone through the shared actor resolver, and
+ * grades the role stored on that user. Same answers as the cookie lane.
+ */
+describe('/admin/revoke-user-session judges a caller signed in by bearer alone as it judges the cookie lane', () => {
+  const bearerFrom = (response: Response): string => response.headers.get('set-auth-token') ?? '';
+  const revokeByBearer = (manager: AuthManager, bearer: string, sessionToken: unknown) =>
+    manager.handleRequest(
+      new Request(`${BASE}/admin/revoke-user-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', authorization: `Bearer ${bearer}` },
+        body: JSON.stringify({ sessionToken }),
+      }),
+    );
+  const seedBearer = async () => {
+    const seeded = await seed();
+    const adminBearer = bearerFrom(await signIn(seeded.manager, 'admin@example.com'));
+    expect(adminBearer, 'sign-in must hand out a bearer').not.toBe('');
+    return { ...seeded, adminBearer };
+  };
+
+  it('a token matching ZERO rows answers 404 with code AND status', async () => {
+    const { engine, manager, targetRow, adminBearer } = await seedBearer();
+
+    const res = await revokeByBearer(manager, adminBearer, 'no-such-token-anywhere');
+    const body: any = await res.json();
+    expect(res.status).toBe(404);
+    expect(body?.code).toBe(ADMIN_REVOKE_USER_SESSION_NOT_FOUND_CODE);
+    expect(body?.success).not.toBe(true);
+    expect(sessionRows(engine).find((r) => r.id === targetRow.id)?.revoked_at).toBeUndefined();
+  });
+
+  it("an admitted revoke still succeeds — an admin revoking an arbitrary user's session", async () => {
+    const { engine, manager, targetCookie, targetRow, adminBearer } = await seedBearer();
+
+    const res = await revokeByBearer(manager, adminBearer, targetRow.token);
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await res.json()).toHaveProperty('success', true);
+    expect(sessionRows(engine).find((r) => r.id === targetRow.id)?.revoke_reason).toBe('admin');
+    expect(await isAuthenticated(manager, targetCookie)).toBe(false);
+  });
+
+  it('a NON-ADMIN caller keeps the vendor 403 for missing and live tokens alike', async () => {
+    const { manager, targetRow } = await seedBearer();
+    const plainBearer = bearerFrom(await signUp(manager, 'plain-bearer@example.com'));
+    expect(plainBearer).not.toBe('');
+
+    const missing = await revokeByBearer(manager, plainBearer, 'no-such-token-anywhere');
+    const live = await revokeByBearer(manager, plainBearer, targetRow.token);
+    expect(missing.status).toBe(403);
+    expect(live.status).toBe(403);
+    expect(await missing.text()).toBe(await live.text());
   });
 });
 

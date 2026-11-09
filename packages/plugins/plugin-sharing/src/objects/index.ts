@@ -15,3 +15,4 @@ export { SysShareLink } from './sys-share-link.object.js';
 export { SysQueue } from './sys-queue.object.js';
 export { SysQueueMember } from './sys-queue-member.object.js';
 export { SysAssignmentCursor } from './sys-assignment-cursor.object.js';
+export { SysAssignmentRule } from './sys-assignment-rule.object.js';

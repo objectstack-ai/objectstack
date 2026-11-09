@@ -22,7 +22,7 @@
  * through every spec release while resolving to nothing: `heading` has never
  * been registered in this repo (the nearest real things are `element:text`
  * with a heading `variant` such as `h2` (`heading` until 17.7.0 retired it), and the `ui/typography`
- * primitives, which never go through the registry at all). Both `heading`
+ * primitives, which never went through the registry and are now deleted). Both `heading`
  * nodes in the `page` sample fell through to the ComponentRegistry fallback,
  * so the gallery's page card — the worked example of a composed page — showed
  * two fallback boxes where its title and its section heading should have been.

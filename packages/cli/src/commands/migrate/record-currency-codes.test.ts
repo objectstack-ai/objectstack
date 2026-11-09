@@ -129,6 +129,9 @@ describe('os migrate record-currency-codes', () => {
     expect(vi.mocked(backfillRecordCurrencyCodes).mock.calls[0][2]).toEqual({
       object: 'opportunity', field: 'amount', code: 'USD', apply: false, maxRecords: undefined,
     });
+    // No scope flag: neither scope option reaches the backfill, which then decides by the rows.
+    expect(vi.mocked(backfillRecordCurrencyCodes).mock.calls[0][2]).not.toHaveProperty('allOrganizations');
+    expect(vi.mocked(backfillRecordCurrencyCodes).mock.calls[0][2].organizationId).toBeUndefined();
     const payload = JSON.parse(stdout.mock.calls.map((c: unknown[]) => String(c[0])).join(''));
     expect(payload).toMatchObject({ apply: false, report: { codeless: 2, written: 0 } });
   }, RUN_TIMEOUT);
@@ -165,6 +168,80 @@ describe('os migrate record-currency-codes', () => {
     const payload = JSON.parse(stdout.mock.calls.map((c: unknown[]) => String(c[0])).join(''));
     expect(payload).toMatchObject({ code: 'INVALID_FIELD', httpStatus: 400, error: refusal.message });
   }, RUN_TIMEOUT);
+
+  describe('organizations (ADR-0144 Open item 13, ruling 6670707546 item A)', () => {
+    /** The real backfill over two organizations' codeless rows, refused for want of a scope. */
+    const multiOrganizationRefusal = async (): Promise<Error & Record<string, unknown>> => {
+      const real = await vi.importActual<typeof import('@objectstack/objectql')>('@objectstack/objectql');
+      const rows = [
+        { id: 'o1', organization_id: 'org_a', amount: 10 },
+        { id: 'o2', organization_id: 'org_a', amount: 20 },
+        { id: 'o3', organization_id: 'org_b', amount: 30 },
+      ];
+      const twoOrgEngine = {
+        ...engine,
+        getObject: () => ({
+          fields: {
+            organization_id: { type: 'text' },
+            amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } },
+          },
+        }),
+        // The keyset walk asks again past the last id; answer that page empty.
+        find: async (_o: string, q: { where?: unknown }) => (q.where ? [] : rows),
+      };
+      return real.backfillRecordCurrencyCodes(twoOrgEngine, { info() {}, warn() {} }, {
+        object: 'opportunity', field: 'amount', code: 'USD', apply: true,
+      }).then(() => { throw new Error('expected the unscoped run to be refused'); }, (e: unknown) => e as Error & Record<string, unknown>);
+    };
+
+    beforeEach(() => {
+      vi.mocked(bootSchemaStack).mockClear();
+      vi.mocked(probeMigrationTarget).mockClear();
+    });
+
+    it('--org hands the organization to the backfill; --all-organizations asks for every one explicitly', async () => {
+      await MigrateRecordCurrencyCodes.run(['--json', ...NAMING, '--org', 'org_a'], { root: CLI_ROOT });
+      expect(vi.mocked(backfillRecordCurrencyCodes).mock.calls[0][2]).toMatchObject({ organizationId: 'org_a' });
+      expect(vi.mocked(backfillRecordCurrencyCodes).mock.calls[0][2]).not.toHaveProperty('allOrganizations');
+      await MigrateRecordCurrencyCodes.run(['--json', ...NAMING, '--all-organizations'], { root: CLI_ROOT });
+      expect(vi.mocked(backfillRecordCurrencyCodes).mock.calls[1][2]).toMatchObject({ allOrganizations: true, organizationId: undefined });
+    }, RUN_TIMEOUT);
+
+    it('--org with --all-organizations is a usage error: nothing is probed, booted or walked', async () => {
+      const err = await MigrateRecordCurrencyCodes.run(
+        ['--json', '--apply', '--yes', ...NAMING, '--org', 'org_a', '--all-organizations'],
+        { root: CLI_ROOT },
+      ).catch((e: unknown) => e);
+      expect(String((err as Error)?.message)).toMatch(/cannot also be provided when using/);
+      expect((err as { oclif?: { exit?: number } }).oclif?.exit).toBe(2);
+      expect(vi.mocked(probeMigrationTarget)).not.toHaveBeenCalled();
+      expect(vi.mocked(bootSchemaStack)).not.toHaveBeenCalled();
+      expect(vi.mocked(backfillRecordCurrencyCodes)).not.toHaveBeenCalled();
+    }, RUN_TIMEOUT);
+
+    it('the refusal of an unscoped run over two organizations: --json carries its envelope and both counts, exit 1', async () => {
+      const refusal = await multiOrganizationRefusal();
+      vi.mocked(backfillRecordCurrencyCodes).mockRejectedValue(refusal);
+      const err = await MigrateRecordCurrencyCodes.run(['--json', '--apply', '--yes', ...NAMING], { root: CLI_ROOT })
+        .catch((e: unknown) => e);
+      expect(isExitSignal(err)).toBe(true);
+      expect((err as { oclif?: { exit?: number } }).oclif?.exit).toBe(1);
+      const payload = JSON.parse(stdout.mock.calls.map((c: unknown[]) => String(c[0])).join(''));
+      expect(payload).toMatchObject({ code: 'VALIDATION_ERROR', httpStatus: 400, error: refusal.message });
+      expect(payload.organizations.map((o: { organizationId: string; codeless: number }) => [o.organizationId, o.codeless]))
+        .toEqual([['org_a', 2], ['org_b', 1]]);
+    }, RUN_TIMEOUT);
+
+    it('the human face lists each organization\'s codeless count and names both flags, exit 1', async () => {
+      vi.mocked(backfillRecordCurrencyCodes).mockRejectedValue(await multiOrganizationRefusal());
+      const err = await MigrateRecordCurrencyCodes.run(NAMING, { root: CLI_ROOT }).catch((e: unknown) => e);
+      expect((err as { oclif?: { exit?: number } }).oclif?.exit).toBe(1);
+      const lines = printedLines();
+      expect(lines).toContain('  organization org_a: 2 codeless row(s) of 2 scanned');
+      expect(lines).toContain('  organization org_b: 1 codeless row(s) of 1 scanned');
+      expect(lines.join('\n')).toMatch(/--org <id>[\s\S]*--all-organizations/);
+    }, RUN_TIMEOUT);
+  });
 
   describe('a code outside ISO 4217 is refused before the probe, the prompt and the boot', () => {
     /** The engine's own refusal of the same code, for the envelope and wording it is held to. */
@@ -237,6 +314,20 @@ describe('os migrate record-currency-codes', () => {
     const lines = printedLines();
     expect(lines).toContain('Would write USD into currency_code on 2 codeless row(s).');
     expect(lines.find((line) => line.startsWith('Dry run —'))).toBe(`${DRY_RUN_LINE} ${JOURNAL_MODE_SWITCH_NOTE}`);
+  }, RUN_TIMEOUT);
+
+  it('a walk --max-records cut short says it is incomplete, never "nothing to backfill"', async () => {
+    boot(POSTGRES_CONFIG);
+    vi.mocked(backfillRecordCurrencyCodes).mockResolvedValue({
+      ...REPORT, organizationId: 'org_a', allOrganizations: false, organizations: [],
+      scannedRecords: 2, codeless: 0, skippedCodePresent: 2, sampleRecordIds: [], truncated: true,
+    } as any);
+    await MigrateRecordCurrencyCodes.run([...NAMING, '--org', 'org_a', '--max-records', '2'], { root: CLI_ROOT });
+    const text = printedLines().join('\n');
+    expect(text).toContain('No codeless opportunity.amount amount among the 2 row(s) examined.');
+    expect(text).toContain('Walk incomplete — 2 row(s) examined, 0 codeless.');
+    expect(text).not.toContain('Nothing to backfill');
+    expect(text).not.toContain('nothing to backfill');
   }, RUN_TIMEOUT);
 
   it('on PostgreSQL the dry-run line names no switch', async () => {

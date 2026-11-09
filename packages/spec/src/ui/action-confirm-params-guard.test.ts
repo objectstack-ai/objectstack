@@ -18,6 +18,16 @@
  * direction is pinned as hard as the rejection direction: a future "helpful"
  * widening of this guard onto the bulk surface goes RED here.
  *
+ * `InlineActionSchema` refuses the pair too (#29383, ruling record 6595808462
+ * letter A): an inline page action runs through the same runner, so the same
+ * two dialogs open, and its pick carries the `description` remedy. So does the
+ * page `action:button` row, `ActionButtonPropsSchema` (#29844, ruling record
+ * 6597621758 letter A), for an ARRAY `params` only: an object `params` there is
+ * the static values and opens no dialog. So do `action:icon` and the
+ * `action:group` / `action:menu` members (#30017, ruling record 6624208841
+ * letter A), on the same terms. The doors share one predicate and one message
+ * (`./action-confirm-beside-params.ts`), pinned equal below.
+ *
  * The rejection tests assert the issue PATH and the MESSAGE SUBSTANCE rather
  * than a bare `success === false`. One condition, one wording: a refusal whose
  * message does not name both keys and point at the remedy sends the author
@@ -27,6 +37,12 @@
 import { describe, expect, it } from 'vitest';
 import { ActionSchema, InlineActionSchema, defineAction } from './action.zod';
 import { BulkActionDefSchema } from './bulk-action.zod';
+import {
+  ActionButtonPropsSchema,
+  ActionGroupPropsSchema,
+  ActionIconPropsSchema,
+  ActionMenuPropsSchema,
+} from './component.zod';
 
 /**
  * Minimum legal registered action. `type` defaults to `script`, whose own
@@ -168,7 +184,7 @@ describe('what the `confirmText` + `params` guard must NOT touch', () => {
   });
 });
 
-describe('the pair guard is scoped to ActionSchema by SCHEMA BOUNDARY', () => {
+describe('the pair guard is scoped by SCHEMA BOUNDARY — the bulk def keeps the pair', () => {
   it('BulkActionDefSchema still ACCEPTS `confirmText` + non-empty `params`', () => {
     // The pinning test the boundary ruling asks for. This pairing is INTENDED
     // on the bulk surface: per that schema's own describe() text the params are
@@ -218,23 +234,267 @@ describe('the pair guard is scoped to ActionSchema by SCHEMA BOUNDARY', () => {
     expect(asAction.success).toBe(false);
   });
 
-  it('InlineActionSchema is out of reach too — it picks fields, not this refine chain', () => {
-    // Recording the guard's real blast radius rather than assuming it. Inline
-    // actions derive from the shared field factory via `.pick()`, so no
-    // refinement on `ActionSchema` reaches them — and the pick deliberately
-    // omits `description`, so the #7278 remedy has no slot on that surface to
-    // move a question into. Same reason the bulk defs were struck from the
-    // target set: a refusal whose remedy is unreachable is a dead end, not a
-    // guard. Whether the inline surface should gain `description` FIRST and the
-    // guard SECOND is left open on #7428 rather than presumed here.
+});
+
+describe('`confirmText` + non-empty `params` is refused on InlineActionSchema too', () => {
+  // #29383 (ruling record 6595808462, letter A). An inline page action runs
+  // through the registered action's runner — the `element:button` renderer
+  // hands both keys to the same `ActionRunner`, which awaits the confirm and
+  // THEN the param prompt — so the pair opens the same two dialogs here. The
+  // inline pick carries `description`, so the remedy has a slot on this door.
+  // Same predicate, same refusal: asserted against ActionSchema's own issue,
+  // so a second wording drifting onto one door goes red.
+  const inlineReject = {
+    type: 'url',
+    target: '/approvals?reject=1',
+    label: 'Reject',
+    params: [{ name: 'reason', label: 'Reason', type: 'textarea' }],
+  } as const;
+
+  it('refuses the pair at the `confirmText` path, with ActionSchema\'s own message', () => {
+    const result = InlineActionSchema.safeParse({ ...inlineReject, confirmText: 'Reject this request?' });
+
+    expect(result.success).toBe(false);
+    const issue = result.success
+      ? undefined
+      : result.error.issues.find((i) => i.path.join('.') === 'confirmText');
+    expect(issue?.code).toBe('custom');
+    expect(issue?.path).toEqual(['confirmText']);
+
+    const registered = guardIssue(ActionSchema.safeParse({
+      ...base,
+      confirmText: 'Reject this request?',
+      params: oneParam,
+    }));
+    expect(issue?.message).toBe(registered?.message);
+    expect(issue?.message).toContain('TWO dialogs');
+    expect(issue?.message).toContain('`description`');
+  });
+
+  it('refuses the localized-map form of `confirmText` too', () => {
+    const result = InlineActionSchema.safeParse({
+      ...inlineReject,
+      confirmText: { en: 'Reject this request?', 'zh-CN': '拒绝该请求？' },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.success ? undefined : result.error.issues.map((i) => i.path.join('.')))
+      .toContain('confirmText');
+  });
+
+  it('accepts the same action with the question on `description` and no `confirmText` — the remedy', () => {
+    const result = InlineActionSchema.safeParse({
+      ...inlineReject,
+      description: 'Reject this request? Say why — the requester sees it.',
+    });
+
+    expect(result.success, JSON.stringify((result as { error?: unknown }).error)).toBe(true);
+  });
+
+  it('accepts `confirmText` on a param-LESS inline action — the confirm is the only dialog', () => {
     const result = InlineActionSchema.safeParse({
       type: 'url',
       target: '/approvals?reject=1',
       label: 'Reject',
       confirmText: 'Reject this request?',
-      params: [{ name: 'reason', label: 'Reason', type: 'textarea' }],
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success, JSON.stringify((result as { error?: unknown }).error)).toBe(true);
   });
+
+  it('accepts `confirmText` beside an EMPTY `params` array — nothing is collected, no second dialog', () => {
+    const result = InlineActionSchema.safeParse({ ...inlineReject, params: [], confirmText: 'Reject this request?' });
+
+    expect(result.success, JSON.stringify((result as { error?: unknown }).error)).toBe(true);
+  });
+});
+
+describe('`confirmText` + non-empty ARRAY `params` is refused on the `action:button` row too', () => {
+  // #29844 (ruling record 6597621758, letter A). The `action:button` block
+  // forwards its row's `confirmText` and an array `params` (as `actionParams`)
+  // to the same `ActionRunner`, which awaits the confirm and THEN the param
+  // prompt — the same two dialogs. Same predicate, same refusal: asserted
+  // against both other doors' issues, so a wording drifting onto one door goes
+  // red. An object `params` on this row is the static values, which open no
+  // dialog, so it keeps `confirmText`.
+  const buttonReject = {
+    label: 'Reject',
+    actionType: 'api',
+    target: '/api/v1/approvals/reject',
+    params: [{ name: 'reason', label: 'Reason', type: 'textarea' }],
+  } as const;
+
+  const parseErrorOf = (result: { success: boolean; error?: unknown }) => JSON.stringify(result.error);
+
+  it('refuses the pair at the `confirmText` path, with the other two doors\' message', () => {
+    const result = ActionButtonPropsSchema.safeParse({ ...buttonReject, confirmText: 'Reject this request?' });
+
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues.filter((i) => i.path.join('.') === 'confirmText');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe('custom');
+    expect(issues[0]?.path).toEqual(['confirmText']);
+
+    const registered = guardIssue(ActionSchema.safeParse({
+      ...base,
+      confirmText: 'Reject this request?',
+      params: oneParam,
+    }));
+    const inline = InlineActionSchema.safeParse({
+      type: 'url',
+      target: '/approvals?reject=1',
+      label: 'Reject',
+      params: oneParam,
+      confirmText: 'Reject this request?',
+    });
+    const inlineIssue = inline.success ? undefined : inline.error.issues.find((i) => i.path.join('.') === 'confirmText');
+    expect(registered?.message).toBeDefined();
+    expect(issues[0]?.message).toBe(registered?.message);
+    expect(issues[0]?.message).toBe(inlineIssue?.message);
+  });
+
+  it('accepts `description` beside an array `params` and no `confirmText` — the remedy', () => {
+    const result = ActionButtonPropsSchema.safeParse({
+      ...buttonReject,
+      description: 'Reject this request? Say why — the requester sees it.',
+    });
+
+    expect(result.success, parseErrorOf(result)).toBe(true);
+  });
+
+  it('accepts `confirmText` on a row with no `params` — the confirm is the only dialog', () => {
+    const { params: _params, ...paramless } = buttonReject;
+    const result = ActionButtonPropsSchema.safeParse({ ...paramless, confirmText: 'Reject this request?' });
+
+    expect(result.success, parseErrorOf(result)).toBe(true);
+  });
+
+  it('accepts `confirmText` beside an EMPTY `params` array — nothing is collected, no second dialog', () => {
+    const result = ActionButtonPropsSchema.safeParse({ ...buttonReject, params: [], confirmText: 'Reject this request?' });
+
+    expect(result.success, parseErrorOf(result)).toBe(true);
+  });
+
+  it('accepts `confirmText` beside an OBJECT `params` — static values, no param dialog opens', () => {
+    const result = ActionButtonPropsSchema.safeParse({
+      ...buttonReject,
+      params: { reason: 'duplicate' },
+      confirmText: 'Reject this request?',
+    });
+
+    expect(result.success, parseErrorOf(result)).toBe(true);
+  });
+});
+
+describe('`confirmText` + non-empty ARRAY `params` is refused on `action:icon` and the `action:group` / `action:menu` members too', () => {
+  // #30017 (ruling record 6624208841, letter A). `action:icon` forwards its
+  // row's `confirmText` and an array `params` (as `actionParams`) to the same
+  // `ActionRunner`, and so do both containers for each member: the same two
+  // dialogs. Same predicate, same refusal: asserted against `action:button`'s
+  // own issue, so a wording drifting onto one door goes red. An object `params`
+  // (the icon's static values; a `type: 'api'` member's request payload) opens
+  // no dialog, so it keeps `confirmText`.
+  const pairParams = [{ name: 'reason', label: 'Reason', type: 'textarea' }];
+  const iconReject = {
+    label: 'Reject',
+    icon: 'x',
+    actionType: 'api',
+    target: '/api/v1/approvals/reject',
+    params: pairParams,
+  } as const;
+  const memberReject = {
+    name: 'reject',
+    label: 'Reject',
+    type: 'api',
+    target: '/api/v1/approvals/reject',
+    params: pairParams,
+  } as const;
+  const asContainer = (member: Record<string, unknown>) => ({
+    actions: [{ name: 'approve', label: 'Approve', type: 'script', target: 'approve' }, member],
+  });
+  const CONTAINERS = [
+    ['action:group', ActionGroupPropsSchema],
+    ['action:menu', ActionMenuPropsSchema],
+  ] as const;
+
+  const parseErrorOf = (result: { success: boolean; error?: unknown }) => JSON.stringify(result.error);
+  /** `action:button`'s issue for the pair: the message every other door must equal. */
+  const buttonMessage = (): string | undefined => {
+    const r = ActionButtonPropsSchema.safeParse({ ...iconReject, confirmText: 'Reject this request?' });
+    return r.success ? undefined : r.error.issues.find((i) => i.path.join('.') === 'confirmText')?.message;
+  };
+
+  it('`action:icon` refuses the pair at the `confirmText` path, with `action:button`\'s message', () => {
+    const result = ActionIconPropsSchema.safeParse({ ...iconReject, confirmText: 'Reject this request?' });
+
+    expect(result.success).toBe(false);
+    const issues = result.success ? [] : result.error.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe('custom');
+    expect(issues[0]?.path).toEqual(['confirmText']);
+    expect(buttonMessage()).toBeDefined();
+    expect(issues[0]?.message).toBe(buttonMessage());
+    // The prescription: the remedy key, and the param-less case that keeps `confirmText` live.
+    expect(issues[0]?.message).toContain('TWO dialogs');
+    expect(issues[0]?.message).toContain('`description`');
+    expect(issues[0]?.message).toContain('param-LESS');
+  });
+
+  for (const [row, schema] of CONTAINERS) {
+    it(`an \`${row}\` member refuses the pair at \`actions.N.confirmText\`, with \`action:button\`'s message`, () => {
+      const result = schema.safeParse(asContainer({ ...memberReject, confirmText: 'Reject this request?' }));
+
+      expect(result.success).toBe(false);
+      const issues = result.success ? [] : result.error.issues;
+      expect(issues).toHaveLength(1);
+      expect(issues[0]?.code).toBe('custom');
+      // The member's own index, so the editor underlines the offending member, not the list.
+      expect(issues[0]?.path).toEqual(['actions', 1, 'confirmText']);
+      expect(issues[0]?.message).toBe(buttonMessage());
+      expect(issues[0]?.message).toContain('TWO dialogs');
+      expect(issues[0]?.message).toContain('`description`');
+    });
+
+    it(`an \`${row}\` member refuses the template-envelope form of \`confirmText\` too`, () => {
+      // A row's `confirmText` is a template slot: the bare string and the
+      // `{ dialect: 'template', source }` envelope are its two spellings (a
+      // localized map is refused by the slot itself, for its own reason).
+      const result = schema.safeParse(asContainer({
+        ...memberReject,
+        confirmText: { dialect: 'template', source: 'Reject this request?' },
+      }));
+
+      expect(result.success).toBe(false);
+      expect(result.success ? [] : result.error.issues.map((i) => [i.code, i.path.join('.')]))
+        .toEqual([['custom', 'actions.1.confirmText']]);
+    });
+  }
+
+  it('`action:icon` accepts `confirmText` with no `params`, beside `params: []`, and beside an OBJECT `params`', () => {
+    const { params: _params, ...paramless } = iconReject;
+    for (const props of [
+      { ...paramless, confirmText: 'Reject this request?' },
+      { ...iconReject, params: [], confirmText: 'Reject this request?' },
+      { ...iconReject, params: { reason: 'duplicate' }, confirmText: 'Reject this request?' },
+      { ...iconReject, description: 'Reject this request? Say why — the requester sees it.' },
+    ]) {
+      const result = ActionIconPropsSchema.safeParse(props);
+      expect(result.success, parseErrorOf(result)).toBe(true);
+    }
+  });
+
+  for (const [row, schema] of CONTAINERS) {
+    it(`an \`${row}\` member accepts \`confirmText\` with no \`params\`, beside \`params: []\`, and beside a \`type: 'api'\` member's OBJECT \`params\``, () => {
+      const { params: _params, ...paramless } = memberReject;
+      for (const member of [
+        { ...paramless, confirmText: 'Reject this request?' },
+        { ...memberReject, params: [], confirmText: 'Reject this request?' },
+        { ...memberReject, params: { reason: 'duplicate' }, confirmText: 'Reject this request?' },
+        { ...memberReject, description: 'Reject this request? Say why — the requester sees it.' },
+      ]) {
+        const result = schema.safeParse(asContainer(member));
+        expect(result.success, parseErrorOf(result)).toBe(true);
+      }
+    });
+  }
 });

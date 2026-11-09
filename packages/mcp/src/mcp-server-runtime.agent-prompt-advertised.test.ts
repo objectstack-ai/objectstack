@@ -232,3 +232,355 @@ describe('agent_prompt — advertised only where an agent can answer it', () => 
     }
   });
 });
+
+/**
+ * [#31514] `agent_prompt` reads an agent through the protocol, the read
+ * `GET /api/v1/meta/agent/NAME` serves, and its advertisement reads the
+ * protocol's listing, `GET /api/v1/meta/agent`'s. An agent a package ships
+ * lives in the registry the protocol reads; the kernel `metadata` service holds
+ * no copy of it, so the metadata double below holds none (`get` answers
+ * `undefined`, `list` answers `[]`), and the protocol double serves it. The
+ * real-kernel twin of these pins is
+ * `packages/qa/dogfood/test/mcp-stdio-package-object-discovery.test.ts`.
+ */
+describe('agent_prompt — one reader with GET /meta/agent/NAME (the protocol)', () => {
+  const PACKAGE_AGENT = {
+    name: 'pkg_helper',
+    label: 'Package Helper',
+    instructions: 'You help with what the package ships.',
+    active: true,
+  };
+
+  /** A protocol double: the merged listing and the by-name read, over `agents` and `skills`. */
+  function protocol({ agents = [PACKAGE_AGENT], skills = [SKILL], byName }: {
+    agents?: unknown[];
+    skills?: unknown[];
+    byName?: (request: { type: string; name: string }) => Promise<unknown>;
+  } = {}) {
+    const itemsOf = (type: string) => (type === 'agent' ? agents : type === 'skill' ? skills : []);
+    return {
+      getMetaItems: vi.fn(async ({ type }: { type: string }) => ({ type, items: itemsOf(type) })),
+      getMetaItem: vi.fn(byName ?? (async ({ type, name }: { type: string; name: string }) => ({
+        type,
+        name,
+        item: (itemsOf(type) as Array<{ name: string }>).find((i) => i.name === name),
+      }))),
+    };
+  }
+
+  async function connectWith(service: ReturnType<typeof metadataService>, read: unknown) {
+    const log = logger();
+    const runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9', logger: log as never });
+    await runtime.bridgePrompts(service as never, read as never);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    await Promise.all([runtime.server.connect(serverTransport), client.connect(clientTransport)]);
+    return {
+      client,
+      log,
+      close: async () => {
+        await client.close();
+        await runtime.stop().catch(() => {});
+      },
+    };
+  }
+
+  /** Every call the metadata double took for the `agent` type. */
+  const agentCallsOn = (service: ReturnType<typeof metadataService>) =>
+    [service.get, service.list, service.listDiagnosed]
+      .flatMap((fn) => (fn as ReturnType<typeof vi.fn>).mock.calls)
+      .filter((args) => args[0] === 'agent');
+
+  it('a boot whose only agent a package ships lists agent_prompt, and the argument names that agent', async () => {
+    const service = metadataService({ agents: [] });
+    const session = await connectWith(service, protocol());
+    try {
+      const listed = await session.client.listPrompts();
+      expect(listed.prompts.map((p) => p.name)).toContain('agent_prompt');
+      expect(agentNameDescription(listed.prompts)).toContain('"pkg_helper"');
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('serves the package agent with the instructions the protocol\'s by-name read answers, and never asks the metadata service for it', async () => {
+    const service = metadataService({ agents: [] });
+    const read = protocol();
+    const session = await connectWith(service, read);
+    try {
+      const served = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'pkg_helper' } });
+      const answered = (await read.getMetaItem({ type: 'agent', name: 'pkg_helper' })) as { item: { instructions: string } };
+      expect(served.messages).toEqual([
+        { role: 'assistant', content: { type: 'text', text: answered.item.instructions } },
+      ]);
+      expect(read.getMetaItem).toHaveBeenCalledWith({ type: 'agent', name: 'pkg_helper' });
+      expect(agentCallsOn(service).filter((args) => args[1] === 'pkg_helper')).toEqual([]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('CONTROL: an environment agent is served as before', async () => {
+    const service = metadataService({ agents: [AGENT] });
+    const session = await connectWith(service, protocol({ agents: [AGENT, PACKAGE_AGENT] }));
+    try {
+      const listed = await session.client.listPrompts();
+      expect(agentNameDescription(listed.prompts)).toContain('"support_triage"');
+      const served = await session.client.getPrompt({
+        name: 'agent_prompt',
+        arguments: { agentName: 'support_triage', objectName: 'case' },
+      });
+      expect(served.messages).toEqual([
+        { role: 'assistant', content: { type: 'text', text: 'You triage support cases.\n\n--- Current Context ---\nCurrent object: case' } },
+      ]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a name the protocol does not serve keeps today\'s miss answer', async () => {
+    const session = await connectWith(metadataService({ agents: [] }), protocol());
+    try {
+      const miss = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'nope' } });
+      expect(miss.messages).toEqual([
+        { role: 'user', content: { type: 'text', text: 'Error: Agent "nope" not found' } },
+      ]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a by-name read refused SERVICE_UNAVAILABLE (503) answers the #6055 outage text and serves no instructions', async () => {
+    const outage = Object.assign(new Error('The metadata store could not be read.'), { code: 'SERVICE_UNAVAILABLE', status: 503 });
+    const session = await connectWith(
+      metadataService({ agents: [] }),
+      protocol({ byName: async () => { throw outage; } }),
+    );
+    try {
+      const answer = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'pkg_helper' } });
+      expect(answer.messages).toHaveLength(1);
+      expect(answer.messages[0].role).toBe('user');
+      const text = (answer.messages[0].content as { text: string }).text;
+      expect(text.startsWith('Error: SERVICE_UNAVAILABLE — ')).toBe(true);
+      expect(text).not.toContain(PACKAGE_AGENT.instructions);
+      expect(session.log.warn).toHaveBeenCalledWith(
+        expect.stringContaining('agent prompt refused'),
+        expect.objectContaining({ agentName: 'pkg_helper' }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+  it('a host whose read has the listing but no by-name read reads the metadata service for both the roster and the get', async () => {
+    // One decision per host. The listing alone would let the roster advertise a
+    // package agent that the get, still on the metadata service, answers "not
+    // found": the #28940 defect again, on a host `bridgePrompts`' parameter type
+    // accepts.
+    const service = metadataService({ agents: [AGENT] });
+    const listingOnly = { getMetaItems: vi.fn(protocol().getMetaItems) };
+    const session = await connectWith(service, listingOnly);
+    try {
+      const listed = await session.client.listPrompts();
+      const description = agentNameDescription(listed.prompts) ?? '';
+      expect(description).toContain('"support_triage"');
+      expect(description).not.toContain('pkg_helper');
+      expect(listingOnly.getMetaItems).not.toHaveBeenCalledWith({ type: 'agent' });
+      const served = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'support_triage' } });
+      expect(served.messages).toEqual([
+        { role: 'assistant', content: { type: 'text', text: 'You triage support cases.' } },
+      ]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a by-name read that throws anything but SERVICE_UNAVAILABLE travels as a protocol error and serves no instructions', async () => {
+    const session = await connectWith(
+      metadataService({ agents: [] }),
+      protocol({ byName: async () => { throw Object.assign(new Error('registry exploded'), { code: 'INTERNAL' }); } }),
+    );
+    try {
+      const got = session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'pkg_helper' } });
+      await expect(got).rejects.toThrow(/registry exploded/);
+      await expect(got).rejects.not.toThrow(PACKAGE_AGENT.instructions);
+      expect(session.log.warn).not.toHaveBeenCalledWith(expect.stringContaining('agent prompt refused'), expect.anything());
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('[#31680, ADR-0150 D3] a by-name read the package-scoped resolver refuses (409 RESOURCE_CONFLICT) travels naming every holder: never "not found", never the outage text', async () => {
+    // The protocol's package-less by-name read refuses a name more than one
+    // package holds, naming each (child E8). Read here as a miss it would tell
+    // the client the agent does not exist; read as the #6055 outage it would
+    // say nothing is known. It is neither: it travels as the refusal it is.
+    const refusal = Object.assign(
+      new Error('agent "pkg_helper" is held by com.acme.alpha and com.acme.beta: qualify the name with its package'),
+      { code: 'RESOURCE_CONFLICT', status: 409, httpStatus: 409 },
+    );
+    const session = await connectWith(
+      metadataService({ agents: [] }),
+      protocol({ byName: async () => { throw refusal; } }),
+    );
+    try {
+      const got = session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'pkg_helper' } });
+      await expect(got).rejects.toThrow(/com\.acme\.alpha and com\.acme\.beta/);
+      await expect(got).rejects.not.toThrow(/not found|SERVICE_UNAVAILABLE/);
+      await expect(got).rejects.not.toThrow(PACKAGE_AGENT.instructions);
+      expect(session.log.warn).not.toHaveBeenCalledWith(expect.stringContaining('agent prompt refused'), expect.anything());
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a degraded roster verdict with the protocol present and no agent named keeps the prompt listed, naming no agent', async () => {
+    const session = await connectWith(
+      metadataService({
+        agentList: async () => ({ items: [], degraded: true, errors: ['loader sys_metadata: connection refused'] }),
+      }),
+      protocol({ agents: [] }),
+    );
+    try {
+      const listed = await session.client.listPrompts();
+      expect(listed.prompts.map((p) => p.name)).toContain('agent_prompt');
+      expect(agentNameDescription(listed.prompts) ?? '').not.toContain('e.g.');
+      expect(session.log.warn).toHaveBeenCalledWith(
+        expect.stringContaining('agent_prompt'),
+        expect.objectContaining({ errors: ['loader sys_metadata: connection refused'] }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+});
+
+/**
+ * [ADR-0150 D5/D6] Two installed packages each ship an agent and a skill of
+ * one name, on the long-lived server the stdio transport serves. Each is named
+ * by its face (`NS-NAME`, spec's `deriveAiFaceName`): the skill prompt list
+ * names both faces, `agent_prompt`'s argument teaches faces, and a face gets
+ * its one item, by its package. A bare name keeps answering while one holder
+ * has it; two holders are refused naming both, and a face two items derive is
+ * refused naming both — never one picked, never one dropped.
+ */
+describe('agent and skill faces on the long-lived server (ADR-0150 D6)', () => {
+  const NAMESPACES: Record<string, string> = { 'com.acme.crm': 'crm', 'com.acme.hr': 'hr' };
+  const packageNamespace = (packageId: string) => NAMESPACES[packageId];
+  const agent = (packageId: string, instructions: string) => ({ name: 'helper', instructions, _packageId: packageId });
+  const skill = (packageId: string, instructions: string) => ({ name: 'qualify_lead', instructions, _packageId: packageId });
+
+  /**
+   * The protocol's two reads over `(package, name)`: the listing stamps each
+   * row's `_packageId`; the by-name read is the exact qualifier when a
+   * `packageId` is given, and refuses a bare name two packages hold (E8).
+   */
+  function packagedProtocol(agents: Array<{ name: string; _packageId?: string }>, skills: unknown[]) {
+    return {
+      getMetaItems: vi.fn(async ({ type }: { type: string }) => ({
+        type, items: type === 'agent' ? agents : type === 'skill' ? skills : [],
+      })),
+      getMetaItem: vi.fn(async ({ type, name, packageId }: { type: string; name: string; packageId?: string }) => {
+        const held = agents.filter((a) => a.name === name && (packageId === undefined || a._packageId === packageId));
+        if (type === 'agent' && packageId === undefined && held.length > 1) {
+          throw Object.assign(new Error(`The agent "${name}" is held by 2 packages`), { code: 'RESOURCE_CONFLICT', status: 409 });
+        }
+        return { type, name, item: type === 'agent' ? held[0] : undefined };
+      }),
+    };
+  }
+
+  async function connectFaces(read: ReturnType<typeof packagedProtocol>, log = logger()) {
+    const runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9', logger: log as never });
+    await runtime.bridgePrompts(metadataService({ agents: [], skills: [] }) as never, read as never, packageNamespace);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    await Promise.all([runtime.server.connect(serverTransport), client.connect(clientTransport)]);
+    return { client, log, close: async () => { await client.close(); await runtime.stop().catch(() => {}); } };
+  }
+
+  const twoOfEach = () => packagedProtocol(
+    [agent('com.acme.crm', 'CRM agent.'), agent('com.acme.hr', 'HR agent.')],
+    [skill('com.acme.crm', 'CRM skill.'), skill('com.acme.hr', 'HR skill.')],
+  );
+  const textOf = (got: any) => got.messages[0].content.text;
+
+  it('lists each package skill under its face, and agent_prompt teaches agent faces', async () => {
+    const session = await connectFaces(twoOfEach());
+    try {
+      const listed = await session.client.listPrompts();
+      expect(listed.prompts.map((p) => p.name)).toEqual(['agent_prompt', 'crm-qualify_lead', 'hr-qualify_lead']);
+      expect(agentNameDescription(listed.prompts)).toContain('"crm-helper", "hr-helper"');
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a skill face gets its one skill, and an agent face reads its one agent by its package', async () => {
+    const read = twoOfEach();
+    const session = await connectFaces(read);
+    try {
+      expect(textOf(await session.client.getPrompt({ name: 'hr-qualify_lead' }))).toBe('HR skill.');
+      const got = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'hr-helper' } });
+      expect(textOf(got)).toBe('HR agent.');
+      expect(read.getMetaItem).toHaveBeenCalledWith({ type: 'agent', name: 'helper', packageId: 'com.acme.hr' });
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a bare skill name two packages hold is refused naming both faces; a bare agent name too', async () => {
+    const session = await connectFaces(twoOfEach());
+    try {
+      const skillGet = session.client.getPrompt({ name: 'qualify_lead' });
+      await expect(skillGet).rejects.toThrow(/"crm-qualify_lead", "hr-qualify_lead"/);
+      await expect(skillGet).rejects.not.toThrow(/CRM skill|HR skill/);
+      const agentGet = session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'helper' } });
+      await expect(agentGet).rejects.toThrow(/held by 2 packages/);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('CONTROL: a bare name one package holds gets that skill and that agent, as before', async () => {
+    const session = await connectFaces(packagedProtocol(
+      [agent('com.acme.crm', 'CRM agent.')],
+      [skill('com.acme.crm', 'CRM skill.')],
+    ));
+    try {
+      expect(textOf(await session.client.getPrompt({ name: 'qualify_lead' }))).toBe('CRM skill.');
+      const got = await session.client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'helper' } });
+      expect(textOf(got)).toBe('CRM agent.');
+      // The list names the face only: the bare name is answered, never listed.
+      const listed = await session.client.listPrompts();
+      expect(listed.prompts.map((p) => p.name)).toEqual(['agent_prompt', 'crm-qualify_lead']);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('a face two items derive is registered once as a refusal naming both, and boot warns naming both', async () => {
+    const both = { 'com.base.a': 'base', 'com.base.b': 'base' } as Record<string, string>;
+    const read = packagedProtocol(
+      [{ name: 'x', _packageId: 'com.base.a' }, { name: 'x', _packageId: 'com.base.b' }],
+      [{ name: 'x', instructions: 'one', _packageId: 'com.base.a' }, { name: 'x', instructions: 'two', _packageId: 'com.base.b' }],
+    );
+    const log = logger();
+    const runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9', logger: log as never });
+    await runtime.bridgePrompts(metadataService({ agents: [], skills: [] }) as never, read as never, (id) => both[id]);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test-client', version: '0.0.0' });
+    await Promise.all([runtime.server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const listed = await client.listPrompts();
+      expect(listed.prompts.filter((p) => p.name === 'base-x')).toHaveLength(1);
+      await expect(client.getPrompt({ name: 'base-x' })).rejects.toThrow(/"com\.base\.a".*"com\.base\.b"/);
+      await expect(client.getPrompt({ name: 'agent_prompt', arguments: { agentName: 'base-x' } }))
+        .rejects.toThrow(/"com\.base\.a".*"com\.base\.b"/);
+      const warned = log.warn.mock.calls.map((c) => String(c[0]));
+      expect(warned.filter((w) => w.includes('"base-x"') && w.includes('com.base.a') && w.includes('com.base.b'))).toHaveLength(2);
+    } finally {
+      await client.close();
+      await runtime.stop().catch(() => {});
+    }
+  });
+});

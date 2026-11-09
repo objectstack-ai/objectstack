@@ -11,17 +11,27 @@ import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-vi.mock('@object-ui/i18n', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useObjectTranslation: () => ({
-    t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k,
-  }),
-}));
+// `t()` answers each key's default text; a describe that sets `i18nMode.real`
+// reads the shipped packs through the real hook instead.
+const i18nMode = vi.hoisted(() => ({ real: false }));
+vi.mock('@object-ui/i18n', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/i18n')>();
+  return {
+    ...actual,
+    useObjectTranslation: (ns?: string) =>
+      i18nMode.real
+        ? actual.useObjectTranslation(ns)
+        : { t: (_k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? _k },
+  };
+});
 
+import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { DraftChangesPanel, computeChangeDetail } from '../DraftChangesPanel';
+import { PACKAGE_EXPORT_COMMAND, customizationEnvironmentText } from '../savedToCustomization';
 
 afterEach(() => {
   vi.restoreAllMocks();
+  i18nMode.real = false;
 });
 
 /* ─────────────── computeChangeDetail (pure) ─────────────── */
@@ -247,5 +257,77 @@ describe('DraftChangesPanel — /meta routes are addressed in the singular', () 
     // names its type through the `object` count family (objectui#13221); an
     // unfolded `objects` group would read the raw `{{n}} {{type}}` fallback.
     expect(screen.getByRole('heading', { level: 4 }).textContent).toBe('{{count}} objects');
+  });
+});
+
+/* ─────────────── where a customization is saved (ADR-0146 D3) ─────────────── */
+
+/**
+ * objectstack#29691 — reviewing a read-only base's `.custom` pair, the sheet
+ * says where the changes are saved, in the one sentence the item header
+ * shares: 保存到 BASE 的定制. Rendered through the real i18next hook and the
+ * shipped packs.
+ */
+describe('DraftChangesPanel — names the base whose customizations it saves (objectstack#29691)', () => {
+  function renderIn(lang: 'en' | 'zh', extra: Partial<React.ComponentProps<typeof DraftChangesPanel>> = {}) {
+    i18nMode.real = true;
+    mockRoutes();
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    return render(
+      <I18nProvider instance={i18n} persistLanguage={false}>
+        <DraftChangesPanel open onOpenChange={() => {}} packageId="com.x" {...extra} />
+      </I18nProvider>,
+    );
+  }
+
+  it('says 保存到 HotCRM 的定制 under the title for a pair, in zh', async () => {
+    renderIn('zh', { customizationOf: 'HotCRM' });
+    await waitFor(() => expect(screen.getByTestId('draft-changes-saved-to')).toHaveTextContent(/^保存到 HotCRM 的定制$/));
+  });
+
+  it('says “Saved to HotCRM’s customizations” in en', async () => {
+    renderIn('en', { customizationOf: 'HotCRM' });
+    expect(await screen.findByTestId('draft-changes-saved-to')).toHaveTextContent(/^Saved to HotCRM’s customizations$/);
+  });
+
+  it('CONTROL: a writable package’s own drafts carry no such sentence', async () => {
+    renderIn('en');
+    await waitFor(() => expect(screen.getByText('ticket')).toBeInTheDocument());
+    expect(screen.queryByTestId('draft-changes-saved-to')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('draft-changes-environment')).not.toBeInTheDocument();
+  });
+
+  /*
+   * objectstack#30119 (ADR-0146 D2) — under it, where the changes live: this
+   * environment's database, as items of the pair the host reviews (its
+   * `packageId`, named as served), and the one command that moves them,
+   * verbatim in every pack.
+   */
+  it('names the pair and `os package export` in the line under it, in en', async () => {
+    renderIn('en', { customizationOf: 'HotCRM', packageId: 'com.hotcrm.custom' });
+    const line = await screen.findByTestId('draft-changes-environment');
+    expect(line.textContent).toContain('this environment’s database');
+    expect(line.textContent).toContain('com.hotcrm.custom');
+    expect(line.textContent).toContain('os package export');
+  });
+
+  it('keeps the pair id and the command untranslated in zh', async () => {
+    renderIn('zh', { customizationOf: 'HotCRM', packageId: 'com.hotcrm.custom' });
+    const line = await screen.findByTestId('draft-changes-environment');
+    expect(line.textContent).toContain('当前环境的数据库');
+    expect(line.textContent).toContain('com.hotcrm.custom');
+    expect(line.textContent).toContain('os package export');
+  });
+});
+
+describe('the environment line keeps the command verbatim in every pack (objectstack#30119)', () => {
+  const LOCALES = ['en', 'zh', 'ja', 'ko', 'de', 'fr', 'es', 'pt', 'ru', 'ar'] as const;
+  it.each(LOCALES)('%s: names the pair and `os package export` once each', async (lang) => {
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    await i18n.changeLanguage(lang);
+    const text = customizationEnvironmentText(i18n.t.bind(i18n) as never, 'com.hotcrm.custom');
+    expect(text).not.toContain('{{');
+    expect(text.split('com.hotcrm.custom')).toHaveLength(2);
+    expect(text.split(PACKAGE_EXPORT_COMMAND)).toHaveLength(2);
   });
 });

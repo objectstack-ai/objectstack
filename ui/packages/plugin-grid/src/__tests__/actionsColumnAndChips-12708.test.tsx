@@ -45,6 +45,8 @@ function renderGrid(opts: {
   schema?: Record<string, unknown>;
   objectFields?: Record<string, unknown>;
   wired?: boolean;
+  /** Serves the object's schema (the rows stay inline), e.g. to declare actions. */
+  dataSource?: Record<string, unknown>;
 } = {}) {
   const schema: any = {
     type: 'object-grid',
@@ -59,6 +61,7 @@ function renderGrid(opts: {
       <ObjectGrid
         schema={schema}
         objectFields={opts.objectFields}
+        {...(opts.dataSource ? { dataSource: opts.dataSource as any } : {})}
         {...(wired ? { onEdit: vi.fn(), onDelete: vi.fn() } : {})}
         {...(opts.rowOperations ? { rowOperations: opts.rowOperations } : {})}
       />
@@ -122,9 +125,21 @@ describe('objectui#12708 · CONTROL — a list whose rows offer actions keeps it
   });
 
   it('draws it for a legacy row action that is not Edit or Delete, with nothing else wired', async () => {
-    renderGrid({ wired: false, schema: { rowActions: ['archive'] } });
+    // `archive` is declared on the object: a bare `rowActions` name draws only
+    // when it names an action the object declares (objectstack#30169).
+    renderGrid({
+      wired: false,
+      schema: { rowActions: ['archive'] },
+      dataSource: {
+        getObjectSchema: async (name: string) => ({
+          name,
+          fields: { name: { type: 'text' }, status: { type: 'text' } },
+          actions: [{ name: 'archive', label: 'Archive' }],
+        }),
+      },
+    });
     await settle();
-    expect(actionsHeader()).not.toBeNull();
+    await waitFor(() => expect(actionsHeader()).not.toBeNull());
   });
 });
 

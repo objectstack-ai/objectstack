@@ -623,6 +623,17 @@ export const UNREACHED_GROUPS = [
       'does not take.',
     card: 'objectui#13472',
   },
+  {
+    glob: 'packages/i18n/scripts/zh-hant.d.mts',
+    reason:
+      'The hand-written declaration twin of `packages/i18n/scripts/zh-hant.mjs`, the converter that generates ' +
+      'the Traditional Chinese pack; the package test `src/__tests__/zh-hant-generated.test.ts` (compiled with ' +
+      '`allowJs: false`) imports it typed through this twin and pins the twin\'s names to the module\'s real ' +
+      'exports. It holds `export declare` lines and no executable code. Declared rather than repaired for the ' +
+      'same reason as the rows above: reaching a `.d.mts` means widening a rule-bearing `files` glob to ' +
+      '`.mts`, a rule STRENGTH decision this gate reports and does not take.',
+    card: 'objectstack#30511',
+  },
 ];
 
 /**

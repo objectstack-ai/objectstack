@@ -954,9 +954,15 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    * Input type — an open widget hint (`text`, `number`, `select`, …) the client
    * maps to a control.
    *
-   * Two members are also VALUE domains, which the resume enforces
-   * (`validateScreenInputs`): `'number'` (a finite JSON number, ruling A′) and
-   * `'file'` (#25801). A `'file'` field renders the platform upload widget; the
+   * Nine members are also VALUE domains, which the resume enforces
+   * (`validateScreenInputs`): the three numeric kinds `'number'` (ruling A′),
+   * `'currency'` and `'percent'` (the same rule, by a later ruling) take a
+   * finite JSON number, a numeric string refused and ⛔ never coerced; the
+   * five string kinds `'text'`, `'textarea'`, `'email'`, `'url'` and `'phone'`
+   * (ruling A+, #31491) take a JSON string, an object, number, boolean or array
+   * refused and ⛔ never coerced (only the shape is checked, not the format of
+   * an email, URL or phone number); and `'file'` (#25801). A refused value
+   * leaves the run paused, so a corrected resume continues it. A `'file'` field renders the platform upload widget; the
    * upload goes through the file service and lands as a `sys_file` no record
    * owns yet, and the resume carries that file's id — ADR-0104 D3's stored
    * form, and nothing else. A later node writes the id into an object's `file`
@@ -977,7 +983,9 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    * result screen that links the records the run created.
    */
   type: z.string().optional().describe(
-    'Input type — an open widget hint (text, number, select, …); `file` renders the platform upload widget and '
+    'Input type — an open widget hint (text, number, select, …); `number`, `currency` and `percent` take a finite '
+    + 'number on resume (a numeric string is refused); `text`, `textarea`, `email`, `url` and `phone` take a string '
+    + 'on resume (any other JSON type is refused, never coerced); `file` renders the platform upload widget and '
     + "the screen resumes with the uploaded file's id, which a later node writes into a `file` field; "
     + '`record_link` shows the `reference` record whose id `defaultValue` evaluates to, by its display name, as a '
     + 'link to its record page, and takes no input',
@@ -1024,16 +1032,19 @@ export const ScreenFieldConfigSchema = lazySchema(() => strictObject({
    * directly, which is the gap #4477 closed for `required`.
    *
    * The resume check compares numbers, and a caller that posts a non-number no
-   * longer slips past it by never reaching it: on a `type: 'number'` field a
-   * present value that is not a finite JSON number is refused first
-   * (`invalid_type`), ⛔ not coerced (maintainer ruling A′, 2026-09-13). So
+   * longer slips past it by never reaching it: on a numeric field
+   * (`type: 'number'`, `'currency'` or `'percent'`) a present value that is
+   * not a finite JSON number is refused first (`invalid_type`), ⛔ not coerced
+   * (maintainer ruling A′, 2026-09-13; `currency` and `percent` by a later
+   * ruling under the same rule). So
    * "a caller that skips the dialog is refused too" holds with no qualifier.
    *
    * Unconditioned on `type` in the SHAPE, exactly as `FieldSchema.min` /
    * `.max` are: a screen field's `type` is an open widget hint, so this schema
    * cannot judge which types a bound is meaningful on. A bound declared on a
    * non-numeric field still constrains nothing the client renders — the shape
-   * refusal above reads `'number'` alone, not the presence of a bound.
+   * refusal above reads the three numeric kinds alone, not the presence of a
+   * bound.
    */
   min: z.number().optional().describe('Minimum accepted value (numeric fields); enforced on resume'),
   max: z.number().optional().describe('Maximum accepted value (numeric fields); enforced on resume'),

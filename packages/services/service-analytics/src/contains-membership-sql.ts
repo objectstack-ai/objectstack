@@ -49,7 +49,7 @@ import type { StrategyContext } from '@objectstack/spec/contracts';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import { declaredValueShapeResolver } from './empty-operator-sql.js';
 import { invalidFilterError } from './strategies/filter-normalizer.js';
-import { sqlDialectFor, type AnalyticsSqlDialect, type TextMatchBind } from './text-match-sql.js';
+import { noJsonFunctionReason, sqlDialectFor, type AnalyticsSqlDialect, type TextMatchBind } from './text-match-sql.js';
 
 /**
  * Is the declared field's stored value JSON — a `STRUCTURED_JSON_TYPES` member,
@@ -59,6 +59,16 @@ import { sqlDialectFor, type AnalyticsSqlDialect, type TextMatchBind } from './t
 export function isJsonStoredShape(shape: ValueShapeFieldDef | undefined): boolean {
   if (!shape || typeof shape.type !== 'string') return false;
   return STRUCTURED_JSON_TYPES.has(shape.type) || isMultiValueField(shape);
+}
+
+/**
+ * [#31394] Whether `@objectstack/core`'s `jsonMembershipPredicate` has a
+ * construct for `dialect`. SQL Server is named in this package for the
+ * text-match arms and has none (`driver-sql` refuses it there too), so it is
+ * handed on as `'unknown'` and refused exactly as it was before it was named.
+ */
+export function hasJsonMembershipSql(dialect: AnalyticsSqlDialect): dialect is 'sqlite' | 'postgres' | 'mysql' {
+  return dialect === 'sqlite' || dialect === 'postgres' || dialect === 'mysql';
 }
 
 /** One membership predicate to compile. */
@@ -86,7 +96,8 @@ export interface ContainsMembershipRequest {
  * the caller's wrapper, exactly as it is for the text-match family.
  */
 export function containsMembershipSql(req: ContainsMembershipRequest): string | null {
-  const positive = jsonMembershipPredicate(req.dialect, { column: () => req.column, value: (v) => req.bind(v) }, req.value);
+  const dialect = hasJsonMembershipSql(req.dialect) ? req.dialect : 'unknown';
+  const positive = jsonMembershipPredicate(dialect, { column: () => req.column, value: (v) => req.bind(v) }, req.value);
   if (positive === null) return null;
   return req.negate ? `NOT ${positive}` : positive;
 }
@@ -97,7 +108,8 @@ export function containsMembershipSql(req: ContainsMembershipRequest): string | 
  * the host cannot name it) and the leaf keeps the text-match family.
  *
  * Refused in the `where` door's envelope (`INVALID_FILTER` / 400, message
- * kept: the caller wrote the filter) when the dialect is `'unknown'`, before
+ * kept: the caller wrote the filter) when the dialect has no JSON construct
+ * here (`'unknown'`, `'mssql'`), before
  * anything binds.
  */
 export function whereContainsMembershipSql(req: {
@@ -111,8 +123,9 @@ export function whereContainsMembershipSql(req: {
 }): string | null {
   const { ctx, target } = req;
   if (!isJsonStoredShape(declaredValueShapeResolver(ctx, target.object)?.(target.field))) return null;
+  const dialect = sqlDialectFor(ctx, target.object);
   const sql = containsMembershipSql({
-    dialect: sqlDialectFor(ctx, target.object),
+    dialect,
     column: req.column,
     value: req.value,
     negate: req.negate,
@@ -123,8 +136,9 @@ export function whereContainsMembershipSql(req: {
     throw invalidFilterError(
       `[analytics] Operator "${operator}" on field "${target.field}" of "${target.object}" targets a multi-valued ` +
         `or JSON-stored field, where it asks whether the comparand is an ELEMENT of the stored list. That test is ` +
-        `a JSON function that differs per SQL dialect, and the dialect of this datasource is not known to the ` +
-        `analytics host, so the operator is refused rather than answered as a substring of the stored text. ` +
+        `a JSON function that differs per SQL dialect, and ` +
+        `${noJsonFunctionReason(dialect, 'the dialect of this datasource is not known to the analytics host')}, ` +
+        `so the operator is refused rather than answered as a substring of the stored text. ` +
         `The filter was NOT applied.`,
     );
   }

@@ -33,6 +33,11 @@ export abstract class ObjectKernelBase {
     protected services: IServiceRegistry | Map<string, any> = new Map();
     protected hooks: Map<string, Array<(...args: any[]) => void | Promise<void>>> = new Map();
     protected state: KernelState = 'idle';
+    /**
+     * Set once `bootstrap()` has dispatched `kernel:ready` and every handler
+     * has settled; read through {@link hasBootPhaseSettled}.
+     */
+    protected kernelReadySettled = false;
     protected logger: Logger;
     protected context!: PluginContext;
     /**
@@ -342,6 +347,25 @@ export abstract class ObjectKernelBase {
      */
     dispatchesBootPhaseHooks(): boolean {
         return true;
+    }
+
+    /**
+     * Whether this kernel's boot has passed `phase`: the hook was dispatched,
+     * every handler of it settled, and the kernel is still running.
+     *
+     * Only `'kernel:ready'` is answered; any other phase answers `false`. By
+     * then every plugin's `start()` and every `kernel:ready` handler has run,
+     * so something a plugin publishes in either place and is still absent
+     * will not appear later in this boot: "not published yet" has become
+     * "not published". `false` means "not known to be past it", never "it
+     * failed": a kernel still booting, one whose boot-phase hooks are
+     * withheld, and a stopped kernel all answer `false`.
+     *
+     * Read-only, and meant to be read when it is needed, never cached.
+     */
+    hasBootPhaseSettled(phase: 'kernel:ready'): boolean {
+        if (phase !== 'kernel:ready') return false;
+        return this.kernelReadySettled && this.state === 'running';
     }
 
     /**

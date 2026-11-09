@@ -336,6 +336,19 @@ const CBP_ORPHAN_CONSEQUENCE =
  *   2. `required: true` + `readonly: true`;
  *   3. `required: true` + `system: true`.
  *
+ * ⚠️ Amended by ruling A of #30905 (ADR-0055 §1 as amended): the object's
+ * ONLY `master_detail`, declared `required: false`, is its optional master — a
+ * detail row may name none, and such a row is read by its owner and by View
+ * All on the detail — so that spelling passes, and only `readonly` / `system`
+ * on it is reported (the parse refuses it too, shape `master-not-writable`).
+ * Shape 1 now reads: `required` absent (or not a boolean) on any
+ * `master_detail`, or `false` on one beside another `master_detail`. On the
+ * sole `master_detail` an absent `required` is reported with both honest
+ * spellings, because the parse cannot see the omission (it reads the parsed
+ * `false`, so it admits the optional master) while `ObjectSchema.create()`
+ * forces it to `true`: one source, two meanings, until the author writes one.
+ * The fix stays `required: true`, the reading the builder already gives it.
+ *
  * Why these three. A `controlled_by_parent` detail derives ALL of its record
  * access from the master its `master_detail` reference names (ADR-0055: such an
  * object "must declare exactly one required `master_detail` field"). Record
@@ -394,21 +407,41 @@ function cbpMasterReferenceFinding(
   fieldPath: string,
   parent: string,
   def: any,
+  masterDetailCount: number,
 ): LintIssue | undefined {
-  const missingRequired = def.required !== true;
+  // [ADR-0055 §1 as amended · #30905 ruling A] The object's ONLY
+  // `master_detail`, declared `required: false`, is its optional master — the
+  // spelling passes. Beside another `master_detail` an explicit `false` is
+  // judged as before; an omitted `required` is reported on every field.
+  const soleMasterDetail = masterDetailCount === 1;
+  const optionalMaster = soleMasterDetail && def.required === false;
+  const missingRequired = def.required !== true && !optionalMaster;
+  // On the sole `master_detail`, an omitted (or non-boolean) `required` has
+  // two honest spellings; elsewhere only `required: true` is one.
+  const eitherSpelling = missingRequired && soleMasterDetail;
   const flags = (['readonly', 'system'] as const).filter((flag) => def[flag] === true);
   if (!missingRequired && flags.length === 0) return undefined;
 
   const subject = `master_detail "${objectName}.${fieldName}" → ${parent}`;
   // [#22161] One verdict per shape, ending in the one shared consequence; the
   // derivation (why the record is unreadable, why the flags skip the check)
-  // is `os explain` text.
-  const message = missingRequired
+  // is `os explain` text. [#30905] The sole master_detail's omitted
+  // `required` names its two spellings instead: the consequence is the
+  // required one's only, and which one is meant is the author's to write.
+  const message = eitherSpelling
+    ? flags.length === 0
+      ? `${subject} declares no required: write true (every detail names its master) or false (an optional master)`
+      : `${subject} declares no required and is marked ${flags.join(' or ')}: write required: true or false, ` +
+        'and drop the flag'
+    : missingRequired
     ? flags.length === 0
       ? `${subject} must be required: ${CBP_ORPHAN_CONSEQUENCE}`
       : `${subject} must be required and not marked ${flags.join(' or ')}: ${CBP_ORPHAN_CONSEQUENCE}`
-    : `${subject} is marked ${flags.join(' and ')}, which skips its required check: ` +
-      CBP_ORPHAN_CONSEQUENCE;
+    : optionalMaster
+      ? `${subject} is the optional master and is marked ${flags.join(' and ')}, which no detail ` +
+        'write supplies: the master reference must be writable'
+      : `${subject} is marked ${flags.join(' and ')}, which skips its required check: ` +
+        CBP_ORPHAN_CONSEQUENCE;
 
   return {
     severity: 'error',
@@ -1016,7 +1049,10 @@ export function lintDataModel(objects: any[]): LintIssue[] {
         // `master_detail` is a likely-wrong choice and stays a `warning`,
         // byte-for-byte as before.
         if (obj.sharingModel === 'controlled_by_parent') {
-          const finding = cbpMasterReferenceFinding(obj.name, fieldName, fieldPath, parent, def);
+          const masterDetailCount = fields.filter(({ def: f }) => f?.type === 'master_detail').length;
+          const finding = cbpMasterReferenceFinding(
+            obj.name, fieldName, fieldPath, parent, def, masterDetailCount,
+          );
           if (finding) issues.push(finding);
         } else if (def.required !== true) {
           issues.push({

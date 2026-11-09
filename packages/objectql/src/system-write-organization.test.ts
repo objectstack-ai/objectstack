@@ -55,7 +55,14 @@ import {
 // re-exports. Same reasoning, and the same shape, as the core precedent
 // `packages/core/src/service-resolution-discriminator.contract.test.ts`.
 import * as barrel from './index.js';
-import { resolveSystemWriteOrganization as coreResolveSystemWriteOrganization } from '@objectstack/core';
+import {
+  resolveSystemWriteOrganization as coreResolveSystemWriteOrganization,
+  resolveTenantFieldName as coreResolveTenantFieldName,
+  DEFAULT_TENANT_FIELD as CORE_DEFAULT_TENANT_FIELD,
+  isFederatedObject as coreIsFederatedObject,
+} from '@objectstack/core';
+import { resolveTenantFieldName, DEFAULT_TENANT_FIELD } from './tenancy/system-write-organization.js';
+import { isFederatedObject } from './federated-object.js';
 
 const ORG_ID = 'org_msokm9oaz0cal87q';
 const SECOND_ORG_ID = 'org_second';
@@ -219,6 +226,55 @@ describe('#8844 the decision — the ruling as one pure function', () => {
     expect(await resolveSystemWriteOrganization({
       posture: 'single', probeOrganizations: probe([]), organizationObjectRegistered: false,
     })).toEqual({ kind: 'no-organization-object' });
+  });
+});
+
+describe('ObjectQL#systemWriteOrganization — the engine answers the decision its system insert makes', () => {
+  // A caller with no organization of its own (a job pull) asks this up front,
+  // so the organization its reads scope by is the one its writes are stamped
+  // with. It must be the insert's own assembly: same posture, same probe (and
+  // memo), same registry fact — and it writes nothing.
+  const probes = (observed: ObservedCall[]) => observed.filter((c) => c.object === 'sys_organization' && c.method === 'find').length;
+
+  it('single, one organization: derived — the organization a system insert is then stamped with', async () => {
+    const { engine, observed } = await makeEngine({ posture: 'single' });
+    expect(await engine.systemWriteOrganization()).toEqual({ kind: 'derived', organizationId: ORG_ID });
+    expect(observed.filter((c) => c.method !== 'find')).toEqual([]);
+
+    await engine.insert('dispatch_order', { subject: 'stamped' }, { context: SYSTEM_CTX } as any);
+    expect(lastWrite(observed, 'dispatch_order')?.options?.tenantId).toBe(ORG_ID);
+    // One probe for both: the answer and the insert share the engine's memo.
+    expect(probes(observed)).toBe(1);
+  });
+
+  it('single, several organizations: refuse (ambiguous), as the insert refuses', async () => {
+    const { engine } = await makeEngine({ posture: 'single', organizations: [ORG_ID, SECOND_ORG_ID] });
+    expect(await engine.systemWriteOrganization())
+      .toEqual({ kind: 'refuse', reason: 'ambiguous-organization', organizationCount: 2 });
+  });
+
+  it.each(['group', 'isolated'] as const)('the injected %s posture: refuse (walled), and nothing is probed', async (posture) => {
+    const { engine, observed } = await makeEngine({ posture });
+    expect(await engine.systemWriteOrganization()).toEqual({ kind: 'refuse', reason: 'walled-posture' });
+    expect(probes(observed)).toBe(0);
+  });
+
+  it('no provider injected: the posture is the deployment\'s, as on the insert', async () => {
+    vi.stubEnv('OS_TENANCY_POSTURE', 'isolated');
+    const { engine } = await makeEngine();
+    expect(await engine.systemWriteOrganization()).toEqual({ kind: 'refuse', reason: 'walled-posture' });
+  });
+
+  it('a composition with no organization object: no-organization-object', async () => {
+    const { engine } = await makeEngine({ posture: 'single', lean: true });
+    expect(await engine.systemWriteOrganization()).toEqual({ kind: 'no-organization-object' });
+  });
+
+  it('a probe that cannot run propagates — it is not answered as "no organization"', async () => {
+    const { engine } = await makeEngine({ posture: 'single' });
+    const driver = engine.getDriverForObject('dispatch_order') as any;
+    driver.find = async () => { throw new Error('connection reset'); };
+    await expect(engine.systemWriteOrganization()).rejects.toThrow('connection reset');
   });
 });
 
@@ -585,5 +641,17 @@ describe('#14936 the published recognizer for the org-less system-write refusal'
     // that cannot.
     expect(resolveSystemWriteOrganization).toBe(coreResolveSystemWriteOrganization);
     expect(barrel.resolveSystemWriteOrganization).toBe(coreResolveSystemWriteOrganization);
+  });
+
+  it('re-exports the tenancy-scope predicate, its column and the federated test @objectstack/core holds, never copies', () => {
+    // The import runner's match lookup (`@objectstack/core`) scopes a read by
+    // the column the engine stamps a created row with, so it asks these same
+    // bindings one layer down. A copy here would pass every engine case and
+    // drift from the runner's reading silently: identity is the pin.
+    expect(resolveTenantFieldName).toBe(coreResolveTenantFieldName);
+    expect(barrel.resolveTenantFieldName).toBe(coreResolveTenantFieldName);
+    expect(DEFAULT_TENANT_FIELD).toBe(CORE_DEFAULT_TENANT_FIELD);
+    expect(barrel.DEFAULT_TENANT_FIELD).toBe(CORE_DEFAULT_TENANT_FIELD);
+    expect(isFederatedObject).toBe(coreIsFederatedObject);
   });
 });

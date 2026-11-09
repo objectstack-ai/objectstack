@@ -42,8 +42,10 @@
 
 import { codeSelfServiceRefusal } from './account-self-service-refusal-code.js';
 import type { AuthManager } from './auth-manager.js';
-import { SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
+import { refusalCodeOf, SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
+import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
+import { refuseIntrospectionForBannedSubject } from './oauth-token-read-ban-refusal.js';
 import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotation.js';
 import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
 import { retireExpiredInvitationsOnReissue } from './invitation-expired-supersede.js';
@@ -65,12 +67,102 @@ export interface AfterHookHost {
   enforceConcurrentCap: AuthManager['enforceConcurrentCap'];
   externalDirectoryDoorDeps: AuthManager['externalDirectoryDoorDeps'];
   isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
+  logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
-  recordSignInOutcome: AuthManager['recordSignInOutcome'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
+  settleSignInAttempt: AuthManager['settleSignInAttempt'];
   stampLastLogin: AuthManager['stampLastLogin'];
   stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
+}
+
+/**
+ * #8019 — who the change-email notice goes to: the user of the session the
+ * endpoint acted on. `undefined` when that user carries no address, and then
+ * no notice is sent.
+ */
+function changeEmailFrom(user: unknown): { email: string; name?: string; id?: string } | undefined {
+  const u = (user ?? {}) as { email?: unknown; name?: unknown; id?: unknown };
+  if (typeof u.email !== 'string' || !u.email) return undefined;
+  return {
+    email: u.email,
+    ...(typeof u.name === 'string' && u.name ? { name: u.name } : {}),
+    ...(typeof u.id === 'string' && u.id ? { id: u.id } : {}),
+  };
+}
+
+/**
+ * The user of the session the endpoint acted on, as better-auth's session
+ * middleware recorded it on `ctx.context.session` before the handler ran.
+ */
+function actingUserIdOf(ctx: any): string | undefined {
+  const id: unknown = ctx?.context?.session?.user?.id;
+  return typeof id === 'string' && id !== '' ? id : undefined;
+}
+
+/**
+ * ADR-0069 D1 — the account a successful password change's after-effects
+ * (the `password_changed_at` stamp, the forced-change flag it clears, the
+ * history entry) land on, or `undefined` when they land on none.
+ *
+ * `/change-password`: the account the endpoint acted on
+ * ({@link actingUserIdOf}), and only when the before-hook's password checks
+ * ran for that same account (`__osPwChangeUserId`, stashed beside them). A
+ * clear of the forced-change flag is the verdict those checks gate, so an
+ * account they did not judge is given none of it, and no account but the one
+ * changed is ever stamped.
+ *
+ * `/reset-password`: no session is involved; the account is the reset
+ * token's, which the before-hook resolved, as before.
+ */
+function passwordChangeAfterEffectsAccount(ctx: any): string | undefined {
+  const checkedFor: unknown = ctx?.context?.__osPwChangeUserId;
+  const checked = typeof checkedFor === 'string' && checkedFor !== '' ? checkedFor : undefined;
+  if (ctx?.path !== '/change-password') return checked;
+  const acting = actingUserIdOf(ctx);
+  return acting !== undefined && acting === checked ? acting : undefined;
+}
+
+/**
+ * better-auth's admin plugin refuses a banned user's new session with this
+ * code, from its `session.create.before` hook (`ADMIN_ERROR_CODES.BANNED_USER`
+ * in `better-auth/dist/plugins/admin/error-codes.mjs`). The package exports no
+ * public path to that table, so the code is named here, once.
+ */
+const VENDOR_BANNED_USER_CODE = 'BANNED_USER';
+
+/**
+ * ADR-0069 D2 — the `/sign-in/email` refusals that come AFTER the password
+ * passed, which the lockout counter neither counts nor clears: only a refused
+ * credential counts toward a lock. better-auth's `signInEmail` throws
+ * `INVALID_EMAIL_OR_PASSWORD` for a wrong password before it reaches either
+ * place these are raised, so a wrong password never carries one of them to
+ * the counter:
+ *
+ *  - `EMAIL_NOT_VERIFIED` (`BASE_ERROR_CODES`), thrown by `signInEmail` itself
+ *    right after the password verified, when the deployment requires a
+ *    verified address;
+ *  - the organization's own allowed IP ranges (`SESSION_SCOPING_REFUSAL`),
+ *    judged where the new session is scoped to it (`refuseUnadmittedScoping`,
+ *    at session creation);
+ *  - a ban ({@link VENDOR_BANNED_USER_CODE}), judged at session creation too.
+ *
+ * A function, read when a sign-in is judged, rather than a set built when this
+ * module loads: `organization-access-policy.ts` imports `auth-manager.ts`,
+ * which reaches this module, so on that import order its constant is not yet
+ * initialised while this module evaluates; and better-auth is loaded lazily,
+ * as everywhere in this package.
+ */
+async function refusedAfterTheCredential(returned: unknown): Promise<boolean> {
+  const code = refusalCodeOf(returned);
+  if (code === undefined) return false;
+  const { BASE_ERROR_CODES } = await import('@better-auth/core/error');
+  const after: readonly string[] = [
+    BASE_ERROR_CODES.EMAIL_NOT_VERIFIED.code,
+    SESSION_SCOPING_REFUSAL.code,
+    VENDOR_BANNED_USER_CODE,
+  ];
+  return after.includes(code);
 }
 
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
@@ -123,10 +215,21 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // also states what this deliberately does NOT do.
   await resetVerifiedOnTwoFactorReenrollment(ctx);
 
+  // ── A banned user's token introspects as inactive while the ban holds ──
+  // `/oauth2/introspect` only: an active answer whose subject is a user
+  // whose ban holds becomes `{ active: false }`, the answer a token that is
+  // not valid gets. See `oauth-token-read-ban-refusal.ts`.
+  await refuseIntrospectionForBannedSubject(ctx);
+
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
   // the after-hook with it on `ctx.context.returned`; a success leaves
-  // the session payload there. Count failures, reset on success.
+  // the session payload there. The gate stamped this attempt as a
+  // failure before the check; settle that stamp now: a success clears
+  // the counter, a failure keeps it. A refusal `refusedAfterTheCredential`
+  // names is neither: the password passed and a policy then refused the
+  // sign-in, so the stamp is handed back and the counter is left as it
+  // stood. Its `login_failed` row is still written below.
   if (ctx?.path === SIGN_IN_EMAIL_PATH) {
     const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
     if (email) {
@@ -137,16 +240,36 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
       } catch {
         succeeded = !(ctx?.context?.returned instanceof Error);
       }
-      const lockStamped = await this.recordSignInOutcome(email, succeeded);
+      const settlement = await this.settleSignInAttempt(
+        email,
+        succeeded
+          ? 'succeeded'
+          : await refusedAfterTheCredential(ctx?.context?.returned)
+            ? 'refused-after-credential'
+            : 'refused',
+      );
       // A refused sign-in writes `login_failed`, and the one that
       // stamped the lockout also writes `account_locked`. A successful
-      // one is recorded as `login` by the session hook, unchanged.
-      if (!succeeded) await this.auditRefusedSignIn(ctx, email, lockStamped);
+      // one is recorded as `login` by the session hook, unchanged. A
+      // sign-in refused because the account is locked had its row
+      // written by the gate, with the lock as its reason.
+      if (!succeeded && !settlement.refusedByLock) await this.auditRefusedSignIn(ctx, email, settlement);
       if (succeeded) {
         const uid = ctx?.context?.returned?.user?.id;
-        if (typeof uid === 'string') await this.enforceConcurrentCap(uid);
+        // [ADR-0069 TL;DR 6] The cap of the organization the new session
+        // was scoped to at creation (ADR-0093 D9), never above the
+        // deployment's.
+        const scopedOrg = ctx?.context?.newSession?.session?.activeOrganizationId;
+        if (typeof uid === 'string') {
+          const newSessionId = ctx?.context?.newSession?.session?.id;
+          await this.enforceConcurrentCap(
+            uid,
+            typeof scopedOrg === 'string' && scopedOrg ? scopedOrg : undefined,
+            typeof newSessionId === 'string' ? newSessionId : undefined,
+          );
+        }
         // ADR-0069 D7 — login audit: stamp last_login_at/ip on success.
-        // Independent of lockout config (recordSignInOutcome no-ops when
+        // Independent of lockout config (settleSignInAttempt no-ops when
         // lockout is off). The IP is the address `handleRequest`
         // established for this request by the client-address trust rule,
         // the same address the D5 allow-list judged; none when it was
@@ -161,6 +284,15 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
 
   // ── ADR-0069 D1: on a successful change/reset — stamp
   //    password_changed_at (expiry) and commit password history.
+  //
+  // Every after-effect lands on ONE account, read by
+  // `passwordChangeAfterEffectsAccount`: on `/change-password` the account
+  // the endpoint itself acted on — the session better-auth's
+  // `sensitiveSessionMiddleware` recorded on `ctx.context.session` before
+  // the handler ran, the reading the change-email notice below takes — and
+  // only when the before-hook's reuse and forced-change checks ran for that
+  // same account. The history entry is the old hash those checks read, so it
+  // is appended only to the account it was read from.
   if (ctx?.path === '/change-password' || ctx?.path === '/reset-password') {
     let succeeded: boolean;
     try {
@@ -170,10 +302,27 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
       succeeded = !(ctx?.context?.returned instanceof Error);
     }
     if (succeeded) {
-      const stampId = ctx?.context?.__osPwChangeUserId;
-      if (stampId) await this.stampPasswordChangedAt(stampId);
-      const stash = ctx?.context?.__osPwHistory;
-      if (stash?.userId) await this.recordPasswordHistory(stash.userId, stash.oldHash);
+      const stampId = passwordChangeAfterEffectsAccount(ctx);
+      if (stampId) {
+        await this.stampPasswordChangedAt(stampId);
+        const stash = ctx?.context?.__osPwHistory;
+        if (stash?.userId === stampId) await this.recordPasswordHistory(stash.userId, stash.oldHash);
+      } else if (ctx?.path === '/change-password' && actingUserIdOf(ctx)) {
+        // The password changed, but the checks that gate these writes never
+        // judged the account it changed on: nothing is stamped, so a forced
+        // change stays outstanding and the user is asked again (the safe
+        // direction), and the operator is told, here.
+        this.logDurabilityDegradation(
+          'AuthManager: a password change succeeded, but its password_changed_at stamp, the '
+            + 'must_change_password clear and the history entry were NOT written: the password '
+            + 'checks before it (reuse, forced change) did not run for the account it changed. '
+            + 'The new password works; any forced change stays outstanding, so the user is asked '
+            + 'to change it again at the next sign-in, and the password-age clock keeps its old '
+            + 'start. Remedy: none needed per request; the next change whose checks run re-stamps.',
+          new Error('password checks did not run for the acting account'),
+          { object: 'sys_user', fields: ['password_changed_at', 'must_change_password'] },
+        );
+      }
     }
     delete ctx.context.__osPwChangeUserId;
     delete ctx.context.__osPwHistory;
@@ -204,9 +353,17 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // does not carry the old address, and better-auth mints a fresh
   // session there when the link is opened without one, so an
   // apply-time notice would silently miss that path.
+  //
+  // The address the notice goes to is the one the account holds as the
+  // request arrives, read from the session the endpoint itself acted on:
+  // better-auth's `sensitiveSessionMiddleware` resolves the caller before
+  // the handler runs and records that session on `ctx.context.session`,
+  // whatever credential carried it, and the handler never writes that object.
+  // So it names the account the request changes, with the address as it
+  // stood. No before-hook can read it: the endpoint resolves its caller only
+  // after every before-hook has run.
   if (ctx?.path === '/change-email') {
-    const from = ctx?.context?.__osChangeEmailFrom;
-    delete ctx.context.__osChangeEmailFrom;
+    const from = changeEmailFrom(ctx?.context?.session?.user);
     let succeeded: boolean;
     try {
       const { isAPIError } = await import('better-auth/api');

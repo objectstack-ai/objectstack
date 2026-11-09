@@ -73,6 +73,8 @@
  * rows, then `loadMetaFromDb`), and that a true orphan is adopted with the
  * registry following its row at once, its record moved to the new binding.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import {
     assertEngineDeleteDispatch,

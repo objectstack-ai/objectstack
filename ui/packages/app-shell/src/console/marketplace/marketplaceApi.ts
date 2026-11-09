@@ -102,7 +102,17 @@ export interface MarketplacePackageSummary {
   manifest_id: string;
   display_name: string;
   description?: string | null;
-  category?: string | null;
+  /**
+   * The marketplace taxonomy (`@objectstack/spec/marketplace`), as the catalog
+   * row's snake_case columns: `businessFunctions` (1–3, the first is primary),
+   * `industries` (0–3), `solutionType` and `maturity`. Absent on a catalog
+   * that does not serve the taxonomy yet, and then every facet hides.
+   * `marketplaceTaxonomy.ts` reads them.
+   */
+  business_functions?: readonly MarketplaceBusinessFunction[] | null;
+  industries?: readonly MarketplaceIndustry[] | null;
+  solution_type?: MarketplaceSolutionType | null;
+  maturity?: PackageMaturity | null;
   tags?: string | null;
   icon_url?: string | null;
   homepage_url?: string | null;
@@ -145,8 +155,16 @@ export type { PluginPermissions } from '@objectstack/spec/kernel';
  */
 export type { PluginRuntime } from '@objectstack/spec/kernel';
 
-import type { MetadataLock, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
+import type { InstallMode, MetadataLock, PluginPermissions, PluginRuntime } from '@objectstack/spec/kernel';
+import { INSTALL_MODES } from '@objectstack/spec/kernel';
 import { isPlainRecord } from '@objectstack/spec/data';
+import type {
+  MarketplaceBusinessFunction,
+  MarketplaceIndustry,
+  MarketplaceSolutionType,
+  PackageMaturity,
+} from '@objectstack/spec/marketplace';
+import type { ProtocolCheckSkipped } from './protocolCheckSkipped.js';
 
 export interface MarketplacePackageVersion {
   id: string;
@@ -179,6 +197,29 @@ export interface MarketplacePackageVersion {
   signed?: boolean;
   /** Whether the marketplace counter-signed (reviewed + approved) this version. */
   platform_verified?: boolean;
+
+  /**
+   * The languages this version ships, measured by the control plane when the
+   * version was published (never authored): the locales that carry text, the
+   * default first, as the app declares them (`zh-CN`). `null` on a version
+   * published before the measurement — "no language information", never
+   * "English only". Absent on a catalog that does not serve it yet, and then
+   * nothing is drawn. `MarketplaceLanguages.tsx` reads it.
+   */
+  supported_locales?: readonly string[] | null;
+  /**
+   * How much of the app each language translates, from the same measurement:
+   * `coverage_percent` is `translated / expected_keys`, rounded to one decimal.
+   * `null` and absent read as `supported_locales` does.
+   */
+  locale_coverage?: MarketplaceLocaleCoverage | null;
+}
+
+/** A version's measured translation coverage (`MarketplacePackageVersion.locale_coverage`). */
+export interface MarketplaceLocaleCoverage {
+  default_locale: string;
+  expected_keys: number;
+  locales: readonly { locale: string; translated: number; coverage_percent: number }[];
 }
 
 export interface MarketplaceListResponse {
@@ -231,10 +272,43 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (payload?.data ?? payload) as T;
 }
 
-export async function listMarketplacePackages(params: { q?: string; category?: string; limit?: number; offset?: number } = {}): Promise<MarketplaceListResponse> {
+/**
+ * One read of the catalog list: the search text, the taxonomy filters and the
+ * page window, as `GET /api/v1/marketplace/packages` takes them.
+ *
+ * The filter keys are `MarketplaceSearchRequestSchema`'s
+ * (`@objectstack/spec/marketplace`): `businessFunctions`, `industries` and
+ * `solutionTypes` (plural, each a list) and `maturity` (one value). The server
+ * applies them OR inside one facet and AND across them, before it pages.
+ */
+export interface MarketplaceListParams {
+  q?: string;
+  limit?: number;
+  offset?: number;
+  businessFunctions?: readonly MarketplaceBusinessFunction[];
+  industries?: readonly MarketplaceIndustry[];
+  solutionTypes?: readonly MarketplaceSolutionType[];
+  maturity?: PackageMaturity;
+}
+
+/** The list-valued filters, each sent as one comma-joined parameter. */
+const LIST_FILTERS = ['businessFunctions', 'industries', 'solutionTypes'] as const;
+
+/**
+ * Read one page of the catalog. A list filter goes out as ONE comma-joined
+ * parameter (`?businessFunctions=sales,marketing`), and a filter that selects
+ * nothing is left out rather than sent empty: the door refuses an empty facet,
+ * a repeated facet key and the retired `category` with 400 `VALIDATION_ERROR`,
+ * and this read sends none of the three.
+ */
+export async function listMarketplacePackages(params: MarketplaceListParams = {}): Promise<MarketplaceListResponse> {
   const usp = new URLSearchParams();
   if (params.q) usp.set('q', params.q);
-  if (params.category) usp.set('category', params.category);
+  for (const key of LIST_FILTERS) {
+    const values = params[key];
+    if (values && values.length > 0) usp.set(key, values.join(','));
+  }
+  if (params.maturity) usp.set('maturity', params.maturity);
   if (params.limit != null) usp.set('limit', String(params.limit));
   if (params.offset != null) usp.set('offset', String(params.offset));
   const qs = usp.toString();
@@ -246,19 +320,18 @@ export async function getMarketplacePackage(id: string): Promise<MarketplaceDeta
 }
 
 /**
- * How install-local installs a package (ADR-0131 D6): `managed` registers it
- * as code that receives its upgrades; `unmanaged` copies its metadata once into
- * this runtime as the environment's own, which follows no upgrade.
+ * How a package is installed (ADR-0131 D6): `managed` registers it as code
+ * that receives its upgrades; `unmanaged` copies its metadata once into the
+ * environment as the environment's own, which follows no upgrade.
  *
- * The console's reading of the two values the install door
- * (`POST /api/v1/marketplace/install-local`) takes as `installMode`. Written
- * here, not derived: the `@objectstack/spec` this package resolves declares no
- * install mode.
+ * The spec's `InstallMode`: the values install-local takes as `installMode`
+ * (`POST /api/v1/marketplace/install-local`) and the hosted install takes as
+ * `install_mode` ({@link installPackage}).
  */
-export type LocalInstallMode = 'managed' | 'unmanaged';
+export type LocalInstallMode = InstallMode;
 
-/** Every install mode, in the order the package page lists them. */
-const LOCAL_INSTALL_MODES: readonly LocalInstallMode[] = ['managed', 'unmanaged'];
+/** Every install mode, in the spec's order, which the package page lists. */
+const LOCAL_INSTALL_MODES: readonly LocalInstallMode[] = INSTALL_MODES;
 
 /**
  * The install modes a package version's manifest declares: its `installModes`
@@ -279,19 +352,33 @@ const LOCAL_INSTALL_MODES: readonly LocalInstallMode[] = ['managed', 'unmanaged'
  * - Otherwise each declared mode once: a mode named twice changes nothing
  *   (the spec's reading of the key).
  */
-export async function getDeclaredInstallModes(
-  packageId: string,
-  versionId = 'latest',
-): Promise<readonly LocalInstallMode[] | undefined> {
-  const data = await call<{ manifest?: unknown } | null>(
-    `/packages/${encodeURIComponent(packageId)}/versions/${encodeURIComponent(versionId)}/manifest`,
-  );
-  const body = data?.manifest;
+export function declaredInstallModesOf(body: unknown): readonly LocalInstallMode[] | undefined {
   if (!isPlainRecord(body)) return undefined;
   const declared = (isPlainRecord(body.manifest) ? body.manifest : body).installModes;
   if (!Array.isArray(declared) || declared.length === 0) return undefined;
   if (!declared.every((m) => (LOCAL_INSTALL_MODES as readonly unknown[]).includes(m))) return undefined;
   return LOCAL_INSTALL_MODES.filter((m) => declared.includes(m));
+}
+
+/** {@link declaredInstallModesOf} the manifest a package version serves. */
+export async function getDeclaredInstallModes(
+  packageId: string,
+  versionId = 'latest',
+): Promise<readonly LocalInstallMode[] | undefined> {
+  return declaredInstallModesOf(await getServedPackageBody(packageId, versionId));
+}
+
+/**
+ * The package body a version's manifest answer carries (`data.manifest`): the
+ * body install-local fetches and installs when it is given this package and
+ * version. The package page reads it ONCE, for the install modes it declares
+ * and for what the install will add (objectstack#30325, `installPreview.ts`).
+ */
+export async function getServedPackageBody(packageId: string, versionId = 'latest'): Promise<unknown> {
+  const data = await call<{ manifest?: unknown } | null>(
+    `/packages/${encodeURIComponent(packageId)}/versions/${encodeURIComponent(versionId)}/manifest`,
+  );
+  return data?.manifest;
 }
 
 /**
@@ -319,8 +406,16 @@ export async function installPackage(input: {
   packageId: string;
   environmentId: string;
   seedSampleData?: boolean;
+  /**
+   * ADR-0131 D6 — sent as `install_mode` only when set; the control plane
+   * judges it against the package's `installModes`. Absent, the request is the
+   * one every install sent before the mode existed, and the control plane's
+   * default stands.
+   */
+  installMode?: LocalInstallMode;
 }): Promise<InstallResponse> {
   const cloudBase = getCloudBase();
+  const withMode = input.installMode ? { install_mode: input.installMode } : {};
 
   // ── In-environment (tenant runtime) path ──────────────────────────────
   // When `getCloudBase()` is non-empty we're a *tenant runtime* (e.g.
@@ -344,6 +439,7 @@ export async function installPackage(input: {
       body: JSON.stringify({
         package_id: input.packageId,
         seed_sample_data: !!input.seedSampleData,
+        ...withMode,
       }),
     }).finally(forgetPackageListReads);
     let payload: any = null;
@@ -353,6 +449,9 @@ export async function installPackage(input: {
       const err = new Error(typeof message === 'string' ? message : `${code}`);
       (err as any).code = code;
       (err as any).status = res.status;
+      // The refusal's facts ride along, as on install-local: the page draws
+      // `DEPENDENCY_MISSING` from them (`dependencyMissing.ts`).
+      if (payload?.error?.details !== undefined) (err as any).details = payload.error.details;
       throw err;
     }
     return (payload?.data ?? payload) as InstallResponse;
@@ -370,6 +469,7 @@ export async function installPackage(input: {
       params: {
         environment_id: input.environmentId,
         seed_sample_data: !!input.seedSampleData,
+        ...withMode,
       },
     }),
   });
@@ -706,18 +806,36 @@ export async function purgeSampleData(installationId: string): Promise<SampleDat
 
 /**
  * The marker the install-local listing puts on an entry this runtime's startup
- * rehydrate refused to load (objectstack#21822, served since `@objectstack/*`
- * 17.7.0). CLOSED on the server: exactly these two members.
+ * rehydrate refused to load. CLOSED on the server (`NotLoadedMarker` in
+ * `@objectstack/cloud-connection`): exactly one of these two arms, each with
+ * exactly these members.
  *
- * `code` is the refusal's error code. The one the server sends today is
- * `OS_PROTOCOL_INCOMPATIBLE`, and `requiredRange` is then the protocol range the
- * package declares (the same `requiredRange` the install door's 422 carries in
- * `error.details`). It is typed `string` rather than that literal because the
- * console names a code it has no sentence for instead of hiding the row.
+ * - {@link LocalInstallNotLoadedProtocol}: the package targets a protocol range
+ *   this runtime does not support (objectstack#21822, served since
+ *   `@objectstack/*` 17.7.0).
+ * - {@link LocalInstallNotLoadedRefused}: the engine refused the package's
+ *   register (objectstack#31566): `code` is the refusal's ADR-0112 code and
+ *   `message` the engine's own sentence, the one the boot logs.
+ *
+ * Read the reason through `notLoadedReason` (`MarketplaceRowActions.tsx`),
+ * the one reader both Installed Apps and the package page draw.
  */
-export interface LocalInstallNotLoaded {
-  code: string;
+export type LocalInstallNotLoaded = LocalInstallNotLoadedProtocol | LocalInstallNotLoadedRefused;
+
+/** The protocol arm: `requiredRange` is the range the package declares (the same `requiredRange` the install door's 422 carries in `error.details`). */
+export interface LocalInstallNotLoadedProtocol {
+  code: 'OS_PROTOCOL_INCOMPATIBLE';
   requiredRange: string;
+}
+
+/**
+ * The register-refusal arm. `code` is typed `string` because the engine's
+ * refusal codes are open to this console: it names a code it has no sentence
+ * for instead of hiding the row. `message` is server text, drawn as text.
+ */
+export interface LocalInstallNotLoadedRefused {
+  code: string;
+  message: string;
 }
 
 /**
@@ -770,6 +888,36 @@ export interface LocalManagedInstallResult {
    * as under a walled tenancy posture, which this sentence names the remedy for.
    */
   credentialNote?: string;
+  /**
+   * Present only when the install door's protocol handshake admitted the
+   * package WITHOUT checking its range (objectstack#30326): it declares no
+   * `engines.protocol`, or one the runtime cannot read. Omitted when checked.
+   */
+  protocolCheckSkipped?: ProtocolCheckSkipped;
+  /** The install's sample-data report ({@link LocalInstallSeeded}). */
+  seeded?: LocalInstallSeeded;
+}
+
+/**
+ * What an install-local answer's `seeded` says about the package's sample
+ * data: `inline` when this install ran the package's seed datasets now, with
+ * the per-record counts of that run; `skipped` (with its `reason`) when it ran
+ * none, as on a package that bundles no datasets or on a copy, which loads
+ * metadata only; `refused` (with its sentence in `reason`) when a walled
+ * deployment's session named no active organization to seed into. `replayer`
+ * is in the door's declared vocabulary and carries no counts.
+ *
+ * `skipped` inside an `inline` run counts records whose row was already in the
+ * database (a reinstall over live sample data), so `inserted + updated +
+ * skipped` is the number of sample records the run left in place.
+ */
+export interface LocalInstallSeeded {
+  mode: 'inline' | 'replayer' | 'skipped' | 'refused';
+  inserted?: number;
+  updated?: number;
+  skipped?: number;
+  errors?: number;
+  reason?: string;
 }
 
 /**
@@ -806,6 +954,10 @@ export interface LocalUnmanagedInstallResult {
   copied: Array<{ type: string; name: string }>;
   strippedLocks: LocalInstallStrippedLock[];
   note?: string;
+  /** As on the managed answer ({@link LocalManagedInstallResult.protocolCheckSkipped}). */
+  protocolCheckSkipped?: ProtocolCheckSkipped;
+  /** `skipped` when the package bundles sample data: a copy loads none of it. */
+  seeded?: LocalInstallSeeded;
 }
 
 export type LocalInstallResult = LocalManagedInstallResult | LocalUnmanagedInstallResult;
@@ -1049,4 +1201,38 @@ export function reseedLocalSampleData(manifestId: string): Promise<LocalSampleDa
 
 export function purgeLocalSampleData(manifestId: string): Promise<LocalSampleDataResult> {
   return postLocalSampleAction(manifestId, 'purge');
+}
+
+/**
+ * `GET /api/v1/marketplace/install-local/:manifestId/sample-data`
+ * (objectstack#30616): how many of a local install's sample rows a purge
+ * would delete right now, counted with the purge's own matcher and keep-rules,
+ * so a page reached after a reload can still say it. `unidentified` are seed
+ * records the purge would report and leave in place.
+ */
+export interface LocalSampleDataCount {
+  manifestId: string;
+  count: number;
+  unidentified: number;
+}
+
+/** {@link LocalSampleDataCount}, or `null` when the count could not be read (refused, failed, or no count in the answer). */
+export async function countLocalSampleData(manifestId: string): Promise<LocalSampleDataCount | null> {
+  try {
+    const res = await fetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}/sample-data`, {
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return null;
+    const payload: any = await res.json().catch(() => ({}));
+    const data: any = payload?.data ?? payload;
+    if (typeof data?.count !== 'number' || !Number.isInteger(data.count) || data.count < 0) return null;
+    return {
+      manifestId,
+      count: data.count,
+      unidentified: typeof data.unidentified === 'number' ? data.unidentified : 0,
+    };
+  } catch {
+    return null;
+  }
 }

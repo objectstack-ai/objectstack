@@ -4,7 +4,7 @@ Guide for registering and consuming services via the kernel DI container.
 
 ## Service Registry API
 
-The `PluginContext` provides three core methods:
+The `PluginContext` provides four core methods:
 
 ```typescript
 // Register a service
@@ -110,7 +110,7 @@ async start(ctx: PluginContext) {
   const cache = ctx.getService<ICacheService>('cache');
 
   // Use services
-  const result = await db.object('account').find();
+  const result = await db.find('account');
   await cache.set('accounts', result);
 }
 ```
@@ -123,7 +123,7 @@ Check availability before calling:
 async start(ctx: PluginContext) {
   try {
     const realtime = ctx.getService<IRealtimeService>('realtime');
-    realtime.publish('my-event', data);
+    await realtime.publish({ type: 'my-event', payload: data, timestamp: new Date().toISOString() });
   } catch {
     ctx.logger.debug('Realtime service not available — skipping');
   }
@@ -144,9 +144,9 @@ async start(ctx: PluginContext) {
 
 ## Well-Known Service Keys
 
-The full plugin-name -> service-key table (13 rows, including which plugins
+The full plugin-name -> service-key table (including which plugins
 register no service at all) lives in
-[../SKILL.md](../SKILL.md#well-known-plugin-names--services).
+[../references/plugin-development.md](../references/plugin-development.md#well-known-plugin-names--services).
 
 ## Core Fallback Injection
 
@@ -219,7 +219,7 @@ throws — so consumers break either way.
 ```typescript
 async start(ctx: PluginContext) {
   const realtime = ctx.getService('realtime');  // ❌ Throws if not available
-  realtime.publish('event', data);
+  await realtime.publish({ type: 'event', payload: data, timestamp: new Date().toISOString() });
 }
 ```
 
@@ -229,7 +229,7 @@ async start(ctx: PluginContext) {
 async start(ctx: PluginContext) {
   try {
     const realtime = ctx.getService('realtime');
-    realtime.publish('event', data);
+    await realtime.publish({ type: 'event', payload: data, timestamp: new Date().toISOString() });
   } catch {
     ctx.logger.debug('Realtime service not available');  // ✅ Graceful fallback
   }

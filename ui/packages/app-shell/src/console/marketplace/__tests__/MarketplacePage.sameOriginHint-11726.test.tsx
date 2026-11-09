@@ -106,7 +106,7 @@ afterEach(() => {
 
 const LANGS = {
   en: { defaultLanguage: 'en', detectBrowserLanguage: false },
-  zh: { defaultLanguage: 'zh', detectBrowserLanguage: false },
+  'zh-Hans': { defaultLanguage: 'zh-Hans', detectBrowserLanguage: false },
 } as const;
 type Lang = keyof typeof LANGS;
 
@@ -129,7 +129,7 @@ const packValue = (lang: Lang, key: string): unknown =>
  */
 const CLAIMS: Record<Lang, { routes: RegExp; servesItself: RegExp }> = {
   en: { routes: /through this runtime/i, servesItself: /\bserves?\b|\bitself\b/i },
-  zh: { routes: /通过本运行时/, servesItself: /自己提供|自身提供|本身提供/ },
+  'zh-Hans': { routes: /通过本运行时/, servesItself: /自己提供|自身提供|本身提供/ },
 };
 
 /** Any host or URL, or an unfilled `{{url}}` hole. */
@@ -203,9 +203,9 @@ describe('a configured plane keeps its hint, naming that plane (objectui#11726)'
     );
   });
 
-  it('zh', async () => {
+  it('zh-Hans', async () => {
     await bootOn('https://cloud.acme.internal');
-    renderIn('zh');
+    renderIn('zh-Hans');
     expect(await screen.findByTestId('marketplace-load-hint')).toHaveTextContent(
       '本运行时通过 https://cloud.acme.internal 上的控制面访问应用市场。请检查该地址是否在线、能否从本运行时访问。',
     );

@@ -557,8 +557,12 @@ describe('#5504 — cost threshold: same gate the read path uses', () => {
   it('an object declaring NO formula evaluates nothing on write', async () => {
     const created = await rig.protocol.createData({ object: 'wf_plain', data: { name: 'nothing derived' } });
     expect(evaluate).not.toHaveBeenCalled();
-    // …and the response carries exactly the stored keys — no phantom columns.
-    expect(Object.keys(created.record as Rec).sort()).toEqual(['id', 'name']);
+    // …and the response carries exactly the stored values — no phantom columns.
+    // [#29538] Every other stored declared column is answered `null`, as the
+    // next read answers it: the response IS that read's record.
+    const record = created.record as Rec;
+    expect(Object.keys(record).filter((k) => record[k] !== null).sort()).toEqual(['id', 'name']);
+    expect(record).toStrictEqual(await rig.engine.findOne('wf_plain', { where: { id: record.id } }));
   });
 
   it('an object declaring formulas evaluates once per formula field per row', async () => {

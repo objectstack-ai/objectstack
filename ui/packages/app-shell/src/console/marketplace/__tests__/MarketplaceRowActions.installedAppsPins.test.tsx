@@ -38,10 +38,15 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { PackagesPage } from '../../../views/metadata-admin/PackagesPage';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
+// The page's package form reaches the CEL authoring helpers, which load these
+// two lazily; warmed here so their first load is paid at import, not inside a
+// test's bounded wait.
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 type Pack = typeof en;
 const EN = { defaultLanguage: 'en', detectBrowserLanguage: false } as const;
-const ZH = { defaultLanguage: 'zh', detectBrowserLanguage: false } as const;
+const ZH = { defaultLanguage: 'zh-Hans', detectBrowserLanguage: false } as const;
 
 /** `{{name}}` interpolation, as i18next applies it to these keys (`escapeValue: false`). */
 const fill = (template: string, values: Record<string, string>) =>
@@ -159,7 +164,7 @@ afterEach(() => {
 
 describe.each([
   ['en', EN, en as Pack],
-  ['zh', ZH, zh as unknown as Pack],
+  ['zh-Hans', ZH, zh as unknown as Pack],
 ])('Packages — a refused marketplace install reads not loaded, with its reason (objectui#11645) [%s]', (_lang, config, pack) => {
   const badge = pack.marketplace.notLoaded.badge;
   const reason = fill(pack.marketplace.notLoaded.protocolIncompatible, { requiredRange: '^16' });
@@ -259,7 +264,7 @@ describe('Packages — Uninstall from a marketplace row (objectui#11645)', () =>
 
 describe.each([
   ['en', EN, en as Pack],
-  ['zh', ZH, zh as unknown as Pack],
+  ['zh-Hans', ZH, zh as unknown as Pack],
 ])('Packages — the kernel note is the marketplace Uninstall tooltip (objectui#12610) [%s]', (_lang, config, pack) => {
   const note = pack.marketplace.installedAdditiveNote;
 
@@ -301,9 +306,9 @@ describe.each([
 describe('every pack\'s kernel note is plain text (objectui#12610)', () => {
   const packs = Object.entries(builtInLocales) as Array<[string, Pack]>;
 
-  it('the walk below reads all ten packs', () => {
+  it('the walk below reads every pack', () => {
     expect(packs.map(([lang]) => lang).sort()).toEqual(
-      ['ar', 'de', 'en', 'es', 'fr', 'ja', 'ko', 'pt', 'ru', 'zh'],
+      ['ar', 'de', 'en', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'ru', 'zh-Hans', 'zh-Hant'],
     );
   });
 
@@ -327,13 +332,16 @@ describe('every pack\'s kernel note is plain text (objectui#12610)', () => {
  */
 const RETIRED_RESTART_CLAIM: Record<string, RegExp> = {
   en: /until you restart|until the next restart|keeps the app registered|remain loaded|restart the runtime|additive only/i,
-  zh: /直到下次重启|仍会保留该应用|仅支持新增|重启运行时/,
+  'zh-Hans': /直到下次重启|仍会保留该应用|仅支持新增|重启运行时/,
+  // The zh-Hans claims, converted the way the generated pack is (`运行时` reads
+  // 執行時 or 執行環境 by context, so both).
+  'zh-Hant': /直到下次重啟|仍會保留該應用|僅支援新增|重啟執行環境|重啟執行時/,
   ja: /再起動するまで|次の再起動まで|再起動して|追加のみ/,
   ko: /재시작될 때까지|재시작하세요|추가 전용/,
   de: /bis zum Neustart|Laufzeitsystem neu|nur additiv/,
   es: /hasta reiniciar|Reinicie el runtime|solo aditiva/,
   fr: /jusqu'au redémarrage|Redémarrez le runtime|uniquement additive/,
-  pt: /até reiniciar|Reinicie o runtime|apenas aditiva/,
+  'pt-BR': /até reiniciar|Reinicie o runtime|apenas aditiva/,
   ru: /до перезапуска|Перезапустите рантайм|только аддитивный/,
   ar: /حتى إعادة التشغيل|أعد تشغيل|إضافية فقط/,
 };
@@ -349,7 +357,7 @@ const UNINSTALL_TEXTS: Array<[string, (pack: Pack) => string]> = [
 /** Withdrawn at once; not loaded at the next start; records kept. */
 const MEASURED_CLAIMS: Record<string, RegExp[]> = {
   en: [/\bat once\b/, /\bdoes not load at the next start\b/, /\bstay in the database\b/],
-  zh: [/立即/, /下次启动时不再加载/, /保留在数据库中/],
+  'zh-Hans': [/立即/, /下次启动时不再加载/, /保留在数据库中/],
 };
 
 /** The confirm (before the DELETE) and the result line (after it), per language. */
@@ -358,7 +366,7 @@ const MEASURED_UNINSTALL_CLAIMS: Record<string, { confirm: RegExp[]; result: Reg
     confirm: [/\bat once\b/, /\bpermission sets\b/, /\bstay in the database\b/],
     result: [/\bhas left the running kernel\b/, /\bpermission sets\b/, /\bstay in the database\b/],
   },
-  zh: {
+  'zh-Hans': {
     confirm: [/立即/, /权限集/, /保留在数据库中/],
     result: [/已从运行中的内核中移除/, /权限集/, /保留在数据库中/],
   },
@@ -366,7 +374,7 @@ const MEASURED_UNINSTALL_CLAIMS: Record<string, { confirm: RegExp[]; result: Reg
 
 describe.each([
   ['en', EN, en as Pack],
-  ['zh', ZH, zh as unknown as Pack],
+  ['zh-Hans', ZH, zh as unknown as Pack],
 ])('Packages — the uninstall texts say the app leaves the running kernel at once (objectui#12684) [%s]', (lang, config, pack) => {
   it('a loaded row\'s Uninstall describes the live withdrawal, and no restart', async () => {
     const user = userEvent.setup();
@@ -423,5 +431,71 @@ describe('no pack\'s uninstall texts say the app stays until a restart (objectui
   it.each(rows.filter(([lang]) => lang !== 'en'))('%s: `marketplace.%s` is translated, not the en text', (_lang, key, value) => {
     expect(enByKey.get(key)).toEqual(expect.any(String));
     expect(value).not.toBe(enByKey.get(key));
+  });
+});
+
+/**
+ * objectstack#31566 (PR objectstack#31650) adds the marker's second arm,
+ * `{ code, message }`: the engine refused the package's register at boot, and
+ * `message` is its own sentence. The row reads it through the one reader
+ * (`MarketplaceNotLoadedReason`): the code's sentence, then the engine's, as
+ * text, so the operator can tell whether to uninstall or fix the package. A
+ * marker with no sentence, or an empty one, reads with the code alone. The
+ * protocol arm is pinned unchanged by the cases above.
+ */
+const ENGINE_MESSAGE =
+  'Package "com.example.crm" declares the default page "crm_home", which is not a record page: '
+  + 'a default page must be a record page of its object.';
+const REGISTER_REFUSED = { ...REFUSED, notLoaded: { code: 'INVALID_METADATA', message: ENGINE_MESSAGE } };
+
+describe.each([
+  ['en', EN, en as Pack],
+  ['zh-Hans', ZH, zh as unknown as Pack],
+])('Packages — a register-refused marketplace install shows the engine\'s reason (objectstack#31566) [%s]', (_lang, config, pack) => {
+  it('the row carries the badge, the code\'s sentence and the engine\'s sentence, and Uninstall', async () => {
+    await serve([REGISTER_REFUSED, LOADED]);
+    renderPackages(config);
+
+    const r = await row('com.example.crm');
+    expect(within(r).getByText(pack.marketplace.notLoaded.badge)).toBeInTheDocument();
+    expect(within(r).getByText(fill(pack.marketplace.notLoaded.otherReason, { code: 'INVALID_METADATA' }))).toBeInTheDocument();
+    expect(within(r).getByText(ENGINE_MESSAGE)).toBeInTheDocument();
+    expect(within(r).getByRole('button', { name: pack.marketplace.action.uninstall })).toBeEnabled();
+  });
+
+  it('control: the protocol marker beside it reads exactly as before, with no engine sentence', async () => {
+    await serve([REGISTER_REFUSED, { ...REFUSED, packageId: 'com.example.old', manifestId: 'com.example.old' }]);
+    renderPackages(config);
+
+    const r = await row('com.example.old');
+    expect(within(r).getByText(fill(pack.marketplace.notLoaded.protocolIncompatible, { requiredRange: '^16' }))).toBeInTheDocument();
+    expect(within(r).queryByTestId('marketplace-not-loaded-engine-message')).toBeNull();
+    expect(r.textContent).not.toContain(ENGINE_MESSAGE);
+  });
+});
+
+describe('Packages — the engine\'s sentence on a row is server text (objectstack#31566)', () => {
+  it('a sentence shaped like markup is drawn as its literal text, never as elements', async () => {
+    const markup = 'Object <b>crm_lead</b> is owned by package "com.example.base".';
+    await serve([{ ...REFUSED, notLoaded: { code: 'OBJECT_OWNERSHIP_CONFLICT', message: markup } }]);
+    renderPackages(EN);
+
+    const r = await row('com.example.crm');
+    expect(within(r).getByText(markup)).toBeInTheDocument();
+    expect(r.querySelector('b')).toBeNull();
+  });
+
+  it.each([
+    ['no `message` member', { code: 'INVALID_METADATA' }],
+    ['an empty `message`', { code: 'INVALID_METADATA', message: '' }],
+    ['a blank `message`', { code: 'INVALID_METADATA', message: '   ' }],
+  ])('a marker with %s reads with the code alone', async (_case, notLoaded) => {
+    await serve([{ ...REFUSED, notLoaded }]);
+    renderPackages(EN);
+
+    const r = await row('com.example.crm');
+    expect(within(r).getByText(en.marketplace.notLoaded.badge)).toBeInTheDocument();
+    expect(within(r).getByText(fill(en.marketplace.notLoaded.otherReason, { code: 'INVALID_METADATA' }))).toBeInTheDocument();
+    expect(within(r).queryByTestId('marketplace-not-loaded-engine-message')).toBeNull();
   });
 });

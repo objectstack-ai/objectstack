@@ -15,6 +15,10 @@
  *  - a `guest` row offers no Accept and says why, and keeps Dismiss;
  *  - Accept, Dismiss and Revoke each call their route, and the row takes the
  *    state the server answered;
+ *  - a dismissed or revoked row offers Reconsider, which calls the re-open
+ *    route once and redraws the row as pending, with Accept and Dismiss; no
+ *    other state offers it, and its 404 / 409 / 501 are surfaced like the
+ *    other refusals (objectstack#30199);
  *  - a `403` or `409` on an action shows the server's own message, never a
  *    silent no-op, and the panel then re-reads the list;
  *  - a `403` on the list renders nothing.
@@ -72,6 +76,9 @@ const STRINGS: SuggestedBindingsStrings = {
   revoke: 'Revoke',
   revoking: 'Revoking',
   revokedToast: (s) => `REVOKED ${s.permission_set_name}`,
+  reopen: 'Reconsider',
+  reopening: 'Reopening',
+  reopenedToast: (s) => `REOPENED ${s.permission_set_name}`,
 };
 
 type Answer = { status: number; body: unknown };
@@ -86,7 +93,7 @@ const listed = (suggestions: SuggestedBinding[]): Answer =>
  * A `fetch` that answers each route from a queue (the last answer repeats),
  * and records every call as `METHOD path`.
  */
-function serve(routes: { list: Answer[]; confirm?: Answer[]; dismiss?: Answer[] }) {
+function serve(routes: { list: Answer[]; confirm?: Answer[]; dismiss?: Answer[]; reopen?: Answer[] }) {
   const calls: string[] = [];
   const next = (q: Answer[] | undefined): Answer => {
     if (!q || q.length === 0) throw new Error('unexpected route');
@@ -100,7 +107,9 @@ function serve(routes: { list: Answer[]; confirm?: Answer[]; dismiss?: Answer[] 
       ? next(routes.confirm)
       : url.pathname.endsWith('/dismiss')
         ? next(routes.dismiss)
-        : next(routes.list);
+        : url.pathname.endsWith('/reopen')
+          ? next(routes.reopen)
+          : next(routes.list);
     return new Response(JSON.stringify(answer.body), {
       status: answer.status,
       headers: { 'Content-Type': 'application/json' },
@@ -146,13 +155,46 @@ describe('SuggestedBindingsPanel — the state of each row (objectui#7611)', () 
     expect(screen.queryByTestId('suggested-binding-dismiss-crm_reader')).toBeNull();
   });
 
-  it('a dismissed or revoked row says it is not granted and offers no action', async () => {
+  it('a dismissed or revoked row says it is not granted and offers Reconsider only', async () => {
     serve({ list: [listed([row({ permission_set_name: 'crm_reader', status: 'dismissed', deployment_decision: true, resolved_by: 'u_admin' })])] });
     panel();
     const el = await rowEl('crm_reader');
     expect(el.dataset.state).toBe('dismissed');
     expect(el.textContent).toContain('NOT GRANTED crm_reader');
-    expect(el.querySelectorAll('button')).toHaveLength(0);
+    expect(el.querySelectorAll('button')).toHaveLength(1);
+    expect(screen.getByTestId('suggested-binding-reopen-crm_reader')).toBeTruthy();
+    expect(screen.queryByTestId('suggested-binding-confirm-crm_reader')).toBeNull();
+    expect(screen.queryByTestId('suggested-binding-dismiss-crm_reader')).toBeNull();
+    expect(screen.queryByTestId('suggested-binding-revoke-crm_reader')).toBeNull();
+  });
+
+  it('CONTROL: no pending, guest, accepted or not-in-force row offers Reconsider', async () => {
+    const pending = row({ permission_set_name: 'crm_pending' });
+    const guest = row({ permission_set_name: 'site_visitor', anchor: 'guest' });
+    const accepted = row({ permission_set_name: 'crm_accepted', status: 'confirmed', deployment_decision: true, resolved_by: 'u_admin' });
+    const toNotInForce = row({ permission_set_name: 'crm_nif' });
+    serve({
+      list: [listed([pending, guest, accepted, toNotInForce])],
+      confirm: [ok({ suggestion: { ...toNotInForce, status: 'confirmed', deployment_decision: true, resolved_by: 'u_admin' }, bindingCreated: false })],
+    });
+    panel();
+    fireEvent.click(await screen.findByTestId('suggested-binding-confirm-crm_nif'));
+    await waitFor(async () => expect((await rowEl('crm_nif')).dataset.state).toBe('notInForce'));
+    const states: Record<string, string | undefined> = {};
+    for (const set of ['crm_pending', 'site_visitor', 'crm_accepted', 'crm_nif']) {
+      states[set] = (await rowEl(set)).dataset.state;
+      expect(screen.queryByTestId(`suggested-binding-reopen-${set}`), set).toBeNull();
+    }
+    expect(states).toEqual({ crm_pending: 'pending', site_visitor: 'guest', crm_accepted: 'accepted', crm_nif: 'notInForce' });
+  });
+
+  it('a caller who may not decide (the list answers 403) is offered no Reconsider', async () => {
+    const calls = serve({ list: [refused(403, 'PERMISSION_DENIED', '[Security] Access denied: listing audience-binding suggestions requires the `manage_metadata` capability.')] });
+    const { container } = panel();
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await Promise.resolve();
+    expect(container.querySelector('[data-testid^="suggested-binding-reopen-"]')).toBeNull();
+    expect(container.innerHTML).toBe('');
   });
 
   it('a baseline row (confirmed, no deployment decision) is not drawn — this surface does not decide the baseline', async () => {
@@ -284,5 +326,93 @@ describe('SuggestedBindingsPanel — the actions (objectui#7611)', () => {
     fireEvent.click(await screen.findByTestId('suggested-binding-revoke-crm_reader'));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message));
     await waitFor(() => expect(container.innerHTML).toBe(''));
+  });
+});
+
+describe('SuggestedBindingsPanel — Reconsider a dismissed or revoked row (objectstack#30199)', () => {
+  const dismissed = row({ permission_set_name: 'crm_reader', status: 'dismissed', deployment_decision: true, resolved_by: 'u_admin', resolved_at: '2026-11-05T00:00:00.000Z' });
+  // What the re-open door answers: pending again, the decision cleared.
+  const reopened = { ...dismissed, status: 'pending' as const, deployment_decision: false, resolved_by: null, resolved_at: null };
+
+  it('one click calls the re-open route once; the row redraws as pending with Accept and Dismiss', async () => {
+    const calls = serve({ list: [listed([dismissed])], reopen: [ok({ suggestion: reopened })] });
+    const onResolved = vi.fn();
+    render(<SuggestedBindingsPanel packageId={PKG} strings={STRINGS} onResolved={onResolved} />);
+    fireEvent.click(await screen.findByTestId('suggested-binding-reopen-crm_reader'));
+    await waitFor(async () => expect((await rowEl('crm_reader')).dataset.state).toBe('pending'));
+    expect(calls.filter((c) => c.startsWith('POST '))).toEqual([
+      'POST /api/v1/security/suggested-bindings/sug_crm_reader/reopen',
+    ]);
+    expect(screen.getByTestId('suggested-binding-confirm-crm_reader')).toBeTruthy();
+    expect(screen.getByTestId('suggested-binding-dismiss-crm_reader')).toBeTruthy();
+    expect(screen.queryByTestId('suggested-binding-reopen-crm_reader')).toBeNull();
+    expect(toast.success).toHaveBeenCalledWith('REOPENED crm_reader');
+    expect(onResolved).toHaveBeenCalledWith(reopened);
+    // A re-open grants nothing: no accept is sent on its behalf.
+    expect(calls.some((c) => c.endsWith('/confirm'))).toBe(false);
+  });
+
+  it('dismiss, reconsider, then accept: each step calls its own route once, in order', async () => {
+    const pending = row({ permission_set_name: 'crm_reader' });
+    const accepted = { ...pending, status: 'confirmed' as const, deployment_decision: true, resolved_by: 'u_admin' };
+    const calls = serve({
+      list: [listed([pending])],
+      dismiss: [ok({ suggestion: dismissed })],
+      reopen: [ok({ suggestion: reopened })],
+      confirm: [ok({ suggestion: accepted, bindingCreated: true })],
+    });
+    panel();
+    fireEvent.click(await screen.findByTestId('suggested-binding-dismiss-crm_reader'));
+    fireEvent.click(await screen.findByTestId('suggested-binding-reopen-crm_reader'));
+    fireEvent.click(await screen.findByTestId('suggested-binding-confirm-crm_reader'));
+    await waitFor(async () => expect((await rowEl('crm_reader')).dataset.state).toBe('accepted'));
+    expect(calls.filter((c) => c.startsWith('POST '))).toEqual([
+      'POST /api/v1/security/suggested-bindings/sug_crm_reader/dismiss',
+      'POST /api/v1/security/suggested-bindings/sug_crm_reader/reopen',
+      'POST /api/v1/security/suggested-bindings/sug_crm_reader/confirm',
+    ]);
+    expect(toast.success).toHaveBeenCalledWith('GRANTED crm_reader');
+  });
+
+  it('a re-opened guest row redraws as guest: Dismiss, and still no Accept', async () => {
+    const guestDismissed = row({ permission_set_name: 'site_visitor', anchor: 'guest', status: 'dismissed', deployment_decision: true, resolved_by: 'u_admin' });
+    serve({ list: [listed([guestDismissed])], reopen: [ok({ suggestion: { ...guestDismissed, status: 'pending', deployment_decision: false, resolved_by: null } })] });
+    panel();
+    fireEvent.click(await screen.findByTestId('suggested-binding-reopen-site_visitor'));
+    await waitFor(async () => expect((await rowEl('site_visitor')).dataset.state).toBe('guest'));
+    expect(screen.queryByTestId('suggested-binding-confirm-site_visitor')).toBeNull();
+    expect(screen.getByTestId('suggested-binding-dismiss-site_visitor')).toBeTruthy();
+  });
+
+  it('re-open refused 409 (the set is no longer suggested) → the server message is shown, and the panel re-reads', async () => {
+    const message = "Permission set 'crm_reader' no longer declares isDefault: true — nothing is suggested.";
+    const calls = serve({ list: [listed([dismissed]), listed([dismissed])], reopen: [refused(409, 'SUGGESTION_STATE', message)] });
+    panel();
+    fireEvent.click(await screen.findByTestId('suggested-binding-reopen-crm_reader'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message));
+    await waitFor(() => expect(calls.filter((c) => c.startsWith('GET '))).toHaveLength(2));
+    expect((await rowEl('crm_reader')).dataset.state).toBe('dismissed');
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('re-open refused 404 (the row is gone) → the server message is shown, and the re-read drops the row', async () => {
+    const message = "Audience-binding suggestion 'sug_crm_reader' not found";
+    const other = row({ permission_set_name: 'crm_other' });
+    serve({ list: [listed([dismissed, other]), listed([other])], reopen: [refused(404, 'SUGGESTION_NOT_FOUND', message)] });
+    panel();
+    fireEvent.click(await screen.findByTestId('suggested-binding-reopen-crm_reader'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message));
+    await waitFor(() => expect(screen.queryByTestId('suggested-binding-crm_reader')).toBeNull());
+    expect((await rowEl('crm_other')).dataset.state).toBe('pending');
+  });
+
+  it('re-open answered 501 (a security service without the door) → its message is shown and the dismissal stands', async () => {
+    const message = "This deployment's security service does not implement re-opening a dismissed audience-binding suggestion, so the dismissal stands.";
+    serve({ list: [listed([dismissed])], reopen: [refused(501, 'NOT_IMPLEMENTED', message)] });
+    panel();
+    fireEvent.click(await screen.findByTestId('suggested-binding-reopen-crm_reader'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message));
+    expect((await rowEl('crm_reader')).dataset.state).toBe('dismissed');
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

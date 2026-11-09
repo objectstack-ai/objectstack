@@ -62,6 +62,11 @@
  *
  * This module imports the engine only as a TYPE, so there is no module cycle
  * at run time, and nothing re-exports it.
+ *
+ * [#30053 codemod] A PRIVATE method's docblock has since moved here,
+ * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * and the class keeps none for it; a public or protected method's docblock
+ * stays on the class, the contract, and its function keeps the placeholder.
  */
 
 import { isTitleEligible, resolveDisplayField, resolveRecordDisplayName } from '@objectstack/spec/data';
@@ -73,6 +78,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { withoutOperationPrivateKeys } from '@objectstack/core';
 import type { ObjectQL } from './engine.js';
 import { isReadRefusal } from './engine-file-reference-hydration.js';
+import { formulaPlanEntry } from './engine-top-level.js';
 
 /**
  * The `ObjectQL` members {@link serveReferenceNames} reads, every one of them
@@ -99,7 +105,29 @@ function bareIdsOf(value: unknown, into: Set<string>): void {
   }
 }
 
-/** The body of `ObjectQL#serveReferenceNames`; the method's docblock there is its contract. */
+/**
+ * [#29460] Serve `FieldSchema.referenceNameVisible` on an expanded read
+ * (director ruling 6574398310, letter B). Runs from
+ * {@link expandRelatedRecords} for a field declaring the key, after the
+ * caller's own expansion of it, and rewrites only the ids that expansion
+ * left bare.
+ *
+ * For each such id it asks, as the caller and with none of the caller's
+ * `$expand` nesting, whether the caller may read it (the security service's
+ * object-level admission, then an id-only read for the row scope). A refused
+ * id whose record exists in the caller's tenant becomes
+ * `{ id, name, readRefused: true }`: `name` is ADR-0079's display name,
+ * read by the engine under the tenant-kept elevation from exactly `id` and
+ * the resolved name field, with the floor `Record #<id>` when field-level
+ * security keeps that field from the caller. A readable target keeps its
+ * expansion, an id the caller's own nested filter left bare stays bare, an
+ * id no record has stays bare. `multiple: true` is judged per element.
+ *
+ * ⛔ Never served on an unexpanded read: ADR-0104 D1's stored form is the
+ * bare id for every caller. ⛔ The caller's projection, filter, order and
+ * nested expand never reach the elevated read, and the field's
+ * `displayField` does not choose its column.
+ */
 export async function serveReferenceNames(
   this: ReferenceNameVisibleHost,
   objectName: string,
@@ -236,3 +264,19 @@ async function servableNameField(
     return undefined;
   }
 }
+
+/**
+ * [#30020 codemod] The `formulaReadsReference` slot of the host
+ * `ObjectQL#serveReferenceNames` hands {@link serveReferenceNames}: moved here
+ * whole by `--hand-slots` of `scripts/codemod-split-engine.mjs`, and the slot
+ * names it.
+ */
+export const formulaReadsReference: ReferenceNameVisibleHost['formulaReadsReference'] = (name, def, fields) => {
+  try {
+    const entry = formulaPlanEntry(name, def, fields);
+    return entry.hops !== undefined || entry.hopConflict !== undefined;
+  } catch {
+    // An expression the planner cannot compile is not served by name.
+    return true;
+  }
+};

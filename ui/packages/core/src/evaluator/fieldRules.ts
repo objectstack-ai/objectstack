@@ -80,6 +80,7 @@ import type { Expression } from '@objectstack/spec';
 
 import { isBlankPredicateText } from './declaredPredicate.js';
 import { isUnevaluablePredicate, UNEVALUABLE_PREDICATE_REASON } from './unevaluablePredicate.js';
+import { isMissingForRequired } from '../validation/required-presence.js';
 
 /** A field-rule predicate as authored in metadata. */
 export type FieldRulePredicate = string | { dialect?: string; source: string };
@@ -430,12 +431,32 @@ export interface FieldRuleFaults {
  * unblock it. See `isServerOwnedValue` in `../validation/server-owned-value.js`
  * for who computes the fact and why the mode is the caller's to state.
  *
+ * ## `requiredWhen` is a TRANSITION GATE on an update, as the engine judges it
+ *
+ * `@objectstack/spec` `Field.requiredWhen`: "the write is refused only when the
+ * merged record violates the requirement AND the pre-write record complied"
+ * (ADR-0113 non-regression). objectql's `evaluateValidationRules` implements
+ * exactly that, and it is the contract this client side is bound to. So on an
+ * UPDATE — `previous` given, and `statics.name` saying which of its columns is
+ * this field's stored value — a stored row that ALREADY violates the rule (the
+ * predicate holds over it and its value is missing) is at rest: no write that
+ * leaves the field empty is refused by this rule, so `required` is `false` and
+ * `requiredWhenAtRest` is `true`. See {@link requiredWhenRestsOnStoredRecord}.
+ *
+ * A row that complied is judged as before, so the write that moves it INTO the
+ * gate and the write that clears a stored value are both still required. An
+ * INSERT has no `previous` and complies vacuously, as on the server. A caller
+ * that passes no `statics.name` keeps the plain verdict.
+ *
  * @param fieldContext  Optional locator for failure warnings — e.g.
  *                      `"field 'amount'"`. The warning then reads
  *                      `visibleWhen of field 'amount' …`; without it, the rule
  *                      kind alone is reported.
  * @returns The three verdicts, plus `faults` — see {@link FieldRuleFaults} for
- *          what a submit path reads from it and what it leaves out.
+ *          what a submit path reads from it and what it leaves out — and
+ *          `requiredWhenAtRest`, true when the stored row already violates
+ *          `requiredWhen` (see above), for a caller that judges another write
+ *          against the same stored row.
  */
 export function resolveFieldRuleState(
   rules: {
@@ -444,11 +465,17 @@ export function resolveFieldRuleState(
     requiredWhen?: FieldRulePredicate;
   },
   record: Record<string, unknown>,
-  statics: { required?: boolean; readonly?: boolean; serverOwnedValue?: boolean },
+  statics: { required?: boolean; readonly?: boolean; serverOwnedValue?: boolean; name?: string },
   previous?: Record<string, unknown>,
   scope?: Record<string, unknown>,
   fieldContext?: string,
-): { visible: boolean; readonly: boolean; required: boolean; faults: FieldRuleFaults } {
+): {
+  visible: boolean;
+  readonly: boolean;
+  required: boolean;
+  faults: FieldRuleFaults;
+  requiredWhenAtRest: boolean;
+} {
   const faults: FieldRuleFaults = {};
   // `onFault` fires beside the built-in warning, not instead of it (`warn`
   // stays on), so recording the report costs no diagnostic and no second
@@ -490,20 +517,60 @@ export function resolveFieldRuleState(
   // render. A broken `requiredWhen` still warns wherever it decides something
   // — the same object's EDIT form, and any create form where the field is not
   // server-owned.
+  const requiredByRule =
+    statics.serverOwnedValue !== true &&
+    statics.required !== true &&
+    rules.requiredWhen != null &&
+    evalFieldPredicate(
+      rules.requiredWhen,
+      record,
+      REQUIRED_WHEN_FAULTED,
+      previous,
+      scope,
+      diag('requiredWhen'),
+    );
+  // Asked only when the rule would require the field: the stored row's verdict
+  // can only relax a TRUE one (the transition-gate section above).
+  const requiredWhenAtRest =
+    requiredByRule &&
+    statics.name !== undefined &&
+    requiredWhenRestsOnStoredRecord(rules.requiredWhen, statics.name, previous, scope);
   const required =
     statics.serverOwnedValue === true
       ? false
       : statics.required === true ||
-        (rules.requiredWhen != null
-          ? evalFieldPredicate(
-              rules.requiredWhen,
-              record,
-              REQUIRED_WHEN_FAULTED,
-              previous,
-              scope,
-              diag('requiredWhen'),
-            )
-          : REQUIRED_WHEN_ABSENT);
+        (rules.requiredWhen != null ? requiredByRule && !requiredWhenAtRest : REQUIRED_WHEN_ABSENT);
 
-  return { visible, readonly, required, faults };
+  return { visible, readonly, required, faults, requiredWhenAtRest };
+}
+
+/**
+ * Does the STORED row already violate this field's `requiredWhen` — the
+ * predicate holds over it and the field's stored value is missing?
+ *
+ * The pre-state half of the engine's transition gate (objectql
+ * `evaluateValidationRules`, ADR-0113 non-regression): a write is refused only
+ * when the merged record violates the rule and the stored row complied, so a
+ * row this answers `true` for rests under the rule whatever the write leaves
+ * in the field. Judged over the stored row alone, bound as both `record` and
+ * `previous`, as the engine binds it.
+ *
+ * `false` without a stored row (an insert complies vacuously) and `false` when
+ * the predicate cannot be evaluated over it: the engine then treats the stored
+ * row as COMPLIANT, so enforcement stays on unless a violation is proven. The
+ * fault is not reported here; the live evaluation of the same rule reports it.
+ *
+ * "Missing" is {@link isMissingForRequired}, the same answer the client's
+ * required check gives, so a value this calls present is never one that check
+ * would refuse.
+ */
+export function requiredWhenRestsOnStoredRecord(
+  pred: FieldRulePredicate | undefined | null,
+  name: string,
+  stored: Record<string, unknown> | undefined,
+  scope?: Record<string, unknown>,
+): boolean {
+  if (pred == null || stored == null) return false;
+  if (!isMissingForRequired(stored[name])) return false;
+  return evalFieldPredicate(pred, stored, false, stored, scope, { warn: false });
 }

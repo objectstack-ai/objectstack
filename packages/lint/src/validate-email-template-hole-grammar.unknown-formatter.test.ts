@@ -2,14 +2,14 @@
 
 /**
  * `email-template-hole-grammar` refuses a hole whose formatter the whitelist
- * (`TEMPLATE_FORMATTERS`) does not name, on every authoring door: the three
+ * (`MAIL_TEMPLATE_FORMATTERS`) does not name, on every authoring door: the three
  * CLI commands and the runtime publish gate for an `email_template` write.
  * Which names are known is `@objectstack/formula`'s to decide (pinned in its
  * `template-unknown-formatter.test.ts`); this file holds the rule's reading.
  */
 import { describe, expect, it } from 'vitest';
 
-import { TEMPLATE_FORMATTERS } from '@objectstack/formula';
+import { MAIL_TEMPLATE_FORMATTERS } from '@objectstack/formula';
 
 import { AUTHORING_COMMANDS, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules } from './runtime-gate.js';
@@ -37,7 +37,7 @@ describe('the rule, on the stack', () => {
     expect(findings[0]).toMatchObject({ severity: 'error', rule: EMAIL_TEMPLATE_HOLE_GRAMMAR, path: `emailTemplates[0].${face}` });
     expect(findings[0].where).toContain('invoice.due');
     expect(findings[0].message).toContain(MISSPELLED);
-    expect(findings[0].message).toContain(`Known formatters: ${TEMPLATE_FORMATTERS.join(', ')}.`);
+    expect(findings[0].message).toContain(`Known formatters: ${MAIL_TEMPLATE_FORMATTERS.join(', ')}.`);
   });
 
   it('a template whose every formatter is known draws nothing', () => {

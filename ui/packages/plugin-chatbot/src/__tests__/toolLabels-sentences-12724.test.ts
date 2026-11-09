@@ -19,6 +19,7 @@
 import { describe, expect, it } from 'vitest';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { humanizeToolName } from '../tool-display.js';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 
 type LocaleCode = keyof typeof builtInLocales;
 const LANGS = Object.keys(builtInLocales) as LocaleCode[];
@@ -29,7 +30,7 @@ const toolsOf = (lang: LocaleCode): Record<string, string> =>
 
 describe('chatbot.tool.* values are sentences, not tool ids (objectui#12724)', () => {
   it('reads every shipped pack, each with the same non-empty key set', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     const enKeys = Object.keys(toolsOf('en')).sort();
     expect(enKeys.length).toBeGreaterThan(0);
     for (const lang of LANGS) {
@@ -45,6 +46,6 @@ describe('chatbot.tool.* values are sentences, not tool ids (objectui#12724)', (
   });
 
   it('zh: todo_write reads as the ruled sentence', () => {
-    expect(toolsOf('zh').todo_write).toBe('记下后续检查项');
+    expect(toolsOf('zh-Hans').todo_write).toBe('记下后续检查项');
   });
 });

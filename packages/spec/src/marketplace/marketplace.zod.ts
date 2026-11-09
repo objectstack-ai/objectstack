@@ -56,7 +56,17 @@ import { CONSUMER_INSTALLABLE_TYPES } from '../kernel/plugin.zod';
  * Publisher Verification Status
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 import { PackageTranslationsSchema } from './package.zod';
+import {
+  MarketplaceBusinessFunctionSchema,
+  MarketplaceBusinessFunctionsSchema,
+  MarketplaceIndustriesSchema,
+  MarketplaceIndustrySchema,
+  MarketplaceSolutionTypeSchema,
+  PackageMaturitySchema,
+  retiredCategoryGuidance,
+} from './taxonomy.zod';
 export const PublisherVerificationSchema = lazySchema(() => z.enum([
   'unverified',  // Not yet verified
   'pending',     // Verification in progress
@@ -161,26 +171,10 @@ export type ArtifactDownloadResponse = z.input<typeof ArtifactDownloadResponseSc
 // Marketplace Listing
 // ==========================================
 
-/**
- * Marketplace Category
- */
-export const MarketplaceCategorySchema = lazySchema(() => z.enum([
-  'crm',             // Customer Relationship Management
-  'erp',             // Enterprise Resource Planning
-  'hr',              // Human Resources
-  'finance',         // Finance & Accounting
-  'project',         // Project Management
-  'collaboration',   // Collaboration & Communication
-  'analytics',       // Analytics & Reporting
-  'integration',     // Integrations & Connectors
-  'automation',      // Automation & Workflows
-  'ai',              // AI & Machine Learning
-  'security',        // Security & Compliance
-  'developer-tools', // Developer Tools
-  'ui-theme',        // UI Themes & Appearance
-  'storage',         // Storage & Drivers
-  'other',           // Other / Uncategorized
-]).describe('Marketplace package category'));
+// `MarketplaceCategorySchema` — the listing's single closed category — was
+// RETIRED with `PackageCategorySchema`. The marketplace taxonomy is the facets
+// in `./taxonomy.zod.ts` (business function, industry, solution type) plus the
+// separate `maturity` flag; `LEGACY_CATEGORY_MAPPING` there maps each old value.
 
 /**
  * Listing Status
@@ -249,8 +243,26 @@ export const MarketplaceListingSchema = lazySchema(() => z.object({
   /** Full description (supports Markdown) */
   description: z.string().optional().describe('Full description (Markdown)'),
 
-  /** Category */
-  category: MarketplaceCategorySchema.describe('Package category'),
+  /**
+   * REMOVED — the listing's single category, retired with
+   * `PackageSchema.category` (see that tombstone). The facets below replace it.
+   */
+  category: retiredKey(retiredCategoryGuidance('MarketplaceListing.category')),
+
+  /**
+   * Business functions the package serves — required on a listing: 1 to 3,
+   * the primary one first; a listing card shows the first.
+   */
+  businessFunctions: MarketplaceBusinessFunctionsSchema,
+
+  /** Industries the package is built for — up to 3; absent means cross-industry. */
+  industries: MarketplaceIndustriesSchema.optional(),
+
+  /** What the package is: `app`, `template` or `connector`. */
+  solutionType: MarketplaceSolutionTypeSchema.default('app'),
+
+  /** `beta` shows a badge on the card and the detail page; absent means stable. */
+  maturity: PackageMaturitySchema.default('stable'),
 
   /** Additional tags for search discovery */
   tags: z.array(z.string()).optional().describe('Search tags'),
@@ -411,8 +423,23 @@ export const MarketplaceSearchRequestSchema = lazySchema(() => z.object({
   /** Search query string */
   query: z.string().optional().describe('Full-text search query'),
 
-  /** Filter by category */
-  category: MarketplaceCategorySchema.optional().describe('Filter by category'),
+  /** REMOVED — the category filter, retired with the listing's `category`. */
+  category: retiredKey(retiredCategoryGuidance('MarketplaceSearchRequest.category')),
+
+  /**
+   * Facet filters. Values inside one facet are OR-ed, facets are AND-ed:
+   * `{ businessFunctions: ['sales', 'marketing'], solutionTypes: ['template'] }`
+   * finds sales OR marketing templates.
+   */
+  businessFunctions: z.array(MarketplaceBusinessFunctionSchema).optional()
+    .describe('Filter: any of these business functions'),
+  industries: z.array(MarketplaceIndustrySchema).optional()
+    .describe('Filter: any of these industries'),
+  solutionTypes: z.array(MarketplaceSolutionTypeSchema).optional()
+    .describe('Filter: any of these solution types'),
+
+  /** Filter by maturity (e.g. stable only). Not a facet: it has no facet count. */
+  maturity: PackageMaturitySchema.optional().describe('Filter by maturity'),
 
   /** Filter by tags */
   tags: z.array(z.string()).optional().describe('Filter by tags'),
@@ -466,8 +493,19 @@ export const MarketplaceSearchResponseSchema = lazySchema(() => z.object({
 
   /** Facets for filtering */
   facets: z.object({
-    categories: z.array(z.object({
-      category: MarketplaceCategorySchema,
+    // `categories` was retired with the listing's `category`; one count list
+    // per taxonomy facet replaces it.
+    categories: retiredKey(retiredCategoryGuidance('MarketplaceSearchResponse.facets.categories')),
+    businessFunctions: z.array(z.object({
+      value: MarketplaceBusinessFunctionSchema,
+      count: z.number().int().min(0),
+    })).optional(),
+    industries: z.array(z.object({
+      value: MarketplaceIndustrySchema,
+      count: z.number().int().min(0),
+    })).optional(),
+    solutionTypes: z.array(z.object({
+      value: MarketplaceSolutionTypeSchema,
       count: z.number().int().min(0),
     })).optional(),
     pricing: z.array(z.object({
@@ -579,7 +617,6 @@ export type PublisherVerification = z.input<typeof PublisherVerificationSchema>;
 export type Publisher = z.input<typeof PublisherSchema>;
 /** Post-parse shape of {@link Publisher} — defaults applied, transforms run (ADR-0122). */
 export type PublisherParsed = z.infer<typeof PublisherSchema>;
-export type MarketplaceCategory = z.input<typeof MarketplaceCategorySchema>;
 export type ListingStatus = z.input<typeof ListingStatusSchema>;
 export type PricingModel = z.input<typeof PricingModelSchema>;
 export type MarketplaceListing = z.input<typeof MarketplaceListingSchema>;

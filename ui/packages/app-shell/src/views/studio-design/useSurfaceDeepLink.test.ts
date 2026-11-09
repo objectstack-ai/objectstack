@@ -1,7 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { resolveSurfaceDeepLink, parseSurfaceTarget, DESIGNER_SURFACE_NAV_PARAM } from './useSurfaceDeepLink';
+import {
+  resolveSurfaceDeepLink,
+  parseSurfaceTarget,
+  DESIGNER_SURFACE_NAV_PARAM,
+  DESIGNER_SURFACE_VIEW_PARAM,
+} from './useSurfaceDeepLink';
 
 /**
  * Pure half of the shared `?surface=` deep-link plumbing — the rail-restore
@@ -80,5 +85,36 @@ describe('parseSurfaceTarget (objectui#11774)', () => {
     expect(
       resolveSurfaceDeepLink(objects, parseSurfaceTarget('object:showcase_task', 'nav_slice_urgent'), 'object'),
     ).toBe(objects[1]);
+  });
+});
+
+/**
+ * objectstack#30046 — the list view an Interfaces `object` entry shows rides
+ * in a key of its own, `view`, beside `surface` and `nav`.
+ */
+describe('parseSurfaceTarget — the open list view (objectstack#30046)', () => {
+  it('the view travels in a key of its own, `view`', () => {
+    expect(DESIGNER_SURFACE_VIEW_PARAM).toBe('view');
+  });
+
+  it('reads the view beside the target and the entry', () => {
+    expect(parseSurfaceTarget('object:crm_opportunity', 'nav_opps', 'crm_opportunity.pipeline')).toEqual({
+      type: 'object',
+      name: 'crm_opportunity',
+      navId: 'nav_opps',
+      viewId: 'crm_opportunity.pipeline',
+    });
+  });
+
+  it('BACK-COMPAT: a link with no `view` parses as it did', () => {
+    expect(parseSurfaceTarget('object:crm_opportunity', 'nav_opps', null)).toEqual({
+      type: 'object',
+      name: 'crm_opportunity',
+      navId: 'nav_opps',
+    });
+  });
+
+  it('`view` alone names nothing', () => {
+    expect(parseSurfaceTarget(null, null, 'crm_opportunity.pipeline')).toBeNull();
   });
 });

@@ -28,8 +28,8 @@ import {
     type MetadataDiagnostics,
     computeViewReferenceDiagnostics,
     decorateMetadataItem,
-    withFormLayoutWarnings,
     withPublishVerdict,
+    withViewLintWarnings,
 } from './metadata-diagnostics.js';
 import { noPendingDraftError } from './protocol-authoring-refusals.js';
 import {
@@ -39,6 +39,7 @@ import {
 } from './protocol-bundle-members.js';
 import { packagelessContentPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
+import { admitExactQualifier, exactQualifierItem } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
     bundleMemberOf,
@@ -47,6 +48,8 @@ import {
     withRowBinding,
 } from './protocol-package-bindings.js';
 import type { ServedOverrideRow } from './served-override.js';
+import { withServedRowChangedAt } from './served-row-changed-at.js';
+import { canonicalIsoInstant } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItem`; the method's docblock there is its contract. */
 export async function getMetaItem(host: Pick<ProtocolHost, 'readMetaItemFace'>, request: {
@@ -90,6 +93,32 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     const wantedMember = bundleMemberDiscriminator(request.type, member);
     const isWantedMember = (candidate: unknown): boolean =>
         wantedMember === undefined || itemDiscriminator(request.type, candidate) === wantedMember;
+    // [ADR-0150 D3, #31680 child E8] A read that names no package is a caller
+    // with no package. For a type whose by-name readers consult
+    // `(package, name)` (the registry's `readsByPackage`), the registry's
+    // answer is the ONE package-scoped resolver's (`resolveItem`): the
+    // environment's own item, else the unique package holder. A name two
+    // packages hold is refused HERE, before any layer below is read, naming
+    // both (a thrown `409 RESOURCE_CONFLICT`); it served the first registered.
+    // Step 3 serves this answer in place of `getItem`'s, and nothing else
+    // below changes. A read that names a package (`?package=`) keeps
+    // `getItem`'s prefer-local read: that address is the exact qualifier of
+    // child G1 (ADR-0150 D5), not a caller.
+    const registry = host.engine?.registry;
+    const packagelessScopedRead: { item: unknown } | undefined =
+        !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
+            ? { item: registry.resolveItem(request.type, request.name, null, member) }
+            : undefined;
+    // [ADR-0150 D5, epic #31527 child G1] A read that names a package
+    // (`?package=X`, and the qualified path `/meta/:type/:ns/:name` the doors
+    // translate to it) is the EXACT qualifier: X's item with its bound
+    // overlay, or a refusal naming every holder (`409 RESOURCE_CONFLICT`),
+    // never another package's item. Judged before any layer is read
+    // ({@link admitExactQualifier}); the answer the layers below reach is
+    // checked against it once they have ({@link exactQualifierItem}).
+    const exactAddress = await admitExactQualifier(host, {
+        type: request.type, name: request.name, packageId: request.packageId, member,
+    });
     let item: unknown;
     // [ADR-0131 D6] Environment → code: the environment's stored row,
     // else the code packages' definition. No organization's row is read —
@@ -108,12 +137,14 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [#29196] A served VIEW's `_diagnostics` also carries the lint's
     // `form-field-unknown` warnings ({@link withFormLayoutWarnings}), judged
     // against the object the registry serves for each name the view spells.
+    // [#31866] …and its list views' `list-view-field-unknown` warnings
+    // ({@link withListViewFieldWarnings}), against the same objects.
     // Applied at every served exit of this read, the draft ones included; a
     // warning, so `valid` is left as the schema answered it. The execution
     // face serves no `_diagnostics`.
-    const serveFormLayout = <T>(served: T): Promise<T> => (execution
+    const serveViewLint = <T>(served: T): Promise<T> => (execution
         ? Promise.resolve(served)
-        : withFormLayoutWarnings(request.type, served, (name) => host.engine?.registry?.getObject?.(name)));
+        : withViewLintWarnings(request.type, served, (name) => host.engine?.registry?.getObject?.(name)));
     // [#26707] A served DRAFT is decorated as above and then told what its
     // publish would refuse: the runtime gate's verdict on the stored draft
     // body ({@link draftPublishVerdict}), folded into `_diagnostics`
@@ -122,7 +153,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // promotion does — never the governed, converted or redacted copy this
     // read serves. The execution face serves no `_diagnostics`.
     const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
-        const served = await serveFormLayout(serveItem(resolved));
+        const served = await serveViewLint(serveItem(resolved));
         if (execution || !served || typeof served !== 'object') return served;
         const issues = await host.draftPublishVerdict({
             type: request.type,
@@ -326,6 +357,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     let draftChanges: ReturnType<typeof storedDraftChanges>;
     // [#26707] The draft row this read serves, for its publish verdict.
     let servedDraftRow: { metadata?: unknown; package_id?: string | null } | undefined;
+    // [#31196] When the stored row whose content the active read adopts last
+    // changed: the item's own `Last-Modified` ({@link withServedRowChangedAt}).
+    // Unset for an item no stored row serves.
+    let servedRowChangedAt: string | undefined;
     try {
         // [#28409, ADR-0146 D8 item 2] The active read serves the
         // package's name, so its declared override is the first candidate
@@ -389,6 +424,9 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             if (readState === 'draft') {
                 draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
                 servedDraftRow = record as { metadata?: unknown; package_id?: string | null };
+            } else {
+                const stamped = record as { updated_at?: unknown; created_at?: unknown };
+                servedRowChangedAt = canonicalIsoInstant(stamped.updated_at ?? stamped.created_at);
             }
         }
     } catch (error) {
@@ -413,7 +451,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         return {
             type: request.type,
             name: request.name,
-            item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : await serveFormLayout(serveItem(governedDraft)),
+            item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : await serveViewLint(serveItem(governedDraft)),
             // [#22114] The draft row's version token — the one a draft save
             // (`?mode=draft`) at this address accepts as `If-Match`.
             // [#22877] The member's own row's, as a save of that member's
@@ -557,10 +595,17 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         if (artifact !== undefined && isWantedMember(artifact)) item = artifact;
     }
     if (item === undefined) {
-        item = host.engine.registry.getItem(request.type, request.name, request.packageId, member);
-        if (item === undefined) {
-            const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
-            if (alt) item = host.engine.registry.getItem(alt, request.name, request.packageId, member);
+        // [ADR-0150 D3, #31680] The package-scoped resolver's answer, read
+        // once above, for a caller with no package of a type it covers; no
+        // first-composite read and no plural-spelling retry beside it.
+        if (packagelessScopedRead) {
+            item = packagelessScopedRead.item;
+        } else {
+            item = host.engine.registry.getItem(request.type, request.name, request.packageId, member);
+            if (item === undefined) {
+                const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
+                if (alt) item = host.engine.registry.getItem(alt, request.name, request.packageId, member);
+            }
         }
         // [#22877] A registry that does not narrow by member (a host
         // double, an older registry) can answer another member of the
@@ -602,6 +647,11 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // pre-existing ordering trade-off, not this issue's). Only when the
     // WHOLE chain resolved nothing does the degraded read change anything,
     // because only then would this method answer "no such item".
+    // [ADR-0150 D5, child G1] An exact read never serves another package's
+    // item: a layer above that answered one (the registry's first-composite
+    // tier, a by-name service read) is replaced by the admitted holder's.
+    if (exactAddress) item = exactQualifierItem(host, request, exactAddress, item, member);
+
     if (item === undefined && serviceDegraded?.degraded) {
         host.throwMetadataServiceUnavailable(serviceDegraded.errors);
     }
@@ -690,9 +740,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             }
         } catch { /* reference diagnostics are best-effort */ }
     }
-    // [#29196] …and the lint's form-layout warnings, after the reference
-    // merge above (which rebuilds `_diagnostics` from its errors alone).
-    decorated = await serveFormLayout(decorated);
+    // [#29196] …and the lint's form-layout warnings, [#31866] and list-view
+    // field warnings, after the reference merge above (which rebuilds
+    // `_diagnostics` from its errors alone).
+    decorated = await serveViewLint(decorated);
     // ADR-0010 — surface lock/provenance flags so Studio can render
     // the correct affordances without a second round trip. [#21670] They
     // report the write doors' verdicts — see {@link servedLockState}.
@@ -722,7 +773,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     const cascadeDeleteObjects = !execution && decorated !== undefined && decorated !== null
         ? host.resolveCascadeDeleteObjects(request.type, request.name)
         : undefined;
-    return {
+    // [#31196] …and, off the record, when the stored row it serves last
+    // changed ({@link withServedRowChangedAt}), for the cached read's
+    // `lastModified`.
+    return withServedRowChangedAt({
         type: request.type,
         name: request.name,
         item: decorated,
@@ -753,5 +807,5 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
         ...(readDisabledActions ? { disabledActions: readDisabledActions(decorated) } : {}),
         ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
-    };
+    }, servedRowChangedAt);
 }

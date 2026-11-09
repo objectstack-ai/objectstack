@@ -14,7 +14,7 @@
 // its own does not prove the addresses agree.
 
 import { describe, it, expect } from 'vitest';
-import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract';
+import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-bundle-extract';
 import { computeI18nCoverage } from '../src/utils/i18n-coverage';
 // Subpath entrypoints — the root barrel re-exports only a curated set, and
 // neither of these two is in it.

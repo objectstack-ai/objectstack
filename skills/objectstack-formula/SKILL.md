@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x and @objectstack/formula 18.x (CEL)
 metadata:
   author: objectstack-ai
-  version: "18.2.0"
+  version: "18.3.0"
   domain: expression
   tags: cel, formula, predicate, condition, validation, visibility, seed-dynamic
 ---
@@ -22,8 +22,7 @@ metadata:
 
 ObjectStack has **one** expression language across every domain that needs
 computation or boolean predicates: **CEL** (Google Common Expression
-Language). This skill is the canonical reference for AI authors emitting
-formula / condition / predicate / dynamic-seed metadata.
+Language).
 
 > **Predicates / formulas are bare CEL — never wrap field references in `{…}`
 > braces.** The #1 authoring mistake is a condition like
@@ -95,11 +94,13 @@ ADR-0068 — spec field docs write predicates like `current_user.positions`.
 `null`. To check for "value present and non-blank" use the stdlib helper
 `isBlank()` or compare to `null` explicitly.
 
-Every predicate reads a `record` — and, where §5 binds it, a `previous` — that
-is **total over the object's declared fields**: a declared column the driver
-never returned reads as `null`, not as a fault. So `has(record.<declared_field>)`
-and `has(previous.<declared_field>)` are uniformly `true` and tell you nothing at
-all. The idiom that reads like a guard is not one:
+Every server-evaluated predicate — validation rules, `requiredWhen`, option
+`visibleWhen`, `readonlyWhen`, hook `condition`, the flow trigger record —
+reads a `record` (and, where §5 binds it, a `previous`) that is **total over
+the object's declared fields**: a declared column the driver never returned
+reads as `null`, not as a fault. There `has(record.<declared_field>)` and
+`has(previous.<declared_field>)` are uniformly `true`, and `!= null` is the
+whole guard. The idiom that reads like a guard is not one:
 
 ```text
 # WRONG — both has() calls are true on a NULL row, so this reaches `null < null`,
@@ -112,18 +113,31 @@ record.start_date != null && record.end_date != null && record.end_date < record
 
 **This is a publish-time rejection, not advice.** `os build` /
 `os validate` / `os lint` and the runtime publish gate reject any validation-rule
-or hook predicate that applies an ordering (`< <= > >=`) or arithmetic
+or hook predicate — and a record-triggered flow's (`triggerType: 'record-*'`)
+start `config.condition`, edge `condition` (nested regions too) or `decision`
+branch `expression` — that applies an ordering (`< <= > >=`) or arithmetic
 (`+ - * / %`) operator to a **declared nullable** field — no `required: true`,
-no `defaultValue`, no default option — unless an explicit `!= null` / `== null` /
+no `defaultValue`, no default option, not a `count` / `sum` roll-up (empty reads
+`0`; `min` / `max` / `avg` stay nullable) — unless an explicit `!= null` / `== null` /
 `!isBlank()` test dominates it in the same boolean branch. `has()` deliberately
 does not satisfy that gate. `has()` over an **undeclared** key stays legal: that
-is its real use — telling "absent from this PATCH" apart from "explicitly null".
+is its use there — telling "absent from this PATCH" apart from "explicitly null".
 
-### Null + string throws
+**The exception: action `visible` / `disabled` are client-side and sparse.**
+They bind the row the client already holds, and that row — a `list_item` row
+above all — lacks a key when the column is outside the view's projection, when
+field-level security refuses it, or when it was never written (the mongo and
+memory drivers).
+Reading an absent key faults `No such key`: a `visible` predicate hides the
+action, a `disabled` one leaves it refused, silently either way.
+There the guard is `has(record.x) && record.x != null`; `has()` alone is enough
+beside a literal `==` / `!=`; a nested path takes one `has()` per segment:
 
-CEL has no implicit `null` coercion. `null + 'foo'` throws
-`no such overload: dyn<null> + string`. Wrap every nullable string operand
-in `coalesce(..., '')`.
+```text
+has(record.status) && record.status != 'resolved'
+has(record.amount) && record.amount != null && record.amount > 1000
+has(record.viewer) && has(record.viewer.can_approve) && record.viewer.can_approve == true
+```
 
 ---
 
@@ -215,11 +229,15 @@ If you need a helper that doesn't exist, prefer adding it to the stdlib
 
 ## Mandatory patterns for AI emission
 
+The ❌ blocks are wrong on purpose, so `check:skill-examples` skips them.
+
 ### 1. Computed text formula — always coalesce nullable operands
 
 ✅ **Correct**
 
+<!-- os:check -->
 ```ts
+import { F } from '@objectstack/spec';
 F`coalesce(record.salutation, '') + ' '
   + coalesce(record.first_name, '') + ' '
   + coalesce(record.last_name, '')`
@@ -235,7 +253,9 @@ F`record.salutation + ' ' + record.first_name + ' ' + record.last_name`
 
 ✅
 
+<!-- os:check -->
 ```ts
+import { F } from '@objectstack/spec';
 F`coalesce(record.cost, 0) > 0
   ? ((coalesce(record.revenue, 0) - record.cost) * 100) / record.cost
   : 0.0`
@@ -250,13 +270,12 @@ F`coalesce(record.cost, 0) > 0
 import { P } from '@objectstack/spec';
 
 P`record.status == 'qualified'`;
-P`record.amount > 10000 && record.region in ['us', 'eu']`;
+P`record.amount != null && record.amount > 10000 && record.region in ['us', 'eu']`;
 P`!isBlank(record.po_number)`;
 ```
 
-For field-level conditional rules, emit the canonical field properties:
-`visibleWhen`, `readonlyWhen`, and `requiredWhen`. Never emit
-`conditionalRequired` — it was REMOVED in protocol 17 and is a parse error.
+Never emit `conditionalRequired` (use `requiredWhen`) — it was REMOVED in
+protocol 17 and is a parse error.
 
 ❌ Salesforce-flavor — **fails CEL compile**: `os build` errors with a
 located message, and the flow engine throws if it ever reaches runtime:
@@ -271,8 +290,10 @@ located message, and the flow engine throws if it ever reaches runtime:
 
 ✅
 
+<!-- os:check -->
 ```ts
-{ close_date: cel`daysFromNow(45)`, created_at: cel`now()` }
+import { cel } from '@objectstack/spec';
+const seed = { close_date: cel`daysFromNow(45)`, created_at: cel`now()` };
 ```
 
 ❌ Compile-time evaluation — every customer gets the package author's clock:
@@ -291,12 +312,11 @@ so they are safe inside one.
 
 ✅
 
+<!-- os:check -->
 ```ts
+import { P } from '@objectstack/spec';
 P`previous.status != 'escalated' && record.status == 'escalated'`
 ```
-
-ISCHANGED-style logic does not exist as a function; use explicit `previous`
-comparison.
 
 `record` is the record's **state**, not this write's diff: stored row ⊕
 payload, so `record.status == 'escalated'` is true on *every* update of an
@@ -321,15 +341,15 @@ a typo'd key (`record.stauts`), a retired field, or a comparison CEL has no
 overload for — does **not** degrade to "the hook did not fire": it **fails the
 write**, with an error naming the hook and the key — `before*` and `after*`
 alike, with no `onError` escape (`onError` governs a handler that throws, and
-the condition is evaluated before any handler runs). A condition that does not
-even **compile** aborts the same way. So on an insert event read `previous`
-only against `null`, and put a column read off it behind `previous != null &&`.
+the condition is evaluated before any handler runs).
 
 **A transition condition needs no special handling for bulk writes.**
 Write it once, on a `before*` or an `after*` event, and it means the same thing
 whether the write carries an id or a predicate:
 
+<!-- os:check -->
 ```ts
+import { P } from '@objectstack/spec';
 // Fires once per row that ACTUALLY transitioned — on `update(id)` and on
 // `update({multi: true})` alike.
 P`previous.status != 'done' && record.status == 'done'`
@@ -379,17 +399,19 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `ISCHANGED(x)` | `previous.x != record.x` |
 | `MONTH_DIFF`, `MID`, `LEFT`, `RIGHT`, `SUBSTITUTE` | _not in stdlib — propose addition_ |
 
-> ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which has a value
-> only where `previous` is a **row** — see §5. On an insert event `previous` is
-> `null`, so the read does not quietly skip the hook, it **fails the write**
-> unless guarded by `previous != null &&`. On update and delete
-> events it IS bound, per matched row, in `before*` and `after*` alike, on bulk
-> and single-record writes.
+> ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which is `null` on an
+> insert event and **fails the write** there unless guarded by `previous != null
+> &&`; on update and delete events it is bound per matched row — see §5.
 
-> ⚠️ **Flow conditions are the exception to row 1.** The automation engine
-> spreads the record's variables to top level, so a bare `status` resolves in a
-> flow start condition. `record.status` resolves there too and is the only
-> spelling valid on every other surface — prefer it.
+> ⚠️ **Flow conditions are the exception to row 1.** The engine spreads the
+> trigger record's fields, nulls included, to top level wherever no flow variable
+> or node id holds the name, so in a start, edge or `decision` condition a bare
+> `budget` IS `record.budget`: `os validate` judges either spelling (bare names
+> only while the flow's bound names are provable) and a guard on one guards both.
+> What the start condition proves non-null is presumed at every edge and branch;
+> spell that guard `record.budget != null` — the runtime publish gate judges the
+> written flow alone and resolves no bare name. An unguarded null fails the
+> **run** at that condition; the write that fired it still lands.
 
 ---
 
@@ -407,7 +429,7 @@ to the envelope.
 | `View` / `Page` | `visibleWhen` (form section/field, page component) | cel |
 | `Field` | `defaultValue` (envelope only; bare string = literal) | cel |
 | `ConditionalValidation` | `when` | cel |
-| `Action` | `disabled` | cel (or boolean) |
+| `Action` | `visible` / `disabled` — client-side, sparse | cel (or boolean) |
 | `Hook` | `condition` | cel |
 | `SharingRule` | `condition` | cel |
 | `Flow.decision` | `expression` / edge `condition` | cel (use `vars.<step>.<key>`) |
@@ -441,11 +463,11 @@ a bare string (auto-wrapped) or their helper, and read the same variable scope.
 | Dialect | Helper | Grammar | Carriers |
 |:---|:---|:---|:---|
 | `cron` | `` cron`0 6 * * MON` `` | 5- or 6-field cron, or one of `@yearly` `@annually` `@monthly` `@weekly` `@daily` `@hourly` `@reboot` | `Job.schedule.expression` (canonical) |
-| `template` | `` tmpl`Hello {{ record.first_name }}` `` | `{{ path }}` or `{{ path \| formatter[:arg] }}` — double braces only, no conditionals; the formatter whitelist is `TEMPLATE_FORMATTERS`, exported from `@objectstack/formula` | `system/email-template` `subject` / `bodyHtml` / `bodyText`, `ai/model-registry` `promptTemplate.system` / `.user`, `Object.titleFormat` (deprecated → `nameField`, ADR-0079) |
+| `template` | `` tmpl`Hello {{ record.first_name }}` `` | `{{ path }}` or `{{ path \| formatter[:arg] }}` — double braces only, no conditionals; the formatter whitelist is `TEMPLATE_FORMATTERS`, exported from `@objectstack/formula` | `system/email-template` `subject` / `bodyHtml` / `bodyText`, `ai/model-registry` `promptTemplate.system` / `.user`, `Object.titleFormat` (a save and `os validate` refuse it; move it to `nameField`, ADR-0079) |
 
 `shared/expression.zod.ts` declares both surfaces and their carriers.
-Missing template paths render as the empty string. Move logic into a CEL field:
-a template holds a path and a formatter, nothing else. A `currency` argument is a
+Missing template paths render as the empty string. Move logic into a CEL field.
+A `currency` argument is a
 literal code (`currency:EUR`); only an email template may read it from the send's
 data instead, `{{ amount | currency:@currency_code }}`.
 
@@ -453,8 +475,7 @@ data instead, `{{ amount | currency:@currency_code }}`.
 
 ## Verify your work
 
-A malformed expression does not fail silently (ADR-0032). It used to evaluate to
-`null` / `false` — a flow "fired" and did nothing; now `os validate` and
+A malformed expression does not fail silently (ADR-0032): `os validate` and
 `os build` run the shared validator over every formula and predicate in the
 stack — CEL syntax **plus** `record.<field>` existence on the target object —
 and fail non-zero with a located, did-you-mean message, while at runtime the

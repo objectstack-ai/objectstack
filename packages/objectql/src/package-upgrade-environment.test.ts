@@ -1,0 +1,341 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * The environment half of the package upgrade plan (epic cloud#3652 Q3,
+ * #30884), read through the real `ObjectQL` engine over an in-memory driver:
+ * rows in each column the upgrade touches, and rows a customer edited that the
+ * seed replay overwrites.
+ */
+
+import { describe, expect, it, vi } from 'vitest';
+import { ObjectKernel } from '@objectstack/core';
+import { ObjectQL } from './engine.js';
+import { ObjectQLPlugin } from './plugin.js';
+import { planPackageUpgrade } from './package-upgrade-environment.js';
+import { isEmptyPackageUpgradePlan } from '@objectstack/metadata-core';
+
+type Row = Record<string, unknown>;
+
+/** In-memory driver: equality, `$in` and `$ne` WHERE; `find` honours `limit`. */
+function makeDriver(rowsByObject: Record<string, Row[]>) {
+  const matches = (row: Row, where: any): boolean => {
+    if (!where || typeof where !== 'object') return true;
+    for (const [k, v] of Object.entries(where)) {
+      if (k === '$and' && Array.isArray(v)) {
+        if (!v.every((w: any) => matches(row, w))) return false;
+        continue;
+      }
+      if (k.startsWith('$')) continue;
+      const value = row[k] === undefined ? null : row[k];
+      if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
+        if (!(v as any).$in.includes(value)) return false;
+        continue;
+      }
+      if (v && typeof v === 'object' && '$ne' in (v as any)) {
+        if (value === (v as any).$ne) return false;
+        continue;
+      }
+      if (value !== (v === undefined ? null : v)) return false;
+    }
+    return true;
+  };
+  const rowsOf = (object: string) => (rowsByObject[object] ?? []).map((row) => ({ ...row }));
+  return {
+    name: 'memory', version: '0.0.0', supports: {} as any,
+    async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
+    async find(object: string, ast: any) {
+      const rows = rowsOf(object).filter((row) => matches(row, ast?.where));
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+    },
+    async findOne(object: string, ast: any) { return rowsOf(object).find((row) => matches(row, ast?.where)) ?? null; },
+    async count(object: string, ast: any) { return rowsOf(object).filter((row) => matches(row, ast?.where)).length; },
+    async create(_o: string, d: any) { return d; },
+    async update(_o: string, _id: string, d: any) { return d; },
+    async delete() { return true; },
+    async bulkCreate(_o: string, r: any[]) { return r; },
+    async bulkUpdate() { return []; }, async bulkDelete() {},
+    async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
+    async commit() {}, async rollback() {},
+  };
+}
+
+async function makeEngine(objects: Array<{ name: string; fields: Record<string, unknown> }>, rows: Record<string, Row[]>) {
+  const engine = new ObjectQL();
+  engine.registerDriver(makeDriver(rows) as any, true);
+  await engine.init();
+  for (const object of objects) (engine.registry as any).registerObject(object);
+  return engine;
+}
+
+const STAGE_FIELDS = { name: { type: 'text' }, label: { type: 'text' }, probability: { type: 'number' }, color: { type: 'text' } };
+const STAGE = { name: 'acme_stage', fields: STAGE_FIELDS };
+
+const stages = (labels: Record<string, string>) =>
+  Object.entries(labels).map(([name, label]) => ({ name, label, probability: 10, color: 'grey' }));
+
+describe('rows a customer edited that the seed replay overwrites', () => {
+  it('a seeded upsert dataset with one row edited reports that row', async () => {
+    const installed = { objects: [STAGE], data: [{ object: 'acme_stage', mode: 'upsert', records: stages({ new: 'New', won: 'Won', lost: 'Lost' }) }] };
+    // The new version relabels `lost`, and changes nothing a customer touched.
+    const incoming = { objects: [STAGE], data: [{ object: 'acme_stage', mode: 'upsert', records: stages({ new: 'New', won: 'Won', lost: 'Closed lost' }) }] };
+    const engine = await makeEngine([STAGE], {
+      acme_stage: [
+        { id: 's1', name: 'new', label: 'New', probability: 10, color: 'grey' },
+        // The customer's edit, which the replay writes `Won` back over.
+        { id: 's2', name: 'won', label: 'Won (signed)', probability: 10, color: 'grey' },
+        // As seeded: the replay's new label is an upgrade, not an erased edit.
+        { id: 's3', name: 'lost', label: 'Lost', probability: 10, color: 'grey' },
+      ],
+    });
+
+    const { plan, environment } = await planPackageUpgrade(engine, installed, incoming, { getObject: (n) => engine.registry.getObject(n) });
+
+    expect(plan.seeds.changed.map((d) => d.key)).toEqual(['acme_stage']);
+    expect(environment.seeds).toEqual([
+      { key: 'acme_stage', object: 'acme_stage', mode: 'upsert', changed: true, matchedRows: 3, editedRows: 1, editedKeys: ['won'] },
+    ]);
+  });
+
+  it('an unchanged upsert dataset overwrites the same edits, and says it is unchanged', async () => {
+    const body = { objects: [STAGE], data: [{ object: 'acme_stage', mode: 'upsert', records: stages({ won: 'Won' }) }] };
+    const engine = await makeEngine([STAGE], { acme_stage: [{ id: 's2', name: 'won', label: 'Signed', probability: 10, color: 'grey' }] });
+    const { environment } = await planPackageUpgrade(engine, body, structuredClone(body));
+    expect(environment.seeds).toEqual([expect.objectContaining({ changed: false, matchedRows: 1, editedRows: 1 })]);
+  });
+
+  it("an ignore dataset never writes over a matched row, so it is not read; nor is a column declared applyOn: 'create'", async () => {
+    const engine = await makeEngine([STAGE], {
+      acme_stage: [{ id: 's2', name: 'won', label: 'Won', probability: 90, color: 'grey' }],
+      acme_tier: [{ id: 't1', name: 'gold', label: 'Platinum' }],
+    });
+    const { environment } = await planPackageUpgrade(
+      engine,
+      { data: [
+        { object: 'acme_stage', mode: 'upsert', columns: { probability: { applyOn: 'create' } }, records: stages({ won: 'Won' }) },
+        { object: 'acme_tier', records: [{ name: 'gold', label: 'Gold' }] },
+      ] },
+      { data: [
+        { object: 'acme_stage', mode: 'upsert', columns: { probability: { applyOn: 'create' } }, records: stages({ won: 'Won' }) },
+        { object: 'acme_tier', records: [{ name: 'gold', label: 'Gold tier' }] },
+      ] },
+      { getObject: (n) => engine.registry.getObject(n) },
+    );
+    expect(environment.seeds).toEqual([
+      { key: 'acme_stage', object: 'acme_stage', mode: 'upsert', changed: false, matchedRows: 1, editedRows: 0, editedKeys: [] },
+    ]);
+  });
+
+  it('a reading that fails is null, never zero, and is told', async () => {
+    const warn = vi.fn();
+    const body = { objects: [STAGE], data: [{ object: 'acme_stage', mode: 'upsert', records: stages({ won: 'Won' }) }] };
+    const engine = await makeEngine([STAGE], {});
+    vi.spyOn(engine, 'find').mockRejectedValue(new Error('connection lost reading acme_stage'));
+    const { environment } = await planPackageUpgrade(engine, body, structuredClone(body), { warn });
+    expect(environment.seeds).toEqual([expect.objectContaining({ matchedRows: null, editedRows: null })]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('answered null, never zero'), expect.objectContaining({ object: 'acme_stage' }));
+  });
+});
+
+describe('rows in each column the upgrade touches', () => {
+  const lead = (fields: Record<string, unknown>) => ({ name: 'acme_lead', fields });
+
+  it('removed, suspected-rename, renamed and retyped columns, each with its rows; a removed object with its rows', async () => {
+    const before = lead({
+      company: { type: 'text' }, legacy: { type: 'text' }, amount: { type: 'text' }, total: { type: 'formula' }, region: { type: 'select' },
+    });
+    const after = lead({
+      account_name: { type: 'text' }, amount_value: { type: 'number', renamedFrom: ['amount'] }, total: { type: 'number' }, area: { type: 'select', renamedFrom: ['region'] },
+    });
+    // The registry holds the installed object's stored columns (the computed
+    // `total` and the option-less `region` would only add boot-log noise here).
+    const registered = lead({ company: { type: 'text' }, legacy: { type: 'text' }, amount: { type: 'text' }, region: { type: 'text' } });
+    const engine = await makeEngine([registered, { name: 'acme_old', fields: { x: { type: 'text' } } }], {
+      acme_lead: [
+        { id: 'l1', company: 'Acme', legacy: null, amount: '10', region: 'emea' },
+        { id: 'l2', company: 'Globex', legacy: 'x', amount: null, region: null },
+        { id: 'l3', company: null, legacy: null, amount: '7', region: 'apac' },
+      ],
+      acme_old: [{ id: 'o1', x: 'a' }, { id: 'o2', x: 'b' }],
+    });
+
+    const { environment } = await planPackageUpgrade(
+      engine,
+      { objects: [before, { name: 'acme_old', fields: { x: { type: 'text' } } }] },
+      { objects: [after] },
+    );
+
+    expect(environment.columns).toEqual([
+      { object: 'acme_lead', field: 'company', reasons: ['removed', 'suspected_rename'], rows: 2 },
+      { object: 'acme_lead', field: 'legacy', reasons: ['removed', 'suspected_rename'], rows: 1 },
+      { object: 'acme_lead', field: 'amount', reasons: ['renamed', 'type_change'], rows: 2 },
+      { object: 'acme_lead', field: 'region', reasons: ['renamed'], rows: 2 },
+    ]);
+    // `total` was computed (formula → number is `safe`): no stored column to count.
+    expect(environment.removedObjects).toEqual([{ object: 'acme_old', rows: 2 }]);
+  });
+
+  it('an identical pair reads nothing', async () => {
+    const engine = await makeEngine([lead({ company: { type: 'text' } })], { acme_lead: [{ id: 'l1', company: 'Acme' }] });
+    const body = { objects: [lead({ company: { type: 'text' } })] };
+    // `overrides: null`: no override reader was given, so the advisory class was not read.
+    expect((await planPackageUpgrade(engine, body, structuredClone(body))).environment).toEqual({ columns: [], removedObjects: [], seeds: [], overrides: null });
+  });
+});
+
+describe("the `manifest` service's planUpgrade", () => {
+  it('folds a multi-package artifact with the platform reader and reads through the engine', async () => {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.bootstrap();
+    try {
+      const ql = kernel.getService<ObjectQL>('objectql');
+      ql.registerDriver(makeDriver({ acme_lead: [{ id: 'l1', company: 'Acme' }, { id: 'l2', company: null }] }) as any, true);
+      (ql.registry as any).registerObject({ name: 'acme_lead', fields: { company: { type: 'text' } } });
+      const artifact = (fields: Record<string, unknown>) => ({
+        packages: [{ manifest: { id: 'com.acme.crm', name: 'crm', version: '1.0.0', type: 'app', objects: [{ name: 'acme_lead', fields }] } }],
+      });
+
+      const manifest = kernel.getService<{ planUpgrade(a: unknown, b: unknown): ReturnType<typeof planPackageUpgrade> }>('manifest');
+      const { plan, environment } = await manifest.planUpgrade(artifact({ company: { type: 'text' } }), artifact({ account_name: { type: 'text' } }));
+
+      expect(plan.suspectedRenames.map((s) => `${s.field}→${s.candidates.map((c) => c.field).join('|')}`)).toEqual(['company→account_name']);
+      expect(environment.columns).toEqual([{ object: 'acme_lead', field: 'company', reasons: ['removed', 'suspected_rename'], rows: 1 }]);
+    } finally {
+      await kernel.shutdown();
+    }
+  });
+});
+
+describe('overrides of the base, as advice (ADR-0146 D2, as amended)', () => {
+  const BASE = 'com.acme.crm';
+  const LEAD = { name: 'acme_lead', fields: { name: { type: 'text' } } };
+  // A view container, as a package ships it: its list view `all` is the item `acme_lead.all`.
+  const view = (label: string) => ({ object: 'acme_lead', listViews: { all: { type: 'grid', label, columns: ['name'] } } });
+  const crm = (version: string, views: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ id: BASE, version, objects: [LEAD], views, ...extra });
+  const override = (basedOn: string) => ({ type: 'view', name: 'acme_lead.all', basedOn });
+  const reader = (entries: Array<Record<string, unknown>>) => vi.fn(async (_packageId: string) => entries as any);
+
+  it('v1 → v2 changes an overridden view: one finding that hides the change; the schema plan is untouched', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const listOverrides = reader([override('1.0.0')]);
+
+    const { plan, environment } = await planPackageUpgrade(engine, crm('1.0.0', [view('Leads')]), crm('2.0.0', [view('All leads')]), { listOverrides });
+
+    expect(listOverrides).toHaveBeenCalledWith(BASE);
+    expect(environment.overrides?.hidesChange).toEqual([expect.objectContaining({
+      package: BASE, type: 'view', name: 'acme_lead.all', basedOn: '1.0.0', installedVersion: '1.0.0', incomingVersion: '2.0.0', change: 'changed',
+    })]);
+    expect(environment.overrides?.hidesChange[0].next).toMatch(/Studio/);
+    expect(environment.overrides?.stale).toEqual([]);
+    // Advice only: the comparison a refusal reads names nothing.
+    expect(isEmptyPackageUpgradePlan(plan)).toBe(true);
+  });
+
+  it('v2 leaves the overridden view as it was: no finding', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const { environment } = await planPackageUpgrade(engine, crm('1.0.0', [view('Leads')]), crm('2.0.0', [view('Leads')]), {
+      listOverrides: reader([override('1.0.0')]),
+    });
+    expect(environment.overrides).toEqual({ hidesChange: [], stale: [] });
+  });
+
+  it('an override whose basedOn is not the installed version is stale, whether or not the upgrade changes its item', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const { environment } = await planPackageUpgrade(engine, crm('1.2.0', [view('Leads')]), crm('2.0.0', [view('Leads')]), {
+      listOverrides: reader([override('1.0.0')]),
+    });
+    expect(environment.overrides?.hidesChange).toEqual([]);
+    expect(environment.overrides?.stale).toEqual([expect.objectContaining({
+      package: BASE, type: 'view', name: 'acme_lead.all', basedOn: '1.0.0', installedVersion: '1.2.0', incomingVersion: '2.0.0',
+    })]);
+    expect(environment.overrides?.stale[0]).not.toHaveProperty('change');
+  });
+
+  it('the container itself, overridden under its object, and a base item the new version removes', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const { environment } = await planPackageUpgrade(
+      engine,
+      crm('1.0.0', [view('Leads')], { dashboards: [{ name: 'acme_home', label: 'Home', widgets: [] }] }),
+      crm('2.0.0', [view('All leads')]),
+      { listOverrides: reader([{ type: 'view', name: 'acme_lead' }, { type: 'dashboard', name: 'acme_home', basedOn: '1.0.0' }]) },
+    );
+    expect(environment.overrides?.hidesChange.map((f) => `${f.type}:${f.name}:${f.change}`)).toEqual([
+      'view:acme_lead:changed', 'dashboard:acme_home:removed',
+    ]);
+  });
+
+  it('an overridden app of apps[] that v2 changes: one finding; an unchanged one: none', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const app = (label: string) => ({ name: 'acme_sales', label, navigation: [{ id: 'leads', type: 'object', objectName: 'acme_lead' }] });
+    const listOverrides = reader([{ type: 'app', name: 'acme_sales', basedOn: '1.0.0' }]);
+    const changed = await planPackageUpgrade(engine, crm('1.0.0', [], { apps: [app('Sales')] }), crm('2.0.0', [], { apps: [app('Sales hub')] }), { listOverrides });
+    expect(changed.environment.overrides?.hidesChange.map((f) => `${f.type}:${f.name}:${f.change}`)).toEqual(['app:acme_sales:changed']);
+    const same = await planPackageUpgrade(engine, crm('1.0.0', [], { apps: [app('Sales')] }), crm('2.0.0', [], { apps: [app('Sales')] }), { listOverrides });
+    expect(same.environment.overrides).toEqual({ hidesChange: [], stale: [] });
+  });
+
+  it('a body the engine registers as its own app: a changed navigation is one finding, the version bump alone is none', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const selfApp = (version: string, label: string) => ({
+      id: BASE, name: 'acme_crm', version, objects: [LEAD], navigation: [{ id: 'leads', type: 'object', objectName: 'acme_lead', label }],
+    });
+    const listOverrides = reader([{ type: 'app', name: 'acme_crm', basedOn: '1.0.0' }]);
+    const changed = await planPackageUpgrade(engine, selfApp('1.0.0', 'Leads'), selfApp('2.0.0', 'All leads'), { listOverrides });
+    expect(changed.environment.overrides?.hidesChange.map((f) => `${f.type}:${f.name}:${f.change}`)).toEqual(['app:acme_crm:changed']);
+    const bumped = await planPackageUpgrade(engine, selfApp('1.0.0', 'Leads'), selfApp('2.0.0', 'Leads'), { listOverrides });
+    expect(bumped.environment.overrides).toEqual({ hidesChange: [], stale: [] });
+  });
+
+  it('loader stamps that name the version an item came with are not a change', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const stamped = (version: string) => ({ ...view('Leads'), _packageId: BASE, _packageVersion: version });
+    // The container carries the stamps (its expanded items are fresh documents): override it as well as its item.
+    const { environment } = await planPackageUpgrade(engine, crm('1.0.0', [stamped('1.0.0')]), crm('2.0.0', [stamped('2.0.0')]), {
+      listOverrides: reader([override('1.0.0'), { type: 'view', name: 'acme_lead', basedOn: '1.0.0' }]),
+    });
+    expect(environment.overrides).toEqual({ hidesChange: [], stale: [] });
+  });
+
+  it('no reader: the class is null, never an empty answer; a reading that fails is null and told', async () => {
+    const engine = await makeEngine([LEAD], {});
+    const v1 = crm('1.0.0', [view('Leads')]);
+    const v2 = crm('2.0.0', [view('All leads')]);
+    expect((await planPackageUpgrade(engine, v1, v2)).environment.overrides).toBeNull();
+
+    const warn = vi.fn();
+    const failing = vi.fn(async () => { throw new Error('sys_metadata unreachable'); });
+    expect((await planPackageUpgrade(engine, v1, v2, { listOverrides: failing, warn })).environment.overrides).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('overrides'), expect.objectContaining({ package: BASE }));
+  });
+});
+
+describe("the `manifest` service's planUpgrade reads the protocol's served overrides", () => {
+  it('a protocol registered after the engine is asked when the plan is, for each base the artifact delivers', async () => {
+    const listServedOverrides = vi.fn(async ({ packageId }: { packageId: string }) =>
+      packageId === 'com.acme.crm' ? [{ type: 'view', name: 'acme_lead.all', basedOn: '1.0.0' }] : []);
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    await kernel.use(new ObjectQLPlugin({ registerProtocol: false } as any));
+    await kernel.use({
+      name: 'test.protocol', version: '1.0.0', dependencies: ['com.objectstack.engine.objectql'],
+      init: async (ctx: any) => { ctx.registerService('protocol', { listServedOverrides }); },
+    } as any);
+    await kernel.bootstrap();
+    try {
+      const ql = kernel.getService<ObjectQL>('objectql');
+      ql.registerDriver(makeDriver({}) as any, true);
+      const artifact = (version: string, label: string) => ({
+        packages: [{ manifest: { id: 'com.acme.crm', name: 'crm', version, type: 'app', views: [{ object: 'acme_lead', listViews: { all: { type: 'grid', label, columns: ['name'] } } }] } }],
+      });
+
+      const manifest = kernel.getService<{ planUpgrade(a: unknown, b: unknown): ReturnType<typeof planPackageUpgrade> }>('manifest');
+      const { environment } = await manifest.planUpgrade(artifact('1.0.0', 'Leads'), artifact('2.0.0', 'All leads'));
+
+      expect(listServedOverrides).toHaveBeenCalledWith({ packageId: 'com.acme.crm' });
+      expect(environment.overrides?.hidesChange.map((f) => `${f.package} ${f.type}:${f.name} ${f.installedVersion}→${f.incomingVersion}`))
+        .toEqual(['com.acme.crm view:acme_lead.all 1.0.0→2.0.0']);
+    } finally {
+      await kernel.shutdown();
+    }
+  });
+});

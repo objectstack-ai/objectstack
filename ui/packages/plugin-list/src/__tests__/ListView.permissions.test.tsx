@@ -198,11 +198,26 @@ function registerSelectingGallery() {
   });
 }
 
+/**
+ * The gallery's data source also serves the object, which declares `archive`:
+ * the non-grid bar draws a bare `bulkActions` name only when the object
+ * declares it (objectstack#30394), so without the declaration the
+ * non-delete control below would have nothing to draw.
+ */
+const galleryDataSource = {
+  ...mockDataSource,
+  getObjectSchema: vi.fn().mockResolvedValue({
+    name: 'account',
+    fields: { name: { type: 'text' }, industry: { type: 'text' } },
+    actions: [{ name: 'archive', label: 'Archive' }],
+  }),
+};
+
 /** `permissions: null` renders with NO PermissionProvider at all. */
 function renderGalleryBulk(permissions: ObjectPermissionConfig | null) {
-  const view = <ListView schema={galleryBulkSchema} dataSource={mockDataSource as any} />;
+  const view = <ListView schema={galleryBulkSchema} dataSource={galleryDataSource as any} />;
   return render(
-    <SchemaRendererProvider dataSource={mockDataSource as any}>
+    <SchemaRendererProvider dataSource={galleryDataSource as any}>
       {permissions
         ? (
           <PermissionProvider roles={roles} permissions={[permissions]} userRoles={['restricted']}>

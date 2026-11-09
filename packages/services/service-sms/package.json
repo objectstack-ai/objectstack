@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/service-sms",
-  "version": "18.2.0",
+  "version": "18.3.0",
   "license": "Apache-2.0",
   "description": "SMS service for ObjectStack — ISmsService + transport-pluggable outbound delivery (Aliyun / Twilio / log).",
   "type": "commonjs",
@@ -32,8 +32,12 @@
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/service-cache": "workspace:*",
+    "@objectstack/service-cluster": "workspace:*",
+    "@objectstack/service-cluster-redis": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
     "@types/node": "^26.6.5",
+    "ioredis-mock": "^8.13.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

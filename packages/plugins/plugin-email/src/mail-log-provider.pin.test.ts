@@ -27,14 +27,15 @@ interface Resolved { value: unknown; source?: string }
 function fakeSettings(values: Record<string, Resolved>) {
   const listeners: Array<() => void> = [];
   const actions = new Map<string, (a: any) => Promise<any>>();
-  let liveStatus: (() => Promise<LiveMailTransportStatus | undefined>) | undefined;
+  type LiveStatusFn = (input?: { locale?: string }) => Promise<LiveMailTransportStatus | undefined>;
+  let liveStatus: LiveStatusFn | undefined;
   return {
     values,
     createClient: () => ({}),
     getNamespace: async () => ({ values }),
     subscribe: (_ns: string, cb: () => void) => { listeners.push(cb); },
     registerAction: (ns: string, id: string, fn: (a: any) => Promise<any>) => { actions.set(`${ns}/${id}`, fn); },
-    registerLiveStatus: (ns: string, fn: () => Promise<LiveMailTransportStatus | undefined>) => {
+    registerLiveStatus: (ns: string, fn: LiveStatusFn) => {
       if (ns === 'mail') liveStatus = fn;
     },
     /** Patch the snapshot and emit settings:changed, as a page save does. */
@@ -42,15 +43,20 @@ function fakeSettings(values: Record<string, Resolved>) {
       Object.assign(values, patch);
       for (const l of listeners) l();
     },
-    /** What the page states, as the settings GET route asks for it (waits for a running re-apply). */
-    statement: () => liveStatus!(),
+    /**
+     * What the page states, as the settings GET route asks for it (waits for a
+     * running re-apply), in the caller's display `locale` when one is given.
+     */
+    statement: (locale?: string) => liveStatus!(locale ? { locale } : undefined),
     /**
      * The "Send test email" answer for the stored values — with nothing edited
-     * on the form, or with `form` as the unsaved form state the page posts.
+     * on the form, or with `form` as the unsaved form state the page posts —
+     * in the caller's display `locale` when one is given.
      */
-    sendTest: (form?: Record<string, unknown>) => actions.get('mail/test')!({
+    sendTest: (form?: Record<string, unknown>, locale?: string) => actions.get('mail/test')!({
       values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.value])),
       payload: form ? { to: 'admin@example.test', values: form } : { to: 'admin@example.test' },
+      ...(locale ? { locale } : {}),
     }),
   };
 }
@@ -224,5 +230,65 @@ describe('"Send test email" with provider "log" on the form, not saved, while SM
     expect(nm.sendMail).toHaveBeenCalledTimes(1);
     expect(answer).toMatchObject({ ok: true, severity: 'info' });
     expect(answer.message).toMatch(/^Sent test email to admin@example\.test via smtp \(smtp\.form\.test:587\)/);
+  });
+});
+
+// Setup → Email in the caller's display language. The page's statement and the
+// "Send test email" answer are both composed here, per request, so both take
+// the locale the settings routes read from the request (`Accept-Language`,
+// else `?locale`). English stays the answer for no locale and for a language
+// this plugin ships no copy for.
+describe('Setup → Email answers in the caller\'s language (zh-CN)', () => {
+  const HAN = /[一-鿿]/;
+  const SMTP_SAVED = {
+    provider: { value: 'smtp', source: 'global' },
+    smtp_host: { value: 'smtp.saved.test', source: 'global' },
+  };
+
+  it('the out-of-the-box statement says, in Chinese, that no mail is sent', async () => {
+    const h = await boot({});
+    const statement = await h.settings.statement('zh-CN');
+    expect(statement?.label).toBe('当前不会发出任何邮件');
+    expect(statement?.bannerSeverity).toBe('warning');
+    expect(statement?.bannerText).toMatch(HAN);
+    expect(statement?.bannerText).not.toMatch(/live transport|sys_email/);
+  });
+
+  it('a delivering transport is named in a Chinese statement', async () => {
+    const h = await boot(SMTP_SAVED);
+    const statement = await h.settings.statement('zh-CN');
+    expect(statement?.label).toBe('邮件通过 SMTP (smtp.saved.test:587) 投递');
+    expect(statement?.bannerSeverity).toBe('info');
+    expect(statement?.bannerText).toMatch(HAN);
+  });
+
+  it('the test toast reports the send in Chinese', async () => {
+    const h = await boot(SMTP_SAVED);
+    nm.sendMail.mockClear();
+    const answer = await h.settings.sendTest(
+      { provider: 'smtp', smtp_host: 'smtp.form.test', smtp_port: 587 },
+      'zh-CN',
+    );
+    expect(nm.sendMail).toHaveBeenCalledTimes(1);
+    expect(answer).toMatchObject({ ok: true, severity: 'info' });
+    expect(answer.message).toMatch(/^测试邮件已发送至 admin@example\.test，经由 smtp \(smtp\.form\.test:587\)/);
+    expect(answer.message).not.toMatch(/Sent test email/);
+  });
+
+  it('"None (log only)" on the form: the warning is Chinese and names the live transport in Chinese', async () => {
+    const h = await boot(SMTP_SAVED);
+    nm.sendMail.mockClear();
+    const answer = await h.settings.sendTest({ provider: 'log' }, 'zh-CN');
+    expect(nm.sendMail).not.toHaveBeenCalled();
+    expect(answer).toMatchObject({ ok: false, severity: 'warning' });
+    expect(answer.message).toMatch(/^没有投递任何邮件/);
+    expect(answer.message).toContain('邮件通过 SMTP (smtp.saved.test:587) 投递');
+  });
+
+  it('CONTROL — a language off the platform locale table answers in English', async () => {
+    const h = await boot({});
+    // The copy carries every platform language (`fr-FR` is French now); Swahili is not on the table.
+    expect((await h.settings.statement('fr-FR'))?.label).toBe('Aucun e-mail ne quitte cette machine');
+    expect((await h.settings.statement('sw-KE'))?.label).toBe('No mail leaves this machine');
   });
 });

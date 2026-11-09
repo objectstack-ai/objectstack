@@ -15,6 +15,7 @@ import { registerSettingsRoutes } from './settings-routes.js';
 import { localizationSettingsManifest } from './manifests/localization.manifest.js';
 import { mailSettingsManifest } from './manifests/mail.manifest.js';
 import { settingsBuiltinTranslations } from './translations/index.js';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { SETTINGS_LIVE_STATUS_BANNER_ID, SettingsValidationError } from './settings-service.types.js';
 import {
   CURRENCY_LOCK_COPY,
@@ -220,16 +221,20 @@ describe('readCurrencyUsage', () => {
   });
 });
 
-describe('the copy — every locale the settings bundle ships', () => {
-  it('covers exactly the locales of settingsBuiltinTranslations', () => {
-    expect(Object.keys(CURRENCY_LOCK_COPY).sort()).toEqual(Object.keys(settingsBuiltinTranslations).sort());
+describe('the copy — every language on the platform locale table', () => {
+  it('covers the locales of settingsBuiltinTranslations, and one entry per platform locale table language', () => {
+    for (const locale of Object.keys(settingsBuiltinTranslations)) expect(CURRENCY_LOCK_COPY).toHaveProperty([locale]);
+    expect(Object.keys(CURRENCY_LOCK_COPY)).toHaveLength(PLATFORM_LOCALE_TAGS.length);
   });
 
   it.each([
     ['zh-CN', '默认币种已锁定为 USD：它已被 1 个对象（Invoice）和 2 条汇率使用。'],
     ['ja', '既定の通貨は USD でロックされています。1 件のオブジェクト（Invoice）と 2 件の為替レートで使用されているためです。'],
     ['es-MX', 'La moneda predeterminada está bloqueada en USD porque está en uso en 1 objeto (Invoice) y 2 tipos de cambio.'],
-    ['fr-FR', 'The default currency is locked at USD because it is in use by 1 object (Invoice) and 2 exchange rates.'],
+    ['fr-FR', 'La devise par défaut est verrouillée sur USD, car elle est utilisée par 1 objet (Invoice) et 2 taux de change.'],
+    ['zh-TW', '預設幣別已鎖定為 USD：它已被 1 個物件（Invoice）和 2 筆匯率使用。'],
+    ['ru', 'Валюта по умолчанию зафиксирована как USD, потому что она используется: 1 объект (Invoice) и 2 обменных курса.'],
+    ['sw-KE', 'The default currency is locked at USD because it is in use by 1 object (Invoice) and 2 exchange rates.'],
   ])('writes the refusal in %s', async (locale, opening) => {
     const { svc, rates, objects } = rig();
     await svc.set('localization', 'currency', 'USD', ctx);

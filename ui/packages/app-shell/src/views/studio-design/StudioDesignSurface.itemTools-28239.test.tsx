@@ -126,6 +126,8 @@ vi.mock('@monaco-editor/react', () => {
 vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
 
 import { AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
+import { StudioItemHeader } from './StudioItemHeader';
+import { StudioItemTools } from '../item-tools/StudioItemTools';
 import { MetadataResourceEditPage } from '../metadata-admin/ResourceEditPage';
 import '../../services/builtinComponents.js';
 import { t } from '../metadata-admin/i18n';
@@ -303,5 +305,80 @@ describe("CONTROL — Setup's item page still opens the five from the shared dir
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     fireEvent.click(screen.getByRole('tab', { name: t('engine.edit.inspector.source', 'en') }));
     expect(await screen.findByRole('textbox', { name: 'JSON source' }, { timeout: 8000 })).toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#29693 — on a row too narrow for the title's twelve characters,
+ * the five tools fold into the header's ⋯ menu. Each menu entry opens the same
+ * sheet its button opens, reading the same door. The row's geometry is stubbed
+ * (no layout here): a 100 px row, the button group 146 px wide, the title's
+ * whole text 200 px and its first twelve characters 120 px.
+ */
+describe('Studio item toolbar — folded into the header’s ⋯ menu, each tool opens the same sheet (objectstack#29693)', () => {
+  const spies: Array<{ mockRestore: () => void }> = [];
+  const box = (width: number) => ({ left: 0, right: width, width, top: 0, bottom: 32, height: 32, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  beforeEach(() => {
+    const realRect = HTMLElement.prototype.getBoundingClientRect;
+    spies.push(
+      vi.spyOn(Range.prototype, 'getBoundingClientRect').mockImplementation(() => box(120)),
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('@container') ? 100 : 0;
+      }),
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        return this.dataset.testid === 'studio-item-tools' ? box(146) : realRect.call(this);
+      }),
+      // The title's whole text, wider than its twelve characters.
+      vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.tagName === 'H1' ? 200 : 0;
+      }),
+    );
+  });
+  afterEach(() => {
+    for (const spy of spies.splice(0)) spy.mockRestore();
+  });
+
+  it('Layers, References, History, Audit and Source open from the menu on object/showcase_account', async () => {
+    render(
+      <MemoryRouter>
+        <StudioItemHeader
+          title="Account"
+          foldMenu={{ label: 'More', testId: 'hdr-more' }}
+          actions={<StudioItemTools type="object" name="showcase_account" packageId={PKG} locale="en" />}
+        />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.queryByTestId('studio-item-tools')).toBeNull());
+    const pick = async (tool: string) => {
+      fireEvent.pointerDown(screen.getByTestId('hdr-more'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+      fireEvent.click(within(await screen.findByRole('menu')).getByTestId(`studio-item-tool-${tool}`));
+      return screen.findByTestId(`studio-item-tool-sheet-${tool}`);
+    };
+    const close = async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    };
+
+    const layers = await pick('layers');
+    expect(await within(layers).findByRole('tab', { name: t('engine.layers.diff', 'en') })).toBeInTheDocument();
+    expect(mockClient.layered).toHaveBeenCalledWith('object', 'showcase_account', { packageId: PKG });
+    await close();
+
+    const refs = await pick('references');
+    expect(await within(refs).findByText('all_accounts')).toBeInTheDocument();
+    expect(mockClient.references).toHaveBeenCalledWith('object', 'showcase_account');
+    await close();
+
+    const history = await pick('history');
+    expect(await within(history).findAllByTitle(ROLLBACK)).toHaveLength(2);
+    await close();
+
+    await pick('audit');
+    await waitFor(() => expect(mockClient.audit).toHaveBeenCalledWith('object', 'showcase_account', { limit: 100 }));
+    await close();
+
+    const source = await pick('source');
+    const editor = await within(source).findByRole('textbox', { name: 'JSON source' }, { timeout: 8000 });
+    expect((editor as HTMLTextAreaElement).value).toContain('"name": "showcase_account"');
   });
 });

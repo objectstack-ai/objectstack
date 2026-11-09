@@ -40,8 +40,8 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { LayoutGrid, Plus, Settings, Star } from 'lucide-react';
 import { cn } from '@object-ui/components';
-import { useDisplayLocale, useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
-import { resolveKeyedI18nLabel } from '../../utils/index.js';
+import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
+import { useServedAppLabel } from '../../hooks/useServedAppLabel.js';
 import { appAddressSegment } from '../../utils/appRoute.js';
 import { getIcon } from '../../utils/getIcon.js';
 import { timeAgo } from '../../utils/relativeTime.js';
@@ -168,7 +168,7 @@ export function HomeAppsStrip({
   lastOpened?: ReadonlyMap<string, string>;
 }) {
   const { t } = useObjectTranslation();
-  const { appLabel } = useObjectLabel();
+  const { appLabel } = useServedAppLabel();
   const displayLocale = useDisplayLocale();
   const [showAll, setShowAll] = useState(false);
 
@@ -228,7 +228,7 @@ export function HomeAppsStrip({
       {/* `-ml-2` puts the first icon under the heading: a tile pads its icon 8 px. */}
       <div className="-ml-2 flex flex-wrap gap-1">
         {visible.map((app) => {
-          const label = appLabel({ name: app.name, label: resolveKeyedI18nLabel(app.label, t) });
+          const label = appLabel(app);
           const fav = favNames.has(app.name);
           const openedAgo = timeAgo(lastOpened?.get(app.name), displayLocale, TILE_OPENED_TIME_FORMAT);
           return (

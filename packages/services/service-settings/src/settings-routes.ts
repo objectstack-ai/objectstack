@@ -59,6 +59,7 @@ import { SettingsService } from './settings-service.js';
 // nothing that leaves over HTTP may carry it. See the module header for the
 // mask shape and why it mirrors ADR-0100's encrypted-field convention.
 import { dropEchoedSecretMasks, redactSecretValues } from './settings-secret-redaction.js';
+import { DEPLOYMENT_NOTICE_CAPABILITY, type DeploymentNoticeDoor } from './deployment-notice.js';
 import {
   SettingsCryptoUnavailableError,
   SettingsForbiddenError,
@@ -88,7 +89,16 @@ export interface SettingsRoutesOptions {
    * D2): a context with no `userId` is anonymous, whatever else it carries.
    */
   contextFromRequest?: (req: IHttpRequest) => SettingsContext | Promise<SettingsContext>;
+  /**
+   * The deployment notice's work (`deployment-notice.ts`), served to
+   * administrators at `GET {base}/deployment/notice` and hidden through
+   * `POST {base}/deployment/notice/hide`. `SettingsServicePlugin` wires it;
+   * a host that mounts the family without it answers both routes `503`,
+   * naming what is missing.
+   */
+  deploymentNotice?: DeploymentNoticeDoor;
 }
+
 
 // [Finding-1] Secure default: anonymous + enforced. No identity is read from
 // request headers — a deployment that wants authenticated settings access must
@@ -204,7 +214,7 @@ function refuseHeldSession(res: IHttpResponse, ctx: SettingsContext | undefined)
 /**
  * The caller's display language, read the way REST's metadata door reads it:
  * the top `Accept-Language` tag, else `?locale`. It only picks the language of
- * prose a write predicate or a live-status provider composes
+ * prose a write predicate, a live-status provider or an action handler composes
  * (`SettingsDisplayOptions`); it authorizes nothing, and it never enters the
  * caller's context.
  */
@@ -273,8 +283,9 @@ export function registerSettingsRoutes(
   };
 
   mountFamilyRoute('get', base, {
-    async serve(_req, res, ctx) {
-      const manifests = service.listManifests(ctx);
+    async serve(req, res, ctx) {
+      // Served as the namespace read serves them: a sourced key's options.
+      const manifests = service.listManifests(ctx, { locale: requestLocaleOf(req) });
       sendOk(res, { manifests });
     },
     refuse(res, err) {
@@ -289,7 +300,8 @@ export function registerSettingsRoutes(
   mountFamilyRoute('get', `${base}/:namespace`, {
     async serve(req, res, ctx) {
       const ns = req.params.namespace;
-      const payload = await service.getNamespace(ns, ctx);
+      // The request's language names a served option no longer offered.
+      const payload = await service.getNamespace(ns, ctx, { locale: requestLocaleOf(req) });
       // The page states what is LIVE, not only what is stored: the owning
       // package's statement heads the specifiers as an `info_banner`, asked on
       // this read (see `SettingsService.liveStatusOf`). Added here and not in
@@ -355,8 +367,17 @@ export function registerSettingsRoutes(
         ns,
         dropEchoedSecretMasks(body, secretKeys),
         ctx,
-        // The language a write predicate's refusal is written in.
-        { locale: requestLocaleOf(req) },
+        // The language a write predicate's refusal is written in, and [#30203]
+        // the request's own connection, for a predicate that judges the change
+        // against it (`SettingsWriteOptions.transport`). Each predicate sees
+        // only the headers it named at registration (`narrowTransport`).
+        {
+          locale: requestLocaleOf(req),
+          transport: {
+            headers: req.headers,
+            ...(req.remoteAddress ? { remoteAddress: req.remoteAddress } : {}),
+          },
+        },
       );
       // The write response carries resolved values too — including cascade
       // entries the caller never submitted (an upper-scope secret it may not
@@ -408,7 +429,7 @@ export function registerSettingsRoutes(
   mountFamilyRoute('post', `${base}/:namespace/:actionId`, {
     async serve(req, res, ctx) {
       const { namespace, actionId } = req.params;
-      const result = await service.runAction(namespace, actionId, req.body, ctx);
+      const result = await service.runAction(namespace, actionId, req.body, ctx, { locale: requestLocaleOf(req) });
       // The 200/400 split is PRE-EXISTING and preserved verbatim: an action
       // that ran and reported `ok: false` is still answered 400. Whether a
       // reported (as opposed to crashed) failure ought to be a 200 carrying the
@@ -436,5 +457,90 @@ export function registerSettingsRoutes(
         sendServerFault(res, 500, 'INTERNAL_ERROR', 'Action failed', err);
       }
     },
+  });
+
+  // ── The deployment notice (ruling A3, record 6634240777) ─────────────────
+  // What a production deployment keeps on its own disk because nobody set it,
+  // for administrators alone: the state names server paths, so it is served
+  // behind this family's door and the infrastructure capability, ⛔ never on
+  // the public auth config. Two segments under the base, so neither route
+  // shares a shape with a same-method `/:namespace` route above.
+  const noticeDoor = opts.deploymentNotice;
+  /**
+   * `true` when the caller was refused: no door wired, or an enforced caller
+   * without the capability. An un-enforced (trusted in-process) context is
+   * not gated, as no manifest gate of the service gates one.
+   */
+  const refuseNoticeCaller = (res: IHttpResponse, ctx: SettingsContext): boolean => {
+    if (!noticeDoor) {
+      sendError(
+        res,
+        503,
+        'SERVICE_UNAVAILABLE',
+        'The deployment notice is not composed on this host: SettingsServicePlugin wires it when it mounts these routes.',
+      );
+      return true;
+    }
+    if (ctx.enforced && !(ctx.permissions ?? []).includes(DEPLOYMENT_NOTICE_CAPABILITY)) {
+      sendError(
+        res,
+        403,
+        'PERMISSION_DENIED',
+        `The deployment notice is for administrators: it needs the ${DEPLOYMENT_NOTICE_CAPABILITY} capability.`,
+      );
+      return true;
+    }
+    return false;
+  };
+  /** The family's arm for a refusal the context resolver raised, then the route's fault tail. */
+  const refuseNotice = (message: string) => (res: IHttpResponse, err: any): void => {
+    if (err instanceof SettingsForbiddenError) {
+      sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
+    } else {
+      sendServerFault(res, 500, 'INTERNAL_ERROR', message, err);
+    }
+  };
+
+  mountFamilyRoute('get', `${base}/deployment/notice`, {
+    async serve(_req, res, ctx) {
+      if (refuseNoticeCaller(res, ctx)) return;
+      sendOk(res, await noticeDoor!.read(ctx));
+    },
+    refuse: refuseNotice('Failed to read the deployment notice'),
+  });
+
+  mountFamilyRoute('post', `${base}/deployment/notice/hide`, {
+    async serve(req, res, ctx) {
+      if (refuseNoticeCaller(res, ctx)) return;
+      const fingerprint = (req.body as { fingerprint?: unknown } | undefined)?.fingerprint;
+      if (typeof fingerprint !== 'string' || fingerprint.length === 0) {
+        sendError(res, 400, 'VALIDATION_ERROR', 'Name the notice you hide: send { "fingerprint": "<the fingerprint the notice was read with>" }.');
+        return;
+      }
+      const answer = await noticeDoor!.hide({ context: ctx, fingerprint });
+      switch (answer.outcome) {
+        case 'recorded':
+          sendOk(res, { hidden: true, fingerprint: answer.state.fingerprint });
+          return;
+        case 'nothing-to-hide':
+          sendError(res, 409, 'RESOURCE_CONFLICT', 'There is no deployment notice to hide: this deployment keeps nothing on its own disk by default.', {
+            details: answer.state,
+          });
+          return;
+        case 'changed':
+          sendError(res, 409, 'RESOURCE_CONFLICT', 'The deployment notice changed since it was read: read it again and hide what it says now.', {
+            details: answer.state,
+          });
+          return;
+        case 'no-ledger':
+          // The ruling makes the audit row part of a hide, so a hide this
+          // deployment cannot record is not one: the notice stays.
+          sendError(res, 409, 'RESOURCE_CONFLICT', 'This deployment keeps no audit log (@objectstack/plugin-audit is not mounted), so a hide cannot be recorded and the notice stays.', {
+            details: { reason: 'no_audit_log' },
+          });
+          return;
+      }
+    },
+    refuse: refuseNotice('Failed to record the deployment notice hide'),
   });
 }

@@ -27,6 +27,8 @@
  * caller naming an organization reads as the environment does, and a type in
  * the overlay regime keeps its overlay.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it, vi } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import type { FlowRegistration } from '@objectstack/spec/api';

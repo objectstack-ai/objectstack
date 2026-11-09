@@ -34,6 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import * as entry from '../index.js';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { BUILT_IN_LANGUAGE_CODES, DEFAULT_BUILT_IN_LANGUAGE } from '../locales/registry.js';
 // @ts-expect-error — plain-JS shared helper, intentionally untyped (`allowJs: false`)
 import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
@@ -106,6 +107,7 @@ describe('the entry re-exports ONE catalogue, not ten (objectui#7479)', () => {
       'loadBuiltInLocale',
       'getLoadedBuiltInLocales',
       'isBuiltInLanguage',
+      'resolveBuiltInLanguage',
       'BUILT_IN_LANGUAGE_CODES',
       'preloadBootstrapLocale',
       'resolveBootstrapLanguage',
@@ -114,11 +116,13 @@ describe('the entry re-exports ONE catalogue, not ten (objectui#7479)', () => {
     }
   });
 
-  it('still enumerates all ten languages — at zero catalogue payload', () => {
-    expect(entry.BUILT_IN_LANGUAGE_CODES).toHaveLength(10);
-    expect(entry.BUILT_IN_LANGUAGE_CODES).toContain('zh');
+  it('still enumerates every platform locale — at zero catalogue payload', () => {
+    // The platform locale table's tags, in its order (objectstack#30511).
+    expect([...entry.BUILT_IN_LANGUAGE_CODES]).toEqual([...PLATFORM_LOCALE_TAGS]);
+    expect(entry.BUILT_IN_LANGUAGE_CODES).toContain('zh-Hans');
+    expect(entry.BUILT_IN_LANGUAGE_CODES).toContain('zh-Hant');
     // Enumerable, but not resident: naming a language must not fetch it.
-    expect(entry.isBuiltInLocaleLoaded('zh')).toBe(entry.isBuiltInLocaleLoaded('zh'));
+    expect(entry.isBuiltInLocaleLoaded('zh-Hant')).toBe(entry.isBuiltInLocaleLoaded('zh-Hant'));
   });
 });
 
@@ -126,9 +130,14 @@ describe('the all-ten door is still open, and still says what it costs', () => {
   it('`locales/index.ts` exports every catalogue and `builtInLocales`', async () => {
     const barrel = await import('../locales/index.js');
     expect(Object.keys(barrel.builtInLocales)).toEqual([...BUILT_IN_LANGUAGE_CODES]);
+    // Each catalogue is also a named export. The names are identifiers, not
+    // tags (`zh` is `zh-Hans`, `zhHant` is `zh-Hant`, `pt` is `pt-BR`), so the
+    // check is by identity: every map value is one of the barrel's exports.
+    const named = new Set(Object.values(barrel));
     for (const code of BUILT_IN_LANGUAGE_CODES) {
-      expect(Object.keys(barrel)).toContain(code);
+      expect(named.has(barrel.builtInLocales[code as keyof typeof barrel.builtInLocales]), code).toBe(true);
     }
+    expect(barrel.zhHant).toBe(barrel.builtInLocales['zh-Hant']);
   });
 
   it('is published under a specifier a reader can see the cost of', () => {

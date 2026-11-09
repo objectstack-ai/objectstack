@@ -1,9 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { randomUUID } from 'node:crypto';
-import type { Plugin, PluginContext } from '@objectstack/core';
+import type { Plugin, PluginContext, RequestAuthService, TenancyPostureSource } from '@objectstack/core';
 import { resolveLocalizationContext } from '@objectstack/core';
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
+import { PREFERENCE_OPTIONS_ROUTE, registerPreferenceOptionsRoutes } from './preference-options-routes.js';
+import type { PreferenceOptionsEngine } from './preference-options.js';
 import { MessagingService } from './messaging-service.js';
 import type { MessagingChannel } from './channel.js';
 import { createInboxChannel } from './inbox-channel.js';
@@ -13,8 +15,10 @@ import { DEFAULT_MAX_IDLE_INTERVAL_MS, NotificationDispatcher, type DispatchClus
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
+import { createPushChannel } from './push-channel.js';
 import {
     NotificationTemplateStore,
+    TEMPLATE_BUILTINS,
     TEMPLATE_DECLARED_FALLBACK_LOCALE,
     type NotificationTemplateStoreWiring,
 } from './template-renderer.js';
@@ -122,12 +126,24 @@ export interface MessagingServicePluginOptions {
      * this; a tick that claims work snaps it back, and the write that makes work
      * wakes its dispatcher at once — `emit()` enqueueing deliveries,
      * `enqueueHttp()` enqueueing a callout, `redeliverHttp()` resetting one.
-     * While idle it bounds how late a dispatcher notices work nobody woke it
-     * for: a deferred delivery coming due (retry, quiet hours, digest window), a
-     * row enqueued by another process, a crashed node's claim passing its
-     * timeout. A value at or below `dispatchIntervalMs` disables the backoff.
+     * While idle it bounds how late a dispatcher notices a row enqueued by
+     * another process; a deferred delivery coming due (retry, quiet hours,
+     * digest window) and a crashed node's claim passing its timeout wake the
+     * dispatcher at their due time instead (#29919). A value at or below
+     * `dispatchIntervalMs` disables the backoff.
      */
     dispatchMaxIdleIntervalMs?: number;
+    /**
+     * [#29919] This kernel is the only process that writes its database's
+     * delivery outboxes (a hosted tenant kernel: one kernel per tenant
+     * database), so every row is enqueued here and wakes its dispatcher. Both
+     * dispatchers then sleep straight from an idle tick to the next due row or
+     * `dispatchMaxIdleIntervalMs`, instead of re-running the backoff's ramp
+     * from `dispatchIntervalMs` after every boot and every burst (default
+     * `false`). Leave it off when another process — a second node, a worker —
+     * writes the same tables: the ramp is what notices its rows sooner.
+     */
+    dispatchSoleWriter?: boolean;
     /**
      * Topics that bypass the per-user preference matrix (ADR-0030 P2) — e.g.
      * security/system alerts users must not be able to mute. Exact match, or a
@@ -217,6 +233,7 @@ export class MessagingServicePlugin implements Plugin {
             partitionCount: 8,
             dispatchIntervalMs: 500,
             dispatchMaxIdleIntervalMs: DEFAULT_MAX_IDLE_INTERVAL_MS,
+            dispatchSoleWriter: false,
             mandatoryTopics: [],
             ...options,
         };
@@ -480,6 +497,9 @@ export class MessagingServicePlugin implements Plugin {
             const templateStoreWiring: NotificationTemplateStoreWiring = {
                 getData,
                 [TEMPLATE_DECLARED_FALLBACK_LOCALE]: getDeclaredFallbackLocale,
+                // [#30509] The code-declared tier producers fill through
+                // `messaging.registerBuiltinTemplates`, read beneath the rows.
+                [TEMPLATE_BUILTINS]: service.builtinTemplates,
             };
             const templateStore = new NotificationTemplateStore(templateStoreWiring);
             ctx.hook('kernel:ready', async () => {
@@ -509,6 +529,34 @@ export class MessagingServicePlugin implements Plugin {
                     logger: ctx.logger,
                 }));
             });
+
+            // Push channel (#29041): same pattern — mounted while a `push`
+            // service (`@objectstack/service-push`) is resolvable. The devices
+            // it addresses are this service's own registry (`sys_user_device`).
+            const getPush = () => {
+                try {
+                    return ctx.getService<import('./push-channel.js').PushSenderSurface>('push');
+                } catch {
+                    return undefined;
+                }
+            };
+            ctx.hook('kernel:ready', async () => {
+                service.registerChannelProvider('push', lazyChannelMount({
+                    resolveTransport: getPush,
+                    create: () => createPushChannel({ getPush, devices: service, getData, getDefaultTemplateLocale }),
+                    announce: '[messaging] push channel registered (delivers to the recipient\'s enabled sys_user_device rows through the push service)',
+                    logger: ctx.logger,
+                }));
+            });
+        }
+
+        // [#30208 row 6, ruling E on #30527] The preference options door
+        // (`preference-options-routes.ts`): the topics and channels a
+        // preference or template can name, for the console's pick-or-type
+        // inputs. Mounted at `kernel:ready`, when the HTTP server is
+        // registered; every source it lists is read per request.
+        if (typeof ctx.hook === 'function') {
+            ctx.hook('kernel:ready', async () => this.mountPreferenceOptionsDoor(ctx, service, getData));
         }
 
         // Reliable delivery (P1): wire the outbox + dispatcher once the engine
@@ -541,6 +589,7 @@ export class MessagingServicePlugin implements Plugin {
                     partitionCount: this.options.partitionCount,
                     intervalMs: this.options.dispatchIntervalMs,
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
+                    soleWriter: this.options.dispatchSoleWriter,
                     logger: ctx.logger,
                     textRenderer,
                 });
@@ -563,6 +612,7 @@ export class MessagingServicePlugin implements Plugin {
                     partitionCount: this.options.partitionCount,
                     intervalMs: this.options.dispatchIntervalMs,
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
+                    soleWriter: this.options.dispatchSoleWriter,
                     logger: ctx.logger,
                 });
                 this.httpDispatcher.start();
@@ -583,6 +633,52 @@ export class MessagingServicePlugin implements Plugin {
         ctx.logger.info(
             `[messaging] service registered with channels: ${service.getRegisteredChannels().join(', ') || '(none)'}`,
         );
+    }
+
+    /**
+     * Mount `GET /api/v1/messaging/preference-options` on the kernel's HTTP
+     * server. A kernel with no HTTP server says so once and mounts nothing:
+     * the fields stay plain text boxes, and the in-process service is unchanged.
+     */
+    private mountPreferenceOptionsDoor(
+        ctx: PluginContext,
+        service: MessagingService,
+        getData: () => IDataEngine | undefined,
+    ): void {
+        const optional = <T>(name: string): T | undefined => {
+            try {
+                return ctx.getService<T>(name) ?? undefined;
+            } catch {
+                return undefined;
+            }
+        };
+        const http = optional<IHttpServer>('http-server');
+        if (!http) {
+            ctx.logger.warn(
+                `[messaging] no HTTP server is registered, so the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}) ` +
+                    'is not mounted: the console draws notification topic and channel as plain text boxes.',
+            );
+            return;
+        }
+        const kernel = ctx.getKernel?.() as
+            | { getServiceAsync?: <T>(name: string) => Promise<T> }
+            | undefined;
+        registerPreferenceOptionsRoutes(http, {
+            getEngine: () => optional<unknown>('objectql'),
+            getAuth: () => optional<RequestAuthService>('auth'),
+            tenancy: kernel && typeof kernel.getServiceAsync === 'function'
+                ? () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy')
+                : undefined,
+            knownChannels: () => service.getKnownChannels(),
+            getData: () => getData() as unknown as PreferenceOptionsEngine | undefined,
+            readFlows: async () => {
+                const protocol = optional<{ getMetaItems?(q: { type: string }): Promise<unknown> }>('protocol');
+                if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
+                const raw = await protocol.getMetaItems({ type: 'flow' });
+                return Array.isArray(raw) ? raw : ((raw as { items?: unknown[] } | null)?.items ?? []);
+            },
+        });
+        ctx.logger.info(`[messaging] preference options list mounted at GET ${PREFERENCE_OPTIONS_ROUTE}`);
     }
 
     /**

@@ -69,9 +69,14 @@ const FEDERATED = ['showcase_ext_customer', 'showcase_ext_order'] as const;
 /** A LOCAL object carrying real reference columns — the positive control. */
 const LOCAL = 'showcase_project';
 
-/** The injected anchors that are REFERENCES, i.e. the ones this audit enumerates. */
+/**
+ * The injected anchors that are REFERENCES, i.e. the ones this audit enumerates.
+ * `organization_id` is no longer among them: both shipped federated objects
+ * declare `tenancy: { enabled: false }` (ADR-0015 §10 — under a walled posture
+ * every external object states its organization scope), and a declared opt-out
+ * is not injected over, so the tenant anchor is absent rather than phantom.
+ */
 const INJECTED_REFERENCE_ANCHORS = [
-  'organization_id',
   'created_by',
   'updated_by',
   'owner_id',
@@ -164,6 +169,8 @@ describe('[#8414] background sweeps do not project phantom columns off a federat
       for (const anchor of INJECTED_REFERENCE_ANCHORS) {
         expect(fields, `${name}.${anchor} is still injected — the fix withholds the QUERY, not the column`).toContain(anchor);
       }
+      // The tenant anchor is the declared exception: the object states its scope.
+      expect(fields, `${name} declares tenancy.enabled: false, so no organization_id is injected`).not.toContain('organization_id');
     }
   });
 

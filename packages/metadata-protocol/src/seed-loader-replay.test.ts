@@ -108,7 +108,9 @@ function createMetadata(): IMetadataService {
   } as unknown as IMetadataService;
 }
 
-// Mirrors the AppPlugin inline-seed config (defaultMode upsert, multiPass on).
+// An upsert config, multi-pass on: how a dataset that declares no mode replays
+// here. (The AppPlugin request itself sets no mode since #30081 — a parsed dataset
+// carries its own, `ignore` when it declares none.)
 const CONFIG = {
   dryRun: false,
   haltOnError: false,

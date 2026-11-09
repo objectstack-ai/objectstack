@@ -55,6 +55,54 @@ export type UninstallCleanup = (args: {
 }) => Promise<{ success: boolean; removed: number; error?: string }>;
 
 /**
+ * [#31232] A guard's answer to "may this package be uninstalled now?": the
+ * refusal {@link ObjectStackProtocolImplementation.deletePackage} throws, as
+ * the guard spelled it — `code` (a ledgered error code), `status` (its HTTP
+ * status) and `message` (the sentence the caller is shown). `undefined` lets
+ * the uninstall proceed.
+ */
+export interface UninstallGuardRefusal {
+    code: string;
+    status: number;
+    message: string;
+}
+
+/**
+ * [#31232] Pre-uninstall guard: the BEFORE-half of {@link UninstallCleanup}.
+ * A plugin that owns a verdict this package must not know (the runtime's
+ * dependent-rule scan reads the schema registry's fold, which lives above this
+ * package and must not be imported here) registers it by name, and
+ * {@link ObjectStackProtocolImplementation.deletePackage} asks every guard,
+ * in registration order, before it reads or moves anything; the first refusal
+ * is thrown as the verb's refusal, with nothing removed.
+ *
+ * A guard only reads: it is asked before the uninstall is decided, so it must
+ * not write. A guard that throws instead of answering refuses the uninstall
+ * with its throw — an uninstall a guard could not judge does not proceed.
+ */
+export type UninstallGuard = (args: {
+    packageId: string;
+    actor?: string;
+}) => UninstallGuardRefusal | undefined | Promise<UninstallGuardRefusal | undefined>;
+
+/**
+ * [#31186, #31283] What an uninstall door states about the package it
+ * uninstalled, for the package's own `package_uninstall` ledger row
+ * ({@link ObjectStackProtocolImplementation.recordPackageUninstall}): the
+ * package's id, the version it removed, the operator, whether its object
+ * tables were kept, and how many of its stored `sys_metadata` items were
+ * removed and failed to be. The environment is the protocol's own.
+ */
+export interface PackageUninstallRecord {
+    packageId: string;
+    version?: string;
+    actor?: string;
+    keepData?: boolean;
+    itemsRemoved: number;
+    itemsFailed: number;
+}
+
+/**
  * [ADR-0090 D5, ADR-0131 D4] The security-catalog names an uninstalled package
  * held. A grant names its set, and the package's sets are served from the
  * registry, not stored, so after the withdrawal nothing else knows them.

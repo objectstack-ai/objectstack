@@ -122,6 +122,43 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   gate answers them with the bounded thread probe (fail closed), never a
  *   leaf.
  *
+ * ## Platform-written: the author `author_id`
+ *
+ * A comment's author is the server's, recorded once, at creation: a row's
+ * author is read-only after creation, like the comment's display name below.
+ * The reason is provenance integrity: the row names the user who wrote it, so
+ * it keeps the value the create stamped for the life of the row.
+ *
+ * - **The stamp.** The create hook in `comment-access-hooks.ts` assigns the
+ *   session user over any value the client sent. A non-system create whose
+ *   session names no user has nobody to record, and is refused (403
+ *   `RECORD_NOT_ACCESSIBLE`), as a reaction with no signed-in user is.
+ * - **Read-only on update.** `readonly: true`, so the engine's update-side
+ *   strip drops a non-system caller's value and reports it (`droppedFields`),
+ *   the author's and a parent editor's alike; the rest of the write lands.
+ * - **System writes** (seeds, imports, migrations) and a `preserveAudit`
+ *   update (a historical import, which only the system principal may start)
+ *   keep the value they supply. On those writes the column's presence is the writer's
+ *   to supply: the engine's record validator does not enforce `required` on a
+ *   `readonly` field, as `sys_file`'s storage-owned `key` and `status` record.
+ *
+ * ## Platform-written: the author's display identity `author_name` / `author_avatar_url`
+ *
+ * The name and avatar a reader is shown beside a comment are the server's,
+ * the same as `author_id`: the create hook in `comment-access-hooks.ts` stamps
+ * both from the session user's own `sys_user` profile (its display name and
+ * `image`), the one resolution the record history's actor columns use, over
+ * any value the client sent and when it sent none. A user whose profile cannot
+ * be read is stored with neither (`null`), never with the client's value.
+ *
+ * - **Read-only on update.** Both declare `readonly: true`, so the engine's
+ *   update-side strip drops a non-system caller's value and reports it
+ *   (`droppedFields`): an edit never changes whose name a comment shows. ⛔
+ *   Not a refusal: the console released before this change sends both on
+ *   every new comment, and the create hook simply assigns over them.
+ * - **System writes** (seeds, imports, migrations) keep the values they
+ *   supply, as they do for `author_id`.
+ *
  * @namespace sys
  */
 export const SysComment = ObjectSchema.create({
@@ -187,22 +224,30 @@ export const SysComment = ObjectSchema.create({
     }),
 
     // ── Author ───────────────────────────────────────────────────
+    // Platform-written (see "Platform-written: the author" above): stamped on
+    // create from the session user, read-only on update.
     author_id: Field.lookup('sys_user', {
       label: 'Author',
       required: true,
+      readonly: true,
       searchable: true,
       group: 'Author',
     }),
 
+    // Platform-written, like `author_id` (see "Platform-written: the
+    // author's display identity" above): stamped on create from the session
+    // user's profile, read-only on update.
     author_name: Field.text({
       label: 'Author Name',
       required: false,
+      readonly: true,
       group: 'Author',
     }),
 
     author_avatar_url: Field.url({
       label: 'Author Avatar',
       required: false,
+      readonly: true,
       group: 'Author',
     }),
 

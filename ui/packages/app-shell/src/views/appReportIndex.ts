@@ -102,7 +102,7 @@
 import { usePermissions } from '@object-ui/permissions';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { metadataText } from '../hooks/useNavTargetLabel.js';
+import { metadataText, servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import { mayReadObject, type ObjectReadCheck } from '../utils/navObjectReadGate.js';
 import { navEntriesShownToMember, type NavMemberGates } from '../hooks/useNavMemberGates.js';
 import { defineWorkspacePreference, versionedPreferenceCodec } from '../utils/workspacePreference.js';
@@ -320,8 +320,9 @@ export function useAppReportEntries(
     .filter((report) => shownByNavigation(report.name as string) && mayOpenReport(report, datasetObjects, can))
     .map((report): AppReportEntry => {
       const name = report.name as string;
-      const text = metadataText(report.label, language);
-      const label = reportLabel({ name, label: text ?? '' });
+      // A served report's label is already translated (objectstack#30244):
+      // drawn as given, the bundle asked only when it carries none.
+      const label = metadataText(report.label, language) ?? reportLabel({ name, label: '' });
       const description = metadataText(report.description, language);
       const object = reportPrimaryObject(report, datasetObjects);
       return {
@@ -487,8 +488,9 @@ const nonBlank = (text: string | undefined): string | undefined =>
  * the whole registry, the app's object scope (its package scope, the one the
  * navigation gates read, plus by name the objects it does not hold; for an
  * app with no package, the objects by name), else the registry as loaded.
- * A label passes through the bundle lookup the console applies to object
- * names (`useObjectLabel`).
+ * A served label is drawn as given, since the server translated it; the
+ * bundle lookup the console applies to object names (`useObjectLabel`) only
+ * when none is served (objectstack#30390).
  */
 export function useReportObjectLabels(app: unknown, objects: readonly string[]): ReportObjectLabels {
   const metadata = useMetadata();
@@ -507,20 +509,10 @@ export function useReportObjectLabels(app: unknown, objects: readonly string[]):
     const name = (item as { name?: unknown }).name;
     if (nonEmptyString(name) && !byName.has(name)) byName.set(name, item as { label?: unknown; pluralLabel?: unknown });
   }
-  const labelText = (object: string) => metadataText(byName.get(object)?.label, language) ?? '';
   return {
-    plural: (object) => {
-      const pluralLabel = byName.get(object)?.pluralLabel;
-      return (
-        nonBlank(
-          objectPluralLabel({
-            name: object,
-            label: labelText(object),
-            ...(typeof pluralLabel === 'string' ? { pluralLabel } : {}),
-          }),
-        ) ?? object
-      );
-    },
-    singular: (object) => nonBlank(objectLabel({ name: object, label: labelText(object) })) ?? object,
+    plural: (object) =>
+      nonBlank(servedObjectPluralLabel({ ...byName.get(object), name: object }, language, objectPluralLabel)) ?? object,
+    singular: (object) =>
+      nonBlank(servedObjectLabel({ name: object, label: byName.get(object)?.label }, language, objectLabel)) ?? object,
   };
 }

@@ -44,6 +44,7 @@ import {
   ListAiPendingActionsRequestSchema,
   ListAiPendingActionsResponseSchema,
   ApproveAiPendingActionResponseSchema,
+  AiPendingActionStatusSchema,
   RejectAiPendingActionResponseSchema,
   AiChatResponseSchema,
   AiCompleteRequestSchema,
@@ -435,6 +436,11 @@ describe('ObjectStack Protocol', () => {
     // caller reading only `res.ok` reports a failed write as a success.
     expect(ApproveAiPendingActionResponseSchema.safeParse({ status: 'executed', result: { id: 'a_1' } }).success).toBe(true);
     expect(ApproveAiPendingActionResponseSchema.safeParse({ status: 'failed', error: 'row locked' }).success).toBe(true);
+    // A write a host policy holds for an approver outside the conversation is
+    // `held`, a 200 where nothing was written, never `executed`.
+    expect(ApproveAiPendingActionResponseSchema.safeParse({ status: 'held', result: { code: 'AI_WRITE_HELD' } }).success).toBe(true);
+    expect(AiPendingActionStatusSchema.safeParse('held').success).toBe(true);
+    expect(ListAiPendingActionsRequestSchema.safeParse({ status: 'held' }).success).toBe(true);
     expect(
       ApproveAiPendingActionResponseSchema.safeParse({ status: 'rejected' }).success,
       'approve never yields "rejected" — that is the other route',
@@ -1872,6 +1878,66 @@ describe('environmentId stays OUT of the meta-read request shape — transport-l
   });
 });
 
+// Its own import lines, as the blocks around it: this group pins one member.
+import { z } from 'zod';
+import type { GetMetaItemsRequest } from './protocol.zod';
+
+describe('GetMetaItemsRequestSchema declares `names` — the batch by-names list read', () => {
+  // Ruling A on #29236: the list narrows to the named items, an unknown name
+  // is simply absent, and an empty value is refused rather than read as every
+  // item. This is the protocol's post-parse shape — a list; the wire's one
+  // comma-separated value is split by the REST door. As in the blocks above,
+  // accept-pins assert the parsed VALUE: the object is non-strict, so
+  // `success` alone is also what an undeclared, stripped key looks like.
+
+  it('accepts names and PRESERVES the list through parse', () => {
+    const result = GetMetaItemsRequestSchema.safeParse({ type: 'app', names: ['crm', 'helpdesk'] });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.names).toEqual(['crm', 'helpdesk']);
+  });
+
+  it('keeps names OPTIONAL — a request without it lists every item, and parse invents none', () => {
+    const result = GetMetaItemsRequestSchema.safeParse({ type: 'app' });
+    expect(result.success).toBe(true);
+    if (result.success) expect('names' in result.data).toBe(false);
+  });
+
+  it('refuses an EMPTY list, at `names` — an empty filter is never read as every item', () => {
+    const result = GetMetaItemsRequestSchema.safeParse({ type: 'app', names: [] });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toHaveLength(1);
+      expect(result.error.issues[0]).toMatchObject({ code: 'too_small', path: ['names'] });
+    }
+  });
+
+  it('judges no member — a name that matches no item is kept, to be simply absent from the answer', () => {
+    for (const names of [['no_such_app'], [''], ['crm', 'crm']]) {
+      const result = GetMetaItemsRequestSchema.safeParse({ type: 'app', names });
+      expect(result.success, JSON.stringify(names)).toBe(true);
+      if (result.success) expect(result.data.names).toEqual(names);
+    }
+  });
+
+  it('refuses the wire spelling — a comma string is the REST door\'s to split, not a protocol value', () => {
+    expect(GetMetaItemsRequestSchema.safeParse({ type: 'app', names: 'crm,helpdesk' }).success).toBe(false);
+    expect(GetMetaItemsRequestSchema.safeParse({ type: 'app', names: [1] }).success).toBe(false);
+  });
+
+  it('states the minimum in the published JSON Schema (a minimum, not a refinement)', () => {
+    const json = z.toJSONSchema(GetMetaItemsRequestSchema, { io: 'input', unrepresentable: 'any' }) as {
+      properties: Record<string, Record<string, unknown>>;
+      required?: string[];
+    };
+    expect(json.properties.names).toMatchObject({ type: 'array', minItems: 1, items: { type: 'string' } });
+    expect(json.required ?? []).not.toContain('names');
+  });
+
+  it('types names as an optional string list, input and output alike', () => {
+    expectTypeOf<GetMetaItemsRequest['names']>().toEqualTypeOf<string[] | undefined>();
+  });
+});
+
 describe('MetadataProtocol declares getMetaItemLayered', () => {
   // Type-level pins (compiled by the spec test typecheck, the
   // translation-typegen.test.ts pattern). The member is an interface
@@ -2950,5 +3016,57 @@ describe('ListAiConversationsResponseSchema declares the next-page signal', () =
   it('the request keeps its three keys — `cursor` is described, not reshaped', () => {
     expect(Object.keys((ListAiConversationsRequestSchema as any).shape)).toEqual(['agentId', 'limit', 'cursor']);
     expect(ListAiConversationsRequestSchema.parse({ limit: 20, cursor: 'c1' })).toEqual({ limit: 20, cursor: 'c1' });
+  });
+});
+
+// ==========================================
+// [#30348] seedApplied.landed — the rows a published seed landed on
+// ==========================================
+
+import {
+  SEED_APPLIED_LANDED_IDS_CAP,
+  SeedAppliedLandedSchema,
+  PublishPackageDraftsResponseSchema as LandedBatchSchema,
+} from './protocol.zod';
+
+describe('seedApplied.landed (#30348) — one shared schema on both publish responses', () => {
+  const single = { success: true, version: 'hmac-sha256:x', seq: 1 };
+  const batch = {
+    success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
+    published: [{ type: 'seed', name: 'demo', version: 'hmac-sha256:y' }], failed: [],
+  };
+  const list = (ids: string[], total = ids.length) => ({ ids, total, truncated: total > ids.length });
+  const landed = [{ object: 'account', inserted: list(['a1', 'a2']), matched: list(['c9']) }];
+
+  it('both receipts carry the same `landed` through the parse', () => {
+    const one = PublishMetaItemResponseSchema.parse({ ...single, seedApplied: { success: true, inserted: 2, updated: 0, landed } });
+    const many = LandedBatchSchema.parse({ ...batch, seedApplied: { success: true, inserted: 2, updated: 0, landed } });
+    expect(one.seedApplied?.landed).toEqual(landed);
+    expect(many.seedApplied?.landed).toEqual(landed);
+  });
+
+  it('existing receipts — no `landed` — parse unchanged, and gain no key', () => {
+    const before = { success: true, inserted: 3, updated: 1 };
+    const one = PublishMetaItemResponseSchema.parse({ ...single, seedApplied: before });
+    const many = LandedBatchSchema.parse({ ...batch, seedApplied: { success: false, error: 'seed apply failed' } });
+    expect(one.seedApplied).toEqual(before);
+    expect('landed' in one.seedApplied!).toBe(false);
+    expect(many.seedApplied).toEqual({ success: false, error: 'seed apply failed' });
+    // And a receipt with no seed carries no `seedApplied` at all.
+    expect('seedApplied' in PublishMetaItemResponseSchema.parse(single)).toBe(false);
+  });
+
+  it('the cap is declared: 200 ids per list; one more is refused, and a cut says so', () => {
+    expect(SEED_APPLIED_LANDED_IDS_CAP).toBe(200);
+    const ids = Array.from({ length: SEED_APPLIED_LANDED_IDS_CAP }, (_, i) => `r${i}`);
+    const cut = { object: 'account', inserted: { ids, total: 250, truncated: true }, matched: list([]) };
+    expect(SeedAppliedLandedSchema.parse(cut)).toEqual(cut);
+    expect(SeedAppliedLandedSchema.safeParse({ ...cut, inserted: { ids: [...ids, 'r200'], total: 250, truncated: true } }).success).toBe(false);
+  });
+
+  it('`total` and `truncated` are required on each list, and both lists on each entry', () => {
+    expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: { ids: [] }, matched: list([]) }).success).toBe(false);
+    expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: { ids: [], total: 0 }, matched: list([]) }).success).toBe(false);
+    expect(SeedAppliedLandedSchema.safeParse({ object: 'a', inserted: list([]) }).success).toBe(false);
   });
 });

@@ -267,12 +267,12 @@ describe('POST /phone-number/send-otp without a deliverable SMS service', () => 
       }),
     );
 
-    // better-auth runs this send through `runInBackgroundOrAwait`, which logs a
-    // throw and answers success — so the refusal cannot leak, by status or
-    // body, whether the number belongs to an account.
+    // On this public door the send runs after the response
+    // (`sendAfterResponseOnPublicDoor`) and what it throws is logged on the
+    // server — so the refusal cannot change the answer, by status or body.
     expect(response.status, await response.clone().text()).toBe(200);
     expect(await response.json()).toEqual({ status: true });
-    expect(deliver).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(1));
     await expect(deliver.mock.results[0]?.value).rejects.toMatchObject({
       statusCode: 400,
       body: { code: 'SMS_SERVICE_REQUIRED' },

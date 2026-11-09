@@ -94,6 +94,7 @@ const drillableSource = () =>
   industrySource({
     object: 'crm_account',
     dimensionFields: { industry: 'industry' },
+    drillScopes: { annual_revenue_sum: {}, avg_deal: {}, distinct_owners: {}, win_rate: {} },
     drillRawRows: [{ industry: null }, { industry: 'fin' }, { industry: 'tech' }],
   });
 

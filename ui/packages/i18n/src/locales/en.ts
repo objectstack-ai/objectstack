@@ -177,6 +177,8 @@ const en = {
     // the server's message plays no part (objectui#11344). It is the one
     // success-toast text the runner writes itself (objectui#10900).
     completedSuccessfully: 'Action completed successfully',
+    // The same toast for an action that has a label: it names what was done.
+    completedNamed: '{{action}} completed',
     // The runner's other own text (objectui#10969): the error fallbacks when no
     // readable error message reached it, and the Undo label it hands the toast
     // handler for an undoable success toast.
@@ -223,6 +225,9 @@ const en = {
   },
   form: {
     noPermissionToSave: "You don't have permission to save this record.",
+    // A write the ADR-0015 external write gate refused (`EXTERNAL_WRITE_FORBIDDEN`, objectstack#30334):
+    // the object is read-only by design, so the line must not read as a missing permission.
+    readOnlyExternalSource: "This table is read-only. Its records come from an external data source that does not accept changes.",
     // The notice a record form shows when every field is locked because the
     // object's affordance for the form's mode is closed for this user
     // (objectui#11000). `{{object}}` is the object's label.
@@ -274,6 +279,17 @@ const en = {
     // Under an empty field that a visible update action's static `patch` would
     // make required (objectstack#28382). `{{action}}` is the action's label.
     requiredForAction: 'Required to run “{{action}}”.',
+    // objectstack#28104 — the marker under a create-form field an AI chat
+    // draft filled (the record-write card's "Open the full form"), shown until
+    // the person edits the field, and the page notice above such a form.
+    aiSuggested: 'AI suggestion',
+    aiDraftNotice: 'AI filled in the fields marked “AI suggestion” from the chat. Nothing is saved until you check them and save.',
+    // objectstack#28106 — on an edit form opened on an AI chat update's
+    // proposed values: the stored value each change replaces, the word for
+    // an empty one, and the per-field revert.
+    aiBefore: 'Was: {{value}}',
+    aiBeforeEmpty: 'empty',
+    aiRevert: 'Revert',
     // The size-limit hint the flat `ObjectForm` appends to a `file` or `image`
     // field's description when the field declares `maxSize` (objectui#12156).
     // `{{size}}` is the formatted limit ("10.0 MB"); only the words translate.
@@ -385,6 +401,18 @@ const en = {
       available: 'Available',
       all: 'All currencies (ISO 4217)',
     },
+    // ADR-0144 D5 — the home field's read-only hint: the rate and document date
+    // the engine converted the record's amount at (`CurrencyField`, the record page);
+    // and the live preview under the amount while it is edited (`homeAmountPreview.tsx`).
+    currencyHome: {
+      convertedAt: 'Converted at {{rate}} on {{date}}',
+      homeCurrency: 'In the home currency (rate 1)',
+      preview: '≈ {{amount}} at {{rate}} on {{date}}',
+      previewSame: '≈ {{amount}} (home currency)',
+      awaitingRate: 'No {{currency}} rate on or before {{date}}: saving is refused until one is added',
+      awaitingDate: 'Set the document date to see the home amount',
+      rateUnreadable: 'Converted to the home currency when you save',
+    },
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Open {{name}}',
@@ -412,6 +440,8 @@ const en = {
       takePhoto: 'Take photo',
       takeSelfie: 'Take selfie',
       cameraCapture: 'Camera capture',
+      choosePhoto: 'Choose photo',
+      photoFailed: 'Could not get the photo',
       uploading: 'Uploading…',
       uploadingPct: 'Uploading… ({{pct}}%)',
       fileFallback: 'File',
@@ -467,6 +497,25 @@ const en = {
     registryRef: {
       loadFailed: 'The list could not be loaded. You can still type the name.',
       notFound: '{{name}} (not found)',
+    },
+    preferenceOption: {
+      allTopics: 'All topics ({{value}})',
+      allChannels: 'All channels ({{value}})',
+      notConfigured: '{{value}} (not configured)',
+      notInList: '{{value}} (not in the list)',
+      useTyped: 'Use "{{value}}"',
+    },
+    quietHours: {
+      timeZone: 'Time zone',
+      start: 'Start',
+      end: 'End',
+      range: '{{start}} to {{end}} ({{zone}})',
+      pastMidnight: 'Runs past midnight and ends the next day.',
+      sameTimes: 'Start and end are the same, so nothing is held.',
+      incomplete: 'Enter both a start and an end time.',
+      unreadable: 'This value is not a time range this control can show. It is kept as stored.',
+      replace: 'Set a time range',
+      zoneNotInList: '{{zone}} (not in the list)',
     },
     recipient: {
       selectTypeFirst: 'Select a recipient type first.',
@@ -816,6 +865,7 @@ const en = {
       noSavedTemplates: 'No saved templates',
       noneOption: '— None —',
       saveCurrent: 'Save current',
+      saveCurrentNeedsMapping: 'Map at least one column to save a template.',
       templateName: 'Template name',
       save: 'Save',
       deleteTemplate: 'Delete template',
@@ -1009,6 +1059,10 @@ const en = {
     eventTitlePlaceholder: 'What\'s this event about?',
     creating: 'Creating…',
     titleRequired: 'Title is required',
+    // A drag-to-reschedule the server refused because the record is gone for
+    // this session: deleted, or no longer visible to it. `{{object}}` is the
+    // object's label; with none to show, `form.recordNotFoundOrHidden` is used.
+    rescheduleNotFound: 'This {{object}} record no longer exists, or you no longer have access to it.',
     a11y: {
       region: 'Calendar',
       grid: 'Calendar grid',
@@ -1094,6 +1148,8 @@ const en = {
     loadErrorUnauthorizedMessage: 'Your session has expired or you are signed out. Sign in again to view these records.',
     loadErrorRejectedTitle: 'This view’s query was rejected',
     loadErrorRejectedMessage: 'The server could not process this view’s filter or query options. Clearing the filters usually fixes it; if the view is saved this way, an administrator needs to correct it.',
+    loadErrorUnknownColumnMessage: 'The column “{{column}}” shows the field “{{field}}”, which {{object}} does not have. An administrator needs to correct or remove the column in this view.',
+    loadErrorUnknownFieldMessage: 'This view’s query names the field “{{field}}”, which {{object}} does not have. Clearing the filters usually fixes it; if the view is saved this way, an administrator needs to correct it.',
     loadErrorApiDisabledTitle: 'This object isn’t available through the API',
     loadErrorApiDisabledMessage: 'This page can’t load its records because the object is not exposed through the API. That is a setting on the object itself, not a permission — an administrator has to enable API access for it before this page can work.',
     retry: 'Retry',
@@ -1150,7 +1206,7 @@ const en = {
   },
   managedByBadge: {
     config: {
-      short: 'Admin config',
+      short: 'Configured here',
       title: 'Administrator configuration',
       body: 'These rows define how the platform behaves at runtime. Author them here; the runtime data they produce lives in a separate table.',
     },
@@ -1160,7 +1216,7 @@ const en = {
       body: 'Rows here are created automatically when actions run on the source record. The list below is a read-only monitoring surface — row-level actions (Approve, Recall, Resend, …) live on each row.',
     },
     systemWritable: {
-      short: 'Platform schema',
+      short: 'Built in · editable',
       title: 'Platform-defined, admin-writable',
       body: "This object's schema is defined by the platform, but its rows are yours to create and edit here. Who may write is governed by delegated administration and record-level security, not by this badge.",
     },
@@ -1170,9 +1226,9 @@ const en = {
       body: "Immutable audit log. Rows cannot be created, edited, or deleted from the UI — they're written by the platform when events occur. Use Export to download for compliance review.",
     },
     betterAuth: {
-      short: 'Identity',
-      title: 'Managed by the identity provider',
-      body: "This object's schema is owned by {{provider}}. Direct edits bypass password hashing, session validation, two-factor checks, and audit hooks. Manage these records through your authentication provider's sign-in, invitation, and security flows instead.",
+      short: 'Via identity service',
+      title: 'Written through the built-in identity service',
+      body: "This object's schema belongs to {{provider}}, the platform's built-in identity service. Create and change these records with the actions on this page, or through sign-in, invitation and security flows; every one of them goes through that service. Editing the table directly would bypass password hashing, session validation, two-factor checks and audit hooks.",
     },
   },
   kanban: {
@@ -1405,6 +1461,7 @@ const en = {
     readonlyAriaLabel: 'Read-only view',
     readonlyTooltip: 'System view — defined in code, read-only.',
     malformedFilter: 'This view’s filter is malformed, so no records are shown: the {{subject}} condition cannot be applied.',
+    exportNotPermitted: 'You don\u2019t have permission to export these records. Contact your administrator if you think you should be able to.',
     // objectui#11605 — an object-bound block whose node names its object in
     // neither place (no own key, no `dataSource.object`). `{{property}}` is the
     // block's object key (`objectName`), interpolated and never translated; the
@@ -1559,6 +1616,7 @@ const en = {
     copyToClipboard: 'Copy to clipboard',
     copied: 'Copied!',
     deleteConfirmation: 'Are you sure you want to delete this record? This cannot be undone.',
+    deleteConfirmQuestion: 'Are you sure you want to delete this record?',
     deleted: 'Record deleted',
     editRecord: 'Edit record',
     viewAll: 'View All',
@@ -1580,6 +1638,7 @@ const en = {
     owner: 'Owner',
     relatedCardMenu: 'More for {{title}}',
     relatedCardEnlarge: 'Enlarge',
+    relatedCardAllColumns: 'All columns',
     relatedCardExpand: 'Expand',
     relatedCardHide: 'Hide',
     relatedCardNew: 'New',
@@ -1648,6 +1707,7 @@ const en = {
     daysAgo_other: '{{count}}d ago',
     // Activity feed actors
     systemActor: 'System',
+    impersonatedActor: '{{admin}} on behalf of {{user}}',
     unknownUser: 'Unknown',
     // Record meta footer (audit provenance). `created`/`updated` are the
     // actor-less variants — "Created by · 5m ago" dangles when created_by
@@ -2000,6 +2060,8 @@ const en = {
       vsLastYear: 'vs last year',
       vsYesterday: 'vs yesterday',
       vsPreviousPeriod: 'vs previous period',
+      vsThisMonth: 'vs this month',
+      vsThisQuarter: 'vs this quarter',
     },
     filters: {
       label: 'Dashboard filters',
@@ -2015,13 +2077,16 @@ const en = {
         last_week: 'Last week',
         this_month: 'This month',
         last_month: 'Last month',
+        next_month: 'Next month',
         this_quarter: 'This quarter',
         last_quarter: 'Last quarter',
+        next_quarter: 'Next quarter',
         this_year: 'This year',
         last_year: 'Last year',
         last_7_days: 'Last 7 days',
         last_30_days: 'Last 30 days',
         last_90_days: 'Last 90 days',
+        next_30_days: 'Next 30 days',
       },
     },
   },
@@ -2240,7 +2305,7 @@ const en = {
     },
     settingsHub: {
       title: 'Settings',
-      subtitle: 'Configure your system, integrations, and feature flags.',
+      subtitle: 'Configure your system and integrations.',
       loadError: 'Failed to load settings',
       empty: 'No settings pages are available yet. They appear here when an installed app provides them.',
       adminManaged: 'Settings are managed by your administrator',
@@ -2323,6 +2388,10 @@ const en = {
       // layer's value in the draft, and Save sends it as `null` (unset), so the
       // row falls back to the value the layer above carries.
       resetToDefault: 'Reset to default',
+      // A value set at the scope this page writes (objectstack#30329), and
+      // the default its Reset returns to. `{{value}}` is that default in words.
+      sourceBadgeModified: 'Modified',
+      defaultValueHint: 'Default: {{value}}',
       // The chips on a settings row's header (objectui#12821): the env-lock
       // chip and the title it shows when the server sends no reason, and the
       // `Deprecated` chip, with `{{replacedBy}}` the key that replaces it.
@@ -2330,33 +2399,112 @@ const en = {
       // page has no control for, `{{type}}` that type.
       envLockBadge: 'Locked by env',
       envLockBadgeTitle: 'Pinned by environment variable — cannot be edited from the UI.',
+      // The clear under a pinned row that has a value stored beneath the pin
+      // (objectstack#30665): it clears the saved value, never "deletes" it, and
+      // says the environment value stays in force. `clearSaved` is the button and
+      // the confirm's title and action; `savedCleared` the toast once it is done.
+      savedBeneathPin: 'A value is also saved here. The environment value stays in force; the saved one returns if the variable is removed.',
+      clearSaved: 'Clear the saved value',
+      clearSavedConfirm: 'The value saved here is cleared, so it does not return when the environment variable is removed. The environment value stays in force.',
+      savedCleared: 'Saved value cleared',
       deprecatedBadge: 'Deprecated',
       deprecatedBadgeReplacedBy: 'Deprecated → {{replacedBy}}',
       unsupportedSpecifierType: 'Unsupported specifier type: {{type}}',
+      // The `map` control (objectstack#31391): keyed rows over the keys the server
+      // serves. `mapAddRow` is the picker that adds a row by its key, `{{key}}` in
+      // `mapRemoveRow` the row's key as shown; `mapKeyNotOffered` marks a stored key
+      // the server no longer offers, with `mapKeyNotOfferedHint` as its title;
+      // `mapUnitLabel` names a duration cell's unit select, `{{column}}` its header,
+      // and `mapUnitHours`..`mapUnitYears` are the h, d, w and y units it offers.
+      mapAddRow: 'Add a row',
+      mapRemoveRow: 'Remove {{key}}',
+      mapKeyNotOffered: 'Not offered',
+      mapKeyNotOfferedHint: 'This key is not one the setting admits now. Saving refuses it until the row is removed or given another key.',
+      mapNoRows: 'No rows',
+      mapSearchKey: 'Search…',
+      mapUnitLabel: '{{column}} unit',
+      mapUnitHours: 'hours',
+      mapUnitDays: 'days',
+      mapUnitWeeks: 'weeks',
+      mapUnitYears: 'years',
       // A settings value that misses its type's declared format blocks Save
       // (objectui#13287). `email` and `url` reuse `validation.email` and
       // `validation.url`; these two name what a phone number and a colour take.
       invalidPhone: 'Enter a phone number using only digits, spaces and + ( ) - .',
       invalidColor: 'Enter a hex color, such as #1a2b3c',
+      // A `json` setting stored as text by the console before objectstack#31241:
+      // the page puts that text in the draft so one Save stores it as an object.
+      jsonStoredAsText: 'This value is stored as text, not as a JSON object. Save to store it as an object; the page has marked it as an unsaved change.',
+      // The address the server judges beside Allowed IP ranges (objectstack#30313),
+      // one whole sentence per state of `GET /api/v1/auth/admin/client-address`:
+      // `trustProxy` off, on, and no address the server can establish.
+      clientAddressDirect: 'Your address, as the server judges it: {{address}}. A list that leaves it out cannot be saved from here. This server does not trust proxy headers, so behind a proxy this is the proxy\'s address.',
+      clientAddressViaProxy: 'Your address, as the server judges it: {{address}}, read from the forwarded headers of the proxy this server trusts. A list that leaves it out cannot be saved from here.',
+      clientAddressUnknown: 'The server cannot establish your address, so a non-empty list cannot be saved from here.',
+      // A settings value that misses its declared pattern (objectstack#30206),
+      // said in the console's words instead of the server's English sentence.
+      // `{{setting}}` is the setting's label and `{{help}}` the help line the
+      // refusal replaces under the field; `invalidFormatPick` is for a setting
+      // chosen from a list.
+      invalidFormat: '{{setting}} is not in a valid format.',
+      invalidFormatHelp: '{{setting}} is not in a valid format. {{help}}',
+      invalidFormatPick: 'Choose a value for {{setting}} from the list.',
     },
-    // The one-time workspace-timezone prompt (objectui#11758): asked of an
-    // administrator while `localization.timezone` is still the manifest default.
-    // `{{current}}` is that default, `{{zone}}` the zone the admin confirmed.
-    workspaceTimezonePrompt: {
-      title: 'Set the system timezone',
-      description: 'This system still uses the platform default timezone, {{current}}. The system timezone decides what "today" means in formulas, how reports group dates and how dates and times are shown, for everyone in the system. Your browser timezone is filled in below.',
-      laterHint: 'You can change it at any time on the Settings page.',
-      decline: 'Keep the default',
-      confirm: 'Set timezone',
-      saved: 'System timezone set to {{zone}}',
-      currencyTitle: 'Set the default currency',
-      currencyDescription: 'This organization has no default currency yet, so amounts are shown without a currency symbol. The currency of your browser\'s region, {{name}} ({{code}}), is filled in below.',
-      currencyConfirm: 'Set currency',
-      currencySaved: 'Default currency set to {{currency}}',
-      bothTitle: 'Set the system timezone and default currency',
-      bothConfirm: 'Save',
-      bothSaved: 'System timezone set to {{zone}} and default currency set to {{currency}}',
-      notNow: 'Not now',
+    // The first-run checklist at the top of Home (objectstack#30206): what an
+    // administrator sets up first, each row's line read from the real setting.
+    // `{{name}}` is the organization's name; `{{language}}`, `{{country}}`,
+    // `{{zone}}` and `{{currency}}` the values in words; `{{current}}` the
+    // timezone the system uses now. `progress` counts the rows shown. A row
+    // that is done shows its value alone, so it has no `done` line here.
+    firstRunChecklist: {
+      title: 'Get your system ready',
+      description: 'What to set up before your colleagues start. Every item can be changed later in Setup.',
+      progress: '{{done}} of {{total}} done',
+      dismiss: 'Hide checklist',
+      set: 'Set',
+      change: 'Change',
+      view: 'View',
+      confirm: 'Confirm',
+      cancel: 'Cancel',
+      prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you confirm.',
+      organizationName: {
+        title: 'Name your organization',
+        todo: 'It still has the name it was created with, "{{name}}".',
+        action: 'Rename',
+      },
+      languageCountry: {
+        title: 'Default language and country',
+        todo: 'Currently {{language}} and {{country}}. Confirm them or choose others.',
+        saved: 'Default language and country saved',
+      },
+      timezone: {
+        title: 'System timezone',
+        todo: 'Still the platform default, {{current}}. It decides what "today" means in formulas and how reports group dates.',
+        saved: 'System timezone set to {{zone}}',
+      },
+      currency: {
+        title: 'Default currency',
+        todo: 'Not set yet, so amounts are shown without a currency symbol.',
+        saved: 'Default currency set to {{currency}}',
+      },
+      mail: {
+        title: 'Email delivery',
+        todo: 'Not set up yet, so emails such as invitations and password resets are not delivered.',
+        done: 'Set up to deliver emails.',
+        action: 'Set up',
+      },
+      invite: {
+        title: 'Invite colleagues',
+        todo: 'You are the only member so far.',
+        done: 'Colleagues have joined or been invited.',
+        action: 'Invite',
+      },
+      connectAssistant: {
+        title: 'Connect an AI assistant',
+        todo: 'Work in this system from Claude, Doubao and similar assistants, as yourself.',
+        done: 'An AI assistant or API key of yours is connected.',
+        action: 'Connect',
+      },
     },
     error: {
       connectionFailed: 'Cannot connect to server',
@@ -2596,6 +2744,26 @@ const en = {
       builderHandoffTitle: 'Build this in the Builder',
       builderHandoffOpen: 'Open in Builder →',
       builderHandoffSuperseded: 'A newer request is available',
+      // cloud#3565 — the record-write card: ONE record the chat proposes and the user confirms (确认 / 打开完整表单 / 取消).
+      recordWriteCreateTitle: 'New {{object}}',
+      recordWriteUpdateTitle: 'Change {{object}}',
+      recordWriteConfirm: 'Confirm',
+      recordWriteOpenForm: 'Open the full form',
+      recordWriteCancel: 'Cancel',
+      recordWriteCancelReason: 'Cancelled from the card',
+      recordWriteOpenFormReason: 'Opened the full form instead',
+      recordWriteDropped: 'Not included',
+      recordWriteSubmitting: 'Writing…',
+      recordWriteWritten: 'Written',
+      recordWriteCancelled: 'Cancelled',
+      sampleDataCleanupTitle: 'Remove the sample data',
+      sampleDataCleanupIrreversible: 'Removed rows cannot be recovered.',
+      sampleDataCleanupAbsent: '{{count}} recorded rows are not listed: you cannot see them, or they are already gone.',
+      sampleDataCleanupAbsent_one: '{{count}} recorded row is not listed: you cannot see it, or it is already gone.',
+      sampleDataCleanupAbsent_other: '{{count}} recorded rows are not listed: you cannot see them, or they are already gone.',
+      sampleDataCleanupEdited: '{{count}} rows edited since they were seeded stay.',
+      sampleDataCleanupEdited_one: '{{count}} row edited since it was seeded stays.',
+      sampleDataCleanupEdited_other: '{{count}} rows edited since they were seeded stay.',
       copy: 'Copy',
       copied: 'Copied',
       regenerate: 'Regenerate',
@@ -2832,6 +3000,28 @@ const en = {
       passwordsMore: 'More entries omitted — use the download.',
       passwordsDownload: 'Download CSV',
     },
+    // objectstack#30205 — the ban dialog's account of a user's open work (app-shell UserAssignedWorkPanel).
+    assignedWork: {
+      title: 'Records this person holds',
+      loading: 'Counting the records this person holds…',
+      countFailed: 'The records this person holds could not be counted: {{message}}',
+      noClient: 'The records this person holds cannot be counted here.',
+      none: 'This person holds no records you can read.',
+      summary: 'Records you can read: {{total}}, owns {{owned}}, assigned {{assigned}}.',
+      row: '{{object}} · {{field}}',
+      notTransferable: 'Lists several people, so it cannot be handed over here.',
+      truncated: 'Not every user field was counted; this person may hold more.',
+      unreadable: 'Not counted, because you cannot read them: {{objects}}',
+      handoverTo: 'Hand over to',
+      handoverHint: 'Optional. The ban does not wait for the hand-over.',
+      handover: 'Hand over',
+      handingOver: 'Handing over…',
+      handoverNext: 'Hand over the next batch',
+      targetBanned: 'That person is banned. Pick an active user.',
+      transferRefused: 'The hand-over was refused: {{message}}',
+      report: 'Handed over {{updated}}, {{failed}} could not be moved, {{remaining}} still held.',
+      failure: '{{object}} {{id}}: {{message}}',
+    },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
       managedUsers: {
@@ -2852,6 +3042,7 @@ const en = {
       cannotEditMetaView: 'This view is built in and defined in code — it cannot be changed.',
       resetView: 'Reset to view',
       resetViewTitle: 'Puts back this view’s own filters, search, sort, grouping, column layout, hidden fields, density, layout, row color, row numbers and inline editing. Pinned views, favorites and how records open stay as they are. Only your list changes.',
+      linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalized: 'Personalized',
       personalizedHeading: 'Your list differs from this view in',
       personalizedParts: {
@@ -2898,6 +3089,9 @@ const en = {
       bulkDeleteConfirm: 'Delete {{count}} selected records? This cannot be undone.',
       bulkDeleteConfirm_one: 'Delete {{count}} selected record? This cannot be undone.',
       bulkDeleteConfirm_other: 'Delete {{count}} selected records? This cannot be undone.',
+      bulkDeleteQuestion: 'Delete {{count}} selected records?',
+      bulkDeleteQuestion_one: 'Delete {{count}} selected record?',
+      bulkDeleteQuestion_other: 'Delete {{count}} selected records?',
       duplicateViewName: 'A view with this name already exists.',
       viewTypeGrid: 'Grid',
       viewTypeGridDesc: 'A spreadsheet-style table of records.',
@@ -3146,6 +3340,8 @@ const en = {
         title: 'Audit Log',
         subtitle: 'Read-only system activity and record changes. Newest first.',
         openAsList: 'Open as list',
+        openEntryPage: 'Open entry page',
+        openEntryPageHint: 'The entry page lists every change to the same record, newest first.',
         openPresetAsList: 'Open {{label}} as list',
         presets: 'Presets',
         presetOtherSource: 'This view reads another data source.',
@@ -3275,7 +3471,7 @@ const en = {
         signIn: 'Sign in as dev admin',
       },
       errors: {
-        invalidCredentials: 'Invalid email or password. Please try again.',
+        invalidCredentials: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Reset it to sign in right away.',
         emailNotVerified: 'Please verify your email address before signing in.',
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
         // objectstack#29105 — refusals of the two-factor sign-in step, by the
@@ -3358,6 +3554,8 @@ const en = {
       useEmailResetText: 'Reset via email instead',
       phoneSuccessTitle: 'Password reset',
       phoneSuccessDescription: 'Your password has been reset. You can now sign in with your new password.',
+      noDeliveryTitle: "A reset link can't be emailed here",
+      noDeliveryDescription: "This deployment doesn't send email, so no password reset link can reach you. Ask an administrator: they can set a new password for you from Setup → Users.",
     },
     resetPassword: {
       title: 'Set a new password',
@@ -3382,6 +3580,7 @@ const en = {
       verifyingDescription: 'Hang tight while we confirm your email.',
       successTitle: 'Email verified',
       successDescription: 'Your email is confirmed. You can now sign in.',
+      handoffSuccessDescription: 'Your email is confirmed. Go back to the app you were signing in to, and sign in there.',
       errorTitle: 'Verification failed',
       errorDescription: 'Verification failed. Please request a new link.',
       missingToken: 'Verification link is missing a token.',
@@ -3496,6 +3695,7 @@ const en = {
         continue: 'Continue',
         preparing: 'Preparing…',
         enrollFailed: 'Could not start enrollment.',
+        unavailable: 'Two-factor authentication is turned off on this deployment, so an authenticator app cannot be set up yet. Ask an administrator to turn it on in Setup → Authentication, then try again.',
         scanTitle: 'Scan with your authenticator',
         scanBody: 'Scan this QR code with Google Authenticator, 1Password, Authy, etc., then enter the 6-digit code.',
         backupTitle: 'Save your backup codes',
@@ -3586,6 +3786,12 @@ const en = {
       saved: 'Language preference updated.',
       readOnly: 'Your administrator manages the language for your account.',
     },
+    appLock: {
+      title: 'App lock',
+      off: 'Off',
+      onImmediately: 'On, locks as soon as you leave the app',
+      onAfter: 'On, locks {{duration}} after you leave the app',
+    },
     password: {
       changeTitle: 'Change Password',
       setTitle: 'Set Local Password',
@@ -3641,6 +3847,8 @@ const en = {
     keyboardShortcuts: 'Keyboard shortcuts',
     onlineDocs: 'Online documentation',
     loadingDocumentation: 'Loading documentation',
+    documentation: 'Documentation',
+    uncategorized: 'Uncategorized',
     about: 'About',
     aboutTitle: 'About this console',
     aboutDescription: 'The build this console was compiled from.',
@@ -3754,6 +3962,12 @@ const en = {
       message: 'Set a recovery password so you can still sign in if single sign-on is ever unavailable.',
       cta: 'Set password',
       dismiss: 'Dismiss',
+    },
+    connectAssistant: {
+      title: 'Work here from your AI assistant',
+      body: 'You can look up and change your records from Claude, Doubao and similar AI assistants. Each one acts as you, with your own permissions.',
+      action: 'Connect an AI Assistant',
+      dismiss: 'Hide',
     },
     pendingDrafts: {
       // objectui#12602 — the drafts row in Home's "My work" section: the
@@ -3917,6 +4131,9 @@ const en = {
     appNothingAvailableGrantDescription: 'This app has no pages your account can open. You can grant access in Setup.',
     appNoReadableObjectDescription: 'Your account cannot read any of the records in this app yet. Ask an administrator to assign you a permission set.',
     appNoReadableObjectGrantDescription: 'Your account cannot read any of the records in this app yet. You can grant access in Setup.',
+    // objectstack-ai/objectstack#29771 — the app root when every entry it shows is a `url` or `action` link (`AppNoAccessEmptyState`, reason `menu-only`).
+    appOpensFromMenu: '{{app}} opens from its menu',
+    appOpensFromMenuDescription: 'This app has no page of its own. Choose an entry in its menu to open a link or run an action.',
     openSetup: 'Open Setup',
     createFirstApp: 'Create Your First App',
     systemSettings: 'System Settings',
@@ -3953,6 +4170,11 @@ const en = {
     changes: {
       title: 'Pending changes',
       description: 'What publishing will change. New items are added; updates overwrite the live version.',
+      // ADR-0146 D3 — where a customization of a read-only base is saved: its `.custom` pair.
+      savedToCustomization: 'Saved to {{package}}’s customizations',
+      // objectstack#30119 (ADR-0146 D2) — the pair lives in this environment's database and moves only by export;
+      // `command` is always the literal `os package export`, never translated.
+      customizationEnvironment: 'These changes are kept in this environment’s database as items of {{pair}}, not in your project’s source. They reach another environment only through {{command}}.',
       loading: 'Loading pending changes…',
       loadFailed: 'Could not load pending changes:',
       empty: 'Nothing pending — every draft has been published.',
@@ -3968,6 +4190,8 @@ const en = {
       draftedByMcp: 'Includes changes drafted by an MCP client',
       detailChangedKeys: 'Also changed:',
       detailNewKeys: 'Includes:',
+      // objectstack#29704 — a NEW item's drill-in when it brings no field or node to list.
+      detailNewItem: 'Publishing adds this item.',
       generatedGroup: 'Generated by the platform ({{n}})',
       confirmNote: 'Publishing releases all {{count}} pending drafts of this package together: all of them go live, or none do.',
       confirmNote_one: 'Publishing releases the {{count}} pending draft of this package: it goes live, or nothing changes.',
@@ -4022,6 +4246,18 @@ const en = {
         email_template: '{{count}} email templates',
         email_template_one: '{{count}} email template',
         email_template_other: '{{count}} email templates',
+        object_extension: '{{count}} object extensions',
+        object_extension_one: '{{count}} object extension',
+        object_extension_other: '{{count}} object extensions',
+        dataset: '{{count}} datasets',
+        dataset_one: '{{count}} dataset',
+        dataset_other: '{{count}} datasets',
+        hook: '{{count}} hooks',
+        hook_one: '{{count}} hook',
+        hook_other: '{{count}} hooks',
+        translation: '{{count}} translations',
+        translation_one: '{{count}} translation',
+        translation_other: '{{count}} translations',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
@@ -4094,6 +4330,17 @@ const en = {
     lookupHelpText: 'No reference object is configured for this parameter, so the record picker is unavailable. Enter a record id, or ask an administrator to fix the action parameter.',
     unresolvedParam: 'This parameter cannot be shown: the field it is backed by is missing from the object metadata, so the control it needs cannot be built. Ask an administrator to fix the action definition.',
     carryOverHint: 'Carried over unchanged (read-only)',
+    // The declared preflight read (objectstack#31808): its panel above the
+    // params, and the hint on a param it fills.
+    preflight: {
+      heading: 'Before you confirm',
+      waiting: 'Fill in {{fields}} to see what this action will do.',
+      loading: 'Checking with the server…',
+      unbound: 'This check needs a value this record does not have, so it was not sent. The values it fills stay empty.',
+      refused: 'This check is declared incorrectly, so it was not sent. The values it fills stay empty. Ask an administrator to fix the action definition.',
+      failed: 'This check could not be completed. The values it fills stay empty. Close this dialog and try again.',
+      seededHint: 'Filled in by the check (read-only)',
+    },
     cancel: 'Cancel',
     confirm: 'Confirm',
     uploading: 'Uploading…',
@@ -4115,6 +4362,47 @@ const en = {
     undoFailed: 'Failed to undo navigation change',
     updateFailed: 'Failed to update navigation',
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "Can't restore: another record now has the same {{field}} value. Change that record first, then restore.",
+      parentPurged: "Can't restore: the {{parent}} record it belonged to has been permanently deleted.",
+      packageUninstalled: "Can't restore: the package that provided {{object}} has been uninstalled.",
+      parentInRecycleBin: "Can't restore yet: the {{parent}} record it belongs to is also in the recycle bin. Restore that record first.",
+      notFound: 'This record is no longer in the recycle bin. It may have been purged.',
+      permissionDenied: "You don't have permission to restore this record.",
+      notAvailable: 'The recycle bin is not available on this deployment.',
+    },
+    page: {
+      title: "Recycle bin",
+      subtitle: "Pick an object to see its deleted records, restore them, or empty its recycle bin. A deleted record is kept until the date shown, then removed for good.",
+      objectsList: "Objects",
+      objectsFilter: "Filter objects",
+      noObjectsTitle: "No recycle bin to manage",
+      noObjectsBody: "You don't manage the recycle bin of any object. An administrator grants it per object.",
+      pick: "Pick an object to see its deleted records.",
+      objectsLoadFailed: "Could not read the objects.",
+      entriesEmpty: "No deleted {{object}} records are in the recycle bin.",
+      loadFailed: "Could not read the recycle bin of {{object}}.",
+      colRecord: "Record",
+      colDeletedBy: "Deleted by",
+      colDeletedAt: "Deleted",
+      colKeptUntil: "Kept until",
+      related: "and {{count}} related records",
+      related_one: "and {{count}} related record",
+      related_other: "and {{count}} related records",
+      restore: "Restore",
+      loadMore: "Load more",
+      emptyAction: "Empty recycle bin",
+      emptyTitle: "Empty the recycle bin of {{object}}?",
+      emptyBody: "Every deleted {{object}} record in it is removed for good. This cannot be undone.",
+      emptied: "{{count}} deleted records removed for good",
+      emptied_one: "{{count}} deleted record removed for good",
+      emptied_other: "{{count}} deleted records removed for good",
+      emptyFailed: "Could not empty the recycle bin of {{object}}.",
+    },
+  },
   objectActions: {
     deleteSuccess: '{{label}} deleted successfully',
     // The delete toast when the deleted record has a display name (ADR-0079),
@@ -4124,6 +4412,12 @@ const en = {
     deleteFailed: 'Failed to delete {{label}}',
     noRecordId: 'No record ID provided',
     deleteConfirm: 'Are you sure you want to delete this record? This cannot be undone.',
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: 'Are you sure you want to delete this record?',
+    restoredNamed: '{{label}} "{{name}}" restored',
+    restoreSuccess: '{{label}} restored',
+    restoreFailed: 'Failed to restore {{label}}',
     deleteConfirmTitle: 'Delete {{label}} "{{name}}"?',
     bulkDeleteConfirmTitle: 'Delete {{count}} {{label}} records?',
     bulkDeleteConfirmTitle_one: 'Delete {{count}} {{label}} record?',
@@ -4148,6 +4442,7 @@ const en = {
     // objectui#13461 — the top bar's avatar button, which holds only the avatar.
     accountMenu: 'Account menu',
     profile: 'Profile',
+    connectAiAssistant: 'Connect an AI Assistant',
     logout: 'Log out',
     preferences: 'Preferences',
     theme: 'Theme',
@@ -4186,6 +4481,7 @@ const en = {
       organizationExists: 'Organization already exists',
       slugTaken: 'That URL slug is already taken',
       notAllowedToCreate: 'You are not allowed to create a new organization',
+      organizationLimitReached: 'You have reached the limit on organizations you can create. Organizations you were invited to do not count toward it.',
       notTheRecipient: 'You are not the recipient of the invitation',
       invitationNotFound: 'This invitation no longer exists or has expired',
       unknown: 'Something went wrong. Please try again.',
@@ -4419,6 +4715,8 @@ const en = {
     noMessages: 'This conversation has no messages yet.',
     sharedObject: 'Shared {{object}}',
     redactedFields: 'Some fields are hidden by the owner: {{fields}}',
+    linkedRecord: 'Linked record',
+    linkedUser: 'Linked user',
   },
   publicForm: {
     submit: 'Submit',
@@ -4438,13 +4736,28 @@ const en = {
     requiredFields: 'Required: {{fields}}',
   },
   connectAgent: {
+    capabilities: {
+      title: 'What your AI assistant can do here',
+      body: 'Once connected, your AI assistant can look up, create, change and delete the records you are allowed to, and run this system\'s actions. It always works as you: it sees and does only what your own permissions allow.',
+      examplesTitle: 'Requests to try in your assistant',
+      example1: 'List the objects I can see.',
+      example2: 'Count how many records each of those objects has.',
+      example3: 'What actions can I run here, and what does each one do?',
+      tryFirst: 'Start with the first one: if your assistant answers with the objects you work with, the connection works.',
+      connected: 'Connected: {{name}}.',
+      connectedKey: 'Connected with the API key "{{name}}".',
+      lastCallHour: 'Its last call was in the hour from {{time}}.',
+      lastCallAt: 'Its last call was at {{time}}.',
+      noCallYet: 'No call yet: ask it the first request above to check the connection.',
+      moreConnected: 'Everything else that can act as you is listed at the bottom of this page.',
+    },
     disabled: {
-      title: 'MCP is disabled on this deployment',
-      body: 'The MCP surface is off (OS_MCP_SERVER_ENABLED=false), so there is nothing to connect. Ask your operator to re-enable it.',
+      title: 'Connecting AI assistants is turned off here',
+      body: 'This deployment has AI assistant connections turned off (OS_MCP_SERVER_ENABLED=false), so there is nothing to connect. Ask your operator to turn them back on.',
     },
     url: {
-      title: 'This system\'s MCP endpoint',
-      body: 'Any MCP-capable AI client connects with this URL. Identity is self-serve: the deployment is its own OAuth 2.1 authorization server, so interactive clients just open a browser login — you connect as yourself, and every call runs under your own permissions and row-level security.',
+      title: 'This system\'s connection address',
+      body: 'Your AI assistant connects with this address. You sign in as yourself in the browser, so everything it does runs under your own permissions.',
       downloadSkill: 'Download SKILL.md',
       skillHint: 'The portable agent skill: teaches any skills-capable agent how to work with this system.',
     },
@@ -4453,18 +4766,49 @@ const en = {
       reachability: 'claude.ai (web) connects from Anthropic\'s servers — the deployment must be reachable over public HTTPS. Claude Desktop and local clients also reach intranet deployments.',
     },
     claudeCode: {
-      body: 'One command — the OAuth login opens automatically on first use:',
+      body: 'One command — the browser sign-in opens automatically on first use:',
       plugin: 'Or install the official plugin (adds the ObjectStack skill and a guided /objectstack:connect command):',
     },
     cursor: {
       addButton: 'Add to Cursor',
       body: 'Use the one-click button, or add this to .cursor/mcp.json:',
     },
-    vscode: {
-      body: 'Add to .vscode/mcp.json (or via the MCP: Add Server command):',
+    fields: {
+      name: 'Name',
+      transport: 'Transport',
+      url: 'Server URL',
     },
     codex: {
-      body: 'Add to ~/.codex/config.toml. If your Codex version lacks the OAuth flow, use an API key header instead (see below):',
+      body: 'In the Codex app: Settings → MCP servers → Add server, then fill in:',
+      hint: 'Save, restart when prompted, then click Authenticate next to objectstack and sign in through the browser. Type /mcp in the composer to check it is connected. If your version offers no browser sign-in, add the header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below).',
+    },
+    workbuddy: {
+      body: 'Connectors → Custom connector → Configure MCP, then merge this entry into mcpServers (WorkBuddy keeps it in ~/.workbuddy/mcp.json):',
+      hint: 'Save, then click Trust on the objectstack connector — it stays inactive until trusted. If your version shows no sign-in prompt, add the request header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below).',
+    },
+    doubao: {
+      title: 'Doubao Work',
+      body: 'Skills · Connectors → New → New custom connector, then fill in:',
+      hint: 'Sign in through the browser when prompted. If no sign-in appears, add the custom header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below). Tasks that run in the cloud need a deployment reachable over public HTTPS.',
+    },
+    qwenwork: {
+      title: 'QwenWork',
+      body: 'Extensions → Connectors → + Add → Paste JSON config:',
+      hint: 'Or add it by hand as Streamable HTTP with this URL. If your version offers no browser sign-in, add the request header Authorization: Bearer <API key> (create one under Advanced: scripts and CI below).',
+    },
+    client: {
+      title: 'Which AI assistant do you use?',
+      hint: 'Choose yours to see only its steps. This browser remembers your choice.',
+    },
+    advanced: {
+      title: 'Advanced: scripts and CI',
+    },
+    unreachable: {
+      claudeWebTitle: 'claude.ai (web): not available for this deployment',
+      claudeWebReason: 'claude.ai connects from Anthropic\'s servers, and they cannot reach {{address}}: only a public HTTPS address is reachable from there.',
+      doubaoCloudTitle: 'Cloud tasks: not available for this deployment',
+      doubaoCloudReason: 'Doubao Work runs cloud tasks from its own servers, and they cannot reach {{address}}: only a public HTTPS address is reachable from there.',
+      remedy: 'Serve this system at a public HTTPS address (https:// on a domain the internet can reach) to make it available.',
     },
     apiKey: {
       title: 'API keys',
@@ -4476,6 +4820,52 @@ const en = {
       minting: 'Creating…',
       showOnce: 'Key "{{name}}" created — copy it now, it will not be shown again:',
       done: 'Done — hide it',
+    },
+    // The list under the setup steps: what can act as the signed-in person.
+    access: {
+      title: 'What can act as you',
+      body: 'The AI assistants you authorized and the API keys you created. Each one acts with your permissions.',
+      assistants: 'Authorized AI assistants',
+      assistantsEmpty: 'You have not authorized any AI assistant yet.',
+      unnamed: 'Unnamed assistant',
+      inOrganization: 'In {{name}}',
+      authorized: 'Authorized {{date}}',
+      lastUsedHour: 'Last used in the hour from {{time}}',
+      notRecorded: 'Last use not recorded',
+      truncated: 'Only the newest are shown; you have authorized more.',
+      withdrawTitle: 'Revoke access for {{name}}?',
+      withdrawBody: 'The assistant loses access at once. To use it again, it has to be authorized again.',
+      keys: 'Your API keys',
+      keysEmpty: 'You have no API keys.',
+      created: 'Created {{date}}',
+      keyLastUsed: 'Last used {{time}}',
+      neverUsed: 'Never used',
+      revoked: 'Revoked',
+      expired: 'Expired',
+      revoke: 'Revoke',
+      revokeTitle: 'Revoke the API key "{{name}}"?',
+      revokeBody: 'Anything that uses this key loses access at once. This cannot be undone.',
+      revoking: 'Revoking…',
+      loadFailed: 'Could not load this list: {{message}}',
+      managedBody: 'The AI assistants this person authorized. Each one acts with their permissions, and Revoke ends its access at once.',
+      managedEmpty: 'This person has not authorized any AI assistant.',
+      managedTruncated: 'Only the newest are shown; this person has authorized more.',
+    },
+  },
+  effectiveAccess: {
+    title: 'Effective permission sets',
+    body: 'Every permission set in force for this person in your current organization, and where each one comes from. Direct grants are also listed below, where they can be removed.',
+    refused: 'You are not allowed to view this person’s effective access.',
+    unserved: 'This server does not report effective access.',
+    loadFailed: 'Could not load effective access: {{message}}',
+    empty: 'No permission set is in force for this person in this organization.',
+    originsLabel: 'Comes from',
+    origin: {
+      direct: 'Direct grant',
+      position: 'Position: {{position}}',
+      default: 'Default binding',
+      derivedPlatformAdmin: 'Configured platform administrator',
+      derivedAiAccess: 'AI access turned on',
     },
   },
   excelImport: {
@@ -4496,6 +4886,36 @@ const en = {
   cloudWorkspaceTimezoneNotice: {
     seeded: 'The environment timezone was set to {{zone}} from your browser when the environment was created. You can change it in Settings → Localization.',
   },
+  // objectstack#30120 — the deployment notice: what a production deployment
+  // keeps on its own disk because nobody set OS_DATABASE_URL, OS_AUTH_SECRET or
+  // OS_SECRET_KEY, shown to administrators on the home page and at the top of
+  // Setup's System Overview (`app-shell` `DeploymentNotice`). `{{file}}` is a
+  // path on the server, printed verbatim. `copy.*` are comment lines of the
+  // variables the copy button puts on the clipboard.
+  deploymentNotice: {
+    title: "This server keeps your data and secrets on its own disk",
+    titleLow: "Finish setting up this deployment",
+    intro: "Nobody set where this production deployment keeps them. Hand the settings below to whoever runs the server, so that replacing it loses nothing.",
+    finding: {
+      databaseLocalFile: "Your business data is a file on this server ({{file}}). Replacing the server or its disk loses it.",
+      authSecretGenerated: "The sign-in secret was generated on this server. If it is lost, everyone is signed out.",
+      dataKeyFile: "The key that encrypts saved passwords and API keys is a file on this server ({{file}}). If it is lost, they can no longer be read.",
+      fileStorageLocal: "Uploaded files are kept on this server's disk.",
+      emailNotConfigured: "No email service is set up, so invitations and password resets are not sent by email.",
+    },
+    copy: {
+      button: "Copy the settings",
+      database: "Your database, e.g. postgres://user:pass@db-host:5432/app, or file:/path/on/a/kept/volume/app.db. Today the data is in {{file}}: move it over before you switch.",
+      carryOver: "Carry the current value over: the contents of {{file}}",
+      newValue: "A long random value, the same on every restart, e.g. the output of: openssl rand -hex 32",
+    },
+    copied: "Copied",
+    hide: "Hide",
+    hideNoAuditLog: "This deployment keeps no audit log, so the notice cannot be hidden.",
+    hideFailed: "The notice could not be hidden. Try again.",
+    hiddenLine: "The deployment notice is hidden. What it states still applies.",
+    showAgain: "Show again",
+  },
   // The AI HITL approval inbox (`@object-ui/plugin-chatbot`'s
   // `AiPendingActionsInbox`) — objectui#7173. Its four relative-time phrases
   // are NOT here: it borrows `detail.justNow` / `minutesAgo` / `hoursAgo` /
@@ -4511,6 +4931,7 @@ const en = {
     tabAll: 'All',
     statusPending: 'Pending',
     statusApproved: 'Approved',
+    statusHeld: 'Waiting for approval',
     statusExecuted: 'Executed',
     statusFailed: 'Failed',
     statusRejected: 'Rejected',
@@ -4628,11 +5049,12 @@ const en = {
       create_metadata: 'Create a metadata item',
       create_object: 'Create an object',
       create_package: 'Create a package',
+      create_record: 'Create the record',
       create_seed: 'Generate sample data',
       delete_field: 'Delete a field',
+      delete_package: 'Delete a package',
       describe_metadata: 'Look at the metadata',
       describe_object: 'Look at the object structure',
-      draft_record: 'Draft the new record',
       get_active_package: 'Check the active package',
       get_authoring_rules: 'Read the authoring rules',
       get_metadata_schema: 'Read the metadata format',
@@ -4644,12 +5066,14 @@ const en = {
       modify_field: 'Change a field',
       open_record: 'Open the record',
       propose_blueprint: 'Draft the app plan',
+      remove_sample_data: 'Remove the sample data',
       set_active_package: 'Switch to the target package',
       suggest_builder: 'Suggest building it with AI',
       test_flow: 'Try out the flow',
       todo_write: 'Note follow-up checks',
       toggle_flow: 'Turn the flow on or off',
       update_metadata: 'Update a metadata item',
+      update_record: 'Change the record',
       validate_expression: 'Check the expression',
       verify_build: 'Check the build',
     },
@@ -4767,35 +5191,14 @@ const en = {
     buyCredits: 'Buy a credit pack',
     upgradePlan: 'Upgrade plan',
   },
-  // Plan-tier labels, keyed by the TIER rather than by the surface that draws
-  // them, so every plan-locked mark reuses one string (objectui#12190). The zh
-  // value follows the cloud control plane's own zh plan label.
-  planTier: {
-    teamAndUp: 'Team plan and up',
-  },
   environment: {
     setUpProduction: 'Set up your production environment',
-    addDevelopment: 'Add development environment',
-    // The plan-locked stand-in for the create action (objectui#12190).
-    // `{{tier}}` is a `planTier.*` label.
-    developmentLocked: 'Development environments · {{tier}}',
-    // Plan/capacity dialog (EnvironmentEntitlementDialog). Shown on a paid
-    // conversion path, so it must read in the user's language — cloud#959.
+    // Capacity dialog (EnvironmentEntitlementDialog). It must read in the
+    // user's language — cloud#959.
     entitlement: {
       productionLimitTitle: 'You already have your production environment',
       productionLimitBody:
         'Each organization includes exactly one production environment. Create a separate organization for another, or contact us about an Enterprise arrangement.',
-      planLockedTitle: 'Development environments are a paid feature',
-      planLockedBody:
-        'Your {{plan}} includes one production environment. Upgrade to add development environments — build in dev, then publish to production.',
-      limitTitle: 'Development environment limit reached',
-      limitBody:
-        'Capacity scales with AI seats. Add an AI seat, or archive an unused development environment to free one up.',
-      limitBodyWithCount:
-        'You are using {{used}} of {{limit}} development environments. Capacity scales with AI seats — add an AI seat, or archive an unused development environment to free one up.',
-      freePlan: 'free plan',
-      namedPlan: '{{plan}} plan',
-      upgradeCta: 'Upgrade plan',
       contactSalesCta: 'Contact sales',
     },
   },
@@ -4835,23 +5238,16 @@ const en = {
       connect: 'Connect',
     },
   },
+  // The rest of `marketplace.*` is the lazy `marketplace` namespace
+  // (`../namespaces/marketplace/en.ts`), fetched when a marketplace page
+  // mounts. What stays here is read by a page outside the marketplace route:
+  // Studio's packages page draws a marketplace install's row through
+  // `MarketplaceRowActions` and `MarketplaceNotLoaded` (the Not loaded badge
+  // and reason, Uninstall with its confirmation and result), and an import's
+  // refusal and protocol note through `useDependencyMissingText` and
+  // `useProtocolCheckSkippedText`.
   marketplace: {
-    title: 'App Marketplace',
-      subtitle: 'Browse approved apps published to the ObjectStack catalog. Click an app to view details and install it into one of your environments.',
-      searchPlaceholder: 'Search apps by name or app ID…',
-      searchAria: 'Search marketplace apps',
-      installed: 'Installed',
-      installedCount: 'Installed ({{count}})',
-      refresh: 'Refresh',
-      all: 'All',
-      noApprovedYet: 'No apps have been approved for the marketplace yet.',
-      noMatchFilters: 'No apps match your filters.',
-      noDescription: 'No description provided.',
-      back: 'Back to marketplace',
-      browseLink: 'Browse the marketplace →',
       installedAdditiveNote: 'Uninstall removes the app from the running kernel at once, together with its permission sets and their grants, and deletes the cached manifest so the package does not load at the next start. Records stored in its objects stay in the database.',
-      versionBadge: 'v{{version}}',
-      installedBadge: 'Installed v{{version}}',
       // objectui#11645 — an install-local entry this runtime refused to load at
       // startup (the listing's `notLoaded` marker), read on Installed Apps.
       notLoaded: {
@@ -4859,83 +5255,18 @@ const en = {
         protocolIncompatible: 'This runtime did not load this package: it targets protocol {{requiredRange}}, which this runtime does not support.',
         otherReason: 'This runtime did not load this package ({{code}}).',
       },
-      load: {
-        failed: 'Failed to load marketplace',
-        failedHintConfigured: 'This runtime reaches the marketplace through the control plane at {{url}}. Check that it is online and reachable from here.',
-        failedHintSameOrigin: 'The marketplace catalog is reached through this runtime. Check that the runtime is online and can reach the catalog.',
-        loading: 'Loading the marketplace catalog…',
-        slow: 'Still loading — the marketplace catalog is slow to answer.',
-        retry: 'Retry',
-        unreachable: 'The marketplace catalog could not be reached.',
-        answeredError: 'The marketplace catalog answered with an error (HTTP {{status}}).',
-        packageFailed: 'Failed to load package',
-        notFound: 'Not found.',
-      },
-      disabled: {
-        title: 'App Marketplace is turned off',
-        description: 'This runtime has no marketplace configured, so there is nothing to browse or install from here.',
-        hint: 'That is the expected state when the runtime is started with <code>OS_CLOUD_URL=off</code> (or <code>none</code>, <code>local</code>, <code>disabled</code>). To turn the marketplace on, point <code>OS_CLOUD_URL</code> at a control plane and restart the runtime.',
-      },
-      detail: {
-        homepage: 'Homepage',
-        installedV: 'Installed · v{{version}}',
-        about: 'About',
-        noReadme: 'No readme provided.',
-        versions: 'Versions',
-        noApprovedVersions: 'No approved versions.',
-        prerelease: 'pre',
-        moreOptions: 'More install options',
-        uninstallFromRuntime: 'Uninstall from this runtime',
-        addSampleData: 'Add sample data',
-        reseedAgain: 'Re-seed sample data',
-        purgeSampleData: 'Purge sample data',
-        purgeConfirm: 'Delete all sample records seeded by this package? User-added records will NOT be touched.',
-        purgeSuccess: 'Removed {{count}} sample record(s).',
-        purgeSuccess_one: 'Removed {{count}} sample record.',
-        purgeSuccess_other: 'Removed {{count}} sample records.',
-        purgeNoData: 'No sample records found to purge.',
-        reseedQueued: 'Sample data will be re-seeded on next environment access.',
-        reseedLocalSuccess: 'Re-seeded sample data: {{inserted}} inserted, {{updated}} updated.',
-        reseedPartialErrors: '({{count}} record(s) failed to write)',
-        reseedPartialErrors_one: '({{count}} record failed to write)',
-        reseedPartialErrors_other: '({{count}} records failed to write)',
-        sampleDataKernelUnavailable: 'This control plane has no environment kernel, so sample data cannot be re-seeded or purged from here. Do it from the environment\'s own runtime.',
-        updateAvailable: 'Update available',
-      },
-      action: {
-        install: 'Install',
-        reinstall: 'Reinstall',
-        working: 'Working…',
-        installToCloud: 'Install to cloud…',
-        installed: 'Installed',
-        installing: 'Installing…',
-        updating: 'Updating…',
+    action: {
         uninstall: 'Uninstall',
         uninstalling: 'Uninstalling…',
         details: 'Details',
-        close: 'Close',
-        dismiss: 'Dismiss',
-        openOnCloud: 'Open on cloud',
-        backHome: 'Back to home',
-        updateTo: 'Update',
-      },
-      install: {
-        dialogTitle: 'Install {{name}}',
-        dialogDescCurrent: 'Install into this environment ({{host}}).',
-        dialogDescPicker: 'Choose an environment to install this app into. You need to be signed into ObjectOS Cloud.',
-        environment: 'Environment',
-        environmentPlaceholder: 'Pick an environment',
-        includeSampleData: 'Include sample data',
-        noEnvs: 'No environments found in your active organization.',
-        noPermission: 'You do not have permission to install apps in any environment. Only organization owners and admins can install — ask your organization admin.',
-        signInFirst: 'You need to sign into ObjectOS Cloud first. Click "Open on cloud" below.',
-        success: 'Installed successfully. Open the environment to see the new app.',
-        localSuccess: 'Installed v{{version}} to this runtime. "{{name}}" should now appear in the app switcher.',
-        // objectui#12098 — the install answered `hotLoaded: false`: installed, and
-        // the running kernel did not register it (objectstack#22695), so nothing
-        // of it is served before the next restart.
-        localLoadsAtRestart: 'Installed v{{version}} to this runtime. "{{name}}" loads when the runtime next restarts; it does not appear in the app switcher until then.',
-        localManifestConflict: '{{message}}\nTip: a local app already owns this manifest_id. Remove it from objectstack.config.ts first.',
+    },
+    uninstall: {
+        confirm: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe app will leave the running kernel at once, together with its permission sets and their grants, and its cached manifest will be removed. Records stored in its objects stay in the database.',
+        confirmNotLoaded: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe cached manifest will be removed. This runtime did not load the package, so none of it is running.',
+        successInList: 'Removed {{manifestId}}: the app has left the running kernel, with its permission sets and their grants. Records stored in its objects stay in the database.',
+        successNotLoaded: 'Removed {{manifestId}}. It was not loaded, so no restart is needed.',
+    },
+    install: {
         // ADR-0141 D2 — the install refusal DEPENDENCY_MISSING, one line per unmet entry.
         dependencyMissing: {
           heading: 'Install refused: a dependency this package declares is not satisfied in this environment, so nothing was installed.',
@@ -4945,130 +5276,13 @@ const en = {
           unreadableVersion: 'Install a release version of {{dependency}} inside {{range}}. The installed version {{installedVersion}} is not MAJOR.MINOR.PATCH.',
           unreadableDeclaration: '{{packageId}} declares its dependencies in a shape install cannot read. Write them as a map from package ID to version range and republish the package.',
         },
-        localUnauthorized: 'Sign in to this runtime first, then try again.',
-        localMarketplaceUnavailable: 'This runtime has no OS_CLOUD_URL configured, so the marketplace catalog is unreachable.',
-        updateTo: 'Update → v{{version}}',
-        installedVersion: 'Installed v{{version}}',
-        // objectui#12087 — an install into THIS environment, from its answer
-        // until the runtime serves the package's app (MarketplacePackagePage).
-        deploying: 'Deploying the app…',
-        deployed: 'The app is deployed and ready.',
-        openApp: 'Open {{name}}',
-        deployTimeout: 'The install was recorded, but this environment is not serving the app yet. It may still be deploying — check again shortly. If it never appears, the package may not have loaded, may include no app, or its app may need a permission you do not hold.',
-        checkAgain: 'Check again',
-        // ADR-0131 D6 — the install modes a package's manifest permits, and
-        // what an unmanaged install answers (MarketplacePackagePage).
-        mode: {
-          label: 'Install mode',
-          managed: 'Managed',
-          managedHint: 'The package stays the authority: it is registered as code, receives its upgrades, and its items are not edited here.',
-          unmanaged: 'Unmanaged copy',
-          unmanagedHint: 'Copied once into this runtime as its own metadata: every item is editable here, and the copy receives no upgrade.',
-          required: 'Choose an install mode to install this package.',
+        // objectstack#30326 — the install answer's data.protocolCheckSkipped: installed, the protocol range unchecked.
+        protocolCheckSkipped: {
+          noRange: '{{packageId}} does not state which platform protocol it supports, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares the protocol it supports (engines.protocol) is checked at install.',
+          unparsedRange: '{{packageId}} states its platform protocol as {{requiredRange}}, which this runtime cannot read, so it was installed under protocol {{protocolVersion}} without a compatibility check and may not work on this platform version. A build of the package that declares a range this runtime reads (engines.protocol) is checked at install.',
         },
-        unmanagedSuccess: 'Copied v{{version}} of "{{name}}" into this runtime as its own metadata, in the base {{base}}. The copy is editable and receives no upgrade.',
-        unmanagedStrippedLocks: 'The package locked these items. The copy is editable, so their locks were not copied:',
-        unmanagedIgnored: 'This runtime does not support unmanaged installs, so "{{name}}" was installed managed (registered as code) instead of copied. Upgrade the runtime, then uninstall the package and install it again as an unmanaged copy.',
-      },
-      // objectui#12146 — the install dialog opened as an UPDATE of the copy
-      // this environment holds (MarketplacePackagePage).
-      update: {
-        dialogTitle: 'Update {{name}}',
-        dialogDescCurrent: 'Update the copy installed in this environment ({{host}}).',
-        dialogDescPicker: 'Choose the environment whose installed copy to update. You need to be signed into ObjectOS Cloud.',
-        majorNotice: 'This is a major version update (v{{fromMajor}} → v{{toMajor}}), which may include breaking changes.',
-        releaseNotes: 'Read the v{{version}} release notes',
-        success: 'Updated to v{{version}}.',
-        deployTimeout: 'The update was recorded, but this environment is not serving v{{version}} yet. It may still be deploying — check again shortly.',
-      },
-      // objectui#3546 — the MarketplacePage "Your organization" strip.
-      org: {
-        heading: 'Your organization',
-        install: 'Install',
-        installed: 'Installed {{name}}',
-        installedBadge: 'Installed',
-        installing: 'Installing…',
-      },
-      // ADR-0025 PD4 §3.5/§3.11 — the pre-install consent panel
-      // (PluginDisclosure.tsx). `runtime` is a CLOSED enum: spec
-      // PluginRuntimeSchema = z.enum(['node', 'sandbox', 'worker']).
-      disclosure: {
-        containsCode: 'This package contains code',
-        reviewed: 'Reviewed & approved',
-        unreviewed: 'Not yet reviewed',
-        signed: 'Signed',
-        grantsIntro: 'This package requests:',
-        notEnforced: 'Recorded at install, and re-confirmed if a later version asks for more — but the runtime does not yet restrict the package to this list.',
-        services: 'Platform services',
-        hooks: 'Lifecycle hooks',
-        network: 'Network access',
-        fs: 'Filesystem access',
-        noPermissions: 'Requests no special permissions.',
-        acknowledge: 'I understand this package runs code and grants the permissions above.',
-        runtime: {
-          node: 'In-process · full trust',
-          sandbox: 'Sandboxed',
-          worker: 'Out-of-process',
-        },
-      },
-      // ADR-0090 D5/D9 — a package's isDefault permission set is an
-      // install-time suggestion to bind it to the everyone/guest position;
-      // the admin confirms here, the server never auto-binds.
-      suggestedBindings: {
-        promptEveryone: 'This app suggests granting "{{set}}" to all signed-in users (the Everyone position).',
-        promptGuest: 'This app suggests granting "{{set}}" to unauthenticated visitors (the Guest position).',
-        confirm: 'Grant',
-        confirming: 'Granting…',
-        dismiss: 'Dismiss',
-        confirmedToast: '"{{set}}" is now granted to {{anchor}}.',
-        dismissedToast: 'Suggestion for "{{set}}" dismissed.',
-        guestUnsupported: 'Cannot be granted here: the Guest position takes no sets from accepted suggestions.',
-        acceptedState: '"{{set}}" was accepted for all signed-in users (the Everyone position).',
-        notInForceState: '"{{set}}" was accepted but is not in force yet: the Everyone position did not change on this request. The server log says why.',
-        dismissedState: '"{{set}}" is not granted: the suggestion was dismissed or revoked.',
-        revoke: 'Revoke',
-        revoking: 'Revoking…',
-        revokedToast: 'Acceptance of "{{set}}" revoked.',
-      },
-      uninstall: {
-        confirm: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe app will leave the running kernel at once, together with its permission sets and their grants, and its cached manifest will be removed. Records stored in its objects stay in the database.',
-        successInList: 'Removed {{manifestId}}: the app has left the running kernel, with its permission sets and their grants. Records stored in its objects stay in the database.',
-        successInDetail: 'Removed {{manifestId}} and its cached manifest: the app has left the running kernel, with its permission sets and their grants. Records stored in its objects stay in the database.',
-        confirmNotLoaded: 'Uninstall {{manifestId}} v{{version}} from this runtime?\n\nThe cached manifest will be removed. This runtime did not load the package, so none of it is running.',
-        successNotLoaded: 'Removed {{manifestId}}. It was not loaded, so no restart is needed.',
-      },
-      accessDenied: {
-        title: 'App Marketplace is admin-only',
-        description: 'You don\'t have permission to install apps in this environment. Ask an owner or admin of this organization for access.',
-      },
-      category: {
-        crm: 'CRM',
-        erp: 'ERP',
-        hr: 'Human Resources',
-        finance: 'Finance',
-        project: 'Project Management',
-        collaboration: 'Collaboration',
-        analytics: 'Analytics',
-        integration: 'Integration',
-        automation: 'Automation',
-        ai: 'AI',
-        security: 'Security',
-        'developer-tools': 'Developer Tools',
-        'ui-theme': 'UI Theme',
-        storage: 'Storage',
-        other: 'Other',
-      },
-      relativeTime: {
-        today: 'today',
-        daysAgo: '{{count}}d ago',
-        monthsAgo: '{{count}}mo ago',
-        monthsAgo_one: '{{count}}mo ago',
-        monthsAgo_other: '{{count}}mo ago',
-        yearsAgo: '{{count}}y ago',
-        yearsAgo_one: '{{count}}y ago',
-        yearsAgo_other: '{{count}}y ago',
-      },
     },
+  },
   approvalsInbox: {
     recordUnresolvable: 'This record cannot be opened',
     loadMore: 'Load more',
@@ -5685,15 +5899,23 @@ const en = {
     clientKeptWithSecret: 'OAuth client {{clientId}}, secret stored',
     clientKept: 'OAuth client {{clientId}}, no secret',
     clientTitle: 'OAuth client for {{name}}',
-    clientIntro: 'This connector signs in with an OAuth client your organization registers with the vendor for this deployment. Enter its client ID, and its client secret if the vendor issued one, then continue to the vendor\'s sign-in. The Connectors documentation describes the redirect URI to register with the client.',
+    clientIntro: 'This connector signs in with an OAuth client your organization registers with the vendor for this deployment, using the redirect URI below. Enter the client\'s ID, and its secret if the vendor issued one, then continue to the vendor\'s sign-in.',
     clientStored: 'Stored client: {{clientId}}',
     clientStoredSecret: 'A client secret is stored with it. It is never shown.',
     clientStoredNoSecret: 'No client secret is stored with it.',
-    clientResend: 'Reconnecting sends the client again: keep the client ID and enter its secret again if it has one, or enter another client to replace it.',
+    clientResend: 'Replacing it sends a new client: enter its client ID, and its secret if the vendor issued one.',
     clientId: 'Client ID',
     clientSecret: 'Client secret',
     clientSecretHint: 'Leave it empty for a public client. The secret is stored encrypted with the connection and never shown again.',
     clientContinue: 'Continue to sign-in',
+    redirectUriLabel: 'Redirect URI',
+    redirectUriCopy: 'Copy',
+    redirectUriCopied: 'Copied',
+    redirectUriHint: 'Register this exact URI with the vendor\'s OAuth client before you continue.',
+    redirectUriMissing: 'This deployment has no fixed public address, so it has no redirect URI and a connect is refused. Set OS_BASE_URL (or OS_AUTH_URL) on the server.',
+    clientKeepHint: 'Reconnecting keeps this client and its stored secret; nothing is entered here.',
+    clientKeep: 'Keep the stored client',
+    clientReplace: 'Replace the stored client',
   },
   // Setup → People & organization: Position holders and Permission set
   // assignment (ADR-0146 D7).

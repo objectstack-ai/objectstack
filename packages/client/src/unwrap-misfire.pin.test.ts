@@ -48,6 +48,7 @@ import {
   RevertPackageCommitResponseSchema,
   RollbackToPackageCommitResponseSchema,
   PackageExportManifestSchema,
+  PackageExportBundleSchema,
   ReassignOrphanedMetadataResponseSchema,
   DuplicatePackageResponseSchema,
 } from '@objectstack/spec/api';
@@ -71,6 +72,9 @@ const BOUND_PAYLOAD_SCHEMAS: ReadonlyArray<readonly [string, unknown]> = [
   ['RevertPackageCommitResponseSchema', RevertPackageCommitResponseSchema],
   ['RollbackToPackageCommitResponseSchema', RollbackToPackageCommitResponseSchema],
   ['PackageExportManifestSchema', PackageExportManifestSchema],
+  // [#28914] `packages.exportAll` — `{ packages }`, strict; each entry is the
+  // export manifest above, so its open half is covered by the plural pin below.
+  ['PackageExportBundleSchema', PackageExportBundleSchema],
   ['ReassignOrphanedMetadataResponseSchema', ReassignOrphanedMetadataResponseSchema],
   ['DuplicatePackageResponseSchema', DuplicatePackageResponseSchema],
 ];

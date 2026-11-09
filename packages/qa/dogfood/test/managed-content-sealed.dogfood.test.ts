@@ -9,7 +9,7 @@
 //
 //   PUT    /meta/flow/crm_convert_lead_wizard          200, an overlay row
 //   PUT    /meta/object/crm_lead (a field relabelled)  200, an overlay row
-//   PUT    /meta/position/sales_rep                    200, an overlay row
+//   PUT    /meta/position/crm_sales_rep                200, an overlay row
 //   PUT    /automation/crm_convert_lead_wizard         200, re-registered
 //   DELETE /meta/flow|object/... over a stored row     200, the row removed
 //   DELETE /meta/object/crm_lead?dropStorage=true      200 — and the managed
@@ -51,7 +51,7 @@ const HATCH = 'flow,object,field,permission,position';
 const FLOW = 'crm_convert_lead_wizard';
 const OBJECT = 'crm_lead';
 const PERMISSION = 'crm_sales_user';
-const POSITION = 'sales_rep';
+const POSITION = 'crm_sales_rep';
 const VIEW = 'crm_opportunity.all';
 
 type Json = Record<string, any>;

@@ -406,6 +406,16 @@
       permanently pending one now — and it stays detectable: the
       `#root`-content assertion in `e2e/console-rendering.spec.ts` reads the
       React root, which this does not touch.
+
+      RETRY. One cause of a bundle that never evaluates is passing: the server
+      went away between serving this page and serving its entry module, as it
+      does while `os dev` restarts. So when a module script fails to load before
+      anything has mounted, the page reloads itself, backing off (1, 2, 4, 8 and
+      16 seconds), at most five times per tab; the count lives in
+      sessionStorage and is cleared on the first mount. Where that storage
+      cannot be read the count cannot be bounded, so nothing retries. After the
+      last attempt the splash stays, as above. No copy is drawn: there is no
+      locale pack to translate it with before the bundle loads.
     -->
     <script>
       (function installBootSplash() {
@@ -422,10 +432,47 @@
         var dark = stored === 'dark' || (followsOs && prefersDark);
         document.documentElement.setAttribute('data-boot-theme', dark ? 'dark' : 'light');
 
+        var RETRY_KEY = 'os-boot-entry-retries';
+        var MAX_RETRIES = 5;
+        function readRetries() {
+          try {
+            return Number(sessionStorage.getItem(RETRY_KEY)) || 0;
+          } catch (_) {
+            return null;
+          }
+        }
+        function writeRetries(count) {
+          try {
+            if (count) sessionStorage.setItem(RETRY_KEY, String(count));
+            else sessionStorage.removeItem(RETRY_KEY);
+          } catch (_) {
+            /* storage blocked — readRetries answers null, so nothing retries */
+          }
+        }
+        function mounted() {
+          var root = document.getElementById('root');
+          return !!(root && root.firstChild);
+        }
+        window.addEventListener(
+          'error',
+          function (event) {
+            var el = event.target;
+            if (!el || el.tagName !== 'SCRIPT' || el.type !== 'module' || !el.src) return;
+            if (mounted()) return;
+            var tries = readRetries();
+            if (tries === null || tries >= MAX_RETRIES) return;
+            writeRetries(tries + 1);
+            setTimeout(function () {
+              if (!mounted()) location.reload();
+            }, 1000 * Math.pow(2, tries));
+          },
+          true,
+        );
+
         if (typeof MutationObserver !== 'function') return;
         var observer = new MutationObserver(function () {
-          var root = document.getElementById('root');
-          if (!root || !root.firstChild) return;
+          if (!mounted()) return;
+          writeRetries(0);
           observer.disconnect();
           var splash = document.getElementById('boot-splash');
           if (splash && splash.parentNode) splash.parentNode.removeChild(splash);

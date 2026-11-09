@@ -123,10 +123,13 @@ const REFUSED_DELEGATE = { userId: 'usr_ag_refused_delegate', tenantId: ORG, pos
  * principal whose self-explanation keeps the write path's notion under ruling
  * C, because its by-id write doors do not treat its refused read as absence.
  */
-const EDIT_ONLY_SET = PermissionSetSchema.parse({
+// Edit or delete without read: the authoring schema refuses this shape (an
+// object permission that edits or deletes a record also reads it), so it is
+// built raw — the shape a row stored before that refusal still carries.
+const EDIT_ONLY_SET = {
   name: 'qa_ag_edit_only',
   objects: { [BOARD]: { allowEdit: true, allowDelete: true, allowTransfer: true } },
-});
+} as unknown as ReturnType<typeof PermissionSetSchema.parse>;
 const EDIT_ONLY_USER = 'usr_ag_edit_only';
 const EDIT_ONLY = { userId: EDIT_ONLY_USER, tenantId: ORG, positions: [] as string[], permissions: [EDIT_ONLY_SET.name] };
 /** Per write verb, a board the edit-only principal's own door writes, so a door that lands changes no other case's row. */
@@ -443,7 +446,11 @@ describe('[#22851] ruling C: a refused read is "cannot read" only for an asker e
     }
   }
 
-  for (const verb of VERBS) {
+  // An object permission that edits or deletes a record also reads it: the
+  // stored edit-only set grants neither verb, and the transfer door here is a
+  // by-id UPDATE of the owner, which asks the same edit grant. So the write
+  // verbs get their own control below, and this one keeps the read verbs.
+  for (const verb of VERBS.filter((v) => !WRITE_VERBS.includes(v))) {
     it(`control, ${verb}: a principal explaining itself keeps the write path's notion, so a refused read is not the missing record`, async () => {
       const id = WRITE_VERBS.includes(verb) ? editOnlyRowOf(verb) : HIDDEN;
       const self = await explainAs(EDIT_ONLY, verb, id);
@@ -462,6 +469,20 @@ describe('[#22851] ruling C: a refused read is "cannot read" only for an asker e
       } else {
         expect(self.record, verb).toEqual({ recordId: id, visible: false, decidedBy: 'object_crud' });
       }
+    });
+  }
+
+  for (const verb of ['update', 'delete'] as const) {
+    it(`control, ${verb}: a stored set granting ${verb} without read is refused by the door and by explain, for the row and a nonexistent id alike`, async () => {
+      const id = editOnlyRowOf(verb);
+      const self = await explainAs(EDIT_ONLY, verb, id);
+      const nonexistent = await explainAs(EDIT_ONLY, verb, NONEXISTENT);
+      expect(self.layers.find((l) => l.layer === 'object_crud')?.verdict, verb).toBe('denies');
+      expect(self.record, verb).toEqual({ recordId: id, visible: false, decidedBy: 'object_crud' });
+      expect(nonexistent.record, verb).toEqual({ recordId: NONEXISTENT, visible: false, decidedBy: 'object_crud' });
+      const row = await doorAs(EDIT_ONLY, verb, id);
+      expect(row, `${verb} door`).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
+      expect(await doorAs(EDIT_ONLY, verb, NONEXISTENT), `${verb} door, nonexistent`).toEqual(row);
     });
   }
 

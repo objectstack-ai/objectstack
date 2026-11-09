@@ -285,6 +285,10 @@ export const FieldErrorCode = z.enum([
   'invalid_value',              // rejected for a reason no other member names
   'reference_not_found',        // a lookup target that does not exist
   'reference_ambiguous',        // a lookup that matched more than one record
+  // a lookup to `sys_user` that names a user whose ban is in force: the write
+  // ADDS work for someone who cannot sign in, so it is refused (a value the
+  // row already stores is not the write's, as for `reference_not_found`).
+  'reference_user_banned',
   // declarative rules layered above the field's own type
   'rule_violation',             // a validation rule said no
   'json_schema_violation',      // a declared JSON Schema said no

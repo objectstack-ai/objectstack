@@ -22,6 +22,12 @@ export * from './artifact-packages.js';
 // `@objectstack/cloud-connection`'s ledger rehydrate), and it sorts with
 // `resolvePluginOrder` above.
 export * from './hydration-order.js';
+// [ADR-0150 D3, epic #31527 child R2] The one rule for which package's item a
+// bare name means: D3's steps over a holder set and a closure the caller
+// supplies, and the refusal vocabulary. Here because its readers sit inside
+// objectql's lean entry, below it (the security catalog) and above it; every
+// one of them already depends on this package.
+export * from './package-scoped-resolution.js';
 // [#22301] The two halves of resolving an app's `requires` that `os serve`
 // (`@objectstack/cli`) and the verification handle (`@objectstack/verify`) both
 // read — the package-owned collection reader (ADR-0130 D4) and the token →
@@ -86,6 +92,14 @@ export * from './utils/datetime.js';
 // two doubles.
 export * from './utils/compensated-sum.js';
 export * from './utils/json-membership-sql.js';
+// [#31394] #6518's text-match construct table, moved from `driver-sql` for the
+// reason `json-membership-sql` above was: the analytics compilers need the same
+// arms and depend on no driver.
+export * from './utils/text-match-sql.js';
+// [#31626] SQL Server's row window (`TOP` / `ORDER BY (SELECT NULL)` / `OFFSET
+// … FETCH`), moved from `driver-sql` for the same reason: the analytics echo
+// prints the window the driver runs.
+export * from './utils/mssql-window-sql.js';
 // [#20889] What an aggregate ANSWERS and its `'number'` presenter, moved from
 // `driver-sql` so the analytics native-SQL face presents with the same rule.
 export * from './utils/aggregate-answer.js';

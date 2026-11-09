@@ -35,7 +35,8 @@ import { render, cleanup, fireEvent, screen, waitFor } from '@testing-library/re
 import '@testing-library/jest-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import { en, zh } from '@object-ui/i18n/locales';
-import { UploadProvider, type UploadAdapter } from '@object-ui/providers';
+import { UploadProvider } from './UploadProvider';
+import type { UploadAdapter } from '@object-ui/types';
 import { ImageField } from './ImageField';
 import type { FieldWidgetComponentProps } from './types';
 

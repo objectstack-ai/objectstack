@@ -50,12 +50,28 @@
  * session impersonated keeps the banner up and states what happened. Silently
  * appearing to succeed would be strictly worse than the original defect —
  * the operator would go back to ordinary work believing they were themselves.
+ *
+ * ## Starting one lands on home
+ *
+ * An administrator starts an impersonation from a Setup page, and the user they
+ * become usually cannot open Setup: left where it was, the console would answer
+ * the page the administrator was on with "no access to this app". So the moment
+ * a session this console already held as an ordinary one becomes impersonated,
+ * the banner navigates to `/`, where the console resolves the landing for the
+ * identity it now holds. Only that transition moves the page: a console that
+ * boots into an impersonated session (a reload, a new tab, a deep link) stays on
+ * the URL it was opened at, and ending an impersonation moves nothing.
+ *
+ * The navigate is the host's (`useHostNavigation`), which the console supplies
+ * from its router so the deployment's basename applies. A tree with no host
+ * navigate, such as a test that mounts the banner alone, does not move.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UserCog } from 'lucide-react';
 import { Button } from '@object-ui/components';
-import { createAuthenticatedFetch } from '@object-ui/auth';
+import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
+import { useHostNavigation } from '@object-ui/react';
 import { GetDataResponseSchema } from '@objectstack/spec/api';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { PERSON_DISPLAY_FIELDS, rowLabel } from '../utils/approverIdentity.js';
@@ -108,6 +124,30 @@ function useAdministratorName(adminId: string | undefined): AdministratorName {
   return answer.name;
 }
 
+/** What the last render saw: whether a session was resolved, and whom it impersonated. */
+interface ObservedSession {
+  resolved: boolean;
+  impersonatedBy: string | undefined;
+}
+
+/**
+ * Navigate home when an ordinary session this console held becomes
+ * impersonated. See the module header for which transitions move the page.
+ */
+function useLandOnImpersonationStart(impersonatedBy: string | undefined): void {
+  const { session } = useAuth();
+  const { navigate } = useHostNavigation();
+  const resolved = session != null;
+  const previous = useRef<ObservedSession | null>(null);
+
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = { resolved, impersonatedBy };
+    if (!navigate || !impersonatedBy) return;
+    if (before?.resolved && !before.impersonatedBy) navigate('/');
+  }, [resolved, impersonatedBy, navigate]);
+}
+
 export function ImpersonationBanner() {
   const { t } = useObjectTranslation();
   // The exit itself — request, token adoption, outcome — is shared with the
@@ -116,6 +156,7 @@ export function ImpersonationBanner() {
   const { impersonatedBy, impersonatedName, stop, stopping, stopError, notRestored } =
     useImpersonationExit();
   const administrator = useAdministratorName(impersonatedBy);
+  useLandOnImpersonationStart(impersonatedBy);
 
   // Nothing to say on an ordinary session. Below every hook, so the hook order
   // is stable across the transition out of impersonation.

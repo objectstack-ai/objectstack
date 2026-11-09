@@ -110,6 +110,13 @@
           "evidence": "packages/spec/src/data/field-group-layout.ts#readGroup (carried verbatim, bare CEL or envelope); ui/packages/plugin-form/src/fieldGroups.ts#deriveFieldGroupSections (onto the form section, with `visibleWhenFault: 'hidden'`); ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#deriveFieldGroupDetailEntries (beside the detail section for `record:details` to evaluate per record)",
           "note": "ADR-0089 group predicate, fail-closed: FALSE hides the whole group, header included."
         },
+        "requiresFeature": {
+          "status": "live",
+          "verifiedAt": "2026-11-06",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/spec/src/data/object.zod.ts#ObjectFieldGroupSchema (the key, and the transform that lowers it); packages/spec/src/kernel/public-auth-features.ts#lowerRequiresFeature (lowered at parse into the group's `visibleWhen`, stripped from the output)",
+          "note": "#30692, ruling 6670372892 on #30210 (row 4 A). Sugar for the flag's gate on `visibleWhen` (AND-composed after an authored predicate), from the same `PUBLIC_AUTH_FEATURES` set an action's `requiresFeature` names; no consumer ever reads the key itself. It is enforced where `visibleWhen` is (the row above): the form section gate and the record page's `record:details` evaluate a group predicate with the host's `features` root in scope (`usePredicateScope`), so the gate holds on both."
+        },
         "collapse": {
           "status": "live",
           "verifiedAt": "2026-10-28",

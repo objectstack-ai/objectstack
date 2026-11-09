@@ -170,6 +170,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -268,7 +269,7 @@ describe('the fallback only ever meets placeholders it can resolve (objectui#351
     it('the walk reaches real copy — not an empty assertion', () => {
       // Non-vacuity, #4118 family standard. Every assertion below is "no value
       // violates", which a broken walk satisfies trivially. Floors, not pins.
-      expect(LOCALE_CODES).toHaveLength(10);
+      expect(LOCALE_CODES).toHaveLength(PLATFORM_LOCALE_TAGS.length);
       const total = [...PACK_LEAVES.values()].reduce((n, list) => n + list.length, 0);
       expect(total).toBeGreaterThan(20_000);
       for (const code of LOCALE_CODES) {

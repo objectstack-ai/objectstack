@@ -108,6 +108,7 @@ const nullKeyedDataset = () => ({
     ],
     object: 'crm_opportunity',
     dimensionFields: { owner_name: 'owner_id' },
+    drillScopes: { deals: {} },
     drillRawRows: [{ owner_name: 'user-ada' }, { owner_name: null }],
   })),
 });
@@ -125,6 +126,7 @@ const fullyKeyedDataset = () => ({
     ],
     object: 'crm_opportunity',
     dimensionFields: { owner_name: 'owner_id' },
+    drillScopes: { deals: {} },
     drillRawRows: [{ owner_name: 'user-ada' }, { owner_name: 'user-grace' }],
   })),
 });

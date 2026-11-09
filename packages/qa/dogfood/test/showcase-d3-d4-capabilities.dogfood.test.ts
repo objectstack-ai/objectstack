@@ -29,7 +29,7 @@ import type { ISharingRuleService } from '@objectstack/spec/contracts';
 
 const MEMBER = 'd34-member@verify.test';
 /** The showcase's compound (ADR-0058 D3) sharing rule — re-homed by #9237. */
-const RULE = 'share_key_account_qualified_contacts_with_managers';
+const RULE = 'showcase_share_key_account_qualified_contacts_with_managers';
 const SYS = { context: { isSystem: true } } as const;
 
 // Member set: invoice CRUD + an OWNER read/pre-image policy AND the D4 CHECK

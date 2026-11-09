@@ -99,7 +99,10 @@ interface Answers {
   activity?: unknown;
   discussion?: unknown;
   attachments?: unknown;
+  /** Objects whose direct GET answers 500; `object@record` limits it to that record's thread. */
   failGet?: string[];
+  /** Answers for one record's page read, over the rest (objectstack#30145). */
+  byRecord?: Record<string, Pick<Answers, 'activity' | 'discussion' | 'attachments'>>;
 }
 
 interface Held { method: string; path: string; body: any; released: boolean; release: () => void }
@@ -107,7 +110,8 @@ interface Held { method: string; path: string; body: any; released: boolean; rel
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 
-function pageAnswer(id: string, body: any, answers: Answers) {
+function pageAnswer(id: string, body: any, all: Answers) {
+  const answers: Answers = { ...all, ...all.byRecord?.[id] };
   return {
     success: true,
     data: {
@@ -158,7 +162,7 @@ function heldTransport(answers: Answers) {
         method, path,
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
         released: false,
-        release: () => { if (h.released) return; h.released = true; const fail = (answers.failGet ?? []).some((o) => method === 'GET' && path.startsWith(`/api/v1/data/${o}?`)); resolve(fail ? new Response(JSON.stringify({ success: false, error: { code: 'DATABASE_ERROR', message: 'db down' } }), { status: 500, headers: { 'content-type': 'application/json' } }) : json(answerFor(h, answers))); },
+        release: () => { if (h.released) return; h.released = true; const fail = (answers.failGet ?? []).some((spec) => { const [o, rec] = spec.split('@'); return method === 'GET' && path.startsWith(`/api/v1/data/${o}?`) && (!rec || path.includes(`${OBJECT}:${rec}`)); }); resolve(fail ? new Response(JSON.stringify({ success: false, error: { code: 'DATABASE_ERROR', message: 'db down' } }), { status: 500, headers: { 'content-type': 'application/json' } }) : json(answerFor(h, answers))); },
       };
       held.push(h);
     });
@@ -203,16 +207,19 @@ async function boot(answers: Answers = {}) {
     refresh: async () => {}, invalidate: () => {},
     ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
   } as never;
-  const open = () => render(
+  const page = (id: string) => (
     <React.StrictMode>
       <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/c1`]}>
         <MetadataCtx.Provider value={metadata}>
-          <RecordDetailView dataSource={ds as never} objects={ALL as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride="c1" />
+          <RecordDetailView dataSource={ds as never} objects={ALL as never} onEdit={() => {}} objectNameOverride={OBJECT} recordIdOverride={id} />
         </MetadataCtx.Provider>
       </MemoryRouter>
-    </React.StrictMode>,
+    </React.StrictMode>
   );
-  return { held, open, ds };
+  const open = () => render(page('c1'));
+  /** Swap the record on the mounted view, as the drawers and the Console do. */
+  const navigate = (view: ReturnType<typeof render>, id: string) => view.rerender(page(id));
+  return { held, open, navigate, ds };
 }
 
 const FAIL = { error: { code: 'DATABASE_ERROR', status: 500, message: 'db down' } };
@@ -358,5 +365,98 @@ describe('objectstack#29188 — attachments (pin: main already shows the failure
     expect(view.container.querySelector('[data-testid="record-attachments-unavailable"]')).not.toBeNull();
     expect(view.container.textContent).not.toContain('No attachments yet');
     expect(RelatedCountStore.get('sys_attachment', recordAttachmentsCountField(OBJECT), 'c1')).toBeUndefined();
+  });
+});
+
+describe('objectstack#30145 — navigating away from a failed feed read does not carry it over', () => {
+  const pageReadOf = (held: Held[], id: string) =>
+    held.filter((h) => h.method === 'POST' && h.path.endsWith(`/${id}/page`));
+  const release = async (h: Held[]) => { await act(async () => { for (const x of h) x.release(); await new Promise((r) => setTimeout(r, 0)); }); await idle(); };
+
+  it('record A settled on a failure; record B, answered empty, shows the empty state and no notice', async () => {
+    const { held, open, navigate } = await boot({
+      byRecord: { c1: { discussion: FAIL, activity: NO_ACTIVITY }, c2: { discussion: NO_COMMENTS, activity: NO_ACTIVITY } },
+    });
+    const view = open();
+    await settle(held);
+    expect(failedSources(peekOf(view.container))).toEqual(['comments']);
+
+    await act(async () => { navigate(view, 'c2'); });
+    await settle(held);
+    const peek = peekOf(view.container);
+    expect(failedSources(peek)).toEqual([]);
+    expect(retryButton(peek)).toBeNull();
+    expect(peek.textContent).not.toContain(COMMENTS_FAILED);
+    expect(peek.textContent).toContain(EMPTY_ACTIVITY);
+  });
+
+  it('record A settled on a failure; record B, answered with rows, draws its rows and no notice', async () => {
+    const { held, open, navigate } = await boot({
+      byRecord: { c1: { discussion: FAIL, activity: FAIL }, c2: {} },
+    });
+    const view = open();
+    await settle(held);
+    expect(failedSources(peekOf(view.container)).sort()).toEqual(['activity', 'comments']);
+
+    await act(async () => { navigate(view, 'c2'); });
+    await settle(held);
+    const peek = peekOf(view.container);
+    expect(failedSources(peek)).toEqual([]);
+    expect(peek.textContent).not.toMatch(/couldn't load/);
+    expect(peek.textContent).toContain('hello from the payload');
+  });
+
+  it('A\'s read is still outstanding when B is opened: B shows its own state, and A\'s failure settling late stays off B', async () => {
+    const { held, open, navigate } = await boot({
+      byRecord: { c1: { discussion: FAIL, activity: FAIL }, c2: { discussion: NO_COMMENTS, activity: NO_ACTIVITY } },
+    });
+    const view = open();
+    await idle();
+    const aReads = pageReadOf(held, 'c1').filter((h) => !h.released);
+    expect(aReads.length).toBeGreaterThan(0);
+
+    await act(async () => { navigate(view, 'c2'); });
+    await idle();
+    // Answer everything but A's page read: B settles while A is still pending.
+    for (let round = 0; round < 12; round++) {
+      const pending = held.filter((h) => !h.released && !aReads.includes(h));
+      if (pending.length === 0) break;
+      await release(pending);
+    }
+    expect(failedSources(peekOf(view.container))).toEqual([]);
+    expect(peekOf(view.container).textContent).toContain(EMPTY_ACTIVITY);
+
+    // A's failure lands after the navigation: B must not show it.
+    await release(aReads);
+    await settle(held);
+    const peek = peekOf(view.container);
+    expect(failedSources(peek)).toEqual([]);
+    expect(retryButton(peek)).toBeNull();
+    expect(peek.textContent).not.toMatch(/couldn't load/);
+    expect(peek.textContent).toContain(EMPTY_ACTIVITY);
+  });
+
+  it('direct reads: A\'s sys_comment 500 settles after navigating to B, which stays clean', async () => {
+    const { held, open, navigate } = await bootDirect({ failGet: ['sys_comment@c1'] });
+    const view = open();
+    await idle();
+    const aComment = readsOf(held, 'sys_comment').filter((h) => !h.released);
+    expect(aComment.length).toBeGreaterThan(0);
+
+    await act(async () => { navigate(view, 'c2'); });
+    await idle();
+    for (let round = 0; round < 12; round++) {
+      const pending = held.filter((h) => !h.released && !aComment.includes(h));
+      if (pending.length === 0) break;
+      await release(pending);
+    }
+    expect(failedSources(peekOf(view.container))).toEqual([]);
+
+    await release(aComment);
+    await settle(held);
+    const peek = peekOf(view.container);
+    expect(failedSources(peek)).toEqual([]);
+    expect(retryButton(peek)).toBeNull();
+    expect(peek.textContent).toContain(EMPTY_ACTIVITY);
   });
 });

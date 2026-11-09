@@ -295,6 +295,35 @@ function PointerValue({ field, row }: { field: { name: string; type: string; ref
 }
 ```
 
+### Where file, image and avatar uploads go (`UploadProvider`)
+
+The file, image and avatar widgets upload through the adapter the nearest
+`UploadProvider` holds, which `useUpload()` reads. Mount it above every place
+those widgets render, dialogs included. An app on an ObjectStack server uses
+`createObjectStackUploadAdapter` from `@object-ui/data-objectstack`:
+
+```tsx
+import type { ReactNode } from 'react';
+import { UploadProvider } from '@object-ui/fields';
+import { createObjectStackUploadAdapter } from '@object-ui/data-objectstack';
+
+declare const App: () => ReactNode;
+
+const adapter = createObjectStackUploadAdapter({ baseUrl: 'https://api.example.com' });
+
+<UploadProvider adapter={adapter}>
+  <App />
+</UploadProvider>
+```
+
+Any other destination is an object with a `name` and an `upload(file, options)`
+method, typed by `UploadAdapter` from `@object-ui/types` (this package
+re-exports it with `UploadOptions` and `UploadResult`). With no provider
+mounted, `useUpload()` falls back to a local adapter that keeps the file in a
+`blob:` URL and stores nothing. The widgets refuse that result: it carries no
+`sys_file` id, so the pick shows an "upload did not complete" error and the
+field stores nothing.
+
 ### File uploads in line-item grids
 
 `GridField` (the master-detail line-items grid) supports `type: 'file'` columns:

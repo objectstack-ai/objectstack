@@ -11,7 +11,7 @@ import {
 import { normalizeFilterOperator } from '@objectstack/spec/ui';
 
 import { filterGroupRules, walkAuthoredFilters, type FilterSurface } from './filter-walk.js';
-import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from './object-graph.js';
+import { indexServedObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from './object-graph.js';
 
 /**
  * Build-time refusal of a bare dashboard date-range PRESET name authored as a
@@ -54,7 +54,7 @@ import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from 
  *   and every alias `normalizeFilterOperator` folds onto them. An ORDERED
  *   comparison against a declared preset name has no legitimate reading on
  *   ANY column, so no field type is needed to refuse it.
- * - **Only the 13 declared names.** A near-miss (`last_60_days`) is not this
+ * - **Only the declared names.** A near-miss (`last_60_days`) is not this
  *   rule's business — on a temporal field the engine's field-typed door
  *   catches it; judging undeclared strings here would be a guessed superset.
  *
@@ -743,7 +743,9 @@ export function validatePresetComparands(
   if (!stack || typeof stack !== 'object') return [];
   const out: PresetComparandFinding[] = [];
 
-  const graph = indexObjectGraph(stack);
+  // [#30383] Served, a field two packages tie on left out: which definition
+  // wins is registration order, so its type is not judged here.
+  const graph = indexServedObjectGraph(stack, { tied: 'drop' });
   const datasets = new Map<string, AnyRec>();
   for (const dataset of recordsOf(stack.datasets)) {
     const name = strName(dataset.name);

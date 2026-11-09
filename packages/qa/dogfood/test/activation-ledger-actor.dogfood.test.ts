@@ -39,7 +39,7 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 const ACTION = 'showcase_mark_done';
 const ACTION_OBJECT = 'showcase_task';
 /** A position the showcase declares and nobody needs switched on during this file. */
-const POSITION = 'auditor';
+const POSITION = 'showcase_auditor';
 /** A packaged showcase flow that no other flow calls as a subflow, so the §7.3 guard never refuses it. */
 const FLOW = 'showcase_scheduled_digest';
 

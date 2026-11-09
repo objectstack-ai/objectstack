@@ -30,6 +30,9 @@ import {
  * is written, the stored record and its `credentialsRef` are unchanged, and no
  * secret is removed. `null`, an absent `secret` and a real one are unchanged.
  *
+ * #29879 — a whitespace-only `secret` (`"   "`, a tab and a newline) is blank
+ * the same way, and the same guard refuses it with the same answer.
+ *
  * Driven through the REAL routes over the REAL service on in-memory stores
  * (the harness of `datasource-admin-declared-keys-kept.test.ts`). Every
  * secret below is an obvious placeholder.
@@ -135,11 +138,18 @@ async function expectSecretRefusal(res: Response): Promise<string> {
     code: 'DATASOURCE_ADMIN_ERROR',
   });
   expect(body.error!.message).toContain('`secret`');
+  expect(body.error!.message).toContain('Nothing was written.');
   return body.error!.message;
 }
 
 describe('PATCH /api/v1/datasources/:name — an empty secret (#28928)', () => {
-  for (const [label, secret] of [['an empty string', ''], ['an empty `value` object', { value: '' }]] as const) {
+  for (const [label, secret] of [
+    ['an empty string', ''],
+    ['an empty `value` object', { value: '' }],
+    // [#29879] Blank is empty: the same guard, the same answer.
+    ['a whitespace-only string', '   '],
+    ['a whitespace-only `value` object', { value: '\t\n' }],
+  ] as const) {
     it(`${label} is refused 400 naming \`secret\`; the credential, its ref and the record are unchanged`, async () => {
       const { send, records, ops, written } = makeDoor([STORED]);
       await expectSecretRefusal(await send('PATCH', '/datasources/wh', { secret }));
@@ -148,6 +158,12 @@ describe('PATCH /api/v1/datasources/:name — an empty secret (#28928)', () => {
       expect(ops).toEqual([]);
     });
   }
+
+  it('control: a secret with whitespace around other characters is a value, sealed as sent (#29879)', async () => {
+    const { send, written } = makeDoor([STORED]);
+    expect((await send('PATCH', '/datasources/wh', { secret: ` ${PLACEHOLDER_SECRET}\t` })).status).toBe(200);
+    expect(written).toEqual([` ${PLACEHOLDER_SECRET}\t`]);
+  });
 
   it('control: a real secret still rotates (a new ref, the old one removed)', async () => {
     const { send, records, ops, written } = makeDoor([STORED]);
@@ -169,13 +185,15 @@ describe('PATCH /api/v1/datasources/:name — an empty secret (#28928)', () => {
 });
 
 describe('POST /api/v1/datasources — an empty secret (#28928)', () => {
-  it('is refused 400 naming `secret`; nothing is stored and no secret is written', async () => {
-    const { send, records, ops, written } = makeDoor();
-    await expectSecretRefusal(await send('POST', '/datasources', { name: 'wh', ...BASE, secret: '' }));
-    expect(records.has('wh')).toBe(false);
-    expect(written).toEqual([]);
-    expect(ops).toEqual([]);
-  });
+  for (const secret of ['', '   ', '\t\n']) {
+    it(`${JSON.stringify(secret)} is refused 400 naming \`secret\`; nothing is stored and no secret is written`, async () => {
+      const { send, records, ops, written } = makeDoor();
+      await expectSecretRefusal(await send('POST', '/datasources', { name: 'wh', ...BASE, secret }));
+      expect(records.has('wh')).toBe(false);
+      expect(written).toEqual([]);
+      expect(ops).toEqual([]);
+    });
+  }
 
   it('control: a real secret is sealed and bound', async () => {
     const { send, records, written } = makeDoor();

@@ -36,6 +36,7 @@ vi.mock('better-auth/plugins/haveibeenpwned', () => ({
 }));
 
 import { betterAuth } from 'better-auth';
+import { runWithRequestState } from '@better-auth/core/context';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { ADMIN_FULL_ACCESS, ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { AuthzStoreUnavailableError, resetCloudManagedForTesting } from '@objectstack/core';
@@ -2057,7 +2058,6 @@ describe('AuthManager', () => {
           maxPasswordLength: 64,
           requireEmailVerification: true,
           autoSignIn: false,
-          revokeSessionsOnPasswordReset: true,
         },
       });
       await manager.getAuthInstance();
@@ -2069,8 +2069,10 @@ describe('AuthManager', () => {
         maxPasswordLength: 64,
         requireEmailVerification: true,
         autoSignIn: false,
-        revokeSessionsOnPasswordReset: true,
       });
+      // better-auth's own option, set by the auth instance whatever the host
+      // passes (the spec key of that name is retired; the manager refuses it).
+      expect(capturedConfig.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
       expect(typeof capturedConfig.emailAndPassword.sendResetPassword).toBe('function');
     });
   });
@@ -3207,6 +3209,8 @@ describe('AuthManager', () => {
         admin: false,
         phoneNumber: false,
         phoneNumberOtp: false,
+        // [#30107] No email service is wired here, so no mail leaves.
+        emailDelivery: false,
         multiOrgEnabled: false,
         // [ADR-0105 D1] Which of `single` | `group` | `isolated` is in force.
         // A vanilla deployment (no tenancy service wired, no env override) is
@@ -3875,7 +3879,8 @@ describe('AuthManager', () => {
       const IMPERSONATION = { impersonatedBy: 'u-admin' };
       // Every posture computable at once: enforced MFA with no grace, and a
       // one-day expiry. Each row below decides which postures its user holds.
-      const POLICY = { mfaRequired: true, mfaGracePeriodDays: 0, passwordExpiryDays: 1 };
+      // [#30201] Two-factor on: the gate holds a user for MFA only while they can enroll.
+      const POLICY = { mfaRequirement: 'everyone', mfaGracePeriodDays: 0, passwordExpiryDays: 1, plugins: { twoFactor: true } };
       const sessionGateFor = async (row: Record<string, unknown>, session: Record<string, unknown>) => {
         const engine = makeDataEngine({ platformAdmin: false });
         // The block's double, its `findOne` answering the posture read of the user row.
@@ -3998,7 +4003,10 @@ describe('AuthManager', () => {
         const matches = Object.entries(w).every(([k, v]) => (user as any)[k] === v);
         return matches ? user : null;
       }),
-      update: vi.fn(async () => ({ ...(user ?? {}) })),
+      update: vi.fn(async (_obj: string, patch: any, options?: any): Promise<unknown> => {
+        assertEngineUpdateDispatch(patch, options);
+        return { ...(user ?? {}) };
+      }),
       count: vi.fn(),
     });
     const mgr = (engine: any, extra: any = {}) => {
@@ -4008,51 +4016,115 @@ describe('AuthManager', () => {
       return m;
     };
 
-    it('assertAccountNotLocked is a no-op when lockout is disabled (threshold 0)', async () => {
-      const engine = makeEngine({ id: 'u1', email: 'a@b.com', locked_until: new Date(Date.now() + 60_000).toISOString() });
+    // The gate runs inside better-auth's request state in production (every
+    // endpoint call opens one); these cases open it the same way, so the
+    // verdict it records is readable by the settlement that follows.
+    const inRequest = <T>(fn: () => T) => runWithRequestState(new WeakMap(), fn);
+    const LOCKED_ROW = () => ({ id: 'u1', email: 'a@b.com', failed_login_count: 3, locked_until: new Date(Date.now() + 60_000).toISOString() });
+
+    it('admitSignInAttempt is a no-op when lockout is disabled (threshold 0)', async () => {
+      const engine = makeEngine(LOCKED_ROW());
       const m = mgr(engine, { lockoutThreshold: 0 });
-      await expect((m as any).assertAccountNotLocked('a@b.com')).resolves.toBeUndefined();
+      await expect(inRequest(() => (m as any).admitSignInAttempt('a@b.com'))).resolves.toBeUndefined();
       expect(engine.findOne).not.toHaveBeenCalled();
+      expect(engine.update).not.toHaveBeenCalled();
     });
 
-    it('assertAccountNotLocked throws ACCOUNT_LOCKED while locked_until is in the future', async () => {
-      const engine = makeEngine({ id: 'u1', email: 'a@b.com', locked_until: new Date(Date.now() + 60_000).toISOString() });
+    it('admitSignInAttempt refuses a locked account by itself, explicitly and reported, when it cannot hand the verdict on', async () => {
+      // No request state open: the credential check could not see the verdict,
+      // so the gate refuses by itself — the lock never yields to the password.
+      const engine = makeEngine(LOCKED_ROW());
+      const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      const m = mgr(engine, { lockoutThreshold: 3, logger });
+      await expect((m as any).admitSignInAttempt('a@b.com')).rejects.toMatchObject({
+        statusCode: 403,
+        body: { code: 'ACCOUNT_LOCKED' },
+      });
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn.mock.calls[0]?.[1]).toMatchObject({ object: 'sys_user', threshold: 3 });
+    });
+
+    it('admitSignInAttempt hands a locked verdict on, and the settlement neither counts nor clears it', async () => {
+      const engine = makeEngine(LOCKED_ROW());
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await expect((m as any).assertAccountNotLocked('a@b.com')).rejects.toMatchObject({
+      const settled = await inRequest(async () => {
+        await (m as any).admitSignInAttempt('a@b.com');
+        engine.update.mockClear();
+        return (m as any).settleSignInAttempt('a@b.com', 'refused');
+      });
+      expect(settled).toEqual({ refusedByLock: true, userId: 'u1' });
+      expect(engine.update).not.toHaveBeenCalled();
+    });
+
+    it('admitSignInAttempt throws 403 ACCOUNT_LOCKED for a locked account when the deployment opted in', async () => {
+      const engine = makeEngine(LOCKED_ROW());
+      const m = mgr(engine, { lockoutThreshold: 3, lockoutRefusal: 'explicit' });
+      await expect(inRequest(() => (m as any).admitSignInAttempt('a@b.com'))).rejects.toMatchObject({
+        statusCode: 403,
         body: { code: 'ACCOUNT_LOCKED' },
       });
     });
 
-    it('assertAccountNotLocked allows sign-in once the lock has expired', async () => {
-      const engine = makeEngine({ id: 'u1', email: 'a@b.com', locked_until: new Date(Date.now() - 60_000).toISOString() });
+    it('admitSignInAttempt counts a locked attempt without moving its lock', async () => {
+      const row = LOCKED_ROW();
+      const engine = makeEngine(row);
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await expect((m as any).assertAccountNotLocked('a@b.com')).resolves.toBeUndefined();
+      await inRequest(() => (m as any).admitSignInAttempt('a@b.com'));
+      const [object, patch, options] = engine.update.mock.calls[0];
+      expect(object).toBe('sys_user');
+      expect(patch).toEqual({ failed_login_count: 4 });
+      expect(options).toMatchObject({ where: { id: 'u1', failed_login_count: 3 }, multi: true });
     });
 
-    it('recordSignInOutcome increments below threshold without locking', async () => {
+    it('admitSignInAttempt admits once the lock has expired', async () => {
+      const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 3, locked_until: new Date(Date.now() - 60_000).toISOString() });
+      const m = mgr(engine, { lockoutThreshold: 3 });
+      await expect(inRequest(() => (m as any).admitSignInAttempt('a@b.com'))).resolves.toBeUndefined();
+    });
+
+    it('admitSignInAttempt stamps the attempt below the threshold in one compare-and-set write, without locking', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 0, locked_until: null });
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await (m as any).recordSignInOutcome('a@b.com', false);
-      const patch = engine.update.mock.calls[0][1];
-      expect(patch.failed_login_count).toBe(1);
-      expect(patch.locked_until).toBeUndefined();
+      await inRequest(() => (m as any).admitSignInAttempt('a@b.com'));
+      const [, patch, options] = engine.update.mock.calls[0];
+      expect(patch).toEqual({ failed_login_count: 1 });
+      expect(options).toMatchObject({ where: { id: 'u1', failed_login_count: 0 }, multi: true });
     });
 
-    it('recordSignInOutcome stamps locked_until (a Date) once the threshold is reached', async () => {
+    it('admitSignInAttempt stamps locked_until (a Date) in the write whose count reaches the threshold', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 2, locked_until: null });
       const m = mgr(engine, { lockoutThreshold: 3, lockoutDurationMinutes: 15 });
-      await (m as any).recordSignInOutcome('a@b.com', false);
+      const settled = await inRequest(async () => {
+        await (m as any).admitSignInAttempt('a@b.com');
+        return (m as any).settleSignInAttempt('a@b.com', 'refused');
+      });
       const patch = engine.update.mock.calls[0][1];
       expect(patch.failed_login_count).toBe(3);
       expect(patch.locked_until instanceof Date).toBe(true);
       // ~15 minutes out (datetime stored as a Date, never epoch-ms — see ADR-0074).
       expect((patch.locked_until as Date).getTime()).toBeGreaterThan(Date.now() + 14 * 60_000);
+      // The refusal that stamped it is the one the account_locked row records.
+      expect(settled).toMatchObject({ refusedByLock: false, userId: 'u1', lockStamped: { userId: 'u1', threshold: 3, lockedUntil: patch.locked_until } });
     });
 
-    it('recordSignInOutcome resets counter + lock on success when there is state to clear', async () => {
+    it('admitSignInAttempt reads again when another attempt moved the counter first', async () => {
+      const row = { id: 'u1', email: 'a@b.com', failed_login_count: 0, locked_until: null as unknown };
+      const engine = makeEngine(row);
+      // The first write lands on a stale read: another attempt took count 1.
+      engine.update
+        .mockImplementationOnce(async () => { row.failed_login_count = 1; return 0; })
+        .mockImplementation(async () => 1);
+      const m = mgr(engine, { lockoutThreshold: 3 });
+      await inRequest(() => (m as any).admitSignInAttempt('a@b.com'));
+      expect(engine.update).toHaveBeenCalledTimes(2);
+      expect(engine.update.mock.calls[1][1]).toEqual({ failed_login_count: 2 });
+      expect(engine.update.mock.calls[1][2]).toMatchObject({ where: { id: 'u1', failed_login_count: 1 } });
+    });
+
+    it('settleSignInAttempt resets counter + lock on success when there is state to clear', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 2, locked_until: null });
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await (m as any).recordSignInOutcome('a@b.com', true);
+      await (m as any).settleSignInAttempt('a@b.com', 'succeeded');
       expect(engine.update).toHaveBeenCalledWith(
         'sys_user',
         { id: 'u1', failed_login_count: 0, locked_until: null },
@@ -4060,18 +4132,33 @@ describe('AuthManager', () => {
       );
     });
 
-    it('recordSignInOutcome skips the write on success when nothing needs clearing', async () => {
+    it('settleSignInAttempt skips the write on success when nothing needs clearing', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 0, locked_until: null });
       const m = mgr(engine, { lockoutThreshold: 3 });
-      await (m as any).recordSignInOutcome('a@b.com', true);
+      await (m as any).settleSignInAttempt('a@b.com', 'succeeded');
       expect(engine.update).not.toHaveBeenCalled();
     });
 
-    it('recordSignInOutcome is a no-op when lockout is disabled', async () => {
+    it('settleSignInAttempt is a no-op when lockout is disabled', async () => {
       const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 5 });
       const m = mgr(engine, { lockoutThreshold: 0 });
-      await (m as any).recordSignInOutcome('a@b.com', false);
+      await (m as any).settleSignInAttempt('a@b.com', 'succeeded');
+      await (m as any).settleSignInAttempt('a@b.com', 'refused');
       expect(engine.update).not.toHaveBeenCalled();
+    });
+
+    it('clearSignInLockout clears the counter and the lock, and skips the write when there is nothing to clear', async () => {
+      const engine = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 4, locked_until: new Date(Date.now() + 60_000).toISOString() });
+      const m = mgr(engine, { lockoutThreshold: 3 });
+      await (m as any).clearSignInLockout('u1');
+      expect(engine.update).toHaveBeenCalledWith(
+        'sys_user',
+        { id: 'u1', failed_login_count: 0, locked_until: null },
+        expect.anything(),
+      );
+      const clean = makeEngine({ id: 'u1', email: 'a@b.com', failed_login_count: 0, locked_until: null });
+      await (mgr(clean, { lockoutThreshold: 3 }) as any).clearSignInLockout('u1');
+      expect(clean.update).not.toHaveBeenCalled();
     });
 
     it('unlockUser clears failed_login_count and locked_until', async () => {
@@ -4694,22 +4781,26 @@ describe('AuthManager', () => {
       }),
       update: vi.fn(async () => ({})),
     });
+    // [#30201] Two-factor on by default here: the gate holds a user for MFA only
+    // while they can enroll. The cases that turn it off say so (`plugins: {}`).
     const mgr = (engine: any, extra: any = {}) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const m = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, ...extra });
+      const m = new AuthManager({
+        secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, plugins: { twoFactor: true }, ...extra,
+      });
       warn.mockRestore();
       return m;
     };
 
-    it('isAuthGateActive is true when mfaRequired (even with expiry off)', () => {
-      expect(mgr(makeEngine(null), { mfaRequired: true }).isAuthGateActive()).toBe(true);
+    it('isAuthGateActive is true when mfaRequirement is set (even with expiry off)', () => {
+      expect(mgr(makeEngine(null), { mfaRequirement: 'everyone' }).isAuthGateActive()).toBe(true);
       expect(mgr(makeEngine(null), {}).isAuthGateActive()).toBe(false);
     });
 
     it('blocks MFA_REQUIRED for an un-enrolled user past the grace window', async () => {
       const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: old }), {
-        mfaRequired: true, mfaGracePeriodDays: 7,
+        mfaRequirement: 'everyone', mfaGracePeriodDays: 7,
       });
       const g = await (m as any).computeAuthGate('u1', undefined, false);
       expect(g?.code).toBe('MFA_REQUIRED');
@@ -4718,14 +4809,14 @@ describe('AuthManager', () => {
     it('does NOT block within the grace window', async () => {
       const recent = new Date(Date.now() - 1 * 86_400_000).toISOString();
       const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: recent }), {
-        mfaRequired: true, mfaGracePeriodDays: 7,
+        mfaRequirement: 'everyone', mfaGracePeriodDays: 7,
       });
       await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
     });
 
     it('stamps mfa_required_at the first time (null) and does not block yet', async () => {
       const engine = makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: null });
-      const m = mgr(engine, { mfaRequired: true, mfaGracePeriodDays: 7 });
+      const m = mgr(engine, { mfaRequirement: 'everyone', mfaGracePeriodDays: 7 });
       await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
       const wrote = engine.update.mock.calls.find((c: any[]) => 'mfa_required_at' in (c[1] ?? {}));
       expect(wrote).toBeTruthy();
@@ -4735,7 +4826,7 @@ describe('AuthManager', () => {
     it('does NOT block an enrolled user (two_factor_enabled)', async () => {
       const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: true, mfa_required_at: old }), {
-        mfaRequired: true, mfaGracePeriodDays: 7,
+        mfaRequirement: 'everyone', mfaGracePeriodDays: 7,
       });
       await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
     });
@@ -4743,18 +4834,78 @@ describe('AuthManager', () => {
     it('grace 0 blocks an un-enrolled user immediately (after the clock is set)', async () => {
       const past = new Date(Date.now() - 1000).toISOString();
       const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: past }), {
-        mfaRequired: true, mfaGracePeriodDays: 0,
+        mfaRequirement: 'everyone', mfaGracePeriodDays: 0,
       });
       const g = await (m as any).computeAuthGate('u1', undefined, false);
       expect(g?.code).toBe('MFA_REQUIRED');
     });
+
+    // [#30201] The twoFactor plugin's endpoints are the only enrollment path.
+    // A hold while it is off answers MFA_REQUIRED to a user whose remediation
+    // endpoint answers 404 — the whole-tenant lockout the card measured.
+    describe('only a user who can enroll is held (#30201)', () => {
+      const OLD = () => new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const logger = () => ({ warn: vi.fn(), info: vi.fn() });
+
+      it('two-factor off: no hold and no grace clock started, said once with the remedy', async () => {
+        const log = logger();
+        const lapsed = makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() });
+        const m = mgr(lapsed, { mfaRequirement: 'everyone', mfaGracePeriodDays: 0, plugins: {}, logger: log });
+        expect(m.isTwoFactorEnabled()).toBe(false);
+        await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
+        expect(await m.resolveUserAuthGates('u1')).toEqual([]);
+        const fresh = makeEngine({ id: 'u2', two_factor_enabled: false, mfa_required_at: null });
+        const m2 = mgr(fresh, { mfaRequirement: 'everyone', plugins: {}, logger: log });
+        expect(await m2.resolveUserAuthGates('u2')).toEqual([]);
+        // The window opens when enrollment does, not before.
+        expect(fresh.update).not.toHaveBeenCalled();
+        // Once per manager, however many requests ask.
+        expect(log.warn).toHaveBeenCalledTimes(2);
+        expect(String(log.warn.mock.calls[0][0])).toMatch(/NOT enforced/);
+        expect(String(log.warn.mock.calls[0][0])).toMatch(/OS_AUTH_TWO_FACTOR=true/);
+        // The settings remedy is conditional: the env var outranks it.
+        expect(String(log.warn.mock.calls[0][0])).toMatch(/unless OS_AUTH_TWO_FACTOR is set to false/);
+      });
+
+      it('an OS_AUTH_TWO_FACTOR=false pin outranks plugins.twoFactor, so the requirement is not enforced', async () => {
+        const prior = process.env.OS_AUTH_TWO_FACTOR;
+        process.env.OS_AUTH_TWO_FACTOR = 'false';
+        try {
+          const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() }), {
+            mfaRequirement: 'everyone', mfaGracePeriodDays: 0, logger: logger(),
+          });
+          expect(m.isTwoFactorEnabled()).toBe(false);
+          // The one answer: what is wired, what is advertised, what the gate asks.
+          expect(m.getPublicConfig().features.twoFactor).toBe(false);
+          expect(await m.resolveUserAuthGates('u1')).toEqual([]);
+        } finally {
+          if (prior === undefined) delete process.env.OS_AUTH_TWO_FACTOR;
+          else process.env.OS_AUTH_TWO_FACTOR = prior;
+        }
+      });
+
+      it('control: the same user is held once two-factor is on, and an enrolled user never is', async () => {
+        const m = mgr(makeEngine({ id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() }), {
+          mfaRequirement: 'everyone', mfaGracePeriodDays: 0,
+        });
+        expect(m.isTwoFactorEnabled()).toBe(true);
+        expect((await m.resolveUserAuthGates('u1')).map((g) => g.code)).toEqual(['MFA_REQUIRED']);
+        const enrolled = mgr(makeEngine({ id: 'u1', two_factor_enabled: true, mfa_required_at: OLD() }), {
+          mfaRequirement: 'everyone', mfaGracePeriodDays: 0, plugins: {},
+        });
+        expect(await enrolled.resolveUserAuthGates('u1')).toEqual([]);
+      });
+    });
   });
 
   // ADR-0069 D3 — per-org MFA tightening (an org may require MFA above the
-  // global floor). Uses an object-aware engine mock (sys_user + sys_organization).
+  // global floor). The organization's level is its `access_policy.mfa_required`
+  // setting, served here by an organization access-policy source built from the
+  // second argument (`{ id, mfa_required }`); the engine mock answers sys_user.
   describe('per-org enforced MFA (ADR-0069 D3)', () => {
     const SECRET = 'test-secret-at-least-32-chars-long';
     const makeEngine = (user: any, org: any) => ({
+      org,
       findOne: vi.fn(async (obj: string, q: any) => {
         assertEngineFindOnePredicate(obj, q);
         const row = obj === 'sys_organization' ? org : user;
@@ -4765,10 +4916,17 @@ describe('AuthManager', () => {
       update: vi.fn(async () => ({})),
       count: vi.fn(async () => 1),
     });
+    // [#30201] Two-factor on by default, as in the block above.
     const mgr = (engine: any, extra: any = {}) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const m = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, ...extra });
+      const m = new AuthManager({
+        secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, plugins: { twoFactor: true }, ...extra,
+      });
       warn.mockRestore();
+      m.setOrganizationAccessPolicySource({
+        read: async (id: string) => (engine.org?.id === id ? { mfa_required: engine.org.mfa_required } : {}),
+        anyOrganizationRequiresMfa: async () => !!engine.org && engine.org.mfa_required !== 'off',
+      });
       return m;
     };
 
@@ -4783,9 +4941,9 @@ describe('AuthManager', () => {
       const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const engine = makeEngine(
         { id: 'u1', two_factor_enabled: false, mfa_required_at: old },
-        { id: 'org1', require_mfa: true },
+        { id: 'org1', mfa_required: 'everyone' },
       );
-      const m = mgr(engine, { mfaRequired: false, mfaGracePeriodDays: 7 });
+      const m = mgr(engine, { mfaRequirement: 'off', mfaGracePeriodDays: 7 });
       (m as any)._orgMfaCache = { value: true, at: Date.now() }; // org-requires cache primed
       const g = await (m as any).computeAuthGate('u1', 'org1', false);
       expect(g?.code).toBe('MFA_REQUIRED');
@@ -4795,16 +4953,27 @@ describe('AuthManager', () => {
       const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
       const engine = makeEngine(
         { id: 'u1', two_factor_enabled: false, mfa_required_at: old },
-        { id: 'org1', require_mfa: false },
+        { id: 'org1', mfa_required: 'off' },
       );
-      const m = mgr(engine, { mfaRequired: false });
+      const m = mgr(engine, { mfaRequirement: 'off' });
       (m as any)._orgMfaCache = { value: true, at: Date.now() };
       await expect((m as any).computeAuthGate('u1', 'org1', false)).resolves.toBeUndefined();
     });
 
+    it('[#30201] does NOT block for the active org\'s MFA level while two-factor is off, nor start the clock', async () => {
+      const engine = makeEngine(
+        { id: 'u1', two_factor_enabled: false, mfa_required_at: null },
+        { id: 'org1', mfa_required: 'everyone' },
+      );
+      const m = mgr(engine, { mfaRequirement: 'off', mfaGracePeriodDays: 0, plugins: {}, logger: { warn: vi.fn() } });
+      (m as any)._orgMfaCache = { value: true, at: Date.now() };
+      await expect((m as any).computeAuthGate('u1', 'org1', false)).resolves.toBeUndefined();
+      expect(engine.update).not.toHaveBeenCalled();
+    });
+
     it('is a no-op when no org requires MFA and there is no active org', async () => {
       const engine = makeEngine({ id: 'u1', two_factor_enabled: false }, null);
-      const m = mgr(engine, { mfaRequired: false });
+      const m = mgr(engine, { mfaRequirement: 'off' });
       // cache says no org requires MFA
       (m as any)._orgMfaCache = { value: false, at: Date.now() };
       await expect((m as any).computeAuthGate('u1', undefined, false)).resolves.toBeUndefined();
@@ -4825,7 +4994,7 @@ describe('AuthManager', () => {
             { id: 'u1', must_change_password: true, password_changed_at: OLD(), two_factor_enabled: false, mfa_required_at: OLD() },
             null,
           ),
-          { passwordExpiryDays: 90, mfaRequired: true, mfaGracePeriodDays: 7 },
+          { passwordExpiryDays: 90, mfaRequirement: 'everyone', mfaGracePeriodDays: 7 },
         );
         m.noteMustChangePasswordIssued();
         const gates = await m.resolveUserAuthGates('u1');
@@ -4836,7 +5005,7 @@ describe('AuthManager', () => {
 
       it('answers [] for a user no policy holds, and reads nothing when no policy is enabled', async () => {
         const enrolled = makeEngine({ id: 'u1', two_factor_enabled: true }, null);
-        expect(await mgr(enrolled, { mfaRequired: true }).resolveUserAuthGates('u1')).toEqual([]);
+        expect(await mgr(enrolled, { mfaRequirement: 'everyone' }).resolveUserAuthGates('u1')).toEqual([]);
         const idle = makeEngine({ id: 'u1' }, null);
         const m = mgr(idle, {});
         (m as any)._orgMfaCache = { value: false, at: Date.now() };
@@ -4848,7 +5017,7 @@ describe('AuthManager', () => {
       it('asks the organization the credential operates in for a per-org MFA requirement', async () => {
         const engine = makeEngine(
           { id: 'u1', two_factor_enabled: false, mfa_required_at: OLD() },
-          { id: 'org_key', require_mfa: true },
+          { id: 'org_key', mfa_required: 'everyone' },
         );
         const m = mgr(engine, { mfaGracePeriodDays: 7 });
         (m as any)._orgMfaCache = { value: true, at: Date.now() };
@@ -4861,7 +5030,7 @@ describe('AuthManager', () => {
       it('fails open on a lookup error, as the session gate does', async () => {
         const engine = makeEngine(null, null);
         engine.findOne.mockImplementation(async () => { throw new Error('db down'); });
-        const m = mgr(engine, { mfaRequired: true });
+        const m = mgr(engine, { mfaRequirement: 'everyone' });
         expect(await m.resolveUserAuthGates('u1')).toEqual([]);
       });
     });
@@ -5003,6 +5172,131 @@ describe('AuthManager', () => {
       expect(ipMatchesRange('::ffff:10.0.0.1', '10.0.0.1')).toBe(true);
       expect(ipMatchesRange('10.0.0.1', '::ffff:10.0.0.1')).toBe(true);
       expect(ipMatchesRange('2001:db8::1', '2001:db8::1')).toBe(true);
+    });
+
+    it('ipMatchesRange reads an IPv6 CIDR as the 128-bit prefix it names', () => {
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db8:ffff:ffff:ffff:ffff:ffff:ffff', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db9::5', '2001:db8::/32')).toBe(false);
+      expect(ipMatchesRange('2001:0DB8:0:0::5', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db8:1234:5600::1', '2001:db8:1234:5600::/56')).toBe(true);
+      expect(ipMatchesRange('2001:db8:1234:5700::1', '2001:db8:1234:5600::/56')).toBe(false);
+      expect(ipMatchesRange('2001:db8::1', '2001:db8::1/128')).toBe(true);
+      expect(ipMatchesRange('2001:db8::2', '2001:db8::1/128')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '::/0')).toBe(true);
+      expect(ipMatchesRange('::1', '::1/128')).toBe(true);
+      expect(ipMatchesRange('::2', '::1/128')).toBe(false);
+      // A zone identifier names an interface, not an address: the address is judged.
+      expect(ipMatchesRange('fe80::1%eth0', 'fe80::/10')).toBe(true);
+    });
+
+    it('ipMatchesRange compares an exact IPv6 entry by the address it denotes, not by its spelling', () => {
+      expect(ipMatchesRange('2001:db8::1', '2001:DB8:0:0:0:0:0:1')).toBe(true);
+      expect(ipMatchesRange('::1', '0:0:0:0:0:0:0:1')).toBe(true);
+      expect(ipMatchesRange('2001:db8::2', '2001:db8::1')).toBe(false);
+    });
+
+    it('ipMatchesRange never matches across address families', () => {
+      // An IPv4 range never admits a pure IPv6 address, an IPv6 range never an IPv4 one.
+      expect(ipMatchesRange('::1', '0.0.0.0/0')).toBe(false);
+      expect(ipMatchesRange('2001:db8::5', '0.0.0.0/0')).toBe(false);
+      expect(ipMatchesRange('203.0.113.5', '::/0')).toBe(false);
+      expect(ipMatchesRange('::ffff:203.0.113.5', '::/0')).toBe(false);
+      // The IPv4-mapped form, dotted or hex, is still the IPv4 address it maps.
+      expect(ipMatchesRange('::ffff:cb00:7105', '203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('203.0.113.5', '::ffff:203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('203.0.114.5', '::ffff:203.0.113.0/24')).toBe(false);
+    });
+
+    // An entry is an address, or an address, `/` and a prefix length written in
+    // decimal digits: one or two of them, 0 to 32, for IPv4 (an IPv4-mapped base
+    // included); one to three, 0 to 128, for IPv6. Any other entry names no
+    // range, so it matches no address, its own base address included.
+    const UNREADABLE_IPV4_ENTRIES = [
+      '10.0.0.0/', '10.0.0.0/ 8', '10.0.0.0 /8', '10.0.0.0/0x8', '10.0.0.0/+8', '10.0.0.0/-0',
+      '10.0.0.0/8.0', '10.0.0.0/1e1', '10.0.0.0/008', '10.0.0.0/33', '10.0.0.0/8/8', '/8',
+    ];
+    const UNREADABLE_IPV6_ENTRIES = [
+      '2001:db8::/', '2001:db8::/ 32', '2001:db8::/0x20', '2001:db8::/+32', '2001:db8::/0032',
+      '2001:db8::/129', '2001:db8::/32/32', '2001:db8::/3x', '2001:db8:::/32', 'zz01:db8::/32',
+    ];
+
+    it('ipMatchesRange matches no address through an IPv4 entry whose prefix is not 1-2 decimal digits from 0 to 32', () => {
+      for (const entry of UNREADABLE_IPV4_ENTRIES) {
+        for (const client of ['10.0.0.0', '10.1.2.3', '8.8.8.8', '::ffff:10.1.2.3']) {
+          expect(ipMatchesRange(client, entry), `${client} against ${JSON.stringify(entry)}`).toBe(false);
+        }
+      }
+      // An IPv4-mapped base is an IPv4 address, so it takes an IPv4 prefix.
+      expect(ipMatchesRange('203.0.113.0', '::ffff:203.0.113.0/120')).toBe(false);
+    });
+
+    it('ipMatchesRange matches no address through an IPv6 entry whose prefix is not 1-3 decimal digits from 0 to 128', () => {
+      for (const entry of UNREADABLE_IPV6_ENTRIES) {
+        for (const client of ['2001:db8::', '2001:db8::5', '2001:db9::5']) {
+          expect(ipMatchesRange(client, entry), `${client} against ${JSON.stringify(entry)}`).toBe(false);
+        }
+      }
+    });
+
+    it('ipMatchesRange matches no address through an entry that is not an address, even one spelled the same', () => {
+      for (const entry of ['unknown', 'localhost', 'office-network', 'unknown/24']) {
+        expect(ipMatchesRange(entry.split('/')[0]!, entry), JSON.stringify(entry)).toBe(false);
+      }
+    });
+
+    it('ipMatchesRange reads every well-formed entry as it did: an address, or an address and a decimal prefix within its family', () => {
+      expect(ipMatchesRange('10.200.0.1', '10.0.0.0/8')).toBe(true);
+      expect(ipMatchesRange('11.0.0.1', '10.0.0.0/8')).toBe(false);
+      expect(ipMatchesRange('10.200.0.1', '10.0.0.0/08')).toBe(true);
+      expect(ipMatchesRange('192.0.2.7', '192.0.2.7/32')).toBe(true);
+      expect(ipMatchesRange('192.0.2.8', '192.0.2.7/32')).toBe(false);
+      expect(ipMatchesRange('192.0.2.7', '192.0.2.7')).toBe(true);
+      expect(ipMatchesRange('192.0.2.8', '192.0.2.7')).toBe(false);
+      expect(ipMatchesRange('198.51.100.1', '0.0.0.0/0')).toBe(true);
+      // Bits past the prefix are not judged, and the entry's own surrounding blanks are not part of it.
+      expect(ipMatchesRange('203.0.113.200', '203.0.113.5/24')).toBe(true);
+      expect(ipMatchesRange('203.0.113.5', '  203.0.113.0/24  ')).toBe(true);
+      expect(ipMatchesRange('2001:db8::1', '2001:db8::1/128')).toBe(true);
+      expect(ipMatchesRange('2001:db8::2', '2001:db8::1/128')).toBe(false);
+      expect(ipMatchesRange('2001:db8::1', '2001:db8::1')).toBe(true);
+      expect(ipMatchesRange('2001:db8:ffff::1', '2001:db8::/32')).toBe(true);
+      expect(ipMatchesRange('2001:db8::5', '2001:db8::/032')).toBe(true);
+      expect(ipMatchesRange('2001:db9::5', '::/0')).toBe(true);
+      expect(ipMatchesRange('203.0.113.5', '::ffff:203.0.113.0/24')).toBe(true);
+      expect(ipMatchesRange('fe80::1%eth0', 'fe80::/10')).toBe(true);
+    });
+
+    it('isClientIpAllowed admits no client through an entry that names no range, and still through the readable ones', () => {
+      const m = mgr({});
+      m.applyConfigPatch({ allowedIpRanges: ['10.0.0.0/', '2001:db8::/129', '192.0.2.7'] });
+      expect(m.isClientIpAllowed('10.1.2.3')).toBe(false);
+      expect(m.isClientIpAllowed('8.8.8.8')).toBe(false);
+      expect(m.isClientIpAllowed('2001:db8::')).toBe(false);
+      expect(m.isClientIpAllowed('192.0.2.7')).toBe(true);
+    });
+
+    it('refuses at construction a declared allowedIpRanges entry that names no range, naming each one', () => {
+      const declare = (allowedIpRanges: unknown[]) => () =>
+        new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', allowedIpRanges: allowedIpRanges as string[] });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        expect(declare(['10.0.0.0/8', '10.0.0.0/', '2001:db8::/129'])).toThrow(
+          /allowedIpRanges.*"10\.0\.0\.0\/".*"2001:db8::\/129"/,
+        );
+        expect(declare(['10.0.0.0/8', 42])).toThrow(/allowedIpRanges.*42/);
+        expect(declare(['10.0.0.0/8', '2001:db8::/32', '192.0.2.7', '::1/128'])).not.toThrow();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('isClientIpAllowed admits an IPv6 client inside an allowed IPv6 range', () => {
+      const m = mgr({ allowedIpRanges: ['2001:db8::/32', '::1'] });
+      expect(m.isClientIpAllowed('2001:db8:abcd::1')).toBe(true);
+      expect(m.isClientIpAllowed('::1')).toBe(true);
+      expect(m.isClientIpAllowed('2001:db9::1')).toBe(false);
+      expect(m.isClientIpAllowed('203.0.113.5')).toBe(false);
     });
 
     it('resolveClientAddress believes forwarded headers only under trustProxy', () => {

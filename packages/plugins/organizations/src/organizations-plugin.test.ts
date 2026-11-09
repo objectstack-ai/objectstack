@@ -390,3 +390,51 @@ describe('OrganizationsPlugin', () => {
     });
   });
 });
+
+// [#30281] The per-org replay picks its seed datasets by locale, and at founding
+// the organization has no Localization setting of its own yet, so the founder's
+// language is what decides (item 3 of the card lands on option (a) by
+// construction, with the app's declared default behind it). Middleware B is the
+// only place that knows the founder: better-auth's create runs as SYSTEM with
+// the signed-in creator as `attributedUserId`. These pin that it hands that id
+// to the replayer, and that a system insert with no person behind it keeps the
+// one-argument call every existing replayer (and the cloud host's) understands.
+describe('per-org seed replay names the founder (#30281)', () => {
+  const insertBy = (id: string, context: Record<string, unknown>) => ({
+    object: 'sys_organization',
+    operation: 'insert' as const,
+    data: { id, name: 'New Co' },
+    result: { id },
+    context,
+  });
+
+  async function startWithReplayer() {
+    const plugin = new OrganizationsPlugin();
+    const { ctx, middlewares } = makeCtx({ 'seed-datasets': [{ object: 'crm_account', records: [{ id: 'a1' }] }] });
+    const seedReplayer = vi.fn(async (_orgId: string, _options?: { userId?: string }) => ({
+      inserted: 1, updated: 0, skipped: 0, errors: [],
+    }));
+    ctx.registerService('seed-replayer', seedReplayer);
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    return { seedReplayer, middlewares };
+  }
+
+  it('hands the replayer the insert\'s attributed user as the founder', async () => {
+    const { seedReplayer, middlewares } = await startWithReplayer();
+
+    await middlewares[1](insertBy('org_zh', { isSystem: true, attributedUserId: 'usr_founder' }), async () => {});
+
+    expect(seedReplayer).toHaveBeenCalledTimes(1);
+    expect(seedReplayer.mock.calls[0]).toEqual(['org_zh', { userId: 'usr_founder' }]);
+  });
+
+  it('keeps the one-argument call when no person founded the organization', async () => {
+    const { seedReplayer, middlewares } = await startWithReplayer();
+
+    await middlewares[1](insertBy('org_sys', { isSystem: true }), async () => {});
+
+    expect(seedReplayer).toHaveBeenCalledTimes(1);
+    expect(seedReplayer.mock.calls[0]).toEqual(['org_sys']);
+  });
+});

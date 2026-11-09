@@ -280,8 +280,8 @@ describe('the lowered body face, against the in-process HookContext (#22837)', (
     expect(body.get('dispatch')).toEqual(new Set(['mode', 'index']));
     expect(body.get('session')).toBe('passthrough');
     // [#25905] Carried member by member, so a member the spec adds to it later is seen as absent.
-    expect(inProcess.get('provenance')).toEqual(new Set(['flowRunId', 'attributedUserId', 'performedByClientId']));
-    expect(body.get('provenance')).toEqual(new Set(['flowRunId', 'attributedUserId', 'performedByClientId']));
+    expect(inProcess.get('provenance')).toEqual(new Set(['flowRunId', 'attributedUserId', 'performedByClientId', 'impersonatedBy']));
+    expect(body.get('provenance')).toEqual(new Set(['flowRunId', 'attributedUserId', 'performedByClientId', 'impersonatedBy']));
     // A tombstone is no member: `session.roles` is `retiredKey(…)`.
     expect(inProcess.get('session')).not.toContain('roles');
     expect(absent.length).toBeGreaterThan(0);

@@ -250,6 +250,15 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     'meta-object-state-routes.ts': 3,
     'record-page-routes.ts': 10,
     'meta-app-bundle-routes.ts': 15,
+    'user-work-routes.ts': 6,
+    // [#30675] The module header, the capability's, the body keys', the host
+    // interface's, the two body helpers' and the function's.
+    'meta-record-currency-backfill-route.ts': 7,
+    // [#30237] The module header, the host interface's, the two closed
+    // parameter sets', the refusal detail keys', the engine interface's, the
+    // paging declaration's, the restore receipt's, the thrown-error answer's,
+    // the function's, and the field-reading helper's inside it.
+    'recycle-bin-routes.ts': 11,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -307,8 +316,12 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // relationship types, the read policy, the host interface, the reach
         // interface, six module-level helpers' blocks, the function's, and the
         // two inner helpers' inside it).
+        // [#30205] 95 + 6 = 101: `user-work-routes.ts`, a new registrar, carries six
+        // (the module header, the host interface, the closed parameter set, the body
+        // keys, the function's, and the engine resolver's inside it).
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(95);
+        // [#30237] 108 + 11 = 119: `recycle-bin-routes.ts`, a new registrar.
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(119);
     });
 });

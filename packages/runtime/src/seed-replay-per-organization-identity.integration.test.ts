@@ -126,7 +126,7 @@ function createLogger() {
 /**
  * Boot the walled composition and hand back the replayer AppPlugin registered.
  * The replayer is the production closure: it builds the per-organization
- * request (`defaultMode: 'upsert'`, `multiPass: true`, `organizationId`) and
+ * request (`multiPass: true`, `organizationId`, each dataset in its own mode) and
  * runs the real loader against the real engine.
  */
 async function bootWalled(dataset: typeof ORG_UNITS) {

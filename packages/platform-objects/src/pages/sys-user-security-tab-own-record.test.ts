@@ -41,9 +41,11 @@ describe('sys_user_detail — the Security tab is gated to the viewer\'s own rec
     expect(security.visibleWhen).toEqual({ dialect: 'cel', source: OWN_RECORD });
   });
 
-  it('gates only the Security tab — every other tab item carries no item-level gate', () => {
+  it('gates only the Security and AI Assistants tabs — every other tab item carries no item-level gate', () => {
+    // AI Assistants carries the platform-admin gate, not an own-record one:
+    // pinned in `sys-user-ai-assistants-tab.test.ts`.
     const gated = items.filter((it) => it.visibleWhen !== undefined).map((it) => (it.label as Rec).en);
-    expect(gated).toEqual(['Security']);
+    expect(gated).toEqual(['Security', 'AI Assistants']);
   });
 
   it('names only actions that are themselves own-record on the object', () => {

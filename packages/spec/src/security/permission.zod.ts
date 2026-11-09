@@ -124,10 +124,17 @@ const OBJECT_PERMISSION_KEY_ALIASES: Readonly<Record<string, string>> = {
 };
 
 /**
- * The object-permission bit a permission VERB resolves to. Only the `allow*`
- * capability bits are reachable from a verb: the super-user axes
- * (`viewAllRecords` / `modifyAllRecords`) are grants a verb never names, and
- * the depth axes (`readScope` / `writeScope`) are not booleans at all.
+ * The object-permission bit a grant question names: the bits
+ * {@link objectPermissionGrants} folds. The super-user axes
+ * (`viewAllRecords` / `modifyAllRecords`) are grants a question never names,
+ * and the depth axes (`readScope` / `writeScope`) are not booleans at all.
+ *
+ * Every `allow*` capability bit a permission VERB resolves to
+ * ({@link OBJECT_PERMISSION_VERBS}) is one, and so are the two recycle-bin
+ * grants (`allowRestoreOwnDeleted`, `manageRecycleBin`, ADR-0148 D5), which the
+ * permission evaluator reads for the engine's `restore` / `purge` operations.
+ * No verb resolves to those two: `restore` and `purge` stay outside the verb
+ * vocabulary (they carry the #12497 retirement guidance).
  */
 export type ObjectPermissionVerbTarget =
   | 'allowRead'
@@ -135,7 +142,9 @@ export type ObjectPermissionVerbTarget =
   | 'allowEdit'
   | 'allowDelete'
   | 'allowExport'
-  | 'allowTransfer';
+  | 'allowTransfer'
+  | 'allowRestoreOwnDeleted'
+  | 'manageRecycleBin';
 
 /**
  * A `can`-prefixed spelling of a bare verb already in
@@ -249,6 +258,20 @@ export function resolveObjectPermissionVerb(verb: string): ObjectPermissionVerbT
  *   (`export ⊆ list`), so a set granting export on an object the caller cannot
  *   read grants nothing — and the super-user bits, which do not imply export,
  *   still satisfy the read half.
+ * - **`allowEdit` and `allowDelete` are CONJUNCTIONS too: `read ∧ grant`.**
+ *   An object permission that edits or deletes a record also reads it. The
+ *   authoring schema refuses an entry that grants either without read
+ *   ({@link checkWriteImpliesRead}); this cell is the runtime half, so an entry
+ *   stored or built before that refusal existed grants neither verb unread.
+ *   `modifyAllRecords` satisfies both halves on its own, since it implies read.
+ *   Applied to the MERGED entry (`/me/permissions`, and the evaluator, which
+ *   merges the caller's resolved entries before it asks), the read half may
+ *   come from a different set than the grant, exactly as export's does.
+ * - **The recycle-bin grants fold the way ruling Q5 = A (ADR-0148 D5) states
+ *   them.** `allowRead` bounds both: a grant on an object the caller cannot
+ *   read grants nothing. `modifyAllRecords` implies both. `manageRecycleBin`
+ *   implies `allowRestoreOwnDeleted`. `allowDelete` does NOT imply either: a
+ *   person who may delete may not thereby restore or purge.
  * - **An ABSENT entry is `false`, never an error.** An object no permission set
  *   mentions is an object with no grant; an effective map is allowed to omit it
  *   exactly as it is allowed to carry an all-`false` entry, and the two must
@@ -264,10 +287,13 @@ export function objectPermissionGrants(
   switch (target) {
     case 'allowRead': return read;
     case 'allowCreate': return permission.allowCreate === true;
-    case 'allowEdit': return permission.allowEdit === true || modifyAll;
-    case 'allowDelete': return permission.allowDelete === true || modifyAll;
+    case 'allowEdit': return read && (permission.allowEdit === true || modifyAll);
+    case 'allowDelete': return read && (permission.allowDelete === true || modifyAll);
     case 'allowTransfer': return permission.allowTransfer === true || modifyAll;
     case 'allowExport': return permission.allowExport === true && read;
+    case 'manageRecycleBin': return read && (permission.manageRecycleBin === true || modifyAll);
+    case 'allowRestoreOwnDeleted':
+      return read && (permission.allowRestoreOwnDeleted === true || permission.manageRecycleBin === true || modifyAll);
   }
 }
 
@@ -386,6 +412,58 @@ function checkScopeAgainstSuperUserBits(
 }
 
 /**
+ * An object permission that edits or deletes a record also reads it: an entry
+ * granting `allowEdit` or `allowDelete` with no read on the same entry is
+ * refused, one issue per bit, at that bit's own path.
+ *
+ * Read is any of the three bits {@link objectPermissionGrants} reads it from:
+ * `allowRead`, `viewAllRecords` or `modifyAllRecords`. So
+ * `{ modifyAllRecords: true }` (which parses to `allowDelete: true`) and
+ * `{ viewAllRecords: true, allowEdit: true }` stay accepted.
+ *
+ * The runtime half is the conjunction in {@link objectPermissionGrants}: an
+ * entry stored or built before this refusal existed grants neither verb
+ * unread, so refusing it here declares exactly what the evaluator enforces
+ * (ADR-0049 `declared ≠ enforced`). Only the AUTHORING schema carries it:
+ * {@link EffectiveObjectPermissionSchema} extends the unrefined base, so the
+ * wire surface stays tolerant of a row an older server still serves.
+ *
+ * Module-private for the reason {@link checkScopeAgainstSuperUserBits} is.
+ */
+function checkWriteImpliesRead(
+  value: {
+    allowRead?: boolean;
+    allowEdit?: boolean;
+    allowDelete?: boolean;
+    viewAllRecords?: boolean;
+    modifyAllRecords?: boolean;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const read = value.allowRead === true || value.viewAllRecords === true || value.modifyAllRecords === true;
+  if (read) return;
+  for (const bit of ['allowEdit', 'allowDelete'] as const) {
+    if (value[bit] !== true) continue;
+    ctx.addIssue({ code: 'custom', path: [bit], message: writeWithoutReadMessage(bit) });
+  }
+}
+
+/**
+ * The refusal of `allowEdit` / `allowDelete` without read. It names both
+ * routes, because only the author knows whether the set should read the
+ * object or should not write it.
+ */
+function writeWithoutReadMessage(bit: 'allowEdit' | 'allowDelete'): string {
+  const verb = bit === 'allowEdit' ? 'edit' : 'delete';
+  return (
+    `${bit}: true is refused without read on the same object (ADR-0049): an object permission that ` +
+    `${verb}s a record also reads it, and the permission evaluator grants ${verb} only together with ` +
+    'read (allowRead, viewAllRecords or modifyAllRecords), so this grant is never enforced. Add ' +
+    `allowRead: true to this entry if the set should ${verb} the object, or delete ${bit} if it should not.`
+  );
+}
+
+/**
  * The refusal of `allowDelete: false` beside `modifyAllRecords: true`
  * (#25575). The text names the route the author is looking for, because the
  * author who writes this pair wants "edit every record, delete none", and
@@ -450,18 +528,14 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
       //    prescription directly.
       restore:
         '`restore` was the alias of `objects.<object>.allowRestore`, which was removed in ' +
-        '@objectstack/spec 17 (ADR-0049) — the `restore` ObjectQL operation it claimed ' +
-        'to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete ' +
-        'the key — a dispatched `restore` stays denied fail-closed by the permission ' +
-        'evaluator\'s destructive-operation backstop, and the bit returns with the M2 ' +
-        'lifecycle initiative alongside the operation it gates.',
+        '@objectstack/spec 17 (ADR-0049). Delete the key. The `restore` operation now exists ' +
+        'with the recycle bin (ADR-0148), and its grants are spelled `allowRestoreOwnDeleted` ' +
+        '(restore the entries you deleted) and `manageRecycleBin` (restore any entry).',
       purge:
         '`purge` was the alias of `objects.<object>.allowPurge`, which was removed in ' +
-        '@objectstack/spec 17 (ADR-0049) — the `purge` ObjectQL operation it claimed ' +
-        'to gate has never shipped (roadmap M2), so granting the bit delivered nothing. Delete ' +
-        'the key — a dispatched `purge` stays denied fail-closed by the permission ' +
-        'evaluator\'s destructive-operation backstop, and the bit returns with the M2 ' +
-        'lifecycle initiative alongside the operation it gates.',
+        '@objectstack/spec 17 (ADR-0049). Delete the key. The `purge` operation now exists ' +
+        'with the recycle bin (ADR-0148), and its grant is spelled `manageRecycleBin` (purge an ' +
+        'entry, empty an object\'s entries, and the permanent delete).',
     },
     history:
       'Until this shape was closed, these were dropped silently — the permission set still parsed, so the ' +
@@ -472,10 +546,16 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
   allowCreate: z.boolean().default(false).describe('Create permission'),
   /** R: Read (Owned records or Shared records) */
   allowRead: z.boolean().default(false).describe('Read permission'),
-  /** U: Edit (Owned records or Shared records) */
-  allowEdit: z.boolean().default(false).describe('Edit permission'),
-  /** D: Delete (Owned records or Shared records) */
-  allowDelete: z.boolean().default(false).describe('Delete permission'),
+  /**
+   * U: Edit (Owned records or Shared records). Requires read on the same
+   * entry: an object permission that edits a record also reads it.
+   */
+  allowEdit: z.boolean().default(false).describe('Edit permission. Requires read on the same entry (allowRead, viewAllRecords or modifyAllRecords): an object permission that edits a record also reads it.'),
+  /**
+   * D: Delete (Owned records or Shared records). Requires read on the same
+   * entry: an object permission that deletes a record also reads it.
+   */
+  allowDelete: z.boolean().default(false).describe('Delete permission. Requires read on the same entry (allowRead, viewAllRecords or modifyAllRecords): an object permission that deletes a record also reads it.'),
 
   /**
    * Export (data portability) — the user-level export axis (#3391 / #3544).
@@ -535,9 +615,12 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
 
   /**
    * REMOVED — `allowRestore` / `allowPurge` claimed to gate `restore` /
-   * `purge` ObjectQL operations that have never existed (no destructive
-   * lifecycle verb is in the engine's dispatch vocabulary — pinned by
-   * objectql's `engine-middleware-operation-vocabulary.test.ts`, #8106).
+   * `purge` ObjectQL operations that did not exist when they were retired (no
+   * destructive lifecycle verb was then in the engine's dispatch vocabulary,
+   * #8106). The operations now exist with the recycle bin (ADR-0148), and their
+   * grants are NEW spellings, `allowRestoreOwnDeleted` and `manageRecycleBin`
+   * (below, #30235 / #30237); these two keys stay tombstones and their
+   * prescriptions name the new spellings (consent 6720657486).
    *
    * ADR-0049 enforce-or-remove, maintainer ruling 2026-08-26 accepting
    * #1883's recommendation B (#12497): an AI author who declared
@@ -546,11 +629,9 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * prescription) instead of a silent strip. The former evaluator pre-mapping
    * (`OPERATION_TO_PERMISSION` restore/purge rows) retired in the same batch —
    * with the bits unwritable, a mapping onto them was a claim about a surface
-   * that rejects authoring — and a dispatched `restore`/`purge` stays denied
-   * fail-closed via the evaluator's `DESTRUCTIVE_OPERATIONS` backstop, so
-   * there is still no ungated window. THE KEYS RETURN with the M2 lifecycle
-   * initiative (feature + RBAC in one batch, maintainer 2026-08-03); #1883
-   * stays open as the anchor.
+   * that rejects authoring. The rows came back with the recycle bin, mapped
+   * onto the new spellings (`restore` → `allowRestoreOwnDeleted`, `purge` →
+   * `manageRecycleBin`, #30237), so these keys did not return.
    *
    * [#12840] Both keys carried `.default(false)` before the retirement, so
    * every artifact the published 17.x toolchain built has them materialized
@@ -569,23 +650,45 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
    * tombstone exists to refuse. The matrix is pinned in `permission.test.ts`.
    */
   allowRestore: retiredKey(
-    '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049) — ' +
-    'the `restore` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so ' +
-    'granting the bit delivered nothing. Delete the key — a dispatched `restore` stays denied ' +
-    'fail-closed by the permission evaluator\'s destructive-operation backstop, and the bit ' +
-    'returns with the M2 lifecycle initiative alongside the operation it gates. ' +
+    '`objects.<object>.allowRestore` was removed in @objectstack/spec 17 (ADR-0049): the ' +
+    '`restore` ObjectQL operation it claimed to gate did not exist then, so granting the bit ' +
+    'delivered nothing. Delete the key. The operation now exists with the recycle bin ' +
+    '(ADR-0148), and its grants are spelled `allowRestoreOwnDeleted` (restore the entries you ' +
+    'deleted) and `manageRecycleBin` (restore any entry). ' +
     'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   allowPurge: retiredKey(
-    '`objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049) — ' +
-    'the `purge` ObjectQL operation it claimed to gate has never shipped (roadmap M2), so ' +
-    'granting the bit delivered nothing (a compliance/GDPR erase the author believed was ' +
-    'permission-locked was not — the operation itself does not exist). Delete the key — a ' +
-    'dispatched `purge` stays denied fail-closed by the permission evaluator\'s ' +
-    'destructive-operation backstop, and the bit returns with the M2 lifecycle initiative' +
-    ' alongside the operation it gates. ' +
+    '`objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049): the ' +
+    '`purge` ObjectQL operation it claimed to gate did not exist then, so granting the bit ' +
+    'delivered nothing (a compliance/GDPR erase the author believed was permission-locked ' +
+    'was not). Delete the key. The operation now exists with the recycle bin (ADR-0148), and ' +
+    'its grant is spelled `manageRecycleBin` (purge an entry, empty an object\'s entries, and ' +
+    'the permanent delete). ' +
     'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
+
+  // [#30235] declared; [#30237] the evaluator mapping and the engine's
+  // restore, purge and empty read them; [#30239] the Console shows them.
+  /**
+   * [ADR-0148 D2/D5] The recycle bin's two grants. NEW spellings, on purpose:
+   * the retired `allowRestore` / `allowPurge` above stay tombstoned, so a key
+   * that once meant "nothing happens" never comes to mean "a snapshot is kept".
+   *
+   * Deliberately OPTIONAL (no Zod default), like `allowExport`: a default would
+   * materialize the key into every parsed entry, and a runtime built before
+   * these keys existed refuses a key it does not know.
+   *
+   * READ by the permission evaluator, which maps the engine's `restore`
+   * operation onto `allowRestoreOwnDeleted` and its `purge` operation (the
+   * permanent delete, `purge(entryId)`, `empty(object)`) onto
+   * `manageRecycleBin`, and by the engine's restore, which lets a caller
+   * without `manageRecycleBin` restore only the entries it deleted. Folded per
+   * ruling Q5 = A ({@link objectPermissionGrants}): `allowRead` bounds both,
+   * `modifyAllRecords` implies both, `manageRecycleBin` implies
+   * `allowRestoreOwnDeleted`, and `allowDelete` implies neither.
+   */
+  allowRestoreOwnDeleted: z.boolean().optional().describe('Recycle bin: restore the entries of this object the caller deleted. Bounded by read; implied by manageRecycleBin and modifyAllRecords, not by allowDelete.'),
+  manageRecycleBin: z.boolean().optional().describe('Recycle bin administration on this object: restore any entry, not only your own, and purge (the permanent delete, purging one entry, emptying the object\'s entries). Bounded by read; implied by modifyAllRecords.'),
 
   /** 
    * View All Records: Super-user read access. 
@@ -690,7 +793,10 @@ export const ObjectPermissionSchema = lazySchema(() =>
     // surface stays tolerant, which is the #4001 authorable/wire split: a
     // server still running an older toolchain may emit a stored pair in an
     // effective-permission response, and an older client must not crash on it.
-    ObjectPermissionBaseSchema.superRefine(checkScopeAgainstSuperUserBits),
+    ObjectPermissionBaseSchema.superRefine((value, ctx) => {
+      checkScopeAgainstSuperUserBits(value, ctx);
+      checkWriteImpliesRead(value, ctx);
+    }),
     OBJECT_PERMISSION_RETIRED_KEY_RESIDUE,
   )),
 );

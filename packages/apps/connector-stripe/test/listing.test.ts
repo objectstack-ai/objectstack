@@ -16,7 +16,8 @@ import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { TemplateManifestSchema } from '@objectstack/spec/marketplace';
+import { explainSolutionTypeContradiction, TemplateManifestSchema } from '@objectstack/spec/marketplace';
+import { resolveInstallModes } from '@objectstack/spec/kernel';
 import stack from '../objectstack.config.js';
 import { STRIPE_READ_OPERATIONS, StripeConnector } from '../src/connectors/stripe.connector.js';
 
@@ -70,8 +71,18 @@ describe('connector-stripe listing', () => {
     expect(manifest.manifestId).toBe(stack.manifest!.id);
   });
 
+  it('is listed as a connector, and the stack declares the connector that makes it one', () => {
+    // `os package publish` runs the same check against the built artifact and
+    // refuses a `connector` that declares none.
+    expect(manifest.solutionType).toBe('connector');
+    expect(explainSolutionTypeContradiction('connector', {
+      installModes: resolveInstallModes(stack.manifest),
+      connectorCount: (stack.connectors ?? []).length,
+    })).toBeUndefined();
+  });
+
   it('declares no key the publisher ignores', () => {
-    // The handbook: the platform decides `publisher` and `isStarter`; the CLI never sends them.
+    // Retired from the file: the platform decides `publisher` and `isStarter`, and the schema refuses both.
     expect(manifest).not.toHaveProperty('publisher');
     expect(manifest).not.toHaveProperty('isStarter');
   });

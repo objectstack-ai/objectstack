@@ -81,7 +81,7 @@
  * ── The section face ─────────────────────────────────────────────────────
  *
  * Exactly the anchors the two landed halves already agree on — the coverage
- * walker's `section` kind (`packages/cli/src/utils/i18n-extract.ts`, #5416) and
+ * walker's `section` kind (`packages/lint/src/i18n-walk.ts`, #5416) and
  * this package's `_sections` fact set (`validate-translation-references.ts`
  * `addSections`, #5422):
  *

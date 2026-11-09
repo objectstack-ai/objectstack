@@ -51,6 +51,7 @@
  * pack must keep the token — asserted below in both directions.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { renderHook } from '@testing-library/react';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -203,12 +204,14 @@ const UNTRANSLATED_TOKENS = [
   'ja :: auth.login.phonePlaceholder',
   'ko :: auth.forgotPassword.phonePlaceholder',
   'ko :: auth.login.phonePlaceholder',
-  'pt :: auth.forgotPassword.phonePlaceholder',
-  'pt :: auth.login.phonePlaceholder',
+  'pt-BR :: auth.forgotPassword.phonePlaceholder',
+  'pt-BR :: auth.login.phonePlaceholder',
   'ru :: auth.forgotPassword.phonePlaceholder',
   'ru :: auth.login.phonePlaceholder',
-  'zh :: auth.forgotPassword.phonePlaceholder',
-  'zh :: auth.login.phonePlaceholder',
+  'zh-Hans :: auth.forgotPassword.phonePlaceholder',
+  'zh-Hant :: auth.forgotPassword.phonePlaceholder',
+  'zh-Hans :: auth.login.phonePlaceholder',
+  'zh-Hant :: auth.login.phonePlaceholder',
 ].sort();
 
 const at = (pack: unknown, path: string): unknown =>
@@ -231,7 +234,7 @@ beforeEach(() => {
 
 describe('objectui#3546 slice three — the auth / oauth namespaces', () => {
   it('covers all ten packs and all forty-two live keys (guards the loops from emptying)', () => {
-    expect(LANGS).toHaveLength(10);
+    expect(LANGS).toHaveLength(PLATFORM_LOCALE_TAGS.length);
     expect(KEYS).toHaveLength(42);
     expect(new Set(KEYS).size).toBe(42);
     // The measured split, so a later slice cannot quietly absorb keys from this
@@ -266,11 +269,11 @@ describe('objectui#3546 slice three — the auth / oauth namespaces', () => {
       }
     }
     expect(identical.sort()).toEqual(UNTRANSLATED_TOKENS);
-    // 18 permitted pairs out of 378 — i.e. 40 of the 42 live keys are translated
+    // 20 permitted pairs out of 420 — i.e. 40 of the 42 live keys are translated
     // in every single pack. The set equality above is vacuous if the packs were
     // empty, so pin the two facts it rests on separately: the exempt value is
     // really the shared token, and a neighbour that embeds it is really not.
-    expect(UNTRANSLATED_TOKENS).toHaveLength(18);
+    expect(UNTRANSLATED_TOKENS).toHaveLength(20);
     expect(at(builtInLocales.ja, 'auth.login.phonePlaceholder')).toBe('+1 555 000 0000');
     expect(at(builtInLocales.ja, 'auth.login.emailOrPhonePlaceholder')).not.toBe(
       at(builtInLocales.en, 'auth.login.emailOrPhonePlaceholder'),
@@ -346,7 +349,7 @@ describe('objectui#3546 slice three — the auth / oauth namespaces', () => {
       ['oauth.consent.authorize', 'OAuthConsentPage'],
     ];
 
-    it.each(['en', 'zh'] as const)('%s resolves every sampled key from the pack', (lang) => {
+    it.each(['en', 'zh-Hans', 'zh-Hant'] as const)('%s resolves every sampled key from the pack', (lang) => {
       const { result } = renderHook(() => useObjectTranslation(), { wrapper: wrapperFor(lang) });
       for (const [key, owner] of SAMPLE) {
         const value = result.current.t(key);

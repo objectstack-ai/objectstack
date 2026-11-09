@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { PLATFORM_ADMIN_SETTINGS_GATE } from './platform-admin-action-gate.js';
 
 /**
  * sys_sso_provider — Registered external SSO identity provider (OIDC / SAML)
@@ -19,7 +20,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * organizationId, domain.
  *
  * All mutations route through better-auth's `/api/v1/auth/sso/*` endpoints
- * (register / delete-provider) so config validation and secret handling run;
+ * (register / update-provider / delete-provider) so config validation and
+ * secret handling run;
  * the generic data layer is read-only (see `enable.apiMethods`).
  *
  * @namespace sys
@@ -73,7 +75,7 @@ export const SysSsoProvider = ObjectSchema.create({
   // /api/v1/auth/sso/* (register / delete-provider) rather than the generic
   // data layer, so server-side config validation + secret handling run.
   //
-  // The four `/admin/sso/*` bridge actions are OFFERED only to the one
+  // The `/admin/sso/*` bridge actions are OFFERED only to the one
   // standing their door admits (ADR-0068 D4): each bridge runs the
   // platform-admin gate before it delegates and answers every other caller
   // 403 `PERMISSION_DENIED`. So each authors
@@ -101,6 +103,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // /sso/register would drop clientId/clientSecret (top-level → Zod-stripped)
       // and persist an unusable `oidc_config = null` provider.
       target: '/api/v1/auth/admin/sso/register',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the actions header above.
       visible: 'current_user.isPlatformAdmin == true',
       refreshAfter: true,
@@ -124,6 +128,10 @@ export const SysSsoProvider = ObjectSchema.create({
         // non-form callers). Removing it restores declared = enforced.
         { name: 'mapEmail', label: 'Map: Email claim', type: 'text', required: false, placeholder: 'email', helpText: 'Optional. Claim mapped to email. Defaults to "email".' },
         { name: 'mapName', label: 'Map: Name claim', type: 'text', required: false, placeholder: 'name', helpText: 'Optional. Claim mapped to display name. Defaults to "name".' },
+        // The groups claim: stored as the provider's `mapping.extraFields.groups`,
+        // the member an SSO sign-in reads the user's IdP groups from to grant
+        // their mapped permission sets (plugin-auth `sso-group-projection.ts`).
+        { name: 'mapGroups', label: 'Map: Groups claim', type: 'text', required: false, placeholder: 'groups', helpText: 'Optional. Claim that carries the user’s groups, e.g. "groups". Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.' },
       ],
     },
     {
@@ -143,6 +151,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // re-dispatches to /sso/register (admin gate runs). The response returns
       // the SP ACS + metadata URLs to configure on the IdP.
       target: '/api/v1/auth/admin/sso/register-saml',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the actions header above.
       visible: 'current_user.isPlatformAdmin == true',
       refreshAfter: true,
@@ -153,6 +163,7 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'entryPoint', label: 'IdP SSO URL', type: 'text', required: true, helpText: 'The IdP’s SAML single sign-on (redirect) endpoint that receives the SAMLRequest.' },
         { name: 'cert', label: 'IdP Signing Certificate', type: 'textarea', required: true, helpText: 'The IdP’s X.509 signing certificate (PEM body). Used to verify assertion signatures.' },
         { name: 'identifierFormat', label: 'NameID Format', type: 'text', required: false, placeholder: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress', helpText: 'Optional. Requested SAML NameID format. Defaults to the IdP’s configured format.' },
+        { name: 'mapGroups', label: 'Map: Groups attribute', type: 'text', required: false, placeholder: 'groups', helpText: 'Optional. Assertion attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to map no groups.' },
       ],
     },
     {
@@ -175,6 +186,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // feature is OFF the bridge returns a clear "not enabled for this
       // environment" error instead of a bare 404.
       target: '/api/v1/auth/admin/sso/request-domain-verification',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the actions header above.
       visible: 'current_user.isPlatformAdmin == true',
       params: [
@@ -211,6 +224,8 @@ export const SysSsoProvider = ObjectSchema.create({
       // on success. Routed through the env bridge, which maps @better-auth/sso's
       // empty 204 / 502 into a clear success/error toast.
       target: '/api/v1/auth/admin/sso/verify-domain',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the actions header above.
       visible: 'current_user.isPlatformAdmin == true',
       successMessage: 'Domain ownership verified',
@@ -247,6 +262,90 @@ export const SysSsoProvider = ObjectSchema.create({
         requiresConfirmation: true,
       },
     },
+    {
+      name: 'edit_sso_sign_in_options',
+      label: 'Edit Sign-In Options',
+      icon: 'settings',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      // The provider's two sign-in toggles (ruling record 6718355623 on the
+      // Enterprise SSO operator knobs), written through @better-auth/sso's own
+      // /sso/update-provider, which takes them as provider additional fields
+      // (plugin-auth `sso-sign-in-options.ts`). Its writers are the provider's
+      // writers: the vendor's provider-access check plus plugin-auth's
+      // held-caller refusal, so no `visible` term — the same door shape as
+      // `delete_sso_provider`. Both fields are `trackHistory`, so a change is
+      // recorded in the audit log. No `ai` block: it changes who can sign in,
+      // so it stays human-only (ADR-0011 bucket H's test).
+      target: '/api/v1/auth/sso/update-provider',
+      successMessage: 'Sign-in options saved',
+      refreshAfter: true,
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+        { name: 'allowIdpInitiated', field: 'allow_idp_initiated', defaultFromRow: true, required: false },
+        { name: 'allowJit', field: 'allow_jit', defaultFromRow: true, required: false },
+      ],
+    },
+    // The provider's groups claim, shown and changed where the register forms
+    // set it: `mapping.extraFields.groups` inside the stored protocol
+    // configuration, the one place it lives. That configuration is `internal`
+    // and the vendor answers no mapping, so no field of this record can carry
+    // the claim; both actions go through plugin-auth bridges that read the
+    // stored configuration and answer only the claim name. Platform-admin
+    // standing, as for the register actions (ADR-0068 D4). No `ai` block on the
+    // edit: it changes what a sign-in grants, so it stays human-only (ADR-0011
+    // bucket H's test, as for "Edit Sign-In Options").
+    {
+      name: 'show_sso_groups_claim',
+      label: 'Show Groups Claim',
+      icon: 'users',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/admin/sso/get-groups-claim',
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
+      visible: 'current_user.isPlatformAdmin == true',
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+      ],
+      resultDialog: {
+        title: 'Groups claim',
+        description:
+          'The OIDC claim or SAML attribute this provider reads the user’s groups from at each sign-in. Empty means the provider maps no groups. Change it with “Edit Groups Claim”.',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'groupsClaim', label: 'Groups claim', format: 'text' },
+        ],
+      },
+    },
+    {
+      name: 'edit_sso_groups_claim',
+      label: 'Edit Groups Claim',
+      icon: 'users',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/admin/sso/set-groups-claim',
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
+      visible: 'current_user.isPlatformAdmin == true',
+      refreshAfter: true,
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+        { name: 'groupsClaim', label: 'Groups claim', type: 'text', required: false, placeholder: 'groups', helpText: 'The OIDC claim or SAML attribute that carries the user’s groups. Each sign-in grants the permission sets mapped to those groups. Leave blank to remove it: the provider then maps no groups.' },
+      ],
+      resultDialog: {
+        title: 'Groups claim saved',
+        description: 'The groups claim this provider now reads at each sign-in. Empty means it maps no groups.',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'groupsClaim', label: 'Groups claim', format: 'text' },
+        ],
+      },
+    },
   ],
 
   listViews: {
@@ -255,7 +354,7 @@ export const SysSsoProvider = ObjectSchema.create({
       name: 'all',
       label: 'All',
       data: { provider: 'object', object: 'sys_sso_provider' },
-      columns: ['provider_id', 'issuer', 'domain', 'domain_verified', 'created_at'],
+      columns: ['provider_id', 'issuer', 'domain', 'domain_verified', 'allow_idp_initiated', 'allow_jit', 'created_at'],
       sort: [{ field: 'provider_id', order: 'asc' }],
       pagination: { pageSize: 50 },
       // Per-object empty state — the shared identity-object copy ("created
@@ -332,6 +431,29 @@ export const SysSsoProvider = ObjectSchema.create({
       internal: true,
       description: 'JSON: entryPoint, cert, identifierFormat, mapping (managed by better-auth)',
       group: 'Protocol',
+    }),
+
+    // Per-provider sign-in options (ruling record 6718355623), written as
+    // @better-auth/sso provider additional fields `allowIdpInitiated` /
+    // `allowJit` (plugin-auth `sso-sign-in-options.ts`). Both widen who can
+    // sign in, so both default OFF and both are `trackHistory`: a change
+    // writes its own audit-log line.
+    allow_idp_initiated: Field.boolean({
+      label: 'Allow IdP-Initiated Sign-In',
+      defaultValue: false,
+      trackHistory: true,
+      description:
+        'Accept a sign-in that starts at the identity provider (an unsolicited SAML response, or an OIDC callback with no state) instead of at this system. Off by default: an IdP-initiated SAML response is not bound to any request this system made. Change it with “Edit Sign-In Options”.',
+      group: 'Identity',
+    }),
+
+    allow_jit: Field.boolean({
+      label: 'Allow Just-in-Time Provisioning',
+      defaultValue: false,
+      trackHistory: true,
+      description:
+        'Under the invite-only audience posture, create an account for a person who signs in through this provider without an account or an invitation. Off by default: such a person is refused. Other postures provision as before. Change it with “Edit Sign-In Options”.',
+      group: 'Identity',
     }),
 
     user_id: Field.lookup('sys_user', {

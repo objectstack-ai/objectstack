@@ -1624,7 +1624,10 @@ describe('packages/*/README.md joined the disk surface — objectui#3622', () =>
     // the VS Code extension package, whose README carried 12 / 8 of them, and
     // objectstack#27042 (c59b1bfa) retired `@object-ui/plugin-ai`, whose README
     // carried 3 / 1 more. Both floors move down by exactly those deletions.
-    expect(decidable.length).toBeGreaterThanOrEqual(126);
+    // 125 measured on objectstack#25921's providers fold: retiring
+    // `@object-ui/providers` deleted its README, which carried 2 / 0 of them
+    // (127 on the merge base), so only the decidable floor moves.
+    expect(decidable.length).toBeGreaterThanOrEqual(125);
     expect(siteAbsolute.length).toBeGreaterThanOrEqual(39);
   });
 });

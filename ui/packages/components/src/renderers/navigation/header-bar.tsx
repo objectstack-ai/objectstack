@@ -17,7 +17,6 @@ import {
   BreadcrumbList,
   BreadcrumbItem,
   BreadcrumbLink,
-  BreadcrumbSeparator,
   BreadcrumbPage,
   DropdownMenu,
   DropdownMenuTrigger,
@@ -25,6 +24,7 @@ import {
   DropdownMenuItem,
   Input,
 } from '../../ui';
+import { BreadcrumbSeparator } from '../../ui/breadcrumb';
 import { ChevronDown, Search } from 'lucide-react';
 // `crumbs` is typed `BreadcrumbItem[]` — the SAME declaration `ui:breadcrumb`'s
 // `items` uses — and `BreadcrumbItem.icon` is not merely declared but DESCRIBED

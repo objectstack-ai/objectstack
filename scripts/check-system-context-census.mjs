@@ -466,7 +466,7 @@ export const NON_READ_ANCHORS = [
     rowSeams: ['Tenant-audit warning silenced'],
   },
   {
-    file: 'packages/objectql/src/engine.ts',
+    file: 'packages/objectql/src/engine-insert.ts',
     symbol: 'insert',
     collapsesOntoRead: true,
     why: 'row 22 -- the strict-drop refusal that never fires under elevation, and the strip-before-validation block the validation row cites',

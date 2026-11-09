@@ -30,6 +30,7 @@
 import { describe, expect, it } from 'vitest';
 import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
+import { validateStackExpressions } from './validate-expressions.js';
 
 /**
  * The card's probe object, verbatim but for the predicate: `stage` sits in
@@ -163,5 +164,73 @@ describe('#26646 — the object door gives the build\'s field group `visibleWhen
     const result = gateObject(fxGroup(ACCEPTED[0]), [sibling]);
 
     expect(expressionFindings(result.errors), dump(result)).toEqual([]);
+  });
+});
+
+/**
+ * #30692 — a field group's `requiresFeature` (ruling 6670372892 on #30210, row
+ * 4 A). The spec lowers it at parse into the group's `visibleWhen` as the
+ * flag's gate alone, or `(<authored>) && <gate>`, and both renderers bind the
+ * host's `features` root for that predicate. The root verdict accepts exactly
+ * that trailing gate; any other `features.*` read in a group predicate keeps
+ * the verdict it had.
+ */
+describe('#30692 — the build and the object door accept the gate a group\'s `requiresFeature` lowers to', () => {
+  const GATE = 'features.multiOrgEnabled != false';
+  const LOWERED = [
+    { dialect: 'cel', source: GATE },
+    { dialect: 'cel', source: `(record.stage == 'won') && ${GATE}` },
+    // The opt-in spelling of another flag of the same registry.
+    { dialect: 'cel', source: '(record.stage == \'won\') && features.twoFactor == true' },
+  ] as const;
+
+  for (const body of LOWERED) {
+    it(`⭐ CONTROL — the lowered \`${body.source}\` publishes clean, and the build agrees`, () => {
+      const result = gateObject(fxGroup(body));
+
+      expect(result.rulesRun).toContain('validateStackExpressions');
+      expect(expressionFindings(result.errors), dump(result)).toEqual([]);
+      expect(expressionFindings(result.advisories), dump(result)).toEqual([]);
+      expect(buildFindings(fxGroup(body))).toEqual([]);
+    });
+  }
+
+  it('⭐ CONTROL — the unlowered key itself publishes clean (a door that judges the item before parse)', () => {
+    const item = { ...fxGroup(undefined), fieldGroups: [{ key: 'g1', label: 'G1', requiresFeature: 'multiOrgEnabled' }] };
+    expect(expressionFindings(gateObject(item).errors), dump(item)).toEqual([]);
+    expect(buildFindings(item)).toEqual([]);
+  });
+
+  const STILL_REFUSED = [
+    // A gate that is not the flag's canonical one.
+    'features.multiOrgEnabled == true',
+    // The gate first: not the lowering's shape.
+    `${GATE} && record.stage == 'won'`,
+    // The authored part reads another root the group does not bind.
+    `('org_admin' in current_user.positions) && ${GATE}`,
+    // Two groups, not one: the part before the gate is \`record.stage == 'a') && (features.organization != false\`.
+    `(record.stage == 'a') && (features.organization != false) && ${GATE}`,
+    // A flag outside the registry.
+    '(record.stage == \'won\') && features.notAFlag != false',
+  ] as const;
+
+  for (const body of STILL_REFUSED) {
+    it(`⭐ LIT — \`${body}\` keeps its root verdict`, () => {
+      const errs = expressionFindings(gateObject(fxGroup(body)).errors);
+      expect(errs, dump(errs)).toHaveLength(1);
+      expect(errs[0]).toMatchObject({ severity: 'error', where: WHERE });
+      expect(errs[0]!.message).toMatch(/^`visibleWhen` reads `(features|current_user)`/);
+      // The build's issue quotes the whole predicate the group carries, not the
+      // part the root verdict judged.
+      const issues = validateStackExpressions({ objects: [fxGroup(body)] }).filter((i) => i.where === WHERE);
+      expect(issues.map((i) => i.source)).toEqual([body]);
+      expect(buildFindings(fxGroup(body))).toEqual(errs);
+    });
+  }
+
+  it('a hand-written `features` read on a group is pointed at `requiresFeature`', () => {
+    const errs = expressionFindings(gateObject(fxGroup('features.multiOrgEnabled == true')).errors);
+    expect(errs, dump(errs)).toHaveLength(1);
+    expect(errs[0]!.message).toContain("`requiresFeature: 'FLAG'`");
   });
 });

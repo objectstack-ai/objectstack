@@ -10,7 +10,7 @@
  */
 
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
-import { useParams, useSearchParams, useNavigate, useLocation, useHref } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
 const ImportWizard = lazy(() =>
@@ -25,6 +25,7 @@ import { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
 import { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useServedViewItems } from '../hooks/useServedViewItems.js';
+import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { DataSource } from '@object-ui/types';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { ViewConfigPanel } from './ViewConfigPanel.js';
@@ -76,7 +77,13 @@ import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { ListPersonalizedMarker } from './ListPersonalizedMarker.js';
 import { useObjectViewViewCrud } from './objectViewViewCrud.js';
-import { PERSONAL_VIEW_OBJECT, buildPersonalViewConfig, personalViewEntry, usePersonalViews } from './personalViews.js';
+import {
+    PERSONAL_VIEW_OBJECT,
+    buildPersonalViewConfig,
+    personalViewEntry,
+    personalViewPanelFilters,
+    usePersonalViews,
+} from './personalViews.js';
 import { PersonalViewNameDialog } from './PersonalViewNameDialog.js';
 import { parseListStateParams } from './userFilterUrlState.js';
 import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
@@ -191,11 +198,28 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // One setter for the page's life, calling the latest one.
     const setSearchParamsRef = useRef(setSearchParamsNow);
     setSearchParamsRef.current = setSearchParamsNow;
+    const location = useLocation();
+    // objectstack#30850 — the router hands a functional update the params it
+    // last RENDERED, and its navigation commits in a transition. Two writes
+    // before that commit (a search term, then the list's own page reset that
+    // term causes) would each start from the same params, and the second
+    // would drop the first. So each write starts from the one before it until
+    // the location moves (a new `location.key`, which every navigation makes).
+    const locationKeyRef = useRef(location.key);
+    locationKeyRef.current = location.key;
+    const pendingSearchRef = useRef<{ locationKey: string; params: URLSearchParams } | undefined>(undefined);
     const setSearchParams = useCallback<typeof setSearchParamsNow>(
-        (next, options) => setSearchParamsRef.current(next, options),
+        (next, options) => setSearchParamsRef.current((rendered) => {
+            const pending = pendingSearchRef.current;
+            const base = pending && pending.locationKey === locationKeyRef.current
+                ? new URLSearchParams(pending.params)
+                : rendered;
+            const params = createSearchParams(typeof next === 'function' ? next(base) : next);
+            pendingSearchRef.current = { locationKey: locationKeyRef.current, params };
+            return params;
+        }, options),
         [],
     );
-    const location = useLocation();
     const { showDebug } = useMetadataInspector();
     const { t, language } = useObjectTranslation();
     const { objectLabel, objectPluralLabel, objectDescription: objectDesc, viewLabel, viewEmptyState, actionParamText, fieldLabel, fieldOptionLabel } = useObjectLabel();
@@ -250,14 +274,22 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // and keeps an `object:` favorite only for an object the app does not list.
     // The entry the list is starred under is named with the plural the title
     // reads (objectui#11733).
+    // What this list is titled: a served object's label is already translated
+    // (objectstack#30311), so it is drawn as given; the bundle is asked only
+    // when the definition carries none. The header, the favorite and an
+    // unlabelled view's tab all read this one function, so they agree.
+    const listTitleOf = useCallback(
+        (def: { name: string; label?: unknown; pluralLabel?: unknown }) => servedObjectPluralLabel(def, language, objectPluralLabel),
+        [language, objectPluralLabel],
+    );
     const listFavorite = useObjectListFavorite({
         appSegment: appName,
         objectName,
-        label: objectPluralLabel(objectDef),
+        label: listTitleOf(objectDef),
     });
     // A view stored with no `label` is named by the object's plural label, on
     // its tab and on the record page's way back alike (objectui#12774).
-    const unlabelledViewText = objectPluralLabel(objectDef);
+    const unlabelledViewText = listTitleOf(objectDef);
 
     // Refresh trigger — bumped after view CRUD or this page's own data writes.
     const [ownRefreshKey, setRefreshKey] = useState(0);
@@ -657,6 +689,22 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const activeView = viewDraft && viewDraft.id === baseView?.id
         ? { ...baseView, ...viewDraft }
         : baseView;
+    // The list's toolbar state is read through this field gate wherever it is
+    // read (the seed, Save as my view, 保存): a field the object does not
+    // declare, or one this reader cannot read, is no list state.
+    const acceptListField = (field: string) =>
+        !!objectDef.fields?.[field]
+        && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
+    // objectstack#30073 — a personal view's own conditions are Filter panel
+    // rows (`personalViewPanelFilters`), edited there and saved back by 保存.
+    // Keyed on the stored conditions' content (ui/AGENTS.md #10).
+    const activeIsPersonal = !!activeView?.id && personalViewIds.has(activeView.id);
+    const panelFiltersKey = activeIsPersonal ? JSON.stringify((activeView as any)?.filter ?? null) : '';
+    const viewPanelFilters = useMemo(
+        () => (panelFiltersKey ? personalViewPanelFilters(activeView, acceptListField) : undefined),
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content the fold reads
+        [panelFiltersKey, objectDef, perms.isLoaded],
+    );
 
     // objectstack#25992 slice 8: the header toolbar actions, the nav `runAction` deep link
     // and the `action:bar` node moved to `./objectViewHeaderToolbar.ts`.
@@ -675,10 +723,14 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleListPersonalizationChange,
         listPersonalizedParts,
         handleResetView,
+        clearSourceListState,
+        readPanelFilters,
+        listPage,
     } = useObjectViewListUrlState({
         objectName,
         objectDef,
         activeView,
+        viewResolving: awaitingPersonalViews,
         listPrefs,
         perms,
         user,
@@ -688,8 +740,46 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#28950 — the 「Personalized」 marker beside the list title (the
     // page header's badge slot, and the phone title): drawn only while the
     // reader's list differs from the view, and the one way back to it.
+    // objectstack#30073 — 保存: the list on screen written back into the open
+    // personal view, through the body Save as my view builds (so the stored
+    // shape is the same), then the reader's list state for it is cleared and
+    // the list opens again on the saved view. A panel the fold cannot write
+    // losslessly keeps the refusal Save as my view gives.
+    // The reader's own `sys_personal_view` rows: one grant read for Save as my
+    // view (create) and for Rename and 保存 (update).
+    const personalViewsReady = personalViews.status === 'ready';
+    const personalGrant = (action: 'create' | 'update') => !perms.isLoaded || perms.can(PERSONAL_VIEW_OBJECT, action);
+    const canUpdatePersonalView = activeIsPersonal && personalViewsReady && personalGrant('update');
+    const handleSaveToPersonalView = async () => {
+        if (!activeView || !activeIsPersonal) return;
+        const built = buildPersonalViewConfig(objectDef.name, activeView, {
+            // The panel's group is the one the list shows (an emptied panel
+            // included), not the address's copy of it.
+            url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
+            preference: listPrefs.preference.perView?.[activeView.id],
+            panelFilters: viewPanelFilters,
+        });
+        if (!built.ok) {
+            toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
+            return;
+        }
+        try {
+            await personalViews.update(activeView.id, built.config);
+            handleResetView();
+        } catch (err) {
+            console.error('[ObjectView] Failed to save a personal view:', err);
+            toast.error(t('form.saveError'), {
+                description: err instanceof Error ? err.message : String(err),
+                classNames: { description: 'whitespace-pre-line' },
+            });
+        }
+    };
     const personalizedMarker = !isEnvironmentList && listPersonalizedParts.length > 0 ? (
-        <ListPersonalizedMarker parts={listPersonalizedParts} onReset={handleResetView} />
+        <ListPersonalizedMarker
+            parts={listPersonalizedParts}
+            onReset={handleResetView}
+            onSave={canUpdatePersonalView ? () => { void handleSaveToPersonalView(); } : undefined}
+        />
     ) : null;
 
     // objectstack#25992 slice 11b: the view-config save and create handlers, view switching
@@ -736,8 +826,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // one (`sys_personal_view` read and create), not to admins only; the name
     // is asked in `PersonalViewNameDialog`. A reader who cannot read the
     // list's own object is offered no Save: there is no list to keep.
-    const personalViewsReady = personalViews.status === 'ready';
-    const personalGrant = (action: 'create' | 'update') => !perms.isLoaded || perms.can(PERSONAL_VIEW_OBJECT, action);
     const listReadable = !perms.isLoaded || perms.can(objectDef.name, 'read');
     const [personalViewDialog, setPersonalViewDialog] = useState<{ mode: 'save' } | { mode: 'rename'; viewId: string } | null>(null);
     const openPersonalView = (id: string) => {
@@ -749,19 +837,24 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         if (!activeView) return false;
         // The list's toolbar state is the address's (`uf_*`), through the same
         // field gate its seed reads it with.
-        const acceptField = (field: string) =>
-            !!objectDef.fields?.[field]
-            && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
         const built = buildPersonalViewConfig(objectDef.name, activeView, {
-            url: parseListStateParams(searchParams, acceptField),
+            // The panel's group is the one the list shows (an emptied panel
+            // included), not the address's copy of it.
+            url: { ...parseListStateParams(searchParams, acceptListField), filters: readPanelFilters() },
             preference: listPrefs.preference.perView?.[activeView.id],
+            panelFilters: viewPanelFilters,
         });
         if (!built.ok) {
             toast.error(t('form.saveError'), { description: t(FILTER_FOLD_REFUSAL_KEYS[built.reason]) });
             return false;
         }
         try {
-            openPersonalView(await personalViews.save(label, built.config));
+            const savedId = await personalViews.save(label, built.config);
+            // objectstack#30073 — the list now lives in the saved view; the
+            // view it came from returns to its own (no temporary conditions,
+            // not personalized).
+            clearSourceListState(activeView.id);
+            openPersonalView(savedId);
             return true;
         } catch (err) {
             console.error('[ObjectView] Failed to save a personal view:', err);
@@ -835,16 +928,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // and Sonner toast instead of native window.confirm.
     // objectstack#28472 — the objects a delete cascades into, named by label.
     const objectLabelOf = useCallback(
-        (name: string) => objectLabel(objects.find((o: any) => o.name === name) ?? { name, label: name }),
-        [objects, objectLabel],
+        (name: string) =>
+            servedObjectLabel(objects.find((o: any) => o.name === name) ?? { name }, language, objectLabel, name),
+        [objects, objectLabel, language],
     );
     const actions = useObjectActions({
         objectName: objectDef.name,
         // The label this page shows (its header and breadcrumb read the same
-        // `objectLabel`), so the delete confirmation that names the record
+        // label), so the delete confirmation that names the record
         // (objectui#11695) and the delete toasts read it in the session's
-        // language; with no translation bundle it is `objectDef.label`.
-        objectLabel: objectLabel(objectDef),
+        // language: the served label as given, the bundle only when none is
+        // served (objectstack#30390).
+        objectLabel: servedObjectLabel(objectDef, language, objectLabel),
         objectDef,
         dataSource,
         onEdit,
@@ -988,6 +1083,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listIdentityKey,
         listSeedRef,
         writeListUrlState,
+        listPage,
         filterScope,
         actions,
         handleRowClick,
@@ -1005,6 +1101,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         initialUfSelections,
         handleUserFilterSelectionsChange,
         handleListTotalChange,
+        viewPanelFilters,
     });
 
     // objectstack#25992 slice 9: the merged views and the plugin's `ObjectViewSchema`
@@ -1115,7 +1212,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  titleSwitcher={pageHeaderShown ? titleSwitcher : null}
                  titleLabel={titleLabel}
                  objectListHref={appName && objectName ? `/apps/${appName}/${objectName}` : undefined}
-                 objectPluralLabel={objectPluralLabel}
+                 objectPluralLabel={listTitleOf}
                  objectDesc={objectDesc}
                  createButton={createButton}
                  importShown={importShown}
@@ -1180,7 +1277,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                    open={showImport}
                    onOpenChange={setShowImport}
                    objectName={objectDef.name}
-                   objectLabel={objectLabel(objectDef)}
+                   objectLabel={servedObjectLabel(objectDef, language, objectLabel)}
                    fields={identityImportEnabled
                      // Identity import has a curated target set — the generic
                      // writable-field filter below would drop phone_number

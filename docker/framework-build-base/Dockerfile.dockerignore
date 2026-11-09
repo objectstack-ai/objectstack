@@ -1,0 +1,19 @@
+# BuildKit ignore file for docker/framework-build-base/Dockerfile.
+#
+# BuildKit reads `<dockerfile path>.dockerignore` next to the Dockerfile, so
+# this file applies whatever the context is. Patterns are relative to the
+# CONTEXT root, which is a checkout of the commit being packaged.
+#
+# Keep it artifact-only: patterns match every path in the context, and a broad
+# name (`**/data`, `**/build`) silently deletes source directories such as
+# packages/spec/src/data.
+
+# The image is public, and a checkout's .git/config can carry the credentials
+# header actions/checkout writes. `.git` also differs on every checkout, so
+# admitting it would rehash the COPY layer on every build.
+**/.git
+
+# Regenerated inside the image; never source.
+**/node_modules
+**/.pnpm-store
+**/.turbo

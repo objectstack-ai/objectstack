@@ -31,11 +31,24 @@ const STUDIO_EN: Record<string, string> = {
   'perm.action.modifyAll': 'Modify All Records (bypass sharing)',
   'perm.col.object': 'Object',
   'perm.col.bulk': 'Bulk',
+  // objectstack#29729 — the object columns' headers. en abbreviates (the words
+  // do not fit the column) and the legend line spells them out; a locale whose
+  // words fit spells the action word here and the legend line is not drawn.
+  'perm.col.create': 'C',
+  'perm.col.read': 'R',
+  'perm.col.edit': 'U',
+  'perm.col.delete': 'D',
+  'perm.col.export': 'E',
+  'perm.col.transfer': 'Tr',
+  'perm.col.viewAll': 'VA',
+  'perm.col.modifyAll': 'MA',
   'perm.posture.private': 'Private',
   'perm.posture.private.tip': 'Secure-by-default object (access.default = private): a permission set’s “*” wildcard grant does NOT cover it. Access needs an explicit grant on this object (or View/Modify All Records). Grants you edit here apply normally.',
   'perm.owd.tip': 'Org-wide default (sharingModel): the record-level visibility baseline for internal users, applied before positions and sharing rules. Object CRUD here gates the operation; the OWD decides which records it reaches (own vs org-wide).',
   'perm.owd.defaultPrivate': 'Private (default)',
   'perm.owd.editLink': 'Edit in the package’s Record Sharing Baseline (OWD) overview',
+  // objectstack#29729 — the Setup matrix's per-object chip.
+  'perm.owd.chip': 'OWD {value}',
   'perm.owd.private': 'Private',
   'perm.owd.public_read': 'Public read',
   'perm.owd.public_read_write': 'Public read/write',
@@ -66,7 +79,7 @@ const STUDIO_EN: Record<string, string> = {
   'perm.cap.none': 'No system capabilities',
   'perm.cap.add': 'Add capability',
   'perm.badge.package': 'Package',
-  'perm.badge.custom': 'Custom',
+  'perm.badge.custom': 'Added',
   'perm.badge.default': 'Default for new users',
   'perm.field.loading': 'Loading fields…',
   'perm.field.empty': 'No fields registered for this object.',
@@ -133,7 +146,7 @@ const STUDIO_EN: Record<string, string> = {
   'perm.cel.type.unknown': 'Unknown',
   'perm.cel.type.unknownHint':
     'the engine cannot prove a single type. Wrap operands in double() / int() / string() to pin it — only proven-Number formulas are offered as dataset measures.',
-  'perm.cel.saveBlocked': 'Fix the CEL syntax errors before saving.',
+  'perm.cel.saveBlocked': 'Fix the expression errors before saving.',
   // The editor's inspector-blocked Save title (objectui#6900, ruling 5831744213):
   // that channel carries more than CEL faults, so its copy names no one kind.
   'perm.inspector.saveBlocked': 'Fix the issues shown in the inspector before saving.',
@@ -268,6 +281,15 @@ const STUDIO_EN: Record<string, string> = {
     'The clone was created, but the server\'s answer did not name it. Open it from the permission-set list.',
   // Embedded hosts have no route to navigate to, so the clone is announced.
   'perm.clone.done': 'Cloned as {name}. Open it from the permission-set list to edit.',
+  // objectstack#29727 — the clone door's notice, by the code it names it with
+  // (`noticeCode`, one per landing); `{package}` is the answer's `package`. A
+  // code this console does not know shows the door's `notice` as sent.
+  'perm.clone.notice.environmentWide':
+    'The copy was saved environment-wide, in no package, as the set it was copied from is. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  'perm.clone.notice.inPackage':
+    'The copy was saved in package \'{package}\', beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  'perm.clone.notice.inCreatedPackage':
+    'The copy was saved in package \'{package}\', created for it to hold your changes to the package the set came from, beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
   // A save that still reached the server and was refused as a packaged set:
   // the same guidance as the lock, keyed on the refusal's code (never its
   // prose), instead of the transport's generic message.
@@ -346,6 +368,8 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.required': 'Required',
   'designer.field.requiredCbpMaster':
     'Required is locked on: this object is controlled by parent, and it derives its master from this master-detail field, which must be required.',
+  'designer.field.requiredCbpOptionalMaster':
+    'This object is controlled by parent, and this master-detail field is its master. Clear Required to make it an optional master: a record that names no master is visible only to its owner and to users with View All Records on this object.',
   'designer.field.unique': 'Unique',
   'designer.field.description': 'Description',
   'designer.field.readonly': 'Read-only',
@@ -418,6 +442,11 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.lookup.allowCreate': 'Allow quick-create',
   'designer.field.lookup.referenceNameVisible': 'Show Name When Unreadable',
   'designer.field.lookup.referenceNameVisible.help': "Lets a reader of this record see the referenced record's name, as plain text with no link, even when they may not open that record. Nothing else of it is shown, and a field-level rule on the name still holds (the name then reads Record # and the id). Unset: such a reference shows as a restricted record.",
+  'designer.field.deleteBehavior': 'Delete Behavior',
+  'designer.field.deleteBehavior.help': 'What happens when the referenced record is deleted',
+  'designer.field.deleteBehavior.set_null': 'Set Null (clear the reference)',
+  'designer.field.deleteBehavior.cascade': 'Cascade (delete children)',
+  'designer.field.deleteBehavior.restrict': 'Restrict (block the delete)',
   'designer.field.relatedList.heading': 'Related list on the parent record',
   'designer.field.relatedList.shown': 'Show',
   'designer.field.relatedList.hidden': 'Don\'t show',
@@ -471,6 +500,14 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.currency.createCodeField': 'Create currency field',
   'designer.field.currency.codeFieldLabel': 'Currency',
   'designer.field.currency.recordHint': 'Lists the text fields of this object whose value domain is ISO 4217 currency. Each record stores its own code there; the amount shows in that currency.',
+  'designer.field.currency.homeAmount': 'Home currency amount',
+  'designer.field.currency.homeField': 'Home amount field',
+  'designer.field.currency.homeFieldNone': '— Not stored —',
+  'designer.field.currency.rateDate': 'Document date',
+  'designer.field.currency.rateDateNone': '— Pick a date field —',
+  'designer.field.currency.rateField': 'Rate field',
+  'designer.field.currency.rateFieldNone': '— Pick a number field —',
+  'designer.field.currency.homeAmountHint': "When a record is saved, the server converts this amount into the organization's home currency at the exchange rate in force on the document date, and stores the result and the rate it used. Lists the read-only fields that can hold them: a dynamic-mode currency field for the amount, a number field for the rate.",
   // Object basics (no-selection default inspector)
   'designer.object.kind': 'Object',
   'designer.object.section.basic': 'Basic info',
@@ -1129,6 +1166,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.refusal.widget': 'the widget “{widget}”',
   'engine.studio.refusal.widgetInput': '{input} on the widget “{widget}”',
   'engine.studio.refusal.reportInput': '“{input}” in the report’s properties',
+  // objectstack#30064 — a refused dataset publish, placed on its measure or dimension.
+  'engine.studio.refusal.datasetMeasure': 'the measure “{member}”',
+  'engine.studio.refusal.datasetMeasureInput': '{input} of the measure “{member}”',
+  'engine.studio.refusal.datasetDimension': 'the dimension “{member}”',
+  'engine.studio.refusal.datasetDimensionInput': '{input} of the dimension “{member}”',
   'engine.studio.refusal.publishIssue': 'Not published. Check {where} — {problem}',
   'engine.studio.refusal.publishWhere': 'Not published. Check {where}: Details say what to change.',
   'engine.studio.refusal.publishUnlocated': 'Not published: the server refused this draft. Details say why.',
@@ -1555,6 +1597,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.objectPicker.showSystem': 'Show system objects ({count})',
   'engine.inspector.objectPicker.hideSystem': 'Hide system objects',
   'engine.inspector.objectPicker.noMatch': 'No object matches. Press Enter to keep what you typed.',
+  // A picker that takes objects only (the new-automation trigger object).
+  'engine.inspector.objectPicker.noMatchObjectsOnly': 'No object matches. Choose one from the list.',
+  'engine.inspector.objectPicker.notChosen': 'No object chosen: \u201c{text}\u201d is not an object. Choose one from the list.',
   // objectstack#28240 — objects outside the edited package's closure.
   'engine.inspector.objectPicker.groupOutside': 'Outside this package\u2019s dependencies',
   'engine.inspector.objectPicker.showOutside': 'Show objects outside this package\u2019s dependencies ({count})',
@@ -1644,6 +1689,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.autoSaveOn': 'Auto-save is on — click to disable',
   'engine.edit.autoSaveOff': 'Auto-save is off — click to enable',
   'engine.edit.autoSavingShortly': 'Auto-saving…',
+  'engine.edit.notSavedHeld': 'Not saved — fix the errors to save',
   'engine.edit.destructive': 'Destructive change',
   'engine.edit.destructiveHint':
     'The change would break existing references. Review the issues and confirm to force-save.',
@@ -1881,6 +1927,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.kernelReadOnly': 'This package is part of the platform. It cannot be edited, disabled or deleted.',
   'engine.packages.detail.codeReadOnly': 'This package is loaded from code, so it is read-only here: it cannot be edited, disabled or deleted in the console. Change it in its source and deploy again.',
   'engine.packages.detail.readOnly': 'This package is read-only here: it cannot be edited, disabled or deleted in the console.',
+  'engine.packages.detail.codeReadOnlyDisableable': 'This package is loaded from code, so it is read-only here: it cannot be edited or deleted in the console, but you can disable it and enable it again. Change it in its source and deploy again.',
+  'engine.packages.detail.readOnlyDisableable': 'This package is read-only here: it cannot be edited or deleted in the console, but you can disable it and enable it again.',
   'engine.packages.detail.actions': 'Actions',
   'engine.packages.detail.edit': 'Edit',
   'engine.packages.edit.title': 'Edit package',
@@ -1895,6 +1943,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.disable': 'Disable',
   'engine.packages.detail.disableTitle': 'Disable "{name}"?',
   'engine.packages.detail.disableDescription': 'The package is taken out of service for every user until it is enabled again. No records are deleted, and you can enable it again at any time.',
+  'engine.packages.detail.disableMayBeRefused': 'The disable is refused while an active validation rule reads a field this package adds; the refusal names each such rule.',
+  'engine.packages.detail.disableRestricted': 'This package cannot be disabled while an active validation rule reads a field it adds. Switch off or change each rule named below first, or keep the package enabled.',
   'engine.packages.detail.export': 'Export',
   'engine.packages.detail.exporting': 'Exporting…',
   'engine.packages.detail.deletePackage': 'Delete package',
@@ -1918,6 +1968,16 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.deleteModeStructureHint': "The package's metadata is removed. The database tables its objects created, and every record in them, are kept.",
   'engine.packages.detail.deleteModeAll': 'Delete the structure and the data',
   'engine.packages.detail.deleteModeAllHint': 'Also drops the database tables its objects created, with every record in them.',
+  'engine.packages.detail.deleteContentsHeading': 'What the package holds',
+  'engine.packages.detail.deleteContentsLoading': 'Reading what the package holds…',
+  'engine.packages.detail.deleteContentsFailed': 'Could not read what the package holds. Deleting it still removes everything in it.',
+  'engine.packages.detail.deleteContentsEmpty': 'The package holds no published items.',
+  'engine.packages.detail.deleteRecordsOne': '{count} record',
+  'engine.packages.detail.deleteRecordsOther': '{count} records',
+  'engine.packages.detail.deleteRecordsUnknown': 'Record count unavailable',
+  'engine.packages.detail.deleteDraftsOne': 'Its {count} unpublished draft is deleted too.',
+  'engine.packages.detail.deleteDraftsOther': 'Its {count} unpublished drafts are deleted too.',
+  'engine.packages.detail.deletePermanent': 'The tables are dropped permanently, with every record in them. Dropped tables do not go to the recycle bin and cannot be restored.',
   'engine.packages.detail.deleteTypeName': 'Type "{name}" to confirm',
   'engine.packages.detail.duplicateGo': 'Create copy',
   'engine.packages.detail.deleteFailed': 'Delete failed',
@@ -1942,6 +2002,11 @@ const STUDIO_EN: Record<string, string> = {
   'engine.datasource.deleteTitle': 'Delete datasource "{item}"?',
   'engine.datasource.deleteBody': 'The connection {name} is removed. This cannot be undone.',
   'engine.datasource.delete': 'Delete',
+  // The objects bound to a datasource, read from object metadata (each object's
+  // `datasource`): the delete confirm lists them, and a refused delete names them.
+  'engine.datasource.deleteBoundBody': 'These objects still use {name}, so it cannot be deleted yet. Delete each object or move it to another datasource first:',
+  'engine.datasource.deleteBoundRefused': '{name} was not deleted: {objects} still use it. Delete these objects or move them to another datasource, then delete {name} again.',
+  'engine.datasource.boundObjectSeparator': ', ',
   // objectui#13460 — the datasource page's own copy. Author data (names, driver
   // labels and descriptions, server messages) and the driver config schema's enum
   // option values (objectui#13353) are not rows here.
@@ -1968,9 +2033,14 @@ const STUDIO_EN: Record<string, string> = {
   'engine.datasource.driver': 'Driver',
   'engine.datasource.driverPlaceholder': 'Choose a driver',
   'engine.datasource.schemaMode': 'Schema mode',
-  'engine.datasource.schemaModeManaged': 'Managed (ObjectStack owns the schema)',
-  'engine.datasource.schemaModeExternal': 'External (read existing schema as-is)',
+  'engine.datasource.schemaModeManaged': 'Managed: ObjectStack creates and changes the tables',
+  'engine.datasource.schemaModeExternal': 'External: read an existing database',
   'engine.datasource.schemaModeValidateOnly': 'Validate only',
+  'engine.datasource.schemaModeExternalHint': 'Choose this to read a database that already holds your data. ObjectStack reads its tables as they are and never creates or changes them. After saving, Sync objects brings its tables in as objects, whose records are read-only.',
+  'engine.datasource.schemaModeManagedHint': 'ObjectStack creates and changes this database’s tables to fit the objects stored in it. Use it only for an empty database set aside for ObjectStack: in an existing database, storing an object adds columns to the table of the same name. A managed datasource has no Sync objects.',
+  'engine.datasource.schemaModeValidateOnlyHint': 'Reads an existing database the way External does, and never changes its tables. If you are unsure, choose External.',
+  'engine.datasource.schemaModeFederationOnly': 'Managed is not offered: this driver only connects to a database another system owns, and ObjectStack never creates or changes its tables.',
+  'engine.datasource.noSyncManaged': 'No Sync objects: this datasource is managed, so ObjectStack creates its tables and there are none to bring in. To read an existing database’s tables, create a datasource for it with the schema mode External.',
   'engine.datasource.testConnection': 'Test connection',
   'engine.datasource.connectionFailed': 'Connection failed',
   'engine.datasource.connectionOk': 'Connection ok',
@@ -2000,6 +2070,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.datasource.syncedOne': 'Synced 1 object from {name}.',
   'engine.datasource.synced': 'Synced {count} objects from {name}.',
   'engine.datasource.syncFailed': 'Failed: {failures}',
+  'engine.datasource.syncNextStepsOne': 'Two steps are left before people can use it:',
+  'engine.datasource.syncNextSteps': 'Two steps are left before people can use them:',
+  'engine.datasource.syncNextStepApp': 'Add to an app. Until then no app’s navigation lists a synced object, and only the link above opens it.',
+  'engine.datasource.syncNextStepAccess': 'Grant access in a permission set. Until then only administrators can read a synced object’s records.',
   'engine.datasourcePreview.empty': 'Set a name and at least a driver to see the datasource preview.',
   'engine.datasourcePreview.unknownDriver': 'unknown',
   'engine.datasourcePreview.active': 'Active',
@@ -2299,6 +2373,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.tabCanvas': 'Canvas',
   'engine.studio.if.noAppTitle': 'This package has no app yet',
   'engine.studio.if.noAppHint': 'Create an app to design its navigation and interfaces.',
+  // objectstack#29851 — a package with no app of its own that adds navigation
+  // to another package's app, as that app's owner serves it.
+  'engine.studio.if.noOwnApp': 'This package has no app of its own.',
+  'engine.studio.if.noOwnAppTitle': 'This package has no app of its own',
+  'engine.studio.if.contributesOne': 'It adds {count} navigation entry to {package}’s app.',
+  'engine.studio.if.contributesOther': 'It adds {count} navigation entries to {package}’s app.',
+  'engine.studio.if.openOwner': 'Open {package}',
   // objectui#12508 — the canvas of an object that has only a draft: no runtime yet.
   'engine.studio.if.objectUnpublishedTitle': 'This object is not published yet',
   'engine.studio.if.objectUnpublishedHint': 'Publish the package to see its records here.',
@@ -2363,6 +2444,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.if.offNav.dashboard': 'Dashboards',
   'engine.studio.if.offNav.report': 'Reports',
   'engine.studio.if.offNav.view': 'Views',
+  'engine.studio.if.offNav.viewForms': 'Form views',
+  'engine.studio.if.offNav.viewMixed': 'Form and list views',
+  'engine.studio.if.offNav.formName': '{object} form',
   'engine.studio.if.openInData': 'Open in Data',
   // objectui#12725 — the status line above the canvas, and the item's ⋯ menu.
   'engine.studio.if.status.design': 'Design',
@@ -2436,6 +2520,18 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.form.sourceLabel': 'Preview source',
   'engine.studio.data.form.sourceDraft': 'Draft',
   'engine.studio.data.form.sourcePublished': 'Published',
+  // objectstack#30057 — which layout the Form tab edits: the form view the
+  // app's create and edit dialogs open, or the object's field groups when it
+  // has none; and, where create and edit open different form views, which one.
+  'engine.studio.data.form.layoutSource.formView': 'Form view: {name}',
+  'engine.studio.data.form.layoutSource.formViewTitle':
+    'New and Edit in the app open this form view, so the layout here is saved to it.',
+  'engine.studio.data.form.layoutSource.fieldGroups': 'Field groups',
+  'engine.studio.data.form.layoutSource.fieldGroupsTitle':
+    'This object has no form view: New and Edit in the app lay out its fields by these groups.',
+  'engine.studio.data.form.flowLabel': 'Form opened by',
+  'engine.studio.data.form.flowCreate': 'New',
+  'engine.studio.data.form.flowEdit': 'Edit',
   'engine.studio.data.fieldProps': 'Field properties',
   'engine.studio.data.groupProps': 'Group properties',
   'engine.studio.data.fieldInspectorMissing':
@@ -2464,15 +2560,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.newSimilar.submit': 'Create copy',
   'engine.studio.auto.newSimilar.failedHttp': 'Could not create the copy (HTTP {status}).',
   'engine.studio.auto.newSimilar.failed': 'Could not create the copy.',
+  // objectstack#29727 — the clone door's notice for the code
+  // `FLOW_CLONE_DISABLED_COPY`; any other code shows the door's `notice` as sent.
+  'engine.studio.auto.newSimilar.notice':
+    'The copy is switched off and does not run until you switch it on, and it still uses the same subflows, actions and objects as the original.',
   'engine.studio.auto.newSimilar.done': 'Saved the copy {name} in package {package}.',
   'engine.studio.auto.newSimilar.noPackage':
     'The server saved the copy {name}, but its answer does not name the package it landed in, so nothing was opened.',
   'engine.studio.auto.newSimilar.dismiss': 'Dismiss',
   // ADR-0146 D4 — a read-only package's flow: the activation-ledger switch
   // (this deployment only, never the definition), offered on the item.
-  'engine.studio.auto.ledger.on': 'On for this deployment',
-  'engine.studio.auto.ledger.off': 'Off for this deployment',
-  'engine.studio.auto.ledger.notRunning': 'On for this deployment, not running here',
+  'engine.studio.auto.ledger.on': 'Switched on for this deployment',
+  'engine.studio.auto.ledger.off': 'Switched off for this deployment',
+  'engine.studio.auto.ledger.notRunning': 'Switched on for this deployment, not running here',
   'engine.studio.auto.ledger.hint':
     'This flow ships in a read-only package. The switch turns it on or off for this deployment only; the package is not changed.',
   'engine.studio.auto.ledger.walled': 'On this deployment, only the platform operator can switch a packaged flow on or off.',
@@ -2480,9 +2580,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.ledger.switchedOff': '"{label}" is switched off for this deployment.',
   'engine.studio.auto.ledger.toggleFailedHttp': 'Could not change activation (HTTP {status}).',
   'engine.studio.auto.ledger.toggleFailed': 'Could not change activation.',
-  'engine.studio.auto.on': 'On',
-  'engine.studio.auto.off': 'Off',
-  'engine.studio.auto.offTitle': 'Disabled — will not run',
+  'engine.studio.auto.on': 'Switched on',
+  'engine.studio.auto.off': 'Switched off',
+  'engine.studio.auto.offTitle': 'Switched off — will not run',
   'engine.studio.auto.onBound': 'Enabled · bound to its trigger',
   'engine.studio.auto.onUnbound': 'Enabled · no trigger (run manually)',
   // objectui#11779 — an enabled flow whose declared trigger is not armed on this
@@ -2490,18 +2590,32 @@ const STUDIO_EN: Record<string, string> = {
   // the platform's sentence is shown instead).
   'engine.studio.auto.notRunning': 'Not running here',
   'engine.studio.auto.notRunningTitle': 'Enabled, but its trigger is not armed on this deployment',
+  // The run note's line for each of the contract's FLOW_UNBOUND_CAUSES: what
+  // this deployment does not do, and who can change it.
+  'engine.studio.auto.unboundCause.deployment_policy':
+    'This deployment keeps scheduled work that comes with a package switched off. Whoever operates this deployment can switch it on.',
+  'engine.studio.auto.unboundCause.disabled_subflow':
+    'A packaged subflow this flow calls is switched off, so this flow does not start. An admin can switch that subflow on.',
+  'engine.studio.auto.unboundCause.notice_after_suspending_subflow':
+    'A save notice in this flow comes after a subflow that can pause, so this flow does not start. Move the save notice ahead of that step, or use a notify step.',
+  'engine.studio.auto.unboundCause.suspending_subflow_in_region':
+    'A subflow inside a loop, parallel branch or error handler calls a flow that can pause, so this flow does not start. Move that call onto the main path of the flow.',
+  'engine.studio.auto.unboundCause.missing_trigger':
+    'This deployment does not run flows started by this kind of trigger. A developer can add the trigger package to the app, and the flow will start running.',
+  'engine.studio.auto.unboundCause.binding_failure':
+    'The trigger is installed, but connecting this flow to it failed. A developer can find the error in the server startup warnings.',
   'engine.studio.auto.unpublishedTitle': 'Not deployed yet — publish to deploy it',
   // objectui#12349 — the engine's registration verdict on a flow. A refused
   // flow is titled with the engine's own message, as sent; an unregistered one
   // reads "Not running here", titled by the row below.
   'engine.studio.auto.refused': 'Refused by the engine',
   'engine.studio.auto.unregisteredTitle': 'The automation engine on this deployment holds no registration for this flow',
-  'engine.studio.auto.enabled': 'Enabled',
-  'engine.studio.auto.disabled': 'Disabled',
+  'engine.studio.auto.enabled': 'Switched on',
+  'engine.studio.auto.disabled': 'Switched off',
   'engine.studio.auto.enableTitle': 'Enable this automation (publish to apply)',
   'engine.studio.auto.disableTitle': 'Disable this automation (publish to apply)',
-  'engine.studio.auto.enabledToast': 'Enabled — publish to apply',
-  'engine.studio.auto.disabledToast': 'Disabled — publish to apply',
+  'engine.studio.auto.enabledToast': 'Switched on — publish to apply',
+  'engine.studio.auto.disabledToast': 'Switched off — publish to apply',
   'engine.studio.auto.newTitle': 'New automation',
   'engine.studio.auto.none': 'No automations yet — click “+” above to create one',
   'engine.studio.auto.emptyMain': 'No automations in this package yet.',
@@ -2535,6 +2649,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.bannerTitle':
     'This matrix lists only the objects this package declares, and “Save” merges just that slice — grants contributed by other packages are preserved. Edits are saved as package drafts and go live when you Publish the package (top bar), exactly like Data and Interfaces.',
   'engine.studio.access.banner': 'This package’s objects · saved as draft',
+  // objectstack#29674 — the note on an open set the base's pair adds: its matrix lists the base's objects too.
+  'engine.studio.access.bannerPair': 'This package’s and {package}’s objects · saved as draft',
+  'engine.studio.access.bannerTitlePair':
+    'This permission set is in the customization package for {package}, so the matrix lists {package}’s objects as well as the ones this package declares, and “Save” merges just that slice — grants contributed by other packages are preserved. Edits are saved as package drafts and go live when you Publish the package (top bar).',
   // objectui#11781 — a read-only package saves no draft; objectui#12453 makes this the header link's title.
   'engine.studio.access.bannerTitleReadOnly':
     'This matrix lists only the objects this package declares. The package is read-only: its permission sets can be viewed here, but not changed.',
@@ -2556,6 +2674,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.suggestRevoke': 'Revoke',
   'engine.studio.access.suggestRevoking': 'Revoking…',
   'engine.studio.access.suggestRevokedToast': 'Acceptance of "{set}" revoked.',
+  'engine.studio.access.suggestReopen': 'Reconsider',
+  'engine.studio.access.suggestReopening': 'Reopening…',
+  'engine.studio.access.suggestReopenedToast': 'Suggestion for "{set}" reopened: nothing is granted until it is accepted.',
   'engine.studio.access.heading': 'Permission sets',
   'engine.studio.access.search': 'Search permissions…',
   'engine.studio.access.none': 'No permission sets yet — click “+” above to create one',
@@ -3230,6 +3351,20 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#28572 — one surface for a read-only base and its customization package.
   'engine.studio.customize.addedIn': 'In {pair}',
   'engine.studio.customize.addedInTitle': 'This item is added by {pair}, this deployment’s customization package, and is saved there.',
+  // objectstack#29786 — items another package contributes to a read-only base.
+  'engine.studio.contributed.from': 'from {package}',
+  'engine.studio.contributed.navTitle': 'Navigation item {name}, added to this app by {package}. Read-only here: open {package} to change it.',
+  'engine.studio.contributed.fieldTitle': 'Field {name}, added to this object by {package}. Read-only here: open {package} to change it.',
+  'engine.studio.contributed.flowTitle': 'Flow {name}, triggered on this object and shipped by {package}. Read-only here: open {package} to change it.',
+  'engine.studio.contributed.undeclaredGroup': 'It names the group “{group}”, which this app does not declare, so it shows at the top level.',
+  // objectstack#29705 — what a person can do with a type's items, in the words
+  // the pillars use for an item's state: an overlay type of a read-only package
+  // takes a customization; a create-only type of a writable package takes new
+  // items. Drawn by the All metadata tiles and the list and item headers.
+  'engine.studio.customize.available': 'Can be customized',
+  'engine.studio.customize.availableTitle': 'This package is read-only. A change to one of these items is saved in this deployment’s customization package, and the package itself stays as it was installed.',
+  'engine.studio.customize.addable': 'Can be added',
+  'engine.studio.customize.addableTitle': 'New items of this type can be added. Items a code package ships stay read-only.',
   'engine.studio.pkg.withPair': 'with {pair}',
   'engine.studio.if.addInPairTitle': 'New in the customization of {baseName}',
   'engine.studio.interfaces.create.descriptionInPair':
@@ -3281,6 +3416,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.area.formEditor.locale': 'Locale {locale}',
   'engine.studio.area.formEditor.oneLocale': 'Only the {locale} version of this template is customized. {package}’s other languages of it stay as they are.',
   'engine.studio.area.formEditor.translationWhole': 'Customizing a translation replaces {package}’s whole {locale} bundle: every string in it is then served from your copy, the ones you leave unchanged included.',
+  // objectstack#30064 — the area's editor of a read-only package's dataset.
+  'engine.studio.area.formEditor.datasetWhole': 'Customizing a dataset copies {package}’s whole dataset into your customization: every measure and dimension is then served from your copy, the ones you leave unchanged included.',
+  'engine.studio.area.formEditor.usedByOne': 'Once published, a change here reaches the {count} item built on this dataset:',
+  'engine.studio.area.formEditor.usedByOther': 'Once published, a change here reaches the {count} items built on this dataset:',
+  'engine.studio.area.formEditor.usedByNone': 'Nothing uses this dataset yet: no dashboard, report or other item names it.',
+  'engine.studio.area.formEditor.usedByError': 'The dashboards and reports that use this dataset could not be read, so what a change here reaches is not known.',
   'engine.studio.publishedAllFlows': 'Published {count} flows',
   'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',
@@ -3299,6 +3440,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.designer.dropHere': 'Drag fields here',
   'engine.studio.designer.relatedTable': 'Related table: {name} — this group places a related list, so it holds no fields',
   'engine.studio.designer.ungrouped': 'Ungrouped',
+  // objectstack#30057 — on a form view, the fields no section lists.
+  'engine.studio.designer.offForm': 'Not on this form',
+  'engine.studio.designer.sectionDeleteTitle': 'Delete section (its fields leave the form)',
   'engine.studio.designer.newGroup': 'New group',
   // objectui#12453 — a read-only field card's title: what a click still does.
   'engine.studio.designer.fieldTitleReadOnly': 'Click a field to view its properties',
@@ -3484,6 +3628,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.actions.presets': 'Common actions',
   'engine.studio.actions.notSaved': 'Not saved — needs “{input}”',
   'engine.studio.actions.heldNeeds': 'the action “{action}” needs “{input}”',
+  'engine.studio.actions.renameHeld': 'Not saved yet: an action added to an installed app keeps the name it was created with. Change the name back to {name} to save your changes.',
   'engine.studio.actions.preset.change': 'Change a picklist field',
   'engine.studio.actions.preset.changeHint': 'Asks for a new “{field}”, then saves it.',
   'engine.studio.actions.preset.changeNeeds': 'Needs a picklist field on this object.',
@@ -3553,10 +3698,11 @@ const STUDIO_EN: Record<string, string> = {
   // the doc and book previews, engine.studio.inspector and the remaining Studio
   // chrome (engine.translationPreview excepted) (#25922 slice S6).
   'engine.directory.title': 'All Metadata Types',
+  // objectstack#29705 — what a person can do here, in the state vocabulary.
   'engine.directory.description':
-    'The platform protocol exposes {count} metadata types ({writable} writable at runtime). Click any tile to browse, override, or create instances.',
+    'Open a type to see its items. Each type says what you can do with it here: read-only, can be customized, can be added or writable.',
   'engine.directory.search': 'Search metadata types…',
-  'engine.directory.writableOnly': 'Writable only',
+  'engine.directory.hideReadOnly': 'Hide read-only',
   'engine.directory.quickFind': 'Quick Find',
   'engine.directory.noMatches': 'No matches',
   'engine.directory.noMatchesHint': 'Adjust your search or filters to see more metadata types.',
@@ -3570,6 +3716,7 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
   // filter of the All metadata area, from a base's customization read.
   'engine.customizationMark.customized': 'Customized ({baseName})',
+  'engine.customizationMark.customizedShort': 'Custom',
   'engine.customizationMark.customizedTitle': 'The customization package {pair} overrides this item of {baseName}',
   'engine.customizationMark.added': 'Added',
   'engine.customizationMark.addedTitle': 'Added to {baseName} by its customization package {pair}',
@@ -4132,6 +4279,9 @@ const STUDIO_EN: Record<string, string> = {
   // Problems panel (ProblemsPanel).
   'engine.flowProblems.title': 'Problems',
   'engine.flowProblems.empty': 'No problems — this flow is structurally valid.',
+  // Shown instead of `empty` when the run note above says the flow does not run
+  // here: "no problems" beneath that note read as a contradiction.
+  'engine.flowProblems.emptyNotRunning': 'The structure checks found nothing to fix. The note above is why this flow does not run here.',
   'engine.flowProblems.sourceSchema': 'schema',
   'engine.flowProblems.sourceExpression': 'expression',
   // objectui#11772 — one extra copy of a connection (`edgeRouteKey`): the
@@ -4144,10 +4294,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.flowProblems.connectRefused.missingTarget': 'Cannot connect: this flow has no node "{target}".',
   'engine.flowProblems.connectRefused.self': 'Cannot connect "{source}" to itself.',
   'engine.flowProblems.connectRefused.repeat': '"{source}" already connects to "{target}". Select that connection to change it.',
-  'engine.badge.createOnly': 'create-only',
+  // objectstack#30038 — the publish refusal of a flow bound to an object outside its package's closure,
+  // worded from the served entry's rule id and path (`previews/flow-closure-refusal.ts`).
+  'engine.flowProblems.closureRefusal.triggerObject': 'This flow starts on records of "{object}", an object this package cannot use. A package can use only its own objects, the objects of the packages it declares as dependencies, and system objects. Pick an object from the list, or declare a dependency on the package that defines "{object}".',
+  'engine.flowProblems.closureRefusal.scanObject': 'This flow\u2019s scheduled scan reads records of "{object}", an object this package cannot use. A package can use only its own objects, the objects of the packages it declares as dependencies, and system objects. Pick an object from the list, or declare a dependency on the package that defines "{object}".',
+  'engine.flowProblems.closureRefusal.inputObject': 'Input "{input}" takes a record of "{object}", an object this package cannot use. A package can use only its own objects, the objects of the packages it declares as dependencies, and system objects. Pick an object from the list for this input, or declare a dependency on the package that defines "{object}".',
   'engine.repeater.empty': 'No items. Click + to add.',
-  'engine.badge.writable': 'writable',
-  'engine.badge.readOnly': 'read-only',
   'engine.cancel': 'Cancel',
   'engine.close': 'Close',
   'engine.validation.invalid': 'Invalid input',
@@ -4208,11 +4360,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.kind': 'List view',
   'engine.studio.inspector.listView.intro':
     'The list on the canvas. Its columns, filter and sort save to this package\'s draft and show on the canvas at once.',
-  // objectui#13151 — a view with no label is named by its object's display
-  // name and its role, never by its qualified name (`{view}` below is the
-  // panel's title, the same string).
-  'engine.studio.inspector.listView.defaultTitle': '{object} · Default view',
-  'engine.studio.inspector.listView.namedTitle': '{object} · {view}',
+  // objectui#13151 — a view with no label is named by its role, never by its
+  // qualified name (`{view}` below is the panel's title, the same string).
+  // objectstack#30046 — the header's title names the object before it.
+  'engine.studio.inspector.listView.defaultView': 'Default view',
   'engine.studio.inspector.listView.notCreated':
     'There is no list view “{view}” yet. Your first change here creates it in this package\'s draft.',
   'engine.studio.inspector.listView.readOnly': 'This package is read-only: the list view is shown here, not edited.',
@@ -4222,13 +4373,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.addSort': '+ Add sort…',
   'engine.studio.inspector.listView.sortAsc': '{field} ascending',
   'engine.studio.inspector.listView.sortDesc': '{field} descending',
-  // objectstack#27836 — "Add view": a new list view of the object, its type picked first.
-  'engine.studio.inspector.listView.addView': 'Add view',
+  // objectstack#27836 — New view, from the header's view switcher: a new list view of the object.
   'engine.studio.inspector.listView.addViewTaken': 'A view named “{name}” already exists. Choose another key.',
-  'engine.studio.inspector.listView.backToEntry': 'Back to {view}',
-  // objectstack#27896 — the panel's view picker: the object's list views, a draft one marked.
-  'engine.studio.inspector.listView.switchView': 'View',
-  'engine.studio.inspector.listView.switchViewDraft': 'Draft',
   // objectui#12725 — a kanban view's card section: a card click on the canvas selects it.
   'engine.studio.inspector.listView.kanbanCard': 'Kanban card',
   'engine.studio.inspector.listView.kanbanCard.intro': 'What each card on the board shows, and what a click on a card opens.',
@@ -4264,6 +4410,27 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.inspector.listView.chart.noDatasets': 'No dataset is built on this object, so this chart has nothing to bind to.',
   'engine.studio.inspector.listView.chart.readFailed': 'The datasets could not be read ({reason}). The binding is shown as saved.',
   'engine.studio.inspector.listView.chart.membersFailed': 'This dataset’s measures and dimensions could not be read ({reason}). They are shown as saved.',
+  'engine.studio.inspector.listView.bulk': 'Selection actions',
+  'engine.studio.inspector.listView.bulk.intro': 'The buttons this list shows when rows are selected: actions of this object, run once for each selected record, and field updates that write the same value to every selected record.',
+  'engine.studio.inspector.listView.bulk.delete.default': 'This view declares no selection action, so the list shows its built-in Delete when rows are selected.',
+  'engine.studio.inspector.listView.bulk.delete.kept': 'The built-in Delete is listed below, so it stays on the selection bar.',
+  'engine.studio.inspector.listView.bulk.delete.dropped': 'This view declares its own selection actions, so the built-in Delete is not shown. Add Delete below to keep it.',
+  'engine.studio.inspector.listView.bulk.readFailed': 'This object’s actions and fields could not be read ({reason}). The selection actions are shown as saved.',
+  'engine.studio.inspector.listView.bulk.actions': 'Actions',
+  'engine.studio.inspector.listView.bulk.addAction': 'Add an action…',
+  'engine.studio.inspector.listView.bulk.builtinDelete': 'Delete (built-in)',
+  'engine.studio.inspector.listView.bulk.notAnAction': 'Not an action of this object',
+  'engine.studio.inspector.listView.bulk.fieldUpdates': 'Field updates',
+  'engine.studio.inspector.listView.bulk.addFieldUpdate': 'Add a field update',
+  'engine.studio.inspector.listView.bulk.defLabel': 'Button label',
+  'engine.studio.inspector.listView.bulk.defLabelPlaceholder': 'Button label, e.g. Change owner',
+  'engine.studio.inspector.listView.bulk.defFields': 'Fields to ask for',
+  'engine.studio.inspector.listView.bulk.addField': 'Add a field…',
+  'engine.studio.inspector.listView.bulk.confirm': 'Confirmation',
+  'engine.studio.inspector.listView.bulk.confirmPlaceholder': 'Confirmation, e.g. Update {{ count }} record(s)?',
+  'engine.studio.inspector.listView.bulk.inMetadata': 'Edited in metadata',
+  'engine.studio.inspector.listView.bulk.add': 'Add',
+  'engine.studio.inspector.listView.bulk.cancel': 'Cancel',
   'engine.studio.inspector.designersMissing':
     'No metadata designers are registered in this session, so there is nothing to edit here.',
   'engine.studio.inspector.noPageSchema': 'Page settings are unavailable — the page schema could not be loaded.',
@@ -4301,6 +4468,48 @@ const STUDIO_EN: Record<string, string> = {
   'engine.translationPreview.totalKeys': '{count} total keys',
   'engine.translationPreview.categoryEmpty': 'empty',
   'engine.translationPreview.more': '+{count} more…',
+  // objectstack#30285 — Studio's translation table.
+  'engine.studio.translationTable.count': '{untranslated} of {total} untranslated',
+  'engine.studio.translationTable.onlyMissing': 'Untranslated only',
+  'engine.studio.translationTable.reading': 'Reading what the package declares…',
+  'engine.studio.translationTable.readingCount': 'Reading what the package declares… {done} of {total}',
+  'engine.studio.translationTable.readError': 'Could not read what the package declares, so there are no rows to translate.',
+  'engine.studio.translationTable.retry': 'Try again',
+  'engine.studio.translationTable.empty': 'The package declares no text to translate.',
+  'engine.studio.translationTable.noneMissing': 'Everything is translated.',
+  'engine.studio.translationTable.groupMissing': '{count} untranslated',
+  'engine.studio.translationTable.servedUnread': 'Could not read what {locale} already serves, so text another bundle translates shows as untranslated.',
+  'engine.studio.translationTable.servedElsewhere': 'Served from another bundle: {text}',
+  'engine.studio.translationTable.col.source': 'Source text',
+  'engine.studio.translationTable.col.translation': 'Translation ({locale})',
+  'engine.studio.translationTable.status.here': 'Translated here',
+  'engine.studio.translationTable.status.elsewhere': 'Translated in another bundle',
+  'engine.studio.translationTable.status.inline': 'Translated in the declaration',
+  'engine.studio.translationTable.status.missing': 'Untranslated',
+  'engine.studio.translationTable.advanced': 'Advanced: edit as JSON',
+  'engine.studio.translationTable.advancedHint': 'The item’s translation groups as JSON, including the keys the table does not list (messages, settings UI, metadata forms).',
+  'engine.studio.translationTable.jsonInvalid': 'Not valid JSON, not applied: {error}',
+  'engine.studio.translationTable.jsonNotObject': 'The JSON must be an object of translation groups.',
+  'engine.studio.translationTable.kind.object': 'Object',
+  'engine.studio.translationTable.kind.field': 'Field',
+  'engine.studio.translationTable.kind.option': 'Option',
+  'engine.studio.translationTable.kind.section': 'Section',
+  'engine.studio.translationTable.kind.view': 'View',
+  'engine.studio.translationTable.kind.action': 'Action',
+  'engine.studio.translationTable.kind.globalAction': 'Global action',
+  'engine.studio.translationTable.kind.app': 'App',
+  'engine.studio.translationTable.kind.navigation': 'Navigation',
+  'engine.studio.translationTable.kind.dashboard': 'Dashboard',
+  'engine.studio.translationTable.kind.widget': 'Widget',
+  'engine.studio.translationTable.kind.dataset': 'Dataset',
+  'engine.studio.translationTable.kind.report': 'Report',
+  'engine.studio.translationTable.kind.picklist': 'Picklist',
+  'engine.studio.translationTable.kind.page': 'Page',
+  'engine.studio.translationTable.kind.flow': 'Flow',
+  'engine.studio.translationTable.kind.hook': 'Hook',
+  'engine.studio.translationTable.kind.position': 'Position',
+  'engine.studio.translationTable.kind.permission': 'Permission set',
+  'engine.studio.translationTable.kind.book': 'Doc book',
   'engine.translationPreview.keyCountOne': '{{count} key}',
   'engine.translationPreview.keyCountOther': '{{count} keys}',
   // Studio item toolbar: the item tools Setup's item page opens, offered in

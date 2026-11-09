@@ -1,5 +1,172 @@
 # @object-ui/mobile
 
+## 18.3.0
+
+### Patch Changes
+
+- 8c8c5b5: refactor(mobile)!: retire the zero-consumer `useOfflineSync`, `requestBackgroundSync` and `resolveResponsiveValue` exports
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/mobile#useOfflineSync, @object-ui/mobile#OfflineSyncState, @object-ui/mobile#requestBackgroundSync, @object-ui/mobile#resolveResponsiveValue) the retired operands are a React hook, its state type and two plain helpers in a published ui package's entry that nothing in the workspace imported; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
+  
+  **BREAKING** for a host that imports any of these four names from `@object-ui/mobile`. None had an importer anywhere in the workspace, so the Console and every `@object-ui/*` package are unaffected. `useOfflineSync` is deleted with its module; `requestBackgroundSync` and `resolveResponsiveValue` leave the package entry only (`useResponsive` still resolves through the latter internally). The offline data source (`createOfflineDataSource`, `createOfflineQueue` and its queue classes), `getServiceWorkerSource`, `useResponsive` and `BREAKPOINTS` stay exported unchanged.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `useOfflineSync(source)` TO your own effect on the `OfflineDataSource` that `createOfflineDataSource` returns: read `source.pending()` into state, call `source.replay()` on the window `online` event, and use `source.drop(opId)` / `source.clear()` for the queue controls.
+  - FROM `OfflineSyncState` TO the state shape that effect keeps (`isOnline`, `pending: OfflineOperation[]`, `isReplaying`).
+  - FROM `requestBackgroundSync(tag)` TO `(await navigator.serviceWorker.ready).sync?.register(tag)`, guarded for browsers without Background Sync.
+  - FROM `resolveResponsiveValue(value, breakpoint)` TO `useResponsive(value)` inside a component, which reads the current breakpoint itself.
+- 3fb1a24: refactor(collaboration,mobile): delete the module-local `createPresenceUpdater` and `requestBackgroundSync` helpers that nothing reads
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Neither name is exported from its package entry (the single `.` export), so no host can import them; the compiled `usePresence.js` and `serviceWorkerSource.js` simply stop carrying the two dead function bodies. Behaviour of every exported name is unchanged.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 45e9b2f: feat(mobile): native shell mode — the Console detects `window.ObjectStackNative` and talks to the ObjectStack mobile shell that hosts it
+  
+  Clause-②: yes (widening) — `@object-ui/mobile` is published and gains new exports; the seat writes the TIER_DEFAULT contract review.
+  Metadata-protocol: none
+  
+  The ObjectStack mobile app hosts the web Console in a WebView and injects a bridge, `window.ObjectStackNative`, before the Console's scripts run (on older Android WebViews, possibly after them). The Console now knows when it is hosted.
+  
+  - **`@object-ui/mobile` gains the bridge type and detection.** `ObjectStackNative` types exactly the members of the shell's bridge contract (`version`, `platform`, `appVersion`, `capabilities`, `safeArea`, `has`, the five calls and the two events). `useNativeHost()` returns it, or `null` outside the shell; it reads the global lazily and re-checks at `DOMContentLoaded`, `load` and a few points after `load`, so a late injection still arrives. `getNativeHost()` is the same read outside React.
+  - **Typed calls that never throw.** `nativeGetPushToken`, `nativeHaptic`, `nativeOpenExternal`, `nativeNavigate` and `nativeResetServer` check `has(capability)` and that the method exists, and resolve a `NativeCallResult`: `{ status: 'unavailable' }`, `{ status: 'ok', value }`, or `{ status: 'failed', code, message }`.
+  - **Router wiring.** `useNativeHostRouting({ route, navigate })` posts `ready()` once per page load after the first route has rendered, posts `routeChanged(route)` once per route change, and answers the shell's cancelable `objectstack-native:navigate` window event by moving the router to `detail.route` (an in-app path only) and cancelling the event, so a notification tap does not reload the Console. Outside the shell it installs nothing.
+  - **The Console uses it.** In the shell the Console posts those events from its router, marks the root element with `data-os-native-shell` set to the shell's platform string (an open set: `ios` and `android` from the mobile app, another value from another shell), and drops the PWA install manifest. It adds no safe-area padding: the shell already pads its WebView. Without the global the Console behaves exactly as before.
+- 46e2400: fix(ui): the list flow works at phone width — 44 px touch targets, panels inset from the screen edge, a pager on the card list, pull-to-refresh only at the top, and an active sort shown on the bar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Measured in a real browser at 375 and 390 px on the CRM and showcase examples. Every change below applies below the `sm` breakpoint only, so wider screens are unchanged, with two exceptions said where they occur.
+  
+  - **Touch targets.** The list bar's view switcher, Filter, Sort, Display and phone search (its field and Clear too) were 24 to 32 px. They are 44 px now. The same goes for the view switcher's menu (search, rows, star, pin, New view, Manage views), the Filter panel (field, operator, value, Remove, Add filter, Clear all, And/Or), the Sort builder, the Group editor and the Display panel's rows, switches and footer buttons. On a touch screen a view row's star and pin always show, because there is no hover to reveal them. This holds at every width on a touch screen, and a mouse still reveals them on hover.
+  - **Panels.** The Filter, Sort and Display panels keep 16 px from both screen edges. They used to run flush against one edge.
+  - **Whole labels.** A sort level and a filter condition give the field select its row's whole width, so a label such as "Last Modified At" is no longer cut to "Creat…" or "Accou…". The filter value field uses 16 px text, so iOS Safari does not zoom in when it is focused.
+  - **Long lists.** Under server pagination, the phone's card list showed only the first page (50 of 403 records), with no way to reach the rest except search or filter. It now ends in a pager (First, Previous, page N of M, Next, Last) that turns the same page the table's pager does. It uses the table's existing words.
+  - **Pull-to-refresh.** The list bound the gesture to its root, which never scrolls, so a downward drag halfway down the list (a reader scrolling back up) showed "Pull to refresh" and refetched. `usePullToRefresh` now starts a pull only when every scroll box between the touched node and the bound element is at its top. This applies at every width, wherever the hook is used.
+  - **Back from a record a list opened.** On a phone a list row pushes the record's page and now marks the push as a related row does, so the page's 「‹」 goes back in the history to the list. Back after it then leaves the list instead of opening the record again. The 「‹」 still reads the object's plural. A phone answering a drawer link replaces the list and stays unmarked; desktop is unchanged.
+  - **Active sort.** Below `sm` the Sort builder lives in the Display panel, so the bar used to show nothing once a list was sorted. While a sort is active, the bar now keeps the Sort trigger with its level count, which opens the builder. It steps aside while the phone search field is open.
+  
+  Nothing a view declares changes, and no public prop, package export or translation key is added.
+- b772078: feat(console): the Console is an installable PWA on desktop, with an offline app shell and a Service Worker ready for Web Push
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Console already injected a web app manifest, but nothing registered a Service Worker, so the installed app showed a browser error page on a cold start without network, and Web Push had no worker to reach. Under the CLI's content-security-policy the branded manifest was refused too, so the served Console was not installable at all.
+  
+  - **`@object-ui/mobile` gains an `'app-shell'` worker strategy.** `getServiceWorkerSource({ strategy: 'app-shell', build })` writes a build-versioned shell worker: its cache is named after the scope and the build, and activation deletes the scope's caches of every other build. Requests under `apiPrefix` and every request outside the scope are network-only (the worker never answers them, never reads or writes the cache for them, so no data and no cookie is stored). Navigations are network-first with the precached HTML entry as the offline fallback; hashed `assets/` files are cache-first. `build` is required by `'app-shell'` and refused by `'offline-first'`. The default `'offline-first'` worker is byte-identical to before.
+  - **`notifications: true`** adds `push` and `notificationclick` handlers. A click focuses or opens an app window at the payload's `route`, an in-app path relative to the scope; a route that is not an in-app path, or that climbs out of the scope, opens nothing. No push subscription is made.
+  - **`cacheLoadedResources(worker)`** asks an `'app-shell'` worker to cache the files the page loaded before the worker controlled it, so the first visit's lazy chunks are there for an offline start. `SERVICE_WORKER_CACHE_URLS_MESSAGE` and `ServiceWorkerStrategy` are exported beside it.
+  - **The Console registers it.** The build emits `service-worker.js` at its root (precache: the entry chunk, its static imports and their CSS), and the Console registers it under its own mount (`/_console/`), never the site root, in production builds. The next navigation after a deploy runs the new build. Inside the ObjectStack mobile shell no worker is registered, and one registered earlier in that WebView is removed. The generated manifest's `start_url`, `scope` and icon are absolute URLs under the mount.
+  - **`@objectstack/cli`**: the Console document's policy adds `manifest-src 'self' blob:`, so the branded manifest loads and the Console is installable.
+- 9f7e408: fix(mobile): the native bridge's `platform` is an open set, and a bridge speaking a newer protocol reads as no bridge
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The ObjectStack desktop shell hosts the Console through the same `window.ObjectStackNative` bridge as the mobile app, and reports a platform other than `ios` or `android`.
+  
+  - **`ObjectStackNative.platform` widens** from `'ios' | 'android'` to `'ios' | 'android' | (string & {})`. The two known values still autocomplete. Code that switches exhaustively over the old two values now has to handle another string; branch on a capability (`has()`) or the viewport instead of the platform. The Console's root attribute `data-os-native-shell` carries the value verbatim.
+  - **Bridge protocol version gate.** The bridge's `version` bumps only on a breaking change, and this package speaks version `1`. `getNativeHost()` and `useNativeHost()` now answer `null` for a bridge whose `version` is greater than `1` or not a number, so a page keeps its browser behaviour (no shell mode, no `ready`, the PWA manifest kept) instead of calling a protocol it cannot read.
+  - **What `ready()` means, written down.** `ready` is posted when the Console has painted its own UI, which may be a loading fallback such as the auth guard's spinner while the session is read on a cold start. The shell lifts its loading cover on it, so the cover hands over to the Console's spinner rather than staying up through the session round-trip. Nothing about when it is posted changes.
+- ec2f5d5: feat(fields): offer the mobile shell's code scanner on text and lookup fields
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - `@object-ui/mobile` types the shell bridge's `scan(opts?)` method: `'scan'` joins `NativeHostMethod`, `ObjectStackNative` gains an optional `scan?(opts)` (a shell older than the scanner does not carry it), `NativeScanOptions` (`formats?: string[]`) is exported, and `nativeScan(opts?)` resolves `unavailable`, `ok` with the decoded text or `null` (the user closed the scanner), or `failed` with the shell's message.
+  - `@object-ui/fields`: inside the shell, when the bridge announces `scan`, an editable single-line text field and a lookup field show a scan button. A text field takes the decoded text through `onChange`, as a keystroke would; a lookup opens its search with it. A closed scanner changes nothing, and a failure shows the error toast with the shell's message. A plain browser, an older shell, and a read-only or disabled field show no button. `PeoplePicker` gains an optional `initialSearch` prop that the search-first lookup uses to open seeded.
+  - `@object-ui/i18n`: two keys, `fields.scan.button` and `fields.scan.failed`, in every locale.
+- 2420778: feat(mobile, app-shell): inside the ObjectStack mobile shell, the header's organization button opens the shell's native connection switcher, and the Console answers the shell's `connectionRemoved` event
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The mobile shell's bridge (`window.ObjectStackNative`) gained `showConnectionSwitcher()` and the `objectstack-native:connectionRemoved` window event. The Console now uses both:
+  
+  - **Organization button.** When the shell announces `has('showConnectionSwitcher')`, `WorkspaceSwitcher`'s button calls `showConnectionSwitcher()`, which opens the shell's own sheet of saved organizations and company servers. The web organization menu does not open. In the shell the button renders whenever there is an active organization, at one membership too, since the sheet lists the shell's connections across company servers; `CurrentOrganizationIndicator` then renders nothing, so the organization is drawn once. In a plain browser, or in a shell that does not announce the capability, both render as before.
+  - **Removed connection.** `useNativeHostRouting` listens for `objectstack-native:connectionRemoved` while the bridge is present and calls `event.waitUntil()` with the promise its new optional `onConnectionRemoved` returns. Omitted, the promise is already resolved, so the shell is released at once. No Console path registers a device push token yet, so there is nothing to unregister today. The option is where that unregister step goes once registration exists.
+  
+  `@object-ui/mobile` adds `showConnectionSwitcher` to `NativeHostMethod` and, as an optional method (an older shell does not carry it), to `ObjectStackNative`, and exports `nativeShowConnectionSwitcher()`, `nativeHostCan(host, method)` (the wrappers' own feature-detect), `NATIVE_CONNECTION_REMOVED_EVENT` and the `NativeConnectionRemovedEvent` type. `@object-ui/app-shell` now depends on `@object-ui/mobile`.
+- a7e6e07: feat(console): photos, attachments and record sharing go through the mobile shell's `pickImage()`, `openFile()` and `share()`
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The ObjectStack mobile shell offers three optional bridge methods for files, each feature-detected with `has()`. The Console now calls them, and a plain browser or an older shell behaves exactly as before.
+  
+  - `@object-ui/mobile`: `ObjectStackNative` gains the optional `pickImage?`, `openFile?` and `share?` members, with the typed wrappers `nativePickImage`, `nativeOpenFile` and `nativeShare` (they resolve `unavailable | ok | failed` and never throw), the types `NativePickImageOptions`, `NativeFile` and `NativeShareContent`, the bridge limit `NATIVE_FILE_MAX_BYTES` (8 MiB), and two helpers: `fileFromNativeFile` (a bridge file to an uploadable `File`) and `nativeFileFromBlob` (bytes to a bridge file).
+  - File and image fields: in a shell with `pickImage`, "Take photo" and "Choose photo" use the shell's camera and photo library. The picked image goes through the field's existing upload pipeline, so the size check and the stored `sys_file` reference are the same as for an `<input type=file>` pick. A cancel uploads nothing; a shell failure shows an error toast. New strings: `fields.file.choosePhoto` and `fields.file.photoFailed`.
+  - Record attachments: in a shell with `openFile`, tapping an attachment fetches its bytes with the Console's own session and hands the bytes to the shell. A file over 8 MiB, a failed fetch, or a refusal from the shell keeps the browser behaviour. The signed download URL never crosses the bridge.
+  - Record page Share: in a shell with `share`, it opens the OS share sheet with the record's page link and title. A refusal from the shell keeps today's `navigator.share` or clipboard copy.
+- b62463f: feat(console): the profile page shows the mobile shell's App lock and opens its settings screen
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Inside the ObjectStack mobile shell, a bridge that offers `openAppLockSettings()` now gets an "App lock" row on the profile page (`/system/profile` and the Account app's profile card). The row shows whether the lock is off, or on and after how long it locks, read from the shell's `getAppLock()`, and a tap opens the shell's native settings screen. The lock is the shell's own setting: the Console reads it and never changes it, so the row has no toggle. No event announces a change, so the page reads it again on mount, when it becomes visible again and when the window regains focus. In a plain browser, or a shell older than the app lock, the page is unchanged.
+  
+  `@object-ui/mobile` adds the two optional bridge members, the `NativeAppLock` type and the `nativeGetAppLock` and `nativeOpenAppLockSettings` wrappers, which feature-detect with `has()` and never throw, like the other wrappers. `@object-ui/i18n` adds `profile.appLock.*` in all ten locale packs.
+- Updated dependencies [f486e9c]
+- Updated dependencies [3eeb81d]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [8a12a17]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [4daad78]
+- Updated dependencies [6866e2e]
+- Updated dependencies [eab4bba]
+- Updated dependencies [a122269]
+- Updated dependencies [17b5152]
+- Updated dependencies [fbe344b]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [2655ebd]
+- Updated dependencies [a33fce2]
+- Updated dependencies [9c51314]
+- Updated dependencies [10755db]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [0027c4a]
+- Updated dependencies [2e20454]
+- Updated dependencies [71de060]
+- Updated dependencies [bed8306]
+- Updated dependencies [ea1751b]
+- Updated dependencies [bede9de]
+- Updated dependencies [044d201]
+- Updated dependencies [82b29fe]
+- Updated dependencies [e7a6cc7]
+- Updated dependencies [462b4f9]
+- Updated dependencies [53dda03]
+- Updated dependencies [c268b72]
+- Updated dependencies [5651647]
+  - @object-ui/types@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

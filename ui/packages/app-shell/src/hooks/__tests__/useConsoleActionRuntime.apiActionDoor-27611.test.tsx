@@ -262,14 +262,14 @@ describe('objectstack#27611 — what the door answers once objectstack#27738 lan
     expect(out).toEqual({ success: false, error: builtInLocales.en.form.noPermissionToSave });
   });
 
-  it('an entitlement 403 opens the upgrade dialog with its call to action, not a red toast', async () => {
+  it('an entitlement 403 opens the limit dialog with its call to action, not a red toast', async () => {
     answer(403, {
       success: false,
       error: {
-        code: 'DEV_ENV_PLAN_LOCKED',
-        message: 'Development environments are a paid feature. Upgrade to add them.',
+        code: 'PRODUCTION_ENV_LIMIT',
+        message: 'Each organization includes exactly one production environment.',
         httpStatus: 403,
-        details: { upgrade_url: '/settings/billing', plan: 'free' },
+        details: { current: 1, limit: 1, contact_url: 'mailto:sales@example.com' },
       },
     });
     const { result, onRefresh } = mount('sys_environment');
@@ -280,28 +280,10 @@ describe('objectstack#27611 — what the door answers once objectstack#27738 lan
     expect(out).toEqual({ success: false });
     expect(onRefresh).not.toHaveBeenCalled();
     render(<>{result.current.dialogs}</>);
-    expect(await screen.findByText('Development environments are a paid feature')).toBeTruthy();
+    expect(await screen.findByText('You already have your production environment')).toBeTruthy();
     const cta = screen.getByTestId('entitlement-cta-primary');
-    expect(cta.textContent).toBe('Upgrade plan');
-    expect(cta.getAttribute('href')).toMatch(/\/settings\/billing$/);
-  });
-
-  it('an exhausted environment pool quotes the usage the door relays', async () => {
-    answer(403, {
-      success: false,
-      error: {
-        code: 'DEV_ENV_LIMIT',
-        message: 'Development environment limit reached.',
-        httpStatus: 403,
-        details: { current: 3, limit: 3, upgrade_url: '/settings/billing' },
-      },
-    });
-    const { result } = mount('sys_environment');
-
-    expect(await click(result, { ...CREATE_ENV, params: { displayName: 'x' } })).toEqual({ success: false });
-    expect(sent().url.endsWith(`${DOOR}sys_environment/create_environment`)).toBe(true);
-    render(<>{result.current.dialogs}</>);
-    expect(await screen.findByText(/You are using 3 of 3 development environments/)).toBeTruthy();
+    expect(cta.textContent).toBe('Contact sales');
+    expect(cta.getAttribute('href')).toBe('mailto:sales@example.com');
   });
 
   it('an approval decision sends its outputs as `outputs.<key>` params, for the door to fold', async () => {

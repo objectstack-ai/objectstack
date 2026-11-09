@@ -87,3 +87,50 @@ describe('ActionRunner — the default success toast is translatable (objectui#1
     expect(toast).toHaveBeenCalledWith('Action completed successfully', expect.objectContaining({ type: 'success' }));
   });
 });
+
+describe('ActionRunner — the default success toast names a labelled action (#30126 item 3)', () => {
+  let runner: ActionRunner;
+  let toast: Mock<ToastHandler>;
+
+  beforeEach(() => {
+    runner = new ActionRunner({});
+    toast = vi.fn();
+    runner.setToastHandler(toast);
+    runner.registerHandler('script', SUCCEEDS);
+  });
+
+  it('with no translator installed, the toast is the English source with the label filled in', async () => {
+    await runner.execute({ type: 'script', name: 'resolve', label: 'Resolve' });
+    expect(toast).toHaveBeenCalledWith('Resolve completed', expect.objectContaining({ type: 'success' }));
+  });
+
+  it('with a translator, it is asked for the named key with the label as its hole', async () => {
+    const translate = vi.fn((_key: string, options: { defaultValue: string } & Record<string, string>) =>
+      `“${options.action}”已完成`);
+    runner.setTranslator(translate);
+
+    await runner.execute({ type: 'script', name: 'resolve', label: '解决' });
+
+    expect(translate).toHaveBeenCalledWith('actions.completedNamed', {
+      action: '解决',
+      defaultValue: '{{action}} completed',
+    });
+    expect(toast).toHaveBeenCalledWith('“解决”已完成', expect.objectContaining({ type: 'success' }));
+  });
+
+  it('an empty answer from the translator falls back to the filled English source', async () => {
+    runner.setTranslator(() => '');
+    await runner.execute({ type: 'script', name: 'resolve', label: 'Resolve' });
+    expect(toast).toHaveBeenCalledWith('Resolve completed', expect.objectContaining({ type: 'success' }));
+  });
+
+  it('a blank label is no name: the generic text stays', async () => {
+    await runner.execute({ type: 'script', name: 'resolve', label: '   ' });
+    expect(toast).toHaveBeenCalledWith('Action completed successfully', expect.objectContaining({ type: 'success' }));
+  });
+
+  it("an author's successMessage still wins over the label", async () => {
+    await runner.execute({ type: 'script', name: 'resolve', label: 'Resolve', successMessage: 'Ticket resolved' });
+    expect(toast).toHaveBeenCalledWith('Ticket resolved', expect.objectContaining({ type: 'success' }));
+  });
+});

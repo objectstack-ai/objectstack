@@ -15,11 +15,47 @@ import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { arObjects } from './ar.objects.generated.js';
+import { frObjects } from './fr.objects.generated.js';
+import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { ruObjects } from './ru.objects.generated.js';
+import { deObjects } from './de.objects.generated.js';
+import { koObjects } from './ko.objects.generated.js';
 import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 import { jaJPGeneratedSourceHashes } from './ja-JP.source-hashes.generated.js';
 import { esESGeneratedSourceHashes } from './es-ES.source-hashes.generated.js';
-import { zhCNPermissionSets, jaJPPermissionSets, esESPermissionSets } from './permission-sets.js';
-import { zhCNBuiltinPositions, jaJPBuiltinPositions, esESBuiltinPositions } from './builtin-positions.js';
+import { zhHantGeneratedSourceHashes } from './zh-Hant.source-hashes.generated.js';
+import { arGeneratedSourceHashes } from './ar.source-hashes.generated.js';
+import { frGeneratedSourceHashes } from './fr.source-hashes.generated.js';
+import { ptBRGeneratedSourceHashes } from './pt-BR.source-hashes.generated.js';
+import { ruGeneratedSourceHashes } from './ru.source-hashes.generated.js';
+import { deGeneratedSourceHashes } from './de.source-hashes.generated.js';
+import { koGeneratedSourceHashes } from './ko.source-hashes.generated.js';
+import {
+  zhCNPermissionSets,
+  jaJPPermissionSets,
+  esESPermissionSets,
+  zhHantPermissionSets,
+  arPermissionSets,
+  frPermissionSets,
+  ptBRPermissionSets,
+  ruPermissionSets,
+  dePermissionSets,
+  koPermissionSets,
+} from './permission-sets.js';
+import {
+  zhCNBuiltinPositions,
+  jaJPBuiltinPositions,
+  esESBuiltinPositions,
+  zhHantBuiltinPositions,
+  arBuiltinPositions,
+  frBuiltinPositions,
+  ptBRBuiltinPositions,
+  ruBuiltinPositions,
+  deBuiltinPositions,
+  koBuiltinPositions,
+} from './builtin-positions.js';
 
 /**
  * ## The provenance companions are READ here, not merely recorded
@@ -73,5 +109,40 @@ export const SecurityTranslations: TranslationBundle = {
     ...withSourceFallback({ objects: esESObjects }, enSource, undefined, esESGeneratedSourceHashes),
     permissions: esESPermissionSets,
     positions: esESBuiltinPositions,
+  },
+  'zh-Hant': {
+    ...withSourceFallback({ objects: zhHantObjects }, enSource, undefined, zhHantGeneratedSourceHashes),
+    permissions: zhHantPermissionSets,
+    positions: zhHantBuiltinPositions,
+  },
+  'ar': {
+    ...withSourceFallback({ objects: arObjects }, enSource, undefined, arGeneratedSourceHashes),
+    permissions: arPermissionSets,
+    positions: arBuiltinPositions,
+  },
+  'fr': {
+    ...withSourceFallback({ objects: frObjects }, enSource, undefined, frGeneratedSourceHashes),
+    permissions: frPermissionSets,
+    positions: frBuiltinPositions,
+  },
+  'pt-BR': {
+    ...withSourceFallback({ objects: ptBRObjects }, enSource, undefined, ptBRGeneratedSourceHashes),
+    permissions: ptBRPermissionSets,
+    positions: ptBRBuiltinPositions,
+  },
+  'ru': {
+    ...withSourceFallback({ objects: ruObjects }, enSource, undefined, ruGeneratedSourceHashes),
+    permissions: ruPermissionSets,
+    positions: ruBuiltinPositions,
+  },
+  'de': {
+    ...withSourceFallback({ objects: deObjects }, enSource, undefined, deGeneratedSourceHashes),
+    permissions: dePermissionSets,
+    positions: deBuiltinPositions,
+  },
+  'ko': {
+    ...withSourceFallback({ objects: koObjects }, enSource, undefined, koGeneratedSourceHashes),
+    permissions: koPermissionSets,
+    positions: koBuiltinPositions,
   },
 };

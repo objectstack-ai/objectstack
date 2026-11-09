@@ -2,9 +2,8 @@
 
 A **datasource** (`defineDatasource`, a `*.datasource.ts` file) is a
 connection to a data store. Objects route to one via their `datasource` field.
-`default` is host-reserved: the host connects it from
-`OS_DATABASE_URL`, and a stack that declares a datasource named `default` is
-refused. Declare a datasource under its own name only to read/write a
+`default` is host-reserved (connected from `OS_DATABASE_URL`; declaring one
+named `default` is refused). Declare one under its own name only for a
 **separate** or **external** store.
 
 ## `schemaMode` — who owns the schema
@@ -23,6 +22,7 @@ An object on an external datasource binds to its remote table via `external`:
 ObjectSchema.create({
   name: 'ext_customer',
   datasource: 'warehouse',
+  sharingModel: 'public_read',
   external: {
     remoteName: 'customers',        // remote TABLE (object name may differ)
     // remoteSchema: 'public',      // optional schema/namespace (pg/mysql)
@@ -33,7 +33,12 @@ ObjectSchema.create({
 ```
 
 - ❌ **`field.columnName` does not exist — on ANY object.** Authoring it is a
-  parse error everywhere, not only on a federated object.
+  parse error everywhere.
+- **Walled posture (`OS_TENANCY_POSTURE` `isolated`/`group`): every external
+  object states its organization scope** — its own `organization_id` field (or
+  `columnMap` onto it), `tenancy: { enabled: false }` (shared), or
+  `systemFields: { tenant: false }`. None ⇒ the boot is refused by name;
+  `tenancy.tenantField` is refused there too.
 
 ## Auto-connect (no `onEnable`)
 
@@ -45,24 +50,18 @@ A declared datasource is connected **automatically at boot** when it is
 3. it sets **`autoConnect: true`**, **or**
 4. a **`datasourceMapping` rule routes at least one object to it**.
 
-A `managed` datasource nothing routes to stays **metadata-only** (not connected).
-
-⚠️ A `datasourceMapping` rule is **routing, not a hint**. A rule pointing at a
-datasource that cannot be connected fails the boot, and a query against a mapped
-object throws.
-
-> `ctx.drivers.register(driver)` in `onEnable` is only an escape hatch for a
-> runtime-built driver; idempotent with auto-connect.
+⚠️ A `datasourceMapping` rule is **routing, not a hint**: a target that cannot
+be connected fails the boot, and a query against a mapped object throws.
 
 ## Credentials — fail-closed
 
 Never inline a password. A code-declared datasource reads one at connect from
 `OS_DATASOURCE_<NAME>_PASSWORD` (`NAME` = the name upper-cased) while the host
 switch `OS_DATASOURCE_ENV_CREDENTIALS` is `on` (`os serve`/`start`/`dev` default
-it on; a library composition is off; `on`/`off` only). Operator caution: an
-installed package may declare a datasource of any free name and so read that
-variable. `external` may instead name **one** channel, which wins and never
-falls back to the variable:
+it on; a library composition is off). Operator caution: an installed package
+may declare a datasource of any free name and so read that variable.
+`external` may instead name **one** channel, which wins and never falls back
+to the variable:
 
 - **`credentialsRef`** — a secret-store handle, resolved at connect, before the
   driver is built.
@@ -73,9 +72,8 @@ falls back to the variable:
   `credentialsRef`, on a built-in driver, on a `managed` datasource, and naming
   an undeclared instance.
 
-No secret store, an unresolvable handle, a disabled instance or no automation
-service leaves the datasource **unconnected with a clear error**. A connector
-credential not set yet answers `503` per request.
+A missing store, handle, instance or automation service leaves the datasource
+**unconnected with a clear error**; an unset connector credential answers `503`.
 
 ## Writes — double opt-in
 

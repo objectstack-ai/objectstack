@@ -273,7 +273,7 @@ describe('#7258 — app-crm `OpportunityStageHook` moves the persisted probabili
       hooks?: Array<{ name?: string; object?: string; events?: string[] }>;
     };
     const registered = (stack.hooks ?? []).find((h) => h.name === OpportunityStageHook.name);
-    expect(registered, '`opportunity_stage_probability` must be in defineStack({ hooks })').toBeDefined();
+    expect(registered, '`crm_opportunity_stage_probability` must be in defineStack({ hooks })').toBeDefined();
     expect(registered!.object).toBe('crm_opportunity');
     expect(registered!.events).toEqual(expect.arrayContaining(['beforeInsert', 'beforeUpdate']));
   });

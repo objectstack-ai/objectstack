@@ -42,6 +42,11 @@
 // map that cannot be seen cannot be judged. The runtime half resolves the field
 // against the live object and fails the node when it holds no address.
 //
+// [#30608] The field map is the object as SERVED, every `objectExtensions`
+// field of the same artifact folded in (`indexFieldTypes`): the live object the
+// runtime half reads is the merged one. A field two packages tie on is skipped
+// too: its type is registration order, which the stack does not state.
+//
 // Wired via REFERENCE_INTEGRITY_RULES (it resolves a field NAME written in
 // metadata against what the stack declares), so `os validate`, `os lint`,
 // `os compile` and the runtime publish door for a flow all refuse it.
@@ -50,7 +55,7 @@ import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import { findClosestMatches, formatSuggestion } from '@objectstack/spec/shared';
 
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
-import { recordsOf } from './object-graph.js';
+import { objectsAsServed, recordsOf } from './object-graph.js';
 
 export interface NotifyEmailFieldRecipientFinding {
   /** Every verdict here gates — see the module note. */
@@ -79,17 +84,37 @@ const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Arra
 /** The field type the form requires. */
 const EMAIL_FIELD_TYPE = 'email';
 
-/** `fieldName -> type` for every object the stack declares (declared fields only). */
-function indexFieldTypes(stack: AnyRec): Map<string, Map<string, string>> {
-  const out = new Map<string, Map<string, string>>();
-  for (const obj of recordsOf(stack.objects)) {
-    if (typeof obj.name !== 'string' || !obj.name) continue;
-    const types = new Map<string, string>();
-    for (const f of recordsOf(obj.fields)) {
-      if (typeof f.name === 'string' && f.name) types.set(f.name, typeof f.type === 'string' ? f.type : '');
+/**
+ * `fieldName -> type` for every object the stack declares, over the objects as
+ * SERVED ([#30608], `objectsAsServed`, the package's one fold): the runtime
+ * resolves the field against the live, merged object, so a field an
+ * `objectExtensions` entry of the same artifact adds is a field of the trigger
+ * record, and a field an extension re-declares is judged on the extension's
+ * definition, which replaces the owner's whole (the registry's
+ * `mergeObjectDefinitions`). `null` marks a field two packages tie on: its name
+ * is served, and which definition (so which type) wins is registration order,
+ * which a stack does not state, so it is not judged. An object that declares no
+ * field keeps its empty map, extended or not: its fields are resolved at
+ * runtime (module note), and an extension adding to it does not make the rest
+ * of them visible.
+ */
+function indexFieldTypes(stack: AnyRec): Map<string, Map<string, string | null>> {
+  const out = new Map<string, Map<string, string | null>>();
+  const declared = recordsOf(stack.objects);
+  const { objects: served, tied } = objectsAsServed(stack);
+  declared.forEach((obj, i) => {
+    if (typeof obj.name !== 'string' || !obj.name) return;
+    const types = new Map<string, string | null>();
+    const declaresAny = recordsOf(obj.fields).some((f) => typeof f.name === 'string' && f.name);
+    const tiedKeys = tied.get(obj.name);
+    if (declaresAny) {
+      for (const f of recordsOf(served[i].fields)) {
+        if (typeof f.name !== 'string' || !f.name) continue;
+        types.set(f.name, tiedKeys?.has(f.name) ? null : typeof f.type === 'string' ? f.type : '');
+      }
     }
     out.set(obj.name, types);
-  }
+  });
   return out;
 }
 
@@ -118,7 +143,7 @@ function triggerRecordObjectOf(flow: AnyRec): { object: string } | { reason: str
 
 /**
  * Validate every `notify` node's email-field recipient against the trigger
- * object's declared fields. Pure `(stack) => Finding[]` (ADR-0019); safe on
+ * object's served fields (`indexFieldTypes`). Pure `(stack) => Finding[]` (ADR-0019); safe on
  * pre- or post-parse stacks.
  */
 export function validateNotifyEmailFieldRecipients(stack: AnyRec): NotifyEmailFieldRecipientFinding[] {
@@ -128,7 +153,7 @@ export function validateNotifyEmailFieldRecipients(stack: AnyRec): NotifyEmailFi
   if (flows.length === 0) return findings;
 
   // Built lazily: a stack with no email-field recipient never pays it.
-  let fieldTypes: Map<string, Map<string, string>> | null = null;
+  let fieldTypes: Map<string, Map<string, string | null>> | null = null;
 
   flows.forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' && flow.name ? flow.name : `#${flowIndex}`;
@@ -167,6 +192,8 @@ export function validateNotifyEmailFieldRecipients(stack: AnyRec): NotifyEmailFi
       if (!declared || declared.size === 0) return;
 
       const type = declared.get(field);
+      // [#30608] A field two packages tie on: served, of no stated type.
+      if (type === null) return;
       if (type === undefined) {
         const emailFields = [...declared].filter(([, t]) => t === EMAIL_FIELD_TYPE).map(([name]) => name);
         const suggestion = formatSuggestion(findClosestMatches(field, emailFields));

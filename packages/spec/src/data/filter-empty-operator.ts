@@ -88,7 +88,8 @@ export const EMPTY_OPERATOR_ARMS: Readonly<Record<EmptyOperatorArm, EmptyOperato
  * The multi-value test runs first. The two sets are disjoint today (no
  * text-like type is multi-capable), so the order only decides a future
  * overlap, and it decides it by the stored SHAPE: a field whose value is a
- * list is emptied to `[]`.
+ * list can hold `[]` (a cleared optional one stores `null`, but a row stored
+ * before that rule can still hold `[]`).
  */
 export function expandEmptyOperator(field: ValueShapeFieldDef): EmptyOperatorExpansion {
   if (isMultiValueField(field)) return EMPTY_OPERATOR_ARMS.multi_value;

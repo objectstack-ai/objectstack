@@ -70,14 +70,15 @@ const ORG_KEYS = [
 // trabajo" / "espace de travail", and Arabic the root of "مساحة" / "مساحات".
 const PACKS: Record<LocaleCode, { orgStem: string; retiredStems: string[] }> = {
   en: { orgStem: 'organization', retiredStems: ['workspace'] },
-  zh: { orgStem: '组织', retiredStems: ['工作区'] },
+  'zh-Hans': { orgStem: '组织', retiredStems: ['工作区'] },
+  'zh-Hant': { orgStem: '組織', retiredStems: ['工作區'] },
   ar: { orgStem: 'مؤسس', retiredStems: ['مساح'] },
   de: { orgStem: 'organisation', retiredStems: ['workspace', 'arbeitsbereich'] },
   es: { orgStem: 'organizaci', retiredStems: ['trabajo'] },
   fr: { orgStem: 'organisation', retiredStems: ['travail'] },
   ja: { orgStem: '組織', retiredStems: ['ワークスペース'] },
   ko: { orgStem: '조직', retiredStems: ['워크스페이스', '작업 공간'] },
-  pt: { orgStem: 'organizaç', retiredStems: ['workspace', 'trabalho'] },
+  'pt-BR': { orgStem: 'organizaç', retiredStems: ['workspace', 'trabalho'] },
   ru: { orgStem: 'организац', retiredStems: ['пространств'] },
 };
 

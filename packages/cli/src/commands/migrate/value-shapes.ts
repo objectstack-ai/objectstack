@@ -18,6 +18,7 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { isNarrowedRun, narrowedFlagNote, refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
+import { formatWithheldColumns, withheldColumns } from '../../utils/migrate-withheld-columns.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -226,6 +227,10 @@ export default class MigrateValueShapes extends Command {
         maxRecordsPerObject: flags['max-records'],
       });
       const passed = valueShapeScanPassed(report);
+      // [#30626] The scan reads the served fold, so a field a disabled
+      // package's extension adds is not scanned. Every such field is named
+      // (the scan's own column rule is the engine's, not exported).
+      const withheld = withheldColumns(engine, flags.object);
       const notStoredLine = notStored.size > 0
         ? `${notStored.size} scanned object(s) have no table in this database yet, so nothing is stored in ` +
             `them and they were not read: ${[...notStored].sort().join(', ')}.`
@@ -276,6 +281,7 @@ export default class MigrateValueShapes extends Command {
           // mistaken for a full one (the shape `os migrate duplicates` keeps).
           filter: narrowed ? { objects: flags.object } : null,
           scan: report,
+          withheldColumns: withheld,
           gatePassed: passed,
           flag,
           duration: timer.elapsed(),
@@ -286,7 +292,7 @@ export default class MigrateValueShapes extends Command {
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
       console.log('');
-      console.log(formatValueShapeScanReport(report).join('\n'));
+      console.log([...formatValueShapeScanReport(report), ...formatWithheldColumns(withheld)].join('\n'));
       console.log('');
       if (notStoredLine) printInfo(notStoredLine);
 

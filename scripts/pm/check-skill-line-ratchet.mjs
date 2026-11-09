@@ -1225,7 +1225,25 @@ export const CEILINGS = new Map([
   // verbatim out of SKILL.md, whose ceiling fell 819 → 319 in the same PR; +32
   // against a net source decrease of 500. Landed count, headroom 0, same
   // convention.
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 101],
+  // Raised 101 → 102 by the main-green doorbell — an ORDINARY raise on a
+  // CROSS_FILE_MOVES destination, recorded under that entry's `ruledRaises`
+  // below, ⛔ not a second move. The text is §C's resume line: a seat that
+  // receives `Notify: main-green` merges `origin/main` through the relay's
+  // `pr_update_branch`, drops its `Waits-on:` line and resumes landing as §C's
+  // last step says; the hold line itself (`Waits-on: main-red #n`) folded into
+  // §C's existing release-condition line at zero lines. Ruling of record: the
+  // main-red resume card (#29445, filing gate ③, a task the maintainer set
+  // directly), maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
+  // Measured delta +1 (101 → 102); landed count, headroom 0.
+  // Raised 102 → 107 by the merge-queue jump rule — an ORDINARY raise on the
+  // same destination, recorded under that entry's `ruledRaises` below, ⛔ not a
+  // second move. The text is when a seat may ring the relay's `pr_enqueue_front`
+  // ((a)(b)(c), audit comment first, one jumper per repository, FAILED handling).
+  // Ruling of record: the jump card (#31403, filing gate ③, a task on the
+  // maintainer's word), maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;
+  // letter 「A」 recorded as comment 6729640900. Measured delta +5 (102 → 107);
+  // landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 107],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
   // rolls to production, which the landing window (ends at MERGED) never
   // covered: post-roll placement/latency reading with the waker-bias re-draw
@@ -1289,7 +1307,19 @@ export const CEILINGS = new Map([
   // line naming which seat reads it on which fire. New files, landed at their
   // own counts (headroom 0, same convention as every entry above); added rows,
   // paid for by the SKILL.md decrease — the map's total goes down.
-  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 96],
+  // 96 → 98 (#29754): an off-shift seat's items (it signed off, or two
+  // `Request: progress` knocks went unanswered) go to an online sibling seat
+  // of the same lane, which claims them with `Resume-from:` citing the brief;
+  // the exceptions (a decision-card wait, no online sibling ⇒ 「待席」 on the
+  // round record, security items stay with the security seat). The sign-off
+  // line keeps the `Release:` + `Resume-from:` transit back to `pm:queue`
+  // (`check-handover.mjs` (a) still reads it) and names the sibling as the
+  // next claimant; the two-unanswered-knocks case cites triage's round record
+  // through execution-duties.md's 接管 shape, since no brief exists. Ruling of
+  // record: amendment 6595840476 on #29754 (maintainer 「同意：下班席位的卡交给
+  // 兄弟席」), which names this file, under #29775 letter A, record 6595514258
+  // (「同意29775 A」). Measured delta +2 (96 → 98 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 98],
   // The project coordinator's interface with the seat threads (maintainer's
   // word, 2026-10-22, verbatim and untranslated: 「刚才你让我转帖的项目指令规则，为
   // 什么不定义在仓库中呢，我只要穿到具体的车道就行。」): lane ownership on the seat
@@ -1320,7 +1350,19 @@ export const CEILINGS = new Map([
   // §8's pointer list in place. Ruling of record: that card's body, filed under the maintainer's verbatim
   // 「设 security#1 座位」, and its amendment comment 6592303181 (「这个应该算一个车道吧？…」) naming this file's
   // new section. Measured delta +6 (56 → 62 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/security-findings.md', 62],
+  // 62 → 64 (#29731): the finder reports and never fixes in place — no widening of the PR or branch in hand, no
+  // own fix branch, no hardening on the same surface — and the task that cannot proceed without that code path
+  // stops as `blocked` with the opaque cause line while the seat parks the card. Ruling of record: that card's
+  // body, filed under the maintainer's verbatim 「开发中遇到的问题应该通过安全通道上报而不是直接处理」. The
+  // dev's route and the fix-only-by-order sentence folded into existing lines (§9 L60, §3 L28). Measured
+  // delta +2 (62 → 64 lines); landed count, headroom 0.
+  // 64 → 65 (#30114): the private-repository branch — a seat tells a public repository from a private one by its
+  // `private` flag read from the API, a private repository's private card is an ordinary `security` issue its fix
+  // is dispatched from, and its PRs, commits and changesets still state the rule and link that issue. +4 lines,
+  // paid by three same-file deletions (a stale private-repository line, the seat's own-account sentence, the
+  // cross-repo finder's filing line); the one-line remainder raised on the maintainer's ruling of record, comment
+  // 6704167516 on that card (option A, 2026-11-07). Measured delta +1 (64 → 65 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/security-findings.md', 65],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   // Lowered 51 → 47 by #25712 item 4: objectui stopped being a sister repo, so
@@ -1344,7 +1386,28 @@ export const CEILINGS = new Map([
   // 94-95 each merged after deleting what contract-review.md and AGENTS.md
   // already state, and the reporting pair 101-102 replaced by one pointer to the
   // push list in lanes/triage.md. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 99],
+  // Raised 99 → 100 by the main-green doorbell — an ORDINARY raise, ⛔ not a
+  // cross-file move. The text is two lines beside the main-red anchor duties:
+  // when an anchor card closes, triage (the director when triage is absent)
+  // reads the open PRs whose body carries a line-leading `Waits-on: main-red
+  // #n`, rings each one's seat once with `Notify: main-green` in the same
+  // round and counts them in the round record, with the worked example (anchor
+  // #N closes ⇒ PRs #a and #b each get one knock). One line was paid by
+  // deleting the Clause-② boundary test that execution-duties.md already states
+  // (its `Clause-②` line and its narrowing line), so the net is +1. Ruling of
+  // record: the main-red resume card (#29445, filing gate ③, a task the
+  // maintainer set directly), maintainer verbatim and untranslated:
+  // 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
+  // Measured delta +1 (99 → 100); landed count, headroom 0.
+  // Raised 100 → 101 under ruling record 6184799323 letter B — an ORDINARY
+  // raise, ⛔ not a cross-file move. Ruling of record 6722123324 (rule 7, the
+  // devx charter) ends 'Triage shows these metrics in the daily dashboard's
+  // lane section', and that line had no written home (#31558). The text is one
+  // line beside the daily-fire duties pointing at lanes/devx.md's metric line,
+  // never restating the six; no line of this file restates text another file
+  // carries, so a deletion would have dropped a live rule. Measured delta +1
+  // (100 → 101); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 101],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1443,7 +1506,27 @@ export const CEILINGS = new Map([
   // record: the card body (「设 security#1 座位」) and amendment comment
   // 6592303181, which names this file's mailbox row. Measured delta +1
   // (55 → 56 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/project-forms.md', 56],
+  // 56 → 58 (#29754): the `Request: progress` / `Notify: progress` pair
+  // (triage → the claiming seat on an item idle 3 h; the seat back with its
+  // record) and the 不敲 line's 「催」 turned from a ban into a rate — one knock
+  // per item per 60 min, an answered ETA holds it, parked or decision-waiting
+  // items are not knocked. Ruling of record: #29775 letter A, record
+  // 6595514258 (maintainer 「同意29775 A」), with the card's amendments
+  // 6595244387 (the rate) and 6595840476. The key row and the record/rate
+  // line are the two lines the ruling orders; the 不敲 line was rewritten in
+  // place. Measured delta +2 (56 → 58 lines); landed count, headroom 0.
+  // Raised 58 → 59 by the main-green doorbell — an ORDINARY raise, ⛔ not a
+  // cross-file move. The text is one 〈信箱 PR〉 scenario row: when a main-red
+  // anchor card closes, triage (the director when triage is absent) rings the
+  // seat of every open PR whose body carries `Waits-on: main-red #n` with
+  // `Notify: main-green`; the key's full spelling lives in
+  // `record-recognisers.mjs` MAILBOX_KEYS, which the self-test pins against this
+  // section both ways, so the row cannot be folded into a neighbour (each sits
+  // at 113–120 B against the 120-byte cap). Ruling of record: the main-red
+  // resume card (#29445, filing gate ③, a task the maintainer set directly),
+  // maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
+  // Measured delta +1 (58 → 59); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 59],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -1515,7 +1598,17 @@ export const CEILINGS = new Map([
   // never-public rules stay in security-findings.md. A NEW file, so this is an
   // added row and no other row moves; set at the landed line count (headroom 0,
   // same convention).
-  ['.claude/skills/pm-dispatch/references/lanes/security.md', 34],
+  // 34 → 53 (#29726): the maintainer's working rules for the seat — the
+  // isolated `CONTRACT_REVIEW_TIER` review before any question reaches the
+  // maintainer, cloud orders for heavy fixes, the per-object close-out, the
+  // relay `closed` move on merge and the pre-release publish-or-not list, the
+  // intake and read rules — plus the review's S1 (two restated lines become
+  // pointers) and S2 (the label is the hand-over). Ruling of record: that card's
+  // body (rulings 1–3, each verbatim there; the order to write them in is
+  // 「这些都应该写到你的skills」), and its amendment comment 6595626876 (「目前的修复都关闭」,
+  // 「你处理完的可以都先关闭」, 「哪些高危要发布应该在我版本发布前决策吧」). Measured
+  // delta +19 (34 → 53 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/security.md', 53],
   // Project Director seat charter (maintainer ruling 2026-08-27, verbatim:
   // 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」; the file
   // carries it as a rule line since the rules-only rewrite, not as this quotation)
@@ -1579,7 +1672,59 @@ export const CEILINGS = new Map([
   // of record: the card body (「设 security#1 座位」, Change 4) and amendment
   // comment 6592303181. Measured delta +2 (15 → 17 lines); landed count,
   // headroom 0.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 17],
+  // 17 → 20 (#29754): the progress round step — sweep `pm:dispatched` cards
+  // and non-mailbox open PRs reading idle off PROGRESS (head commit,
+  // non-triage comment, the seat's label change), never `updated_at`; knock
+  // the claiming seat `Request: progress` once per item per hour, read the
+  // answers next round, list the unanswered; two silent rounds ⇒ the seat
+  // reads as down and its items go to an online sibling, which triage knocks
+  // once and never releases. Ruling of record: #29775 letter A, record
+  // 6595514258 (maintainer 「同意29775 A」), amendment 6595244387 (the rate and
+  // the escalation) and amendment 6595840476 (maintainer 「同意：下班席位的卡交给
+  // 兄弟席」, the idle reading and the sibling hand-over, which names this
+  // file). Measured delta +3 (17 → 20 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 20],
+  // Review seat charter (`review#N`): the seat whose only job is the contract
+  // review, held on any account that reaches CONTRACT_REVIEW_TIER — its seat
+  // word, mailbox, review-seat-first routing of `Request: contract-review`
+  // and the owed-review list, the earliest-claim mutual exclusion, the delta
+  // rule, independence (never a PR its own account dispatched or implemented)
+  // and what it never does; the review itself stays in contract-review.md.
+  // Ruling of record: the maintainer's question 「契约复审我想分拆到其他账户，怎么处理。」
+  // and ruling 「选 B，立卡」 (dedicated review seats), quoted verbatim on the
+  // card that ordered this file (filing gate ③). A NEW file, so this is an
+  // added row and no other row moves; set at the landed line count (headroom
+  // 0, same convention as every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/review.md', 21],
+  // QA seat charter (`qa#N`): the Routine seat that owns checklist-test §6's
+  // two standing routines (the weekly four-record regression, the post-release
+  // npm smoke), each round's close-out, record close and supersede, and the
+  // weekly `retest-owed.mjs` read that feeds the next regression; it dispatches
+  // no dev and changes no product code. Ruling of record: the maintainer's
+  // letter A on the card that ordered this file, 「同意 新设 qa#1」, recorded
+  // verbatim in triage's ruling comment 6715420603, whose workload names
+  // `references/lanes/qa.md`. A NEW file, so this is an added row and no other
+  // row moves; set at the landed line count (headroom 0, same convention as
+  // every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/qa.md', 29],
+  // AI eval seat charter (`eval#N`): the standing seat that runs the AI
+  // regressions (scenario cards over MCP, the in-product Q&A baseline, the
+  // hosted chat eval set, the five AI write gates) on the maintainer's
+  // Routines cadence; it dispatches no dev and changes no product code.
+  // Ruling of record: comment 6721331178, the maintainer's 「同意开 AI 评测 车道」
+  // transcribed verbatim, whose workload names `references/lanes/eval.md`. A
+  // NEW file, so this is an added row and no other row moves; set at the
+  // landed line count (headroom 0, same convention as every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 45],
+  // repo:cloud lane charter: the cloud seats keep first-touch triage of the
+  // cloud repo, run the first-touch sweep before they claim, set grade and
+  // state when they file, and triage's daily reconciliation is the backstop;
+  // the cloud seats' own standing commitments come from the companion card
+  // #31918. Ruling of record: comment 6739409918, the maintainer's letter A,
+  // whose workload names `lanes/cloud.md`. A NEW file, so this is an added
+  // row and no other row moves; set at the landed line count (headroom 0,
+  // same convention as every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 28],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -1663,7 +1808,14 @@ export const CEILINGS = new Map([
   // hardening re-runs the item itself).
   // 277 → 276 (#29111): the Guardrails security definition and fix dispatch
   // became a pointer at pm-dispatch security-findings.md (lowering is legitimate).
-  ['.claude/skills/checklist-test/SKILL.md', 276],
+  // 276 → 279: ruling comment 6715420603 (maintainer letter A, 「同意 新设 qa#1」)
+  // orders the card's three text fixes, two of which land here: §6 names the
+  // `qa#1` seat as the routines' one owner (a rewrite in place, 0 lines), and §5
+  // gains the close line (close-out complete ⇒ the QA seat closes the record
+  // `completed`; residuals stay on their cards, retests owed through
+  // `retest-owed.mjs`). Measured delta +3 (two text lines and their paragraph
+  // break), ceiling moved by +3; landed count, headroom 0.
+  ['.claude/skills/checklist-test/SKILL.md', 279],
   ['.claude/skills/checklist-author/SKILL.md', 62],
   // 157 → 140 (#25753): lines that named objectui as a sibling repo retired; landed count.
   ['.claude/skills/dogfood-verification/SKILL.md', 140],
@@ -2241,6 +2393,27 @@ export const CROSS_FILE_MOVES = new Map([
       ruling: '入队与落地 consolidation into landing-operations.md under the principle-only cut of SKILL.md, authorised by #14685 item 5 (comment 5520452691)',
       was: 69,
       sources: [['.claude/skills/pm-dispatch/SKILL.md', 819]],
+      ruledRaises: [
+        {
+          // Quoted beside this entry's ceiling above. Copied from there, not paraphrased.
+          ruling:
+            'the main-green resume line on `.claude/skills/pm-dispatch/references/landing-operations.md` §C'
+            + ' — the main-red resume card (#29445, filing gate ③, a task the maintainer set directly),'
+            + ' maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」',
+          date: '2026-11-03',
+          delta: 1,
+        },
+        {
+          // Quoted beside this entry's ceiling above. Copied from there, not paraphrased.
+          ruling:
+            'the merge-queue jump rule on `.claude/skills/pm-dispatch/references/landing-operations.md`'
+            + ' — the jump card (#31403, filing gate ③, a task on the maintainer\'s word),'
+            + ' maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;'
+            + ' letter 「A」 recorded as comment 6729640900',
+          date: '2026-11-09',
+          delta: 5,
+        },
+      ],
     },
   ],
   // The thin triage seat (maintainer's word 2026-10-23, verbatim and
@@ -2369,6 +2542,10 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/security.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/review.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/qa.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/eval.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],

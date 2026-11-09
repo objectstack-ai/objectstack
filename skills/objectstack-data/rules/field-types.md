@@ -8,20 +8,21 @@
 
 ## Two spellings: `Field.*` factory or object literal
 
-The tables below give the **object-literal** spelling. Real apps overwhelmingly
-use the equivalent **`Field.*` factory** (`@objectstack/spec`) — same schema, plus
+The tables below give the **object-literal** spelling. Real apps mostly
+use the equivalent **`Field.*` factory** — same schema, plus
 per-helper JSDoc and inference (`Field.lookup`'s const generic is what lets
 `defineSeed()` type its reference values). A helper exists for every type below
 except a few authored as literals (`tags`, `progress`, `repeater`, `vector`).
 
+<!-- os:check -->
 ```typescript
-import { Field } from '@objectstack/spec';
+import { Field } from '@objectstack/spec/data';
 
-fields: {
+const fields = {
   name:       Field.text({ required: true, maxLength: 255 }),
   stage:      Field.select(['new', 'won'], { required: true }),  // options 1st
   account_id: Field.lookup('account', { required: true }),       // reference 1st
-}
+};
 ```
 
 > **Config columns list only real `FieldSchema` keys.** Per-type display knobs
@@ -93,7 +94,7 @@ options: [
 | `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `lookupAutofill` |
 | `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `lookupAutofill` |
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
-| `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'` |
+| `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default — declared, deleting the user acts as on `lookup`: `cascade` deletes the holders, `set_null` clears the field or drops that member, `restrict` refuses with `409 DELETE_RESTRICTED`; undeclared, the field keeps the deleted user's id) |
 
 **`lookupAutofill: [{ target, source, overwrite? }]`** (single-value `lookup` /
 `master_detail`): a pick copies the picked record's `source` into this object's
@@ -128,7 +129,7 @@ Stored as JSON on the parent row — no separate table / FK:
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `formula` | Computed from an expression referencing other fields — virtual: not aggregatable, a dataset measure needs a stored field (objectstack-ui → Dashboards → Dataset-Bound Widgets) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
+| `formula` | Computed from an expression referencing other fields — virtual: neither aggregatable nor a dataset or cube dimension (group key); both need a stored field (objectstack-ui → Dashboards → Dataset-Bound Widgets) | `expression` (CEL, `record.` prefixes), `returnType` (`'number' \| 'text' \| 'boolean' \| 'date' \| 'currency'`); `'currency'` carries its own `currencyConfig` |
 | `summary` | Roll-up aggregation from child records | `summaryOperations` ({ object, field? (omit for `count`), function, relationshipField?, filter? }) |
 | `autonumber` | Auto-incrementing display format ({0000} counter + optional date / {field} tokens, resets per scope) | `format` (shorthand) / `autonumberFormat` (canonical) — e.g., `"CASE-{0000}"`, `"AD{YYYYMMDD}{0000}"` |
 
@@ -171,7 +172,9 @@ dataset measure's own `currency` wins over a `'dynamic'` field; over a `'fixed'`
 or a derived sum/difference over one `'fixed'` code, it may only restate that code,
 else `DATASET_INVALID`: delete it, and the column takes the code (objectstack-ui →
 Dashboards). A `'fixed'` code is not judged against the tenant's. Switched a
-stored field to `'record'`? Backfill: `os migrate record-currency-codes`.
+stored field to `'record'`? Backfill: `os migrate record-currency-codes --org <id>`
+(or `--all-organizations` for every one); a multi-organization database refuses
+a run with neither.
 
 `homeAmount` (`'record'` only, all three required): the engine stores the
 home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
@@ -199,22 +202,8 @@ import { F } from '@objectstack/spec';
 const total = {
   type: 'formula',
   expression: F`record.amount * record.tax_rate`,
-  returnType: 'number',   // see the Calculated table
+  returnType: 'number',
 };
-```
-
-### Summary (Roll-up)
-
-```typescript
-{
-  type: 'summary',
-  summaryOperations: {
-    object: 'invoice_line_item',   // child object to aggregate
-    field: 'amount',               // child field
-    function: 'sum',               // 'count' | 'sum' | 'min' | 'max' | 'avg'
-    // relationshipField / filter — optional (see rules/relationships.md)
-  },
-}
 ```
 
 ### Autonumber
@@ -239,7 +228,7 @@ The `format` is literal text interleaved with `{...}` tokens:
 **Rules — get these wrong and records mis-number silently or fail to save:**
 
 1. **Every `{field}` you interpolate must be `required: true`** and set before the record is created. An empty interpolated field makes the record number generation *throw* (the compile lint flags a non-existent field as an error, an optional one as a warning).
-2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique). The literal separator keeps distinct groups apart.
+2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique).
 3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000` (it grows, never wraps). Size it for readability, not as a ceiling.
 4. **Only known tokens are interpolated.** Date tokens are **case-sensitive** — `{yyyy}` parses as a `{field}` reference and renders **empty** (rule 1 applies). Only a spelling no field could have — `{ YYYY }`, `{YYYY-MM}` — is emitted **literally**.
 
