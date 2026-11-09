@@ -293,8 +293,9 @@
  * ## The one row that reorders the merge queue — `pr_enqueue_front`
  *
  * `enqueuePullRequest(input: { pullRequestId, jump: true, expectedHeadOid })`
- * puts a pull at the FRONT of its base's merge queue, or moves it there when
- * it is already queued. Jumping rebuilds every merge group behind it (GitHub's
+ * puts a pull at the FRONT of its base's merge queue. Whether it also moves a
+ * pull that is ALREADY queued is NOT MEASURED until the first live stroke on
+ * one; if GitHub refuses that case, the row reads FAILED. Jumping rebuilds every merge group behind it (GitHub's
  * own documentation of the option), and it is an ADDITIONAL repository
  * permission above write ("Jump to the front of the queue", a custom-role
  * permission an admin holds by default), so the row is fenced like
