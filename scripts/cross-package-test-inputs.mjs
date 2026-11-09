@@ -373,7 +373,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // The pin names only the census; these two are the census's own relative
       // imports, loaded by the spawned child, so no path the pin quotes lands
       // in them and the pin itself is what holds them.
-      'scripts/js-comment-mask.mjs': ['packages/core/src/security/vouched-reference-callers.pin.test.ts'],
+      'scripts/js-comment-mask.mjs': [
+        'packages/core/src/security/vouched-reference-callers.pin.test.ts',
+        // [#31898] The API-key client-facts census imports the separator
+        // itself to tell a seam call from prose and quoted text.
+        'packages/core/src/security/credential-use-client-doors.pin.test.ts',
+      ],
       'scripts/invoked-as.mjs': ['packages/core/src/security/vouched-reference-callers.pin.test.ts'],
     },
   },

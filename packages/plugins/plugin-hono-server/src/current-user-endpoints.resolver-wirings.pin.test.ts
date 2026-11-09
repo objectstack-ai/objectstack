@@ -57,6 +57,8 @@ const DOOR_PARAMETERS: Omit<RequestExecutionContextInput, 'headers' | 'ql' | 'au
     accessToken: 'withhold',
     oauth: undefined,
     onAdmission: undefined,
+    // [#31898] The door states it: session-only, it reads no key.
+    transport: undefined,
 };
 
 type Row = Record<string, unknown>;

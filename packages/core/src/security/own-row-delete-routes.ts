@@ -169,6 +169,9 @@ export function ownRowDeleteCallerResolver(sources: OwnRowDeleteCallerSources): 
       accessToken: 'withhold',
       oauth: undefined,
       onAdmission: undefined,
+      // [#31898] The transport's own peer address, for the `credential_use` row
+      // an admitted API key writes; the trust rule is the auth service's.
+      transport: { remoteAddress: req.remoteAddress || undefined },
     });
   };
 }

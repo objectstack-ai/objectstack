@@ -68,6 +68,8 @@ import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { MANIFEST_FILENAME, computeIntegrity, createTarGz, type ArchiveFile } from '../src/utils/osplugin.js';
 import { childEnv } from './helpers/serve-process.js';
 import { CONFIG_MISS_FAMILY, discoverConfigMissFamily } from './helpers/config-miss-family.js';
+// [#10126] Paid at MODULE LOAD, as `pnpm check:test-source-alias` asks: `osplugin.ts` reaches it by a dynamic `import()`.
+import '@objectstack/runtime';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -172,6 +174,12 @@ const FAMILY: Record<string, string[]> = {
   'migrate security-catalog-overlays': [],
   // Its dry run takes the `summary-nulls` shape: a read-only boot, no row written.
   'migrate stored-expressions': [],
+  // [ADR-0150 D10] Read-only, its only form: it boots as `os serve` composes
+  // (`deferSchemaDdl` + `readOnlyProbe`) and reports. Its `bind` declares no
+  // `json:` literal of its own (it spreads the report's flags), so this
+  // discovery does not reach it; its one-document `--json` stdout is pinned in
+  // `stored-references.integration.test.ts`, every run parsed whole.
+  'migrate stored-references': [],
   'migrate summary-nulls': [],
   // One object per run, so it needs a name: the fixture's own `jp_ticket`,
   // which the composed host config registers. No database file exists, so the

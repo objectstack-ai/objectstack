@@ -144,6 +144,8 @@ const DOORS: Record<string, (engine: ObjectQL, raw: string) => Promise<string | 
       accessToken: 'withhold',
       oauth: undefined,
       onAdmission: undefined,
+      // [#31898] These rows judge the stamp, not the client facts: none handed.
+      transport: undefined,
     });
     return ctx?.userId;
   },
@@ -163,6 +165,8 @@ const DOORS: Record<string, (engine: ObjectQL, raw: string) => Promise<string | 
       accessToken: 'carry',
       oauth: undefined,
       onAdmission: undefined,
+      // [#31898] These rows judge the stamp, not the client facts: none handed.
+      transport: undefined,
     });
     return ctx?.userId;
   },
@@ -478,7 +482,7 @@ describe('[#31821] the credential_use row records where the use came from', () =
       accessToken: opts.anonymous === 'guest' ? 'carry' : 'withhold',
       oauth: undefined,
       onAdmission: undefined,
-      ...(opts.transport === false ? {} : { transport: { remoteAddress: opts.remoteAddress } }),
+      transport: opts.transport === false ? undefined : { remoteAddress: opts.remoteAddress },
     });
 
   const rowOf = async (id: string): Promise<Row> => {
