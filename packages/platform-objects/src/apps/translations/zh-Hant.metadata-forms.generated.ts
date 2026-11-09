@@ -2241,6 +2241,14 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "dimensions.nullLabel": {
         label: "空值標籤"
       },
+      "dimensions.synonyms": {
+        label: "同義詞",
+        helpText: "人們提問時對這個維度的叫法（如 階段、銷售階段、stage），以逗號分隔，可中英混寫。由資料集 AI 工具比對，從不顯示。最多 20 個，每個最多 60 個字元；同一資料集裡一個詞只能對應一個成員"
+      },
+      "dimensions.description": {
+        label: "描述",
+        helpText: "以淺白業務語言寫的定義：一兩句話說明這個維度是什麼、何時使用。隨分析中繼資料發布並由資料集 AI 工具讀取；它是定義，不是提示詞，也不是給 AI 的指令。最多 500 個字元"
+      },
       measures: {
         label: "度量",
         helpText: "每個度量：名稱、聚合函式、欄位（count 時可省略）、顯示格式/貨幣"
@@ -2274,6 +2282,14 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "measures.duration": {
         label: "時長"
+      },
+      "measures.synonyms": {
+        label: "同義詞",
+        helpText: "人們提問時對這個度量的叫法（如 收入、銷售額、revenue），以逗號分隔，可中英混寫。由資料集 AI 工具比對，從不顯示。最多 20 個，每個最多 60 個字元；同一資料集裡一個詞只能對應一個成員"
+      },
+      "measures.description": {
+        label: "描述",
+        helpText: "以淺白業務語言寫的定義：一兩句話說明這個度量是什麼、何時使用。隨分析中繼資料發布並由資料集 AI 工具讀取；它是定義，不是提示詞，也不是給 AI 的指令。最多 500 個字元"
       }
     }
   },
