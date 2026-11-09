@@ -1,6 +1,6 @@
 # ADR-0144: Multi-currency — a record currency in a sibling code field, dated exchange rates, and a home-currency amount computed and stored at write
 
-**Status**: Accepted — 2026-10-28, ruled on objectstack#27119 (ruling [`6465431966`](https://github.com/objectstack-ai/objectstack/issues/27119#issuecomment-6465431966), decision batch #421 item 2, #27119 Q1 = 乙-现在). `docs/adr/**` is Tier H (Prime Directive #14): this record lands by an authorised approval and the maintainer's merge. **This record declares; it implements nothing** — no schema, no code, no changeset. The children of epic #8345 implement it. · **Amended** (2026-11-09, [#31743](https://github.com/objectstack-ai/objectstack/issues/31743), maintainer ruling A, recorded in [`6739066323`](https://github.com/objectstack-ai/objectstack/issues/31743#issuecomment-6739066323), 「同意」): a `record`-mode amount on a `master_detail` child may name its parent's code field through that `master_detail` and so follows the parent's currency (D2); a `summary` rolled up through that same `master_detail` is admitted in the parent's currency (D6); and once a record has a child that follows it, the record's code field is refused on update (the lock the ruling asked this amendment to pick, D2). The amendment declares and implements nothing; #31910, #31911 and #31912 implement it. See the dated notes of 2026-11-09 under D1, D2 and D6.
+**Status**: Accepted — 2026-10-28, ruled on objectstack#27119 (ruling [`6465431966`](https://github.com/objectstack-ai/objectstack/issues/27119#issuecomment-6465431966), decision batch #421 item 2, #27119 Q1 = 乙-现在). `docs/adr/**` is Tier H (Prime Directive #14): this record lands by an authorised approval and the maintainer's merge. **This record declares; it implements nothing** — no schema, no code, no changeset. The children of epic #8345 implement it. · **Amended** (2026-11-09, [#31743](https://github.com/objectstack-ai/objectstack/issues/31743), maintainer ruling A, recorded in [`6739066323`](https://github.com/objectstack-ai/objectstack/issues/31743#issuecomment-6739066323), 「同意」): a `record`-mode amount on a `master_detail` child may name its parent's code field through that `master_detail` and so follows the parent's currency (D2); a `summary` rolled up through that same `master_detail` is admitted in the parent's currency (D6); and once a record has a child that follows it, a change of the record's code field is refused (the lock the ruling asked this amendment to pick, D2; writing the same code again, or a first code over a blank one, passes). The amendment declares and implements nothing; #31910, #31911 and #31912 implement it. See the dated notes of 2026-11-09 under D1, D2 and D6.
 
 - **Decided by**: the maintainer, 2026-10-28T09:29Z, on #27119, verbatim and untranslated: 「同意立专题卡」 — the epic
   form the director seat proposed for 乙-现在. Per the ruling, the maintainer had read the design record
@@ -44,8 +44,9 @@
   `valueDomain: 'iso_4217_currency'`. That field holds each record's currency. The amount stays a bare number
   (ADR-0104 D1).
   *Amended (2026-11-09, #31743):* an amount on a `master_detail` child may instead name its parent's code field,
-  spelled `<master_detail field>.<parent code field>`, and then follows the parent's currency. The parent's code field
-  is refused on update while such a child exists (D2).
+  spelled `<master_detail field>.<parent code field>`, and then follows the parent's currency. A change of the
+  parent's code field is refused while such a child exists; the same code again, or a first code over a blank one,
+  passes (D2).
 - `sys_exchange_rate { currency, rate, effective_date, source }` holds dated rates against the organization's home
   currency, which is `localization.currency`. In v1, rows are entered by hand or imported. A provider feed is an app flow
   that writes rows.
@@ -208,11 +209,15 @@ field refuses at build unless grouped by its code field" (see the note under D6)
 > stays refused. Such an amount reads its record's currency from its parent row. The child stores no code of its own,
 > and the explicit stored value of D8 rule 4 is the parent's code.
 >
-> **When a parent's currency changes after child rows exist, the parent's code field locks.** The ruling made this
-> its condition, verbatim: "the amendment must state what happens when a parent record's currency changes after child
-> rows exist — either the parent's code field locks once it has children, or the children's home-currency projections
-> are rewritten in cascade. Pick one in the amendment; do not leave it to the objectql child card." The pick is the
-> lock, the spec seat's, in claim
+> **When a parent's currency changes after child rows exist, the parent's code field locks.** The record of the
+> ruling states its condition, verbatim: "The amendment must state what happens when a parent record's currency
+> changes after child rows exist. It picks one of these two, in the amendment itself, and does not leave the choice to
+> the objectql child card:"
+>
+> - "the parent's code field locks once it has children; or"
+> - "the children's home-currency projections are rewritten in cascade."
+>
+> The pick is the lock, the spec seat's, in claim
 > [`6739159874`](https://github.com/objectstack-ai/objectstack/issues/31743#issuecomment-6739159874). Once a record
 > has at least one child row whose amount's `currencyField` follows it through `master_detail`, an update that changes
 > the record's code field, to another code or to blank, is refused. The seat's reasons, verbatim:
@@ -221,12 +226,18 @@ field refuses at build unless grouped by its code field" (see the note under D6)
 > - "D4 already locks the home currency once it is used."
 > - "A cascade would make one parent write fan out without bound."
 >
-> The refusal is `VALIDATION_FAILED` / 400, answered before anything is written, with one `invalid_value` finding on
-> the parent's code field. That is the vocabulary D4's lock answers in: a well-formed value that the system's state
-> refuses (`packages/services/service-settings/src/settings-service.ts`, where a write predicate's refusal becomes
+> The refusal is `VALIDATION_FAILED` / 400, the record-write envelope, answered before anything is written, with one
+> `invalid_value` finding on the parent's code field. `invalid_value` is the finding D4's lock also carries, inside
+> the settings write's own `SETTINGS_VALIDATION` envelope, for a well-formed value that the system's state refuses
+> (`packages/services/service-settings/src/settings-service.ts`, where a write predicate's refusal becomes
 > `invalid_value`). The message names the child object or objects whose rows follow the code. It says that the code
 > can change once no child row follows it. Like D4's lock, "follows" is read at each write and never recorded, so
-> the lock lifts once the last following child row is gone. Writing the same code again is not a change. Neither is
+> the lock lifts once the last following child row is gone. **A child row in the recycle bin still follows its
+> parent** ([ADR-0148](./0148-recycle-bin-separate-store-restore-under-original-ids-retention-in-days.md)): the lock
+> counts it until the row is restored or purged. A restore writes the snapshotted row back as it was, with no
+> projection (ADR-0148 D2), so a row deleted on its own, restored after its parent's code changed, would carry a home
+> amount converted from a code its parent no longer holds. Not chosen: refusing such a restore instead, since the
+> child stores no code and its snapshot carries none to compare the parent's against. Writing the same code again is not a change. Neither is
 > setting a code on a record whose code is blank, the counterpart of D4 passing the first setting of an unset home
 > currency: a child amount beside a blank code is refused at its own write (`ERR_CURRENCY_CODE_REQUIRED`, D8 rule 4),
 > so no child has been converted from a code the parent never had. The lock is the engine's, on the record-write path
@@ -280,8 +291,8 @@ field refuses at build unless grouped by its code field" (see the note under D6)
   registration (M0-2, #27186), and the analytics cube measure door (M0-3, #27187).
 
 > **Amended (2026-11-09, #31743) — a roll-up through `master_detail` over children that follow their parent is
-> admitted.** Ruling A, verbatim: "a `summary` rolled up through that same master_detail is single-currency by
-> construction and is admitted in the parent's currency." A `summary` totals the children of one parent. When the
+> admitted.** Ruling A, verbatim: "A `summary` rolled up through that same master_detail is single-currency by
+> construction, and is admitted in the parent's currency." A `summary` totals the children of one parent. When the
 > child amount's `currencyField` follows that parent through the `master_detail` the `summary` rolls up through (see
 > the note under D2), every row it reads is in the parent's currency. The roll-up is then not a raw aggregate across
 > currencies, and the first bullet does not refuse it. It is admitted only through that very `master_detail` field.
@@ -301,7 +312,8 @@ field refuses at build unless grouped by its code field" (see the note under D6)
 >   field of the same object. `packages/spec/src/data/object.zod.ts#refuseDishonestHomeAmount` compares the pointers
 >   of amounts that share a rate field.
 > - `packages/objectql/src/validation/record-currency-code.ts#recordCurrencyFieldOf` reads the pointer as a sibling
->   field name. Its readers are the write-time projection
+>   field name. Its readers are `packages/objectql/src/validation/record-currency-code.ts#recordCurrencyPairs` (the
+>   blank-code guard of D8 rule 4), the write-time projection
 >   (`packages/objectql/src/home-amount-projection.ts#projectHomeAmounts`), the code backfill
 >   (`packages/objectql/src/record-currency-backfill.ts#backfillRecordCurrencyCodes`) and the aggregate door.
 > - `packages/objectql/src/record-currency-aggregate-door.ts#recordCurrencySummaryRefusal` refuses every `summary`
@@ -430,7 +442,8 @@ D8 already excludes a switch, injected columns, fixed field names and a setting 
 - *Amended (2026-11-09, #31743):* **a child can follow its parent's currency, and the parent's code then locks.** The
   amendment admits two declarations that D2 and D6 refused: the two-segment `currencyField` and a `summary` through
   that `master_detail`. Both are additive, and nothing an author wrote before changes meaning. Its one new refusal is
-  on data: a record's code field is refused on update while a child row follows it (D2). That refusal binds only
+  on data: a change of a record's code field is refused while a child row follows it, a binned row included; the
+  same code again, or a first code over a blank one, passes (D2). That refusal binds only
   records with such children, so no stored row is touched. It is not a third step that cannot be undone, because it
   lifts once the following child rows are gone. Each child's changeset declares its own semver.
 - **Every converting write adds a rate lookup.**
@@ -646,11 +659,13 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
 14. **Edges of a child that follows its parent's currency** (#31911, #31910; opened 2026-11-09 by the amendment of
     D2 and D6). Ruling A and the lock under D2 do not decide three edges:
     - **A child row that moves to another parent** whose code differs. The lock binds the parent's code field, not
-      the child's `master_detail` value. Such a move changes the child's currency the way a write of its own code
-      field changes a sibling-code amount's currency today.
+      the child's `master_detail` value. The lean, not adopted here: such a move changes the child's currency the way
+      a write of its own code field changes a sibling-code amount's currency today, and the write projects again.
     - **Grouping that makes a raw aggregate single-currency.** Does an ObjectQL aggregate, or a dataset or cube
-      measure, over such a child amount that groups by the `master_detail` field, or by the parent path, count as
-      grouped by its code field (D6's first bullet)?
+      measure, over such a child amount that groups by the parent path (the code field reached through the
+      `master_detail`) count as grouped by its code field (D6's first bullet)? That half is #31911's reading of D6.
+      Grouping by the `master_detail` field itself would widen D6 past ruling A, so that half takes a maintainer
+      ruling.
     - **The code backfill** (item 13) for an amount whose code lives on the parent. The command writes a code into the
       amount's own object today.
 
