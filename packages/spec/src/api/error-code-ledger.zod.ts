@@ -481,7 +481,8 @@ export const ERROR_CODE_LEDGER = {
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
     // [cloud#3814 D1] the runtime package doors refuse a package change, 409,
-    // right after the caller's authorization and before anything is written,
+    // right after the caller's authorization and the walled-catalog refusal
+    // (both still answer first) and before anything is written,
     // when the deployment declares several replicas on the Redis cluster
     // driver (`declaresMultiReplicaOnRedis`, `@objectstack/service-cluster`):
     // `POST /packages`, `PATCH /packages/:id/enable` and `/disable`,
@@ -489,7 +490,7 @@ export const ERROR_CODE_LEDGER = {
     // `PATCH /packages/:id` and `DELETE /packages/:id`
     // (`multi-replica-package-refusal.ts`), plus the flow and permission-set
     // clone doors when the copy would CREATE the source's paired
-    // customization package. Each change would reach only the serving
+    // customization package (its App's pair, `pairOf`). Each change would reach only the serving
     // replica: the registry is read at boot and the enable/disable choice is
     // kept per replica. The string is the shared constant one package over
     // (see the `@objectstack/cloud-connection` row and PROVENANCE_WAIVERS);

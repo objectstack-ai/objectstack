@@ -16,7 +16,8 @@
  *
  * Two clone doors create a package as a side effect: a "new similar" copy of a
  * flow or a permission set shipped by a read-only package lands in that
- * base's paired customization package, ensured on the spot. Those doors are
+ * base's paired customization package — its App's pair, `pairOf(base)`
+ * (ruling 6691022506) — ensured on the spot. Those doors are
  * refused only when the ensure would CREATE the pair on this replica
  * ({@link multiReplicaPairCreationRefusal}); a pair this replica already
  * serves is reused, which creates no package, and the copy itself is a
@@ -31,7 +32,7 @@
  */
 
 import { declaresMultiReplicaOnRedis, MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
-import { customizationPackageId } from '@objectstack/spec/kernel';
+import { installedManifestsOf, pairOf, type InstalledPackageSource } from '@objectstack/metadata-core';
 import type { HttpDispatcherResult, HttpProtocolContext } from './http-dispatcher.js';
 
 /** What the refusal needs from the domain's deps: service resolution and the error envelope. */
@@ -89,8 +90,10 @@ export async function refuseMultiReplicaPackageChange(
  * customization package as a side effect: the refusal message when this
  * deployment declares replicas on Redis AND this replica's registry does not
  * hold the pair yet (so the ensure would create a package on this replica
- * alone), else `null`. A base that derives no pair id is left to the ensure's
- * own refusal.
+ * alone), else `null`. The pair is `pairOf(base)` over this replica's
+ * installed manifests — the App's pair for a member of an installed App — the
+ * one the ensure lands in. A base that derives no pair is left to the
+ * ensure's own refusal.
  */
 export async function multiReplicaPairCreationRefusal(
     deps: Pick<MultiReplicaRefusalDeps, 'resolveService'>,
@@ -100,9 +103,12 @@ export async function multiReplicaPairCreationRefusal(
     subject: string,
 ): Promise<string | null> {
     if (!(await packageChangeReachesOneReplica(deps, context))) return null;
-    const pair = customizationPackageId(basePackageId);
+    // The pair the ensure would land in, derived the way the ensure derives
+    // it: the base's App's pair (ruling 6691022506), read from this replica's
+    // installed manifests — never a local `<base>.custom` spelling.
+    const registry = (ql as { registry?: InstalledPackageSource } | null | undefined)?.registry;
+    const pair = pairOf(basePackageId, installedManifestsOf(registry));
     if (!pair.ok) return null;
-    const registry = (ql as { registry?: { getPackage?(id: string): unknown } } | undefined)?.registry;
     if (registry?.getPackage?.(pair.value)) return null;
     return multiReplicaPackageChangeMessage(`${subject} needs the paired customization package '${pair.value}', which `
         + 'does not exist yet, and creating it');

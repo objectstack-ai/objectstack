@@ -111,7 +111,18 @@ interface Answer {
  * protocol refuses (an illegal machine name among it) throws the way the real
  * engine throws. The default rig's engine is a map that accepts anything.
  */
-async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud'; clusterDriver?: string } = {}) {
+/**
+ * [cloud#3814 D1] An installed App and a read-only member of it shipping
+ * {@link SUITE_FLOW}: the member's pair is its App's, `com.acme.suite.custom`
+ * (ruling 6691022506). `legacyMemberPair` also installs the per-package pair
+ * an earlier version created for the member.
+ */
+const SUITE_APP = { id: 'com.acme.suite', name: 'Suite', version: '2.0.0', type: 'app', namespace: 'suite' };
+const SUITE_MEMBER = { id: 'com.acme.suite-crm', name: 'Suite CRM', version: '2.0.0', type: 'module', namespace: 'suitecrm', dependencies: { [SUITE_APP.id]: '^2' } };
+const SUITE_PAIR = 'com.acme.suite.custom';
+const SUITE_FLOW = 'suite_lead_route';
+
+async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud'; clusterDriver?: string; appMember?: boolean; legacyMemberPair?: boolean } = {}) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -134,6 +145,17 @@ async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud'; 
     // The base's flow, registered as the loader registers a package's flow.
     const shipped = { ...flowOf(SOURCE), _packageId: BASE.id, _packageVersion: BASE.version, _provenance: 'package' };
     engine.registry.registerItem('flow', shipped as any, 'name' as any, BASE.id);
+    const suiteShipped = { ...flowOf(SUITE_FLOW), _packageId: SUITE_MEMBER.id, _packageVersion: SUITE_MEMBER.version, _provenance: 'package' };
+    if (options.appMember) {
+        for (const m of [SUITE_APP, SUITE_MEMBER]) {
+            engine.registry.installPackage(m as any, 'code');
+            (engine as unknown as { manifests: Map<string, unknown> }).manifests.set(m.id, m);
+        }
+        if (options.legacyMemberPair) {
+            engine.registry.installPackage({ id: `${SUITE_MEMBER.id}.custom`, name: 'Legacy pair', version: '2.0.0', type: 'module', namespace: 'suitecrm_custom', dependencies: { [SUITE_MEMBER.id]: '^2' } } as any, 'authored');
+        }
+        engine.registry.registerItem('flow', suiteShipped as any, 'name' as any, SUITE_MEMBER.id);
+    }
 
     const published: unknown[] = [];
     const services = new Map<string, unknown>([
@@ -141,7 +163,7 @@ async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud'; 
     ]);
     const protocol = new ObjectStackProtocolImplementation(engine as any, () => services);
 
-    const flows = new Map<string, any>([[SOURCE, shipped], [LOCAL, flowOf(LOCAL)]]);
+    const flows = new Map<string, any>([[SOURCE, shipped], [LOCAL, flowOf(LOCAL)], ...(options.appMember ? [[SUITE_FLOW, suiteShipped] as [string, any]] : [])]);
     const registerFlow = vi.fn((name: string, definition: unknown) => {
         if (options.parse) FlowSchema.parse(definition);
         flows.set(name, definition);
@@ -548,4 +570,66 @@ describe('[cloud#3814 D1] declared replicas on the Redis driver: a clone that wo
             expect(rig.installed()).toContain(PAIR);
         }, 60_000);
     }
+});
+
+describe('[cloud#3814 D1] declared replicas on the Redis driver: the pair probed is the App\'s pair (pairOf), as the ensure derives it', () => {
+    const prior = process.env.OS_CLUSTER_REPLICAS;
+    afterEach(() => {
+        if (prior === undefined) delete process.env.OS_CLUSTER_REPLICAS;
+        else process.env.OS_CLUSTER_REPLICAS = prior;
+    });
+
+    it('precondition — the ensure door pairs the member with its App\'s pair, not a per-member one', async () => {
+        const rig = await boot({ clusterDriver: 'redis', appMember: true });
+        const ensured = await rig.protocol.ensureCustomizationPackage({ basePackageId: SUITE_MEMBER.id });
+        expect(ensured.packageId).toBe(SUITE_PAIR);
+    }, 60_000);
+
+    it('a member of an installed App whose pair is absent: 409 naming the App\'s pair, nothing created', async () => {
+        const rig = await boot({ clusterDriver: 'redis', appMember: true });
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const answer = await rig.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(409);
+        expect(answer.code).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+        expect(String(answer.body?.error?.message)).toContain(`'${SUITE_PAIR}'`);
+        expect(rig.installed()).not.toContain(SUITE_PAIR);
+        expect(rig.published).toEqual([]);
+        expect(await rig.rows('acme_suite_route')).toEqual([]);
+    }, 60_000);
+
+    it('…refused too while only the member\'s legacy per-package pair is installed: the ensure would still create the App\'s', async () => {
+        const rig = await boot({ clusterDriver: 'redis', appMember: true, legacyMemberPair: true });
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const answer = await rig.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(409);
+        expect(answer.code).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+        expect(rig.installed()).not.toContain(SUITE_PAIR);
+        expect(rig.published).toEqual([]);
+    }, 60_000);
+
+    it('a member whose App\'s pair this replica already serves is not refused by this card: the door answers as on a single node, and nothing is created', async () => {
+        // The App's pair, ensured on a single node.
+        const single = await boot({ clusterDriver: 'redis', appMember: true });
+        await single.protocol.ensureCustomizationPackage({ basePackageId: SUITE_MEMBER.id });
+        const singleAnswer = await single.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)' });
+
+        const rig = await boot({ clusterDriver: 'redis', appMember: true });
+        await rig.protocol.ensureCustomizationPackage({ basePackageId: SUITE_MEMBER.id });
+        const pairsBefore = rig.published.length;
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const answer = await rig.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)' });
+
+        // Not this card's refusal: the same answer a single node gives (today
+        // the door's own closure refusal — the App's pair declares the App,
+        // not the member; outside this card).
+        expect(answer.code, JSON.stringify(answer.body)).not.toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+        expect({ status: answer.status, code: answer.code }).toEqual({ status: singleAnswer.status, code: singleAnswer.code });
+        expect(rig.published.length).toBe(pairsBefore);
+        expect(rig.installed().filter((id) => id === SUITE_PAIR)).toHaveLength(1);
+    }, 60_000);
 });

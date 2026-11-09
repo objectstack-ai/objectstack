@@ -25,6 +25,7 @@
 import '@objectstack/metadata';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { MULTI_REPLICA_PACKAGE_CHANGE_REFUSED } from '@objectstack/service-cluster';
+import { installedManifestsOf, pairOf } from '@objectstack/metadata-core';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -106,14 +107,35 @@ interface BootOptions {
     noEnsure?: boolean;
     /** The composed `cluster` service's driver; absent ⇒ no `cluster` service. */
     clusterDriver?: string;
+    /**
+     * [cloud#3814 D1] Adds an installed App (`com.acme.suite`) and a read-only
+     * member of it (`com.acme.suite-crm`) shipping {@link SUITE_SET}: the
+     * member's pair is its App's, `com.acme.suite.custom` (ruling 6691022506).
+     * `legacyMemberPair` also installs the per-package pair an earlier version
+     * created for the member, `com.acme.suite-crm.custom`.
+     */
+    appMember?: boolean;
+    legacyMemberPair?: boolean;
 }
+
+/** [cloud#3814 D1] A set a read-only member of an installed App ships. */
+const SUITE_APP = 'com.acme.suite';
+const SUITE_MEMBER = 'com.acme.suite-crm';
+const SUITE_SET = { name: 'suite_reader', label: 'Suite Reader', objects: { sys_user: { allowRead: true } }, _packageId: SUITE_MEMBER };
 
 function boot(opts: BootOptions = {}) {
     // ZERO `sys_permission_set` rows: every data read throws, so the door
     // passing proves it reads no row.
     const packages: Record<string, { manifest: Record<string, unknown> }> = structuredClone(PACKAGES);
+    if (opts.appMember) {
+        packages[SUITE_APP] = { manifest: { id: SUITE_APP, type: 'app', namespace: 'suite', version: '2.0.0' } };
+        packages[SUITE_MEMBER] = { manifest: { id: SUITE_MEMBER, type: 'module', namespace: 'suitecrm', version: '2.0.0', dependencies: { [SUITE_APP]: '^2' } } };
+        if (opts.legacyMemberPair) {
+            packages[`${SUITE_MEMBER}.custom`] = { manifest: { id: `${SUITE_MEMBER}.custom`, namespace: 'suitecrm_custom', dependencies: { [SUITE_MEMBER]: '^2' } } };
+        }
+    }
     const engine: any = {
-        manifests: new Set(['crm']),
+        manifests: new Set(opts.appMember ? ['crm', SUITE_APP, SUITE_MEMBER] : ['crm']),
         registry: {
             getPackage: (id: string) => packages[id],
             getObject: (name: string) => (name === 'account' ? { name: 'account' } : name === 'sys_user' ? { name: 'sys_user' } : undefined),
@@ -124,7 +146,7 @@ function boot(opts: BootOptions = {}) {
     if (opts.catalogError) {
         bindTestSecurityCatalog(engine, () => { throw opts.catalogError; });
     } else if (!opts.unbound) {
-        bindTestSecurityCatalog(engine, CATALOG);
+        bindTestSecurityCatalog(engine, opts.appMember ? { permissions: [...CATALOG.permissions, SUITE_SET] } : CATALOG);
     }
     const saves: Saved[] = [];
     const ensures: string[] = [];
@@ -142,7 +164,9 @@ function boot(opts: BootOptions = {}) {
         protocol.ensureCustomizationPackage = async ({ basePackageId }: { basePackageId: string }) => {
             ensures.push(basePackageId);
             if (opts.ensureError) throw opts.ensureError;
-            const pairId = `${basePackageId}.custom`;
+            // The pair is the base's App's, as the real door derives it.
+            const derived = pairOf(basePackageId, installedManifestsOf(engine.registry));
+            const pairId = derived.ok ? derived.value : `${basePackageId}.custom`;
             const created = packages[pairId] === undefined;
             if (created) packages[pairId] = { manifest: { id: pairId, dependencies: { [basePackageId]: '^1' } } };
             return { basePackageId, packageId: pairId, namespace: 'crm_custom', dependencyRange: '^1', created, writable: true };
@@ -648,4 +672,51 @@ describe('[cloud#3814 D1] declared replicas on the Redis driver: a copy that wou
             expect(h.saves.map((s) => s.packageId)).toEqual(['crm.custom']);
         });
     }
+});
+
+describe('[cloud#3814 D1] declared replicas on the Redis driver: the pair probed is the App\'s pair (pairOf), as the ensure derives it', () => {
+    const prior = process.env.OS_CLUSTER_REPLICAS;
+    afterEach(() => {
+        if (prior === undefined) delete process.env.OS_CLUSTER_REPLICAS;
+        else process.env.OS_CLUSTER_REPLICAS = prior;
+    });
+
+    it('a member of an installed App whose pair is absent: 409 naming the App\'s pair, no ensure, no save', async () => {
+        const h = boot({ clusterDriver: 'redis', appMember: true });
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const res = await clone(h, HOLDER(), SUITE_SET.name, { name: 'my_suite_reader', label: 'My Suite Reader' });
+
+        expect(statusOf(res)).toBe(409);
+        expect(codeOf(res)).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+        expect(String((res as any)?.response?.body?.error?.message)).toContain(`'${SUITE_APP}.custom'`);
+        expect(h.ensures).toEqual([]);
+        expect(h.saves).toHaveLength(0);
+    });
+
+    it('…refused too while only the member\'s legacy per-package pair is installed: the ensure would still create the App\'s', async () => {
+        const h = boot({ clusterDriver: 'redis', appMember: true, legacyMemberPair: true });
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const res = await clone(h, HOLDER(), SUITE_SET.name, { name: 'my_suite_reader', label: 'My Suite Reader' });
+
+        expect(statusOf(res)).toBe(409);
+        expect(codeOf(res)).toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
+        expect(h.ensures).toEqual([]);
+        expect(h.saves).toHaveLength(0);
+    });
+
+    it('a member whose App\'s pair this replica already serves: 200, saved in the App\'s pair, nothing created', async () => {
+        const h = boot({ clusterDriver: 'redis', appMember: true });
+        const first = await clone(h, HOLDER(), SUITE_SET.name, { name: 'first_suite_reader', label: 'First' });
+        expect(statusOf(first)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual([`${SUITE_APP}.custom`]);
+        process.env.OS_CLUSTER_REPLICAS = '3';
+
+        const second = await clone(h, HOLDER(), SUITE_SET.name, { name: 'second_suite_reader', label: 'Second' });
+
+        expect(statusOf(second)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual([`${SUITE_APP}.custom`, `${SUITE_APP}.custom`]);
+        expect((second as any).response.body.data.noticeCode).toBe('PERMISSION_SET_CLONE_IN_PACKAGE');
+    });
 });
