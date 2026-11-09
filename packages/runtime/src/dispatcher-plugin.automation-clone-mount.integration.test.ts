@@ -100,8 +100,12 @@ describe('#20676 — the discriminator, measured in both directions', () => {
         expect(dispatcherAnswered(r), `trigger -> ${r.status} ${JSON.stringify(r.body)}`).toBe(true);
     }, 60_000);
 
-    it('NEGATIVE CONTROL: an unmounted sibling segment answers the transport, not the domain', async () => {
-        const r = await post(`${PREFIX}/automation/${FLOW}/no-such-verb`);
+    // [ADR-0150 D5, child G1] One segment deeper than the sibling verbs: every
+    // two-segment path now reaches the domain under every verb (the addressed
+    // `/automation/:ns/:name` mounts, declared domain-decides-every-verb), so
+    // the shape no mount serves is the three-segment one.
+    it('NEGATIVE CONTROL: an unmounted shape answers the transport, not the domain', async () => {
+        const r = await post(`${PREFIX}/automation/${FLOW}/no-such-verb/extra`);
         expect(dispatcherAnswered(r)).toBe(false);
         expect(transportRefused(r), `unmounted sibling -> ${r.status} ${JSON.stringify(r.body)}`).toBe(true);
     }, 60_000);

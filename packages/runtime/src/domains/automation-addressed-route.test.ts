@@ -70,6 +70,7 @@ function dispatcherWith(h: Holdings, flowNames: string[] = ['send_digest', 'ping
         return {
             handled: answered.handled,
             status: answered.response?.status ?? 200,
+            headers: answered.response?.headers as Record<string, string> | undefined,
             body: answered.response?.body as any,
         };
     };
@@ -201,6 +202,52 @@ describe('every gate judges the bare shape, ahead of the address', () => {
         const answer = await call('/crm/send_digest/toggle', 'POST', ADMIN, { enabled: false });
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(automation.toggleFlow.mock.calls.map((c: any[]) => [c[0], c[1]])).toEqual([['send_digest', false]]);
+    });
+});
+
+describe('the legacy trigger is two segments bare, three addressed, and nothing else at three', () => {
+    it('`trigger/:x/:y` whose `:x` is no address is declined — the flow `:x` never runs', async () => {
+        const { call, automation } = dispatcherWith(ONE_HOLDER);
+        expect((await call('/trigger/nope/send_digest', 'POST')).handled).toBe(false);
+        expect((await call('/trigger/send_digest/extra', 'POST')).handled).toBe(false);
+        expect(automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — the addressed and the bare legacy trigger run their flow', async () => {
+        const { call, automation } = dispatcherWith(ONE_HOLDER);
+        expect((await call('/trigger/crm/send_digest', 'POST')).status).toBe(200);
+        expect((await call('/trigger/send_digest', 'POST')).status).toBe(200);
+        expect(automation.execute.mock.calls.map((c: any[]) => c[0])).toEqual(['send_digest', 'send_digest']);
+    });
+});
+
+describe('a served shape under another verb answers the domain\'s 405, the verbs it serves in `Allow`', () => {
+    // Every two-segment path reaches the domain under every verb now (the
+    // addressed `/automation/:ns/:name` mounts), so the `Allow` the transport
+    // used to build is the domain's to give, from the shapes it serves.
+    it('bare and addressed: the verb a shape is never served under is refused with that shape\'s verbs, and nothing runs', async () => {
+        const { call, automation } = dispatcherWith(ONE_HOLDER);
+        for (const [path, method, allow] of [
+            ['/send_digest/trigger', 'GET', 'POST'],
+            ['/crm/send_digest/trigger', 'GET', 'POST'],
+            ['/send_digest/runs', 'POST', 'GET'],
+            ['/trigger/send_digest', 'GET', 'POST'],
+            ['/connectors/credential-refs', 'POST', 'GET'],
+            ['/send_digest', 'POST', 'GET, PUT, DELETE'],
+        ] as const) {
+            const answer = await call(path, method);
+            expect([path, method, answer.status, answer.headers?.Allow, codeOf(answer)])
+                .toEqual([path, method, 405, allow, 'METHOD_NOT_ALLOWED']);
+        }
+        expect(automation.execute).not.toHaveBeenCalled();
+        expect(automation.listRunsPage).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — a shape no route serves is declined, never a 405', async () => {
+        const { call } = dispatcherWith(ONE_HOLDER);
+        for (const method of ['GET', 'POST', 'PUT']) {
+            expect((await call('/send_digest/no-such-verb', method)).handled).toBe(false);
+        }
     });
 });
 

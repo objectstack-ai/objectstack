@@ -2063,6 +2063,16 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     { verb: 'post', pattern: '/automation/connectors/:ns/:name/connection', readsBody: true, encode: true },
                     { verb: 'delete', pattern: '/automation/connectors/:ns/:name/connection', readsBody: false, encode: true },
                 ];
+                // Every two-segment path now matches a mount by its parameters
+                // alone (`/automation/:ns/:name` under GET, PUT and DELETE), so
+                // the transport's own `405` would build its `Allow` from mounts
+                // that never serve the path. The domain decides every verb there
+                // instead (`automationRouteAllow`): the GET patterns a
+                // two-segment path resolves to are declared — the addressed one
+                // and the two earlier GET mounts that win the path under GET.
+                domainDecidesEveryVerb('GET', `${base}/automation/:ns/:name`);
+                domainDecidesEveryVerb('GET', `${base}/automation/:name/runs`);
+                domainDecidesEveryVerb('GET', `${base}/automation/connectors/credential-refs`);
                 for (const { verb, pattern, readsBody, encode } of addressedAutomationRoutes) {
                     server![verb](`${base}${pattern}`, async (req: any, res: any) => {
                         try {

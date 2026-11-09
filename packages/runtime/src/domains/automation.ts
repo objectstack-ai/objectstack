@@ -16,11 +16,13 @@ import {
 } from '@objectstack/core';
 // [#22773] The inbound-hook door, handed the one route the floor admits.
 import { handleInboundHookRequest } from './automation-hooks.js';
+import { buildApiError } from '../error-envelope.js';
 import {
     admitAutomationAddress,
     automationAddressRegistryOf,
     bareNameRefusal,
     readAutomationAddress,
+    automationRouteAllow,
     type AutomationAddressRefusal,
     type AutomationAddressRegistry,
 } from './automation-address.js';
@@ -1236,7 +1238,7 @@ async function automationRegistryOf(deps: DomainHandlerDeps, context: HttpProtoc
  */
 function bareByNameItem(parts: readonly string[], method: string): { type: 'flow' | 'connector'; name: string } | undefined {
     if (parts.length === 0) return undefined;
-    if (parts[0] === 'trigger') return method === 'POST' && parts[1] ? { type: 'flow', name: parts[1] } : undefined;
+    if (parts[0] === 'trigger') return method === 'POST' && parts.length === 2 ? { type: 'flow', name: parts[1] } : undefined;
     if (parts[0] === 'connectors') {
         if (!isConnectorConnectionDoor([...parts], method) || parts[1] === CONNECTOR_OAUTH_SEGMENT) return undefined;
         try {
@@ -3637,6 +3639,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // [#9378] Both doors answer through `respondToFlowTrigger` — see its
     // docblock for the status table, complete since #9415 delivered the
     // ruling's remaining two rows (409 / 422).
+    // [ADR-0150 D5, child G1] `trigger/:x/:y` is the addressed legacy trigger
+    // or no route: a first segment that is no address leaves three segments
+    // here, which the arm below would have run as the flow `:x`, ignoring the
+    // rest. Declined — behind every gate above, so none becomes narrower than
+    // its route — as `/actions` declines a path past its arity.
+    if (parts[0] === 'trigger' && parts.length === 3) return { handled: false };
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
         const triggerName = parts[1];
         if (typeof automationService.execute === 'function') {
@@ -4822,6 +4830,25 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             }
         }
     }
-    
+
+    // [ADR-0150 D5, child G1] A shape this domain serves under another verb
+    // answers `405` with the verbs it serves (`automationRouteAllow`), the
+    // answer the transport gave before the addressed shapes were mounted with a
+    // parameter in every position. RFC 9110 §15.5.6: the `Allow` header rides
+    // the hand-rolled response (`deps.error` cannot carry it), the body goes
+    // through the one builder, as `/actions`' 405 does.
+    {
+        const allow = automationRouteAllow(parts);
+        if (allow.length > 0 && !allow.includes(m)) {
+            return {
+                handled: true,
+                response: {
+                    status: 405,
+                    headers: { Allow: allow.join(', ') },
+                    body: { success: false, error: buildApiError({ message: 'Method not allowed', httpStatus: 405 }) },
+                },
+            };
+        }
+    }
     return { handled: false };
 }

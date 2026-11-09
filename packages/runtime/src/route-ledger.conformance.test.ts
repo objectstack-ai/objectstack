@@ -305,4 +305,29 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
     }
     expect([...served].sort()).toEqual([...AUTOMATION_FLOW_SUBRESOURCE_SEGMENTS].sort());
   });
+
+  // [ADR-0150 D5, child G1] The domain's `405` names the verbs a bare shape is
+  // served under (`automationRouteAllow`), since every two-segment path reaches
+  // it under every verb. Those verbs are the ledger's: for each bare
+  // `/automation` row's path (parameters filled), every bare row whose pattern
+  // matches that path, and nothing else.
+  it('the `/automation` domain\'s `Allow` for each bare shape is exactly the verbs the ledger serves there', async () => {
+    const { automationRouteAllow } = await import('./domains/automation-address.js');
+    const rows = ROUTE_LEDGER
+      .map((row) => {
+        const [verb, rest] = [row.route.slice(0, row.route.indexOf(' ')), row.route.slice(row.route.indexOf(' ') + 1).split('?')[0]];
+        return { verb, segments: rest.split('/').filter(Boolean) };
+      })
+      .filter(({ segments }) => segments[0] === 'automation' && !segments.includes(':ns'));
+    expect(rows.length).toBeGreaterThan(20);
+    const fill = (seg: string) => (seg.startsWith(':') ? `${seg.slice(1)}_1` : seg);
+    const matches = (pattern: string[], path: string[]) =>
+      pattern.length === path.length && pattern.every((seg, i) => seg.startsWith(':') || seg === path[i]);
+    const VERBS = ['GET', 'POST', 'PUT', 'DELETE'];
+    for (const { segments } of rows) {
+      const path = segments.map(fill);
+      const served = VERBS.filter((verb) => rows.some((row) => row.verb === verb && matches(row.segments, path)));
+      expect([path.join('/'), automationRouteAllow(path.slice(1))]).toEqual([path.join('/'), served]);
+    }
+  });
 });

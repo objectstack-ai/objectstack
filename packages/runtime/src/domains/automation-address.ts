@@ -260,3 +260,50 @@ export function admitAutomationAddress(
 
 /** The reserved environment segment, re-exported for the domain's messages. */
 export { ENVIRONMENT_ADDRESS_SEGMENT };
+
+/**
+ * [ADR-0150 D5, child G1] The verbs the `/automation` routes serve on the bare
+ * shape `parts` (the segments after `/automation`, the qualifier already
+ * stripped), as the dispatcher mounts them and `route-ledger.ts` lists them —
+ * `route-ledger.conformance.test.ts` pins every `/automation` row against it.
+ *
+ * Why the domain needs it: the addressed shapes are mounted with a parameter
+ * in every position (`/automation/:ns/:name`), so every verb on a
+ * two-segment path now reaches this domain, which answers a shape it serves
+ * under another verb `405` with this `Allow` — the answer the transport gave
+ * the same path before those mounts existed — instead of the transport
+ * building its `Allow` from mounts that match the path only by their
+ * parameters. Empty: no route has this shape.
+ */
+export function automationRouteAllow(parts: readonly string[]): string[] {
+    const allow = new Set<string>();
+    const [a, b, c, d] = parts;
+    switch (parts.length) {
+        case 0:
+            allow.add('POST');
+            break;
+        case 1:
+            for (const verb of ['GET', 'PUT', 'DELETE']) allow.add(verb);
+            break;
+        case 2:
+            if (a === 'trigger') allow.add('POST');
+            if (b === 'trigger' || b === 'toggle' || b === 'clone') allow.add('POST');
+            if (b === 'runs') allow.add('GET');
+            if (a === 'connectors' && b === 'credential-refs') allow.add('GET');
+            break;
+        case 3:
+            if (b === 'runs') allow.add('GET');
+            if (a === 'connectors' && b === 'credential-refs') { allow.add('PUT'); allow.add('DELETE'); }
+            if (a === 'connectors' && c === 'connection') for (const verb of ['GET', 'POST', 'DELETE']) allow.add(verb);
+            if (a === 'connectors' && b === 'oauth' && c === 'callback') allow.add('GET');
+            if (a === 'hooks') allow.add('POST');
+            break;
+        case 4:
+            if (b === 'runs' && d === 'screen') allow.add('GET');
+            if (b === 'runs' && (d === 'resume' || d === 'cancel' || d === 'restore-suspension')) allow.add('POST');
+            break;
+        default:
+            break;
+    }
+    return ['GET', 'POST', 'PUT', 'DELETE'].filter((verb) => allow.has(verb));
+}
