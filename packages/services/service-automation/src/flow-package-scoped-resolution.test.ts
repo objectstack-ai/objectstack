@@ -419,7 +419,10 @@ describe('[#31754] the collision line for a name two packages hold says neither 
             expect(line).not.toContain('Only the armed definition dispatches');
             expect(line).not.toContain('\n');
             // What the line points at: the refusal, naming both, and nothing armed.
-            expect(String((refusal as Error)?.message)).toMatch(/held by 2 packages in this environment[\s\S]*com\.acme\.alpha[\s\S]*com\.acme\.stranger/);
+            const refused = String((refusal as Error)?.message);
+            expect(refused).toContain('held by 2 packages in this environment');
+            expect(refused).toContain('package "com.acme.alpha"');
+            expect(refused).toContain('package "com.acme.stranger"');
             expect(await engine.getFlow('notify')).toBeNull();
         });
     }
@@ -429,7 +432,13 @@ describe('[#31754] the collision line for a name two packages hold says neither 
             [{ ...leaf('notify'), _packageId: A, _provenance: 'package' }, { ...leaf('notify'), _provenance: 'org' }],
             { notify: A },
         );
-        expect(line).toBe('SEALED');
+        expect(line).toBe(
+            "[Automation] Flow name collision: 'notify' is claimed by 2 definitions (package 'com.acme.alpha', " +
+                "a runtime-authored row (sys_metadata)); arming package 'com.acme.alpha' because a managed package's " +
+                'flow is sealed (ADR-0126 §2), and shadowing 1 other definition(s). Only the armed definition ' +
+                "dispatches. To change what runs, declare it as an override in 'com.acme.alpha.custom' (overrides: " +
+                "{ package: 'com.acme.alpha', basedOn }), or save it under a new name.",
+        );
     });
 
     it('CONTROL: the declared override beside a stored row keeps its line byte for byte (ADR-0146 D9)', () => {
@@ -443,11 +452,23 @@ describe('[#31754] the collision line for a name two packages hold says neither 
             ],
             { notify: A },
         );
-        expect(line).toBe('OVERRIDE');
+        expect(line).toBe(
+            "[Automation] Flow name collision: 'notify' is claimed by 3 definitions (the declared override in " +
+                "'com.acme.alpha.custom' (sys_metadata), package 'com.acme.alpha', a runtime-authored row " +
+                "(sys_metadata)); arming the declared override in 'com.acme.alpha.custom' (sys_metadata) because it " +
+                "is the declared override of 'com.acme.alpha' (ADR-0146 D9), and shadowing 2 other definition(s). " +
+                "Only the armed definition dispatches. To change what runs, declare it as an override in " +
+                "'com.acme.alpha.custom' (overrides: { package: 'com.acme.alpha', basedOn }), or save it under a new name.",
+        );
     });
 
     it('CONTROL: two environment rows of a name no package ships keep their line byte for byte (arrival order)', () => {
         const line = lineOf([{ ...leaf('notify'), _provenance: 'org' }, { ...leaf('notify'), _provenance: 'org' }], {});
-        expect(line).toBe('ARRIVAL');
+        expect(line).toBe(
+            "[Automation] Flow name collision: 'notify' is claimed by 2 definitions (a runtime-authored row " +
+                '(sys_metadata), a runtime-authored row (sys_metadata)); arming a runtime-authored row (sys_metadata) ' +
+                'by arrival order, and shadowing 1 other definition(s). Only the armed definition dispatches. ' +
+                'Rename one of them.',
+        );
     });
 });

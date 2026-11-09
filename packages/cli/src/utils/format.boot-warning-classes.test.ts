@@ -491,8 +491,9 @@ describe('print-once: Boot diagnostics withholds what the banner restated (forma
     );
     const collision = record(
       "[Automation] Flow name collision: 'dup_flow' is claimed by 2 definitions (package 'crm', a runtime-authored " +
-        "row (sys_metadata)); arming package 'crm' by package id, and shadowing 1 other definition(s). " +
-        'Only the armed definition dispatches. Rename one of them.',
+        "row (sys_metadata)); arming package 'crm' because a managed package's flow is sealed (ADR-0126 §2), and " +
+        'shadowing 1 other definition(s). Only the armed definition dispatches. To change what runs, declare it ' +
+        "as an override in 'crm.custom' (overrides: { package: 'crm', basedOn }), or save it under a new name.",
     );
     printServerReady({
       ...BASE,
