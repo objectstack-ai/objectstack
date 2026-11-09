@@ -174,10 +174,12 @@ function boot(what: string, cwd: string, args: string[], env: Record<string, str
         OS_ARTIFACT_URL: undefined,
         OS_ARTIFACT_PATH: undefined,
         OS_MODE: undefined,
-        NODE_ENV: undefined,
         OS_PORT: undefined,
         PORT: undefined,
         ...env,
+        // Last, so no leg's `env` can put the child in development/test: the
+        // shipped entry in production posture is the CONTROL legs' subject.
+        NODE_ENV: undefined,
       }),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
