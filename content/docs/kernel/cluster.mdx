@@ -742,7 +742,8 @@ all 5 replicas will still join the cluster.
 </Callout>
 
 Note this reads the operator-**declared** count, not live membership: no
-membership view exists at boot. It is the right input for telling an operator
+membership view exists at boot (the membership heartbeat in §8.2 starts only
+once the kernel is ready). It is the right input for telling an operator
 about the configuration they wrote, and is deliberately not sufficient for
 enforcement.
 
@@ -832,6 +833,53 @@ A `postgres` driver would remain a viable "single binary, single dependency"
 choice for small deployments that already run Postgres and want to avoid
 a Redis dependency, but nobody has built one — it is deferred to a
 community/optional driver against the same `registerClusterDriver()` SPI.
+
+### 8.2 Membership
+
+Which replicas are alive right now is answered by `readClusterMembers(cluster)`
+from `@objectstack/service-cluster`. It runs only for a multi-replica
+deployment that is **declared** (`OS_CLUSTER_REPLICAS` > 1 or
+`OS_EXPECT_MULTI_NODE=true`) **and** runs the `redis` driver; everywhere else
+nothing is written and the single-node answer below is returned.
+
+Under that declaration `ClusterServicePlugin` starts a heartbeat when the
+kernel is ready. Every beat writes this replica's record to the KV key
+`cluster:member:<nodeId>` with a TTL and keeps `nodeId` in the
+`cluster:members` roster. The roster is changed only by compare-and-set, and
+only by heartbeats, which also drop ids whose member key has expired. The
+member id is `cluster.nodeId` (random per process unless the config sets
+`nodeId`), so a restarted process is a new member and the old one expires.
+A replica that is killed drops out within the TTL; one that shuts down
+cleanly deletes its key and drops out at once.
+
+Timing is the plugin option `membership`:
+
+```ts
+new ClusterServicePlugin({
+  config: { driver: 'redis', url },
+  membership: { heartbeatMs: 5000, ttlMs: 15000 }, // the defaults
+});
+```
+
+`ttlMs` is never below two beats. The spec field `heartbeatMs` on the cluster
+config is a different setting and is not read here.
+
+`readClusterMembers()` never throws and never writes. It returns a
+`ClusterMembership`:
+`{ state, self, members, asOf, reason? }`, where each member is
+`{ nodeId, host, pid, startedAt, lastBeatAt }` (times in epoch ms) and
+`members` is sorted by `nodeId`.
+
+| `state` | When | `members` | `asOf` |
+|:--|:--|:--|:--|
+| `single-node` | No declaration, or a driver other than `redis` | This replica alone; `lastBeatAt` is the reading time. The store is not read. | The reading time |
+| `live` | The store answered | Every replica whose member key is alive | The reading time |
+| `degraded` | The store could not be read | The last good reading, or this replica alone if there was none | **When that last good reading was taken**, not now |
+
+`reason` is present only on `degraded`. It describes the failure without the
+URL's credentials. A failed beat is logged at `debug` only: the store outage
+itself is already logged once by the driver. Neither the boot nor any request
+waits on a beat.
 
 ## 9. Industry alignment
 
