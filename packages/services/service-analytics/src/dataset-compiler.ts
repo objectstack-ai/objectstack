@@ -595,8 +595,12 @@ function compileDurationMeasure(
   };
 }
 
-/** Map a dataset dimension type to the Cube dimension `type`. */
-function dimensionType(d: DatasetDimension): CubeDimension['type'] {
+/**
+ * Map a dataset dimension type to the Cube dimension `type` — the one mapping
+ * the compiled cube and the dataset AI tools' catalogue (`dataset-tools.ts`)
+ * both read, so the catalogue names the type the query answer carries.
+ */
+export function datasetDimensionCubeType(d: DatasetDimension): CubeDimension['type'] {
   switch (d.type) {
     case 'date': return 'time';
     case 'number': return 'number';
@@ -871,9 +875,15 @@ export function compileDataset(
       // machine name, which `/analytics/meta` then published as a display title
       // (`title: 'owner'` for a dimension labelled `{ en: 'Owner', … }`).
       label: resolveI18nLabel(d.label, REGISTRY_LOCALE) ?? d.name,
-      type: dimensionType(d),
+      type: datasetDimensionCubeType(d),
       sql: d.field,
     };
+    // [ADR-0149 D1/M1] The member's business definition rides onto the Cube
+    // member, where `getMeta` already publishes a `description` — one text for
+    // discovery, future tooltips and the dataset AI tools. Resolved like the
+    // label beside it; absent when the dataset declares none.
+    const dimDescription = resolveI18nLabel(d.description, REGISTRY_LOCALE);
+    if (dimDescription !== undefined) dim.description = dimDescription;
     if (dim.type === 'time') {
       dim.granularities = d.dateGranularity
         ? [d.dateGranularity]
@@ -924,6 +934,9 @@ export function compileDataset(
       sql: m.field ?? '*',
     };
     if (typeof m.format === 'string') metric.format = m.format;
+    // [ADR-0149 D1/M1] Same as the dimension's description above.
+    const metricDescription = resolveI18nLabel(m.description, REGISTRY_LOCALE);
+    if (metricDescription !== undefined) metric.description = metricDescription;
     measures[m.name] = metric;
     if (m.filter) measureFilters[m.name] = m.filter;
   }
