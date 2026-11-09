@@ -91,6 +91,26 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   layer, is the boundary for what actions can do.
 - **API key (headless).** Mint a key (`POST /api/v1/keys`, shown once) and
   send it as `x-api-key` — for CI, scripts, and agents without a browser.
+- **AI service account (unattended).** When an agent runs on its own, not
+  on your behalf, give it its own identity instead of your key. An
+  organization administrator (or a platform administrator) registers one
+  (Setup → Users → *Register AI Service Account*, or
+  `POST /api/v1/auth/service-account/register` with `name` and an optional
+  `ownerId`): a user of kind `agent`, a plain member of the active
+  organization, accountable to a named person who is a member there (the
+  caller by default). Its name carries its purpose. It never signs in: it has
+  no password and no session, and its email is a placeholder that is never
+  delivered. Its owner, or an administrator of its organization, mints its
+  key (*Create API Key* on the account, or
+  `POST /api/v1/auth/service-account/create-key` with `userId`), shown once,
+  bound to the account's organization and under the same expiry ceiling as
+  any key. The key acts as the account: only the grants given to the account
+  count, an account never holds administrator standing, and the agent
+  ceiling clears View All, Modify All and the other elevated permissions from
+  whatever sets it is given. Both doors take a signed-in session only, so a
+  key — the account's own included — can neither register an account nor mint
+  one's key. An account is never counted as one of the administrators that
+  keep an organization manageable, and never receives administrator mail.
 
 Per client:
 
