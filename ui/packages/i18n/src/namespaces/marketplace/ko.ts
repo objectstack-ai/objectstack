@@ -216,6 +216,7 @@ const ko = {
       businessFunction: '업무 기능',
       industry: '업종',
       solutionType: '유형',
+      languages: '언어',
     },
     businessFunction: {
       sales: '영업',
@@ -249,6 +250,11 @@ const ko = {
     },
     maturity: {
       beta: '베타',
+    },
+    languages: {
+      none: '언어 정보 없음',
+      more: '외 {{extra}}개',
+      default: '(기본)',
     },
     relativeTime: {
       today: "오늘",
