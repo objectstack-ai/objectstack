@@ -835,7 +835,8 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Every holder of the function `name` (ADR-0150 D4): each package that
    * registered one under that name, with its own entry, and an owner-less
-   * registration as the environment's own item — the holder set
+   * registration as the platform's item (`platformItem`: code a plugin or
+   * the host registers, in every caller's reach like `sys`) — the holder set
    * `resolvePackageScopedFunction` resolves a flow's or an action's function
    * over, in the referrer's package. A snapshot, taken at the call.
    * `resolveFunction` and `resolveFunctionEntry` keep answering the one

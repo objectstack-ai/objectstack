@@ -301,8 +301,18 @@ export class HooksAndFunctionsFacet {
 
   /** The body of `ObjectQL#functionHoldersOf`; the method's docblock there is its contract. */
   static functionHoldersOf(this: Pick<HooksAndFunctionsHost, 'functionHolders'>, name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
-    // A snapshot: a registration after this call is not in it.
-    return packageScopedHolderSource<Readonly<FunctionEntry>>(this.functionHolders.get(name) ?? []);
+    // A snapshot: a registration after this call is not in it. An owner-less
+    // registration is the platform's (code a plugin or the host registers),
+    // never an item authored in the environment (epic seat ruling 6729484996).
+    const holdings = [...(this.functionHolders.get(name) ?? [])];
+    const platform = holdings.find(([packageId]) => packageId === null)?.[1];
+    const packages = packageScopedHolderSource<Readonly<FunctionEntry>>(holdings.filter(([packageId]) => packageId !== null));
+    return Object.freeze({
+      packageHolders: packages.packageHolders,
+      packageItem: packages.packageItem,
+      environmentItem: () => undefined,
+      platformItem: () => platform,
+    });
   }
 
   /** The body of `ObjectQL#bindHooks`; the method's docblock there is its contract. */

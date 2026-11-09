@@ -144,7 +144,8 @@ export function resolvePackageScopedName<T = unknown>(
   return resolvePackageScopedHolders<T>(
     query,
     {
-      packageHolders: registry.packageScopedHoldersOf(type, name),
+      // The caller's own holding counts for its step 1 even as a bundle addition.
+      packageHolders: registry.packageScopedHoldersOf(type, name, query.callerPackageId),
       packageItem: (packageId) => registry.getPackageScopedItem<T>(type, name, packageId, member),
       environmentItem: () => registry.getEnvironmentScopedItem<T>(type, name, member),
     },
@@ -170,8 +171,11 @@ export type PackageScopedFunctionEngine = Pick<ObjectQL, 'registry' | 'functionH
  * referrer (ADR-0150 D4's last row): the rule (`resolvePackageScopedHolders`)
  * with the engine's per-package function holders (`ObjectQL#functionHoldersOf`)
  * and the caller's closure from the one walk ({@link packageResolutionClosure}
- * over the engine's registry). An owner-less registration is the
- * environment's own item. Writes nothing, never throws for a name.
+ * over the engine's registry). An owner-less registration is the platform's
+ * item — code a plugin or the host registers, never an item authored in the
+ * environment — so it is in every caller's reach, like `sys` (ADR-0150 D2):
+ * a package caller holding none itself counts it beside its closure's
+ * holders. Writes nothing, never throws for a name.
  *
  * ⛔ No caller reads it yet: `resolveFunction` / `resolveFunctionEntry` keep
  * answering the one last-registered function per name until a later child

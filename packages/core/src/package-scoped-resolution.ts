@@ -65,6 +65,11 @@
  *    and asking for one throws.
  *  - **An overridable baseline** ({@link OVERRIDABLE_BASELINE_PACKAGES}) answers
  *    only when no other candidate of that step does.
+ *  - **The platform's item** ({@link PackageScopedHolderSource.platformItem}:
+ *    an engine function a plugin or the host registers under no package) is
+ *    in every caller's reach, like `sys` (D2): step 2 counts it beside the
+ *    closure's holders, and a caller with no package reaches it after the
+ *    environment's own item (epic seat ruling on #31733, 6729484996).
  */
 
 // ---------------------------------------------------------------------------
@@ -256,18 +261,22 @@ const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
 
 /**
  * Who holds a name under package addressing: a package (the vocabulary's own
- * {@link BareNameHolder}), or the environment's own item — an item authored in
- * this environment, in the implicit environment package (ADR-0150 D1 bucket 4).
+ * {@link BareNameHolder}), the environment's own item — an item authored in
+ * this environment, in the implicit environment package (ADR-0150 D1 bucket 4)
+ * — or the platform: code a plugin or the host registers under no package (an
+ * owner-less engine function), reachable from every caller like `sys` (D2;
+ * epic seat ruling on #31733, 6729484996).
  */
 export type PackageScopedHolder =
   | Extract<BareNameHolder, { kind: 'package' }>
-  | { readonly kind: 'environment' };
+  | { readonly kind: 'environment' }
+  | { readonly kind: 'platform' };
 
 /** How a refusal names a holder. */
 export function describePackageScopedHolder(holder: PackageScopedHolder): string {
-  return holder.kind === 'environment'
-    ? 'the environment (an item authored in this environment, bound to no package)'
-    : describeBareNameHolder(holder);
+  if (holder.kind === 'environment') return 'the environment (an item authored in this environment, bound to no package)';
+  if (holder.kind === 'platform') return 'the platform (registered by a plugin or the host, owned by no package)';
+  return describeBareNameHolder(holder);
 }
 
 /** How the resolved item was reached (ADR-0150 D3's steps). */
@@ -281,7 +290,9 @@ export type PackageScopedResolutionStep =
   /** the unique package holder in the environment (a caller with no package) */
   | 'unique-holder'
   /** an overridable baseline, reached because no other candidate of the step holds the name */
-  | 'baseline';
+  | 'baseline'
+  /** the platform's item (owned by no package, in every caller's reach), the step's only candidate */
+  | 'platform';
 
 /** Why a resolution refused. */
 export type PackageScopedRefusalReason =
@@ -351,6 +362,16 @@ export interface PackageScopedHolderSource<T = unknown> {
    * overlay).
    */
   environmentItem(): T | undefined;
+  /**
+   * The platform's item of the name — code a plugin or the host registered
+   * under no package (an owner-less engine function) — or `undefined`.
+   * Omitted, there is none. Like a `sys` package (ADR-0150 D2) it is in every
+   * caller's reach: a package caller that holds no item itself counts it
+   * beside its closure's holders (one answers, two or more refuse naming
+   * each), and a caller with no package reaches it after the environment's
+   * own item and before the package holders.
+   */
+  platformItem?(): T | undefined;
 }
 
 /**
@@ -421,10 +442,11 @@ function typeLabel(type: PackageScopedResolvableType): string {
 export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 'message'>): string {
   const subject = `The ${typeLabel(refusal.type)} "${refusal.name}"`;
   const named = refusal.candidates.map(describePackageScopedHolder).join('; ');
+  const platform = refusal.candidates.some((c) => c.kind === 'platform');
   switch (refusal.reason) {
     case 'ambiguous-in-closure':
-      return `${subject} is held by ${refusal.candidates.length} packages in the declared dependency closure of ` +
-        `package "${refusal.callerPackageId}": ${named}. Nothing picks one of them: address it by its package.`;
+      return `${subject} is held by ${refusal.candidates.length} ${platform ? 'holders' : 'packages'} in the declared dependency closure of ` +
+        `package "${refusal.callerPackageId}"${platform ? ' and the platform' : ''}: ${named}. Nothing picks one of them: address it by its package.`;
     case 'ambiguous-in-environment':
       return `${subject} is held by ${refusal.candidates.length} packages in this environment and the caller names ` +
         `no package: ${named}. Nothing picks one of them: address it by its package.`;
@@ -483,6 +505,8 @@ function resolveEnvironmentWide<T>(
   if (environmentItem !== undefined) {
     return { status: 'resolved', item: environmentItem, holder: { kind: 'environment' }, via: 'environment' };
   }
+  const platformItem = source.platformItem?.();
+  if (platformItem !== undefined) return { status: 'resolved', item: platformItem, holder: { kind: 'platform' }, via: 'platform' };
   const pick = pickUnique(query.type, source.packageHolders);
   if (pick.kind === 'one') return packageItem<T>(source, pick.packageId, pick.baseline ? 'baseline' : 'unique-holder');
   if (pick.kind === 'several') return refuse(query, callerPackageId, 'ambiguous-in-environment', pick.packageIds.map(packageHolder));
@@ -521,9 +545,16 @@ export function resolvePackageScopedHolders<T = unknown>(
   // Step 1 — the caller package's own item.
   if (holders.includes(callerPackageId)) return packageItem<T>(source, callerPackageId, 'own');
 
-  // Step 2 — the unique holder in its resolution closure.
+  // Step 2 — the unique holder in its resolution closure, the platform's
+  // item counted beside it (in every caller's reach, like `sys`).
   const reach = closureOf(callerPackageId);
-  const pick = pickUnique(query.type, holders.filter((id) => reach.has(id)));
+  const reachable = holders.filter((id) => reach.has(id));
+  const platformItem = source.platformItem?.();
+  if (platformItem !== undefined) {
+    if (reachable.length === 0) return { status: 'resolved', item: platformItem, holder: { kind: 'platform' }, via: 'platform' };
+    return refuse(query, callerPackageId, 'ambiguous-in-closure', [...reachable.map(packageHolder), { kind: 'platform' }]);
+  }
+  const pick = pickUnique(query.type, reachable);
   if (pick.kind === 'one') return packageItem<T>(source, pick.packageId, pick.baseline ? 'baseline' : 'closure');
   if (pick.kind === 'several') return refuse(query, callerPackageId, 'ambiguous-in-closure', pick.packageIds.map(packageHolder));
 

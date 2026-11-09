@@ -631,7 +631,7 @@ describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150
     expect(r.status === 'refused' && r.message).toContain('The function "score"');
   });
 
-  it('red line 2: every refusal names every holder, and the environment', () => {
+  it('red line 2: every refusal names every holder, and the platform', () => {
     for (const id of [A, B, C]) installOn(id);
     installOn(P, [A, B, C]);
     installOn(MID);
@@ -640,19 +640,58 @@ describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150
     if (inClosure.status !== 'refused') throw new Error(`expected a refusal, got ${inClosure.status}`);
     expect(inClosure.candidates).toEqual([A, B, C].map((packageId) => ({ kind: 'package', packageId })));
     for (const id of [A, B, C]) expect(inClosure.message).toContain(`package "${id}"`);
-    engine.registerFunction('score', fn('host'));
     const outside = resolveFn('score', MID);
     if (outside.status !== 'refused') throw new Error(`expected a refusal, got ${outside.status}`);
     expect(outside.reason).toBe('outside-closure');
-    expect(outside.candidates).toEqual([...[A, B, C].map((packageId) => ({ kind: 'package', packageId })), { kind: 'environment' }]);
+    expect(outside.candidates).toEqual([A, B, C].map((packageId) => ({ kind: 'package', packageId })));
+    engine.registerFunction('score', fn('host'));
+    const withPlatform = resolveFn('score', P);
+    if (withPlatform.status !== 'refused') throw new Error(`expected a refusal, got ${withPlatform.status}`);
+    expect(withPlatform.reason).toBe('ambiguous-in-closure');
+    expect(withPlatform.candidates).toEqual([...[A, B, C].map((packageId) => ({ kind: 'package', packageId })), { kind: 'platform' }]);
+    expect(withPlatform.message).toContain('the platform');
   });
 
-  it('an owner-less registration is the environment\'s own: a caller with no package gets it, a package caller is refused (D3 (a))', () => {
-    installOn(P);
-    engine.registerFunction('score', fn('host'));
-    expect(engine.functionHoldersOf('score').packageHolders).toEqual([]);
-    expect(resolveFn('score')).toMatchObject({ status: 'resolved', via: 'environment', holder: { kind: 'environment' } });
-    expect(resolveFn('score', P)).toMatchObject({ status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'environment' }] });
+  describe('an owner-less registration is the platform\'s, in every caller\'s reach like `sys` (ruling 6729484996)', () => {
+    it('a caller with no package and a package caller whose only holder it is both resolve to it', () => {
+      installOn(P);
+      engine.registerFunction('score', fn('host'));
+      expect(engine.functionHoldersOf('score').packageHolders).toEqual([]);
+      expect(engine.functionHoldersOf('score').environmentItem()).toBeUndefined();
+      for (const caller of [undefined, P]) {
+        expect(resolveFn('score', caller)).toMatchObject({ status: 'resolved', via: 'platform', holder: { kind: 'platform' } });
+        expect(tagOf(resolveFn('score', caller))).toBe('host');
+      }
+    });
+
+    it('a holder outside the closure is no candidate beside it', () => {
+      installOn(C);
+      installOn(P);
+      engine.registerFunction('score', fn('gamma'), `app:${C}`);
+      engine.registerFunction('score', fn('host'));
+      expect(tagOf(resolveFn('score', P))).toBe('host');
+    });
+
+    it('the caller\'s own function still comes first', () => {
+      installOn(P);
+      engine.registerFunction('score', fn('host'));
+      engine.registerFunction('score', fn('caller'), `app:${P}`);
+      expect(resolveFn('score', P)).toMatchObject({ status: 'resolved', via: 'own' });
+      expect(tagOf(resolveFn('score', P))).toBe('caller');
+    });
+
+    it('red line 1: beside a closure holder it refuses, naming both', () => {
+      installOn(A);
+      installOn(P, [A]);
+      engine.registerFunction('score', fn('alpha'), `app:${A}`);
+      engine.registerFunction('score', fn('host'));
+      expect(resolveFn('score', P)).toMatchObject({
+        status: 'refused', reason: 'ambiguous-in-closure',
+        candidates: [{ kind: 'package', packageId: A }, { kind: 'platform' }],
+      });
+      // A caller with no package keeps the environment-wide order: the platform's first.
+      expect(tagOf(resolveFn('score'))).toBe('host');
+    });
   });
 
   it('a `sys` package\'s function is in every caller\'s closure', () => {
@@ -716,13 +755,23 @@ describe('R2 — a bundle addition is no holder of its base\'s name for a bare r
     it(`a dependent's locale its base does not ship (${how}) adds no holder: the base's name still resolves`, () => {
       add(D, 'fr-FR', 'addon-fr');
       expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([A]);
-      for (const caller of [undefined, P, D]) {
+      for (const caller of [undefined, P]) {
         expect(label(resolve('email_template', 'welcome', caller))).toBe('alpha template');
       }
       // The addition is still the dependent's member, read naming the dependent.
       expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', D, 'fr-FR')?.label).toBe('addon-fr template');
       // The base's address does not serve it.
       expect(resolve('email_template', 'welcome', undefined, 'fr-FR')).toEqual({ status: 'not-found' });
+    });
+
+    it(`the dependent's own bare read (${how}) still answers its own item at step 1, as before the addition rule`, () => {
+      add(D, 'fr-FR', 'addon-fr');
+      expect(registry.packageScopedHoldersOf('email_template', 'welcome', D)).toEqual([A, D]);
+      expect(resolve('email_template', 'welcome', D, 'fr-FR')).toMatchObject({ status: 'resolved', via: 'own', holder: { kind: 'package', packageId: D } });
+      expect(label(resolve('email_template', 'welcome', D, 'fr-FR'))).toBe('addon-fr template');
+      expect(label(resolve('email_template', 'welcome', D))).toBe('addon-fr template');
+      // A member only the base holds: unchanged — the caller's own holding answers, and it lacks it.
+      expect(resolve('email_template', 'welcome', D, 'en-US')).toEqual({ status: 'not-found' });
     });
   }
 

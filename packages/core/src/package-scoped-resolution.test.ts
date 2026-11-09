@@ -152,3 +152,34 @@ describe('the holder source', () => {
     expect(() => packageScopedHolderSource([[null, 1], [null, 2]])).toThrow(TypeError);
   });
 });
+
+describe('the platform\'s item — in every caller\'s reach, like `sys` (epic seat ruling 6729484996)', () => {
+  const withPlatform = (pairs: Array<[string, string]>, platform: string | undefined) => {
+    const packages = packageScopedHolderSource(pairs);
+    return { ...packages, platformItem: () => platform };
+  };
+  const ask = (pairs: Array<[string, string]>, platform: string | undefined, reach: readonly string[], callerPackageId?: string) =>
+    resolvePackageScopedHolders({ type: ENGINE_FUNCTION_TYPE, name: 'score', callerPackageId }, withPlatform(pairs, platform), closure(reach));
+
+  it('a package caller whose only reachable candidate it is resolves to it; a holder outside the closure is no candidate', () => {
+    expect(ask([], 'host', [], P)).toEqual({ status: 'resolved', item: 'host', holder: { kind: 'platform' }, via: 'platform' });
+    expect(ask([[C, 'c']], 'host', [], P)).toMatchObject({ status: 'resolved', item: 'host', via: 'platform' });
+  });
+
+  it('the caller\'s own item comes first', () => {
+    expect(ask([[P, 'p']], 'host', [], P)).toMatchObject({ status: 'resolved', item: 'p', via: 'own' });
+  });
+
+  it('red line 1: beside a closure holder it refuses, naming each', () => {
+    const r = ask([[A, 'a']], 'host', [A], P);
+    expect(r).toMatchObject({ status: 'refused', reason: 'ambiguous-in-closure', candidates: [{ kind: 'package', packageId: A }, { kind: 'platform' }] });
+    expect(r.status === 'refused' && r.message).toContain('the platform');
+  });
+
+  it('a caller with no package: the environment\'s own item, then the platform\'s, then the unique package holder', () => {
+    expect(ask([[A, 'a']], 'host', [])).toMatchObject({ status: 'resolved', item: 'host', via: 'platform' });
+    const env = { ...withPlatform([[A, 'a']], 'host'), environmentItem: () => 'env' };
+    expect(resolvePackageScopedHolders({ type: ENGINE_FUNCTION_TYPE, name: 'score' }, env, closure([]))).toMatchObject({ item: 'env', via: 'environment' });
+    expect(ask([[A, 'a']], undefined, [])).toMatchObject({ item: 'a', via: 'unique-holder' });
+  });
+});

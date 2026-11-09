@@ -8318,8 +8318,13 @@ export class SchemaRegistry {
    * dependent's member: {@link getPackageScopedItem} naming the dependent
    * reads it. A package holding a member its dependency also holds is a
    * holder (a clash, refused by the resolver, never folded away).
+   *
+   * @param callerPackageId - The package a bare read is made from. Its own
+   *   holding stays in the set even when it is an addition, so its step 1
+   *   (its own item, ADR-0150 D3) answers as before: the addition only stops
+   *   counting toward OTHER callers' ambiguity (epic seat review 6729484996).
    */
-  packageScopedHoldersOf(type: string, name: string): string[] {
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[] {
     const collection = this.metadata.get(type);
     if (!collection) return [];
     const composite = this.compositeHoldersOf(collection, name);
@@ -8333,7 +8338,7 @@ export class SchemaRegistry {
     if (!disc || holders.size < 2) return [...holders];
     const membersOf = new Map<string, Set<string>>();
     for (const id of holders) membersOf.set(id, this.bundleMembersHeldBy(type, collection, name, id, compositeSet, disc));
-    return [...holders].filter((id) => !this.isBundleAddition(id, membersOf));
+    return [...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf));
   }
 
   /**
