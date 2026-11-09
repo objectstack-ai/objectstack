@@ -533,6 +533,9 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
             if (opts.laneThrows) throw new Error('datasource store unreachable');
         });
         const resyncCredential = vi.fn(async () => {});
+        // [#31722] Lane 2's seam, on the protocol.
+        const resyncProtocol = vi.fn(async () => {});
+        Object.assign(svc('protocol'), { resyncMetadataMutationPubSub: resyncProtocol });
         Object.assign(svc('metadata'), { resyncClusterPubSub: resyncMetadata });
         Object.assign(svc('datasource-admin'), { resyncDatasourceMutationPubSub: resyncDatasource });
         Object.assign(svc('automation'), { resyncConnectorCredentialPubSub: resyncCredential });
@@ -544,7 +547,7 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
             liveness.reportUp('command');
             await new Promise((r) => setTimeout(r, 0));
         };
-        return { ...h, outage, resyncMetadata, resyncDatasource, resyncCredential };
+        return { ...h, outage, resyncMetadata, resyncProtocol, resyncDatasource, resyncCredential };
     }
 
     it('calls each attached lane’s resync seam once per recovered outage', async () => {
@@ -555,12 +558,16 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
 
         await h.outage();
         expect(h.resyncMetadata).toHaveBeenCalledTimes(1);
+        expect(h.resyncProtocol).toHaveBeenCalledTimes(1);
         expect(h.resyncDatasource).toHaveBeenCalledTimes(1);
         expect(h.resyncCredential).toHaveBeenCalledTimes(1);
-        expect(infoLines(h).some((l) => l.includes('resynced metadata.changed, datasource.mutated, connector-credential.mutated'))).toBe(true);
+        expect(infoLines(h).some((l) => l.includes(
+            'resynced metadata.changed, metadata.mutated, datasource.mutated, connector-credential.mutated',
+        ))).toBe(true);
 
         await h.outage();
         expect(h.resyncMetadata).toHaveBeenCalledTimes(2);
+        expect(h.resyncProtocol).toHaveBeenCalledTimes(2);
     });
 
     it('one lane failing is a warning and does not stop the others', async () => {
@@ -569,6 +576,7 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
         await h.fire('kernel:ready');
         await h.outage();
         expect(h.resyncMetadata).toHaveBeenCalledTimes(1);
+        expect(h.resyncProtocol).toHaveBeenCalledTimes(1);
         expect(h.resyncCredential).toHaveBeenCalledTimes(1);
         expect(warnLines(h).filter((l) => l.includes('datasource.mutated resync after'))).toHaveLength(1);
     });
@@ -580,6 +588,7 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
         await h.fire('kernel:shutdown');
         await h.outage();
         expect(h.resyncMetadata).not.toHaveBeenCalled();
+        expect(h.resyncProtocol).not.toHaveBeenCalled();
     });
 
     it('CONTROL — the in-process memory driver attaches no lane, so no resync is wired', async () => {
@@ -588,7 +597,32 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
         await h.fire('kernel:ready');
         await h.outage();
         expect(h.resyncMetadata).not.toHaveBeenCalled();
+        expect(h.resyncProtocol).not.toHaveBeenCalled();
         expect(h.resyncDatasource).not.toHaveBeenCalled();
         expect(h.resyncCredential).not.toHaveBeenCalled();
+    });
+
+    it('[#31722] lane 2 — a protocol that predates the seam is bridged and simply not resynced', async () => {
+        const h = resyncHarness();
+        delete (h.ctx.getService<Record<string, unknown>>('protocol') as Record<string, unknown>).resyncMetadataMutationPubSub;
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        expect(h.attachMutation).toHaveBeenCalledTimes(1);
+
+        await h.outage();
+        expect(h.resyncProtocol).not.toHaveBeenCalled();
+        expect(h.resyncMetadata).toHaveBeenCalledTimes(1);
+        expect(infoLines(h).some((l) => l.includes('resynced metadata.changed, datasource.mutated, connector-credential.mutated'))).toBe(true);
+    });
+
+    it('[#31722] lane 2 — a rejected protocol resync is a warning; the other lanes still run', async () => {
+        const h = resyncHarness();
+        h.resyncProtocol.mockRejectedValueOnce(new Error('sys_metadata read failed'));
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.outage();
+        expect(h.resyncProtocol).toHaveBeenCalledTimes(1);
+        expect(h.resyncDatasource).toHaveBeenCalledTimes(1);
+        expect(warnLines(h).filter((l) => l.includes('metadata.mutated resync after'))).toHaveLength(1);
     });
 });

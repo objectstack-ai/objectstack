@@ -102,6 +102,19 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>) {
     const { rows, historyRows, nextId } = store;
     const registeredItems: Array<{ type: string; name: unknown }> = [];
     const registeredObjects: string[] = [];
+    /** [#31722] The label each `registerObject` call carried, in order. */
+    const registeredLabels: unknown[] = [];
+    /**
+     * [#31722] This replica's `sys_metadata` reads fail while set: `'all'`
+     * fails every read, `'items'` only the by-item re-reads (a read asking
+     * for no column subset), so the resync's one active-row read still answers.
+     */
+    const readFault: { mode?: 'all' | 'items' } = {};
+    const failRead = (table: string, opts?: { fields?: unknown }) => {
+        if (table !== 'sys_metadata' || !readFault.mode) return;
+        if (readFault.mode === 'items' && opts?.fields !== undefined) return;
+        throw new Error('sys_metadata read failed: connection reset');
+    };
     const unregisteredObjects: string[] = [];
     const removedObjectOverlays: string[] = [];
     const removedEntries: string[] = [];
@@ -132,13 +145,15 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>) {
     const engine: any = {
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(table, opts);
+            failRead(table, opts);
             if (table === 'sys_metadata_history') {
                 return historyRows.find((h) => matchesHistory(h, opts.where)) ?? null;
             }
             if (table !== 'sys_metadata') return null;
             return findRow(opts.where)?.row ?? null;
         },
-        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number; fields?: string[] }) {
+            failRead(table, opts);
             // Hold the caller's bound AFTER the filter, by PRESENCE — the
             // objectql-double-limit contract: a bound the double ignores makes
             // a pagination bug invisible to every test built on it.
@@ -190,7 +205,7 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>) {
             registerItem: (type: string, item: any) => {
                 registeredItems.push({ type, name: item?.name });
             },
-            registerObject: (body: any) => { registeredObjects.push(body?.name); },
+            registerObject: (body: any) => { registeredObjects.push(body?.name); registeredLabels.push(body?.label); },
             unregisterObject: (name: string) => { unregisteredObjects.push(name); return true; },
             removeObjectOverlay: (name: string) => { removedObjectOverlays.push(name); },
             removeRuntimeShadow: () => false,
@@ -214,6 +229,8 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>) {
         protocol,
         registeredItems,
         registeredObjects,
+        registeredLabels,
+        readFault,
         unregisteredObjects,
         removedObjectOverlays,
         removedEntries,
@@ -462,5 +479,190 @@ describe('[#13331] listener replay — boot-cached consumers hear remote mutatio
         // The writer's listeners heard the LOCAL emit exactly once — the
         // remote replay stays local to the receiving node (no echo).
         expect(writerSeen).toHaveLength(1);
+    });
+});
+
+/**
+ * [#31722] `cluster.resync` on lane 2: the hint a cluster outage lost.
+ *
+ * The bus below drops every publish while `down` — the at-most-once loss of a
+ * real driver whose store is unreachable. `resyncMetadataMutationPubSub()` is
+ * the seam `MetadataClusterBridgePlugin` calls on the driver's local
+ * `cluster.resync` event (its own tests pin that call, and that the in-process
+ * driver never wires it).
+ */
+describe('[#31722] cluster.resync — the peer re-converges what a lost hint would have told it', () => {
+    /** `makeCluster()`, over a bus that loses every publish while `outage.down`. */
+    function makeLossyCluster() {
+        const cluster = makeCluster({ attach: false });
+        const outage = { down: false };
+        const publish = cluster.bus.publish.bind(cluster.bus);
+        cluster.bus.publish = async (channel: string, payload: unknown) => {
+            if (outage.down) return;
+            await publish(channel, payload);
+        };
+        cluster.writer.protocol.attachMetadataMutationPubSub(cluster.bus, 'node-a');
+        cluster.peer.protocol.attachMetadataMutationPubSub(cluster.bus, 'node-b');
+        return { ...cluster, outage };
+    }
+
+    const save = (replica: ReturnType<typeof makeReplica>, name: string, label?: string) =>
+        replica.protocol.saveMetaItem({ type: 'object', name, item: objectBody(name, label), mode: 'publish' });
+
+    it('⭐ an object authored while the hint was lost is served by the peer after its resync', async () => {
+        const { writer, peer, outage } = makeLossyCluster();
+
+        outage.down = true;
+        expect((await save(writer, 'gadget')).success).toBe(true);
+        outage.down = false;
+        await settle();
+        // The loss: the writer serves it, the peer never heard.
+        expect(writer.registeredObjects).toEqual(['gadget']);
+        expect(peer.registeredObjects).toEqual([]);
+
+        const report = await peer.protocol.resyncMetadataMutationPubSub();
+        expect(peer.registeredObjects).toEqual(['gadget']);
+        expect(report).toMatchObject({ rows: 1, converged: 1, deleted: 0, kept: 0, unchanged: 0 });
+    });
+
+    it('a lost update re-converges that item only; an unchanged item is not re-applied', async () => {
+        const { writer, peer, outage } = makeLossyCluster();
+        await save(writer, 'gadget', 'Gadget');
+        await save(writer, 'widget', 'Widget');
+        await vi.waitFor(() => expect(peer.registeredObjects).toEqual(['gadget', 'widget']));
+        // Both hints were delivered: a first resync re-reads the two items the hints named.
+        expect(await peer.protocol.resyncMetadataMutationPubSub()).toMatchObject({ converged: 2, unchanged: 0 });
+        expect(peer.registeredObjects).toEqual(['gadget', 'widget', 'gadget', 'widget']);
+
+        outage.down = true;
+        await save(writer, 'gadget', 'Gadget renamed');
+        outage.down = false;
+
+        const report = await peer.protocol.resyncMetadataMutationPubSub();
+        expect(report).toMatchObject({ rows: 2, converged: 1, unchanged: 1 });
+        expect(peer.registeredObjects).toEqual(['gadget', 'widget', 'gadget', 'widget', 'gadget']);
+        expect(peer.registeredLabels.at(-1)).toBe('Gadget renamed');
+    });
+
+    it('a lost delete takes the delete’s heal walk on the peer', async () => {
+        const { writer, peer, outage } = makeLossyCluster();
+        await save(writer, 'gadget');
+        await vi.waitFor(() => expect(peer.registeredObjects).toEqual(['gadget']));
+
+        outage.down = true;
+        expect((await writer.protocol.deleteMetaItem({ type: 'object', name: 'gadget' })).success).toBe(true);
+        outage.down = false;
+        await settle();
+        expect(peer.unregisteredObjects).toEqual([]);
+
+        const report = await peer.protocol.resyncMetadataMutationPubSub();
+        // The same removal a delivered delete makes (the lane's #13331 case above).
+        expect(peer.unregisteredObjects).toEqual(['gadget']);
+        expect(peer.removedObjectOverlays).toEqual(['gadget']);
+        expect(report).toMatchObject({ rows: 0, deleted: 1, kept: 0 });
+    });
+
+    it('a delete of a row present at attach, lost in the outage, is found from the baseline', async () => {
+        const { writer, peer, outage, bus } = makeLossyCluster();
+        // Stored before the peer's lane attached: the peer never heard a hint for it.
+        peer.protocol.detachMetadataMutationPubSub();
+        await save(writer, 'gadget');
+        peer.protocol.attachMetadataMutationPubSub(bus, 'node-b');
+
+        outage.down = true;
+        await writer.protocol.deleteMetaItem({ type: 'object', name: 'gadget' });
+        outage.down = false;
+
+        expect(await peer.protocol.resyncMetadataMutationPubSub()).toMatchObject({ rows: 0, deleted: 1 });
+        expect(peer.unregisteredObjects).toEqual(['gadget']);
+    });
+
+    it('a revert to an earlier body (an earlier checksum) is still re-converged after a delivered hint', async () => {
+        const { writer, peer, outage } = makeLossyCluster();
+        await save(writer, 'gadget', 'One');
+        await vi.waitFor(() => expect(peer.registeredLabels).toEqual(['One']));
+        await peer.protocol.resyncMetadataMutationPubSub();
+        await save(writer, 'gadget', 'Two');
+        await vi.waitFor(() => expect(peer.registeredLabels.at(-1)).toBe('Two'));
+
+        outage.down = true;
+        await save(writer, 'gadget', 'One');
+        outage.down = false;
+
+        await peer.protocol.resyncMetadataMutationPubSub();
+        expect(peer.registeredLabels.at(-1)).toBe('One');
+    });
+
+    it('a failed active-row read rejects and keeps every entry; the next resync converges', async () => {
+        const { writer, peer, outage } = makeLossyCluster();
+        await save(writer, 'gadget');
+        await vi.waitFor(() => expect(peer.registeredObjects).toEqual(['gadget']));
+
+        outage.down = true;
+        await writer.protocol.deleteMetaItem({ type: 'object', name: 'gadget' });
+        outage.down = false;
+
+        peer.readFault.mode = 'all';
+        await expect(peer.protocol.resyncMetadataMutationPubSub()).rejects.toThrow(
+            /could not read sys_metadata .*every registry entry is kept/,
+        );
+        expect(peer.unregisteredObjects).toEqual([]);
+
+        peer.readFault.mode = undefined;
+        await peer.protocol.resyncMetadataMutationPubSub();
+        expect(peer.unregisteredObjects).toEqual(['gadget']);
+    });
+
+    it('an item whose own re-read fails is kept, logged once, and re-read on the next resync', async () => {
+        const { writer, peer, outage } = makeLossyCluster();
+        await save(writer, 'gadget');
+        await save(writer, 'widget');
+        await vi.waitFor(() => expect(peer.registeredObjects).toEqual(['gadget', 'widget']));
+
+        outage.down = true;
+        await writer.protocol.deleteMetaItem({ type: 'object', name: 'gadget' });
+        await writer.protocol.deleteMetaItem({ type: 'object', name: 'widget' });
+        outage.down = false;
+
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            peer.readFault.mode = 'items';
+            const report = await peer.protocol.resyncMetadataMutationPubSub();
+            // A transient failure is not a delete.
+            expect(peer.unregisteredObjects).toEqual([]);
+            expect(report).toMatchObject({ rows: 0, deleted: 0, kept: 2 });
+            const lines = error.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('metadata.mutated resync'));
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toContain('could not re-read 2 stored item(s) (object/gadget, object/widget)');
+        } finally {
+            error.mockRestore();
+        }
+
+        peer.readFault.mode = undefined;
+        expect(await peer.protocol.resyncMetadataMutationPubSub()).toMatchObject({ deleted: 2, kept: 0 });
+        expect([...peer.unregisteredObjects].sort()).toEqual(['gadget', 'widget']);
+    });
+
+    it('CONTROL — nothing lost: a resync after a quiet outage re-applies nothing', async () => {
+        const { writer, peer } = makeLossyCluster();
+        await save(writer, 'gadget');
+        await vi.waitFor(() => expect(peer.registeredObjects).toEqual(['gadget']));
+        await peer.protocol.resyncMetadataMutationPubSub();
+        const before = [...peer.registeredObjects];
+
+        expect(await peer.protocol.resyncMetadataMutationPubSub()).toMatchObject({ rows: 1, converged: 0, unchanged: 1 });
+        expect(peer.registeredObjects).toEqual(before);
+        expect(peer.unregisteredObjects).toEqual([]);
+    });
+
+    it('CONTROL — no transport attached (a single node): the seam reads nothing and does nothing', async () => {
+        const store = makeSharedStore();
+        const solo = makeReplica(store);
+        await solo.protocol.saveMetaItem({ type: 'object', name: 'gadget', item: objectBody('gadget'), mode: 'publish' });
+        solo.readFault.mode = 'all';
+
+        await expect(solo.protocol.resyncMetadataMutationPubSub()).resolves.toBeUndefined();
+        expect(solo.registeredObjects).toEqual(['gadget']);
+        expect(solo.unregisteredObjects).toEqual([]);
     });
 });

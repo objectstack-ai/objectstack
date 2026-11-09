@@ -11,6 +11,7 @@
  * `registerStoredObjectExtension`, `resyncStoredObjectExtensions`,
  * `onMetadataMutation`, `emitMetadataMutation`, `attachMetadataMutationPubSub`,
  * `detachMetadataMutationPubSub`, `applyRemoteMetadataMutation`,
+ * `resyncMetadataMutationPubSub` (#31722, written here beside its lane),
  * `onMetaItemPublished`, `getOverlayRepo` moved out of `protocol.ts` whole by
  * `scripts/codemod-split-protocol.mjs`; `registerUninstallGuard` (#31232) was
  * written here in the same shape, beside `registerUninstallCleanup`.
@@ -56,6 +57,8 @@ import type {
     UninstallGuard,
 } from './protocol-package-lifecycle-types.js';
 import { METADATA_MUTATION_CLUSTER_CHANNEL } from './protocol-mutation-events.js';
+import { MetadataMutationResyncLedger, RESYNC_ROW_FIELDS } from './protocol-mutation-resync.js';
+import type { MetadataMutationResyncReport } from './protocol-mutation-resync.js';
 import type {
     ClusterMetadataMutationPayload,
     MetaItemPublishedEvent,
@@ -323,19 +326,32 @@ export class ProtocolClassHeadFacet {
      * surface hand-announcing. Local listeners first, then the bus, matching
      * `MetadataManager.notifyWatchers`' order.
      */
-    static emitMetadataMutation(host: Pick<ProtocolHost, 'notifyMutationListenersLocal' | 'publishMetadataMutation'>, evt: MetadataMutationEvent): void {
+    static emitMetadataMutation(host: Pick<ProtocolHost, 'clusterResync' | 'notifyMutationListenersLocal' | 'publishMetadataMutation'>, evt: MetadataMutationEvent): void {
+        // [#31722] A local write moves what this replica's registry holds for
+        // the item, so the lane's resync re-reads it rather than trust the
+        // row's checksum (a later revert can bring an earlier one back).
+        if (evt.state !== 'draft') host.clusterResync?.touch(evt);
         host.notifyMutationListenersLocal(evt);
         host.publishMetadataMutation(evt);
     }
 
     /** The body of `ObjectStackProtocolImplementation#attachMetadataMutationPubSub`; the method's docblock there is its contract. */
-    static attachMetadataMutationPubSub(host: Pick<ProtocolHost, 'applyRemoteMetadataMutation' | 'clusterNodeId' | 'clusterPubSub' | 'clusterUnsubscribe' | 'detachMetadataMutationPubSub'>, pubsub: IPubSub, nodeId: string): () => void {
+    static attachMetadataMutationPubSub(host: Pick<ProtocolHost, 'applyRemoteMetadataMutation' | 'clusterNodeId' | 'clusterPubSub' | 'clusterResync' | 'clusterUnsubscribe' | 'detachMetadataMutationPubSub' | 'findEnvironmentRows'>, pubsub: IPubSub, nodeId: string): () => void {
         if (host.clusterPubSub === pubsub && host.clusterNodeId === nodeId) {
             return () => host.detachMetadataMutationPubSub();
         }
         host.detachMetadataMutationPubSub();
         host.clusterPubSub = pubsub;
         host.clusterNodeId = nodeId;
+        // [#31722] The resync baseline: which stored row each registry entry
+        // was converged on, taken by one read now (see
+        // `protocol-mutation-resync.ts`).
+        const ledger = new MetadataMutationResyncLedger();
+        host.clusterResync = ledger;
+        ledger.seed(() => host.findEnvironmentRows('sys_metadata', {
+            where: { state: 'active' },
+            fields: [...RESYNC_ROW_FIELDS],
+        }));
         host.clusterUnsubscribe = pubsub.subscribe<ClusterMetadataMutationPayload>(
             METADATA_MUTATION_CLUSTER_CHANNEL,
             (msg) => {
@@ -350,6 +366,7 @@ export class ProtocolClassHeadFacet {
                 // `applyRegistryWriteThrough`'s `mode === 'publish'` gate),
                 // and this guard keeps a peer honest about the same rule.
                 if (p.event.state === 'draft') return;
+                host.clusterResync?.touch(p.event);
                 void host.applyRemoteMetadataMutation(p.event).catch((err) => {
                     console.warn(
                         `[Protocol] cluster metadata-mutation apply failed for `
@@ -365,13 +382,28 @@ export class ProtocolClassHeadFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#detachMetadataMutationPubSub`; the method's docblock there is its contract. */
-    static detachMetadataMutationPubSub(host: Pick<ProtocolHost, 'clusterNodeId' | 'clusterPubSub' | 'clusterUnsubscribe'>): void {
+    static detachMetadataMutationPubSub(host: Pick<ProtocolHost, 'clusterNodeId' | 'clusterPubSub' | 'clusterResync' | 'clusterUnsubscribe'>): void {
         if (host.clusterUnsubscribe) {
             try { host.clusterUnsubscribe(); } catch { /* idempotent */ }
             host.clusterUnsubscribe = undefined;
         }
         host.clusterPubSub = undefined;
         host.clusterNodeId = undefined;
+        host.clusterResync = undefined;
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#resyncMetadataMutationPubSub`; the method's docblock there is its contract. */
+    static async resyncMetadataMutationPubSub(host: Pick<ProtocolHost, 'applyRemoteMetadataMutation' | 'clusterPubSub' | 'clusterResync' | 'findEnvironmentRows'>): Promise<MetadataMutationResyncReport | undefined> {
+        // No transport, no lane: a single node never missed a hint.
+        const ledger = host.clusterResync;
+        if (!host.clusterPubSub || !ledger) return undefined;
+        return ledger.resync({
+            readActiveRows: () => host.findEnvironmentRows('sys_metadata', {
+                where: { state: 'active' },
+                fields: [...RESYNC_ROW_FIELDS],
+            }),
+            converge: (evt) => host.applyRemoteMetadataMutation(evt),
+        });
     }
 
     /**

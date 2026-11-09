@@ -150,6 +150,9 @@ export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjecti
 // never trusted content (receipt re-reads `sys_metadata` locally).
 export { METADATA_MUTATION_CLUSTER_CHANNEL } from './protocol.js';
 export type { ClusterMetadataMutationPayload } from './protocol.js';
+// [#31722] What the lane's resync seam (`resyncMetadataMutationPubSub()`)
+// reports after a cluster outage.
+export type { MetadataMutationResyncReport } from './protocol.js';
 // [#10219] The per-item publish notification the host bridges to the
 // kernel-wide `metadata:reloaded` announce. Exported for the same reason its
 // mutation sibling is: the subscriber lives in another package.
