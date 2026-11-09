@@ -42,7 +42,7 @@ import {
     rekeyFlowDispatchesByPackage,
     scopedDispatchKey,
 } from './flow-dispatch-key-package-backfill.js';
-import { ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
+import { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
 
 const ORG = 'org_a';
 const SYS_ORG = { isSystem: true, tenantId: ORG } as const;
@@ -462,6 +462,22 @@ describe('R10 — the ledger is held until the boot re-key has finished (seat co
         const engine = await boot();
         const store = new ObjectStoreFlowDispatchStore(engine as never);
         expect(await store.claim(`schedule:${A}:${ONE_HOLDER}:2026-11-08T12:00:00.000Z`)).toBe(true);
+    });
+});
+
+describe('R10 — the missed-run check reads the window\'s bare key too (the transition read)', () => {
+    it('a window claimed under its bare key by a node of the previous release is dispatched, not missed', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        automation.setFlowDispatchStore(store);
+        const W = '2026-11-08T12:00:00.000Z';
+        await store.claim(`schedule:${ONE_HOLDER}:${W}`);
+        const missed = {
+            flowName: ONE_HOLDER, dueAt: W, detectedAt: '2026-11-08T13:00:00.000Z',
+            dispatchKey: `schedule:${A}:${ONE_HOLDER}:${W}`, legacyDispatchKey: `schedule:${ONE_HOLDER}:${W}`,
+        };
+        await expect(automation.recordMissedRun(missed)).resolves.toBe('dispatched');
+        // CONTROL: the scoped key alone reads the window as missed.
+        await expect(automation.recordMissedRun({ ...missed, legacyDispatchKey: undefined })).resolves.toBe('recorded');
     });
 });
 
