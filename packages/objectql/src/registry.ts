@@ -126,6 +126,7 @@ import {
 // pure, so the registry and the engine plugin's load-time audit read one
 // spelling of each. See the module header.
 import {
+  collectManifestPicklistNames,
   collectPicklistReferences,
   duplicatePicklistValueError,
   findDuplicatePicklistValue,
@@ -571,13 +572,14 @@ function fieldPatchYieldKey(field: string, key: string, option?: string): string
 type PicklistItemLike = { options?: PicklistOptionLike[]; _packageId?: string };
 
 /**
- * [ADR-0150 D3, child E6] Who wrote one field's picklist reference: the
- * package the reference resolves from, or `null` for a caller with no package.
+ * [ADR-0150 D3, child E6] Who wrote one field's picklist reference: every
+ * package whose own layer declares it, in fold order, or `[null]` — one caller
+ * with no package — when no packaged layer does.
  */
-type PicklistReferrer = (field: string | undefined, picklist: string) => string | null;
+type PicklistReferrer = (field: string | undefined, picklist: string) => readonly (string | null)[];
 
 /** Every reference is the environment's: a body no packaged layer declares. */
-const NO_PACKAGE_REFERRER: PicklistReferrer = () => null;
+const NO_PACKAGE_REFERRER: PicklistReferrer = () => [null];
 
 /** Are two package-scoped holders the same one? */
 function sameHolder(a: PackageScopedHolder, b: PackageScopedHolder): boolean {
@@ -598,13 +600,17 @@ function declaredPicklistOf(body: unknown, field: string): string | undefined {
 }
 
 /**
- * [ADR-0150 D3, child E6] The referrer of each picklist reference a served
- * body carries, read from the contributors that fold into it: the LAST
- * packaged layer, in fold order (the owner, then each extension), whose own
- * declaration names that same list on that field. A reference no packaged
- * layer writes came from an environment-authored body — a tenant overlay, a
- * stored row, an object created in this environment — and resolves as the
- * environment's (`null`), never from the package that body customizes (D3).
+ * [ADR-0150 D3, child E6] The referrers of each picklist reference a served
+ * body carries, read from the contributors that fold into it: EVERY packaged
+ * layer (the owner, then each extension) whose own declaration names that same
+ * list on that field, each package once. Several layers can write one
+ * reference; none of them is picked over the others (epic seat review on
+ * #31731): the field is served a list only when every one of them reaches the
+ * same holder ({@link SchemaRegistry.resolvePicklistFields}). A reference no
+ * packaged layer writes came from an environment-authored body — a tenant
+ * overlay, a stored row, an object created in this environment — and resolves
+ * as the environment's (`null`), never from the package that body customizes
+ * (D3).
  */
 function picklistReferrerOf(contributors: readonly ObjectContributor[] | undefined): PicklistReferrer {
   if (!contributors || contributors.length === 0) return NO_PACKAGE_REFERRER;
@@ -613,12 +619,12 @@ function picklistReferrerOf(contributors: readonly ObjectContributor[] | undefin
     ...contributors.filter((c) => c.ownership === 'extend'),
   ].filter((c) => !isTenantAuthored(c.definition));
   return (field, picklist) => {
-    if (field === undefined) return null;
-    let referrer: string | null = null;
+    if (field === undefined) return [null];
+    const referrers = new Set<string | null>();
     for (const c of packaged) {
-      if (declaredPicklistOf(c.definition, field) === picklist) referrer = c.packageId ?? null;
+      if (declaredPicklistOf(c.definition, field) === picklist) referrers.add(c.packageId ?? null);
     }
-    return referrer;
+    return referrers.size > 0 ? [...referrers] : [null];
   };
 }
 
@@ -9688,24 +9694,42 @@ export class SchemaRegistry {
    * The registry as R reads it once `manifests` (an artifact the install door
    * is judging, not yet registered) are installed: each manifest answers
    * `getPackage` for its own id — its `dependencies` and `namespace`, which is
-   * all the closure reads — ahead of an installed version of it. Holders and
-   * items stay the registry's: the artifact's own lists are the door's to
-   * count. ⛔ No closure is computed here; R computes it from this view.
+   * all the closure reads — ahead of an installed version of it, and each
+   * `picklist` a manifest declares is held by that manifest's package, next
+   * to the registry's holders. So a reference to a list a sibling in the
+   * artifact declares is judged by R's one rule — reached through the
+   * referrer's declared closure, else refused naming every holder — exactly as
+   * the served field will be once the artifact registers (epic seat review on
+   * #31731). ⛔ No closure is computed here; R computes it from this view.
    */
   private withPendingManifests(manifests: readonly unknown[]): PackageScopedRegistry {
     const pending = new Map<string, InstalledPackage>();
+    const pendingLists = new Map<string, Set<string>>();
     for (const manifest of manifests) {
       const id = artifactPackageId(manifest);
-      if (id !== undefined) pending.set(id, { manifest } as unknown as InstalledPackage);
+      if (id === undefined) continue;
+      pending.set(id, { manifest } as unknown as InstalledPackage);
+      for (const name of collectManifestPicklistNames(manifest)) {
+        let holders = pendingLists.get(name);
+        if (!holders) pendingLists.set(name, holders = new Set());
+        holders.add(id);
+      }
     }
+    const pendingHolders = (type: string, name: string): ReadonlySet<string> =>
+      (type === 'picklist' ? pendingLists.get(name) : undefined) ?? new Set();
     return {
       getPackage: (id) => pending.get(id) ?? this.getPackage(id),
       getAllPackages: () => [
         ...this.getAllPackages().filter((row) => !pending.has(artifactPackageId(row.manifest) ?? '')),
         ...pending.values(),
       ],
-      packageScopedHoldersOf: (type, name) => this.packageScopedHoldersOf(type, name),
-      getPackageScopedItem: (type, name, packageId, member) => this.getPackageScopedItem(type, name, packageId, member),
+      packageScopedHoldersOf: (type, name) => [
+        ...new Set([...this.packageScopedHoldersOf(type, name), ...pendingHolders(type, name)]),
+      ],
+      getPackageScopedItem: <T>(type: string, name: string, packageId: string, member?: string): T | undefined =>
+        pendingHolders(type, name).has(packageId)
+          ? ({ name, _packageId: packageId } as unknown as T)
+          : this.getPackageScopedItem<T>(type, name, packageId, member),
       getEnvironmentScopedItem: (type, name, member) => this.getEnvironmentScopedItem(type, name, member),
     };
   }
@@ -9871,7 +9895,32 @@ export class SchemaRegistry {
    */
   private resolvePicklistFields<T>(body: T, referrerOf: PicklistReferrer = NO_PACKAGE_REFERRER): T {
     return resolvePicklistFieldsOnto(body, (picklist, field) =>
-      this.resolvePicklistOptions(picklist, referrerOf(field, picklist)));
+      this.resolveFieldPicklistOptions(picklist, referrerOf(field, picklist)));
+  }
+
+  /**
+   * [ADR-0150 D3, child E6; epic seat review on #31731] One field's list, when
+   * several packaged layers write its reference: each referrer's resolution
+   * is R's, and the field is served only when every one of them resolves to
+   * the SAME holder. Any other answer — one of them refused or reaching
+   * nothing, or two reaching different holders — serves no options, so the
+   * record validator refuses the field's values; the boot audit names each
+   * referrer whose own resolution refuses, with R's sentence
+   * ({@link findUnresolvedPicklistReferences}). ⛔ No referrer is preferred by
+   * fold order.
+   */
+  private resolveFieldPicklistOptions(
+    picklist: string,
+    referrers: readonly (string | null)[],
+  ): PicklistOptionLike[] | undefined {
+    const [first, ...others] = referrers;
+    if (others.length > 0) {
+      const verdicts = referrers.map((referrer) => this.picklistReferenceVerdict(picklist, referrer));
+      const [head] = verdicts;
+      if (head.status !== 'resolved') return undefined;
+      if (!verdicts.every((v) => v.status === 'resolved' && sameHolder(v.holder, head.holder))) return undefined;
+    }
+    return this.resolvePicklistOptions(picklist, first ?? null);
   }
 
   /** Drop a package's `picklistExtensions`; `true` when it had any. */

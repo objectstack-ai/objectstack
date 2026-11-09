@@ -949,31 +949,38 @@ export class ObjectQLPlugin implements Plugin {
         // against the registry or against a list the artifact itself declares.
         // A refused install registers nothing.
         if (this.picklistVocabularySealed) {
-          const declared = new Set<string>();
-          for (const manifest of ordered) for (const name of collectManifestPicklistNames(manifest)) declared.add(name);
-          // [ADR-0150 D3, child E6] A registered list is reached the way the
-          // served field will reach it: from the package that writes the
-          // reference, through the package-scoped resolver, against the
-          // artifact's own manifests (their declared dependencies). A
-          // reference it refuses — the environment's own list included
-          // (D3 (a)) — is refused here, loudly, naming every candidate. An
-          // extension's target is a contribution, judged caller-less (epic
-          // seat ruling X on #31678; `SchemaRegistry.picklistContributions`).
+          // [ADR-0150 D3, child E6] A reference is reached the way the served
+          // field will reach it: from the package that writes it, through the
+          // package-scoped resolver, against a registry view holding the
+          // artifact's manifests — their declared dependencies and the lists
+          // each one declares. A list the reference's OWN manifest declares is
+          // its own; every other list, a sibling's in this artifact included,
+          // is R's to answer (epic seat review on #31731: no artifact-wide
+          // "declared somewhere" pass). A reference R refuses — the
+          // environment's own list included (D3 (a)) — is refused here,
+          // loudly, naming every candidate. An extension's target is a
+          // contribution, judged caller-less (epic seat ruling X on #31678;
+          // `SchemaRegistry.picklistContributions`).
           const judge = <R extends { picklist: string; packageId: string | undefined }>(
             ref: R,
+            own: ReadonlySet<string>,
             caller: string | null | undefined,
           ): R & { refusal?: string } | undefined => {
-            if (declared.has(ref.picklist)) return undefined;
+            if (own.has(ref.picklist)) return undefined;
             const verdict = ql.registry.picklistReferenceVerdict(ref.picklist, caller, ordered);
             if (verdict.status === 'resolved') return undefined;
             return verdict.status === 'refused' ? { ...ref, refusal: verdict.message } : ref;
           };
-          const unresolved = ordered
-            .flatMap((manifest) => collectManifestPicklistReferences(manifest, artifactPackageId(manifest)))
-            .flatMap((ref) => judge(ref, ref.packageId) ?? []);
-          const orphans = ordered
-            .flatMap((manifest) => collectManifestPicklistExtensions(manifest, artifactPackageId(manifest)))
-            .flatMap((ext) => judge(ext, null) ?? []);
+          const unresolved = ordered.flatMap((manifest) => {
+            const own = collectManifestPicklistNames(manifest);
+            return collectManifestPicklistReferences(manifest, artifactPackageId(manifest))
+              .flatMap((ref) => judge(ref, own, ref.packageId) ?? []);
+          });
+          const orphans = ordered.flatMap((manifest) => {
+            const own = collectManifestPicklistNames(manifest);
+            return collectManifestPicklistExtensions(manifest, artifactPackageId(manifest))
+              .flatMap((ext) => judge(ext, own, null) ?? []);
+          });
           const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
           if (refusal) throw refusal;
         }
