@@ -227,17 +227,21 @@ export interface ApprovalResumeSurface {
   /** Flow definition lookup, used to derive step-progress display data. */
   getFlow?(name: string): Promise<any | null>;
   /**
-   * [ADR-0150 D3] The package that ships the flow `name`, per the loader's
-   * set, or `undefined` for a flow authored in this deployment. Read by
-   * {@link ApprovalService.flowPackageOf}: an approval step is declared inside
-   * its flow, so the queue an approver names is read from that package.
+   * [ADR-0150 D3] The package whose OWN body the engine runs for the flow
+   * `name` — the shipping package when the armed body is the loader's, and
+   * `undefined` for a declared `.custom` override or any other
+   * environment-authored body, and for a flow authored in this deployment.
+   * Read by {@link ApprovalService.flowPackageOf}: an approval step is written
+   * in the body that runs, so the queue an approver names is read from that
+   * body's package, and an override's step from no package (ADR-0150 D3: a
+   * reference in an overlay is the environment's).
    *
-   * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
-   * (`packagedFlowOwner`, the one the engine's own subflow addressing reads);
-   * it widens no engine surface. Optional: absent, every step reads its queue
+   * ⚠️ Declares a method `AutomationEngine` implements publicly
+   * (`armedFlowPackage`, the reader its own subflow addressing reads); it
+   * widens no engine surface. Optional: absent, every step reads its queue
    * names environment-wide, as before.
    */
-  packagedFlowOwner?(name: string): string | undefined;
+  armedFlowPackage?(name: string): string | undefined;
   /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
@@ -3646,14 +3650,17 @@ export class ApprovalService implements IApprovalService {
 
   /**
    * [ADR-0150 D3] The package the approval step of flow `flowName` is
-   * declared in: the package that ships the flow, as the automation engine
-   * answers it (`packagedFlowOwner`, the reader its own subflow addressing
-   * takes the caller's package from), or `null` for a flow authored in this
-   * deployment, a request with no flow, and an engine that cannot say.
+   * written in: the package of the body the engine runs for the flow, as the
+   * engine answers it (`armedFlowPackage`, the reader its own subflow
+   * addressing takes the caller's package from) — the shipping package for
+   * its own body, and `null` for an environment-authored override of it, a
+   * flow authored in this deployment, a request with no flow, and an engine
+   * that cannot say. ⛔ Not `packagedFlowOwner`: it names the package that
+   * ships the NAME, whichever body is armed under it.
    */
   private flowPackageOf(flowName: string | null | undefined): string | null {
-    if (!flowName || typeof this.automation?.packagedFlowOwner !== 'function') return null;
-    const owner = this.automation.packagedFlowOwner(flowName);
+    if (!flowName || typeof this.automation?.armedFlowPackage !== 'function') return null;
+    const owner = this.automation.armedFlowPackage(flowName);
     return typeof owner === 'string' && owner !== '' ? owner : null;
   }
 
