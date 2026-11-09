@@ -263,3 +263,65 @@ describe('catalog list — cloud path', () => {
         expect(fetchCalls).toEqual([`${CLOUD}${LIST}${query}`]);
     });
 });
+
+// ── The catalog list door: a query the snapshot cannot evaluate ─────────────
+
+describe('catalog list — a key the public snapshot does not evaluate takes the cloud path', () => {
+    /** The cloud's list answer: one row, plus a key the snapshot page would drop. */
+    const CLOUD_BODY = JSON.stringify({
+        success: true,
+        data: { items: [{ id: 'crm' }], total: 1, limit: 20, offset: 0, facets: { opaque: 'served by the cloud' } },
+    });
+
+    beforeEach(() => {
+        vi.stubGlobal('fetch', vi.fn(async (input: any) => {
+            const url = String(input);
+            fetchCalls.push(url);
+            if (url === `${PUBLIC_BASE}/packages.json`) {
+                return new Response(JSON.stringify({
+                    success: true,
+                    data: { items: ROWS, total: ROWS.length, limit: 100, offset: 0 },
+                }), { status: 200, headers: { 'content-type': 'application/json' } });
+            }
+            if (url.startsWith(CLOUD)) {
+                return new Response(CLOUD_BODY, { status: 200, headers: { 'content-type': 'application/json' } });
+            }
+            return new Response('not found', { status: 404 });
+        }));
+    });
+
+    const forwarded = async (query: string, opts?: { publicBase?: string }) => {
+        const res: Response = await list(query, opts);
+        expect(res.status).toBe(200);
+        expect(fetchCalls).toEqual([`${CLOUD}${LIST}${query}`]);
+        expect(await res.text()).toBe(CLOUD_BODY);
+    };
+
+    it('?languages= alone is answered by the cloud, not as the whole snapshot verbatim', async () => {
+        await forwarded('?languages=zh-CN');
+    });
+
+    it('?languages= with the page window is answered by the cloud, not as a snapshot page that ignored it', async () => {
+        await forwarded('?languages=zh-CN,ja-JP&businessFunctions=sales&limit=20&offset=0');
+    });
+
+    it('any other key the snapshot does not evaluate takes the cloud path too', async () => {
+        await forwarded('?limit=20&offset=0&licenses=mit');
+    });
+
+    it('CONTROL: a query of evaluated keys only is still answered from the snapshot, with no cloud call', async () => {
+        const res: Response = await list('?q=e&businessFunctions=sales,finance&industries=retail&solutionTypes=app&maturity=stable&limit=20&offset=0');
+        expect(res.headers.get('x-cache')).toBe('PUBLIC-R2-FILTERED');
+        expect(((await res.json()) as any).data.items.map((r: any) => r.id)).toEqual(['crm']);
+        expect(fetchCalls).toEqual([`${PUBLIC_BASE}/packages.json`]);
+
+        fetchCalls = [];
+        const bare: Response = await list('');
+        expect(bare.headers.get('x-cache')).toBe('PUBLIC-R2');
+        expect(fetchCalls).toEqual([`${PUBLIC_BASE}/packages.json`]);
+    });
+
+    it('CONTROL: with no public snapshot configured, the same query is forwarded verbatim', async () => {
+        await forwarded('?languages=zh-CN,ja-JP&limit=20&offset=0', { publicBase: '' });
+    });
+});
