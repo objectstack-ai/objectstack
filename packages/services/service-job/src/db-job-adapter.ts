@@ -256,9 +256,10 @@ export class DbJobAdapter implements IJobService {
    * lock already released and reruns the job, and `once` is the sharpest case
    * because there is no later tick to self-correct that away.
    *
-   * **The lock's window is also bounded by its lease** (`leaseMs`, never
-   * renewed), so it does not stop a job from overlapping ITSELF once a run
-   * outlasts the lease (#31811). That is the timer adapters' own in-process
+   * **The lock's window is also bounded by its lease** (`leaseMs`). The fire
+   * renews it while the handler runs (#31843), but a renewal that fails lets it
+   * lapse mid-run, so the lease is not what stops a job from overlapping ITSELF
+   * on one node (#31811). That is the timer adapters' own in-process
    * latch: on whichever adapter owns the timer, a scheduled tick of a job whose
    * previous scheduled run is still in flight on this node is skipped with one
    * `warn`, and manual `trigger()` / `replay()` are not gated by it. No

@@ -350,6 +350,25 @@
           "sys_approval_request"
         ]
       }
+    },
+    {
+      "id": 20,
+      "prompt": "Our package `acme.billing` ships the flow `billing_invoice_paid`. When it runs it should call the `notify_owner` flow that the installed package `acme.crm` ships. Write the node and anything else the package needs.",
+      "expected_output": "A `subflow` node with `config: { flowName: 'notify_owner' }` in `billing_invoice_paid`, plus `acme.billing`'s manifest declaring `dependencies: { 'acme.crm': '^1.0.0' }` (any range). A package flow's bare child name resolves to its own package's flow, else the one holder in its declared dependency closure plus `sys`; without the dependency the flow still passes `os validate`, and the node fails at run time (`outside-closure`, naming `acme.crm`). No copy of `notify_owner` into `acme.billing` or into the environment, and no package-qualified flow name.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "type: 'subflow'",
+          "flowName: 'notify_owner'",
+          "dependencies",
+          "'acme.crm'"
+        ],
+        "must_not_contain": [
+          "dependencies: {}",
+          "acme.crm/notify_owner",
+          "acme.crm:notify_owner"
+        ]
+      }
     }
   ]
 }

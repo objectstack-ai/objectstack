@@ -1,4 +1,4 @@
-# Automation — long flow examples (moved verbatim from SKILL.md)
+# Automation — long flow examples
 
 ### Flow Example — Auto-Escalate Overdue Cases
 
@@ -83,12 +83,14 @@ is on the context, so the start `condition` and a `record.*` CEL value envelope 
 exactly as for a record-change flow — and because the window is evaluated every
 day, a threshold is never missed.
 
+<!-- os:check -->
 ```typescript
-{
+import { defineFlow } from '@objectstack/spec';
+defineFlow({
   name: 'crm_renewal_alert',
   label: 'Renewal Alert',
   type: 'schedule',
-  runAs: 'system',              // a sweep has no trigger user — elevate explicitly
+  runAs: 'system',
   nodes: [
     {
       id: 'start', type: 'start', label: 'Daily Sweep',
@@ -108,7 +110,7 @@ day, a threshold is never missed.
     // …downstream nodes (notify, update_record, …)
   ],
   edges: [ /* start → downstream */ ],
-}
+});
 ```
 
 **Date EQUALITY never matches**, so a hand-rolled sweep filters windows, not
