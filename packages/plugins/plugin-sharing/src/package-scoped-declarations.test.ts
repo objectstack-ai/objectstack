@@ -357,3 +357,149 @@ describe('a declared rule’s queue recipient resolves from the rule’s package
     expect(await serviceWithGrant('u_alpha').revokeRuleGrantsForRetiredRecipients(rule)).toBe(0);
   });
 });
+
+describe('a queue read from a caller package resolves by D3 (ADR-0150, the queue contract’s callerPackageId)', () => {
+  const GAMMA = 'com.acme.gamma';
+
+  /** Holders of the two packages' positions, plus GAMMA's, in org_a. */
+  const tables = (): Record<string, Row[]> => ({
+    sys_user_position: [
+      ...TABLES().sys_user_position,
+      { id: 'up_3', position: 'gamma_agent', user_id: 'u_gamma', organization_id: 'org_a' },
+    ],
+  });
+
+  /** ALPHA's declared rule `share_support`, granting to queue `support`, and its org_a projection. */
+  const declaredQueueRule = () => {
+    declare('sharing_rule', ALPHA, {
+      ...sharingRule('share_support', 'unused'),
+      sharedWith: { type: 'queue', value: 'support' },
+    });
+    return {
+      id: 'share_support',
+      name: 'share_support',
+      label: 'share_support',
+      object_name: 'account',
+      organization_id: 'org_a',
+      criteria: { region: 'emea' },
+      recipient_type: 'queue' as const,
+      recipient_id: 'support',
+      access_level: 'read' as const,
+      active: true,
+      managed_by: 'package' as const,
+    };
+  };
+
+  const queueService = () => {
+    const engine = makeEngine(tables());
+    return { engine, queues: new OwnershipQueueService({ engine: () => engine as any }) };
+  };
+
+  /**
+   * ALPHA (the rule's package P) declares a dependency on BETA (D); GAMMA (U)
+   * is unrelated. BETA and GAMMA each declare queue `support`.
+   */
+  const dependencyAndUnrelated = () => {
+    registry = new SchemaRegistry();
+    install(BETA);
+    install(GAMMA);
+    install(ALPHA, [BETA]);
+    declare('queue', BETA, queue('support', 'beta_agent'));
+    declare('queue', GAMMA, queue('support', 'gamma_agent'));
+  };
+
+  it('resolves to the dependency’s queue, not the unrelated package’s, for every read that takes a name', async () => {
+    dependencyAndUnrelated();
+    const { queues } = queueService();
+    const fromAlpha = { callerPackageId: ALPHA };
+    expect(await queues.resolveQueue('support', 'org_a', fromAlpha)).toMatchObject({ name: 'support', source: 'declared', packageId: BETA });
+    expect(await queues.expandMembers('support', 'org_a', fromAlpha)).toEqual(['u_beta']);
+    expect(await queues.expandMembers('support', 'org_a', { ...fromAlpha, onFailedRead: 'refuse' })).toEqual(['u_beta']);
+    expect(await queues.isMember('u_beta', 'support', 'org_a', fromAlpha)).toBe(true);
+    expect(await queues.isMember('u_gamma', 'support', 'org_a', { ...fromAlpha, onFailedRead: 'refuse' })).toBe(false);
+  });
+
+  it('serves the declared rule’s queue recipient from the dependency: its member’s standing grant is still desired', async () => {
+    dependencyAndUnrelated();
+    const rule = declaredQueueRule();
+    const engine = makeEngine({
+      ...tables(),
+      sys_record_share: [{ id: 'rs_1', source: 'rule', source_id: 'share_support', organization_id: 'org_a', recipient_id: 'u_beta' }],
+    });
+    const queues = new OwnershipQueueService({ engine: () => engine as any });
+    const service = new SharingRuleService({
+      engine: engine as any,
+      sharing: {} as any,
+      declaredRules: createDeclaredSharingRuleSource({ engine: { registry } }),
+      ownershipQueues: () => queues,
+      logger: { warn: () => {}, error: () => {} },
+    });
+    expect(await service.revokeRuleGrantsForRetiredRecipients(rule)).toBe(0);
+    expect(await service.queueRecipientPackageOf(rule)).toBe(ALPHA);
+  });
+
+  it('refuses when the caller’s closure reaches two holders, naming both', async () => {
+    registry = new SchemaRegistry();
+    install(BETA);
+    install(GAMMA);
+    install(ALPHA, [BETA, GAMMA]);
+    declare('queue', BETA, queue('support', 'beta_agent'));
+    declare('queue', GAMMA, queue('support', 'gamma_agent'));
+    const { queues } = queueService();
+    const fromAlpha = { callerPackageId: ALPHA };
+    expect(await queues.resolveQueue('support', 'org_a', fromAlpha)).toBeNull();
+    expect(await queues.expandMembers('support', 'org_a', fromAlpha)).toEqual([]);
+    expect(await queues.isMember('u_beta', 'support', 'org_a', fromAlpha)).toBe(false);
+    for (const read of [
+      () => queues.expandMembers('support', 'org_a', { ...fromAlpha, onFailedRead: 'refuse' }),
+      () => queues.isMember('u_beta', 'support', 'org_a', { ...fromAlpha, onFailedRead: 'refuse' }),
+    ]) {
+      const refused = await read().catch((e: unknown) => e);
+      expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+      expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+      expect((refused as PackageScopedNameRefusedError).refusal).toMatchObject({
+        reason: 'ambiguous-in-closure',
+        callerPackageId: ALPHA,
+        candidates: [
+          { kind: 'package', packageId: BETA },
+          { kind: 'package', packageId: GAMMA },
+        ],
+      });
+    }
+  });
+
+  it('reads environment-wide without a caller package, as before the key: the same two holders are refused', async () => {
+    dependencyAndUnrelated();
+    const { queues } = queueService();
+    for (const options of [undefined, { callerPackageId: null }, { callerPackageId: '' }]) {
+      expect(await queues.resolveQueue('support', 'org_a', options)).toBeNull();
+      expect(await queues.expandMembers('support', 'org_a', options ?? undefined)).toEqual([]);
+      expect(await queues.isMember('u_beta', 'support', 'org_a', options ?? undefined)).toBe(false);
+      const refused = await queues.expandMembers('support', 'org_a', { ...options, onFailedRead: 'refuse' }).catch((e: unknown) => e);
+      expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+      expect((refused as PackageScopedNameRefusedError).refusal).toMatchObject({
+        reason: 'ambiguous-in-environment',
+        callerPackageId: null,
+        candidates: [
+          { kind: 'package', packageId: BETA },
+          { kind: 'package', packageId: GAMMA },
+        ],
+      });
+    }
+  });
+
+  it('serves nothing when the holder the caller reaches is disabled, never the unrelated package’s queue', async () => {
+    dependencyAndUnrelated();
+    registry.disablePackage(BETA);
+    const { queues } = queueService();
+    expect(await queues.resolveQueue('support', 'org_a', { callerPackageId: ALPHA })).toBeNull();
+    expect(await queues.expandMembers('support', 'org_a', { callerPackageId: ALPHA, onFailedRead: 'refuse' })).toEqual([]);
+  });
+
+  it('looks through every holder’s positions, so a position move in the dependency’s queue reaches the rule', async () => {
+    dependencyAndUnrelated();
+    const { queues } = queueService();
+    expect(await queues.queuesNaming('position', new Set(['beta_agent']), 'org_a')).toEqual(['support']);
+    expect(await queues.queuesNaming('position', new Set(['gamma_agent']), 'org_a')).toEqual(['support']);
+  });
+});
