@@ -4938,7 +4938,9 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
         // for a caller with no package, never the first listed.
         if (isObjectLessActionKey(objectName)) return pickActionHolder(hits, name, false);
         // ⛔ An object-bound pair two packages bind to ONE object keeps today's
-        // answer (the first declaration): its no-package refusal is the action
+        // answer (the first declaration — the object's own, since the
+        // collector lists embedded rows first and keeps another package's
+        // standalone row beside it): its no-package refusal is the action
         // family's own card (ADR-0150 "Covered and uncovered types", record
         // 6729825528), not this door's.
         return { action: hits[0].action, objectName, obj: hits[0].obj };
