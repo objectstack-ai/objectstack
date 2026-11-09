@@ -18,7 +18,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "Log de auditoria",
     pluralLabel: "Logs de auditoria",
-    description: "Trilha de auditoria imutável dos eventos da plataforma",
+    description: "Trilha de auditoria dos eventos da plataforma. Somente a plataforma grava seus registros, que são somente leitura na API de dados e na Configuração.",
     fields: {
       created_at: {
         label: "Data e hora"

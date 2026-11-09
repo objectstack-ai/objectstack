@@ -111,7 +111,7 @@ export const REQUIRED_AGGREGATORS = [
   { workflow: 'lint.yml', job: 'typecheck', context: 'TypeScript Type Check' },
   // #22991: the single 193-step job became an aggregate over eight lanes.
   { workflow: 'lint.yml', job: 'lint', context: 'Lint & Repo Gates' },
-  // #26460: the `Test UI` aggregate over the 16 `test-ui` shards.
+  // #26460: the `Test UI` aggregate over the `test-ui` shards (16 slots, planned since #31914).
   { workflow: 'ci.yml', job: 'test-ui-gate', context: 'Test UI' },
 ];
 
@@ -510,7 +510,7 @@ async function selfTest() {
       from: '    needs: [dogfood, dogfood-verify, filter, queue-verdict]\n',
       to: '    needs: [dogfood, filter, queue-verdict]\n',
     },
-    { label: 'test-ui-gate loses its matrix from needs:', file: 'ci.yml', member: 'test-ui', from: '    needs: [test-ui, filter, queue-verdict]\n', to: '    needs: [filter, queue-verdict]\n' },
+    { label: 'test-ui-gate loses its matrix from needs:', file: 'ci.yml', member: 'test-ui', from: '    needs: [test-ui, filter, test-ui-plan, queue-verdict]\n', to: '    needs: [filter, test-ui-plan, queue-verdict]\n' },
   ];
   for (const scenario of dropped) {
     const verdict = fixture(scenario.label, scenario.file, (s) => s.replace(scenario.from, scenario.to));
@@ -540,7 +540,7 @@ async function selfTest() {
       to: '    needs: [dogfood, dogfood-verify, filter, queue-verdict, dogfood-ghost]\n',
       ghost: 'dogfood-ghost',
     },
-    { label: 'test-ui-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test-ui, filter, queue-verdict]\n', to: '    needs: [test-ui, filter, queue-verdict, test-ui-ghost]\n', ghost: 'test-ui-ghost' },
+    { label: 'test-ui-gate needs a job that was deleted', file: 'ci.yml', from: '    needs: [test-ui, filter, test-ui-plan, queue-verdict]\n', to: '    needs: [test-ui, filter, test-ui-plan, queue-verdict, test-ui-ghost]\n', ghost: 'test-ui-ghost' },
   ];
   for (const scenario of phantom) {
     const verdict = fixture(scenario.label, scenario.file, (s) => s.replace(scenario.from, scenario.to));

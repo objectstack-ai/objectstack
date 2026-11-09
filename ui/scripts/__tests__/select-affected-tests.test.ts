@@ -759,7 +759,7 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
     expect(job).toContain(header);
     const run = job.slice(job.indexOf(header));
     expect(run).toContain(`${uiRun('test')} --shard=\${{ matrix.shard }}/${shards}`);
-    expect(run).toContain(`pnpm --dir ui exec vitest run --shard=\${{ matrix.shard }}/${shards} --reporter=default --reporter=github-actions "\${filters[@]}"`);
+    expect(run).toContain('pnpm --dir ui exec vitest run --reporter=default --reporter=github-actions "${ran[@]}" "${files[@]}"');
   });
 });
 
