@@ -6,13 +6,15 @@
  * ## The gap this closes
  *
  * Three migrations in this directory tighten an existing UNIQUE index into a
- * NULL-safe (and sometimes row-scoped) form at `kernel:ready`:
+ * NULL-safe (and sometimes row-scoped) form at `kernel:ready`, and a fourth
+ * adds a row-scoped one beside a declared key:
  *
  * | migration | table | index(es) |
  * |---|---|---|
  * | `ensureMetadataOverlayIndexes` | `sys_metadata` | active + draft |
  * | `ensureSysSettingIdentityIndex` | `sys_setting` | row identity |
  * | `ensureNotificationPreferenceIdentityIndex` | `sys_notification_preference` | one global default per key |
+ * | `ensureActivationLedgerPackagelessIndex` | `sys_metadata_activation` | one package-less row per (type, name) — ADDED, not tightened |
  *
  * A third, `ensureViewDefinitionActiveIndex` (`sys_view_definition`), retired
  * with its table under ADR-0131 D13: no writer or reader of that table's rows
@@ -100,6 +102,14 @@ import {
     buildNotificationPreferencePresenceSql,
     notificationPreferenceIdentityKeyParts,
 } from './notification-preference-identity-index.js';
+import {
+    ACTIVATION_LEDGER_PACKAGELESS_INDEX_COLUMNS,
+    ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME,
+    ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE,
+    ACTIVATION_LEDGER_TABLE,
+    buildActivationLedgerPackagelessDuplicateProbeSql,
+    buildActivationLedgerPresenceSql,
+} from './activation-ledger-packageless-index.js';
 
 /** The column every one of the duplicate-listing queries counts into. */
 const DUPLICATE_ROWS_COLUMN = 'duplicate_rows';
@@ -176,7 +186,7 @@ function isMysqlClient(client?: string): boolean {
 }
 
 /**
- * Every index the `kernel:ready` migrations tighten — FOUR, from three
+ * Every index the `kernel:ready` migrations build — FIVE, from four
  * migrations, because `ensureMetadataOverlayIndexes` builds one index per
  * overlay state and either can be blocked independently.
  *
@@ -232,6 +242,17 @@ export function runtimeIndexProbes(opts: { client?: string } = {}): RuntimeIndex
             // The migration's own fallback presence statement, as for `sys_setting`.
             presenceSql: buildNotificationPreferencePresenceSql(),
             duplicateSql: buildNotificationPreferenceDuplicateProbeSql(),
+        },
+        {
+            migration: 'ensureActivationLedgerPackagelessIndex',
+            table: ACTIVATION_LEDGER_TABLE,
+            // Its OWN name: this index is added beside the declared key, not a
+            // tightening of it under the declared name like the ones above.
+            index: ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME,
+            keyParts: [...ACTIVATION_LEDGER_PACKAGELESS_INDEX_COLUMNS],
+            rowScope: ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE,
+            presenceSql: buildActivationLedgerPresenceSql(),
+            duplicateSql: buildActivationLedgerPackagelessDuplicateProbeSql(),
         },
     ];
 }

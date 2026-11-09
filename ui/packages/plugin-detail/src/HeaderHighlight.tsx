@@ -26,7 +26,7 @@ import { Pencil } from 'lucide-react';
 import { InlineFieldInput } from './InlineFieldInput';
 import {
   enrichDetailField,
-  isComputedFieldType,
+  isComputedDetailField,
   isInlineExcludedDetailFieldType,
 } from './fieldEnrichment';
 import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
@@ -193,7 +193,7 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                 : pickLocalized(objectDefField?.label, language) || undefined;
             const caption = fieldLabel(objectName || '', field.name, entryLabel || field.name);
 
-            // Field-level editability gate — shares `isComputedFieldType` with
+            // Field-level editability gate — shares `isComputedDetailField` with
             // DetailSection so the strip and the body agree on which highlights
             // are editable. Computed types (formula/summary/rollup/auto_number),
             // `readonly` (view OR object metadata), and immutable system/audit
@@ -203,7 +203,8 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
             // not `resolvedType` — an authored display `type` can narrow
             // editability but never widen it (objectui#3355). `resolvedType`
             // keeps its display precedence for renderer selection just below.
-            const isComputed = isComputedFieldType(field.type, objectDefField?.type);
+            // A stored field carrying an `expression` is computed too (objectstack#31759).
+            const isComputed = isComputedDetailField(field.type, objectDefField);
             const isReadonly =
               field.readonly === true || objectDefField?.readonly === true;
             const isSystem = NON_EDITABLE_SYSTEM_FIELDS.has(field.name);

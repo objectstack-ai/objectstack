@@ -171,7 +171,11 @@ Once the local server is up, `os dev` in an interactive terminal offers
 the target is ObjectOS Cloud and you are not logged in, the same key runs
 `os cloud login` first. When the target is a runtime
 [`os environments use-runtime`](#deploy-to-a-self-hosted-runtime) remembered, the
-key deploys there and asks for no cloud login. Saving a file never deploys.
+key deploys there and asks for no cloud login. On a self-hosted runtime an
+upgrade that would rename or retype a stored field without declaring it asks
+"Deploy anyway?" in the same terminal (see
+[To a self-hosted runtime](#to-a-self-hosted-runtime)); answering no deploys
+nothing. Saving a file never deploys.
 
 ```bash
 os dev                     # Auto-compile cwd config, then start
@@ -3251,6 +3255,8 @@ is its production, so a deploy is always a deliberate act.
 | `--confirm-global-uniques` | — | Self-hosted target only: confirm the app's installation-wide `unique` constraints are genuinely platform-wide when the runtime's refusal asks (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
 | `--confirm-access-upgrade <token>` | — | Self-hosted target only: confirm the upgrade's access findings with the finding-set token the runtime's refusal printed (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
 | `--confirm-upgrade <token>` | — | Self-hosted target only: confirm the upgrade's schema findings (a suspected rename, a type change that is not safe) with the finding-set token the runtime's refusal printed (as [`os package install`](#os-package-install)). Refused when the target is ObjectOS Cloud |
+| `--dry-run` | — | Self-hosted target only: build, print the upgrade plan, say whether the install would stop for a confirmation, and install nothing. Refused when the target is ObjectOS Cloud |
+| `--json` | — | Self-hosted target only: print one JSON document on stdout (see below); progress goes to stderr. Refused when the target is ObjectOS Cloud; the document then says so (`target: cloud`, `result: failed`) |
 
 `os package publish` stays the command for a **release**: it publishes the
 version the manifest declares, with `--install` optional.
@@ -3268,17 +3274,31 @@ answers are the ones printed.
 1. **Build** — the same compile as above. A failed build prints its errors, and
    nothing is installed.
 2. **Dry run** — the runtime's upgrade plan of the installed version against this
-   build is printed; nothing is installed. A runtime that refuses it, or does not
-   serve install-local, stops the deploy with exit `1`. A runtime that predates the
-   dry run ignores it and installs: the command says so and exits `1`.
+   build is printed, grouped by change: objects and fields added and removed,
+   renames declared with `renamedFrom` (`old → new`), suspected renames, type
+   changes, and seed datasets with their mode. Nothing is installed. A runtime that
+   refuses it, or does not serve install-local, stops the deploy with exit `1`. A
+   runtime that predates the dry run ignores it and installs: the command says so
+   and exits `1`. With `--dry-run` the deploy stops here and exits `0`, after saying
+   whether the install would stop for a confirmation and on which findings.
 3. **Install** — with `--confirm-global-uniques`, `--confirm-access-upgrade` and
-   `--confirm-upgrade` passed through. The endpoint's refusals (installation-wide
-   uniques to confirm on an `isolated` runtime, an access upgrade to confirm, a
-   schema upgrade to confirm, a package the running kernel cannot register, …)
-   stop the deploy with exit `1`, and the retry they print names `os deploy`:
-   `os deploy --confirm-global-uniques` for installation-wide uniques,
-   `os deploy --confirm-access-upgrade <token>` for access findings, or
-   `os deploy --confirm-upgrade <token>` for schema findings.
+   `--confirm-upgrade` passed through. A plan with only additions and declared
+   renames installs without a question. The endpoint's refusals
+   (installation-wide uniques to confirm on an `isolated` runtime, an access
+   upgrade to confirm, a schema upgrade to confirm, a package the running kernel
+   cannot register, …) stop the deploy with exit `1`, and the retry they print
+   names `os deploy`: `os deploy --confirm-global-uniques` for installation-wide
+   uniques, `os deploy --confirm-access-upgrade <token>` for access findings, or
+   `os deploy --confirm-upgrade <token>` for schema findings. A schema upgrade
+   stop (an undeclared suspected rename, a type change that is not safe) also
+   names the other way forward: declare the old key in the new field's
+   `renamedFrom` and rebuild. There is no rename flag; a rename is declared in the
+   package.
+   - **On a terminal** (stdin and stdout both interactive, so also under the `d`
+     key), the schema upgrade stop asks `Deploy anyway, accepting each finding as
+     listed? [y/N]`. Yes installs again with the refusal's own finding-set token;
+     anything else deploys nothing and exits `1`. Only the schema upgrade stop
+     asks. Off a terminal, or with `--json`, nothing is asked.
 4. **Live** — install-local registers the package in the running kernel before it
    answers, so the answer is the verdict: `hotLoaded` prints `Live: … now serves …`
    and exits `0`. A package the runtime recorded but its running kernel could not
@@ -3287,6 +3307,26 @@ answers are the ones printed.
 
 The `d` key in [`os dev`](#os-dev) runs the same `os deploy`, so it deploys to the
 runtime too and asks for no cloud login.
+
+With `--json`, stdout carries one JSON document and every progress line goes to
+stderr. A refusal or a failure exits `1`; a dry run or a live install exits `0`.
+
+| Key | Value |
+|---|---|
+| `target` | `runtime` (or `cloud` when the flag is refused there) |
+| `url` | The runtime's URL |
+| `result` | `planned` (`--dry-run`), `installed`, `refused` or `failed` |
+| `package` | `{ manifestId, version, installedVersion }` from the dry run |
+| `plan`, `environment` | The runtime's dry-run reading, verbatim |
+| `wouldStop` | The schema findings the install would ask to confirm, previewed from the plan (`[]`: none; `null`: not read) |
+| `refusal` | The runtime's refusal, verbatim: `{ status, code, message, details }` |
+| `confirm` | `os deploy --confirm-upgrade <token>` when the refusal is a schema upgrade stop |
+| `error` | What stopped the deploy, when something did |
+
+```bash
+os deploy --dry-run              # the plan, and whether the install would stop; nothing installed
+os deploy --json | jq .result    # one document on stdout
+```
 
 ### MCP
 

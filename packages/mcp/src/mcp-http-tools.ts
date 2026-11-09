@@ -56,6 +56,17 @@ import {
   MCP_OAUTH_SCOPE_DATA_WRITE,
   MCP_OAUTH_SCOPE_ACTIONS,
   MCP_OAUTH_SCOPE_METADATA_WRITE,
+  // [ADR-0149 D2] The dataset pair's names and its input shapes, declared once
+  // in spec. The tool `description` comes from the service-analytics
+  // definition the bridge carries; nothing here restates either.
+  LIST_DATASETS_TOOL_NAME,
+  QUERY_DATASET_TOOL_NAME,
+  ListDatasetsInputSchema,
+  QueryDatasetInputSchema,
+  type ListDatasetsInput,
+  type ListDatasetsOutput,
+  type QueryDatasetInput,
+  type QueryDatasetOutput,
 } from '@objectstack/spec/ai';
 // [#15942 / #16293] The confirmation member the `run_action` door accepts and
 // forwards. Imported, never hand-spelled: the door that refuses (the runtime's
@@ -64,6 +75,7 @@ import {
 import {
   AI_ACTION_CONFIRMATION_MEMBER,
   type AIActionConfirmation,
+  type AIToolDefinition,
   type ActionConfirmationRequiredDetails,
   type ImportObjectResult,
   type RemoteTable,
@@ -208,6 +220,37 @@ export interface McpDataBridge {
       timezone?: string;
     },
   ): Promise<unknown[]>;
+  /**
+   * [ADR-0149 D2] `list_datasets`: the governed datasets this caller may
+   * query, each with its dimensions and measures, their business vocabulary,
+   * and which of `input.terms` matched which member. Runs AS the principal
+   * through the service-analytics executor; the tool layer adds and removes
+   * nothing.
+   *
+   * OPTIONAL, under the same graceful-degradation contract as
+   * {@link McpDataBridge.aggregate}: a host with no analytics service, or one
+   * whose `IAnalyticsService.queryDataset` is absent, omits all three dataset
+   * members ({@link listDatasets}, {@link queryDataset},
+   * {@link datasetToolDefinitions}) and no dataset tool registers. The pair
+   * registers only when all three are present (`registerDatasetTools`).
+   */
+  listDatasets?(input: ListDatasetsInput): Promise<ListDatasetsOutput>;
+  /**
+   * [ADR-0149 D2] `query_dataset`: one saved dataset by name and a selection
+   * against it, answered with rows and the `provenance` the executor composed
+   * from what ran. `maxRows` is the tool's page cap (`maxQueryLimit`, the one
+   * `query_records` uses); the executor holds `selection.limit` to it.
+   * OPTIONAL — see {@link listDatasets}.
+   */
+  queryDataset?(input: QueryDatasetInput, opts: { maxRows: number }): Promise<QueryDatasetOutput>;
+  /**
+   * [ADR-0149 D2] The dataset pair's `AIToolDefinition`s, as the
+   * service-analytics executor defines them — the ONE definition the product
+   * AI registers too. `registerDatasetTools` takes each tool's `description`
+   * (the D3 selection rule the model reads) from here, so `packages/mcp`
+   * holds no second copy of it. OPTIONAL — see {@link listDatasets}.
+   */
+  datasetToolDefinitions?(): ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>;
 }
 
 export interface RegisterObjectToolsOptions {
@@ -1643,6 +1686,105 @@ export function wireBridgeTools(
   if (typeof bridge.listRemoteTables === 'function' && typeof bridge.importObject === 'function') {
     registered.push(...registerFederationTools(server, bridge as McpFederationBridge, options));
   }
+  // [ADR-0149 D2] `list_datasets` / `query_dataset`, only where the bridge
+  // carries all three dataset members and the grant admits `data:read`.
+  registered.push(...registerDatasetTools(server, bridge, options));
+  return registered;
+}
+
+/** The dataset members together: the pair registers only on a bridge that carries all three. */
+type McpDatasetBridge = Required<Pick<McpDataBridge, 'listDatasets' | 'queryDataset' | 'datasetToolDefinitions'>>;
+
+/** Whether `bridge` carries every dataset member ({@link McpDataBridge.listDatasets}). */
+export function hasDatasetTools(bridge: Partial<McpDataBridge>): bridge is McpDataBridge & McpDatasetBridge {
+  return (
+    typeof bridge.listDatasets === 'function'
+    && typeof bridge.queryDataset === 'function'
+    && typeof bridge.datasetToolDefinitions === 'function'
+  );
+}
+
+/**
+ * [ADR-0149 D2] Register the dataset pair, `list_datasets` and
+ * `query_dataset`, over the bridge's dataset members.
+ *
+ * - **Read family.** Both register under `data:read` exactly as
+ *   `aggregate_records` does: `grantedScopes` undefined (an API key, a
+ *   session) keeps them, a scope list without `data:read` registers neither,
+ *   and the SDK then answers a call as an unknown tool — the refusal every
+ *   other read tool gives outside its grant.
+ * - **Optional.** A bridge missing any of the three members registers
+ *   neither tool, and nothing else on the surface changes (D2: "a bridge that
+ *   omits them registers no dataset tools").
+ * - **One definition.** Each tool's `description` — the D3 selection rule the
+ *   model reads — is the service-analytics definition the bridge hands over
+ *   ({@link McpDataBridge.datasetToolDefinitions}); a tool the bridge defines
+ *   no description for is not registered. The input schema is the spec
+ *   declaration that definition's `parameters` is projected from
+ *   (`ListDatasetsInputSchema` / `QueryDatasetInputSchema`), taken whole the
+ *   way `aggregate_records` takes `AggregationNodeSchema`: the SDK then
+ *   refuses an undeclared key before dispatch with the spec's own
+ *   prescription (`dataset` → `datasetName`, a selection member put beside
+ *   `selection`), which a JSON Schema round-trip would reduce to a bare
+ *   "Unrecognized key".
+ * - **No second gate, none bypassed (D4).** Every call goes to the bridge
+ *   member, which runs the service-analytics executor AS the principal; a
+ *   refusal comes back in its ADR-0112 envelope ({@link errorResultWithCode}).
+ */
+export function registerDatasetTools(
+  server: McpServer,
+  bridge: Partial<McpDataBridge>,
+  options: RegisterObjectToolsOptions = {},
+): string[] {
+  const registered: string[] = [];
+  if (!hasDatasetTools(bridge)) return registered;
+  const scopes = options.grantedScopes;
+  if (scopes && !scopes.includes(MCP_OAUTH_SCOPE_DATA_READ)) return registered;
+  const maxRows = options.maxQueryLimit ?? DEFAULT_MAX_LIMIT;
+  const definitions = bridge.datasetToolDefinitions();
+  const descriptionOf = (name: string): string | undefined =>
+    definitions.find((d) => d.name === name)?.description;
+
+  const listDescription = descriptionOf(LIST_DATASETS_TOOL_NAME);
+  if (listDescription) {
+    registered.push(LIST_DATASETS_TOOL_NAME);
+    server.registerTool(
+      LIST_DATASETS_TOOL_NAME,
+      {
+        description: listDescription,
+        inputSchema: ListDatasetsInputSchema,
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      },
+      async (args: ListDatasetsInput) => {
+        try {
+          return textResult(await bridge.listDatasets(args));
+        } catch (err) {
+          return errorResultWithCode(err);
+        }
+      },
+    );
+  }
+
+  const queryDescription = descriptionOf(QUERY_DATASET_TOOL_NAME);
+  if (queryDescription) {
+    registered.push(QUERY_DATASET_TOOL_NAME);
+    server.registerTool(
+      QUERY_DATASET_TOOL_NAME,
+      {
+        description: queryDescription,
+        inputSchema: QueryDatasetInputSchema,
+        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      },
+      async (args: QueryDatasetInput) => {
+        try {
+          return textResult(await bridge.queryDataset(args, { maxRows }));
+        } catch (err) {
+          return errorResultWithCode(err);
+        }
+      },
+    );
+  }
+
   return registered;
 }
 

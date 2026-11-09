@@ -43,13 +43,25 @@
  * a batch, the count. The confirm button reads as the deletion it is; every
  * host paints it in the destructive button style.
  *
- * ## The delete is permanent, and the toast names what went (objectstack#27823)
+ * ## Whether the delete can be undone depends on the object (ADR-0148)
  *
- * The platform has no recycle bin, so the one-record body says the delete
- * cannot be undone, as the batch body already did. The success toast names
- * the deleted record by the same resolver ({@link recordDelete}.successText),
- * the counterpart of the record-save toasts; a record with nothing nameable
- * keeps the object-label toast.
+ * A by-id delete of a business record goes to the recycle bin: its answer
+ * carries `recycleBinEntryId`, and restoring that entry writes the record
+ * back under its original id. A platform object (`sys_`, `cloud_`, `ai_`, the
+ * spec's `hasPlatformObjectPrefix`) never enters the bin, so its body says
+ * the delete cannot be undone, as it always has (objectstack#27823). Before
+ * the delete the console cannot know whether the server composes a bin, so a
+ * business object's body asks the question alone: it promises neither
+ * permanence nor recovery, and the toast says what happened afterwards.
+ *
+ * The success toast names the deleted record by the same resolver
+ * ({@link recordDelete}.successText), the counterpart of the record-save
+ * toasts; a record with nothing nameable keeps the object-label toast. When
+ * the delete wrote an entry AND the host passed `restore` (it does only for a
+ * caller holding `allowRestoreOwnDeleted` on the object, the spec's
+ * `objectPermissionGrants`), the toast carries an Undo action that restores
+ * that entry: a restore, never a re-create. Without either, the toast is
+ * today's, byte for byte. A batch keeps its summary toast with no Undo.
  *
  * ## The confirmation names what the delete cascades into (objectstack#28472)
  *
@@ -75,9 +87,11 @@
  * converts them.
  */
 
+import { hasPlatformObjectPrefix } from '@objectstack/spec/system';
 import type { ActionResult } from './ActionRunner.js';
 import { getRecordDisplayName } from '../utils/record-title.js';
 import { isExternalWriteRefusal } from '../utils/external-write-refusal.js';
+import { recycleBinRestoreRefusalText, type RecycleBinRefusalLabels } from './recycleBinRestore.js';
 
 /** The `en` pack's `form.readOnlyExternalSource`, for a host with no translation. */
 const READ_ONLY_EXTERNAL_SOURCE_EN =
@@ -97,15 +111,35 @@ interface RecordDeleteDeps {
   /** The object definition, so the success toast's name follows its declared `nameField`. */
   objectDef?: unknown;
   dataSource: {
-    delete(resource: string, id: string): Promise<unknown>;
+    delete(
+      resource: string,
+      id: string,
+      opts?: { onRecycleBinEntry?: (entryId: string) => void },
+    ): Promise<unknown>;
   };
   /** The host's toast sink (sonner's `toast` in both hosts today). */
   toast: {
-    success(message: string): unknown;
+    success(message: string, data?: { action?: RecordDeleteToastAction }): unknown;
     error(message: string, data?: { description?: string }): unknown;
   };
-  /** Re-read the list after a delete. */
+  /** Re-read the list after a delete, and after an undo. */
   onRefresh?: () => void;
+  /**
+   * Restore the recycle-bin entry a delete wrote (ADR-0148) — the host's
+   * `dataSource.restoreRecycleBinEntry` bound to the object. Pass it ONLY when
+   * the caller may restore its own deletes on the object
+   * (`objectPermissionGrants(perm, 'allowRestoreOwnDeleted')`): without it no
+   * Undo is offered, and the delete is asked for no entry id.
+   */
+  restore?: (entryId: string) => Promise<unknown>;
+  /** Labels for a refused restore's sentence; each falls back to the machine name. */
+  refusalLabels?: RecycleBinRefusalLabels;
+}
+
+/** The Undo action a delete toast carries (sonner's `action` shape). */
+export interface RecordDeleteToastAction {
+  label: string;
+  onClick: () => void;
 }
 
 /**
@@ -140,6 +174,16 @@ export interface RecordDeleteConfirmCopy {
 export type RecordDeleteConfirmTarget = { record: Row | null | undefined } | { count: number };
 
 /**
+ * The record's display name for a toast, or `''`: the resolver's floor
+ * (`Record #<id>`, or empty for an id-less row) is not a name.
+ */
+function nameOf(objectDef: unknown, record: Row | null | undefined): string {
+  const resolved = record ? getRecordDisplayName(objectDef, record, { fallback: '' }) : '';
+  const id = record?.id ?? record?._id;
+  return resolved && !(id !== null && id !== undefined && resolved === `Record #${id}`) ? resolved : '';
+}
+
+/**
  * The record-delete core: `confirmText` is the question to ask before deleting
  * one record, `run` performs the delete (one record, or several settled
  * together) and reports it. See the module docblock for objectui#10383.
@@ -149,8 +193,20 @@ export const recordDelete = Object.freeze({
    * The question to ask before deleting ONE record — the body of
    * {@link recordDelete}.confirmCopy.
    */
-  confirmText(deps: Pick<RecordDeleteDeps, 't'>): string {
-    return deps.t('objectActions.deleteConfirm');
+  confirmText(deps: Pick<RecordDeleteDeps, 't'> & { objectName?: string }): string {
+    return recordDelete.entersRecycleBin(deps.objectName)
+      ? deps.t('objectActions.deleteConfirmQuestion')
+      : deps.t('objectActions.deleteConfirm');
+  },
+
+  /**
+   * Whether a by-id delete of `objectName` can go to the recycle bin: every
+   * object but a platform one (ADR-0148 D4, the engine's own predicate). An
+   * absent name reads as a platform object, so the body keeps saying the
+   * delete is permanent rather than dropping the sentence on a guess.
+   */
+  entersRecycleBin(objectName: string | undefined): boolean {
+    return typeof objectName === 'string' && objectName !== '' && !hasPlatformObjectPrefix(objectName);
   },
 
   /**
@@ -186,7 +242,12 @@ export const recordDelete = Object.freeze({
     if ('count' in target) {
       return {
         title: t('objectActions.bulkDeleteConfirmTitle', { count: target.count, label }),
-        message: `${t('console.objectView.bulkDeleteConfirm', { count: target.count })}${cascade}`,
+        message: `${t(
+          recordDelete.entersRecycleBin(deps.objectName)
+            ? 'console.objectView.bulkDeleteQuestion'
+            : 'console.objectView.bulkDeleteConfirm',
+          { count: target.count },
+        )}${cascade}`,
         confirmText,
       };
     }
@@ -211,12 +272,67 @@ export const recordDelete = Object.freeze({
     record: Row | null | undefined,
   ): string {
     const { t, label } = deps;
-    const resolved = record ? getRecordDisplayName(deps.objectDef, record, { fallback: '' }) : '';
-    const id = record?.id ?? record?._id;
-    const name = resolved && !(id !== null && id !== undefined && resolved === `Record #${id}`)
-      ? resolved
-      : '';
+    const name = nameOf(deps.objectDef, record);
     return name ? t('objectActions.deletedNamed', { label, name }) : t('objectActions.deleteSuccess', { label });
+  },
+
+  /**
+   * The success toast for ONE deleted record: {@link recordDelete}.successText,
+   * plus an Undo action when the delete wrote a recycle-bin entry and the host
+   * passed `restore`. Without both it is exactly today's toast — one argument,
+   * no action. `onRestored` runs after a successful undo (the record page
+   * navigates back to the record).
+   */
+  successToast(
+    deps: Pick<RecordDeleteDeps, 't' | 'label' | 'objectDef' | 'toast' | 'onRefresh' | 'restore' | 'refusalLabels'>,
+    record: Row | null | undefined,
+    entryId: string | undefined,
+    onRestored?: () => void,
+  ): void {
+    const message = recordDelete.successText(deps, record);
+    const restore = deps.restore;
+    if (!entryId || !restore) {
+      deps.toast.success(message);
+      return;
+    }
+    deps.toast.success(message, {
+      action: {
+        label: deps.t('actions.undo'),
+        onClick: () => {
+          void recordDelete.undo({ ...deps, restore }, record, entryId).then((restored) => {
+            if (restored) onRestored?.();
+          });
+        },
+      },
+    });
+  },
+
+  /**
+   * Undo a delete: restore the entry it wrote (a restore, never a create),
+   * refresh, and report. A refused restore toasts its reason in the user's
+   * language ({@link recycleBinRestoreRefusalText}); a failure with no known
+   * code keeps the server's message. Resolves whether the record came back.
+   */
+  async undo(
+    deps: Pick<RecordDeleteDeps, 't' | 'label' | 'objectDef' | 'toast' | 'onRefresh' | 'refusalLabels'> & {
+      restore: (entryId: string) => Promise<unknown>;
+    },
+    record: Row | null | undefined,
+    entryId: string,
+  ): Promise<boolean> {
+    const { t, label, toast } = deps;
+    try {
+      await deps.restore(entryId);
+    } catch (err) {
+      toast.error(t('objectActions.restoreFailed', { label }), {
+        description: recycleBinRestoreRefusalText(t, err, deps.refusalLabels) ?? (err as Error)?.message,
+      });
+      return false;
+    }
+    deps.onRefresh?.();
+    const name = nameOf(deps.objectDef, record);
+    toast.success(name ? t('objectActions.restoredNamed', { label, name }) : t('objectActions.restoreSuccess', { label }));
+    return true;
   },
 
   /**
@@ -272,9 +388,20 @@ export const recordDelete = Object.freeze({
     if (!recordId) return { success: false, error: t('objectActions.noRecordId') };
 
     try {
-      await dataSource.delete(objectName, recordId as string);
+      // The entry id is asked for only when an Undo can be offered, so a
+      // host that cannot restore deletes exactly as before.
+      let entryId: string | undefined;
+      if (deps.restore) {
+        await dataSource.delete(objectName, recordId as string, {
+          onRecycleBinEntry: (id) => {
+            entryId = id;
+          },
+        });
+      } else {
+        await dataSource.delete(objectName, recordId as string);
+      }
       onRefresh?.();
-      toast.success(recordDelete.successText(deps, record));
+      recordDelete.successToast(deps, record, entryId);
       return { success: true, reload: true, silent: true };
     } catch (err) {
       // A delete the object's external datasource does not admit (ADR-0015,

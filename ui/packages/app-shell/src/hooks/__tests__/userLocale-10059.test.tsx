@@ -346,6 +346,7 @@ describe('pickRenderableLocale follows the server resolveLocale order', () => {
       </I18nProvider>,
     );
 
-    await waitFor(() => expect(shownLanguage()).toBe('zh-CN'));
+    // The offered entry is the platform locale table tag since objectstack#30514.
+    await waitFor(() => expect(shownLanguage()).toBe('zh-Hans'));
   });
 });

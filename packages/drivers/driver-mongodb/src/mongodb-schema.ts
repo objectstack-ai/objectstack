@@ -234,6 +234,44 @@ interface IndexDef {
 }
 
 /**
+ * [ADR-0150 D4] Unique indexes a collection carries beyond its declaration,
+ * because `IndexSchema` cannot say them — the Mongo copy of what
+ * `metadata-protocol` builds at `kernel:ready` on SQL
+ * (`activation-ledger-packageless-index.ts`, whose docblock carries the why).
+ *
+ * `sys_metadata_activation` is unique on `(metadata_type, package_id, name)`,
+ * built NULL-distinct here like every declared unique (#29278), so a row whose
+ * `package_id` is null or missing — an item the environment authored — is
+ * constrained by it no longer. This index keeps those rows to one per
+ * `(metadata_type, name)`. Its filter `package_id: null` matches a missing field
+ * as well as an explicit `null` (measured on mongod 8.0.34: two documents
+ * without the field, and one without it then one with `null`, are each refused
+ * `E11000`; two packages' rows are admitted); `{ $exists: false }` is refused
+ * inside a partial filter (`CannotCreateIndex`). The other two key parts take
+ * {@link NON_NULL_BSON_TYPES}, so a document missing one is exempt, as SQL's
+ * NULL rule says.
+ *
+ * Keyed by collection name, never a generic rule: it widens nothing any other
+ * collection declares.
+ */
+const RUNTIME_OWNED_UNIQUES: Readonly<Record<string, ReadonlyArray<{ spec: IndexSpecification; options: CreateIndexesOptions }>>> = {
+  sys_metadata_activation: [
+    {
+      spec: { metadata_type: 1, name: 1 },
+      options: {
+        name: 'uniq_sys_metadata_activation_packageless',
+        unique: true,
+        partialFilterExpression: {
+          metadata_type: { $type: [...NON_NULL_BSON_TYPES] },
+          name: { $type: [...NON_NULL_BSON_TYPES] },
+          package_id: null,
+        },
+      },
+    },
+  ],
+};
+
+/**
  * ObjectStack object definition (subset needed for schema sync).
  */
 interface ObjectDef {
@@ -460,6 +498,11 @@ export async function syncCollectionSchema(
     for (const f of fields) spec[f] = 1;
     indexOps.push({ spec: spec as IndexSpecification, options: { name } });
   }
+
+  // Runtime-owned uniques the declared surface cannot express (see
+  // {@link RUNTIME_OWNED_UNIQUES}) — built here because this driver has no
+  // raw-SQL seam for `metadata-protocol`'s `kernel:ready` index migrations.
+  for (const owned of RUNTIME_OWNED_UNIQUES[collectionName] ?? []) indexOps.push(owned);
 
   // Create indexes (idempotent — MongoDB ignores duplicates)
   for (const { spec, options } of indexOps) {

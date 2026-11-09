@@ -121,6 +121,7 @@ import { isWritablePackage, kernelPackageScope, type ObjectStackProtocolImplemen
 import { newSimilarTargetRefusal, newSimilarTargetRefusalAnswer } from './new-similar-target.js';
 import { validationFailure } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
+import { multiReplicaPairCreationRefusal, multiReplicaPackageChangeError } from '../multi-replica-package-refusal.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 
 /** The door's first path segment under `/security`. */
@@ -312,6 +313,12 @@ export async function resolveDefaultCloneLanding(
     ql: unknown,
     protocol: Partial<Pick<ObjectStackProtocolImplementation, 'ensureCustomizationPackage'>>,
     source: SecurityCatalogEntry,
+    /**
+     * [cloud#3814 D1] Asked with the base right before the pair is ensured;
+     * it throws to refuse the ensure (the multi-replica refusal), writing
+     * nothing.
+     */
+    beforeEnsure?: (basePackageId: string) => Promise<void>,
 ): Promise<PermissionSetCloneLanding> {
     const sourcePackageId = source.packageId;
     if (sourcePackageId === undefined) return { packageId: null, created: false };
@@ -330,6 +337,7 @@ export async function resolveDefaultCloneLanding(
             { statusCode: 501 },
         );
     }
+    await beforeEnsure?.(sourcePackageId);
     const pair = await protocol.ensureCustomizationPackage({ basePackageId: sourcePackageId });
     return { packageId: pair.packageId, created: pair.created };
 }
@@ -550,7 +558,12 @@ export async function handlePermissionSetCloneWrite(
             if (refused) return newSimilarTargetRefusalAnswer(deps, refused);
             landing = { packageId: target.package, created: false };
         } else {
-            landing = await resolveDefaultCloneLanding(ql, protocol, source);
+            landing = await resolveDefaultCloneLanding(ql, protocol, source, async (base) => {
+                // [cloud#3814 D1] Declared replicas on the Redis driver: creating
+                // the pair here would register a package on this replica alone.
+                const oneReplica = await multiReplicaPairCreationRefusal(deps, context, ql, base, `Cloning permission set '${source.name}'`);
+                if (oneReplica) throw multiReplicaPackageChangeError(oneReplica);
+            });
         }
 
         // ── 7. the save ─────────────────────────────────────────────────────

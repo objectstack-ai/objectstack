@@ -88,6 +88,7 @@ import {
 import { CloneFlowRequestSchema } from '@objectstack/spec/api';
 import { newSimilarTargetRefusal, newSimilarTargetRefusalAnswer } from './new-similar-target.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
+import { multiReplicaPairCreationRefusal, multiReplicaPackageChangeError } from '../multi-replica-package-refusal.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
 // [#9416, #25821, #25976] The one value-shape check every door that starts or
@@ -2606,6 +2607,10 @@ async function resolveCloneTarget(
     }
     return {
         land: async () => {
+            // [cloud#3814 D1] Declared replicas on the Redis driver: creating
+            // the pair here would register a package on this replica alone.
+            const oneReplica = await multiReplicaPairCreationRefusal(deps, context, await deps.getObjectQL(context), owner, `Cloning ${subject}`);
+            if (oneReplica) return { refused: { handled: true, response: deps.errorFromThrown(multiReplicaPackageChangeError(oneReplica)) } };
             let pair: string;
             try {
                 pair = (await ensure.call(protocol, { basePackageId: owner })).packageId;

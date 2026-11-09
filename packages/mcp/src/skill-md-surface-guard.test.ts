@@ -82,6 +82,21 @@ function makeFullBridge(): McpDataBridge & McpActionBridge & McpFileBridge {
     async createUploadLink() {
       return { url: 'https://x.test/u', expiresAt: '2026-01-01T00:00:00.000Z' };
     },
+    // [ADR-0149 D2] The dataset members, so `list_datasets` / `query_dataset`
+    // are on the surface this guard reads: a host with the analytics service
+    // carries them, and its skill is rendered with `datasetTools: true`.
+    async listDatasets() {
+      return { datasets: [] };
+    },
+    async queryDataset() {
+      throw new Error('not called');
+    },
+    datasetToolDefinitions() {
+      return [
+        { name: 'list_datasets', description: 'List the governed datasets.' },
+        { name: 'query_dataset', description: 'Query one governed dataset.' },
+      ];
+    },
   };
 }
 
@@ -145,7 +160,7 @@ describe('SKILL.md ↔ native tool surface drift guard', () => {
     // Sanity: the harness must see the full surface, or the guard guards nothing.
     expect(registered.length).toBeGreaterThanOrEqual(9);
 
-    const md = renderSkillMarkdown({ fileTools: true });
+    const md = renderSkillMarkdown({ fileTools: true, datasetTools: true });
     const undocumented = registered.filter((name) => !md.includes(name));
     expect(undocumented, `tools registered but missing from SKILL.md — update packages/mcp/src/skill-md.ts: ${undocumented.join(', ')}`).toEqual([]);
   });
@@ -158,7 +173,7 @@ describe('SKILL.md ↔ native tool surface drift guard', () => {
     for (const t of AUTHORING_TOOLS) expect(registered).toContain(t.name);
 
     // The skill rendered for the SAME grant and the SAME registry names every one of them …
-    const md = renderSkillMarkdown({ grantedScopes: EVERY_SCOPE, authoringTools: registry.getAll(), fileTools: true });
+    const md = renderSkillMarkdown({ grantedScopes: EVERY_SCOPE, authoringTools: registry.getAll(), fileTools: true, datasetTools: true });
     const undocumented = registered.filter((name) => !md.includes(name));
     expect(undocumented, `tools registered but missing from the authoring SKILL.md: ${undocumented.join(', ')}`).toEqual([]);
 

@@ -15,10 +15,16 @@
  *
  * A "reload" here is an unmount + a fresh `I18nProvider` mount — a new i18next
  * instance, so anything it knows had to come out of storage.
+ *
+ * objectstack#30514 (ruling F of objectstack#29349) narrowed the menu to the
+ * platform locale table's languages, so an out-of-table app locale like `th`
+ * is no longer offered: it still boots on the loader's credit, and the
+ * self-heal then reverts and purges it once the app's list lands.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
+import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import { I18nProvider, useObjectTranslation, LOCALE_STORAGE_KEY } from '../provider';
 
 /** The console's wiring: app packs fetched on demand, nothing in `resources`. */
@@ -42,20 +48,30 @@ beforeEach(() => {
 });
 
 describe('app-locale restore (lockstep with the switcher)', () => {
-  it('restores an app-shipped locale that has no built-in pack', async () => {
-    const first = mountConsole();
-    await act(async () => {
-      await first.result.current.changeLanguage('th');
-    });
-    await waitFor(() => expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('th'));
-    first.unmount();
+  it('boots a stored out-of-table locale, then reverts and purges it once the list lands', async () => {
+    // objectstack#30514: the menu offers only the platform locale table's
+    // languages, so `th` is never offered — not even when the app lists it.
+    // The bootstrap still accepts it on the loader's credit (nothing
+    // synchronous can tell), and the self-heal then adjudicates it against
+    // what the menu OFFERS, not against the raw app list.
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, 'th');
 
-    // Reload. Before the widening this asserted `en`: `th` is not a built-in
-    // pack and not in `config.resources`, so the restore validation dropped
-    // AND purged it — the user's pick lost on the first F5.
-    const second = mountConsole();
-    expect(second.result.current.language).toBe('th');
-    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('th');
+    const { result } = mountConsole();
+
+    expect(result.current.language).toBe('th');
+    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh-Hans']));
+    await waitFor(() => expect(result.current.language).toBe('en'));
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBeNull();
+  });
+
+  it('keeps a stored spelling of a table language, which the menu offers as its tag', async () => {
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-CN');
+
+    const { result } = mountConsole({}, ['en', 'zh-CN']);
+
+    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh-Hans']));
+    expect(result.current.language).toBe('zh-CN');
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-CN');
   });
 
   it('restores it in the BOOTSTRAP language, not as a late correction', () => {
@@ -153,10 +169,31 @@ describe('app-locale restore (lockstep with the switcher)', () => {
 });
 
 describe('offerableLanguages — the intersection the switcher renders', () => {
-  it('is the app list ∩ what this renderer can resolve', async () => {
-    const { result } = mountConsole({}, ['en', 'zh', 'th']);
+  it('is the platform locale table ∩ the app list, as table tags in the app order', async () => {
+    // `zh` and `zh-CN` are two spellings of `zh-Hans`: one entry. `th` lands
+    // on no table tag: not offered, although the loader could fetch it.
+    const { result } = mountConsole({}, ['ja-JP', 'en', 'zh', 'zh-CN', 'th']);
 
-    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh', 'th']));
+    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['ja', 'en', 'zh-Hans']));
+  });
+
+  it('reads region variants through the table, as the pack that serves them', async () => {
+    const { result } = mountConsole({}, ['de-AT', 'zh-TW', 'en-GB']);
+
+    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['de', 'zh-Hant', 'en']));
+  });
+
+  it('falls back to the table when the app lists no table language', async () => {
+    const { result } = mountConsole({}, ['th']);
+
+    await waitFor(() => expect(result.current.offerableLanguages).not.toBeNull());
+    expect(result.current.offerableLanguages).toEqual(PLATFORM_LOCALE_TAGS);
+  });
+
+  it('offers the table tags when no locale list is wired (control)', () => {
+    const { result } = mountConsole({}, null);
+
+    expect(result.current.offerableLanguages).toEqual(PLATFORM_LOCALE_TAGS);
   });
 
   it('drops an app locale this renderer cannot produce', async () => {
@@ -170,7 +207,7 @@ describe('offerableLanguages — the intersection the switcher renders', () => {
 
     // No loader and no `config.resources`: `th` is in the app's list but this
     // renderer has no way to produce a single string of it.
-    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh']));
+    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh-Hans']));
   });
 
   it('is null while the app list is in flight', () => {
@@ -201,7 +238,7 @@ describe('offerableLanguages — the intersection the switcher renders', () => {
       );
     const { result, rerender } = renderHook(() => useObjectTranslation(), { wrapper });
 
-    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh']));
+    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh-Hans']));
     rerender();
     rerender();
     expect(calls.n).toBe(1);

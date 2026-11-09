@@ -47,7 +47,7 @@ import { HistoryTimeline } from './HistoryTimeline';
 import { RecordMetaFooter } from './RecordMetaFooter';
 import { RecordPageProvenanceContext } from './recordPageProvenance';
 import { SchemaRenderer, SchemaErrorBoundary, toRenderableSchema, useSafeFieldLabel, useDataInvalidation, useInlineEdit, useRowPredicate, resolveApprovalLock, usePrintPage, useRecordContext } from '@object-ui/react';
-import { buildExpandFields, declaredNameField, getRecordDisplayName, formatTitleTemplate, recordDisplayValueAt, resolveAffordance, toDisplayDate, userActionPredicates, withoutDeniedFields } from '@object-ui/core';
+import { buildExpandFields, declaredNameField, getRecordDisplayName, formatTitleTemplate, recordDelete, recordDisplayValueAt, resolveAffordance, toDisplayDate, userActionPredicates, withoutDeniedFields } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency } from '@object-ui/i18n';
 import type { DetailViewSchema, DataSource, ActionSchema, SchemaNode } from '@object-ui/types';
@@ -899,7 +899,11 @@ export const DetailView: React.FC<DetailViewProps> = ({
   }, [dataSource, schema.objectName, schema.resourceId, t]);
 
   const handleDelete = React.useCallback(() => {
-    const confirmMessage = schema.deleteConfirmation || t('detail.deleteConfirmation');
+    // ADR-0148 — a business object's delete goes to the recycle bin, so its
+    // question promises neither permanence nor recovery; a platform object's
+    // keeps saying it cannot be undone (`recordDelete.entersRecycleBin`).
+    const confirmMessage = schema.deleteConfirmation
+      || t(recordDelete.entersRecycleBin(schema.objectName) ? 'detail.deleteConfirmQuestion' : 'detail.deleteConfirmation');
     // Use window.confirm as fallback — the ActionProvider's onConfirm handler
     // will intercept this if wired up via the action system.
     if (window.confirm(confirmMessage)) {

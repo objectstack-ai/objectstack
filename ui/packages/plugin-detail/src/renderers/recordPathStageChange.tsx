@@ -64,7 +64,7 @@ import {
   useSafeFieldLabel,
 } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation } from '@object-ui/i18n';
-import { isComputedFieldType } from '../fieldEnrichment';
+import { isComputedDetailField } from '../fieldEnrichment';
 import { NON_EDITABLE_SYSTEM_FIELDS } from '../systemFields';
 import { updateVia } from '../InlineEditSaveBar';
 import { isConcurrentUpdateError } from '../ConcurrentUpdateDialog';
@@ -168,7 +168,7 @@ export function useStageChange(allowStageChange: boolean, statusField: string | 
     && !!inline?.canEdit
     && !inline.editing
     && fieldDef?.readonly !== true
-    && !isComputedFieldType(undefined, fieldDef?.type)
+    && !isComputedDetailField(undefined, fieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(statusField)
     && resolveFieldAffordance('recordEdit', perms, objectName, statusField);
 
