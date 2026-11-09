@@ -79,7 +79,7 @@
 // check:nul-bytes all scan skills/ from here).
 //
 //   node scripts/check-skill-compatibility-version.mjs              # check
-//   node scripts/check-skill-compatibility-version.mjs --fix        # derive both lines, then check
+//   node scripts/check-skill-compatibility-version.mjs --fix        # derive both lines and body versions, then check
 //   node scripts/check-skill-compatibility-version.mjs --self-test
 
 import { spawnSync } from 'node:child_process';
@@ -368,7 +368,13 @@ export function deriveFrontmatter(text, pkgs) {
 //
 // `deriveBodyVersions` is the pure derivation of every non-history body
 // version, kept apart from `deriveFrontmatter` because the token ratchet asks
-// that function which ONE line of a SKILL.md is the release stamp.
+// that function which ONE line of a SKILL.md is the release stamp. `--fix`
+// runs both, so the root `version` script rewrites a body version the way it
+// restamps the frontmatter (ruling B on #31115): an install pin is a derived
+// value an author never types. Two readers ask this writer rather than parse
+// the body themselves: the release guard reads `bodyPinnedPaths()` for the
+// files it may write, and the token ratchet asks `deriveBodyVersions` which
+// version VALUES a body owns, and leaves exactly those bytes unpriced.
 
 const BODY_INSTALL_PIN_RE = /"@objectstack\/([a-z0-9][a-z0-9-]*)"(\s*:\s*")([~^]?)(\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)"/g;
 const BODY_PROSE_VERSION_RE = /@objectstack\/([a-z0-9][a-z0-9-]*)([ @]v?)(\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)/g;
@@ -777,23 +783,81 @@ export function stampedSkillPaths({ root = REPO_ROOT } = {}) {
 }
 
 /**
- * The `--fix` leg: derive every scanned file and write the ones that moved under
- * `root`. Returns the derived set (what the check then judges) and what was
- * written, so the self-test can hold the written set against `stampedSkillPaths()`.
- *
- * @returns {{ files: { file: string, text: string }[], written: { file: string, changes: string[] }[] }}
+ * A workspace that answers every package with one probe version, which no
+ * release carries: handed to `deriveBodyVersions`, it makes the writer rewrite
+ * every body version it owns, whatever the tree's real versions are. The token
+ * ratchet builds the same probe for the same question.
  */
-export function applyFix(scanned, pkgs, root = REPO_ROOT) {
-  const written = [];
+const BODY_PROBE = Object.freeze({ get: () => ({ version: 'body-pin-probe' }) });
+
+/**
+ * Every repo-relative path whose BODY `--fix` may write: the skill markdown
+ * files carrying at least one version the body writer owns (an install pin, or
+ * prose that does not read as history), in walk order.
+ *
+ * The post-version shape guard reads this beside `stampedSkillPaths()` (ruling
+ * B on #31115). It asks the writer, never a second parser: each file is derived
+ * with `BODY_PROBE`, so a file is listed exactly when the version pass can move
+ * it at SOME release, not only at the next one — the guard runs after the pass
+ * wrote, when every value is already current. A file whose only versions read
+ * as history is not listed, and is never written. A version naming a package
+ * the workspace lacks is counted as writable here; the check reds it, so no
+ * green tree carries one.
+ *
+ * Zero pinned files is a legitimate answer and returns `[]` (the guard's
+ * `grep -vxF -f` over an empty list admits nothing). Zero skill markdown files
+ * THROWS: that is a moved directory, not a catalog without pins.
+ *
+ * @param {{ root?: string }} [options] checkout to walk; defaults to this one
+ * @returns {string[]} POSIX-separated, repo-relative `skills/**.md` paths
+ */
+export function bodyPinnedPaths({ root = REPO_ROOT } = {}) {
+  const markdown = readSkillMarkdown(root);
+  if (markdown.length === 0) {
+    throw new Error(
+      `check-skill-compatibility-version: no markdown under ${SKILLS_DIR}/. The version pass derives ` +
+        'every skill body, so this is a moved directory rather than a catalog without pins — ' +
+        'refusing to report an empty body-pinned set.',
+    );
+  }
+  return markdown.filter(({ text }) => deriveBodyVersions(text, BODY_PROBE).changes.length > 0).map((f) => f.file);
+}
+
+/**
+ * The `--fix` leg: derive every scanned SKILL.md frontmatter and every skill
+ * markdown body, and write each file that moved under `root`, once. Returns the
+ * derived sets (what the check then judges) and what was written, so the
+ * self-test can hold the written set against `stampedSkillPaths()` and
+ * `bodyPinnedPaths()`.
+ *
+ * @returns {{
+ *   files: { file: string, text: string }[],
+ *   markdown: { file: string, text: string }[],
+ *   written: { file: string, changes: string[] }[],
+ * }}
+ */
+export function applyFix(scanned, pkgs, root = REPO_ROOT, markdownFiles = readSkillMarkdown(root)) {
+  const derived = new Map();
   const files = scanned.map(({ file, text }) => {
     const { text: next, changes } = deriveFrontmatter(text, pkgs);
-    if (next !== text) {
-      writeFileSync(join(root, file), next);
-      written.push({ file, changes });
-    }
+    derived.set(file, { before: text, text: next, changes });
     return { file, text: next };
   });
-  return { files, written };
+  const markdown = markdownFiles.map(({ file, text }) => {
+    const prior = derived.get(file) ?? { before: text, text, changes: [] };
+    const { text: next, changes } = deriveBodyVersions(prior.text, pkgs);
+    derived.set(file, { before: prior.before, text: next, changes: [...prior.changes, ...changes] });
+    return { file, text: next };
+  });
+  const written = [];
+  for (const [file, { before, text, changes }] of derived) {
+    if (text === before) continue;
+    writeFileSync(join(root, file), text);
+    written.push({ file, changes });
+  }
+  // A SKILL.md body is judged from the same derived text as its frontmatter.
+  const frontmatterFiles = files.map(({ file }) => ({ file, text: derived.get(file).text }));
+  return { files: frontmatterFiles, markdown, written };
 }
 
 function readWorkspacePackages(root = REPO_ROOT) {
@@ -904,7 +968,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '--fix rewrites a pin inside a folded `compatibility: >` block too': 1,
   '--fix invents no structure: a file with no metadata.version comes back unchanged, and the check names it': 1,
   '--fix leaves a pin naming a package the workspace lacks alone, for the check to refuse': 1,
-  'stampedSkillPaths() equals the set --fix writes on an all-stale fixture, in walk order': 1,
+  'stampedSkillPaths() then bodyPinnedPaths() is the set --fix writes on an all-stale fixture, in walk order': 1,
+  'bodyPinnedPaths() lists a stale install pin and never a history-only file, which --fix leaves alone': 1,
+  'a body-pin write is admitted by the bodyPinnedPaths() filter alone, and an empty body list admits nothing': 1,
+  'bodyPinnedPaths() THROWS on a tree with no skill markdown, and answers [] on one with no pins': 1,
+  'bodyPinnedPaths() on the live tree is exactly the files the reader finds a non-history version in': 1,
   'a SKILL.md write outside stampedSkillPaths() stays unexpected under the guard\'s grep -vxF -f filter': 1,
   'stampedSkillPaths() THROWS on a tree with no skills, never an empty list': 1,
   'body: an install pin at the workspace version → GREEN; one behind → RED naming file:line, both versions and the fix': 1,
@@ -925,7 +993,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 40;
+const SELF_TEST_BATTERY_FLOOR = 44;
 
 // The body-version rows of the self-test's derivation table, each a battery of
 // its own (see SELF_TEST_BATTERIES). A row throws to fail.
@@ -1050,6 +1118,12 @@ function selfTest() {
   // non-directory entry, and an internal SKILL.md the walk never reaches.
   const STALE_TEXT = fm('compatibility: Requires @objectstack/spec 16.x (Zod v4 schemas)', '16.0.0');
   const OUTSIDE_SKILL = '.claude/skills/internal/SKILL.md';
+  // A starter package.json one release behind, and a reference whose only
+  // version is a past release named as one.
+  const BODY_PINNED = 'skills/b/references/bootstrap.md';
+  const STALE_BODY = '# Bootstrap\n\n```json\n{ "dependencies": { "@objectstack/spec": "^16.0.0" } }\n```\n';
+  const BODY_HISTORY = 'skills/b/references/history.md';
+  const HISTORY_BODY = '# History\n\nThe `split` mode was removed in @objectstack/spec 16.0.0.\n';
   const withStaleFixture = (body) => {
     const root = mkdtempSync(join(tmpdir(), 'skill-compat-stamped-'));
     try {
@@ -1061,6 +1135,8 @@ function selfTest() {
       put('skills/b/SKILL.md', fm('compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)', '17.0.0-rc.4'));
       put(exemptUpgrade.file, exemptUpgrade.text.replace('"17.0.0-rc.5"', '"16.0.0"'));
       put('skills/README.md', '# index\n');
+      put(BODY_PINNED, STALE_BODY);
+      put(BODY_HISTORY, HISTORY_BODY);
       mkdirSync(join(root, 'skills', 'no-skill-md'), { recursive: true });
       put(OUTSIDE_SKILL, STALE_TEXT);
       body(root);
@@ -1341,13 +1417,17 @@ function selfTest() {
     },
     // ── The post-version surface the shape guard reads ──────────────────────
     {
-      label: 'stampedSkillPaths() equals the set --fix writes on an all-stale fixture, in walk order',
+      label: 'stampedSkillPaths() then bodyPinnedPaths() is the set --fix writes on an all-stale fixture, in walk order',
       run: () => withStaleFixture((root) => {
-        const listed = stampedSkillPaths({ root });
+        const stamped = stampedSkillPaths({ root });
+        const listed = [...stamped, ...bodyPinnedPaths({ root }).filter((p) => !stamped.includes(p))];
         const { written } = applyFix(readSkillFiles(root).files, PKGS, root);
         const wrote = written.map((w) => w.file);
         if (JSON.stringify(wrote) !== JSON.stringify(listed)) {
-          throw new Error(`--fix wrote ${JSON.stringify(wrote)}, the export lists ${JSON.stringify(listed)}`);
+          throw new Error(`--fix wrote ${JSON.stringify(wrote)}, the exports list ${JSON.stringify(listed)}`);
+        }
+        if (judgeBodyVersions(readSkillMarkdown(root), PKGS).problems.length !== 0) {
+          throw new Error('a body is still stale after --fix, so the body writes did not land under root');
         }
         // The writes really landed under `root` and nowhere else: each listed file
         // now passes the check, and the internal skill outside the walk is untouched.
@@ -1381,6 +1461,83 @@ function selfTest() {
         const c = spawnSync('grep', ['-vxF', '-f', listFile, movedFile], { encoding: 'utf8' });
         if (c.status !== 1 || c.stdout !== '') throw new Error(`control: grep exit ${c.status}, output ${JSON.stringify(c.stdout)}`);
       }),
+    },
+    {
+      label: 'bodyPinnedPaths() lists a stale install pin and never a history-only file, which --fix leaves alone',
+      run: () => withStaleFixture((root) => {
+        const listed = bodyPinnedPaths({ root });
+        if (JSON.stringify(listed) !== JSON.stringify([BODY_PINNED])) {
+          throw new Error(`bodyPinnedPaths() lists ${JSON.stringify(listed)}, wanted ${JSON.stringify([BODY_PINNED])}`);
+        }
+        applyFix(readSkillFiles(root).files, PKGS, root);
+        if (readFileSync(join(root, BODY_HISTORY), 'utf8') !== HISTORY_BODY) throw new Error('--fix rewrote a history sentence');
+        const want = STALE_BODY.replace('^16.0.0', `^${PKGS.get('@objectstack/spec').version}`);
+        if (readFileSync(join(root, BODY_PINNED), 'utf8') !== want) throw new Error('--fix did not rewrite the install pin, range kept');
+        // After the pass every value is current, and the file is still listed:
+        // the guard reads the export AFTER the version pass wrote.
+        if (JSON.stringify(bodyPinnedPaths({ root })) !== JSON.stringify([BODY_PINNED])) {
+          throw new Error('a current install pin dropped out of bodyPinnedPaths()');
+        }
+      }),
+    },
+    {
+      label: 'a body-pin write is admitted by the bodyPinnedPaths() filter alone, and an empty body list admits nothing',
+      run: () => withStaleFixture((root) => {
+        const skillList = join(root, 'skill-list.txt');
+        const bodyList = join(root, 'body-list.txt');
+        const emptyList = join(root, 'empty-list.txt');
+        const movedFile = join(root, 'moved.txt');
+        writeFileSync(skillList, stampedSkillPaths({ root }).map((p) => `${p}\n`).join(''));
+        writeFileSync(bodyList, bodyPinnedPaths({ root }).map((p) => `${p}\n`).join(''));
+        writeFileSync(emptyList, '');
+        writeFileSync(movedFile, [BODY_PINNED, BODY_HISTORY].map((p) => `${p}\n`).join(''));
+        const filter = (list, input) => {
+          const r = spawnSync('grep', ['-vxF', '-f', list, input], { encoding: 'utf8' });
+          if (r.error) throw new Error(`could not spawn grep: ${r.error.message}`);
+          return r.stdout.split('\n').filter(Boolean);
+        };
+        const afterSkill = filter(skillList, movedFile);
+        if (JSON.stringify(afterSkill) !== JSON.stringify([BODY_PINNED, BODY_HISTORY])) {
+          throw new Error(`the SKILL.md list admitted a body file: ${JSON.stringify(afterSkill)}`);
+        }
+        const afterBody = filter(bodyList, movedFile);
+        if (JSON.stringify(afterBody) !== JSON.stringify([BODY_HISTORY])) {
+          throw new Error(`the body list left ${JSON.stringify(afterBody)}, wanted only the history file unexpected`);
+        }
+        const afterEmpty = filter(emptyList, movedFile);
+        if (JSON.stringify(afterEmpty) !== JSON.stringify([BODY_PINNED, BODY_HISTORY])) {
+          throw new Error(`an empty list admitted ${JSON.stringify(afterEmpty)}`);
+        }
+      }),
+    },
+    {
+      label: 'bodyPinnedPaths() THROWS on a tree with no skill markdown, and answers [] on one with no pins',
+      run: () => {
+        const empty = mkdtempSync(join(tmpdir(), 'skill-compat-nobody-'));
+        try {
+          let threw = false;
+          try { bodyPinnedPaths({ root: empty }); } catch (err) { threw = /no markdown under skills\//.test(err.message); }
+          if (!threw) throw new Error('an empty tree resolved without the refusal');
+          mkdirSync(join(empty, SKILLS_DIR, 'a'), { recursive: true });
+          writeFileSync(join(empty, SKILLS_DIR, 'a', 'SKILL.md'), ok().text);
+          const none = bodyPinnedPaths({ root: empty });
+          if (none.length !== 0) throw new Error(`a tree with no body versions listed ${JSON.stringify(none)}`);
+        } finally {
+          rmSync(empty, { recursive: true, force: true });
+        }
+      },
+    },
+    {
+      label: 'bodyPinnedPaths() on the live tree is exactly the files the reader finds a non-history version in',
+      run: () => {
+        const listed = bodyPinnedPaths();
+        const read = readSkillMarkdown().filter((f) => extractBodyVersions(f.text).some((v) => !v.history))
+          .map((f) => f.file);
+        if (listed.length === 0) throw new Error('the live tree lists no body-pinned file; the lit control below should have one');
+        if (JSON.stringify(listed) !== JSON.stringify(read)) {
+          throw new Error(`the writer lists ${JSON.stringify(listed)}, the reader finds ${JSON.stringify(read)}`);
+        }
+      },
     },
     {
       label: 'stampedSkillPaths() THROWS on a tree with no skills, never an empty list',
@@ -1571,22 +1728,25 @@ function main() {
 
   const { files: scanned, problems: layout } = readSkillFiles();
   const pkgs = readWorkspacePackages();
+  let markdown = readSkillMarkdown();
 
-  // --fix: derive the two version-shaped lines from the workspace manifests,
-  // write only the files that moved, then CHECK the result like any other run —
-  // a derivation that leaves a file red (no stamp to rewrite, a pin naming no
-  // package) is reported, never papered over.
+  // --fix: derive the two version-shaped lines and every body version from the
+  // workspace manifests, write only the files that moved, then CHECK the result
+  // like any other run — a derivation that leaves a file red (no stamp to
+  // rewrite, a pin naming no package) is reported, never papered over.
   let files = scanned;
   if (process.argv.includes('--fix')) {
-    const fixed = applyFix(scanned, pkgs);
+    const fixed = applyFix(scanned, pkgs, REPO_ROOT, markdown);
     for (const { file, changes } of fixed.written) console.log(`✎ ${file}: ${changes.join('; ')}`);
     files = fixed.files;
-    console.log(`check-skill-compatibility-version --fix: ${fixed.written.length} of ${files.length} SKILL.md file(s) rewritten.\n`);
+    markdown = fixed.markdown;
+    console.log(`check-skill-compatibility-version --fix: ${fixed.written.length} of ${markdown.length} skill markdown file(s) rewritten.\n`);
   }
 
   const { problems, results, pinCount } = runAllChecks(files, pkgs, EXEMPT);
+  const body = judgeBodyVersions(markdown, pkgs);
 
-  const all = [...layout, ...problems];
+  const all = [...layout, ...problems, ...body.problems];
   if (all.length > 0) {
     report(all);
     process.exit(1);
@@ -1600,6 +1760,8 @@ function main() {
     `  ${pinCount} pinned major(s) all match the workspace (${CATALOG_VERSION_PACKAGE} is ${majorOf(anchor.version)}.x)\n` +
     `  ${files.length} metadata.version stamp(s) all equal ${CATALOG_VERSION_PACKAGE} ${anchor.version} ` +
     `(derived; \`${FIX_COMMAND}\` writes them)\n` +
+    `  ${body.count} body version(s) in ${markdown.length} skill markdown file(s): each equals its workspace package ` +
+    'or reads as history\n' +
     `  ${exemptCount} justified exemption(s), each with its stated reason still true of the file.`,
   );
 }
