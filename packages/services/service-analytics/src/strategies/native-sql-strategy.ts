@@ -49,7 +49,7 @@ import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
 import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
-import { declaredCubeMemberKey } from '../cube-member-key.js';
+import { declaredCubeFilterMember, declaredCubeMemberKey } from '../cube-member-key.js';
 import { hasJsonMembershipSql, isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
@@ -1995,16 +1995,28 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     );
   }
 
+  /**
+   * [#31880] The definition a FILTER member resolves to: the declared member
+   * it names across both bags ({@link declaredCubeFilterMember}: dimensions,
+   * then measures, the where gate's order), else — for a dotted one — the
+   * synthetic relation traversal. The declared measure comes first, so
+   * `CUBE.total` reads the measure's column exactly as `total` does instead of
+   * joining a hop named for the cube.
+   */
+  private lookupFilterMember(cube: Cube, member: string): { sql: string; type?: string } | undefined {
+    const declared = declaredCubeFilterMember(cube, member);
+    if (declared) return declared.kind === 'dimension' ? cube.dimensions[declared.key] : cube.measures[declared.key];
+    return this.lookupMember(cube, member, 'dimension');
+  }
+
   private resolveFieldSql(
     cube: Cube,
     member: string,
     parentTable: string,
     joins: StatementJoins,
   ): string {
-    const dim = this.lookupMember(cube, member, 'dimension');
-    if (dim) return this.qualifyAndRegisterJoin(dim.sql, parentTable, joins, cube);
-    const measure = this.lookupMember(cube, member, 'measure');
-    if (measure) return this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
+    const entry = this.lookupFilterMember(cube, member);
+    if (entry) return this.qualifyAndRegisterJoin(entry.sql, parentTable, joins, cube);
     // [#21249] A member the cube does not declare is a base-table column too
     // (`where: { id }`), so it takes the same qualification as a declared one:
     // returned bare it sat beside a joined target's own `id`, ambiguous.
@@ -2034,9 +2046,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     baseTable: string,
     referenceOf: HopReference | undefined,
   ): { object: string; field: string } {
-    const dim = this.lookupMember(cube, member, 'dimension');
-    const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
-    const rawSql = dim?.sql ?? measure?.sql ?? member;
+    const rawSql = this.lookupFilterMember(cube, member)?.sql ?? member;
 
     if (rawSql.includes('.')) {
       // Multi-hop (ADR-0071): the column's owning object is the object the

@@ -437,3 +437,178 @@ describe('[#31842] a dotted filter member whose tail names a declared member', (
     }
   });
 });
+
+/**
+ * [#31880] A declared MEASURE behind the cube's own qualifier in a filter
+ * (`<dataset>.total`, `<cube>.total`, `<object>.total`), on both live
+ * strategies and the draft preview, through a compiled dataset and a
+ * hand-authored cube, on real SQLite.
+ *
+ * The where gate always read such a member as the measure (its `'any'` lookup
+ * consults both bags before any traversal), but both strategies asked the
+ * dimension lookup first, and that lookup turns every dotted member naming no
+ * declared dimension into a relationship traversal. So the qualified spelling
+ * compiled as a join through a hop named for the cube: native refused
+ * `DATASET_INVALID` ("join … is not backed") on a dataset and answered a 500
+ * from a self-join on a hand-authored cube; the engine face refused it as a
+ * cross-object filter or handed the engine a column the object lacks. Bare
+ * `total` filtered the measure's column, row by row (`WHERE amount > ?`).
+ * Now a filter member resolves against the declared dimensions, then the
+ * declared measures, before the traversal tier, so every qualified spelling
+ * compiles exactly as `total` does: the same statement, the same rows.
+ */
+describe('[#31880] a declared measure behind the cube\'s own qualifier in a filter', () => {
+  const DEAL = 'os31880_deal';
+  const VENDOR = 'os31880_vendor';
+  const DATASET = DatasetSchema.parse({
+    name: 'os31880_deals',
+    label: 'Deals',
+    object: DEAL,
+    dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+    measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
+  });
+  /** A hand-authored cube over the deal, named apart from the object. */
+  const CUBE = {
+    name: 'os31880_cube',
+    sql: DEAL,
+    dimensions: { region: { sql: 'region', type: 'string' } },
+    measures: { count: { type: 'count', sql: '*' }, total: { type: 'sum', sql: 'amount' } },
+  };
+  const ROWS = [
+    { id: 'd1', region: 'emea', amount: 1, vendor: 'v1' },
+    { id: 'd2', region: 'emea', amount: 10, vendor: 'v1' },
+    { id: 'd3', region: 'amer', amount: 100, vendor: 'v1' },
+  ];
+  /** `total > 5` keeps d2 and d3 when it reads the measure's column row by row. */
+  const OVER_FIVE = { $gt: 5 };
+
+  let engine: ObjectQL;
+  const services: Partial<Record<'native' | 'objectql', AnalyticsService>> = {};
+  /** Every statement (native) and engine aggregate (ObjectQL face) a query sends. */
+  const sent: string[] = [];
+  const LIVE = ['native', 'objectql'] as const;
+
+  const seedProtocol = {
+    getMetaItems: async () => [{ name: 'os31880_seed', object: DEAL }],
+    getMetaItem: async () => ({ item: { records: ROWS } }),
+  };
+  const filterDataset = (face: Face, member: string) =>
+    services[face === 'preview' ? 'objectql' : face]!.queryDataset(
+      DATASET,
+      { dimensions: ['region'], measures: ['total'], runtimeFilter: { [member]: OVER_FIVE } } as never,
+      undefined,
+      face === 'preview' ? { previewDrafts: true } : undefined,
+    );
+  const filterCube = (face: (typeof LIVE)[number], member: string) =>
+    services[face]!.query({
+      cube: CUBE.name,
+      dimensions: [`${CUBE.name}.region`],
+      measures: [`${CUBE.name}.total`],
+      where: { [member]: OVER_FIVE },
+    } as never);
+  /** The rows a query answers and what it sent, in one comparable value. */
+  const answerOf = async (run: () => Promise<{ rows: unknown }>) => {
+    sent.length = 0;
+    const result = await run();
+    const rows = (result.rows as Array<Record<string, unknown>>)
+      .map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === 'string' ? v : Number(v)])))
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    return { rows, sent: [...sent] };
+  };
+
+  beforeAll(async () => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
+    engine = new ObjectQL({ logger: quiet } as never);
+    engine.registerDriver(driver as never, true);
+    await engine.init();
+    engine.registry.registerObject({ name: VENDOR, label: 'Vendor', fields: { name: { name: 'name', type: 'text' } } } as never);
+    engine.registry.registerObject({
+      name: DEAL,
+      label: 'Deal',
+      fields: {
+        region: { name: 'region', type: 'text' },
+        amount: { name: 'amount', type: 'number' },
+        vendor: { name: 'vendor', type: 'lookup', reference: VENDOR },
+      },
+    } as never);
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine as never);
+    await engine.insert(VENDOR, { id: 'v1', name: 'Initech' } as never);
+    for (const row of ROWS) await engine.insert(DEAL, { ...row } as never);
+
+    const record = engine as unknown as Record<'execute' | 'aggregate', (...args: unknown[]) => Promise<unknown>>;
+    for (const method of ['execute', 'aggregate'] as const) {
+      const original = record[method].bind(engine);
+      record[method] = async (...args: unknown[]) => {
+        sent.push(`${method} ${JSON.stringify(args.slice(0, 2))}`);
+        return original(...args);
+      };
+    }
+
+    for (const [face, caps] of [
+      ['native', undefined],
+      ['objectql', () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false })],
+    ] as const) {
+      const registered: Record<string, unknown> = {};
+      const provided: Record<string, unknown> = { data: engine, protocol: seedProtocol };
+      await new AnalyticsServicePlugin({ cubes: [CUBE], ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
+        getService: (name: string) => provided[name] ?? registered[name],
+        registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+        replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+        hook: () => {},
+        logger: quiet,
+      } as never);
+      services[face] = registered.analytics as AnalyticsService;
+    }
+  });
+
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  it("'<dataset>.total' and '<object>.total' in a runtimeFilter answer exactly what 'total' answers, on both strategies", async () => {
+    for (const face of LIVE) {
+      const bare = await answerOf(() => filterDataset(face, 'total'));
+      expect(bare.rows, face).toEqual([{ region: 'amer', total: 100 }, { region: 'emea', total: 10 }]);
+      for (const member of [`${DATASET.name}.total`, `${DEAL}.total`]) {
+        expect(await answerOf(() => filterDataset(face, member)), `${face} ${member}`).toEqual(bare);
+      }
+    }
+  });
+
+  it("a hand-authored cube: '<cube>.total' and '<object>.total' in a where answer exactly what 'total' answers, on both strategies", async () => {
+    for (const face of LIVE) {
+      const bare = await answerOf(() => filterCube(face, 'total'));
+      expect(bare.rows, face).toEqual([
+        { [`${CUBE.name}.region`]: 'amer', [`${CUBE.name}.total`]: 100 },
+        { [`${CUBE.name}.region`]: 'emea', [`${CUBE.name}.total`]: 10 },
+      ]);
+      for (const member of [`${CUBE.name}.total`, `${DEAL}.total`]) {
+        expect(await answerOf(() => filterCube(face, member)), `${face} ${member}`).toEqual(bare);
+      }
+    }
+  });
+
+  it("the draft preview answers '<dataset>.total' in a runtimeFilter exactly as it answers 'total'", async () => {
+    const bare = await answerOf(() => filterDataset('preview', 'total'));
+    expect(bare.rows).toEqual([{ region: 'amer', total: 100 }, { region: 'emea', total: 10 }]);
+    expect(await answerOf(() => filterDataset('preview', `${DATASET.name}.total`))).toEqual(bare);
+  });
+
+  it("CONTROL: 'vendor.total', whose first segment is not the cube's own, stays a relationship path on both strategies", async () => {
+    for (const face of LIVE) {
+      const err = await refusalOf(filterDataset(face, 'vendor.total'));
+      expect(err.code, `${face}: ${err.message}`).toBe('INVALID_FIELD');
+      expect(err.status).toBe(400);
+      expect(err.param).toBe('where');
+      expect(err.member).toBe('vendor.total');
+      expect(err.message).toContain("traverses relationship path 'vendor'");
+    }
+    // The hand-authored cube has no include gate: the engine face refuses it as
+    // the cross-object filter it is, never reading the cube's own 'total'.
+    const err = await refusalOf(filterCube('objectql', 'vendor.total'));
+    expect(err.code, err.message).toBe('INVALID_FIELD');
+    expect(err.status).toBe(400);
+    expect(err.member).toBe('vendor.total');
+  });
+});
