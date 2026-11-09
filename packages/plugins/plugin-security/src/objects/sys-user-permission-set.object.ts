@@ -113,6 +113,26 @@ export const SysUserPermissionSet = ObjectSchema.create({
       description: 'The organization this grant belongs to.',
     }),
 
+    // [ADR-0150 D8 row R1] The package that holds the permission set this
+    // grant names, beside its name (ADR-0126 §4: two facts, two columns). A
+    // permission set is identified by (package, name); this column is backfilled
+    // at boot from the set's one package holder
+    // (`stored-permission-set-package-backfill.ts`) and stays empty for a set
+    // the environment authored, the platform registered, two packages hold, or
+    // nothing holds. Nothing reads it yet and no writer stamps it: the grant
+    // still resolves by name, so a grant written after a boot is filled by the
+    // next one. Width: the package-id class (`sys_audience_binding_suggestion
+    // .package_id`, `sys_metadata.package_id`).
+    permission_set_package: Field.text({
+      label: 'Permission Set Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description:
+        'The app the permission set comes from. Filled in by the platform; empty when the set was created here, ' +
+        'or when more than one app provides a set of that name.',
+    }),
+
     // Provenance, not a business link: the platform writes it, a caller does
     // not. A non-system insert is stamped with its writer by the
     // DelegatedAdminGate whatever the payload carried, and a system writer

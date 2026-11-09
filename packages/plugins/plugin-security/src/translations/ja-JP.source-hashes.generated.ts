@@ -21,6 +21,8 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_user_permission_set._validations.validity_window_order.message": "b2216aacc3b6f97b",
   "objects.sys_user_permission_set.fields.display_title.help": "ee7ef063488cd6c3",
   "objects.sys_user_permission_set.fields.display_title.label": "70f7aadecce647a5",
+  "objects.sys_user_permission_set.fields.permission_set_package.help": "4113fdb4710cddea",
+  "objects.sys_user_permission_set.fields.permission_set_package.label": "4b0224196e5cc035",
   "objects.sys_user_position._validations.reserved_identity_position.message": "1ab6d3060fc7e20a",
   "objects.sys_user_position.fields.display_title.help": "39b5571b48e7d800",
   "objects.sys_user_position.fields.display_title.label": "70f7aadecce647a5",

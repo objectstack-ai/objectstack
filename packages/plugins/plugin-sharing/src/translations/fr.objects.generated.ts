@@ -171,6 +171,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           admin: "Administrateur"
         }
       },
+      package_id: {
+        label: "Package",
+        help: "The app a rule that came with an app belongs to. Filled in by the platform; empty for rules created here."
+      },
       customized: {
         label: "Personnalisée",
         help: "Activé dès que vous modifiez une règle fournie avec une application, afin que vos changements soient conservés lors de sa mise à jour."
@@ -321,6 +325,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "File d’attente",
         help: "Le nom de la file d’attente à laquelle appartient ce membre."
+      },
+      queue_package: {
+        label: "Queue Package",
+        help: "The app the queue comes from. Filled in by the platform; empty for queues created here."
       },
       recipient_type: {
         label: "Type de membre",
