@@ -448,6 +448,11 @@ const zh = {
     currencyHome: {
       convertedAt: '按汇率 {{rate}}（{{date}}）折算',
       homeCurrency: '本位币（汇率 1）',
+      preview: '≈ {{amount}}（按汇率 {{rate}}，{{date}}）',
+      previewSame: '≈ {{amount}}（本位币）',
+      awaitingRate: '{{date}} 及之前没有 {{currency}} 的汇率：添加汇率之前无法保存',
+      awaitingDate: '填写单据日期后显示本位币金额',
+      rateUnreadable: '保存时折算为本位币',
     },
     boolean: {
       offBadge: '{{label}} — 已关闭',

@@ -114,7 +114,7 @@ export const AddToCampaignAction = defineAction({
 A server-side `body` (or a registered `handler`) receives `ctx` with `input` (the dialog params), `record` (the target row, when a
 `recordId` is in scope), `api` (scoped cross-object CRUD) and the caller. Read
 the active organization as `ctx.user?.organizationId ?? ctx.session?.organizationId`
-— the blessed name (same axes and `undefined` cases as hooks, objectstack-data).
+(as in hooks, objectstack-data).
 Bodies execute **trusted** (`ctx.api` /
 `ctx.engine` bypass RLS/FLS). `ctx.session.positions` (absent when the caller holds none) is
 **not an authorization input** — ask the security service for privilege (ADR-0095).
@@ -150,7 +150,10 @@ path starting with `/` (`{recordId}` placeholder; an external URL is refused, us
 `openIn`), valid only with `opensInNewTab: true`; the endpoint enforces its own
 auth (the tab carries no in-app session).
 
+<!-- os:check -->
 ```typescript
+import { defineAction } from '@objectstack/spec/ui';
+
 export const OpenInvoicePdfAction = defineAction({
   name: 'crm_open_invoice_pdf',
   label: 'Open PDF',
@@ -166,8 +169,8 @@ export const OpenInvoicePdfAction = defineAction({
 > A printable document (an invoice) is a page that declares `print` — [Print pages](./pages.md#print-pages).
 
 > ⚠️ **Never express new-tab behavior via `params`** — it is `ActionParam[]` for
-> **user input** only: `params: [{ name: 'newTab', type: 'checkbox' }]` builds and
-> draws a checkbox in the dialog.
+> **user input** only: `params: [{ name: 'newTab', type: 'checkbox' }]` draws a
+> checkbox.
 
 ## Action Parameter Patterns
 
