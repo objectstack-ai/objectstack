@@ -1329,6 +1329,7 @@ const zhHant = {
     copyToClipboard: '複製到剪貼簿',
     copied: '已複製！',
     deleteConfirmation: '確定要刪除此記錄嗎？此操作無法撤銷。',
+    deleteConfirmQuestion: '確定要刪除此記錄嗎？',
     deleted: '記錄已刪除',
     editRecord: '編輯記錄',
     viewAll: '檢視全部',
@@ -2597,6 +2598,9 @@ const zhHant = {
       bulkDeleteConfirm: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
       bulkDeleteConfirm_one: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
       bulkDeleteConfirm_other: '確定要刪除選中的 {{count}} 條記錄嗎？此操作無法撤銷。',
+      bulkDeleteQuestion: '確定要刪除選中的 {{count}} 條記錄嗎？',
+      bulkDeleteQuestion_one: '確定要刪除選中的 {{count}} 條記錄嗎？',
+      bulkDeleteQuestion_other: '確定要刪除選中的 {{count}} 條記錄嗎？',
       duplicateViewName: '已存在同名檢視。',
       viewTypeGrid: '表格',
       viewTypeGridDesc: '電子表格風格的記錄表格。',
@@ -3748,12 +3752,31 @@ const zhHant = {
     undoFailed: '撤銷導航變更失敗',
     updateFailed: '更新導航失敗',
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: '無法恢復：另一條記錄已在使用相同的「{{field}}」值。請先修改那條記錄，再恢復。',
+      parentPurged: '無法恢復：它所屬的{{parent}}記錄已被永久刪除。',
+      packageUninstalled: '無法恢復：提供「{{object}}」的軟體包已被解除安裝。',
+      parentInRecycleBin: '暫時無法恢復：它所屬的{{parent}}記錄也在回收站中。請先恢復那條記錄。',
+      notFound: '這條記錄已不在回收站中，可能已被清除。',
+      permissionDenied: '您沒有恢復這條記錄的權限。',
+      notAvailable: '此部署未啟用回收站。',
+    },
+  },
   objectActions: {
     deleteSuccess: '{{label}} 刪除成功',
     deletedNamed: '{{label}}“{{name}}”已刪除',
     deleteFailed: '刪除 {{label}} 失敗',
     noRecordId: '未提供記錄 ID',
     deleteConfirm: '確定要刪除此記錄嗎？此操作無法撤銷。',
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: '確定要刪除此記錄嗎？',
+    restoredNamed: '{{label}}“{{name}}”已恢復',
+    restoreSuccess: '{{label}} 已恢復',
+    restoreFailed: '恢復 {{label}} 失敗',
     deleteConfirmTitle: '刪除{{label}}“{{name}}”？',
     bulkDeleteConfirmTitle: '刪除 {{count}} 條 {{label}} 記錄？',
     bulkDeleteConfirmTitle_one: '刪除 {{count}} 條 {{label}} 記錄？',

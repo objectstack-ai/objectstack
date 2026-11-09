@@ -20,10 +20,18 @@
 import RedisMock from 'ioredis-mock';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
-import { ClusterServicePlugin, offerClusterDriverConnection } from '@objectstack/service-cluster';
+import { createServer, type AddressInfo } from 'node:net';
+import {
+  ClusterDriverLiveness,
+  ClusterServicePlugin,
+  offerClusterDriverConnection,
+  offerClusterDriverLiveness,
+  onClusterResync,
+  readClusterDriverHealth,
+} from '@objectstack/service-cluster';
 // Importing the driver registers `redis` with `defineCluster()` — at module
 // eval, so no test body pays the cold load.
-import '@objectstack/service-cluster-redis';
+import { createRedisClient } from '@objectstack/service-cluster-redis';
 
 import { CacheServicePlugin, planCacheAdapter, type CacheAdapterPlanInput } from './cache-service-plugin.js';
 import { MemoryCacheAdapter } from './memory-cache-adapter.js';
@@ -271,5 +279,171 @@ describe('real ObjectKernel boots — cluster plugin + redis driver over ioredis
   it('a declared multi-node kernel with `adapter: \'memory\'` refuses to boot', async () => {
     vi.stubEnv('OS_CLUSTER_REPLICAS', '2');
     await expect(boot(new CacheServicePlugin({ adapter: 'memory' }), mockClient())).rejects.toThrow(/per-process cache/);
+  });
+});
+
+describe('the derived connection reports its outage — never an unhandled error event', () => {
+  /** A port nothing listens on: every connect attempt is refused at once. */
+  async function refusedPort(): Promise<number> {
+    const server = createServer();
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const { port } = server.address() as AddressInfo;
+    await new Promise<void>((r) => server.close(() => r()));
+    return port;
+  }
+
+  /** Records the connection the cache derives through `base.duplicate()`. */
+  function captureDerived<C extends { duplicate?: () => unknown }>(base: C): { client?: any } {
+    const box: { client?: any } = {};
+    const original = base.duplicate!.bind(base);
+    base.duplicate = () => (box.client = original());
+    return box;
+  }
+
+  async function until(check: () => boolean, what: string): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (!check()) {
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+
+  function livenessFor(cluster: object, port?: number) {
+    const warns: string[] = [];
+    const liveness = new ClusterDriverLiveness({
+      driver: 'redis',
+      nodeId: 'n1',
+      target: port === undefined ? undefined : `127.0.0.1:${port}`,
+      logger: { warn: (m) => warns.push(m), info: () => {} },
+    });
+    offerClusterDriverLiveness(cluster, liveness);
+    return { liveness, warns };
+  }
+
+  async function shutdown(hooks: Map<string, Array<() => Promise<void>>>): Promise<void> {
+    for (const fn of hooks.get('kernel:shutdown') ?? []) await fn();
+  }
+
+  /** Real ioredis against a refused port, with a password in the URL and a fast reconnect. */
+  async function refusedRedis() {
+    const port = await refusedPort();
+    const base = createRedisClient({
+      url: `redis://:s3cret@127.0.0.1:${port}`,
+      options: { retryStrategy: () => 20, maxRetriesPerRequest: 1 },
+    });
+    const derived = captureDerived(base);
+    const cluster = { driver: 'redis', nodeId: 'n1' };
+    offerClusterDriverConnection(cluster, { driver: 'redis', client: base, keyPrefix: 'os:' });
+    return { port, base, derived, cluster };
+  }
+
+  /** Init a multi-node cache over `cluster`, fail a GET, and let the derived connection retry a few times. */
+  async function failThroughOutage(cluster: object, derived: { client?: any }) {
+    vi.stubEnv('OS_CLUSTER_REPLICAS', '2');
+    const { ctx, services, logs, hooks } = makeCtx({ cluster });
+    await new CacheServicePlugin().init(ctx);
+    let reconnects = 0;
+    derived.client.on('reconnecting', () => { reconnects += 1; });
+    await expect((services.get('cache') as RedisCacheAdapter).get('k')).rejects.toThrow();
+    await until(() => reconnects >= 3, 'three reconnect attempts');
+    return { logs, hooks };
+  }
+
+  const unhandledLines = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter((call) => String(call[0]).includes('Unhandled error event'));
+
+  it('a refused store over the redis driver: no unhandled error event, ONE outage warning in the driver\'s liveness, no credential', async () => {
+    const { port, base, derived, cluster } = await refusedRedis();
+    const { warns } = livenessFor(cluster, port);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { logs, hooks } = await failThroughOutage(cluster, derived);
+      expect(unhandledLines(consoleError)).toEqual([]);
+      expect(warns).toHaveLength(1);
+      expect(warns[0]).toMatch(/lost its connection/);
+      expect(warns.join('\n')).not.toContain('s3cret');
+      expect(readClusterDriverHealth(cluster)).toMatchObject({ state: 'down', outages: 1 });
+      // The plugin adds no outage line of its own.
+      expect(logs.filter(([level]) => level !== 'info')).toEqual([]);
+      await shutdown(hooks);
+    } finally {
+      consoleError.mockRestore();
+      derived.client?.disconnect();
+      base.disconnect();
+    }
+  });
+
+  it('a driver that offers no liveness: still no unhandled error event — the outage is logged once through the plugin\'s logger', async () => {
+    const { base, derived, cluster } = await refusedRedis();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { logs, hooks } = await failThroughOutage(cluster, derived);
+      expect(unhandledLines(consoleError)).toEqual([]);
+      const warnings = logs.filter(([level]) => level === 'warn').map(([, message]) => message);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/lost its connection/);
+      expect(warnings[0]).not.toContain('s3cret');
+      await shutdown(hooks);
+    } finally {
+      consoleError.mockRestore();
+      derived.client?.disconnect();
+      base.disconnect();
+    }
+  });
+
+  it('a deliberate shutdown is not an outage: the cache detaches before it quits its connection', async () => {
+    vi.stubEnv('OS_CLUSTER_REPLICAS', '2');
+    const base = mockClient();
+    const derived = captureDerived(base as { duplicate?: () => unknown });
+    const cluster = redisCluster(base);
+    const { warns } = livenessFor(cluster);
+    const { ctx, hooks } = makeCtx({ cluster });
+    await new CacheServicePlugin().init(ctx);
+    derived.client.emit('ready');
+    expect(readClusterDriverHealth(cluster)?.state).toBe('up');
+    // ioredis emits `close` when the quit closes the socket.
+    const quit = derived.client.quit.bind(derived.client);
+    derived.client.quit = async () => { derived.client.emit('close'); return quit(); };
+
+    await shutdown(hooks);
+
+    expect(warns).toEqual([]);
+    expect(readClusterDriverHealth(cluster)).toMatchObject({ state: 'up', outages: 0 });
+  });
+
+  it('`cluster.resync` waits for the cache\'s connection too — the reason it shares the driver\'s liveness', async () => {
+    vi.stubEnv('OS_CLUSTER_REPLICAS', '2');
+    const base = mockClient() as any;
+    const derived = captureDerived(base);
+    const cluster = redisCluster(base);
+    const { liveness, warns } = livenessFor(cluster);
+    liveness.watchConnection(base, 'command');
+    const { ctx, hooks } = makeCtx({ cluster });
+    await new CacheServicePlugin().init(ctx);
+    let resyncs = 0;
+    onClusterResync(cluster, () => { resyncs += 1; });
+
+    derived.client.emit('error', new Error('ECONNREFUSED'));
+    base.emit('error', new Error('ECONNREFUSED'));
+    base.emit('ready');
+    expect(resyncs).toBe(0);
+    expect(readClusterDriverHealth(cluster)?.state).toBe('down');
+
+    derived.client.emit('ready');
+    expect(resyncs).toBe(1);
+    expect(warns).toHaveLength(1);
+    await shutdown(hooks);
+  });
+
+  it('CONTROL: an injected client is its owner\'s — the cache attaches no listener to it', async () => {
+    vi.stubEnv('OS_CLUSTER_REPLICAS', '2');
+    const own = mockClient() as any;
+    const before = ['error', 'close', 'ready'].map((e) => own.listenerCount(e));
+    const cluster = redisCluster();
+    livenessFor(cluster);
+    const { ctx, hooks } = makeCtx({ cluster });
+    await new CacheServicePlugin({ redis: { client: own } }).init(ctx);
+    expect(['error', 'close', 'ready'].map((e) => own.listenerCount(e))).toEqual(before);
+    await shutdown(hooks);
   });
 });

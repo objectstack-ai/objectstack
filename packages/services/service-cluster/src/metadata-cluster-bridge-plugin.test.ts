@@ -24,7 +24,7 @@
  * without that control a guard is indistinguishable from "never say bridged".
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import { MetadataClusterBridgePlugin } from './metadata-cluster-bridge-plugin.js';
 import { ClusterDriverLiveness, offerClusterDriverLiveness } from './cluster-resync.js';
@@ -67,6 +67,15 @@ interface HarnessOptions {
     automation?: 'none' | 'bare' | 'real';
     /** When true, the automation seam throws on attach. */
     automationAttachThrows?: boolean;
+    /**
+     * [#31597] The `settings` slot: `'none'` (getService throws — the default,
+     * so every earlier case reads exactly as it did), `'bare'` (present, no
+     * attachSettingsChangePubSub — an older implementation), or `'real'`
+     * (exposes attachSettingsChangePubSub).
+     */
+    settings?: 'none' | 'bare' | 'real';
+    /** When true, the settings seam throws on attach. */
+    settingsAttachThrows?: boolean;
 }
 
 function makeHarness(opts: HarnessOptions = {}) {
@@ -74,6 +83,7 @@ function makeHarness(opts: HarnessOptions = {}) {
         driver = 'redis', metadata = 'fallback', protocol = 'real',
         datasourceAdmin = 'none', datasourceAttachThrows = false,
         automation = 'none', automationAttachThrows = false,
+        settings = 'none', settingsAttachThrows = false,
     } = opts;
 
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -91,6 +101,12 @@ function makeHarness(opts: HarnessOptions = {}) {
     const attachCredential = vi.fn((_pubsub: unknown, _nodeId: string) => {
         if (automationAttachThrows) throw new Error('automation attach exploded');
         return detachCredential;
+    });
+
+    const detachSettings = vi.fn();
+    const attachSettings = vi.fn((_pubsub: unknown, _nodeId: string) => {
+        if (settingsAttachThrows) throw new Error('settings attach exploded');
+        return detachSettings;
     });
 
     const pubsub = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() };
@@ -115,6 +131,10 @@ function makeHarness(opts: HarnessOptions = {}) {
         automation === 'none' ? undefined
         : automation === 'bare' ? { execute: vi.fn() }
         : { attachConnectorCredentialPubSub: attachCredential };
+    const settingsService =
+        settings === 'none' ? undefined
+        : settings === 'bare' ? { get: vi.fn(), subscribe: vi.fn() }
+        : { attachSettingsChangePubSub: attachSettings };
 
     const hooks = new Map<string, Array<() => Promise<void> | void>>();
     const ctx = {
@@ -145,6 +165,10 @@ function makeHarness(opts: HarnessOptions = {}) {
                 if (!automationService) throw new Error('service not found: automation');
                 return automationService;
             }
+            if (name === 'settings') {
+                if (!settingsService) throw new Error('service not found: settings');
+                return settingsService;
+            }
             throw new Error(`service not found: ${name}`);
         },
     } as unknown as PluginContext;
@@ -158,6 +182,7 @@ function makeHarness(opts: HarnessOptions = {}) {
         attachMetadata, detachMetadata, attachMutation, detachMutation,
         attachDatasource, detachDatasource,
         attachCredential, detachCredential,
+        attachSettings, detachSettings,
     };
 }
 
@@ -533,6 +558,9 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
             if (opts.laneThrows) throw new Error('datasource store unreachable');
         });
         const resyncCredential = vi.fn(async () => {});
+        // [#31722] Lane 2's seam, on the protocol.
+        const resyncProtocol = vi.fn(async () => {});
+        Object.assign(svc('protocol'), { resyncMetadataMutationPubSub: resyncProtocol });
         Object.assign(svc('metadata'), { resyncClusterPubSub: resyncMetadata });
         Object.assign(svc('datasource-admin'), { resyncDatasourceMutationPubSub: resyncDatasource });
         Object.assign(svc('automation'), { resyncConnectorCredentialPubSub: resyncCredential });
@@ -544,7 +572,7 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
             liveness.reportUp('command');
             await new Promise((r) => setTimeout(r, 0));
         };
-        return { ...h, outage, resyncMetadata, resyncDatasource, resyncCredential };
+        return { ...h, outage, resyncMetadata, resyncProtocol, resyncDatasource, resyncCredential };
     }
 
     it('calls each attached lane’s resync seam once per recovered outage', async () => {
@@ -555,12 +583,16 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
 
         await h.outage();
         expect(h.resyncMetadata).toHaveBeenCalledTimes(1);
+        expect(h.resyncProtocol).toHaveBeenCalledTimes(1);
         expect(h.resyncDatasource).toHaveBeenCalledTimes(1);
         expect(h.resyncCredential).toHaveBeenCalledTimes(1);
-        expect(infoLines(h).some((l) => l.includes('resynced metadata.changed, datasource.mutated, connector-credential.mutated'))).toBe(true);
+        expect(infoLines(h).some((l) => l.includes(
+            'resynced metadata.changed, metadata.mutated, datasource.mutated, connector-credential.mutated',
+        ))).toBe(true);
 
         await h.outage();
         expect(h.resyncMetadata).toHaveBeenCalledTimes(2);
+        expect(h.resyncProtocol).toHaveBeenCalledTimes(2);
     });
 
     it('one lane failing is a warning and does not stop the others', async () => {
@@ -569,6 +601,7 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
         await h.fire('kernel:ready');
         await h.outage();
         expect(h.resyncMetadata).toHaveBeenCalledTimes(1);
+        expect(h.resyncProtocol).toHaveBeenCalledTimes(1);
         expect(h.resyncCredential).toHaveBeenCalledTimes(1);
         expect(warnLines(h).filter((l) => l.includes('datasource.mutated resync after'))).toHaveLength(1);
     });
@@ -580,6 +613,7 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
         await h.fire('kernel:shutdown');
         await h.outage();
         expect(h.resyncMetadata).not.toHaveBeenCalled();
+        expect(h.resyncProtocol).not.toHaveBeenCalled();
     });
 
     it('CONTROL — the in-process memory driver attaches no lane, so no resync is wired', async () => {
@@ -588,7 +622,185 @@ describe('cluster.resync — every attached lane re-reads what an outage made it
         await h.fire('kernel:ready');
         await h.outage();
         expect(h.resyncMetadata).not.toHaveBeenCalled();
+        expect(h.resyncProtocol).not.toHaveBeenCalled();
         expect(h.resyncDatasource).not.toHaveBeenCalled();
         expect(h.resyncCredential).not.toHaveBeenCalled();
+    });
+
+    it('[#31722] lane 2 — a protocol that predates the seam is bridged and simply not resynced', async () => {
+        const h = resyncHarness();
+        delete (h.ctx.getService<Record<string, unknown>>('protocol') as Record<string, unknown>).resyncMetadataMutationPubSub;
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        expect(h.attachMutation).toHaveBeenCalledTimes(1);
+
+        await h.outage();
+        expect(h.resyncProtocol).not.toHaveBeenCalled();
+        expect(h.resyncMetadata).toHaveBeenCalledTimes(1);
+        expect(infoLines(h).some((l) => l.includes('resynced metadata.changed, datasource.mutated, connector-credential.mutated'))).toBe(true);
+    });
+
+    it('[#31722] lane 2 — a rejected protocol resync is a warning; the other lanes still run', async () => {
+        const h = resyncHarness();
+        h.resyncProtocol.mockRejectedValueOnce(new Error('sys_metadata read failed'));
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.outage();
+        expect(h.resyncProtocol).toHaveBeenCalledTimes(1);
+        expect(h.resyncDatasource).toHaveBeenCalledTimes(1);
+        expect(warnLines(h).filter((l) => l.includes('metadata.mutated resync after'))).toHaveLength(1);
+    });
+});
+
+describe('[#31597] lane 5 — the settings service’s settings.changed fan-out, behind declared replicas over redis', () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+    /** Declare (or not) several replicas, the R3 switch the lane keys on. */
+    const declare = (replicas: string) => {
+        vi.stubEnv('OS_CLUSTER_REPLICAS', replicas);
+        vi.stubEnv('OS_EXPECT_MULTI_NODE', '');
+    };
+
+    it('⭐ attaches with the cluster’s pubsub and node id when 2 replicas are declared over redis, and reports it', async () => {
+        declare('2');
+        const h = makeHarness({ settings: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+        expect(h.attachSettings).toHaveBeenCalledTimes(1);
+        expect(h.attachSettings).toHaveBeenCalledWith(h.pubsub, 'node-a');
+        expect(infoLines(h).some((l) => l.includes('bridged settings.changed'))).toBe(true);
+    });
+
+    it('binds at kernel:bootstrapped, after the settings service bound its engine at kernel:ready', async () => {
+        declare('2');
+        const h = makeHarness({ settings: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        expect(h.attachSettings).not.toHaveBeenCalled();
+        await h.fire('kernel:bootstrapped');
+        expect(h.attachSettings).toHaveBeenCalledTimes(1);
+    });
+
+    it('CONTROL — the redis driver with no declaration attaches nothing and says nothing above debug', async () => {
+        declare('');
+        const h = makeHarness({ settings: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+        expect(h.attachSettings).not.toHaveBeenCalled();
+        expect(infoLines(h).some((l) => l.includes('settings.changed'))).toBe(false);
+        expect(warnLines(h).some((l) => l.includes('settings'))).toBe(false);
+        expect(debugLines(h).some((l) => l.includes('settings fan-out skipped'))).toBe(true);
+        // The other lanes keep their own guard: lane 2 still attaches on redis.
+        expect(h.attachMutation).toHaveBeenCalledTimes(1);
+    });
+
+    it('one declared replica is a single node: no lane', async () => {
+        declare('1');
+        const h = makeHarness({ settings: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+        expect(h.attachSettings).not.toHaveBeenCalled();
+    });
+
+    it('declared replicas over a driver other than redis: no lane', async () => {
+        declare('3');
+        const h = makeHarness({ settings: 'real', driver: 'postgres' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+        expect(h.attachSettings).not.toHaveBeenCalled();
+    });
+
+    it('declared replicas over the in-process memory driver: no lane', async () => {
+        declare('3');
+        const h = makeHarness({ settings: 'real', driver: 'memory' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+        expect(h.attachSettings).not.toHaveBeenCalled();
+    });
+
+    it('skips quietly when no settings service is registered, or it does not expose the seam', async () => {
+        declare('2');
+        for (const settings of ['none', 'bare'] as const) {
+            const h = makeHarness({ settings });
+            await new MetadataClusterBridgePlugin().init(h.ctx);
+            await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+            expect(h.attachSettings).not.toHaveBeenCalled();
+            expect(warnLines(h).some((l) => l.includes('settings'))).toBe(false);
+            expect(debugLines(h).some((l) => l.includes('settings fan-out'))).toBe(true);
+        }
+    });
+
+    it('a throwing attach is reported and does not take the other lanes down', async () => {
+        declare('2');
+        const h = makeHarness({ settings: 'real', settingsAttachThrows: true, automation: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+        expect(h.logger.error).toHaveBeenCalledWith(
+            'MetadataClusterBridgePlugin: settings-lane attach failed',
+            expect.any(Error),
+        );
+        expect(h.attachMutation).toHaveBeenCalledTimes(1);
+        expect(h.attachCredential).toHaveBeenCalledTimes(1);
+    });
+
+    it('kernel:shutdown detaches lane 5, and a throwing lane-4 detach does not strand it', async () => {
+        declare('2');
+        const h = makeHarness({ settings: 'real', automation: 'real' });
+        h.detachCredential.mockImplementation(() => {
+            throw new Error('credential detach exploded');
+        });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+        await h.fire('kernel:shutdown');
+        expect(h.detachSettings).toHaveBeenCalledTimes(1);
+    });
+
+    describe('cluster.resync', () => {
+        function resyncHarness() {
+            const h = makeHarness({ settings: 'real' });
+            const resyncSettings = vi.fn(async () => {});
+            Object.assign(h.ctx.getService<Record<string, unknown>>('settings'), {
+                resyncSettingsChangePubSub: resyncSettings,
+            });
+            const liveness = new ClusterDriverLiveness({ driver: 'redis', nodeId: 'node-a', logger: { warn: vi.fn(), info: vi.fn() } });
+            offerClusterDriverLiveness(h.ctx.getService<object>('cluster'), liveness);
+            const outage = async () => {
+                liveness.reportUp('command');
+                liveness.reportDown('command', new Error('ECONNREFUSED'));
+                liveness.reportUp('command');
+                await new Promise((r) => setTimeout(r, 0));
+            };
+            return { ...h, outage, resyncSettings };
+        }
+
+        it('the settings lane re-reads once per recovered outage', async () => {
+            declare('2');
+            const h = resyncHarness();
+            await new MetadataClusterBridgePlugin().init(h.ctx);
+            await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+            await h.outage();
+            expect(h.resyncSettings).toHaveBeenCalledTimes(1);
+            expect(infoLines(h).some((l) => l.includes('resynced settings.changed'))).toBe(true);
+        });
+
+        it('CONTROL — undeclared, the lane never attached, so a reconnect calls nothing', async () => {
+            declare('');
+            const h = resyncHarness();
+            await new MetadataClusterBridgePlugin().init(h.ctx);
+            await h.fire('kernel:ready');
+        await h.fire('kernel:bootstrapped');
+            await h.outage();
+            expect(h.resyncSettings).not.toHaveBeenCalled();
+        });
     });
 });

@@ -15,12 +15,17 @@ import { spawnSync } from 'node:child_process';
  * holds every command source to that.
  *
  * Its own module so a test can replace the step without spawning a CLI.
+ *
+ * `stdoutToStderr` (`os deploy --json`): the child's stdout goes to this
+ * process's stderr, so the one JSON document is all that reaches stdout. The
+ * child writes to the file descriptor directly, past any `process.stdout`
+ * reservation in this process, so the redirection has to happen here.
  */
-export function compileForDeploy(artifactPath: string): number {
+export function compileForDeploy(artifactPath: string, options: { stdoutToStderr?: boolean } = {}): number {
   const result = spawnSync(
     process.execPath,
     [process.argv[1], 'compile', '--output', artifactPath],
-    { stdio: 'inherit' },
+    { stdio: options.stdoutToStderr ? ['inherit', 2, 'inherit'] : 'inherit' },
   );
   return result.status ?? 1;
 }

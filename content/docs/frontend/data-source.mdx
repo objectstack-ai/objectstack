@@ -324,6 +324,9 @@ the same URL make one request, even when the entry's read settled first:
 Outside such a scope nothing is kept beyond the request in flight: a page that
 mounts again reads again.
 
-The console's product-page blocks — `hero`, `stat`, `usage-bar`, `checklist` and
-`tile-grid` — accept this binding in their arms; see the `@object-ui/app-shell`
-README.
+The console's product-page blocks — `hero`, `stat`, `usage-bar`, `checklist`,
+`tile-grid` and `row-table` — accept this binding in their arms; see the
+`@object-ui/app-shell` README. `row-table` draws every row of a list in the
+answer as a table: `rows: '${data.actors}'` names the list, and each column
+declares a `path` into one row, a `label`, and a `format` of `text`, `datetime`
+or `enum`.

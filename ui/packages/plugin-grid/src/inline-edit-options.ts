@@ -13,6 +13,7 @@
  */
 
 import { isInlineExcludedFieldType } from '@object-ui/fields';
+import { isExpressionComputedField } from '@object-ui/core';
 
 /**
  * For a field governed by a blocking `state_machine` validation, the values
@@ -46,7 +47,10 @@ const NON_EDITABLE_FIELD_TYPES = new Set<string>([
 /**
  * Whether a field may be edited in place in the grid. False for explicitly
  * `readonly` fields, for inherently computed / binary types (see
- * {@link NON_EDITABLE_FIELD_TYPES}), and for every type the fields package
+ * {@link NON_EDITABLE_FIELD_TYPES}), for a field of any type carrying an
+ * `expression` (`isExpressionComputedField`: the engine computes and stores
+ * it on every write, so a typed value never stands — objectstack#31759), and
+ * for every type the fields package
  * excludes from inline editing (`isInlineExcludedFieldType` — alias-aware,
  * so `composite` → `object`, `repeater` → `grid` are read-only cells, never
  * a plain text box). A null/unknown field is treated as editable so the
@@ -57,6 +61,7 @@ export function isFieldInlineEditable(
 ): boolean {
   if (!fieldDef) return true;
   if (fieldDef.readonly === true) return false;
+  if (isExpressionComputedField(fieldDef)) return false;
   if (typeof fieldDef.type !== 'string') return true;
   return !NON_EDITABLE_FIELD_TYPES.has(fieldDef.type) && !isInlineExcludedFieldType(fieldDef.type);
 }

@@ -200,6 +200,7 @@ import { redactBoundStatement } from '@objectstack/types';
 // supplies the facts and turns a `refuse` into the throw.
 import {
   ORGANIZATION_OBJECT,
+  type SystemWriteOrganizationDecision,
 } from './tenancy/system-write-organization.js';
 import {
   type TenancyPosture,
@@ -3048,6 +3049,32 @@ export class ObjectQL implements IObjectQLEngine {
   setTenancyPostureProvider(provider: () => string | undefined): void {
     // [#29986 codemod] The body moved to `engine-secrets-and-routing.ts` (see `SecretsAndRoutingHost`).
     return SecretsAndRoutingFacet.setTenancyPostureProvider.call(secretsAndRoutingHost.of(this), provider);
+  }
+
+  /**
+   * [ADR-0131 D9] The organization a SYSTEM-context write that carries none
+   * resolves to on this engine — the decision its own system insert makes
+   * (`resolveSystemInsertOrganization`), from the same three inputs: the
+   * posture in force (the injected tenancy-posture accessor, else the
+   * deployment's), the install's organizations (the memoised probe, capped at
+   * two), and whether this composition registers `sys_organization` at all.
+   * The predicate is `@objectstack/core`'s `resolveSystemWriteOrganization`,
+   * never a second spelling of it.
+   *
+   * For a caller that runs system work with no organization of its own and
+   * wants to carry, ahead of its writes, the organization those writes would
+   * be stamped with — a job that declares no `organization` resolves its pull's
+   * context here, so the pull's reads scope by the organization its writes
+   * land in. Not a write and not a gate: it refuses nothing itself. A `refuse`
+   * decision is the answer the write would turn into its refusal, and the
+   * write stays the one that refuses.
+   *
+   * A probe that could not run (an outage, not an empty table) propagates, as
+   * it does on the insert.
+   */
+  systemWriteOrganization(): Promise<SystemWriteOrganizationDecision> {
+    // [#31823] The body lives in `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
+    return MiddlewareAndContextFacet.systemWriteOrganization.call(middlewareAndContextHost.of(this));
   }
 
   private async encryptSecretFields(

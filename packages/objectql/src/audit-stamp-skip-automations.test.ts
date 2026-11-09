@@ -46,8 +46,9 @@
 //  (d) the registration: every `sys:audit` entry carries no metadata binding,
 //      so a builtin added to the list later cannot reach the opt-out either.
 //
-// The driver below stamps NOTHING itself, so every audit value on a stored row
-// is the hook's.
+// The driver below stamps no audit column itself, so every audit value on a
+// stored row is the hook's. It stamps only the tenant column, as every real
+// driver does from `DriverOptions.tenantId`.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectKernel, runImport } from '@objectstack/core';
@@ -62,7 +63,7 @@ const IMPORTER = 'usr_importer';
 const EDITOR = 'usr_editor';
 const ORG = 'org_acme';
 
-/** A store-backed stub driver that stamps nothing: the stored row IS the verdict. */
+/** A store-backed stub driver that stamps no audit column: the stored row IS the verdict. */
 function makeStubDriver() {
   const rows = new Map<string, Record<string, any>>();
   const createOptions: any[] = [];
@@ -102,7 +103,11 @@ function makeStubDriver() {
       createOptions.push(options);
       n += 1;
       const id = (data.id as string) ?? `rec_${n}`;
-      const row = { ...data, id };
+      // The tenant column is the DRIVER's own stamp on every real driver
+      // (`injectTenantOnInsert`, from `DriverOptions.tenantId`), never an audit
+      // hook's, so this stub carries it too: the import runner's match lookup
+      // reads the record in the caller's organization by that column.
+      const row = { ...(options?.tenantId ? { organization_id: options.tenantId } : {}), ...data, id };
       rows.set(id, row);
       return { ...row };
     },

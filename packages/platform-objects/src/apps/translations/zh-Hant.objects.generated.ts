@@ -88,6 +88,18 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "AI 存取權限",
         help: "該使用者是否佔用一個 AI 席位。席位授予 `ai_seat` 能力，可使用應用程式內的 AI 助手（build 和 ask）。可佔用席位的使用者數受許可證所含席位數限制。"
       },
+      principal_kind: {
+        label: "主體類型",
+        help: "該使用者是人員還是 AI 服務帳號。AI 服務帳號從不登入，只透過它自己的 API 金鑰操作。在建立使用者時設定，之後不會改變。",
+        options: {
+          human: "人員",
+          agent: "AI 服務帳號"
+        }
+      },
+      accountable_user_id: {
+        label: "負責人",
+        help: "對於 AI 服務帳號，指對它負責的人員。人員的此項為空。負責人自己的權限不會傳給該帳號。"
+      },
       image: {
         label: "頭像"
       },
@@ -2123,6 +2135,11 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             label: "對應：姓名 claim",
             helpText: "可選。對應到顯示名稱的 claim。預設為「name」。",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "對應：群組 claim",
+            helpText: "可選。攜帶使用者所屬群組的 claim，例如「groups」。每次登入都會授予對應到這些群組的權限集。留空則不對應任何群組。",
+            placeholder: "groups"
           }
         }
       },
@@ -2153,6 +2170,11 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID 格式",
             helpText: "可選。請求的 SAML NameID 格式。預設為 IdP 設定的格式。",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "對應：群組屬性",
+            helpText: "可選。攜帶使用者所屬群組的斷言屬性。每次登入都會授予對應到這些群組的權限集。留空則不對應任何群組。",
+            placeholder: "groups"
           }
         }
       },
@@ -2181,6 +2203,35 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "編輯登入選項",
         successMessage: "登入選項已儲存"
+      },
+      show_sso_groups_claim: {
+        label: "檢視群組 claim",
+        resultDialog: {
+          title: "群組 claim",
+          description: "此提供者在每次登入時讀取使用者所屬群組的 OIDC claim 或 SAML 屬性。空白表示此提供者不對應任何群組。可透過「編輯群組 claim」變更。",
+          acknowledge: "完成",
+          fields: {
+            groupsClaim: "群組 claim"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "編輯群組 claim",
+        params: {
+          groupsClaim: {
+            label: "群組 claim",
+            helpText: "攜帶使用者所屬群組的 OIDC claim 或 SAML 屬性。每次登入都會授予對應到這些群組的權限集。留空即移除：此提供者將不再對應任何群組。",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "群組 claim 已儲存",
+          description: "此提供者此後每次登入時讀取的群組 claim。空白表示不對應任何群組。",
+          acknowledge: "完成",
+          fields: {
+            groupsClaim: "群組 claim"
+          }
+        }
       }
     }
   },

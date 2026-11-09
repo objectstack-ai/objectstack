@@ -20,7 +20,7 @@
 // everything from ` #13419` on is not part of the value. The step's real
 // parsed name is the three-letter string `The`. The GitHub Actions log names
 // the step `The`, and anything that resolves a step by its name text against
-// the workflow source (scripts/pm/ci-failure.mjs) cannot find it.
+// the workflow source cannot find it.
 //
 // This repo names issue numbers in step names as a matter of style, so the
 // keystroke that produces this is available to every future author and

@@ -24,9 +24,9 @@
  *
  * The console's own list (`app-shell` `ObjectView` → `useObjectActions`) is
  * the behaviour matched, and every case below reads one of its steps:
- *  - a row asks "Are you sure you want to delete this record? This cannot be
- *    undone." (objectstack-ai/objectstack#27823); a selection
- *    asks "Delete N selected records? This cannot be undone." once; the
+ *  - a row asks "Are you sure you want to delete this record?" and a
+ *    selection asks "Delete N selected records?" once (a business record
+ *    enters the recycle bin, objectstack#30239); the
  *    title names the row (or counts the selection) and the confirm button is
  *    a destructive "Delete" (objectui#11695);
  *  - Delete deletes through `dataSource.delete`, one call per record, and the
@@ -227,7 +227,7 @@ describe('objectui#10383 — row Delete on the registered object-view path', () 
 
     const dialog = await confirmDialog();
     expect(
-      within(dialog).getByText('Are you sure you want to delete this record? This cannot be undone.'),
+      within(dialog).getByText('Are you sure you want to delete this record?'),
     ).toBeInTheDocument();
     // objectui#11695 — the title names the row and its object; the confirm is
     // a destructive Delete, not the generic "Confirm Action" / "Continue".
@@ -289,7 +289,7 @@ describe('objectui#10383 — bulk Delete on the registered object-view path', ()
 
     const dialog = await confirmDialog();
     expect(
-      within(dialog).getByText('Delete 2 selected records? This cannot be undone.'),
+      within(dialog).getByText('Delete 2 selected records?'),
     ).toBeInTheDocument();
     expect(within(dialog).getByRole('heading')).toHaveTextContent('Delete 2 Test object records?');
     expect(within(dialog).getByRole('button', { name: 'Delete' }).className).toContain('bg-destructive');

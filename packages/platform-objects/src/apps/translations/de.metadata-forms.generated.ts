@@ -2241,6 +2241,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "dimensions.nullLabel": {
         label: "Bezeichnung für Null"
       },
+      "dimensions.synonyms": {
+        label: "Synonyme",
+        helpText: "Wörter, mit denen Personen diese Dimension in einer Frage bezeichnen (z. B. Phase, Verkaufsphase, stage), durch Kommas getrennt; gemischte Sprachen sind erlaubt. Von den Dataset-KI-Werkzeugen abgeglichen, nie angezeigt. Höchstens 20, jedes höchstens 60 Zeichen; ein Wort darf in diesem Dataset nur einem Element entsprechen"
+      },
+      "dimensions.description": {
+        label: "Beschreibung",
+        helpText: "Fachliche Definition in einfacher Sprache: ein oder zwei Sätze dazu, was diese Dimension ist und wann man sie verwendet. Wird mit den Analyse-Metadaten veröffentlicht und von den Dataset-KI-Werkzeugen gelesen; eine Definition, nie ein Prompt oder eine Anweisung an eine KI. Höchstens 500 Zeichen"
+      },
       measures: {
         label: "Kennzahlen",
         helpText: "Jeweils: Name, Aggregation, Feld (optional für count) und Anzeigeformat/Währung"
@@ -2274,6 +2282,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "measures.duration": {
         label: "Dauer"
+      },
+      "measures.synonyms": {
+        label: "Synonyme",
+        helpText: "Wörter, mit denen Personen diese Kennzahl in einer Frage bezeichnen (z. B. Umsatz, Erlös, revenue), durch Kommas getrennt; gemischte Sprachen sind erlaubt. Von den Dataset-KI-Werkzeugen abgeglichen, nie angezeigt. Höchstens 20, jedes höchstens 60 Zeichen; ein Wort darf in diesem Dataset nur einem Element entsprechen"
+      },
+      "measures.description": {
+        label: "Beschreibung",
+        helpText: "Fachliche Definition in einfacher Sprache: ein oder zwei Sätze dazu, was diese Kennzahl ist und wann man sie verwendet. Wird mit den Analyse-Metadaten veröffentlicht und von den Dataset-KI-Werkzeugen gelesen; eine Definition, nie ein Prompt oder eine Anweisung an eine KI. Höchstens 500 Zeichen"
       }
     }
   },

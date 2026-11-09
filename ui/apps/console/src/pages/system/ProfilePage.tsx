@@ -37,7 +37,7 @@ import {
 } from '@object-ui/components';
 import { useUpload } from '@object-ui/fields';
 import { ConsolePageHeader } from '@object-ui/app-shell';
-import { useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
+import { resolveBuiltInLanguage, useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
 import { useAdapter, extractFieldErrors, extractWriteErrorMessage } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { resolveFieldAffordance } from '@object-ui/core';
@@ -581,8 +581,8 @@ interface LanguageCardProps {
  * ## What is offered, and what happens when the write route is not there
  *
  * The option list is `offerableLanguages` — the i18n provider's own answer
- * (the deployment's published locales ∩ what this renderer can resolve), which
- * is what `LocaleSwitcher` renders too. ⛔ No second list is introduced here.
+ * (the platform locale table ∩ the deployment's published locales, as table
+ * tags), which is what `LocaleSwitcher` renders too. ⛔ No second list is introduced here.
  * A stored tag that is not in that set is prepended so the control shows the
  * truth rather than rendering blank.
  *
@@ -618,7 +618,15 @@ function LanguageCard({ userId }: LanguageCardProps) {
       .then((row) => {
         if (cancelled) return;
         const raw = (row as { locale?: unknown } | null)?.locale;
-        const value = typeof raw === 'string' && raw.length > 0 ? raw : USE_DEPLOYMENT_DEFAULT;
+        // A stored spelling of a platform locale table language (`zh-CN`) is
+        // read as its table tag (`zh-Hans`), the value the offered list carries
+        // (objectstack#30514). Read as-is, it matched no option and was
+        // prepended beside the table entry: two options for one language.
+        // A tag the table does not name stays as stored.
+        const value =
+          typeof raw === 'string' && raw.length > 0
+            ? (resolveBuiltInLanguage(raw) ?? raw)
+            : USE_DEPLOYMENT_DEFAULT;
         setStored(value);
         setChoice(value);
         setRowRead(true);

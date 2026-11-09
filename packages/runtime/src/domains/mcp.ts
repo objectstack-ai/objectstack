@@ -17,7 +17,9 @@ import {
     FEDERATION_READ_CAPABILITY,
     FEDERATION_WRITE_CAPABILITY,
     federationCapabilityRefusal,
+    metaRequestLocale,
     projectMetaActionForCaller,
+    translateMetaList,
     type FederationCallKind,
 } from '@objectstack/rest';
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
@@ -157,7 +159,11 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     // `read_file` / `create_upload_link` exactly where the storage plugin's
     // caller-scoped verbs are served.
     const recordFiles = await resolveMcpRecordFileService(deps, context);
-    const bridge = buildMcpBridge(deps, context, { recordFiles });
+    // [ADR-0149 D2] The dataset seam, resolved on the same schedule: the bridge
+    // carries `list_datasets` / `query_dataset` exactly where the analytics
+    // service serves its dataset executor.
+    const datasetTools = await resolveMcpDatasetToolsService(deps, context);
+    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools });
     let webRes: Response;
     try {
         webRes = await mcp.handleHttpRequest(webRequest, {
@@ -265,7 +271,9 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
 
     // [#30892] The file pair is taught where the bridge would carry it.
     const fileTools = (await resolveMcpRecordFileService(deps, context)) !== undefined;
-    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools });
+    // [ADR-0149 D2] …and the dataset pair, with the D3 selection rule.
+    const datasetTools = (await resolveMcpDatasetToolsService(deps, context)) !== undefined;
+    const markdown: string = mcp.renderSkill({ mcpUrl, fileTools, datasetTools });
     // Raw text must NOT ride the `response` channel — `sendResult` JSON-
     // encodes those bodies unconditionally. The `result` stream channel is
     // the one raw pipe through every adapter (string events are written
@@ -500,7 +508,7 @@ async function readMergedSkillRows(
  */
 async function readMergedItems(
     protocol: McpMergedMetadataRead | undefined | null,
-    type: 'skill' | 'object' | 'action',
+    type: 'skill' | 'object' | 'action' | 'dataset',
 ): Promise<unknown[] | undefined> {
     if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
     const answer = await protocol.getMetaItems({ type });
@@ -598,7 +606,7 @@ async function warnIfSkillListIncomplete(
 export function buildMcpBridge(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
-    seams: { recordFiles?: McpRecordFileService } = {},
+    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService } = {},
 ): any {
     const ec = context.executionContext;
     const envId = context.environmentId;
@@ -1111,6 +1119,112 @@ export function buildMcpBridge(
         // [#30892] The file seam (`read_file` / `create_upload_link`), carried
         // only where the storage plugin serves its caller-scoped verbs.
         ...(seams.recordFiles ? recordFileMembers(seams.recordFiles, callData, driver, envId, ec, deps, context) : {}),
+        // [ADR-0149 D2] The dataset seam (`list_datasets` / `query_dataset`),
+        // carried only where the analytics service serves its executor.
+        ...(seams.datasetTools ? datasetToolMembers(seams.datasetTools, getProtocol, ec, deps, context) : {}),
+    };
+}
+
+/**
+ * [ADR-0149 D2] The face of the `analytics` service the MCP dataset tools
+ * call: `datasetTools(deps)` binds the service-analytics executor
+ * (`createDatasetTools`) to the service itself. Named here structurally, as
+ * {@link McpRecordFileService} is, so this package takes no dependency on the
+ * analytics package (it loads opt-in). Every method refuses by throwing an
+ * ADR-0112 coded error.
+ */
+export interface McpDatasetToolsService {
+    datasetTools(deps: {
+        loadDatasets: (context: unknown) => Promise<readonly unknown[]>;
+        diagnoseDelegation?: (object: string, context: unknown) => Promise<{ narrowed: boolean; statement?: string } | undefined>;
+        maxQueryLimit?: number;
+    }): {
+        readonly definitions: ReadonlyArray<{ name: string; description: string }>;
+        listDatasets(input: unknown, context?: unknown): Promise<any>;
+        queryDataset(input: unknown, context?: unknown): Promise<any>;
+    };
+}
+
+/**
+ * [ADR-0149 D2] The `analytics` service when it serves the dataset executor,
+ * else `undefined` (no analytics service — it loads opt-in — or one without
+ * `datasetTools`). A lookup that throws is "not served": the tools are then
+ * not listed, as for {@link resolveMcpRecordFileService}.
+ */
+export async function resolveMcpDatasetToolsService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<McpDatasetToolsService | undefined> {
+    let service: Partial<McpDatasetToolsService> | undefined;
+    try {
+        service = (await deps.resolveService(context, 'analytics', context.environmentId)) as unknown as
+            Partial<McpDatasetToolsService> | undefined;
+    } catch {
+        return undefined;
+    }
+    return service && typeof service.datasetTools === 'function' ? (service as McpDatasetToolsService) : undefined;
+}
+
+/**
+ * [ADR-0149 D2] The bridge's three dataset members over the analytics
+ * service's executor, bound to THIS request's principal.
+ *
+ * - The saved datasets come from the read the REST door resolves
+ *   `datasetName` from (the protocol's merged `getMetaItems({ type: 'dataset' })`),
+ *   localized with the `/meta` list translation for this request's locale, as
+ *   the REST door localizes a saved dataset. A throwing read is left to throw:
+ *   the executor answers it as a degraded read (`partial` / 503), never as an
+ *   empty catalogue.
+ * - The narrowing probe is the bridge's own `diagnoseDelegation` read, asked
+ *   of this request's security service, so `query_dataset` states a narrowing
+ *   exactly where `query_records` does.
+ * - `maxRows` is the tool layer's page cap; the executor holds
+ *   `selection.limit` to it.
+ */
+function datasetToolMembers(
+    service: McpDatasetToolsService,
+    getProtocol: () => Promise<McpMergedMetadataRead | undefined>,
+    ec: unknown,
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+) {
+    const envId = context.environmentId;
+    const loadDatasets = async (): Promise<readonly unknown[]> => {
+        const protocol = await getProtocol();
+        const items = (await readMergedItems(protocol, 'dataset')) ?? [];
+        const translated = await translateMetaList(
+            {
+                resolveI18nService: async () => {
+                    try {
+                        return await deps.resolveService(context, 'i18n', envId);
+                    } catch {
+                        return undefined;
+                    }
+                },
+                resolveProtocol: async () => protocol as any,
+                requestLocale: (i18n?: unknown) => metaRequestLocale({ headers: context.request?.headers }, i18n),
+            },
+            'dataset',
+            items,
+        );
+        return Array.isArray(translated) ? translated : items;
+    };
+    const diagnoseDelegation = async (object: string) => {
+        try {
+            const security = await deps.resolveService(context, 'security', envId) as
+                Partial<ISecurityService> | undefined;
+            if (typeof security?.describeDelegationNarrowing !== 'function') return undefined;
+            return await security.describeDelegationNarrowing(object, ec as any);
+        } catch {
+            return undefined;
+        }
+    };
+    const executor = (maxQueryLimit?: number) =>
+        service.datasetTools({ loadDatasets, diagnoseDelegation, ...(maxQueryLimit !== undefined ? { maxQueryLimit } : {}) });
+    return {
+        listDatasets: (input: unknown) => executor().listDatasets(input, ec),
+        queryDataset: (input: unknown, opts: { maxRows: number }) => executor(opts.maxRows).queryDataset(input, ec),
+        datasetToolDefinitions: () => executor().definitions,
     };
 }
 

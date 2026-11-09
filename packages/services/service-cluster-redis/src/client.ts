@@ -111,21 +111,9 @@ export function watchRedisConnection(
     liveness: ClusterDriverLiveness,
     source: string,
 ): () => void {
-    const onError = (err: unknown): void => liveness.reportDown(source, err);
-    const onClose = (): void => liveness.reportDown(source);
-    const onReady = (): void => liveness.reportUp(source);
-    client.on('error', onError);
-    client.on('close', onClose);
-    client.on('ready', onReady);
-    if (client.status === 'ready') liveness.reportUp(source);
-    let watching = true;
-    return () => {
-        if (!watching) return;
-        watching = false;
-        client.off('error', onError);
-        client.off('close', onClose);
-        client.off('ready', onReady);
-    };
+    // The one listener style (`ClusterDriverLiveness.watchConnection`), shared
+    // with the connections derived from this one (`watchClusterDriverConnection`).
+    return liveness.watchConnection(client, source);
 }
 
 /**

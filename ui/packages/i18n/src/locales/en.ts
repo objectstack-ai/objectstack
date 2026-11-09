@@ -1614,6 +1614,7 @@ const en = {
     copyToClipboard: 'Copy to clipboard',
     copied: 'Copied!',
     deleteConfirmation: 'Are you sure you want to delete this record? This cannot be undone.',
+    deleteConfirmQuestion: 'Are you sure you want to delete this record?',
     deleted: 'Record deleted',
     editRecord: 'Edit record',
     viewAll: 'View All',
@@ -3085,6 +3086,9 @@ const en = {
       bulkDeleteConfirm: 'Delete {{count}} selected records? This cannot be undone.',
       bulkDeleteConfirm_one: 'Delete {{count}} selected record? This cannot be undone.',
       bulkDeleteConfirm_other: 'Delete {{count}} selected records? This cannot be undone.',
+      bulkDeleteQuestion: 'Delete {{count}} selected records?',
+      bulkDeleteQuestion_one: 'Delete {{count}} selected record?',
+      bulkDeleteQuestion_other: 'Delete {{count}} selected records?',
       duplicateViewName: 'A view with this name already exists.',
       viewTypeGrid: 'Grid',
       viewTypeGridDesc: 'A spreadsheet-style table of records.',
@@ -4344,6 +4348,19 @@ const en = {
     undoFailed: 'Failed to undo navigation change',
     updateFailed: 'Failed to update navigation',
   },
+  // ADR-0148 — why a recycle-bin restore was refused, one sentence per code the
+  // restore door answers (`recycleBinRestoreRefusalText` in @object-ui/core).
+  recycleBin: {
+    refusal: {
+      uniqueValueTaken: "Can't restore: another record now has the same {{field}} value. Change that record first, then restore.",
+      parentPurged: "Can't restore: the {{parent}} record it belonged to has been permanently deleted.",
+      packageUninstalled: "Can't restore: the package that provided {{object}} has been uninstalled.",
+      parentInRecycleBin: "Can't restore yet: the {{parent}} record it belongs to is also in the recycle bin. Restore that record first.",
+      notFound: 'This record is no longer in the recycle bin. It may have been purged.',
+      permissionDenied: "You don't have permission to restore this record.",
+      notAvailable: 'The recycle bin is not available on this deployment.',
+    },
+  },
   objectActions: {
     deleteSuccess: '{{label}} deleted successfully',
     // The delete toast when the deleted record has a display name (ADR-0079),
@@ -4353,6 +4370,12 @@ const en = {
     deleteFailed: 'Failed to delete {{label}}',
     noRecordId: 'No record ID provided',
     deleteConfirm: 'Are you sure you want to delete this record? This cannot be undone.',
+    // ADR-0148 — a business object's delete goes to the recycle bin: the
+    // question alone, promising neither permanence nor recovery.
+    deleteConfirmQuestion: 'Are you sure you want to delete this record?',
+    restoredNamed: '{{label}} "{{name}}" restored',
+    restoreSuccess: '{{label}} restored',
+    restoreFailed: 'Failed to restore {{label}}',
     deleteConfirmTitle: 'Delete {{label}} "{{name}}"?',
     bulkDeleteConfirmTitle: 'Delete {{count}} {{label}} records?',
     bulkDeleteConfirmTitle_one: 'Delete {{count}} {{label}} record?',

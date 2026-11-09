@@ -627,13 +627,51 @@ export interface HashShadowKeyPart {
  * nothing.
  */
 export function parseHashShadowKeyParts(generationExpression: string): HashShadowKeyPart[] {
-  const matches = String(generationExpression ?? '').matchAll(
+  // A row-scoped shadow ({@link parseHashShadowRowScope}) hashes the parts
+  // after its `then`; the column its `when` tests is the scope, not a key part.
+  const raw = String(generationExpression ?? '');
+  const digest = HASH_SHADOW_ROW_SCOPE.exec(raw)?.[2] ?? raw;
+  const matches = digest.matchAll(
     /(coalesce\s*\(\s*)?`((?:[^`]|``)+)`/gi,
   );
   return [...matches].map((m) => ({
     column: m[2]!.replace(/``/g, '`'),
     nullSafe: m[1] != null,
   }));
+}
+
+/**
+ * `case when <col> is null then <digest> end`, as MariaDB stores it — the shape
+ * of a ROW-SCOPED hash shadow. See {@link parseHashShadowRowScope}.
+ */
+const HASH_SHADOW_ROW_SCOPE = /^\s*case\s+when\s+`((?:[^`]|``)+)`\s+is\s+null\s+then\s+([\s\S]*\S)\s+end\s*$/i;
+
+/**
+ * The column a ROW-SCOPED hash shadow tests, or `null` for an ordinary shadow.
+ *
+ * The driver's own shadows (`createHashShadowUniqueIndex`) hash every row. One
+ * index is built with a shadow whose digest is NULL outside a row scope:
+ * `metadata-protocol`'s activation-ledger package-less guard on MariaDB
+ * (`activation-ledger-packageless-index.ts`, ADR-0150 D4), `CASE WHEN
+ * package_id IS NULL THEN <digest of metadata_type, name> END`. MariaDB has no
+ * partial index and no functional key part, so this is how it says
+ * `UNIQUE (metadata_type, name) WHERE package_id IS NULL`: a UNIQUE key over the
+ * shadow exempts every row whose digest is NULL, which is every packaged row.
+ *
+ * So such a carrier IS a partial unique on the digest's key parts, and the
+ * introspection records it as one (`partial: true`, `shadowKey` = those parts):
+ * a partial index is runtime-managed ({@link isSyncReproducibleIndex}), so the
+ * differ never offers to drop it as an orphan, and it is the guard
+ * {@link widenedUniqueReplacements} asks for before it retires the narrower key.
+ * Read on its raw expression, the carrier would key `(package_id, metadata_type,
+ * name)` and read as a destructive orphan (measured, MariaDB 11.8).
+ *
+ * Only `IS NULL` scopes are recognised: that is the one form any producer
+ * writes, and a scope this parser cannot read leaves the carrier as it was.
+ */
+export function parseHashShadowRowScope(generationExpression: string): string | null {
+  const m = HASH_SHADOW_ROW_SCOPE.exec(String(generationExpression ?? ''));
+  return m ? m[1]!.replace(/``/g, '`') : null;
 }
 
 /** Minimal shape of an introspected physical column (see SqlDriver.introspectColumns). */
@@ -2226,6 +2264,25 @@ export interface LegacyUniqueReplacement {
    * one, and only one of them is the index being replaced.
    */
   legacyColumns: string[];
+  /**
+   * Set by the widening arm only ({@link widenedUniqueReplacements}): the
+   * columns the declared key gained over {@link legacyColumns}. Absent on the
+   * tenant arms, whose replacement scopes the key per organization instead.
+   */
+  widenedBy?: string[];
+  /**
+   * The {@link widenedBy} columns the object does not declare `required`. A
+   * row whose gained column is NULL is constrained by the wider key no longer
+   * (SQL UNIQUE is NULL-distinct), and the migration message says so.
+   */
+  widenedNullable?: string[];
+  /**
+   * Set by the widening arm when a gained column is nullable and no partial
+   * UNIQUE guard on {@link legacyColumns} stands beside the index: the narrower
+   * index is still the only rule over those rows, so `diffManagedIndexes`
+   * accounts for it and offers nothing — neither the replace nor an orphan drop.
+   */
+  kept?: boolean;
 }
 
 /**
@@ -2247,6 +2304,153 @@ export interface LegacyUniqueReplacement {
  * An index the current metadata declares is by definition not legacy.
  */
 export function legacyUniqueReplacements(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  physicalColumns: Set<string>;
+  declaredIndexes?: DeclaredIndexInput[];
+  /**
+   * The table's physical indexes. Only the widening arm reads them
+   * ({@link widenedUniqueReplacements}): it names a superseded index only when
+   * one by that name exists, rather than every subsequence a declaration has.
+   * Absent, that arm claims nothing.
+   */
+  physical?: ReadonlyArray<PhysicalIndex>;
+}): LegacyUniqueReplacement[] {
+  const out = tenantScopedLegacyReplacements(args);
+  // One physical index is superseded once: the tenant arms answer first, and
+  // the widening arm never claims a name they already claimed.
+  const claimed = new Set(out.flatMap((l) => l.legacyNames));
+  for (const l of widenedUniqueReplacements(args)) {
+    const legacyNames = l.legacyNames.filter((n) => !claimed.has(n));
+    if (legacyNames.length === 0) continue;
+    for (const n of legacyNames) claimed.add(n);
+    out.push({ ...l, legacyNames });
+  }
+  return out;
+}
+
+/**
+ * The most key parts {@link widenedUniqueReplacements} enumerates subsequences
+ * of: `2^n - 2` candidate names per declared index, so the bound keeps the
+ * enumeration small on a wide composite. No declared unique in the platform
+ * catalog comes near it.
+ */
+const WIDENED_UNIQUE_MAX_KEY_PARTS = 8;
+
+/**
+ * A declared GLOBAL unique index whose key gained columns, superseding the
+ * narrower generated index an earlier declaration built (ADR-0150 D4: the
+ * activation ledger's `(metadata_type, name)` became
+ * `(metadata_type, package_id, name)`).
+ *
+ * Widening a unique key is a pure relaxation: any two rows that collide on the
+ * wider key already collided on the narrower one, so the wider index can be
+ * created over existing data without failing, and dropping the narrower one
+ * afterwards loses no row. Left to the orphan arm, the narrower index reads as
+ * an undeclared index with ObjectStack's naming — a `drop_index` categorized
+ * DESTRUCTIVE, opt-in — and an operator who applies only the safe half keeps
+ * refusing exactly the rows the new declaration admits. So it is routed through
+ * the same `replace_unique_index` op the tenant arms use: categorized `safe`,
+ * applied create-before-drop, the old index dropped only once the new one is
+ * confirmed present.
+ *
+ * Deliberately narrow — every condition is required:
+ *  - the declared index is UNNAMED (a named index keeps its name, so there is
+ *    no second name to retire) and `unique: true`/`'global'` — never
+ *    `'organization'`, whose materialized key is the tenant arms' to judge;
+ *  - every listed column is physical;
+ *  - the superseded index's columns are an in-order PROPER subsequence of the
+ *    listed ones, and its name is the one {@link buildIndexName} gives that
+ *    subsequence (`diffManagedIndexes` then also requires it to be a plain
+ *    UNIQUE on exactly those columns);
+ *  - no index metadata asks for today has that name — field-level uniques
+ *    included, so a live single-column unique is never read as superseded;
+ *  - an index by that name exists physically (`args.physical`), so the arm
+ *    names what is there rather than every subsequence of every declaration;
+ *  - when a gained column is nullable (not declared `required`), a partial
+ *    UNIQUE on exactly the narrower columns stands beside it
+ *    ({@link hasPartialUniqueGuard}). UNIQUE is NULL-distinct, so a row whose
+ *    gained column is NULL is constrained by the wider key no longer, and
+ *    without that guard dropping the narrower index would drop the only rule
+ *    keeping those rows to one — not a relaxation of it. Such an index is
+ *    KEPT (`kept`): accounted for, offered neither as a replace nor as an
+ *    orphan drop, until the guard stands.
+ *
+ * A table with no tenant column is in scope: widening has nothing to do with
+ * tenancy.
+ */
+function widenedUniqueReplacements(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  physicalColumns: Set<string>;
+  declaredIndexes?: DeclaredIndexInput[];
+  physical?: ReadonlyArray<PhysicalIndex>;
+}): LegacyUniqueReplacement[] {
+  const { table, physicalColumns, declaredIndexes } = args;
+  const physicalNames = new Set((args.physical ?? []).map((p) => p.name));
+  if (physicalNames.size === 0) return [];
+  const current = new Set(declaredIndexSet(args).map((i) => i.name));
+  const out: LegacyUniqueReplacement[] = [];
+  for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
+    if (idx?.unique !== true && idx?.unique !== 'global') continue;
+    if (typeof idx?.name === 'string' && idx.name.trim()) continue;
+    const listed = Array.isArray(idx?.fields)
+      ? idx.fields.filter((f): f is string => typeof f === 'string' && f.length > 0)
+      : [];
+    if (listed.length < 2 || listed.length > WIDENED_UNIQUE_MAX_KEY_PARTS) continue;
+    if (!listed.every((c) => physicalColumns.has(c))) continue;
+    const replacement = normalizeDeclaredIndex(table, idx, args.tenantField);
+    if (!replacement) continue;
+    const full = (1 << listed.length) - 1;
+    for (let mask = 1; mask < full; mask++) {
+      const narrower = listed.filter((_, i) => (mask & (1 << i)) !== 0);
+      const legacyName = buildIndexName(table, narrower, true);
+      if (current.has(legacyName) || !physicalNames.has(legacyName)) continue;
+      const gained = listed.filter((c) => !narrower.includes(c));
+      const nullable = gained.filter((c) => args.fields?.[c]?.required !== true);
+      // A NULL in a gained column exempts the row from the wider key, so the
+      // narrower index is the only thing keeping those rows to one per
+      // `narrower`. It is offered for retirement only once a partial UNIQUE on
+      // exactly `narrower`, scoped by a WHERE, already stands beside it (the
+      // activation ledger's runtime-built package-less index). Until then it is
+      // KEPT: accounted for, so the orphan arm never offers to drop it either.
+      const kept = nullable.length > 0 && !hasPartialUniqueGuard(args.physical ?? [], narrower);
+      out.push({
+        column: listed.find((c) => !narrower.includes(c))!,
+        legacyColumns: narrower,
+        legacyNames: [legacyName],
+        replacement,
+        widenedBy: gained,
+        widenedNullable: nullable,
+        ...(kept ? { kept: true } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Does a partial UNIQUE index on exactly `columns`, in key order, stand on the
+ * table? The guard {@link widenedUniqueReplacements} requires before it calls
+ * retiring a narrower key a pure relaxation when the gained column is nullable.
+ *
+ * Read through the ENFORCED key ({@link enforcedIndexKey}), so a row-scoped
+ * hash-shadow carrier — MariaDB's spelling of the partial guard, which stores
+ * one digest column ({@link parseHashShadowRowScope}) — answers by the columns
+ * it hashes, exactly as the SQLite/PostgreSQL partial index answers by its own.
+ */
+function hasPartialUniqueGuard(physical: ReadonlyArray<PhysicalIndex>, columns: readonly string[]): boolean {
+  return physical.some((p) => {
+    if (!p.unique || p.partial !== true || (p.expressions?.length ?? 0) > 0) return false;
+    const key = enforcedIndexKey(p).columns;
+    return key.length === columns.length && key.every((c, i) => c === columns[i]);
+  });
+}
+
+/** The tenant arms of {@link legacyUniqueReplacements}: a unique now scoped per organization. */
+function tenantScopedLegacyReplacements(args: {
   table: string;
   fields: Record<string, any>;
   tenantField: string | null;
@@ -2527,6 +2731,11 @@ export function diffManagedIndexes(args: {
     });
     if (present.length === 0) continue;
     for (const n of present) explained.add(n);
+    // Kept, not offered: the widening arm found the narrower index still the
+    // only rule over rows a nullable gained column exempts (see
+    // `widenedUniqueReplacements`). It is accounted for — never an orphan to
+    // drop — and the plan says nothing about it until the guard stands.
+    if (l.kept) continue;
     out.push({
       kind: 'index_mismatch',
       remoteName: table,
@@ -2545,7 +2754,19 @@ export function diffManagedIndexes(args: {
         createColumns: l.replacement.columns,
         ...(l.replacement.nullSafeColumns ? { nullSafeColumns: l.replacement.nullSafeColumns } : {}),
       },
-      message:
+      message: l.widenedBy
+        ? `${table}.${l.legacyColumns.join('+')}: a UNIQUE index (${present.join(', ')}) on ` +
+          `${indexSignature(l.legacyColumns, true)} is superseded by the declared ` +
+          `${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)}, which adds ` +
+          `${l.widenedBy.join(', ')} to the key and admits rows the old index refuses. Replacing it is a pure ` +
+          `relaxation: run "os migrate apply".` +
+          (l.widenedNullable && l.widenedNullable.length > 0
+            ? ` ⚠️ ${l.widenedNullable.join(', ')} ${l.widenedNullable.length === 1 ? 'is' : 'are'} nullable, and ` +
+              `UNIQUE treats NULLs as distinct: a row whose ${l.widenedNullable.join(' or ')} is NULL is constrained ` +
+              `by the new key no longer. The partial UNIQUE on (${l.legacyColumns.join(', ')}) that stands beside ` +
+              `it is what keeps those rows to one; dropping the partial index would admit two.`
+            : '')
+        :
         `${table}.${l.legacyColumns.join('+')}: a legacy platform-wide UNIQUE index (${present.join(', ')}) still enforces ` +
         `uniqueness across ALL tenants, but metadata scopes it per '${l.replacement.columns[0]}' — a second ` +
         `tenant reusing the value is rejected on insert. Replacing it with ${indexSignature(l.replacement.columns, true, l.replacement.nullSafeColumns)} ` +

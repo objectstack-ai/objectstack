@@ -82,6 +82,26 @@
       }
     },
     {
+      "id": 18,
+      "prompt": "Our package `com.acme.crm` must share every escalated `case` with the members of `support_tier2`, the ownership queue the `com.acme.helpdesk` package ships. `com.acme.crm` declares no dependencies today.",
+      "expected_output": "A sharing rule in `com.acme.crm` with `sharedWith: { type: 'queue', value: 'support_tier2' }`, and `com.acme.crm`'s manifest declares `dependencies` on `com.acme.helpdesk`: a package's rule reads the queue as its own package's, else the one holder in its declared `dependencies` closure plus `sys`. Without the dependency the only holder sits outside the closure and the rule is refused `outside-closure` (`RESOURCE_CONFLICT`), granting no one. The queue is not redeclared in `com.acme.crm`: a second package holding the name is refused too.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["type: 'queue'", "dependencies", "outside-closure"],
+        "must_not_contain": ["name: 'support_tier2'"]
+      }
+    },
+    {
+      "id": 19,
+      "prompt": "Our package `com.acme.crm` ships a position `crm_case_handler` whose holders must get `hd_agent`, the permission set the `com.acme.helpdesk` package ships. `com.acme.crm` declares no dependencies today.",
+      "expected_output": "In `com.acme.crm`, the position `{ name: 'crm_case_handler', label: 'Case Handler', permissionSets: ['hd_agent'] }`, and `com.acme.crm`'s manifest declares `dependencies: { 'com.acme.helpdesk': '^1.0.0' }`: a package's position reads each set name as its own package's set, else the one holder in its declared `dependencies` closure plus `sys`. Without the dependency the only holder sits outside the closure: the name is refused `outside-closure`, the boot's catalog reference report logs it, and the position grants nothing through it. The set is not redeclared in `com.acme.crm`: a second package shipping the name is refused at install.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["permissionSets: ['hd_agent']", "dependencies: {", "outside-closure"],
+        "must_not_contain": ["name: 'hd_agent'"]
+      }
+    },
+    {
       "id": 9,
       "prompt": "A `vendor` list view of the rows whose `api_key` (a `secret` field) starts with `sk_live`.",
       "expected_output": "Redirects: a credential is filtered only by presence, `filter: [{ field: 'api_key', operator: 'is_not_null' }]`; any other filter or sort is `400 INVALID_FIELD`.",

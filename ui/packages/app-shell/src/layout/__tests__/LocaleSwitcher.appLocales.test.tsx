@@ -11,16 +11,19 @@
  * shipping only `en`+`zh` still listed all ten, so picking 日本語 handed the
  * user a half-translated UI its author never opted into.
  *
- * The ruling on the card is INTERSECTION: (the app's `/api/v1/i18n/locales`
- * response) ∩ (what this renderer can resolve — built-in packs,
- * `config.resources`, and anything the dynamic loader can fetch). The hardcoded
- * ten survive only as the offline/no-backend fallback.
+ * The ruling on the card is INTERSECTION, narrowed by ruling F of
+ * objectstack#29349 (objectstack#30514): (the platform locale table) ∩ (the
+ * app's `/api/v1/i18n/locales` response, read through the table's read
+ * aliases). Each entry is a table tag with the table's own label, two
+ * spellings of one language are one entry, and a code the table does not
+ * name (`th`) is not offered. The table's tags survive alone as the
+ * offline/no-backend fallback.
  */
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { I18nProvider } from '@object-ui/i18n';
+import { I18nProvider, LOCALE_STORAGE_KEY } from '@object-ui/i18n';
 
 // Passthrough dropdown primitives — the open/close choreography is Radix's
 // business; what matters here is which items the menu is built from.
@@ -74,24 +77,61 @@ beforeEach(() => {
 });
 
 describe('LocaleSwitcher — menu composed from the app locale list', () => {
-  it('offers an app-shipped locale outside the built-in ten, named by Intl.DisplayNames', async () => {
+  it('does not offer an app locale the platform locale table does not name', async () => {
     mountConsole({ locales: async () => ['en', 'zh-Hans', 'th'] });
 
-    // `th` has no built-in pack and no platform locale table row; CLDR names it.
-    await waitFor(() => expect(screen.getByText('ไทย')).toBeInTheDocument());
-    expect(screen.getByText('English')).toBeInTheDocument();
+    // `th` has no Console pack, no Studio catalogue, no platform bundle and no
+    // built-in email: offering it would offer an incomplete language, which
+    // ruling F rules out. The app's other entries stay.
+    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
     expect(screen.getByText('简体中文')).toBeInTheDocument();
+    expect(screen.queryByText('ไทย')).not.toBeInTheDocument();
   });
 
-  it('offers an app-shipped locale supplied through config.resources', async () => {
+  it('does not offer an out-of-table locale supplied through config.resources either', async () => {
     mountConsole({
       locales: async () => ['en', 'th'],
       resources: { th: { common: { save: 'บันทึก' } } },
       loader: false,
     });
 
-    await waitFor(() => expect(screen.getByText('ไทย')).toBeInTheDocument());
-    expect(screen.getByText('English')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
+    expect(screen.queryByText('ไทย')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['app-crm / app-showcase', ['en', 'zh-CN'], ['English', '简体中文']],
+    ['app-todo', ['en', 'zh-CN', 'ja-JP'], ['English', '简体中文', '日本語']],
+    ['HotCRM sales', ['en', 'zh-CN', 'ja-JP', 'es-ES'], ['English', '简体中文', '日本語', 'Español']],
+  ])('reads a %s declaration in stored spellings as table entries, with table labels', async (_app, declared, labels) => {
+    mountConsole({ locales: async () => declared });
+
+    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
+    // Each table row once, never the CLDR name of the stored spelling
+    // (中文（中国）, 日本語 (日本), Español de España).
+    for (const label of labels) expect(screen.getAllByText(label)).toHaveLength(1);
+    expect(screen.queryByText('中文（中国）')).not.toBeInTheDocument();
+    expect(screen.queryByText('日本語 (日本)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Español de España')).not.toBeInTheDocument();
+  });
+
+  it('lists a stored spelling beside its own table tag as ONE entry', async () => {
+    mountConsole({ locales: async () => ['en', 'zh-CN', 'zh-Hans'] });
+
+    await waitFor(() => expect(screen.getByText('English')).toBeInTheDocument());
+    // One pack, one entry.
+    expect(screen.getAllByText('简体中文')).toHaveLength(1);
+    expect(screen.queryByText('中文（中国）')).not.toBeInTheDocument();
+  });
+
+  it('ticks the table entry for a session running in a stored spelling', async () => {
+    // A choice stored before the table existed: `zh-CN`, served by `zh-Hans`.
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, 'zh-CN');
+    mountConsole({ locales: async () => ['en', 'zh-CN'] });
+
+    await waitFor(() => expect(screen.getByText('简体中文')).toBeInTheDocument());
+    expect(screen.getByText('简体中文').textContent).toContain('✓');
+    expect(screen.getByText('English').textContent).not.toContain('✓');
   });
 
   it('names a regional app locale, capitalized like the built-in labels', async () => {

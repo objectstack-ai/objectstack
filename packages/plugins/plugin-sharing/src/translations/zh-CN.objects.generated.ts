@@ -171,6 +171,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           admin: "管理员"
         }
       },
+      package_id: {
+        label: "所属应用",
+        help: "随应用安装的规则属于哪个应用。由平台填写；在这里创建的规则为空。"
+      },
       customized: {
         label: "已定制",
         help: "当你修改了随应用安装的规则后置位，应用更新时你的改动会被保留。"
@@ -321,6 +325,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       queue: {
         label: "队列",
         help: "该成员所属队列的名称。"
+      },
+      queue_package: {
+        label: "队列所属应用",
+        help: "该队列来自哪个应用。由平台填写；在这里创建的队列为空。"
       },
       recipient_type: {
         label: "成员类型",

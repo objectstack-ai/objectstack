@@ -165,6 +165,7 @@ import type { AnalyticsQuery } from '@objectstack/spec/contracts';
 import type { AnalyticsRequestKey } from './dataset-refusal.js';
 import { invalidMemberError } from './dataset-refusal.js';
 import { columnObjectOf, type HopReference } from './hop-object.js';
+import { declaredCubeMemberKey } from './cube-member-key.js';
 
 /** The declared `FieldType` vocabulary — the only types the compatibility table can answer for. */
 const DECLARED_FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
@@ -274,17 +275,16 @@ function declarerOf(target: DimensionColumn): string {
 /**
  * [#20912] The cube measure a `measures` entry resolves to —
  * `NativeSQLStrategy.lookupMember(…, 'measure')`'s resolution, which
- * `ObjectQLStrategy`'s mirrors: the key itself, then for a dotted entry the
- * key after its first segment (the `<cube>.` qualifier, or the legacy second
- * segment), then the underscore-flattened key. A measure has no synthetic
- * relation tier, so nothing else resolves. Own keys only.
+ * `ObjectQLStrategy`'s mirrors: the key itself, the key behind the cube's own
+ * qualifier, or a flattened key over the same relationship path. A measure has
+ * no synthetic relation tier, so nothing else resolves. Own keys only.
  */
 function measureEntryOf(cube: Cube, member: string): { type?: unknown; sql?: unknown } | undefined {
   const bag = (cube.measures ?? {}) as Record<string, { type?: unknown; sql?: unknown } | undefined>;
-  const own = (key: string) => (Object.prototype.hasOwnProperty.call(bag, key) ? bag[key] : undefined);
-  if (own(member)) return own(member);
-  if (!member.includes('.')) return undefined;
-  return own(member.split('.').slice(1).join('.')) ?? own(member.replace(/\./g, '_'));
+  // [#31842] The key is the strategies' own rule ({@link declaredCubeMemberKey}):
+  // a dotted entry never names a measure by its tail alone.
+  const key = declaredCubeMemberKey(cube, bag, member);
+  return key !== undefined && Object.prototype.hasOwnProperty.call(bag, key) ? bag[key] : undefined;
 }
 
 /** The ADR-0112 envelope every refusal of this door carries, naming the member and the column. */

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { strictObject } from '../shared/strict-object';
 import { enumWithRetiredValues } from '../shared/retired-key';
@@ -192,7 +193,7 @@ const BaseSharingRuleSchema = strictObject(
   },
   {
   // Identification
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique rule name (snake_case)'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Unique rule name (snake_case)'),
   label: z.string().optional().describe('Human-readable label'),
   description: z.string().optional().describe('Administrative notes'),
 

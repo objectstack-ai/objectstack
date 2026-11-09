@@ -40,6 +40,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
         label: "조직",
         help: "이 부여가 속한 조직입니다."
       },
+      permission_set_package: {
+        label: "Permission Set Package",
+        help: "The app the permission set comes from. Filled in by the platform; empty when the set was created here, or when more than one app provides a set of that name."
+      },
       granted_by: {
         label: "부여자",
         help: "이 권한 세트를 부여한 사용자입니다."

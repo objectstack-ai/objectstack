@@ -43,6 +43,7 @@ export {
 export * from './serverActionHandler.js';
 export * from './recordIdParam.js';
 export * from './recordDelete.js';
+export * from './recycleBinRestore.js';
 export * from './navigationTarget.js';
 // Named, not `export *`: `actionCopyText`, `fillTransitionalCopy` stay in the
 // module for its in-package readers and off the public entry

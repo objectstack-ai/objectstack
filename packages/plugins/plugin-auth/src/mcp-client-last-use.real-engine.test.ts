@@ -99,7 +99,7 @@ function isStampRead(query: unknown): boolean {
   return Array.isArray(q?.fields) && q.fields.includes('last_used_at') && !!q.where && 'client_id' in q.where;
 }
 
-async function rig() {
+async function rig(opts: { getAuditSink?: () => unknown } = {}) {
   const engine = new ObjectQL();
   engines.push(engine);
   engine.registerDriver(
@@ -113,7 +113,13 @@ async function rig() {
 
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   const makeManager = () =>
-    new AuthManager({ secret: SECRET, baseUrl: BASE, dataEngine: engine as never, logger } as never);
+    new AuthManager({
+      secret: SECRET,
+      baseUrl: BASE,
+      dataEngine: engine as never,
+      logger,
+      ...(opts.getAuditSink ? { getAuditSink: opts.getAuditSink } : {}),
+    } as never);
   const manager = makeManager();
   const api: any = await manager.getApi();
 
@@ -623,4 +629,81 @@ describe('[#30918 × #30879] the stamp lands only on the consent that admitted t
     expect(r.writes(), 'the new consent is newer than the token, so it is not stamped').toBe(0);
     expect(await r.stampOf(regranted!)).toBeNull();
   }, 60_000);
+});
+
+describe('[#31796] a skip_consent client\'s use is handed to the ledger once per hour', () => {
+  const SKIP_CLIENT = 'client_31796_skip';
+
+  /** The ledger's credential-use ingress, as plugin-audit registers it on the `audit` slot: every call captured. */
+  function captureSink() {
+    const uses: Record<string, unknown>[] = [];
+    return {
+      uses,
+      sink: {
+        recordAuthEvent: async () => undefined,
+        recordCredentialUse: async (event: Record<string, unknown>) => {
+          uses.push(event);
+        },
+      },
+    };
+  }
+
+  /** A server-only `skip_consent` client, as the provider stores it: it never has a consent row. */
+  async function skipConsentClient(r: Awaited<ReturnType<typeof rig>>): Promise<string> {
+    const authCtx = await r.manager.getAuthContext();
+    await authCtx.adapter.create({
+      model: 'oauthClient',
+      data: {
+        clientId: SKIP_CLIENT,
+        name: 'Server Agent',
+        scopes: ['openid', 'data:read'],
+        redirectUris: ['http://localhost:56789/cb'],
+        skipConsent: true,
+      },
+    });
+    const [app] = (await r.engine.find('sys_oauth_application', { where: { client_id: SKIP_CLIENT }, fields: ['id'] }, SYS)) as any[];
+    return String(app.id);
+  }
+
+  it('many admitted calls in one hour hand the use on once, naming the application row; the next hour once more', async () => {
+    const { uses, sink } = captureSink();
+    const r = await rig({ getAuditSink: () => sink });
+    const applicationId = await skipConsentClient(r);
+
+    const token = await r.mint({ azp: SKIP_CLIENT });
+    for (let i = 0; i < 25; i++) {
+      expect(await admittedCall(r.manager, token)).toMatchObject({ userId: USER, clientId: SKIP_CLIENT });
+    }
+    await vi.waitFor(() => expect(uses).toHaveLength(1));
+    await drain();
+    expect(uses, 'twenty-five calls in one hour').toEqual([
+      {
+        kind: 'oauth_access_token',
+        objectName: 'sys_oauth_application',
+        credentialId: applicationId,
+        userId: USER,
+        clientId: SKIP_CLIENT,
+        usedAt: iso(HOUR_10),
+      },
+    ]);
+    expect(r.writes(), 'no consent row exists, so none is written').toBe(0);
+
+    vi.setSystemTime(HOUR_11 + 2 * MINUTE);
+    const next = await r.mint({ azp: SKIP_CLIENT });
+    for (let i = 0; i < 3; i++) await admittedCall(r.manager, next);
+    await vi.waitFor(() => expect(uses).toHaveLength(2));
+    await drain();
+    expect(uses[1]).toMatchObject({ credentialId: applicationId, usedAt: iso(HOUR_11) });
+  });
+
+  it('a client with a consent row is stamped on its consent and hands nothing on', async () => {
+    const { uses, sink } = captureSink();
+    const r = await rig({ getAuditSink: () => sink });
+    const id = await r.consent();
+    const token = await r.mint();
+    for (let i = 0; i < 3; i++) await admittedCall(r.manager, token);
+    await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
+    await drain();
+    expect(uses).toEqual([]);
+  });
 });

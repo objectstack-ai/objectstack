@@ -399,3 +399,80 @@ describe('Marketplace card badges (objectstack#31011)', () => {
     }
   });
 });
+
+/**
+ * The card's languages line (objectstack#31462): the latest version's
+ * `supported_locales` and `locale_coverage`, as the control plane measured them
+ * at publish. Three answers, three faces: a list draws the languages with their
+ * coverage, an answered `null` reads "No language information" (never "English
+ * only"), and absent keys draw nothing, so a catalog that does not serve them
+ * reads as it did before.
+ */
+describe('Marketplace card languages (objectstack#31462)', () => {
+  const COVERAGE = {
+    default_locale: 'en',
+    expected_keys: 80,
+    locales: [
+      { locale: 'en', translated: 80, coverage_percent: 100 },
+      { locale: 'zh-CN', translated: 80, coverage_percent: 100 },
+      { locale: 'ja-JP', translated: 48, coverage_percent: 60 },
+      { locale: 'th', translated: 10, coverage_percent: 12.5 },
+    ],
+  };
+  const MEASURED = row('measured', 'Measured App', {
+    latest_version: {
+      id: 'ver_measured',
+      version: '2.0.0',
+      supported_locales: ['en', 'zh-CN', 'ja-JP', 'th'],
+      locale_coverage: COVERAGE,
+    },
+  });
+  const PAIR = row('pair', 'Pair App', {
+    latest_version: {
+      id: 'ver_pair',
+      version: '1.1.0',
+      supported_locales: ['zh-CN', 'en'],
+      locale_coverage: { default_locale: 'zh-CN', expected_keys: 10, locales: [{ locale: 'en', translated: 7, coverage_percent: 70 }] },
+    },
+  });
+  const OLD = row('old', 'Old App', {
+    latest_version: { id: 'ver_old', version: '0.9.0', supported_locales: null, locale_coverage: null },
+  });
+  /** A catalog from before the measurement: neither key on the wire. */
+  const UNSERVED = row('unserved', 'Unserved App', {});
+
+  const line = (id: string) => within(screen.getByTestId(`marketplace-card-com.acme.${id}`)).queryByTestId('marketplace-card-languages');
+
+  it('a measured version names its languages, default first, with coverage; three, then how many more', async () => {
+    await renderPage(always([MEASURED, PAIR, OLD, UNSERVED]));
+
+    const measured = line('measured')!;
+    expect(measured).toHaveAttribute('data-state', 'listed');
+    // `zh-CN` is read through the platform locale table, as the language menu
+    // names it; `th` is outside the table and named by the runtime.
+    const full = 'English 100% · 简体中文 100% · 日本語 60% · ไทย 12.5%';
+    expect(measured.querySelector('[aria-hidden="true"].truncate')).toHaveTextContent(
+      `English 100% · 简体中文 100% · 日本語 60% · ${L.languages.more.replace('{{extra}}', '1')}`,
+    );
+    expect(measured).toHaveAttribute('title', full);
+    expect(measured).toHaveTextContent(`${L.facet.languages}: ${full}`);
+    // A language the coverage has no row for is drawn without a percent.
+    expect(line('pair')!.querySelector('.truncate')).toHaveTextContent(/^简体中文 · English 70%$/);
+  });
+
+  it('a version published before the measurement reads "No language information", never "English only"', async () => {
+    await renderPage(always([OLD]));
+
+    const old = line('old')!;
+    expect(old).toHaveAttribute('data-state', 'unknown');
+    expect(old).toHaveTextContent(L.languages.none);
+    expect(old).not.toHaveTextContent('English');
+  });
+
+  it('CONTROL: a catalog that serves neither key draws no languages line', async () => {
+    await renderPage(always([UNSERVED, ...TAXONOMY_CATALOG]));
+
+    expect(screen.queryAllByTestId('marketplace-card-languages')).toHaveLength(0);
+    expect(screen.queryByText(L.languages.none)).toBeNull();
+  });
+});

@@ -57,6 +57,20 @@ export { judgeRedeclaredOwnerFields, redeclaredFieldChanges, redeclaredOwnerFiel
 export { classifyIndexFailure } from './migrations/partial-index-probe.js';
 export type { IndexExec } from './migrations/partial-index-probe.js';
 
+// [ADR-0150 D4] `sys_metadata_activation`'s one row per (metadata_type, name)
+// among the rows that name no package — a runtime index ADDED beside the
+// declared `(metadata_type, package_id, name)` key, which is NULL-distinct.
+export {
+    ensureActivationLedgerPackagelessIndex,
+    buildActivationLedgerPackagelessIndexSql,
+    buildActivationLedgerPackagelessDuplicateProbeSql,
+    ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME,
+} from './migrations/activation-ledger-packageless-index.js';
+export type {
+    EnsureActivationLedgerPackagelessIndexResult,
+    EnsureActivationLedgerPackagelessIndexStatus,
+} from './migrations/activation-ledger-packageless-index.js';
+
 // [#8629] `sys_setting`'s declared ROW IDENTITY, delivered as a runtime
 // NULL-safe UNIQUE migration — the `ensureOverlayIndex` paradigm again, for the
 // object whose `user_id` key part is NULL on every tenant- and global-scope row
@@ -150,6 +164,9 @@ export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjecti
 // never trusted content (receipt re-reads `sys_metadata` locally).
 export { METADATA_MUTATION_CLUSTER_CHANNEL } from './protocol.js';
 export type { ClusterMetadataMutationPayload } from './protocol.js';
+// [#31722] What the lane's resync seam (`resyncMetadataMutationPubSub()`)
+// reports after a cluster outage.
+export type { MetadataMutationResyncReport } from './protocol.js';
 // [#10219] The per-item publish notification the host bridges to the
 // kernel-wide `metadata:reloaded` announce. Exported for the same reason its
 // mutation sibling is: the subscriber lives in another package.

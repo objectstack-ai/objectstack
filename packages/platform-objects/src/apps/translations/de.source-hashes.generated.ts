@@ -163,8 +163,11 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_setting_audit.fields.source.options.import": "05c80d3a61ec3290",
   "objects.sys_setting_audit.fields.source.options.migration": "477a479630b97ad5",
   "objects.sys_setting_audit.fields.source.options.system": "d2c13a5a8c70ea8d",
+  "objects.sys_sso_provider._actions.edit_sso_groups_claim.params.groupsClaim.placeholder": "833cddda1a6e25f9",
   "objects.sys_sso_provider._actions.register_saml_provider.params.identifierFormat.placeholder": "5945ff9a6b644855",
+  "objects.sys_sso_provider._actions.register_saml_provider.params.mapGroups.placeholder": "833cddda1a6e25f9",
   "objects.sys_sso_provider._actions.register_sso_provider.params.mapEmail.placeholder": "66309c7adf5c9436",
+  "objects.sys_sso_provider._actions.register_sso_provider.params.mapGroups.placeholder": "833cddda1a6e25f9",
   "objects.sys_sso_provider._actions.register_sso_provider.params.mapName.placeholder": "a484c34aaf624bd6",
   "objects.sys_sso_provider._actions.register_sso_provider.params.scopes.placeholder": "58ac90cde28c764d",
   "objects.sys_sso_provider._actions.request_domain_verification.resultDialog.fields.dnsRecordName": "b9fb79397650d504",
@@ -174,4 +177,5 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_team.pluralLabel": "3fe8519872f65108",
   "objects.sys_team_member.fields.team_id.label": "42b87165ac826b2b",
   "objects.sys_user.fields.name.label": "5274417ff1ccaf01",
+  "objects.sys_user.fields.principal_kind.options.human": "ed18d3469e10aef2",
 };

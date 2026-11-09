@@ -41,7 +41,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           platform_admin_standing_change: "Platform Admin Standing Change",
           action_invocation: "Action Invocation",
           package_uninstall: "Package Uninstall",
-          package_unmanaged_import: "Package Unmanaged Import"
+          package_unmanaged_import: "Package Unmanaged Import",
+          credential_use: "Credential Use"
         }
       },
       user_id: {

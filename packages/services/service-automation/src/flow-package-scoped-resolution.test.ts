@@ -21,9 +21,14 @@ import { SchemaRegistry } from '@objectstack/objectql';
 import { AutomationEngine } from './engine.js';
 import type { NodeExecutor } from './engine.js';
 import { installBuiltinNodes } from './builtin/index.js';
-import { flowNameResolver } from './plugin.js';
+import { LiteKernel } from '@objectstack/core';
+import { AutomationServicePlugin, flowNameResolver } from './plugin.js';
+import { connectorNameResolver } from './connector-package-scope.js';
 import { InMemoryFlowActivationStore } from './flow-activation-store.js';
 import { FlowActivationProjection } from './flow-activation-projection.js';
+import { resolveFlowPrecedence } from './flow-precedence.js';
+import { bindStoredRow } from '@objectstack/metadata-protocol';
+import { installedManifestsOf } from '@objectstack/metadata-core';
 
 const P = 'com.acme.caller';
 const A = 'com.acme.alpha';
@@ -91,11 +96,15 @@ let ran: string[];
 
 const install = (id: string, deps: string[] = []) => registry.installPackage(manifest(id, deps), 'code');
 
-/** Package `packageId` ships flow `body`: in its registry slot, the loader's set and the engine. */
+/**
+ * Package `packageId` ships flow `body`: in its registry slot, the loader's set
+ * and the engine — armed from the loader's own body, as the automation
+ * plugin's arming steps record it (`registerFlow`'s `armedFrom`).
+ */
 function ship(packageId: string, body: { name: string }) {
     registry.registerItem('flow', { ...body, _packageId: packageId }, 'name' as never, packageId);
     loaderSet[body.name] = packageId;
-    engine.registerFlow(body.name, body);
+    engine.registerFlow(body.name, body, { source: 'package', packageId });
 }
 
 /** The environment authored flow `body`: a package-less row in the bare slot, and the engine. */
@@ -362,5 +371,397 @@ describe('FlowActivationProjection', () => {
         const projection = new FlowActivationProjection(readers(undefined));
         projection.add('notify', Q);
         expect(projection.has('notify')).toBe(true);
+    });
+});
+
+/**
+ * [#31754, ADR-0150 D3] The boot pull's flow name collision line asks the
+ * resolver the engine asks (`refusalOf`, built here as the plugin builds it,
+ * from `flowNameResolver`). For a name two packages hold, precedence still
+ * hands the lexicographically first body on and `registerFlow` refuses it
+ * (red line 2 above), so the line says NEITHER is armed and points at that
+ * refusal. The three shapes on a real cold boot are pinned in
+ * `flow-declared-override-first-boot-pull.integration.test.ts`. CONTROL: with
+ * no resolver handed in, every arm's line is byte for byte main's.
+ */
+describe('[#31754] the collision line for a name two packages hold says neither is armed', () => {
+    const NOTHING_INSTALLED = installedManifestsOf(undefined);
+    /** The boot pull's two steps over the registry: precedence (its one warning), then registration. */
+    function pull(): { line: string; refusal: unknown } {
+        const warn = vi.fn();
+        const resolver = flowNameResolver({ getService: () => ({ registry }) } as never);
+        const [winner] = resolveFlowPrecedence(
+            registry.listItems('flow') as unknown[],
+            { warn },
+            (name) => engine.packagedFlowOwner(name),
+            NOTHING_INSTALLED,
+            (name) => {
+                const resolution = resolver(name, null);
+                return resolution?.status === 'refused' ? resolution.message : undefined;
+            },
+        );
+        expect(warn).toHaveBeenCalledTimes(1);
+        let refusal: unknown;
+        try {
+            engine.registerFlow(winner.name, winner.definition as never);
+        } catch (e) {
+            refusal = e;
+        }
+        return { line: String(warn.mock.calls[0][0]), refusal };
+    }
+    /** One collision line from precedence alone. */
+    function lineOf(listed: unknown[], owner: Record<string, string>): string {
+        const warn = vi.fn();
+        resolveFlowPrecedence(listed, { warn }, (name) => owner[name], NOTHING_INSTALLED);
+        expect(warn).toHaveBeenCalledTimes(1);
+        return String(warn.mock.calls[0][0]);
+    }
+
+    for (const order of [[A, Q], [Q, A]] as const) {
+        it(`two packages, registered ${order[0] === A ? 'alpha' : 'stranger'} first: the line arms neither, and the engine refuses`, async () => {
+            install(A);
+            install(Q);
+            for (const id of order) registry.registerItem('flow', { ...leaf('notify'), _packageId: id }, 'name' as never, id);
+            loaderSet.notify = A;
+
+            const { line, refusal } = pull();
+            expect(line).toBe(
+                "[Automation] Flow name collision: 'notify' is claimed by 2 definitions (package 'com.acme.alpha', " +
+                    "package 'com.acme.stranger'); arming neither: the engine refuses this bare name for a caller with " +
+                    "no package (ADR-0150 D3), so no definition dispatches; the 'failed to register flow' warning for " +
+                    "'notify' names every holder. Rename one of them.",
+            );
+            expect(line).not.toContain('arming package');
+            expect(line).not.toContain('by package id');
+            expect(line).not.toContain('Only the armed definition dispatches');
+            expect(line).not.toContain('\n');
+            // What the line points at: the refusal, naming both, and nothing armed.
+            const refused = String((refusal as Error)?.message);
+            expect(refused).toContain('held by 2 packages in this environment');
+            expect(refused).toContain('package "com.acme.alpha"');
+            expect(refused).toContain('package "com.acme.stranger"');
+            expect(await engine.getFlow('notify')).toBeNull();
+        });
+    }
+
+    it('CONTROL: with no resolver, two packages keep main\'s line byte for byte (by package id)', () => {
+        const line = lineOf(
+            [{ ...leaf('notify'), _packageId: Q, _provenance: 'package' }, { ...leaf('notify'), _packageId: A, _provenance: 'package' }],
+            { notify: A },
+        );
+        expect(line).toBe(
+            "[Automation] Flow name collision: 'notify' is claimed by 2 definitions (package 'com.acme.alpha', " +
+                "package 'com.acme.stranger'); arming package 'com.acme.alpha' by package id, and shadowing 1 other " +
+                'definition(s). Only the armed definition dispatches. Rename one of them.',
+        );
+    });
+
+    it('CONTROL: a package beside an environment row keeps its line byte for byte (ADR-0126 §2)', () => {
+        const line = lineOf(
+            [{ ...leaf('notify'), _packageId: A, _provenance: 'package' }, { ...leaf('notify'), _provenance: 'org' }],
+            { notify: A },
+        );
+        expect(line).toBe(
+            "[Automation] Flow name collision: 'notify' is claimed by 2 definitions (package 'com.acme.alpha', " +
+                "a runtime-authored row (sys_metadata)); arming package 'com.acme.alpha' because a managed package's " +
+                'flow is sealed (ADR-0126 §2), and shadowing 1 other definition(s). Only the armed definition ' +
+                "dispatches. To change what runs, declare it as an override in 'com.acme.alpha.custom' (overrides: " +
+                "{ package: 'com.acme.alpha', basedOn }), or save it under a new name.",
+        );
+    });
+
+    it('CONTROL: the declared override beside a stored row keeps its line byte for byte (ADR-0146 D9)', () => {
+        const pair = `${A}.custom`;
+        const declared = { overrides: { package: A, basedOn: '1.0.0' }, _provenance: 'org' };
+        const line = lineOf(
+            [
+                bindStoredRow({ ...leaf('notify'), _provenance: 'org' }, null),
+                { ...leaf('notify'), _packageId: A, _provenance: 'package' },
+                bindStoredRow({ ...leaf('notify'), ...declared }, pair),
+            ],
+            { notify: A },
+        );
+        expect(line).toBe(
+            "[Automation] Flow name collision: 'notify' is claimed by 3 definitions (the declared override in " +
+                "'com.acme.alpha.custom' (sys_metadata), package 'com.acme.alpha', a runtime-authored row " +
+                "(sys_metadata)); arming the declared override in 'com.acme.alpha.custom' (sys_metadata) because it " +
+                "is the declared override of 'com.acme.alpha' (ADR-0146 D9), and shadowing 2 other definition(s). " +
+                "Only the armed definition dispatches. To change what runs, declare it as an override in " +
+                "'com.acme.alpha.custom' (overrides: { package: 'com.acme.alpha', basedOn }), or save it under a new name.",
+        );
+    });
+
+    it('CONTROL: two environment rows of a name no package ships keep their line byte for byte (arrival order)', () => {
+        const line = lineOf([{ ...leaf('notify'), _provenance: 'org' }, { ...leaf('notify'), _provenance: 'org' }], {});
+        expect(line).toBe(
+            "[Automation] Flow name collision: 'notify' is claimed by 2 definitions (a runtime-authored row " +
+                '(sys_metadata), a runtime-authored row (sys_metadata)); arming a runtime-authored row (sys_metadata) ' +
+                'by arrival order, and shadowing 1 other definition(s). Only the armed definition dispatches. ' +
+                'Rename one of them.',
+        );
+    });
+});
+
+// ── [epic #31527 child E5] connector_action names its connector from the flow's package ──
+
+/** A declared connector instance `name` in the registry: package `packageId`'s, or the environment's. */
+function declareConnector(name: string, packageId?: string) {
+    const item = { name, label: name, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] };
+    if (packageId) registry.registerItem('connector', { ...item, _packageId: packageId }, 'name' as never, packageId);
+    else registry.registerItem('connector', { ...item, _provenance: 'org' }, 'name' as never);
+}
+
+/** The engine's one live instance under `name`; `pings` records each dispatch to it. */
+let pings: string[];
+function liveConnector(name: string) {
+    engine.registerConnector(
+        { name, label: name, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] } as never,
+        { ping: async () => { pings.push(name); return { ok: true }; } },
+    );
+}
+
+/** start → connector_action(connectorId.ping) → end. */
+function dispatcher(name: string, connectorId: string) {
+    return {
+        name,
+        label: name,
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: {} },
+            { id: 'call', type: 'connector_action', label: 'Ping', connectorConfig: { connectorId, actionId: 'ping', input: {} } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'call' },
+            { id: 'e2', source: 'call', target: 'end' },
+        ],
+    };
+}
+
+describe('ADR-0150 D3 — a connector_action names its connector from the calling flow\'s package (epic #31527 child E5)', () => {
+    beforeEach(() => {
+        pings = [];
+        const ctx = { getService(name: string) { if (name === 'objectql') return { registry }; throw new Error(`no ${name}`); } };
+        engine.setConnectorNameResolver(connectorNameResolver(ctx as never));
+    });
+
+    it("dispatches to the caller package's own instance, as before", async () => {
+        install(P);
+        declareConnector('billing', P);
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(pings).toEqual(['billing']);
+    });
+
+    it('dispatches to the one holder in its declared dependency closure', async () => {
+        install(A);
+        install(P, [A]);
+        declareConnector('billing', A);
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(pings).toEqual(['billing']);
+    });
+
+    it('an environment-authored flow dispatches to the one package holder (a caller with no package)', async () => {
+        install(A);
+        declareConnector('billing', A);
+        liveConnector('billing');
+        author(dispatcher('my_charge', 'billing'));
+        const result = await engine.execute('my_charge');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(pings).toEqual(['billing']);
+    });
+
+    it('a connector a plugin registers in code is no registry item, and still dispatches', async () => {
+        install(P);
+        liveConnector('slack');
+        ship(P, dispatcher('notify', 'slack'));
+        const result = await engine.execute('notify');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(pings).toEqual(['slack']);
+    });
+
+    it('red line 1 — a packaged flow is never served an instance held only outside its closure: refused naming the holder, nothing dispatched', async () => {
+        install(Q);
+        install(P);
+        declareConnector('billing', Q);
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain("connector_action 'call'");
+        expect(String(result.error)).toContain(Q);
+        expect(pings).toEqual([]);
+    });
+
+    it('ADR-0150 D3 (a) — a packaged flow never resolves to an environment-only instance: refused, nothing dispatched', async () => {
+        install(P);
+        declareConnector('billing');
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain("connector_action 'call'");
+        expect(String(result.error)).toContain('environment');
+        expect(pings).toEqual([]);
+    });
+
+    it('red line 2 — two holders in its closure: refused naming both, never the first listed', async () => {
+        install(A);
+        install(Q);
+        install(P, [A, Q]);
+        declareConnector('billing', A);
+        declareConnector('billing', Q);
+        liveConnector('billing');
+        ship(P, dispatcher('charge', 'billing'));
+        const result = await engine.execute('charge');
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain(A);
+        expect(String(result.error)).toContain(Q);
+        expect(pings).toEqual([]);
+    });
+
+    it('the automation plugin attaches the resolver at init: a booted engine refuses the outside-closure name for the flow\'s package', async () => {
+        install(Q);
+        install(P);
+        declareConnector('billing', Q);
+        const kernel = new LiteKernel({ logger: { level: 'silent' } } as never);
+        kernel.use(new AutomationServicePlugin());
+        kernel.use({
+            name: 'test.harness',
+            type: 'standard' as const,
+            version: '1.0.0',
+            dependencies: ['com.objectstack.service-automation'],
+            async init(ctx: any) {
+                ctx.registerService('objectql', { registry });
+                // The protocol's loader set: package P ships flow `charge`.
+                ctx.registerService('protocol', {
+                    packagedArtifactOwner: ({ type, name }: { type: string; name: string }) =>
+                        type === 'flow' && name === 'charge' ? P : undefined,
+                });
+            },
+            async start() {},
+        } as never);
+        await kernel.bootstrap();
+        try {
+            const booted = kernel.getService('automation') as AutomationEngine;
+            // P's own body of `charge`, armed as the plugin's arming steps arm it.
+            booted.registerFlow('charge', dispatcher('charge', 'billing'), { source: 'package', packageId: P });
+            const refusal = booted.connectorNameRefusal('billing', { flowName: 'charge' } as never);
+            expect(refusal?.status).toBe('refused');
+            expect(refusal?.message).toContain(Q);
+            // An environment-authored flow (no package) is not refused here.
+            expect(booted.connectorNameRefusal('billing', { flowName: 'my_charge' } as never)).toBeUndefined();
+        } finally {
+            await kernel.shutdown();
+        }
+    });
+});
+
+// ── [epic #31527 child E5, epic review R1] the armed body decides the caller package ──
+
+/**
+ * ADR-0150 D3, the paragraph after (a)–(d): "A reference written in an
+ * environment-authored overlay (ADR-0005) is the environment's reference. It
+ * resolves as a caller with no package … It never resolves from the package
+ * the overlay customizes." So a run of P's flow NAME whose armed body is an
+ * environment override names its `connectorId` and its `subflow` with no
+ * package — as on main before E1 — while P's own body still names them from P.
+ *
+ * Each body is armed the way the automation plugin arms it: classified by
+ * `resolveFlowPrecedence` (the winner's `contender`) and handed to
+ * `registerFlow` as `armedFrom`. Three override shapes: a package-less stored
+ * row, the `.custom` pair's declared override as the boot pull's registry list
+ * carries it (its stored binding), and the same override as the protocol's
+ * view serves it at `kernel:ready` (no binding; the base's `_packageId`).
+ */
+describe('ADR-0150 D3 — an environment override of a packaged flow names its references with no package (epic #31527 child E5, R1)', () => {
+    const PAIR = `${P}.custom`;
+    const declared = { overrides: { package: P, basedOn: '1.0.0' } };
+    const SHAPES: ReadonlyArray<readonly [string, (body: { name: string }) => unknown]> = [
+        ['a package-less environment row', (body) => bindStoredRow({ ...body, _provenance: 'org' }, null)],
+        ['the .custom declared override (stored row, boot pull)', (body) => bindStoredRow({ ...body, ...declared, _provenance: 'org' }, PAIR)],
+        [
+            'the .custom declared override (served envelope, kernel:ready)',
+            (body) => ({ ...body, ...declared, _packageId: P, _packageVersion: '1.0.0', _provenance: 'package' }),
+        ],
+    ];
+    /** P's own body, as the loader ships it. */
+    const loaderBody = (body: { name: string }) => ({ ...body, _packageId: P, _packageVersion: '1.0.0', _provenance: 'package' });
+
+    /** P ships `body`'s name; the engine arms `armed` for it the way the plugin does. */
+    function armOverName(body: { name: string }, armed: unknown) {
+        install(P);
+        registry.registerItem('flow', { ...body, _packageId: P }, 'name' as never, P);
+        loaderSet[body.name] = P;
+        const [winner] = resolveFlowPrecedence([armed], undefined, (name) => engine.packagedFlowOwner(name), installedManifestsOf(registry));
+        engine.registerFlow(winner.name, winner.definition as never, winner.contender);
+        return winner.contender;
+    }
+
+    beforeEach(() => {
+        pings = [];
+        const ctx = { getService(name: string) { if (name === 'objectql') return { registry }; throw new Error(`no ${name}`); } };
+        engine.setConnectorNameResolver(connectorNameResolver(ctx as never));
+    });
+
+    for (const [shape, overlay] of SHAPES) {
+        it(`connectorId — ${shape}: an environment-only instance is reached, as a caller with no package`, async () => {
+            declareConnector('billing');
+            liveConnector('billing');
+            const arm = armOverName(dispatcher('charge', 'billing'), overlay(dispatcher('charge', 'billing')));
+            expect(arm.source).not.toBe('package');
+            expect(engine.armedFlowPackage('charge')).toBeUndefined();
+            const result = await engine.execute('charge');
+            expect(result.success, String(result.error)).toBe(true);
+            expect(pings).toEqual(['billing']);
+        });
+
+        it(`subflow — ${shape}: an environment-only flow is reached, as a caller with no package`, async () => {
+            author(leaf('welcome'));
+            armOverName(caller('process', 'welcome'), overlay(caller('process', 'welcome')));
+            expect(engine.armedFlowPackage('process')).toBeUndefined();
+            const result = await engine.execute('process');
+            expect(result.success, String(result.error)).toBe(true);
+            expect(ran).toEqual(['welcome']);
+        });
+    }
+
+    it("CONTROL: P's own body (a package arm) still names its connectorId from P — the environment-only instance is refused", async () => {
+        declareConnector('billing');
+        liveConnector('billing');
+        const arm = armOverName(dispatcher('charge', 'billing'), loaderBody(dispatcher('charge', 'billing')));
+        expect(arm).toEqual({ source: 'package', packageId: P });
+        expect(engine.armedFlowPackage('charge')).toBe(P);
+        const result = await engine.execute('charge');
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain('environment');
+        expect(pings).toEqual([]);
+    });
+
+    it("CONTROL: P's own body (a package arm) still names its subflow from P — the environment-only flow is refused", async () => {
+        author(leaf('welcome'));
+        armOverName(caller('process', 'welcome'), loaderBody(caller('process', 'welcome')));
+        expect(engine.armedFlowPackage('process')).toBe(P);
+        const result = await engine.execute('process');
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('the environment (an item authored in this environment, bound to no package)');
+        expect(ran).toEqual([]);
+    });
+
+    it('a write door\'s body (no arm handed) is the environment\'s; the body the engine held keeps its arm when put back', async () => {
+        install(P);
+        ship(P, leaf('notify'));
+        expect(engine.armedFlowPackage('notify')).toBe(P);
+        const held = await engine.getFlow('notify');
+        engine.registerFlow('notify', leaf('notify'));
+        expect(engine.armedFlowPackage('notify')).toBeUndefined();
+        engine.registerFlow('notify', held);
+        expect(engine.armedFlowPackage('notify')).toBe(P);
+        expect(engine.armedFlowPackage('never_registered')).toBeUndefined();
     });
 });

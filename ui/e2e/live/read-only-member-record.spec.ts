@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { signInMember } from './member';
+import { memberRequestContext, signInMember } from './member';
 import { writesRecordsOf } from './data-writes';
 
 /**
@@ -49,7 +49,6 @@ test('a member who may read but not write an inquiry gets a read-only form and n
   browser,
   page,
   request,
-  playwright,
 }) => {
   // Three page loads in two browser contexts, one of them cold.
   test.setTimeout(120_000);
@@ -66,7 +65,7 @@ test('a member who may read but not write an inquiry gets a read-only form and n
   const member = await signInMember(request, 'showcase_manager');
 
   await test.step('premise: the server lets the member read the record and refuses its update', async () => {
-    const api = await playwright.request.newContext({ extraHTTPHeaders: { Authorization: `Bearer ${member.token}` } });
+    const api = await memberRequestContext(member);
     try {
       const read = await api.get(`${API}/api/v1/data/${OBJECT}/${id}`);
       expect(read.status(), 'the member reads the admin-owned inquiry').toBe(200);

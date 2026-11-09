@@ -64,8 +64,9 @@ const RULE = 'naming/namespace-prefix';
 const prefixIssues = (config: unknown) =>
   lintConfig(config as any).filter((i) => i.rule === RULE);
 // The rule's two findings, told apart by the subject each sentence opens with.
-// Since the namespace contract (ruling C on #30798) a bare name warns on its
-// own, so the duplicate axis this file pins is read through `dupIssues`.
+// Since ADR-0150 the bare-name finding judges only capabilities and positions
+// (an app name is short by default), so the duplicate axis this file pins is
+// read through `dupIssues`, and the owning-package suggestion through positions.
 const dupIssues = (config: unknown) =>
   prefixIssues(config).filter((i) => i.message.includes('is declared more than once'));
 const bareIssues = (config: unknown) =>
@@ -88,6 +89,7 @@ const obj = () => ({
   fields: { number: { type: 'text', label: 'Number' } },
 });
 const app = (name: string, label: string) => ({ name, label });
+const position = (name: string, label: string) => ({ name, label });
 const action = (name: string, objectName?: string) => ({
   name,
   label: 'Log Call',
@@ -132,12 +134,9 @@ describe('#17821 — the duplicate-name advisory is evaluated per package', () =
         { ...B, apps: [app('home', 'Home B')] },
       ]);
       expect(dupIssues(config)).toEqual([]);
-      // Both names are bare, so each package is told to prefix its OWN item
-      // with its OWN namespace — the contract that makes the pair unambiguous.
-      expect(bareIssues(config).map((i) => [i.path, i.fix])).toEqual([
-        ['packages[0].manifest.apps[0].name', 'alpha_home'],
-        ['packages[1].manifest.apps[0].name', 'beta_home'],
-      ]);
+      // And a short app name is the intended spelling since ADR-0150 (D9): each
+      // package's `home` is addressed by (package, name), so nothing is owed.
+      expect(bareIssues(config)).toEqual([]);
     });
 
     it('THE TRUE POSITIVE — the SAME two names inside ONE package still warn', () => {
@@ -160,10 +159,11 @@ describe('#17821 — the duplicate-name advisory is evaluated per package', () =
     it('THE SUGGESTION comes from the OWNING package, never from a sibling', () => {
       // The card's sharpest symptom: the prescribed rename carried `alpha_`,
       // the namespace of the package that does NOT own the reported item. The
-      // rename now rides the bare-name finding, and must keep that property.
+      // rename rides the bare-name finding, which since ADR-0150 judges
+      // positions (one environment slot, D7), and must keep that property.
       const issues = bareIssues(shape([
-        { ...A, apps: [app('portal', 'Portal')], objects: [obj()] },
-        { ...B, apps: [app('home', 'Home B'), app('home', 'Home B2')] },
+        { ...A, positions: [position('portal', 'Portal')], objects: [obj()] },
+        { ...B, positions: [position('home', 'Home B'), position('home', 'Home B2')] },
       ]));
       expect(issues.map((i) => i.fix)).toEqual(['alpha_portal', 'beta_home', 'beta_home']);
       for (const issue of issues.filter((i) => i.path.startsWith('packages[1].'))) {
@@ -265,10 +265,11 @@ describe('#17821 — a single-package project is judged exactly as it was', () =
   const oneBody = () => ({ ...A, apps: [app('home', 'H1'), app('home', 'H2')], objects: [obj()] });
 
   it('one `packages[]` entry is judged identically to no `packages[]` at all', () => {
-    // Both findings, compared whole: two bare names and the one duplicate, in
-    // the top-level coordinates the rest of `lintConfig` reports in.
+    // The rule's findings, compared whole: the one duplicate (a short app name
+    // draws no bare-name finding since ADR-0150), in the top-level coordinates
+    // the rest of `lintConfig` reports in.
     const bare = prefixIssues({ manifest: { ...TOP }, ...{ apps: oneBody().apps, objects: oneBody().objects } });
-    expect(bare.map((i) => i.path)).toEqual(['apps[0].name', 'apps[1].name', 'apps[1].name']);
+    expect(bare.map((i) => i.path)).toEqual(['apps[1].name']);
     expect(dupIssues({ manifest: { ...TOP }, apps: oneBody().apps, objects: oneBody().objects })).toHaveLength(1);
 
     for (const [, shape] of SHAPES) {

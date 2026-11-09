@@ -49,6 +49,7 @@ import { whereContainsMembershipSql } from '../contains-membership-sql.js';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
 import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
+import { declaredCubeMemberKey } from '../cube-member-key.js';
 import { hasJsonMembershipSql, isJsonStoredShape } from '../contains-membership-sql.js';
 import { expandEmptyOperator } from '@objectstack/spec/data';
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
@@ -1811,14 +1812,17 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
    * Resolve a member reference (dimension, measure, or filter field) to its
    * cube definition.
    *
-   * Accepts three naming conventions:
-   *   1. `<cube>.<field>` — the canonical analytics qualifier (stripped to `<field>`).
-   *   2. `<lookup>.<field>` — a relation traversal (e.g. `account.industry`).
-   *      First tried as the literal key, then as the underscore-flattened
-   *      key (`account_industry`), and finally returned as a synthetic
-   *      definition whose `sql` is the dotted reference so the JOIN
-   *      machinery can pick it up.
-   *   3. `<field>` — a bare field name on the cube's table.
+   * The declared key a spelling names is {@link declaredCubeMemberKey}'s one
+   * rule, which the door's gates read too: the key verbatim (an exact dotted
+   * key included), behind the cube's own qualifier (`<cube>.<field>`,
+   * `<object>.<field>`), or through an underscore-flattened key
+   * (`account_industry`) whose `sql` is that same relationship path. [#31842]
+   * A dotted spelling never names a key by its tail alone: `vendor.region` is
+   * not the base `region`.
+   *
+   * A dotted dimension that names no declared key is a relation traversal
+   * (`account.industry`): it comes back as a synthetic definition whose `sql`
+   * is the dotted reference, so the JOIN machinery picks it up.
    */
   private lookupMember(
     cube: Cube,
@@ -1826,25 +1830,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     kind: 'dimension' | 'measure',
   ): { sql: string; type?: string } | undefined {
     const bag = kind === 'dimension' ? cube.dimensions : cube.measures;
-    // Direct hit on the registered key (handles `cube.field` and exact dotted keys).
-    if (bag[member]) return bag[member];
-    if (member.includes('.')) {
-      const [first, ...rest] = member.split('.');
-      const tail = rest.join('.');
-      // `<cube>.<field>` style.
-      if (first === cube.name && bag[tail]) return bag[tail];
-      // Plain second-segment lookup (legacy behaviour).
-      if (bag[tail]) return bag[tail];
-      // Underscore-flattened relation lookup (e.g. `account_industry`).
-      const flat = member.replace(/\./g, '_');
-      if (bag[flat]) return bag[flat];
-      // Synthetic relation traversal — let qualifyAndRegisterJoin handle it.
-      if (kind === 'dimension') {
-        return { sql: member, type: 'string' };
-      }
-    } else if (bag[member]) {
-      return bag[member];
-    }
+    const key = declaredCubeMemberKey(cube, bag, member);
+    if (key !== undefined) return bag[key];
+    // Synthetic relation traversal — let qualifyAndRegisterJoin handle it.
+    if (kind === 'dimension' && member.includes('.')) return { sql: member, type: 'string' };
     return undefined;
   }
 
@@ -1854,9 +1843,10 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     parentTable: string,
     joins: StatementJoins,
   ): string {
+    // `lookupMember` answers every dotted member (a declared key, or the
+    // synthetic traversal), so an undeclared one here is a bare base column.
     const dim = this.lookupMember(cube, member, 'dimension');
-    const raw = dim ? dim.sql : (member.includes('.') ? member.split('.')[1] : member);
-    return this.qualifyAndRegisterJoin(raw, parentTable, joins, cube);
+    return this.qualifyAndRegisterJoin(dim ? dim.sql : member, parentTable, joins, cube);
   }
 
   /**
@@ -2015,11 +2005,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (dim) return this.qualifyAndRegisterJoin(dim.sql, parentTable, joins, cube);
     const measure = this.lookupMember(cube, member, 'measure');
     if (measure) return this.qualifyAndRegisterJoin(measure.sql, parentTable, joins, cube);
-    const fieldName = member.includes('.') ? member.split('.')[1] : member;
     // [#21249] A member the cube does not declare is a base-table column too
     // (`where: { id }`), so it takes the same qualification as a declared one:
     // returned bare it sat beside a joined target's own `id`, ambiguous.
-    return this.qualifyAndRegisterJoin(fieldName, parentTable, joins, cube);
+    // [#31842] Only a bare one reaches here: `lookupMember` answers every
+    // dotted member, so no second segment is ever read as a base column.
+    return this.qualifyAndRegisterJoin(member, parentTable, joins, cube);
   }
 
   /**
@@ -2045,7 +2036,7 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
   ): { object: string; field: string } {
     const dim = this.lookupMember(cube, member, 'dimension');
     const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
-    const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
+    const rawSql = dim?.sql ?? measure?.sql ?? member;
 
     if (rawSql.includes('.')) {
       // Multi-hop (ADR-0071): the column's owning object is the object the

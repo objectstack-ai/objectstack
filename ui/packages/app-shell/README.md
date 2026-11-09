@@ -503,7 +503,7 @@ See the full table in [ADR-0059](../../docs/adr/0059-action-params-shared-field-
 
 ## Product-page blocks
 
-Five generic blocks for the pages a product composes as metadata (a product's
+Six generic blocks for the pages a product composes as metadata (a product's
 welcome page, a CRM's sales home), registered by this package and named for
 what they draw. Each reads its props from the node's `properties`; copy is a
 string or an inline translation map (`{ en, "zh-CN" }`), resolved in the
@@ -516,6 +516,7 @@ viewer's language.
 | `usage-bar` | how much of a limit is used | `label`, `used`, `limit?` (absent or `0` = unlimited: no bar), `unit?` |
 | `checklist` | steps that tick as they are done | `items: [{ label, done, action? }]`, `collapsedWhenDone?` (draw nothing once every step is done) |
 | `tile-grid` | the console home's launcher tiles | `items: [{ label, href, icon?, caption? }]`, `addTile?: { label, href }` |
+| `row-table` | the rows a bound list holds, as a table | `rows` (a list, or a `${…}` hole naming one), `columns: [{ path, label, format?, enum? }]`, `emptyLabel?` |
 
 Any of them can carry the spec's API binding, and then read values from the
 answer through `${…}` holes:
@@ -525,6 +526,32 @@ answer through `${…}` holes:
   "type": "usage-bar",
   "dataSource": { "provider": "api", "read": { "url": "/api/v1/cloud/home" }, "path": "data" },
   "properties": { "label": "Storage", "used": "${data.storage.usedMb}", "limit": "${data.storage.limitMb}", "unit": "MB" }
+}
+```
+
+`row-table` draws every row, its columns in the order written. A column's
+`path` is a dotted path into one row (`owner.name`), its `label` the heading,
+and its `format` one of `text` (the default, drawn as written), `datetime` (an
+instant in the viewer's display locale and time zone, the `datetime` field
+cell's face) or `enum` (the label `enum: { value: label }` names; a value the
+map does not name is drawn as written). A field the row lacks, `null` or empty
+draws `—`; an empty list draws `emptyLabel` ("No rows to display" when
+omitted). A `rows` hole that resolves to anything but a list, or a column the
+block cannot draw, draws the binding's error panel instead of an empty table:
+
+```json
+{
+  "type": "row-table",
+  "dataSource": { "provider": "api", "read": { "url": "/api/v1/ai/actors" }, "path": "data" },
+  "properties": {
+    "rows": "${data.actors}",
+    "columns": [
+      { "path": "name", "label": { "en": "Name", "zh-CN": "名称" } },
+      { "path": "status", "label": "Status", "format": "enum", "enum": { "active": "Active", "paused": "Paused" } },
+      { "path": "lastRun.at", "label": "Last run", "format": "datetime" }
+    ],
+    "emptyLabel": { "en": "No agents yet" }
+  }
 }
 ```
 

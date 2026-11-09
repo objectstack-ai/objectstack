@@ -39,7 +39,8 @@ const warnings = vi.hoisted(() => {
 
 import '../productBlocks';
 
-const HOME_BLOCKS = ['hero', 'stat', 'usage-bar', 'checklist', 'tile-grid'] as const;
+// `row-table` (#31856) joined the five, registered the same way.
+const HOME_BLOCKS = ['hero', 'stat', 'usage-bar', 'checklist', 'tile-grid', 'row-table'] as const;
 
 const DEPRECATED = /Registering component "([^"]+)" without a namespace is deprecated/;
 
@@ -49,7 +50,7 @@ afterAll(() => {
 });
 
 describe('console home blocks register under `app-shell` (objectui#13301)', () => {
-  it('logs no deprecation line for the five blocks when the module loads', () => {
+  it('logs no deprecation line for the blocks when the module loads', () => {
     const named = warnings.seen
       .map((line) => DEPRECATED.exec(line)?.[1])
       .filter((type): type is string => Boolean(type));
@@ -94,6 +95,7 @@ describe('a page authoring the bare key still draws each block (objectui#13301)'
     ['usage-bar', { type: 'usage-bar', properties: { label: 'Storage', used: 256, limit: 1024 } }, 'Storage'],
     ['checklist', { type: 'checklist', properties: { items: [{ label: 'Create an environment', done: false }] } }, 'Create an environment'],
     ['tile-grid', { type: 'tile-grid', properties: { items: [{ label: 'CRM', href: '/apps/crm' }] } }, 'CRM'],
+    ['row-table', { type: 'row-table', properties: { rows: [{ name: 'Ada' }], columns: [{ path: 'name', label: 'Name' }] } }, 'Ada'],
   ];
 
   it.each(pages)('`%s`', (_block, schema, text) => {

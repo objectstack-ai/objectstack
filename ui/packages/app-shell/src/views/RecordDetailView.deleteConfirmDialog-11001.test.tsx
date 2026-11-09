@@ -91,6 +91,7 @@ type Pack = {
   detail: { delete: string; moreActions: string };
   objectActions: {
     deleteConfirm: string;
+    deleteConfirmQuestion: string;
     deleteConfirmTitle: string;
     deleteConfirmButton: string;
     deletedNamed: string;
@@ -234,12 +235,13 @@ describe('record page Delete asks through the in-app confirm dialog (objectui#11
     expect(within(dialog).getByRole('heading')).toHaveTextContent(
       fill(EN.objectActions.deleteConfirmTitle, { label: 'Call', name: 'Intro call' }),
     );
-    expect(within(dialog).getByText(EN.objectActions.deleteConfirm)).toBeInTheDocument();
-    // objectstack-ai/objectstack#27823 — the question says the delete is
-    // permanent, in the batch question's own words.
+    expect(within(dialog).getByText(EN.objectActions.deleteConfirmQuestion)).toBeInTheDocument();
+    // objectstack#30239 — a business record enters the recycle bin, so the
+    // question no longer says the delete is permanent (the #27823 sentence
+    // stays on platform objects only).
     const permanent = EN.console.objectView.bulkDeleteConfirm.split('? ').pop()!;
-    expect(within(dialog).getByText(EN.objectActions.deleteConfirm).textContent).toContain(permanent);
     expect(permanent).toBe('This cannot be undone.');
+    expect(dialog.textContent).not.toContain(permanent);
     const confirm = within(dialog).getByRole('button', { name: EN.objectActions.deleteConfirmButton });
     expect(confirm.className).toContain('bg-destructive');
     expect(within(dialog).queryByRole('button', { name: EN.actionConfirm.confirm })).toBeNull();
@@ -300,7 +302,7 @@ describe('record page Delete names the record in zh too (objectui#11695)', () =>
     // The zh template is not the en one, so this reads the zh pack, not a fallback.
     expect(title).not.toBe(fill(EN.objectActions.deleteConfirmTitle, { label: 'Call', name: 'Intro call' }));
     expect(within(dialog).getByRole('heading')).toHaveTextContent(title);
-    expect(within(dialog).getByText(ZH.objectActions.deleteConfirm)).toBeInTheDocument();
+    expect(within(dialog).getByText(ZH.objectActions.deleteConfirmQuestion)).toBeInTheDocument();
     const confirm = within(dialog).getByRole('button', { name: ZH.objectActions.deleteConfirmButton });
     expect(confirm.className).toContain('bg-destructive');
 

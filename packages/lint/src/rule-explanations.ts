@@ -4971,6 +4971,28 @@ const MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Mapping connector source (`validate-mapping-connector-source.ts`) ─────
+
+const MAPPING_CONNECTOR_SOURCE_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'mapping-connector-source-unknown',
+  covers: 'what a mapping\'s connector source may name',
+  paragraphs: [
+    'A mapping\'s `connectorSource.connector` names the connector a sync pulls its records from. ' +
+      'The pull reads only a declared instance, a `connectors[]` entry, never a connector a plugin ' +
+      'registers in code, and only one whose `provider` is `rest` or `openapi`. Any other name is ' +
+      'refused on every pull: a `job` whose `pull` names the mapping is still scheduled, and every run ' +
+      'records a failed job run that writes nothing. This rule reports the name at `os validate`.',
+    'It names what the stack can tell the name is: a datasource (a `datasources[]` entry is a ' +
+      'database connection, not a connector), a connector of another provider or a provider-less ' +
+      'catalog descriptor, or nothing at all, with the nearest declared rest or openapi connector ' +
+      'when one is close.',
+    'A warning, not an error: the automation plugin also materializes connectors other installed ' +
+      'packages declare and connector rows a Studio publish stores, and one package\'s lint sees ' +
+      'neither, so a name it cannot resolve may still resolve at run time. This stack\'s own ' +
+      'connectors and those of sibling packages in the same artifact are judged.',
+  ],
+};
+
 // ── View container shape (`validate-view-containers.ts`) ───────────────────
 
 const VIEW_CONTAINER_SHAPE_EXPLANATION: RuleExplanation = {
@@ -5968,6 +5990,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_BRANCH_LABEL_UNMATCHED_EXPLANATION.rule]: FLOW_BRANCH_LABEL_UNMATCHED_EXPLANATION,
   [ACTION_NAME_UNDEFINED_EXPLANATION.rule]: ACTION_NAME_UNDEFINED_EXPLANATION,
   [MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION.rule]: MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION,
+  [MAPPING_CONNECTOR_SOURCE_UNKNOWN_EXPLANATION.rule]: MAPPING_CONNECTOR_SOURCE_UNKNOWN_EXPLANATION,
   [VIEW_CONTAINER_SHAPE_EXPLANATION.rule]: VIEW_CONTAINER_SHAPE_EXPLANATION,
   [PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION.rule]: PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION,
   [PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION.rule]: PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION,

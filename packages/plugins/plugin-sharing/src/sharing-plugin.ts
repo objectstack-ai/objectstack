@@ -94,6 +94,7 @@ import { bindRecordShareCascade } from './record-share-cascade.js';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { inProcessSessionReadInput } from '@objectstack/types';
+import { backfillStoredDeclarationPackagesAtBoot } from './stored-declaration-package-backfill.js';
 
 /**
  * One page of the boot's organization enumeration. A PAGE size, not a cap: the
@@ -1010,8 +1011,15 @@ export class SharingServicePlugin implements Plugin {
             // it: this one IS an access-control surface.
             bindBusinessUnitTreeRecompute(engine, this.ruleService, ctx.logger as any, async (rule) => {
               // [ADR-0142 D2] A queue recipient reads the BU tree exactly when
-              // its queue has a business-unit member.
-              const queue = await this.queues?.resolveQueue(rule.recipient_id, rule.organization_id ?? null);
+              // its queue has a business-unit member — the queue the rule's
+              // grants are read from, so a declared rule's from its package
+              // (ADR-0150 D3).
+              const callerPackageId = await this.ruleService?.queueRecipientPackageOf(rule);
+              const queue = await this.queues?.resolveQueue(
+                rule.recipient_id,
+                rule.organization_id ?? null,
+                callerPackageId ? { callerPackageId } : undefined,
+              );
               return queue ? specsReadBusinessUnits(queue.members) : false;
             });
 
@@ -1249,6 +1257,18 @@ export class SharingServicePlugin implements Plugin {
     // loader) has settled. Idempotent: a runtime write that already
     // materialized a grant is reconciled to the same state.
     ctx.hook('kernel:bootstrapped', async () => {
+      // [ADR-0150 D8 rows R5, R6, R13] Managed sharing-rule rows, queue
+      // members and assignment cursors gain the package that holds the
+      // declared item they name, from its one package holder; the ambiguous
+      // set is reported, never bound. Before the rule passes below, so the
+      // rule-row writes it makes are reconciled by them, not one by one. Never
+      // fails the boot. See `stored-declaration-package-backfill.ts`.
+      try {
+        await backfillStoredDeclarationPackagesAtBoot(this.engine as any, (this.engine as any)?.registry, ctx.logger as any);
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: declared-item package backfill (kernel:bootstrapped) failed', { error: err?.message });
+      }
+
       // [#3865] Normalise retired `access_level: 'full'` rows FIRST, so the
       // rule reconcile below materialises grants from already-canonical rules
       // (and any `full` share rows it re-grants land as `edit` in one pass

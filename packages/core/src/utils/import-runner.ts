@@ -12,6 +12,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { CreateDataRequest, FindDataRequest, GetMetaItemRequest, UpdateDataRequest, ValidateDataIssue, ValidateDataRequest, ValidateDataResponse } from '@objectstack/spec/api';
 import { isMatchKeySets } from '@objectstack/spec/api';
 import { bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult } from './bulk-write.js';
+import { isFederatedObject, resolveTenantFieldName } from '../security/tenant-field.js';
 import { isUniqueViolationError, isEngineDuplicateRecordEnvelope, mapDataError, sandboxBusinessMessage, isSandboxOrigin, isSandboxOwnFault, resolveThrownHttpError, UNDECLARED_HOOK_REFUSAL_CODE } from '@objectstack/types';
 
 /**
@@ -677,6 +678,47 @@ async function servesReferenceTarget(p: ImportProtocolLike, target: string): Pro
 }
 
 /**
+ * The column an update or upsert import's match lookup scopes by, and the
+ * organization it scopes to; `null` when the lookup is the key alone.
+ *
+ * Why: the record a key names is the one in the organization a created row
+ * would be stamped with, the context's `tenantId` (the engine's write target
+ * in every posture). The key's unique index leads with that column, and under
+ * the `single` posture the engine adds no tenant scope to a read (ADR-0131
+ * D11), so a lookup on the key alone scanned the table once per row. Scoped,
+ * it is one index probe.
+ *
+ * The column is the engine's own answer, read off the target's declaration:
+ * a federated object (`isFederatedObject`) has none the platform may scope by,
+ * and otherwise `resolveTenantFieldName` decides (`tenancy.enabled: false`,
+ * then a declared `tenancy.tenantField`, then `organization_id`). Both are the
+ * engine's bindings, which live in this package for exactly this asker.
+ *
+ * ⛔ The scope only ever narrows the lookup, never widens it: no organization
+ * in the context, no declaration to read, or a read that fails, and the lookup
+ * is the key alone, as before. A NULL tenant value is matched by nothing here:
+ * NULL is not an owner (ADR-0131 D1), so it is not the caller's organization.
+ */
+async function matchScopeOf(
+  p: ImportProtocolLike,
+  objectName: string,
+  context: { tenantId?: unknown } | undefined,
+): Promise<{ field: string; organization: string } | null> {
+  const tenantId = context?.tenantId;
+  if (typeof tenantId !== 'string' || tenantId === '') return null;
+  if (typeof p.getMetaItem !== 'function') return null;
+  let item: unknown;
+  try {
+    item = ((await p.getMetaItem({ type: 'object', name: objectName })) as { item?: unknown } | undefined)?.item;
+  } catch {
+    return null;
+  }
+  if (!item || typeof item !== 'object' || isFederatedObject(item)) return null;
+  const field = resolveTenantFieldName(item);
+  return field ? { field, organization: tenantId } : null;
+}
+
+/**
  * [#27947] Does this target field name at most one record, so a cell holding
  * its value identifies the record? Yes when its `unique` declares a constraint
  * (`isUniqueDeclared`: `true`, `'organization'`, `'global'`), and for an
@@ -944,12 +986,18 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       const v = data[f];
       return !(v === undefined || v === null || v === '');
     }));
+  // The organization the match lookup is scoped to ({@link matchScopeOf}),
+  // read from the target's declaration once per import, on the first lookup.
+  let matchScope: Promise<{ field: string; organization: string } | null> | undefined;
   const findExisting = async (
     data: Record<string, any>,
   ): Promise<{ match: Record<string, any> | 'blank' | 'none' | 'ambiguous'; keySet: string[] }> => {
     const keySet = keySetOf(data);
     if (!keySet) return { match: 'blank', keySet: [] };
     const filter: Record<string, any> = {};
+    const scope = await (matchScope ??= matchScopeOf(p, objectName, context));
+    // A key set that names the tenant column keeps the row's own value.
+    if (scope && !keySet.includes(scope.field)) filter[scope.field] = scope.organization;
     for (const f of keySet) filter[f] = data[f];
     const r = await p.findData(findArgsBase({
       object: objectName,

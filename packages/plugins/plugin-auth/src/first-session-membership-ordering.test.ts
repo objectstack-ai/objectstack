@@ -54,6 +54,9 @@ const USER = 'u_first_session';
 const USER_EMAIL = 'first.session@example.com';
 const DEFAULT_ORG = 'org_default';
 
+/** The AI service account check `session.create.before` runs first (ADR-0151 D2). */
+const PRINCIPAL_KIND_READ = ['sys_user', expect.objectContaining({ where: { id: USER }, limit: 1 })];
+
 interface MemberRow {
   id: string;
   organization_id: string;
@@ -224,7 +227,9 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
       // is refused by the reconciler before it touches the store, and the
       // re-read never runs because nothing was bound.
       expect(engine.findOne).toHaveBeenCalledTimes(2);
-      expect(engine.find).not.toHaveBeenCalled();
+      // The one `find` is the AI service account check on the user's own row
+      // (ADR-0151 D2), which runs before any membership logic.
+      expect(engine.find.mock.calls).toEqual([PRINCIPAL_KIND_READ]);
     });
   });
 
@@ -262,7 +267,13 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
       const engine = {
         findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
                                      assertEngineFindOnePredicate(object, query); throw new Error('db down'); }),
-        find: vi.fn(async () => { throw new Error('db down'); }),
+        // The AI service account check on the user's own row answers (a failed
+        // read there refuses the session, pinned in
+        // `service-account-sign-in-refusal.test.ts`); every membership read fails.
+        find: vi.fn(async (object: string) => {
+          if (object === 'sys_user') return [];
+          throw new Error('db down');
+        }),
         insert: vi.fn(async () => { throw new Error('db down'); }),
       };
       const hooks = hooksFor({ engine: engine as any, defaultOrgId: DEFAULT_ORG });
@@ -320,7 +331,7 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
       const hooks = hooksFor({ engine, defaultOrgId: DEFAULT_ORG });
       await hooks.session.create.before({ userId: USER }, {});
       expect(engine.findOne).toHaveBeenCalledTimes(2);
-      expect(engine.find).not.toHaveBeenCalled();
+      expect(engine.find.mock.calls).toEqual([PRINCIPAL_KIND_READ]);
     });
 
     it('a creation staged in ANOTHER request does not reach this sign-in', async () => {

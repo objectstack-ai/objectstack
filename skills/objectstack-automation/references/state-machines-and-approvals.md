@@ -2,7 +2,7 @@
 
 A record's **state machine** locks the legal transitions of its status field
 so that automation — increasingly AI-generated — cannot drive a record into an
-illegal state.
+illegal state. Unmarked blocks are fragments.
 
 ### State Machine — a `state_machine` validation rule (ADR-0020)
 
@@ -14,8 +14,10 @@ an update whose `field` moves to a state not listed for the current state is
 rejected with the rule's `message`. A `from` state mapped to `[]` is a declared
 dead-end.
 
+<!-- os:check -->
 ```typescript
-{
+import type { StateMachineValidation } from '@objectstack/spec/data';
+const rule: StateMachineValidation = {
   type: 'state_machine',
   name: 'case_lifecycle',
   label: 'Case Lifecycle',
@@ -29,7 +31,7 @@ dead-end.
     resolved:  ['open', 'closed'],
     closed:    [],                 // final — no outgoing transitions
   },
-}
+};
 ```
 
 Notes:
@@ -68,15 +70,17 @@ is one diagram a reviewer (or AI) can read end-to-end.
 > `sys_approval_action`, the record lock, the status mirror, approver
 > resolution) is owned by `plugin-approvals`.
 
+<!-- os:check -->
 ```typescript
+import { cel, defineFlow } from '@objectstack/spec';
 // A record-triggered flow: high-value opportunities need manager sign-off,
 // and director sign-off too when the amount clears 500k.
-{
+defineFlow({
   name: 'crm_opportunity_discount_approval',
   label: 'Opportunity Discount Approval',
   type: 'record_change',
   nodes: [
-    // The trigger is the START node's config (SKILL.md § Trigger Configuration).
+    // The trigger is the START node's config.
     {
       id: 'start',
       type: 'start',
@@ -125,7 +129,6 @@ is one diagram a reviewer (or AI) can read end-to-end.
       condition: cel`record.amount > 100000` },
     { id: 'e2', source: 'manager_review',  target: 'needs_director',   label: 'approve' },
     { id: 'e3', source: 'manager_review',  target: 'rejected',         label: 'reject'  },
-    // Decision branches: mutually-exclusive edge `condition` predicates.
     { id: 'e4', source: 'needs_director',  target: 'director_signoff', label: 'true',
       condition: cel`record.amount > 500000` },
     { id: 'e5', source: 'needs_director',  target: 'mark_won',         label: 'false',
@@ -134,7 +137,7 @@ is one diagram a reviewer (or AI) can read end-to-end.
     { id: 'e7', source: 'director_signoff', target: 'rejected',        label: 'reject'  },
     { id: 'e8', source: 'mark_won',         target: 'approved' },
   ],
-}
+});
 ```
 
 ### Send-back for revision (ADR-0044)
@@ -188,8 +191,7 @@ Three pieces author it:
 > so the branch cannot run; `flow-approval-revise-target-not-service-owned`), a
 > `revise` edge whose window never loops back (a dead end `registerFlow` accepts
 > but that leaves the submitter nowhere to resubmit), and a resubmit edge left
-> **without** `type: 'back'` (an unmarked cycle `registerFlow` rejects). Resubmit
-> is an explicit verb (`POST /api/v1/approvals/requests/:id/resubmit`), never a
+> **without** `type: 'back'`. Resubmit is never a
 > record-save. See the `showcase_budget_approval` flow in the showcase app in
 > the framework repo for the canonical shape.
 
@@ -297,8 +299,7 @@ slate — guard genuinely-optional inputs explicitly, e.g.
 }
 ```
 
-The full "previous approver picks the next step's approvers" loop, end to end
-(the shipped `showcase_dynamic_approval` flow in the showcase app is this shape):
+The full "previous approver picks the next step's approvers" loop, end to end:
 
 <!-- os:check -->
 ```typescript
