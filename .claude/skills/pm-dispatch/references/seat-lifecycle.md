@@ -88,7 +88,7 @@
 - 队列空是逐卡表非结论:报无卡可派(维护者/协调者/轮报)即列队列过滤当刻返回的各卡。
 - 逐卡:卡号、同轮现读标签与 assignee(⛔ 不用缓存)、具名卡点;无卡点即候选,⛔ 不得报空。
 - 卡点一份词表:候选定义反面(`execution-duties.md`),open `Blocked-by:`、无分诊审计、他席 `Claim:`。
-- 单车道仓 `repo:*` 席:每轮首触 sweep 先于待命五项;cloud 细则见 `lanes/cloud.md`。
+- 单车道仓 `repo:*` 席:每轮首触 sweep 清空再认领,先于待命五项;cloud 细则见 `lanes/cloud.md`。
 - 巡查每轮探针后读信箱、认领满 `batch`,跑待命五项;间隔按 `execution-duties.md` 收集节②。
 - 待命五项各以其主节为准,⛔ 此处不另抄:findings 配合;`pm:blocked`/`pm:on-hold` 解锁扫描。
 - 在飞/已入队 PR 跟到 MERGED;决策箱仅在报告中列出 ⛔ 不 nag;跨车道备忘跟进。

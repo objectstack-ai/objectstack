@@ -17,8 +17,8 @@
 ## 常设承诺
 
 - 首触先行:每轮巡查先清 cloud 仓 open 卡中无 `pm:*` 状态或无 `priority:*` 者,清空后才认领。
-- 逐张按路线图次序定级,并落 `pm:queue` 或 `pm:blocked`+`Blocked-by:`,或附理由关卡。
-- 缺件卡补齐照 `filing-gate.md` 单车道仓条。
+- 逐张定级(判据照 `filing-gate.md`),并落 `pm:queue` 或 `pm:blocked`+`Blocked-by:`,或附理由关卡。
+- 排除同 `triage-duties.md` 析取排除行与决策卡;缺件卡补齐照 `filing-gate.md` 单车道仓条。
 - 立卡即完整:本车道立的每张卡建卡同笔带 `priority:*` 与 pm 状态,不留首触欠账。
 - 取卡序:企业版卡按 `cloud/ROADMAP.md` 档位与行序(`execution-duties.md` 取卡节),⛔ 不抄表行。
 - 企业版卡一律挂作 cloud 仓企业版父单的 sub-issue(该父单上的维护者裁决)。
