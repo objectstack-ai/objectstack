@@ -12,6 +12,7 @@ import {
 } from './kernel/unmanaged-install';
 import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
 import { findNamespaceObjectNameClashes, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
+import { validateNamespaceNotAddressLiteral } from './kernel/address-grammar';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
@@ -2583,6 +2584,16 @@ function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
     hold(body, body?.objects);
   }
   hold(config.manifest as Record<string, unknown> | undefined, config.objects);
+  // [ADR-0150 D5, child G1] …and no namespace this artifact declares spells a
+  // literal segment of the address grammar (`trigger`, `global`, `hooks`, …):
+  // the router reads the literal before any namespace, so the package's
+  // qualified addresses would never reach it. The install door's own judge,
+  // asked here so a new package is refused when it is written, not first at
+  // install (a package the boot registers is only warned there).
+  for (const { namespace } of namespaces) {
+    const refusal = validateNamespaceNotAddressLiteral(namespace);
+    if (refusal) errors.push(refusal);
+  }
   for (const clash of findNamespaceObjectNameClashes({ namespaces, objects })) errors.push(clash.message);
   return errors;
 }
