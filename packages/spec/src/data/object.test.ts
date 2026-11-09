@@ -1311,7 +1311,7 @@ describe('ObjectSchema.create()', () => {
     it('tombstone: dead metadata keys removed in 16.0 carry upgrade guidance', () => {
       const cases: Array<[string, unknown, string]> = [
         ['versioning', { enabled: true }, 'trackHistory'],
-        ['softDelete', { enabled: true }, 'hard deletes'],
+        ['softDelete', { enabled: true }, 'the recycle bin that shipped later (ADR-0148)'],
         ['search', { fields: ['name'] }, 'searchableFields'],
         ['recordName', { type: 'autonumber' }, 'autonumber'],
         ['keyPrefix', 'ACC', 'no effect'],
@@ -2704,12 +2704,13 @@ describe('apiMethods legacy-value strip (ObjectCapabilities)', () => {
     expect(result.success).toBe(false);
   });
 
-  it('restore/purge strip carries the retired-trash guidance', () => {
+  it('restore/purge strip carries the recycle-bin guidance: both derive from delete', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const result = ObjectCapabilities.parse({ apiMethods: ['delete', 'restore', 'purge'] });
     expect(result.apiMethods).toEqual(['delete']);
     const msg = warn.mock.calls.map((c) => c[0]).join('\n');
-    expect(msg).toContain('`enable.trash` was retired because no runtime ever read it');
+    expect(msg).toContain("`restore` derives from delete: it is the recycle bin's restore door");
+    expect(msg).toContain("`purge` derives from delete: it is the recycle bin's purge door");
   });
 
   it('the authored enum itself no longer admits legacy values', () => {
