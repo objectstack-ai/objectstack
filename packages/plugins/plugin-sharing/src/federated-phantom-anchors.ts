@@ -8,8 +8,8 @@
  *
  * `applySystemFields` (the ObjectQL registry) injects `owner_id` into every
  * object that has not opted out — **including federated ones** (ADR-0015
- * `external`) — while `Engine.syncObjectSchema` returns EARLY for
- * `external != null` and issues no DDL, because the remote schema is owned
+ * `external`) — while `Engine.syncObjectSchema` returns EARLY for a
+ * federated object and issues no DDL, because the remote schema is owned
  * externally. So for a federated object `owner_id` exists in the registered
  * schema and **nowhere else**. Measured on a booted showcase stack at
  * `origin/main` @ `b54aaab`, with a federated object carrying no ADR-0090 D1
@@ -85,17 +85,18 @@
  * `columnMap` arm to carry.
  */
 
-import { isOwnerAnchorUnprovable, platformProvisionsStorage } from '@objectstack/spec/data';
+import { isFederatedObject } from '@objectstack/core';
+import { isOwnerAnchorUnprovable } from '@objectstack/spec/data';
 
 /**
  * Is `schema` a federated (ADR-0015 `external`) object binding a remote table?
  * The platform provisions no storage for one, so nothing it injects is real.
  * The spec's `platformProvisionsStorage` is the one spelling of that predicate
- * (#7865's convergence map), so this reads it rather than restating it.
+ * (#7865's convergence map). `@objectstack/core`'s binding reads it, and this
+ * module path re-exports that binding rather than wrapping it again, so the
+ * runtime has one function for the question.
  */
-export function isFederatedObject(schema: unknown): boolean {
-  return !platformProvisionsStorage(schema);
-}
+export { isFederatedObject };
 
 /**
  * Does this object's `owner_id` exist only in the registry — i.e. is it the

@@ -29,6 +29,7 @@
 
 import { describe, it, expect, afterEach, beforeEach, afterAll, vi } from 'vitest';
 import { SignJWT, generateKeyPair } from 'jose';
+import { currentCredentialUseClient, hashApiKey, resolveRequestExecutionContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager, OAUTH_ORGANIZATION_CLAIM } from './auth-manager.js';
@@ -99,7 +100,7 @@ function isStampRead(query: unknown): boolean {
   return Array.isArray(q?.fields) && q.fields.includes('last_used_at') && !!q.where && 'client_id' in q.where;
 }
 
-async function rig(opts: { getAuditSink?: () => unknown } = {}) {
+async function rig(opts: { getAuditSink?: () => unknown; trustProxy?: boolean } = {}) {
   const engine = new ObjectQL();
   engines.push(engine);
   engine.registerDriver(
@@ -119,6 +120,7 @@ async function rig(opts: { getAuditSink?: () => unknown } = {}) {
       dataEngine: engine as never,
       logger,
       ...(opts.getAuditSink ? { getAuditSink: opts.getAuditSink } : {}),
+      ...(opts.trustProxy ? { trustProxy: true } : {}),
     } as never);
   const manager = makeManager();
   const api: any = await manager.getApi();
@@ -705,5 +707,118 @@ describe('[#31796] a skip_consent client\'s use is handed to the ledger once per
     await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
     await drain();
     expect(uses).toEqual([]);
+  });
+});
+
+/**
+ * [#31821] Where the admitted call came from travels with the use to the
+ * stamp: the address THIS manager establishes under the deployment's
+ * `trustProxy` (its `resolveClientAddress`, the one trust rule), and the user
+ * agent. Read where plugin-audit reads it, inside the stamp's own
+ * `afterUpdate` (`currentCredentialUseClient`), on the real engine.
+ */
+describe('[#31821] the use carries the client facts the deployment establishes', () => {
+  const PEER = '203.0.113.7';
+  const FORWARDED = '198.51.100.9';
+  const UA = 'desk-assistant/2.0 (+31821)';
+  const TRANSPORT = { headers: { 'user-agent': UA, 'x-forwarded-for': FORWARDED }, remoteAddress: PEER };
+
+  /** Every facts scope a stamp write of `object` ran in (`null` outside one), seen from its afterUpdate. */
+  function stampFacts(engine: ObjectQL, object: string): unknown[] {
+    const seen: unknown[] = [];
+    engine.registerHook('afterUpdate', async () => {
+      seen.push(currentCredentialUseClient() ?? null);
+    }, { object });
+    return seen;
+  }
+
+  it.each([
+    [false, PEER],
+    [true, FORWARDED],
+  ])('an OAuth token\'s consent stamp, trustProxy %s: the address is %s, and the user agent is the call\'s', async (trustProxy, expected) => {
+    const r = await rig({ trustProxy });
+    const seen = stampFacts(r.engine, 'sys_oauth_consent');
+    const id = await r.consent();
+    const principal = await r.manager.verifyMcpAccessToken(await r.mint());
+    r.manager.recordMcpAccessTokenUse(principal!, TRANSPORT);
+    await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
+    await drain();
+    expect(seen).toEqual([{ ipAddress: expected, userAgent: UA }]);
+  });
+
+  it('a door that hands no transport: the stamp runs outside any scope, so the row says not_supplied', async () => {
+    const r = await rig();
+    const seen = stampFacts(r.engine, 'sys_oauth_consent');
+    const id = await r.consent();
+    await admittedCall(r.manager, await r.mint());
+    await vi.waitFor(async () => expect(await r.stampOf(id)).toBe(iso(HOUR_10)));
+    await drain();
+    expect(seen).toEqual([null]);
+  });
+
+  it('a skip_consent client\'s use carries the facts on its hand-off', async () => {
+    const uses: Record<string, unknown>[] = [];
+    const r = await rig({
+      getAuditSink: () => ({
+        recordAuthEvent: async () => undefined,
+        recordCredentialUse: async (event: Record<string, unknown>) => {
+          uses.push(event);
+        },
+      }),
+    });
+    const authCtx = await r.manager.getAuthContext();
+    await authCtx.adapter.create({
+      model: 'oauthClient',
+      data: { clientId: 'client_31821_skip', name: 'Server Agent', scopes: ['openid', 'data:read'], redirectUris: ['http://localhost:56789/cb'], skipConsent: true },
+    });
+    const principal = await r.manager.verifyMcpAccessToken(await r.mint({ azp: 'client_31821_skip' }));
+    r.manager.recordMcpAccessTokenUse(principal!, TRANSPORT);
+    await vi.waitFor(() => expect(uses).toHaveLength(1));
+    expect(uses[0].client).toEqual({ ipAddress: PEER, userAgent: UA });
+  });
+
+  it.each([
+    [false, PEER],
+    [true, FORWARDED],
+  ])('an API key admitted through the shared composition with this manager as the auth service, trustProxy %s: the address is %s', async (trustProxy, expected) => {
+    const r = await rig({ trustProxy });
+    const seen = stampFacts(r.engine, 'sys_api_key');
+    await r.engine.insert('sys_user', { id: USER, email: 'kai@last-use.example.com', name: 'Kai' }, SYS);
+    const raw = 'osk_31821_trust_rule_key_material';
+    await r.engine.insert('sys_api_key', { id: 'key_31821', name: 'ci', user_id: USER, key: hashApiKey(raw), prefix: 'osk_', revoked: false }, SYS);
+    // The authorization reads of objects this rig never provisioned answer as
+    // the driver's missing table, the one read failure the resolver reads as
+    // "no rows"; the key read and the stamp go to the real engine.
+    const ql = new Proxy(r.engine, {
+      get(target, prop) {
+        if (prop === 'find') {
+          return async (object: string, ...rest: unknown[]) => {
+            if (!target.registry.getObject(object)) throw new Error(`SQLITE_ERROR: no such table: ${object}`);
+            return (target.find as any)(object, ...rest);
+          };
+        }
+        const value = (target as any)[prop];
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const ctx = await resolveRequestExecutionContext({
+      headers: new Headers({ 'x-api-key': raw, 'user-agent': UA, 'x-forwarded-for': FORWARDED }),
+      ql,
+      authService: r.manager as never,
+      tenancy: undefined,
+      anonymous: 'fail-closed',
+      authGate: 'resolved',
+      credentials: 'api-key-and-session',
+      sessionApi: 'optional',
+      session: 'request',
+      localization: 'withhold',
+      requestLocale: undefined,
+      accessToken: 'withhold',
+      oauth: undefined,
+      onAdmission: undefined,
+      transport: { remoteAddress: PEER },
+    });
+    expect(ctx?.userId).toBe(USER);
+    expect(seen).toEqual([{ ipAddress: expected, userAgent: UA }]);
   });
 });

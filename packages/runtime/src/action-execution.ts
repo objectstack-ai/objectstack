@@ -2745,6 +2745,12 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         // door's twin (`buildAutomationContext`): never re-derived or raised,
         // absent when the request carries none. See `AutomationContext.posture`.
         ...(typeof ec?.posture === 'string' && ec.posture.length > 0 ? { posture: ec.posture } : {}),
+        // [ADR-0151 D3] An AI service account's kind, the trigger door's twin
+        // (`buildAutomationContext`): the run carries the account's grants, so
+        // without the kind it would be evaluated as a person's (the member
+        // baseline, no agent ceiling). Only the account (`agent` with no
+        // `onBehalfOf`); an OAuth-delegated agent is forwarded as before.
+        ...(ec?.principalKind === 'agent' && !ec?.onBehalfOf ? { principalKind: 'agent' as const } : {}),
         // [#22450] The caller's already-resolved language, the trigger door's
         // twin (`buildAutomationContext`): a refused run's message renders in
         // it. See `AutomationContext.locale`.
@@ -4786,7 +4792,14 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
     console.info(
         `[action-audit] MCP run_action '${action.name}' on '${objectName}' — body executes TRUSTED ` +
         `(system-elevated context, RLS/FLS-bypassing) for user '${ec?.userId ?? 'anonymous'}'` +
-        (ec?.principalKind === 'agent' ? ` (AGENT on behalf of '${ec?.onBehalfOf?.userId ?? 'unknown'}')` : ''),
+        // [ADR-0151 D3] An agent names a person it acts for only when it is
+        // OAuth-delegated; an AI service account is its own subject, so the
+        // user above IS the agent and no one stands behind it.
+        (ec?.principalKind === 'agent'
+            ? ec?.onBehalfOf
+                ? ` (AGENT on behalf of '${ec.onBehalfOf.userId ?? 'unknown'}')`
+                : ' (AGENT: an AI service account, acting for itself)'
+            : ''),
     );
     const actionContext: any = {
         record,

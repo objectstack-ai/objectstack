@@ -59,7 +59,7 @@ import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationBasePackageId } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationBasePackageId, findNamespaceObjectNameClashes, type NamespaceObjectNameClash, type ObjectNameHolder, type NamespaceHolder } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema, ActionSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -3327,6 +3327,46 @@ export class ArtifactObjectNameConflictError extends Error {
     this.existingPackageId = existingPackageId;
     this.incomingPackageId = incomingPackageId;
     this.coOwnership = coOwnership;
+  }
+}
+
+/**
+ * [ADR-0150 D6, child K] Raised when an install would put a namespace and an
+ * object name on the same string, in either direction, or ships an object
+ * short-named `custom` (`NS_custom`, the namespace the ADR-0146 paired package
+ * of `NS` takes). The predicate is the spec's one
+ * (`findNamespaceObjectNameClashes`, `kernel/namespace-prefix.ts`); every door
+ * that admits an object or a namespace asks it, and each clash's sentence
+ * names both spellings.
+ *
+ * Same envelope and code as {@link NamespaceNameConflictError}: `code:
+ * 'NAMESPACE_CONFLICT'`, `status: 422` — the condition is "a name the
+ * namespace position reads is already taken", and the remedy is a rename. No
+ * code is minted. Every clash is listed (red line 2); the top-level fields
+ * repeat the first.
+ */
+export class NamespaceObjectNameConflictError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** Every clash, in the predicate's order. */
+  readonly clashes: readonly NamespaceObjectNameClash[];
+  /** The first clash's namespace. */
+  readonly namespace: string;
+  /** The first clash's object name. */
+  readonly objectName: string;
+  /** The package whose install this refusal stopped. */
+  readonly incomingPackageId: string;
+
+  constructor(clashes: readonly NamespaceObjectNameClash[], incomingPackageId: string) {
+    const [first] = clashes;
+    super(clashes.map((c) => c.message).join(' '));
+    this.name = 'NamespaceObjectNameConflictError';
+    this.clashes = clashes;
+    this.namespace = first.namespace;
+    this.objectName = first.objectName;
+    this.incomingPackageId = incomingPackageId;
   }
 }
 
@@ -9096,6 +9136,13 @@ export class SchemaRegistry {
     // `collisionPolicy` downgrade, like the bare-name rule below.
     this.refuseNamespaceNameConflicts(manifest);
 
+    // [ADR-0150 D6, child K] A namespace never equals an object name, in
+    // either direction, and no object is short-named `custom` — the spec's one
+    // predicate, against what the environment already holds. Ahead of every
+    // mutation, at every install, boot included, with no `collisionPolicy`
+    // downgrade, like the check above.
+    this.refuseNamespaceObjectNameClashes(manifest, selfId);
+
     // The security catalog's one-name-one-holder rule (ADR-0048 §3.4 narrowed
     // for positions, permission sets and capabilities; maintainer ruling Q4 = A
     // on #15196) — also ahead of every mutation, for the same reason. No
@@ -9345,6 +9392,62 @@ export class SchemaRegistry {
    */
   private refuseNamespaceNameConflicts(manifest: ObjectStackManifest): void {
     this.refuseNamespaceHolderConflicts(namespacePackageOf(manifest));
+  }
+
+  /**
+   * [ADR-0150 D6, child K] Refuse an install whose namespace equals an object
+   * name the environment holds or the package itself ships, whose object name
+   * equals an installed namespace, or whose object is short-named `custom`
+   * (`findNamespaceObjectNameClashes`, `@objectstack/spec/kernel`).
+   *
+   * The incoming side is the package's namespace and the objects it ships
+   * (`manifest.objects` and each nested `plugins[]` entry's, the objects
+   * `registerApp` registers under it). The installed side is every namespace
+   * the namespace gate has recorded and every object the registry holds,
+   * minus what this same package already holds (a reload, a re-install or an
+   * upgrade is never its own clash). A clash already present between two
+   * installed holders is not this install's to report.
+   *
+   * @throws {NamespaceObjectNameConflictError} ADR-0112 envelope, every clash named.
+   */
+  private refuseNamespaceObjectNameClashes(manifest: ObjectStackManifest, selfId: string | undefined): void {
+    const incomingId = selfId ?? manifest.id;
+    const isSelf = (packageId: string | undefined): boolean =>
+      packageId !== undefined && (packageId === incomingId || packageId === manifest.id);
+    const namespace = typeof manifest.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+
+    const incomingObjects: ObjectNameHolder[] = [];
+    const seen = new Set<string>();
+    const shipped = (body: ObjectStackManifest): void => {
+      for (const shortName of declaredOwnedObjectNames(body)) {
+        const name = computeFQN(namespace, shortName);
+        if (seen.has(name)) continue;
+        seen.add(name);
+        incomingObjects.push({ name, ...(namespace ? { namespace } : {}), ...(incomingId ? { packageId: incomingId } : {}) });
+      }
+    };
+    shipped(manifest);
+    const plugins = (manifest as { plugins?: unknown }).plugins;
+    if (Array.isArray(plugins)) {
+      for (const plugin of plugins) if (plugin && typeof plugin === 'object') shipped(plugin as ObjectStackManifest);
+    }
+
+    const installedNamespaces: NamespaceHolder[] = [];
+    for (const [ns, owners] of this.namespaceRegistry) {
+      for (const owner of owners) if (!isSelf(owner)) installedNamespaces.push({ namespace: ns, packageId: owner });
+    }
+    const installedObjects: ObjectNameHolder[] = [];
+    for (const fqn of this.objectContributors.keys()) {
+      const ownerId = this.getObjectOwner(fqn)?.packageId;
+      if (isSelf(ownerId) || seen.has(fqn)) continue;
+      installedObjects.push({ name: fqn, ...(ownerId ? { packageId: ownerId } : {}) });
+    }
+
+    const clashes = findNamespaceObjectNameClashes(
+      { namespaces: namespace ? [{ namespace, ...(incomingId ? { packageId: incomingId } : {}) }] : [], objects: incomingObjects },
+      { namespaces: installedNamespaces, objects: installedObjects },
+    );
+    if (clashes.length > 0) throw new NamespaceObjectNameConflictError(clashes, incomingId ?? '(unnamed package)');
   }
 
   /**

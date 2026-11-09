@@ -130,7 +130,7 @@ export const SysMetadataAuditObject = ObjectSchema.create({
      *  - on `denied`: `'not_overridable'` | `'not_creatable'` |
      *    `'item_locked'` | `'invalid_metadata'` | `'destructive_change'` |
      *    `'metadata_conflict'` | `'batch_aborted'` | `'namespace_prefix'` |
-     *    `'stored_type_not_canonical'`
+     *    `'namespace_conflict'` | `'stored_type_not_canonical'`
      *  - on `forced`: `'lock_override'` (Phase 3)
      *
      * `stored_type_not_canonical` (#8908) is the second PRE-FLIGHT refusal, and
@@ -155,6 +155,12 @@ export const SysMetadataAuditObject = ObjectSchema.create({
      * One row per violation, each keyed on the offending draft's own
      * `(type, name)` — a pre-flight refusal names N items and no single causal
      * one, so a batch-level row would have to invent an identity.
+     *
+     * `namespace_conflict` (ADR-0150 D6) is the third PRE-FLIGHT refusal: an
+     * object draft whose name equals a namespace an installed package declares
+     * (a namespace never equals an object name), or is its own package's
+     * `NS_custom` (the namespace the ADR-0146 paired package takes). Same
+     * shape as `namespace_prefix`: one row per offending draft.
      *
      * `batch_aborted` (#8400) is the batch publish's own refusal value:
      * `publishPackageDrafts` promotes a whole package inside ONE transaction,
