@@ -112,12 +112,14 @@ function resyncSeamOf(owner: unknown, method: string): (() => unknown) | undefin
  * converges without a restart:
  *
  *  1. metadata service — `resyncClusterPubSub()`;
+ *  2. metadata protocol — `resyncMetadataMutationPubSub()` (#31722): one read
+ *     of `sys_metadata`'s active rows names every item a lost hint could have
+ *     touched, and each is re-converged by the delivered-hint applier, from
+ *     the replica's OWN re-read of its row; a read that fails changes nothing;
  *  3. datasource admin service — `resyncDatasourceMutationPubSub()`;
  *  4. automation service — `resyncConnectorCredentialPubSub()`;
  *  5. settings service — `resyncSettingsChangePubSub()`.
  *
- * Lane 2 has no resync seam yet: its convergence is a per-item registry
- * write-through, and a full re-convergence of the registry is its own change.
  * The in-process driver never emits the event, so the single-node path is
  * unchanged.
  *
@@ -381,6 +383,7 @@ export class MetadataClusterBridgePlugin implements Plugin {
                 pubsub: IClusterService['pubsub'],
                 nodeId: string,
             ) => () => void).call(protocol, cluster.pubsub, cluster.nodeId);
+            this.registerLaneResync('metadata.mutated', protocol, 'resyncMetadataMutationPubSub');
             ctx.logger.info(
                 `MetadataClusterBridgePlugin: bridged metadata.mutated → cluster.pubsub (node=${cluster.nodeId})`,
             );
