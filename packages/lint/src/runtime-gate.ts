@@ -570,46 +570,16 @@ const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
 /**
  * The package closure a write by `packageId` is judged against (#9612): the
  * package and the transitive closure of the `dependencies` its manifest
- * declares, read through `getPackage` — the host's package registry on the
- * server (`resolveWritePackageScope` in `@objectstack/metadata-protocol`), the
- * served package list in Studio, whose object pickers offer what this closure
- * admits. ONE walk for both, so the picker and the publish gate cannot
- * disagree about what a package may reference.
+ * declares. ONE walk for the server's publish gate and Studio's object
+ * pickers, so the two cannot disagree about what a package may reference.
  *
- * Answers `undefined` — narrow nothing — for no package id, the
- * `sys_metadata` sentinel (an overlay row, not a package), and a package
- * `getPackage` cannot produce: its manifest is the only declaration of what it
- * may reference, and narrowing without it would be narrowing on nothing.
- *
- * A declared dependency `getPackage` cannot produce is still IN the closure:
- * the package declared it, so an object stamped with it is reachable by
- * declaration. Only the transitive walk stops there.
- *
- * Pure. A `getPackage` that throws propagates; the caller decides what an
- * unreadable registry means (the server answers `undefined`).
+ * [epic #31527 child R2] The walk lives in `@objectstack/metadata-core`
+ * (`package-closure.ts`, its docblock is the contract), beside the App-pair
+ * widening and the package-scoped resolution closure that read it, so the
+ * readers inside objectql's lean entry read the same walk. Re-exported here
+ * under its name, so this package's surface is unchanged.
  */
-export function resolvePackageClosure(
-  packageId: string | null | undefined,
-  getPackage: (id: string) => { manifest?: unknown } | undefined,
-): { packageId: string; dependencies: string[] } | undefined {
-  if (typeof packageId !== 'string' || packageId === '' || packageId === OVERLAY_PROVENANCE_SENTINEL) return undefined;
-  if (!getPackage(packageId)) return undefined;
-
-  const dependencies = new Set<string>();
-  const frontier = [packageId];
-  while (frontier.length > 0) {
-    const current = frontier.pop() as string;
-    const manifest = getPackage(current)?.manifest as { dependencies?: Record<string, unknown> } | undefined;
-    const declared = manifest?.dependencies;
-    if (!declared || typeof declared !== 'object') continue;
-    for (const dep of Object.keys(declared)) {
-      if (dep === packageId || dependencies.has(dep)) continue;
-      dependencies.add(dep);
-      frontier.push(dep);
-    }
-  }
-  return { packageId, dependencies: [...dependencies] };
-}
+export { resolvePackageClosure } from '@objectstack/metadata-core';
 
 /**
  * The context collections the snapshot carries, in stack-key order — DERIVED

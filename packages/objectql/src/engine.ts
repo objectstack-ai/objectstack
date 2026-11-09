@@ -137,6 +137,8 @@ import {
   type EngineTransactionInfo,
   type EngineTransactionOptions,
   Logger,
+  type PackageScopedHolderSource,
+  RUNTIME_COMPATIBILITY_PACKAGE_ID,
   type RetryOptions,
   recordNotFoundError,
 } from '@objectstack/core';
@@ -641,6 +643,14 @@ export class ObjectQL implements IObjectQLEngine {
   // `AppPlugin`, or directly via `engine.registerFunction(...)`.
   private functions = new Map<string, FunctionEntry>();
 
+  // [ADR-0150 D4, #31716] The same registrations by holder: function name →
+  // registering package (the owner read as its package id; `null` for an
+  // owner-less registration) → that package's entry. `functions` above keeps
+  // one entry per name, the last-registered; this keeps every holder, so a
+  // referrer's function can be resolved in its package
+  // (`resolvePackageScopedFunction` over `functionHoldersOf`).
+  private functionHolders = new Map<string, Map<string | null, FunctionEntry>>();
+
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
 
@@ -815,6 +825,21 @@ export class ObjectQL implements IObjectQLEngine {
   resolveFunctionEntry(name: string): Readonly<FunctionEntry> | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
     return HooksAndFunctionsFacet.resolveFunctionEntry.call(hooksAndFunctionsHost.of(this), name);
+  }
+
+  /**
+   * Every holder of the function `name` (ADR-0150 D4): each package that
+   * registered one under that name, with its own entry, and an owner-less
+   * registration as the platform's item (`platformItem`: code a plugin or
+   * the host registers, in every caller's reach like `sys`) — the holder set
+   * `resolvePackageScopedFunction` resolves a flow's or an action's function
+   * over, in the referrer's package. A snapshot, taken at the call.
+   * `resolveFunction` and `resolveFunctionEntry` keep answering the one
+   * last-registered entry per name.
+   */
+  functionHoldersOf(name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
+    // [#31716] The body lives in `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
+    return HooksAndFunctionsFacet.functionHoldersOf.call(hooksAndFunctionsHost.of(this), name);
   }
 
   /** Remove all functions registered under a given `packageId`. */
@@ -8793,7 +8818,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerObject(
     schema: ServiceObject,
-    packageId: string = '__runtime__',
+    packageId: string = RUNTIME_COMPATIBILITY_PACKAGE_ID,
     namespace?: string
   ): string {
     // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
@@ -9201,6 +9226,7 @@ export class ObjectQL implements IObjectQLEngine {
       get drivers() { return engine.drivers; },
       facade: engine,
       get functions() { return engine.functions; },
+      get functionHolders() { return engine.functionHolders; },
       getDriver: (...a) => engine.getDriver(...a),
       get hooks() { return engine.hooks; },
       isClosedUnitHandle: (...a) => engine.isClosedUnitHandle(...a),

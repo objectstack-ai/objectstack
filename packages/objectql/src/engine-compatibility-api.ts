@@ -48,6 +48,7 @@
 import type { ServiceObject } from '@objectstack/spec/data';
 import type { IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 import { StorageNameMapping } from '@objectstack/spec/system';
+import { RUNTIME_COMPATIBILITY_PACKAGE_ID } from '@objectstack/core';
 import { isFederatedObject } from './federated-object.js';
 import type { ObjectQL } from './engine.js';
 
@@ -72,7 +73,7 @@ export interface CompatibilityApiHost {
 export function registerObject(
   this: Pick<CompatibilityApiHost, '_registry'>,
   schema: ServiceObject,
-  packageId: string = '__runtime__',
+  packageId: string = RUNTIME_COMPATIBILITY_PACKAGE_ID,
   namespace?: string,
 ): string {
   // Auto-assign field names from keys
