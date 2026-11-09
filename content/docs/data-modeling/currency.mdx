@@ -153,6 +153,32 @@ With no shell on the deployment (a hosted organization), an organization admin h
 `POST /api/v1/meta/_migrate-record-currency-codes` and the body
 `{ "object", "field", "code", "apply" }`, a preview unless `apply` is `true`.
 
+### Re-pointing `currencyField` on a field that already holds rows
+
+The amount is a bare number, and its currency is whatever the field `currencyField` names
+holds. Pointing an existing record-mode amount at another field (another sibling, or a
+`master_detail` child's `PARENT_FIELD.CODE_FIELD` path, in either direction) converts no
+stored amount: every row keeps its number and is read in the currency the new field
+holds. A row whose old and new codes differ now displays, filters and groups under a
+currency it was not entered in.
+
+1. **The save answers 409 `destructive_change`.** Saving the re-pointed object reports
+   the finding `currency_field_repointed` on the amount field. The save reads no row, so
+   it reports the finding whether or not the table holds any. Re-submit with `force`
+   (`?force=true` on `PUT /api/v1/meta/:type/:name`) to make the change. An identical
+   pointer is not a re-point, and neither is a new field or an object saved for the
+   first time.
+2. **A new sibling code field that is blank** leaves its rows codeless, with the same
+   consequences as a switch into record mode. Fill it with the backfill above
+   (`os migrate record-currency-codes`, or its REST door). A path stores no code on the
+   child, so there is nothing to backfill: each row follows its parent record.
+3. **Stored home amounts are not re-rated.** If the amount declares `homeAmount`, its
+   stored home amounts and rates were converted from the old code. Re-derive them from
+   the new one with
+   [`os migrate recompute-home-amounts`](#recomputing-stored-home-amounts), which is a
+   shell command with no REST door. If the save also removes `homeAmount`, nothing
+   re-rates them.
+
 ### Aggregating a record-mode amount
 
 Amounts in different currencies do not add. A `sum`, `avg`, `min` or `max` over a
