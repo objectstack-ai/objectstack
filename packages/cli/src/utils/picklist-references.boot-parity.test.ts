@@ -121,8 +121,9 @@ describe('picklist-residual-unreferenced — the author-time door and the boot a
  * options) because a runtime write is judged against the packages INSTALLED
  * here. So the agreement is pinned rather than inherited — and pinned where
  * the two can disagree: a list a SIBLING package of the same artifact owns,
- * which this door resolves under ADR-0130 D4 and the save door must resolve
- * because the boot registered it.
+ * which this door resolves through the declaring package's declared
+ * dependency on it (ADR-0150 D3) and the save door must resolve because the
+ * boot registered it.
  *
  * Asked of the save door's judge directly, over the real registry the boot
  * filled. `readMetaItem` is stubbed to "no stored row", so the case is a FIRST
@@ -194,5 +195,48 @@ describe('[#29898] picklist-reference-unknown — the author-time door and the m
     expect(saveDoor?.issues?.map((i) => i.path)).toEqual(['fields.status.picklist']);
     expect(door[0].path, door[0].path).toBe('packages[0].manifest.objects[0].fields.status.picklist');
     expect(door[0].path?.endsWith(saveDoor!.issues![0].path)).toBe(true);
+  });
+});
+
+/**
+ * [ADR-0150 D3; maintainer ruling N1, record 6729820123] The third parity: a
+ * field naming a list a SIBLING package of the same artifact declares, with no
+ * declared dependency on it. Since E6 the boot serves that field no options
+ * and warns with R's refusal (`findOutsideClosurePicklistReferences`), and the
+ * install judge refuses it; this door refuses it first, in the same sentence —
+ * both read `resolvePackageScopedHolders` over `packageResolutionClosure`.
+ */
+describe('[ADR-0150 D3] picklist-reference-unknown — a sibling\'s list with no declared dependency: the door and the boot say one sentence', () => {
+  const artifact = (dependencies?: Record<string, string>): AnyRec => ({
+    manifest: manifest(STACK_ID),
+    packages: [
+      { manifest: { ...manifest('com.example.parity.core'), ...(dependencies ? { dependencies } : {}), objects: [caseObj(statusField)] } },
+      { manifest: { ...manifest('com.example.parity.app'), picklists: [status] } },
+    ],
+  });
+  const outsideClosure = (engine: { registry: unknown } | undefined) =>
+    (engine?.registry as { findOutsideClosurePicklistReferences(): Array<{ field: string; refusal?: string }> })
+      .findOutsideClosurePicklistReferences();
+
+  it('the door refuses it, with the sentence the boot warns with', async () => {
+    const stack = artifact();
+    const door = judgePicklistReferences(stack).refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN);
+    const { refusal, engine } = await bootStack(stack);
+
+    expect(refusal, String(refusal?.message)).toBeUndefined();
+    expect(door).toHaveLength(1);
+    expect(door[0].path).toBe('packages[0].manifest.objects[0].fields.status.picklist');
+    expect(outsideClosure(engine).map((o) => [o.field, o.refusal])).toEqual([['status', door[0].message]]);
+  });
+
+  it('CONTROL: with the dependency declared, the door accepts it and the boot warns nothing', async () => {
+    const stack = artifact({ 'com.example.parity.app': '^1.0.0' });
+    const door = judgePicklistReferences(stack);
+    const { refusal, engine } = await bootStack(stack);
+
+    expect(refusal, String(refusal?.message)).toBeUndefined();
+    expect(door.refusals.filter((r) => r.rule === PICKLIST_REFERENCE_UNKNOWN)).toEqual([]);
+    expect(door.notices).toEqual([]);
+    expect(outsideClosure(engine)).toEqual([]);
   });
 });
