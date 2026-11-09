@@ -386,3 +386,117 @@ describe('aiTestEmbedderActionHandler — a form check says it is one (#24769)',
     expect(message).not.toMatch(/to exercise live calls/);
   });
 });
+
+/**
+ * #31960 — Setup → AI presented "Memory (echo — testing only)" as the chosen
+ * provider on a host where AI is disabled, and saved it with a success toast
+ * although the AI runtime never honours it. The manifest now declares no
+ * provider default and no longer offers `memory`: an unset provider reads as
+ * unset, the save door refuses `memory` through the declared option table, and
+ * the open-edition "Test connection" stub stops reading an absent provider as
+ * memory. Whether AI is disabled is the AI runtime's own decision, stated on
+ * the page by that runtime (`registerLiveStatus`), never re-derived here.
+ */
+describe('aiSettingsManifest — no provider is presented until one is configured (#31960)', () => {
+  const providerSpec = () =>
+    (aiSettingsManifest.specifiers as any[]).find((s) => s.key === 'provider' && s.type === 'select');
+  const aiSvc = (env: Record<string, string> = {}, errors: string[] = []) => {
+    const svc = new SettingsService({
+      env,
+      crypto: new ConfidentialTestAdapter(),
+      logger: { error: (m: string) => void errors.push(m) },
+    });
+    svc.registerManifest(aiSettingsManifest);
+    return svc;
+  };
+
+  it('declares no provider default and does not offer memory', () => {
+    const spec = providerSpec();
+    expect(spec).toBeDefined();
+    expect('default' in spec).toBe(false);
+    expect(spec.options.map((o: any) => o.value)).not.toContain('memory');
+    const parsed = SettingsManifestSchema.parse(aiSettingsManifest) as any;
+    expect(parsed.specifiers.find((s: any) => s.key === 'provider').default).toBeUndefined();
+  });
+
+  it('an unset provider reads as null from the default rung', async () => {
+    const r = await aiSvc().get('ai', 'provider');
+    expect(r.value).toBeNull();
+    expect(r.source).toBe('default');
+    expect(r.locked).toBe(false);
+  });
+
+  it('save door: memory is refused as a value outside the option table, and nothing is stored', async () => {
+    const svc = aiSvc();
+    await expect(svc.setMany('ai', { provider: 'memory' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'provider', code: 'invalid_option', value: 'memory' }],
+    });
+    const r = await svc.get('ai', 'provider');
+    expect(r.value).toBeNull();
+    expect(r.source).toBe('default');
+  });
+
+  it('env door: OS_AI_PROVIDER=memory is loudly ignored and the provider stays unset', async () => {
+    const errors: string[] = [];
+    const r = await aiSvc({ OS_AI_PROVIDER: 'memory' }, errors).get('ai', 'provider');
+    expect(r.value).toBeNull();
+    expect(r.source).toBe('default');
+    expect(r.locked).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('OS_AI_PROVIDER');
+    expect(errors[0]).toContain('IGNORED');
+  });
+
+  it('a memory row stored before the option left the table is served as stored, never throws, and locks nothing', async () => {
+    // Simulated as it happens on an upgraded host: written under the OLD
+    // table, then the narrowed manifest registered over the same namespace
+    // (the `mail.provider` / `sendgrid` precedent in settings-service.test.ts).
+    const svc = new SettingsService({ env: {}, crypto: new ConfidentialTestAdapter() });
+    svc.registerManifest({
+      ...aiSettingsManifest,
+      specifiers: (aiSettingsManifest.specifiers as any[]).map((s) =>
+        s.key === 'provider' ? { ...s, options: [{ value: 'memory', label: 'Memory' }, ...s.options] } : s,
+      ),
+    } as any);
+    await svc.setMany('ai', { provider: 'memory' });
+    svc.registerManifest(aiSettingsManifest);
+
+    const r = await svc.get('ai', 'provider');
+    expect(r.value).toBe('memory');
+    expect(r.source).toBe('global');
+    await expect(svc.getMany('ai', ['provider', 'temperature'])).resolves.toBeDefined();
+    // Unrelated keys still save; re-writing memory is refused; a real provider
+    // replaces it; a reset clears the namespace.
+    await expect(svc.setMany('ai', { trace_enabled: false })).resolves.toBeDefined();
+    await expect(svc.setMany('ai', { provider: 'memory' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [{ field: 'provider', code: 'invalid_option' }],
+    });
+    await expect(
+      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test' }),
+    ).resolves.toBeDefined();
+    expect((await svc.get('ai', 'provider')).value).toBe('openai');
+    await expect(svc.resetNamespace('ai')).resolves.toBeGreaterThan(0);
+    expect((await svc.get('ai', 'provider')).value).toBeNull();
+  });
+
+  it('a real provider saves and reads exactly as before', async () => {
+    const svc = aiSvc();
+    await expect(
+      svc.setMany('ai', { provider: 'openai', openai_api_key: 'sk-test', openai_model: 'gpt-4o' }),
+    ).resolves.toBeDefined();
+    const r = await svc.get('ai', 'provider');
+    expect(r.value).toBe('openai');
+    expect(r.source).toBe('global');
+  });
+
+  it('Test connection with no provider answers that none is configured, not a memory echo', async () => {
+    for (const values of [{}, { provider: null }, { provider: '' }]) {
+      const r = await runTest(values);
+      expect(r.ok).toBe(false);
+      expect(r.severity).toBe('warning');
+      expect(r.message).not.toMatch(/memory|echo/i);
+    }
+  });
+});
