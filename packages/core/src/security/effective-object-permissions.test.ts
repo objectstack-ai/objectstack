@@ -206,9 +206,15 @@ describe('[#20083] plain wildcard coverage', () => {
     );
     // Seeded all-false, then folded: the super-user entry shape, not the wildcard's own key
     // order — [#20134] with `allowTransfer`, which `modifyAllRecords` grants, appended by the
-    // per-set fold (the wildcard's own `allowTransfer: false` grants nothing and is not copied).
-    expect(Object.keys(map.crm_account)).toEqual(['allowCreate', 'allowRead', 'allowEdit', 'allowDelete', 'allowTransfer', 'apiOperations']);
+    // per-set fold (the wildcard's own `allowTransfer: false` grants nothing and is not copied),
+    // and [#30237 PR 4] the two recycle-bin keys, which `modifyAllRecords` implies (Q5 = A).
+    expect(Object.keys(map.crm_account)).toEqual([
+      'allowCreate', 'allowRead', 'allowEdit', 'allowDelete', 'allowTransfer',
+      'allowRestoreOwnDeleted', 'manageRecycleBin', 'apiOperations',
+    ]);
     expect(map.crm_account.allowTransfer).toBe(true);
+    expect(map.crm_account.allowRestoreOwnDeleted).toBe(true);
+    expect(map.crm_account.manageRecycleBin).toBe(true);
     // …and the private object is the seed's, as before.
     expect(map.crm_secret).toMatchObject({ allowRead: true, allowEdit: true });
   });
@@ -427,7 +433,7 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
     expect(map.crm_hidden_lead.apiOperations).toEqual([]);
     // The controls: the export axis alone, which takes `export` and nothing else.
     expect(map.crm_account.apiOperations).toEqual(
-      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'],
     );
     expect(map.crm_lead.apiOperations).toEqual(['get', 'list', 'aggregate', 'search']);
   });
@@ -445,7 +451,7 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
       source,
     );
     expect(map.crm_secret.apiOperations).toEqual(
-      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'import'],
+      ['get', 'list', 'create', 'update', 'delete', 'upsert', 'bulk', 'aggregate', 'search', 'restore', 'purge', 'import'],
     );
     // The public objects the plain wildcard DOES cover keep `export` — an unrestricted one keeps its whole closure.
     expect(map.crm_account).not.toHaveProperty('apiOperations');

@@ -424,7 +424,9 @@
  *   H  人合 — every register row except objectstack's `.claude/**` (today: `docs/adr/**`,
  *      `docs/NORTH-STAR.md`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, and since
  *      the B2 ruling of 2026-10-13 the `workflows` row, `.github/workflows/**`,
- *      scoped to objectstack, objectui and cloud): the maintainer's hand, or
+ *      scoped to objectstack, objectui and cloud — in objectstack split by
+ *      content since ruling record 6722205630, "The workflows row's split"
+ *      below): the maintainer's hand, or
  *      an authorized APPROVED review by `GOVERNED_APPROVERS` and then the
  *      owning seat lands it. The tier ruling left this landing as it was; the
  *      list itself grew by one row on 2026-10-13. The `.claude/**` row of every
@@ -460,6 +462,52 @@
  * tier function, and `check-governed-prose.mjs` keeps pinning the SET of globs
  * the instruction prose names — the tier is an attribute the prose states in
  * words, which that gate deliberately does not parse.
+ *
+ * ## The workflows row's split (#31538, ruling record 6722205630, letter C)
+ *
+ * In objectstack the `workflows` row's tier is read off the DIFF, not the
+ * path (`split` on the row; objectui and cloud stay Tier H by path):
+ *
+ *   H by PATH — the release, publish and deploy files in
+ *      `WORKFLOW_TIER_H_FILES`, each with its reason, any edit at all.
+ *   H by DIFF (C2) — an added or changed `permissions:`; a `secrets` or
+ *      job-token line (`github.token` in any case, any `github[…]` index,
+ *      `toJSON(github)`) added, changed or moved;
+ *      `pull_request_target`; a `uses:` (or image) no workflow uses at the
+ *      base (`.github/actions/**` vouches for nothing: no register row
+ *      governs it); a deleted job, a changed literal check-run name or a changed
+ *      `needs:`; a new `continue-on-error`; an `if:` the base does not hold for
+ *      the same owner with the same text, unless its job is new on the head.
+ *   S otherwise — a contract-review PASS on the current head, every check
+ *      green, and the owning seat lands it (the Tier S landing above).
+ *
+ * ⛔ Biased to H, because this surface can switch the other gates off: a
+ * changed job, step or workflow that holds a secret or a write token; an
+ * added `|| true`, `set +e`, `exit 0` or `OS_SKIP_`/`OS_DISABLE_`/`OS_ALLOW_`;
+ * a gate invocation or a `uses:` dropped from the file, or from an existing
+ * job (a gate moved into a new job that never runs); a changed trigger set or workflow
+ * name; a new job with a computed or colliding name; a new, deleted or
+ * non-YAML file. ⛔ Fail closed: a copy the line reader refuses (anchors,
+ * tags, tabs, flow mappings, flow spanning lines, double-quoted escapes, a
+ * line led by an indicator, a valued node with children…), an unreadable
+ * commit, a missing base or no reading at all is H — so `--test`, which has
+ * paths only, always says H, and `--pr` reads the diff only on a checkout
+ * holding both commits.
+ *
+ * Known limit, S by the ruling: the TEXT of a `run:` or `shell:` edit is not
+ * judged beyond a dropped gate token or an added risky pattern, so
+ * `echo "pnpm check:x"`, `|| :` or `shell: bash {0}` read S. A gate token is
+ * one `WORKFLOW_INVOCATIONS` spelling: `check:*`, a `scripts/` path, vitest,
+ * eslint, tsc, playwright, lychee, `turbo run X`, `pnpm X`, `git diff
+ * --exit-code` / `--quiet` with its arguments, `npx X`, or `node` / `bash` /
+ * `sh` on a file path. A gate spelled any other way (`python3 -c`,
+ * `/bin/bash x.sh`, an inline `test` / `[`, a bin `pnpm exec` names) is not
+ * tracked per job, so moving it out of its job reads S. The contract
+ * review of record is the control there.
+ *
+ * `readWorkflowDiff` is the one reader; the queue guard calls it per queued
+ * commit and `--branch` / `--pr` per PR. The reader is dependency-free on
+ * purpose: the guard's `pull_request` leg runs before any install.
  *
  * ### The generator co-edit fence (#11084) — a NARROWING, not a widening
  *
@@ -1044,11 +1092,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused': 22,
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
+  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
-// zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 35;
+// zeroing it, so the roster's own size is pinned too. Raised 35 → 36 with the
+// workflows split battery (ruling record 6722205630): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 36;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1204,6 +1254,9 @@ export const HUMAN_MERGE_LINE_THRESHOLD = 3000;
  * and a `ui-*` row never reaches the root: prefixes and exact paths both
  * anchor at the repository root.
  */
+/** The `workflows` row's prefix, which its content-aware split reads (`readWorkflowDiff`). */
+export const WORKFLOWS_PREFIX = '.github/workflows/';
+
 export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'adr', prefix: 'docs/adr/', glob: 'docs/adr/**', tier: GOVERNED_TIER_H, what: 'architecture decision records' }),
   Object.freeze({ id: 'claude-tree', prefix: '.claude/', glob: '.claude/**', tier: GOVERNED_TIER_S, tierRepos: Object.freeze(['objectstack']), what: 'the agent instruction tree (skills, agents, hooks, settings)' }),
@@ -1211,7 +1264,7 @@ export const GOVERNED_SURFACES = Object.freeze([
   Object.freeze({ id: 'agents-md', exact: 'AGENTS.md', glob: 'AGENTS.md', tier: GOVERNED_TIER_H, what: 'the repo-root agent instruction file' }),
   Object.freeze({ id: 'claude-md', exact: 'CLAUDE.md', glob: 'CLAUDE.md', tier: GOVERNED_TIER_H, what: 'the repo-root Claude instruction file' }),
   Object.freeze({ id: 'north-star', exact: 'docs/NORTH-STAR.md', glob: 'docs/NORTH-STAR.md', tier: GOVERNED_TIER_H, what: "the maintainer's North Star — the law above AGENTS.md" }),
-  Object.freeze({ id: 'workflows', prefix: '.github/workflows/', glob: '.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack', 'objectui', 'cloud']), what: 'CI, deploy and release workflows: what runs on every push, what deploys, what gates the queue' }),
+  Object.freeze({ id: 'workflows', prefix: '.github/workflows/', glob: '.github/workflows/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack', 'objectui', 'cloud']), split: Object.freeze({ repos: Object.freeze(['objectstack']), reader: 'readWorkflowDiff' }), what: 'CI, deploy and release workflows: what runs on every push, what deploys, what gates the queue' }),
   Object.freeze({ id: 'ui-adr', prefix: 'ui/docs/adr/', glob: 'ui/docs/adr/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's architecture decision records" }),
   Object.freeze({ id: 'ui-claude-tree', prefix: 'ui/.claude/', glob: 'ui/.claude/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's agent instruction tree" }),
   Object.freeze({ id: 'ui-skills-catalog', prefix: 'ui/skills/', glob: 'ui/skills/**', tier: GOVERNED_TIER_H, repos: Object.freeze(['objectstack']), what: "the ui workspace's published skills catalog" }),
@@ -1548,8 +1601,575 @@ export function landingTierOf(matched) {
  * list answers `H` (see `landingTierOf`). `repo` is required, as for
  * `governedPathsIn`: the rows consulted are the ones that govern it.
  */
-export function governedTierFor(paths, repo, register = GOVERNED_SURFACES) {
-  return landingTierOf(governedPathsIn(paths, assertGovernedRepo(repo, 'governedTierFor'), register));
+export function governedTierFor(paths, repo, register = GOVERNED_SURFACES, workflowDiff = null) {
+  const id = assertGovernedRepo(repo, 'governedTierFor');
+  return landingTierOf(applyWorkflowSplit(governedPathsIn(paths, id, register), id, workflowDiff));
+}
+
+// ── the `workflows` row's content-aware tier (ruling record 6722205630, letter C) ──
+
+/**
+ * Where the split is ruled and what it reads (header section "The workflows
+ * row's split"). The row keeps `tier: H` — every path-only reader of the
+ * register (the relay's review request, the CODEOWNERS mirror, the record
+ * face) still answers H, the fail-closed tier. Only a reader that hands in a
+ * READING of the diff (`readWorkflowDiff`) can move a workflow path to Tier S,
+ * and only in the repositories the row's `split.repos` names.
+ */
+export const WORKFLOW_SPLIT_RULING = 'ruling record 6722205630, letter C';
+
+/**
+ * Tier H by PATH: the release, publish and deploy workflows, read off this
+ * repository's own files (`push: true`, `npm publish`, `vercel deploy`, a wiki
+ * push) and the row's own `what` ("what deploys"). Every edit to one of these
+ * is Tier H whatever its content. `fleet-write.yml` is not a release — it is
+ * the relay that holds the App key every fleet write leaves through, biased
+ * to H for the credential. ⛔ A row here is a ruling-sized edit: it widens the
+ * maintainer's queue, never the seats'.
+ */
+export const WORKFLOW_TIER_H_FILES = Object.freeze([
+  Object.freeze({ path: '.github/workflows/release.yml', why: 'publishes the packages and queues the `release` deployment (Prime Directive #15)' }),
+  Object.freeze({ path: '.github/workflows/docker-publish.yml', why: 'pushes the runtime image (`push: true`, `packages: write`)' }),
+  Object.freeze({ path: '.github/workflows/framework-build-base.yml', why: 'pushes the framework build base image (`push: true`, `packages: write`)' }),
+  Object.freeze({ path: '.github/workflows/docs-deploy.yml', why: 'deploys the docs site (`vercel deploy --prebuilt`, the deploy token)' }),
+  Object.freeze({ path: '.github/workflows/checklist-status.yml', why: 'publishes the checklist status pages to the wiki (`contents: write`)' }),
+  Object.freeze({ path: '.github/workflows/fleet-write.yml', why: "the fleet's write relay and its App key (biased to H: the credential, not a release)" }),
+]);
+
+/** The patterns an ADDED line may not carry without Tier H (biased cases: each can turn a check off or skip a gate). */
+const WORKFLOW_RISKY_LINE = /\|\|\s*true\b|\bset\s+\+e\b|\bexit\s+0\b|\bOS_(?:SKIP|DISABLE|ALLOW)_[A-Z0-9_]+/;
+/** `secrets`, or the job's token: `github.token` in any case, any `github[…]` index, or `toJSON(github)` whole. */
+const WORKFLOW_CREDENTIAL = /\bsecrets\b|\bgithub\s*(?:\.\s*token\b|\[)|\btojson\s*\(\s*github\s*\)/i;
+/**
+ * The gate invocations a run block carries, each as a token; one dropped from a file is Tier H (biased: a removed check).
+ * `git diff --exit-code` / `--quiet` keeps its arguments (a narrowed pathspec is a narrowed gate); `npx` drops the
+ * package's `@version` (a bump is not a lost gate); `node` / `bash` / `sh` take the first file path after them.
+ */
+const WORKFLOW_INVOCATIONS = Object.freeze([
+  [/check:[A-Za-z0-9:._-]+/g, (m) => m[0]],
+  [/scripts\/[A-Za-z0-9._/-]+\.(?:mjs|cjs|js|mts|ts|sh|py)/g, (m) => m[0]],
+  [/\b(vitest|eslint|tsc|playwright|lychee)\b/g, (m) => m[1]],
+  [/\bturbo\s+run\s+([A-Za-z0-9:._-]+)/g, (m) => `turbo run ${m[1]}`],
+  [/\bpnpm(?:\s+--?[A-Za-z][\w-]*(?:[= ](?!-)\S+)?)*\s+(?:run\s+)?([A-Za-z][\w:.-]*)/g, (m) => `pnpm ${m[1]}`],
+  [/\bgit\s+diff\b(?=[^;&|)\n]*\s--(?:exit-code|quiet)\b)[^;&|)\n]*/g, (m) => m[0].replace(/\s+/g, ' ').trim()],
+  [/\bnpx(?:\s+--?[A-Za-z][\w-]*(?:=\S+)?)*\s+["']?(@?[A-Za-z0-9][\w.-]*(?:\/[\w.-]+)?)/g, (m) => `npx ${m[1]}`],
+  [/(?<![\w./-])(node|bash|sh)\s[^;&|\n]*?["']?(?:\.\/)?((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.(?:mjs|cjs|js|mts|ts|sh|py))\b/g, (m) => `${m[1]} ${m[2]}`],
+]);
+
+const unquote = (value) => {
+  const v = String(value ?? '').trim();
+  return (v.startsWith('"') && v.endsWith('"') && v.length > 1) || (v.startsWith("'") && v.endsWith("'") && v.length > 1) ? v.slice(1, -1) : v;
+};
+
+/**
+ * One line's YAML comment removed, quote-aware: a `#` opens a comment at the
+ * line start or after whitespace, never inside a quoted scalar. A quote opens
+ * only at a token start, so `don't` in a plain scalar is text. Returns null on
+ * a quote that never closes on the line — the reader refuses those.
+ */
+function stripYamlComment(line) {
+  let quote = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i];
+    if (quote === '"') {
+      if (c === '\\') i += 1;
+      else if (c === '"') quote = null;
+      continue;
+    }
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      continue;
+    }
+    const prev = i === 0 ? ' ' : line[i - 1];
+    if ((c === '"' || c === "'") && /[\s[{,:]/.test(prev)) quote = c;
+    else if (c === '#' && /\s/.test(prev)) return line.slice(0, i).trimEnd();
+  }
+  return quote === null ? line : null;
+}
+
+/** Why a scalar value cannot be read on one line, or null. */
+function unreadableValue(value) {
+  const v = value.trim();
+  if (/^[&*!]/.test(v)) return 'an anchor, alias or tag';
+  // A flow mapping hides its keys (`- { name: Gate, if: false }`) from this reader, so any one but `{}` is refused.
+  if (v !== '{}' && /[{}]/.test(v.replace(/\$\{\{.*?\}\}/g, '').replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, ''))) return 'a flow mapping';
+  if (v.startsWith('{') || v.startsWith('[')) {
+    let depth = 0;
+    for (const c of v.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '')) {
+      if (c === '{' || c === '[') depth += 1;
+      else if (c === '}' || c === ']') depth -= 1;
+    }
+    if (depth !== 0) return 'a flow collection spanning lines';
+  }
+  return null;
+}
+
+/**
+ * A line-model reader of ONE workflow file — the subset of YAML the
+ * repository's workflows are written in: block mappings, block sequences,
+ * one-line flow sequences, quoted and plain scalars (a plain scalar may
+ * continue on deeper lines), and `|` / `>` block scalars. Pure, no dependency:
+ * the queue guard's job imports this file before any install.
+ *
+ * ⛔ Fail closed: a tab in the indentation, a document marker or directive, an
+ * anchor, alias, tag or merge key, a flow mapping other than `{}`, a flow
+ * collection spanning lines, a quote that never closes, a double-quoted
+ * escape that spells a character, a line led by a YAML indicator, a child
+ * under a node with a scalar value, or a line that is neither a key, an item
+ * nor a continuation answers `{ ok: false, line, reason }` — and an unread file is
+ * Tier H. Returns `{ ok: true, root }`: nodes `{ indent, key, value, item,
+ * children, block, line }`.
+ */
+export function readWorkflowTree(text) {
+  if (typeof text !== 'string') return { ok: false, line: 0, reason: 'there is no text to read' };
+  const root = { indent: -1, key: null, value: '', item: false, children: [], block: [], line: 0 };
+  const stack = [root];
+  const fail = (line, reason) => ({ ok: false, line, reason });
+  const attach = (node) => {
+    while (stack.length > 1) {
+      const top = stack[stack.length - 1];
+      if (top.indent < node.indent) break;
+      // A compact sequence: `steps:` and its `- ` items at the same indent.
+      if (node.item && top.indent === node.indent && !top.item && top.key !== null && top.value === '' && top.blockStyle === undefined) break;
+      stack.pop();
+    }
+    const parent = stack[stack.length - 1];
+    // A node with a scalar value and children is not YAML: refuse it rather than guess which one GitHub reads.
+    if (parent !== root && parent.value !== '') return false;
+    parent.children.push(node);
+    stack.push(node);
+    return true;
+  };
+  let block = null;
+  let last = null;
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i];
+    const n = i + 1;
+    if (block !== null) {
+      const indentOf = raw.length - raw.trimStart().length;
+      if (raw.trim() === '' || indentOf > block.indent) {
+        block.node.block.push(raw.trim());
+        continue;
+      }
+      block = null;
+    }
+    const lead = /^[ \t]*/.exec(raw)[0];
+    const trimmed = raw.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    if (lead.includes('\t')) return fail(n, 'a tab in the indentation');
+    if (lead === '' && (/^(?:---|\.\.\.)(?:\s|$)/.test(trimmed) || trimmed.startsWith('%'))) return fail(n, 'a document marker or directive');
+    let rest = stripYamlComment(trimmed);
+    if (rest === null) return fail(n, 'a quote that never closes on its line');
+    // `"i\x66"` is the key `if`: an escape that spells a character is refused, never compared raw.
+    if ((rest.match(/"(?:[^"\\]|\\.)*"/g) ?? []).some((q) => /\\[xuUNLP_]/.test(q))) return fail(n, 'a double-quoted escape (`\\x`, `\\u`, `\\U`, …)');
+    let indent = lead.length;
+    let item = null;
+    while (rest === '-' || rest.startsWith('- ')) {
+      item = { indent, key: null, value: '', item: true, children: [], block: [], line: n };
+      if (!attach(item)) return fail(n, 'a child under a node that already has a scalar value');
+      if (rest === '-') {
+        rest = '';
+        break;
+      }
+      const after = rest.slice(2);
+      indent += 2 + (after.length - after.trimStart().length);
+      rest = after.trimStart();
+    }
+    if (rest === '') {
+      last = item;
+      continue;
+    }
+    const kv = /^("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_$][A-Za-z0-9_.$/-]*)\s*:(?:\s+(.*))?$/.exec(rest);
+    if (kv) {
+      const key = unquote(kv[1]);
+      const value = (kv[2] ?? '').trim();
+      if (key === '<<') return fail(n, 'a merge key');
+      const why = unreadableValue(value);
+      if (why) return fail(n, why);
+      const node = { indent, key, value, item: false, children: [], block: [], line: n };
+      if (/^[|>][0-9+-]*$/.test(value)) {
+        node.value = '';
+        node.blockStyle = value;
+        block = { node, indent };
+      }
+      if (!attach(node)) return fail(n, 'a child under a node that already has a scalar value');
+      last = node;
+      continue;
+    }
+    const why = unreadableValue(rest);
+    if (why) return fail(n, why);
+    if (item !== null) {
+      item.value = rest;
+      last = item;
+      continue;
+    }
+    // A continuation never starts with an indicator: `? permissions` / `: write-all` is an explicit key, not text.
+    if (/^[?:\-,[\]{}#&*!|>'"%@`]/.test(rest)) return fail(n, `a line led by the YAML indicator \`${rest[0]}\``);
+    if (last !== null && indent > last.indent && last.blockStyle === undefined && last.children.length === 0) {
+      last.value = `${last.value} ${rest}`.trim();
+      continue;
+    }
+    return fail(n, 'a line that is neither a key, a list item nor a continuation');
+  }
+  return { ok: true, root };
+}
+
+/** A node's subtree, indentation-free, as one comparable string. */
+function serializeNode(node) {
+  return JSON.stringify([node.item ? '-' : '', node.key, node.value, node.block, node.children.map(serializeNode)]);
+}
+
+/** A node's own text: key, value and block lines — what a pattern is matched against. */
+function ownText(node) {
+  return [`${node.key ?? ''}: ${node.value}`, ...node.block].join('\n');
+}
+
+/** A flow list, a scalar, or the block items / keys under a node, as names. */
+function namesUnder(node) {
+  if (!node) return [];
+  if (node.value !== '') {
+    const v = node.value.trim();
+    return (v.startsWith('[') ? v.slice(1, -1).split(',') : [v]).map(unquote).map((s) => s.trim()).filter(Boolean);
+  }
+  return node.children.map((c) => unquote(c.item ? c.value : c.key)).filter(Boolean);
+}
+
+/** The identity a `uses:` or image names, its version dropped: a bump of an action already in use is the same identity. */
+export function workflowUsesIdentity(value) {
+  const v = unquote(value);
+  if (v.startsWith('docker://')) return v.replace(/@sha256:[0-9a-f]+$/, '').replace(/:[^/:]+$/, '');
+  if (v.startsWith('./')) return v;
+  return v.replace(/@.*$/, '');
+}
+
+const childOf = (node, key) => node?.children.find((c) => !c.item && c.key === key) ?? null;
+
+/**
+ * The facts of ONE workflow file the classifier compares — or the reader's
+ * refusal. Every fact names its OWNER (`workflow`, `job:ID`, or
+ * `job:ID/step:KEY`), so a line moved inside its owner is the same fact and a
+ * line moved to another job is not. A step's KEY is its `id`, `name`, `uses`
+ * identity or first run line, in that order, numbered when repeated.
+ */
+export function workflowFacts(text) {
+  const tree = readWorkflowTree(text);
+  if (!tree.ok) return tree;
+  const top = (key) => childOf(tree.root, key);
+  const facts = {
+    ok: true,
+    name: top('name') ? unquote(top('name').value) : null,
+    events: [...new Set(namesUnder(top('on')))].sort(),
+    jobs: new Map(),
+    owners: new Map([['workflow', serializeNode(tree.root)]]),
+    permissions: [], ifs: [], coes: [], credentialLines: [], risky: [],
+    credentialOwners: new Set(), writeOwners: new Set(),
+    uses: [], invocations: new Set(),
+    // Per JOB: the gate tokens and `uses:` identities it holds, so a step moved out of an existing job is seen.
+    jobTokens: new Map(),
+  };
+  const holdToken = (owner, token) => {
+    if (!owner.startsWith('job:')) return;
+    const id = owner.split('/')[0].slice('job:'.length);
+    if (!facts.jobTokens.has(id)) facts.jobTokens.set(id, new Set());
+    facts.jobTokens.get(id).add(token);
+  };
+  const visit = (node, owner) => {
+    const text = ownText(node);
+    if (node.key === 'permissions') {
+      facts.permissions.push(JSON.stringify([owner, serializeNode(node)]));
+      if (/\bwrite(?:-all)?\b/.test(serializeNode(node))) facts.writeOwners.add(owner);
+    }
+    if (node.key === 'if') facts.ifs.push([owner, [node.value, ...node.block].join(' ').replace(/\s+/g, ' ').trim()]);
+    if (node.key === 'continue-on-error' && !/^(?:false|'false'|"false")$/.test(node.value)) facts.coes.push(JSON.stringify([owner, node.value]));
+    if (WORKFLOW_CREDENTIAL.test(text)) {
+      facts.credentialOwners.add(owner);
+      facts.credentialLines.push(JSON.stringify([owner, text]));
+    }
+    for (const line of [node.value, ...node.block]) {
+      if (!line.trim().startsWith('#') && WORKFLOW_RISKY_LINE.test(line)) facts.risky.push(JSON.stringify([owner, line.trim()]));
+    }
+    if (node.key === 'uses' || (node.key === 'image' && node.value !== '')) {
+      facts.uses.push(workflowUsesIdentity(node.value));
+      holdToken(owner, `uses: ${workflowUsesIdentity(node.value)}`);
+    }
+    if (node.key === 'run') {
+      for (const line of [node.value, ...node.block]) {
+        if (line.trim().startsWith('#')) continue;
+        for (const [pattern, token] of WORKFLOW_INVOCATIONS) {
+          for (const m of line.matchAll(pattern)) {
+            facts.invocations.add(token(m));
+            holdToken(owner, token(m));
+          }
+        }
+      }
+    }
+    for (const child of node.children) visit(child, owner);
+  };
+  for (const child of tree.root.children) {
+    if (child.key !== 'jobs') visit(child, 'workflow');
+  }
+  const jobsNode = top('jobs');
+  for (const job of jobsNode?.children ?? []) {
+    if (job.item) continue;
+    const id = job.key;
+    const owner = `job:${id}`;
+    const steps = [];
+    const seen = new Map();
+    const stepsNode = childOf(job, 'steps');
+    for (const step of stepsNode?.children ?? []) {
+      if (!step.item) continue;
+      const pick = (k) => childOf(step, k);
+      const run = pick('run');
+      const base =
+        unquote(pick('id')?.value ?? '') ||
+        unquote(pick('name')?.value ?? '') ||
+        (pick('uses') ? workflowUsesIdentity(pick('uses').value) : '') ||
+        (run ? [run.value, ...run.block].find((l) => l.trim() !== '') ?? '' : '') ||
+        '(anonymous)';
+      const k = (seen.get(base) ?? 0) + 1;
+      seen.set(base, k);
+      const stepOwner = `${owner}/step:${base}${k > 1 ? `#${k}` : ''}`;
+      steps.push(stepOwner);
+      facts.owners.set(stepOwner, serializeNode(step));
+      for (const child of step.children) visit(child, stepOwner);
+    }
+    for (const child of job.children) {
+      if (child !== stepsNode) visit(child, owner);
+    }
+    facts.owners.set(owner, serializeNode(job));
+    facts.jobs.set(id, { name: unquote(childOf(job, 'name')?.value ?? '') || id, needs: namesUnder(childOf(job, 'needs')), steps });
+  }
+  return facts;
+}
+
+/**
+ * What a base tree already uses and names, across every workflow (the files
+ * `readWorkflowDiff` hands in, never `.github/actions/**`, which is no register
+ * row): the `uses:` / image identities a head may use without Tier H, and
+ * the job names a NEW job may not take (two jobs, one check-run name). An
+ * unparseable file still contributes its `uses:` lines, read by pattern.
+ */
+export function workflowInventory(files) {
+  const uses = new Set();
+  const jobNames = new Set();
+  for (const { text } of Array.isArray(files) ? files : []) {
+    const facts = workflowFacts(text);
+    if (facts.ok) {
+      for (const u of facts.uses) uses.add(u);
+      for (const job of facts.jobs.values()) jobNames.add(job.name);
+    }
+    for (const m of String(text ?? '').matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)) uses.add(workflowUsesIdentity(m[1]));
+  }
+  return { uses, jobNames };
+}
+
+/** The members of `b` not matched one-for-one in `a` — a multiset difference. Pure. */
+function addedIn(a, b) {
+  const pool = new Map();
+  for (const x of a) pool.set(x, (pool.get(x) ?? 0) + 1);
+  const out = [];
+  for (const x of b) {
+    const left = pool.get(x) ?? 0;
+    if (left > 0) pool.set(x, left - 1);
+    else out.push(x);
+  }
+  return out;
+}
+
+const ownerWords = (owner) => (owner === 'workflow' ? 'the workflow level' : `\`${owner}\``);
+
+/**
+ * The Tier H triggers between two parsed copies of one workflow file, as
+ * reasons — empty means Tier S. The C2 list of the ruling, then the cases
+ * biased to H. Pure.
+ */
+export function workflowDiffReasons(a, b, inventory) {
+  const reasons = [];
+  const say = (reason) => {
+    if (!reasons.includes(reason)) reasons.push(reason);
+  };
+  // C2 — permissions, credentials, pull_request_target.
+  if (addedIn(a.permissions, b.permissions).length + addedIn(b.permissions, a.permissions).length > 0) say('a `permissions:` block added, changed or removed');
+  for (const line of [...addedIn(a.credentialLines, b.credentialLines), ...addedIn(b.credentialLines, a.credentialLines)]) say(`a \`secrets.*\` / token reference added, changed or moved at ${ownerWords(JSON.parse(line)[0])}`);
+  if (a.events.includes('pull_request_target') || b.events.includes('pull_request_target')) say('a `pull_request_target` workflow: every edit runs with the base repository\'s credentials');
+  // C2 — a `uses:` (or image) the base tree does not already use anywhere.
+  if (!inventory) say('no inventory of the base tree\'s actions was read, so a new `uses:` cannot be ruled out');
+  else for (const u of new Set(b.uses)) if (!inventory.uses.has(u)) say(`a \`uses:\` / image not used anywhere on the base tree: \`${u}\``);
+  // C2 — a deleted job, or a changed check-run name set.
+  for (const [id, job] of a.jobs) {
+    const now = b.jobs.get(id);
+    if (!now) say(`a deleted job: \`${id}\``);
+    else {
+      // A required context is a literal name (`check:required-contexts` refuses a matrix on one), so a rename
+      // between two COMPUTED names — a matrix job's shard count — changes no required context.
+      const computed = (name) => name.includes('${{');
+      if (now.name !== job.name && !(computed(now.name) && computed(job.name))) say(`a job's check-run name changed: \`${id}\` \`${job.name}\` → \`${now.name}\``);
+      // Either direction: a job whose dependency is skipped is skipped, and a skipped required check reads green.
+      // A gate step moved out of an existing job (into a new job that never runs) is a dropped gate there.
+      const held = b.jobTokens.get(id) ?? new Set();
+      for (const token of a.jobTokens.get(id) ?? []) if (!held.has(token)) say(`an existing job no longer holds \`${token}\`: \`${id}\``);
+      if ([...new Set(job.needs)].sort().join() !== [...new Set(now.needs)].sort().join()) say(`a job's \`needs:\` changed: \`${id}\` [${job.needs.join(', ')}] → [${now.needs.join(', ')}]`);
+    }
+  }
+  for (const [id, job] of b.jobs) {
+    if (a.jobs.has(id)) continue;
+    if (job.name.includes('${{')) say(`a new job whose check-run name is computed: \`${id}\``);
+    else if (inventory && inventory.jobNames.has(job.name)) say(`a new job takes a check-run name already in use: \`${id}\` \`${job.name}\``);
+  }
+  if (a.name !== b.name) say('the workflow `name:` changed');
+  if (a.events.join() !== b.events.join()) say(`the trigger set changed: [${a.events.join(', ')}] → [${b.events.join(', ')}]`);
+  // C2 — a new `continue-on-error`, or an `if:` the base does not hold for the same owner with the same text.
+  // An owner is a name the author picks, so only a job NEW on the head may bring its own `if:`: a renamed step
+  // given `if: false` beside a dummy under the old name is in an existing job, and is H.
+  for (const fact of addedIn(a.coes, b.coes)) say(`a new \`continue-on-error\` at ${ownerWords(JSON.parse(fact)[0])}`);
+  for (const fact of addedIn(a.ifs.map((f) => JSON.stringify(f)), b.ifs.map((f) => JSON.stringify(f)))) {
+    const [owner] = JSON.parse(fact);
+    const jobId = owner === 'workflow' ? null : owner.split('/')[0].slice('job:'.length);
+    if (jobId === null || a.jobs.has(jobId)) say(`an \`if:\` added or changed in a job that already ran: ${ownerWords(owner)}`);
+  }
+  // Biased to H — each listed in the report.
+  for (const owner of new Set([...a.credentialOwners, ...b.credentialOwners, ...a.writeOwners, ...b.writeOwners])) {
+    const before = a.owners.get(owner);
+    const after = b.owners.get(owner);
+    if (before !== undefined && after !== undefined && before !== after) say(`a changed ${ownerWords(owner)} that already holds a secret or a write token`);
+  }
+  for (const fact of addedIn(a.risky, b.risky)) say(`an added line that can skip a check: \`${JSON.parse(fact)[1].trim().slice(0, 80)}\``);
+  for (const token of a.invocations) if (!b.invocations.has(token)) say(`a gate invocation dropped from the file: \`${token}\``);
+  for (const u of new Set(a.uses)) if (!b.uses.includes(u)) say(`a \`uses:\` / image dropped from the file: \`${u}\``);
+  return reasons;
+}
+
+/**
+ * ONE workflow file's tier between two commits: `{ path, tier, reasons }`,
+ * `S` only when no reason holds. Pure over the texts (`null` = absent at
+ * that commit). ⛔ Fail closed on every reading the classifier cannot make:
+ * a pinned release/publish/deploy file, a file that is not YAML, a new or
+ * deleted file, a copy that does not parse — each is Tier H with its reason.
+ */
+export function classifyWorkflowChange({ path, base = null, head = null, inventory = null }) {
+  const reasons = [];
+  const pinned = WORKFLOW_TIER_H_FILES.find((f) => f.path === path);
+  if (pinned) reasons.push(`a release, publish or deploy workflow, Tier H by path: ${pinned.why}`);
+  else if (!/\.ya?ml$/.test(String(path))) reasons.push('not a `.yml` / `.yaml` file, so the classifier cannot read it');
+  else if (base === null && head === null) reasons.push('absent at both commits: nothing was read');
+  else if (base === null) reasons.push('a new workflow file: every trigger, job and permission in it is new');
+  else if (head === null) reasons.push('a deleted workflow file: every job in it is deleted');
+  else if (base !== head) {
+    const a = workflowFacts(base);
+    const b = workflowFacts(head);
+    if (!a.ok) reasons.push(`the base copy does not parse (line ${a.line}: ${a.reason})`);
+    if (!b.ok) reasons.push(`the head copy does not parse (line ${b.line}: ${b.reason})`);
+    if (a.ok && b.ok) reasons.push(...workflowDiffReasons(a, b, inventory));
+  }
+  return { path, tier: reasons.length === 0 ? GOVERNED_TIER_S : GOVERNED_TIER_H, reasons };
+}
+
+/**
+ * The READING the split needs: every changed workflow path classified between
+ * `base` and `head`, with `inventoryBase`'s actions and job names as what is
+ * "already in use". `git(argv)` returns stdout and throws on failure — the
+ * seam the self-test drives and both scripts' callers fill. `cache` (a Map)
+ * keeps one inventory per base across the rows of one run.
+ *
+ * ⛔ Fail closed: no base, an unreadable commit or any git failure answers
+ * `{ measured: false, reason }`, and an unmeasured reading is Tier H.
+ */
+export function readWorkflowDiff({ paths, base, head, inventoryBase = base, git, cache = null }) {
+  const unmeasured = (reason) => ({ measured: false, reason, base: base ?? null, head: head ?? null, files: [] });
+  const wanted = [...new Set((Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p.startsWith(WORKFLOWS_PREFIX)))];
+  if (typeof base !== 'string' || base === '') return unmeasured('no base commit was named, so the workflow diff has nothing to be read against');
+  if (typeof head !== 'string' || head === '') return unmeasured('no head commit was named, so the workflow diff cannot be read');
+  if (typeof git !== 'function') return unmeasured('no git reader was supplied');
+  try {
+    const listAt = (rev, ...dirs) => git(['ls-tree', '-r', '--name-only', rev, '--', ...dirs]).split('\n').map((l) => l.trim()).filter(Boolean);
+    const show = (rev, path) => git(['show', `${rev}:${path}`]);
+    let inventory = cache?.get(inventoryBase) ?? null;
+    if (inventory === null) {
+      // Workflows only: `.github/actions/**` is no register row, so an action used there alone vouches for
+      // nothing. The listing argv is unchanged (the queue guard pins it read once per run); the filter drops them.
+      const files = listAt(inventoryBase, '.github/workflows', '.github/actions').filter((p) => p.startsWith(WORKFLOWS_PREFIX) && /\.ya?ml$/.test(p));
+      inventory = workflowInventory(files.map((p) => ({ path: p, text: show(inventoryBase, p) })));
+      cache?.set(inventoryBase, inventory);
+    }
+    const baseFiles = new Set(listAt(base, WORKFLOWS_PREFIX));
+    const headFiles = new Set(listAt(head, WORKFLOWS_PREFIX));
+    const files = wanted.map((path) =>
+      classifyWorkflowChange({ path, base: baseFiles.has(path) ? show(base, path) : null, head: headFiles.has(path) ? show(head, path) : null, inventory }),
+    );
+    return { measured: true, reason: null, base, head, inventoryBase, files };
+  } catch (error) {
+    return unmeasured(`git could not read the workflow files (${String(error?.stderr || error?.message || error).trim().split('\n')[0]})`);
+  }
+}
+
+/** Several readings of one pull request (one per queued commit) as one: unmeasured if any is, else every file, H winning a path read twice. Pure. */
+export function mergeWorkflowReadings(readings) {
+  const list = (Array.isArray(readings) ? readings : []).filter((r) => r !== null && r !== undefined);
+  if (list.length === 0) return null;
+  const unread = list.find((r) => r.measured !== true);
+  if (unread) return { measured: false, reason: unread.reason ?? 'a reading was not measured', base: unread.base ?? null, head: unread.head ?? null, files: [] };
+  const byPath = new Map();
+  for (const file of list.flatMap((r) => r.files)) {
+    const seen = byPath.get(file.path);
+    byPath.set(file.path, seen ? { path: file.path, tier: seen.tier === GOVERNED_TIER_S && file.tier === GOVERNED_TIER_S ? GOVERNED_TIER_S : GOVERNED_TIER_H, reasons: [...seen.reasons, ...file.reasons] } : file);
+  }
+  return { measured: true, reason: null, base: list[0].base, head: list[list.length - 1].head, files: [...byPath.values()] };
+}
+
+/**
+ * The split verdict for one matched row's files: `S` only when the reading was
+ * measured and classified EVERY file `S`. A path the reading did not classify,
+ * or no reading at all, is H. Pure.
+ */
+export function workflowSplitVerdict(files, reading) {
+  const list = Array.isArray(files) ? files : [];
+  if (!reading || reading.measured !== true) {
+    return { tier: GOVERNED_TIER_H, measured: false, reason: reading?.reason ?? 'no reading of the diff was handed in — a path list alone cannot say what a workflow edit changes', files: [] };
+  }
+  const byPath = new Map(reading.files.map((f) => [f.path, f]));
+  const judged = list.map((p) => byPath.get(p) ?? { path: p, tier: GOVERNED_TIER_H, reasons: ['the reading did not classify this path'] });
+  return { tier: judged.length > 0 && judged.every((f) => f.tier === GOVERNED_TIER_S) ? GOVERNED_TIER_S : GOVERNED_TIER_H, measured: true, reason: null, files: judged, base: reading.base ?? null, head: reading.head ?? null };
+}
+
+/**
+ * The matched slice with every split row's tier read off the diff, in `repo`.
+ * A row without `split`, or a repository its `split.repos` does not name,
+ * passes through as the same object — so every reading without a workflow
+ * hit is byte-identical to before. Pure.
+ */
+export function applyWorkflowSplit(matched, repo, reading = null) {
+  return (Array.isArray(matched) ? matched : []).map((surface) => {
+    if (!surface?.split || !surface.split.repos.includes(repo)) return surface;
+    const splitVerdict = workflowSplitVerdict(surface.files, reading);
+    return Object.freeze({ ...surface, tier: splitVerdict.tier, splitVerdict });
+  });
+}
+
+/**
+ * The split's words under a verdict, or '' when no split row was hit (every
+ * other rendering byte-identical). Pure.
+ */
+export function renderWorkflowSplitLines(matched) {
+  const rows = (Array.isArray(matched) ? matched : []).filter((s) => s?.splitVerdict);
+  return rows
+    .map(({ splitVerdict: v }) => {
+      if (!v.measured) {
+        return (
+          `      ⚖️ ${WORKFLOWS_PREFIX}** split (${WORKFLOW_SPLIT_RULING}): content NOT MEASURED — ${v.reason}.\n` +
+          '         Tier H, fail closed. `--branch <ref>`, or `--pr <n>` on a checkout holding both commits, reads it.\n'
+        );
+      }
+      if (v.tier === GOVERNED_TIER_S) {
+        return `      ⚖️ ${WORKFLOWS_PREFIX}** split (${WORKFLOW_SPLIT_RULING}): Tier S by content — ${v.files.length} file(s) read, no Tier H trigger.\n`;
+      }
+      const hot = v.files.filter((f) => f.tier !== GOVERNED_TIER_S);
+      return (
+        `      ⚖️ ${WORKFLOWS_PREFIX}** split (${WORKFLOW_SPLIT_RULING}): Tier H by content —\n` +
+        hot.map((f) => `        - ${f.path}: ${f.reasons.slice(0, 4).join('; ')}${f.reasons.length > 4 ? `; +${f.reasons.length - 4} more` : ''}\n`).join('')
+      );
+    })
+    .join('');
 }
 
 /** `owner/name` out of any git remote spelling, or null. Pure. */
@@ -1695,10 +2315,11 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo, size 
  * it names which one, and the verdict carries it (`repo`, and
  * `surfacesChecked` counts the rows that govern it, not the whole table).
  */
-export function testVerdict(paths, { repo, size = null, fork = null, checks = null, approval = null } = {}) {
+export function testVerdict(paths, { repo, size = null, fork = null, checks = null, approval = null, workflowDiff = null } = {}) {
   assertGovernedRepo(repo, 'testVerdict');
   const list = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p !== '');
-  const matched = governedPathsIn(list, repo);
+  // The `workflows` row's tier is read off the diff where a reading was handed in (the split): H otherwise.
+  const matched = applyWorkflowSplit(governedPathsIn(list, repo), repo, workflowDiff);
   const hit = new Set(matched.flatMap((s) => s.files));
   const sized = sizeVerdict(size, approval);
   const forked = fork && typeof fork === 'object' ? fork : forkVerdict(null); // the FORK limb, or NOT MEASURED
@@ -1900,6 +2521,7 @@ export function renderTestVerdict(verdict) {
       `      and no maintainer click is waited for. One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」;\n` +
       `      one Tier H path among the hits and the whole PR would be Tier H.\n` +
       `${lines.join('\n')}${clear}\n` +
+      renderWorkflowSplitLines(verdict.matched) +
       `${intake}${renderSizeLines(size)}` +
       renderExceptionLines(verdict)
     );
@@ -1911,6 +2533,7 @@ export function renderTestVerdict(verdict) {
     `      One hit governs the whole PR — 「混合 diff 一条命中即整 PR 分叉」; proportion is not a question.\n` +
     `      ⚖️ landing tier: H(人合) — ${GOVERNED_TIERS[GOVERNED_TIER_H].landing}.\n` +
     `${lines.join('\n')}${clear}\n` +
+    renderWorkflowSplitLines(verdict.matched) +
     `${intake}${renderSizeLines(size)}` +
     renderExceptionLines(verdict)
   );
@@ -3284,6 +3907,8 @@ export async function fetchPullFiles({ apiUrl, slug, pull, channels, fetchImpl =
       kind: 'pull',
       slug,
       pull,
+      headSha: sha,
+      baseSha: typeof head?.base?.sha === 'string' ? head.base.sha : null,
       endpoint: `/repos/${slug}/pulls/${pull}/files`,
       channel: chosen.id,
       pages,
@@ -3637,8 +4262,8 @@ function rootFromArgs(args) {
  * leave two readings of the same register in circulation, which is the shape
  * the card is about. `--self-test` pins the identity end to end.
  */
-async function emitVerdict(paths, args, derivation = null, size = null, intake = null, repo = undefined) {
-  let verdict = testVerdict(paths, { repo, size, ...(intake ?? {}) });
+async function emitVerdict(paths, args, derivation = null, size = null, intake = null, repo = undefined, workflowDiff = null) {
+  let verdict = testVerdict(paths, { repo, size, ...(intake ?? {}), workflowDiff });
   // The provenance-aware exceptions (#9866 + #11705): recompute only when a
   // registered path is actually among the hits, so every other run stays the
   // zero-git, zero-cost read it always was. The driver applies each row's
@@ -3813,7 +4438,30 @@ async function runBranchMode(args) {
   }
   if (!args.includes('--json')) console.log(renderDerivation(derived.derivation));
   console.error(checkoutRepoNote(where));
-  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, null, where.repo);
+  // The `workflows` split reads the same merge-base range the path list came from.
+  const workflowDiff = derived.paths.some((p) => p.startsWith(WORKFLOWS_PREFIX))
+    ? readWorkflowDiff({ paths: derived.paths, base: derived.derivation.mergeBase, head: derived.derivation.refSha, git: (argv) => git(root, argv) })
+    : null;
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, null, where.repo, workflowDiff);
+}
+
+/**
+ * `--pr`'s reading for the `workflows` split: the PR's own head and base
+ * commits, read from THIS checkout when it is the PR's repository and holds
+ * both — the API's patch text is no tree, so nothing else is read. Anything
+ * short of that is an unmeasured reading (Tier H) naming the fetch that cures it.
+ */
+export function pullWorkflowDiff({ derivation, paths, sameCheckout, run, git: readGit }) {
+  const unmeasured = (reason) => ({ measured: false, reason, base: null, head: derivation?.headSha ?? null, files: [] });
+  const headSha = derivation?.headSha;
+  const baseSha = derivation?.baseSha;
+  if (!sameCheckout) return unmeasured('the PR is not in the repository this checkout holds, so its commits cannot be read here');
+  if (!isObjectId(headSha) || !isObjectId(baseSha)) return unmeasured('the PR object named no head or base commit');
+  const missing = [headSha, baseSha].filter((sha) => !run(['cat-file', '-e', `${sha}^{commit}`]).ok);
+  if (missing.length > 0) return unmeasured(`${missing.map((sha) => sha.slice(0, 10)).join(' and ')} not in this checkout — \`git fetch origin pull/${derivation.pull}/head main\``);
+  const mergeBase = run(['merge-base', baseSha, headSha]);
+  if (!mergeBase.ok || !isObjectId(mergeBase.out)) return unmeasured('no merge base of the PR head and its base could be computed here (a shallow clone?)');
+  return readWorkflowDiff({ paths, base: mergeBase.out, head: headSha, git: readGit });
 }
 
 /** `--pr <n>` (#17003): the API's changed-files list — three-dot by construction — or a refusal. */
@@ -3868,7 +4516,10 @@ async function runPullMode(args) {
     return EXIT_CANNOT_SWEEP;
   }
   if (!args.includes('--json')) console.log(renderDerivation(derived.derivation));
-  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks }, repo);
+  const workflowDiff = derived.paths.some((p) => p.startsWith(WORKFLOWS_PREFIX))
+    ? pullWorkflowDiff({ derivation: derived.derivation, paths: derived.paths, sameCheckout: target.slug === selfSlug, run: (argv) => tryGit(root, argv), git: (argv) => git(root, argv) })
+    : null;
+  return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks }, repo, workflowDiff);
 }
 
 /**
@@ -4530,6 +5181,212 @@ async function selfTest() {
   // directions are pinned: each row's specimen is governed Tier H in
   // objectstack, and a `ui/` source path, a nested copy of an instruction file
   // and every other repository answer NOT governed.
+  // ── the `workflows` row's content-aware split (ruling record 6722205630, letter C) ──
+  //
+  // One pin per C2 trigger, the near-misses that must stay Tier S, the cases
+  // biased to H, and every fail-closed door. The fixtures are workflow TEXTS,
+  // classified pure; `readWorkflowDiff` is driven through an injected git.
+  battery('⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)');
+  {
+    const WF = '.github/workflows/ci.yml';
+    const BASE_WF = [
+      'name: CI',
+      'on:',
+      '  pull_request:',
+      '    paths:',
+      "      - 'packages/**'",
+      '  merge_group:',
+      'jobs:',
+      '  build:',
+      '    name: Build Core',
+      '    runs-on: ubuntu-latest',
+      '    timeout-minutes: 20',
+      '    steps:',
+      '      - uses: actions/checkout@v7',
+      '      - name: Restore cache',
+      '        uses: actions/cache@v4',
+      '        with:',
+      '          key: core-${{ hashFiles(\'pnpm-lock.yaml\') }}',
+      '      - name: Gate',
+      "        if: github.event_name != 'schedule'",
+      '        run: |',
+      '          # the gate',
+      '          pnpm check:generated',
+      '          node scripts/check-required-contexts.mjs',
+      '      - name: Build with the cache token',
+      '        env:',
+      '          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}',
+      '        run: pnpm turbo run build --filter=@objectstack/spec',
+      '  shards:',
+      '    name: Test UI (${{ matrix.shard }}/16)',
+      '    needs: [build]',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: pnpm vitest run',
+      '',
+    ].join('\n');
+    const edit = (from, to) => {
+      if (!BASE_WF.includes(from)) throw new Error(`fixture anchor missing: ${from}`);
+      return BASE_WF.replace(from, to);
+    };
+    const INVENTORY = workflowInventory([{ path: WF, text: BASE_WF }]);
+    const tierOf = (head, opts = {}) => classifyWorkflowChange({ path: opts.path ?? WF, base: opts.base === undefined ? BASE_WF : opts.base, head, inventory: opts.inventory === undefined ? INVENTORY : opts.inventory });
+    const isH = (r, re) => r.tier === GOVERNED_TIER_H && r.reasons.some((x) => re.test(x));
+    const isS = (r) => r.tier === GOVERNED_TIER_S && r.reasons.length === 0;
+    const show = (r) => JSON.stringify(r.reasons);
+
+    // The register: the row keeps `tier: H` for every path-only reader; the split is a reading, in objectstack alone.
+    const row = GOVERNED_SURFACES.find((s) => s.id === 'workflows');
+    assert('the-workflows-row-keeps-tier-H-and-carries-a-split-scoped-to-objectstack-alone', row.tier === GOVERNED_TIER_H && Object.isFrozen(row.split) && row.split.repos.join() === 'objectstack' && GOVERNED_SURFACES.filter((s) => s.split).map((s) => s.id).join() === 'workflows', JSON.stringify(row));
+    assert('the-split-repositories-are-a-subset-of-the-rows-own', row.split.repos.every((r) => surfaceRepos(row).includes(r)));
+    assert('the-reader-parses-the-fixture-and-the-baseline-is-S-against-itself', workflowFacts(BASE_WF).ok === true && isS(tierOf(BASE_WF)) && isS(tierOf(`${BASE_WF}\n`)), show(tierOf(BASE_WF)));
+
+    // Tier H by PATH: the six release, publish and deploy files, each on disk under its own name.
+    const PINNED = WORKFLOW_TIER_H_FILES.map((f) => f.path);
+    assert('six-files-are-Tier-H-by-path-release-docker-base-image-docs-wiki-and-the-write-relay', PINNED.join() === ['release', 'docker-publish', 'framework-build-base', 'docs-deploy', 'checklist-status', 'fleet-write'].map((n) => `${WORKFLOWS_PREFIX}${n}.yml`).join(), PINNED.join());
+    assert('every-pinned-path-is-a-real-workflow-file-of-this-repository', PINNED.every((p) => existsSync(resolve(scriptDir, '..', '..', p))), PINNED.filter((p) => !existsSync(resolve(scriptDir, '..', '..', p))).join());
+    assert('a-pinned-file-is-H-even-on-a-comment-only-edit', PINNED.every((p) => isH(classifyWorkflowChange({ path: p, base: BASE_WF, head: `# a comment\n${BASE_WF}`, inventory: INVENTORY }), /Tier H by path/)));
+
+    // Tier H by DIFF: one pin per C2 trigger.
+    assert('C2-permissions-added-is-H', isH(tierOf(edit('    timeout-minutes: 20', '    timeout-minutes: 20\n    permissions:\n      contents: write')), /`permissions:` block/), show(tierOf(edit('    timeout-minutes: 20', '    timeout-minutes: 20\n    permissions:\n      contents: write'))));
+    const READ_PERMS = edit('jobs:\n', 'permissions:\n  contents: read\njobs:\n');
+    const widened = tierOf(READ_PERMS.replace('contents: read', 'contents: write'), { base: READ_PERMS });
+    assert('C2-a-changed-permissions-key-is-H', isH(widened, /`permissions:` block/), show(widened));
+    const tokened = tierOf(edit('      - run: pnpm vitest run', '      - run: pnpm vitest run\n        env:\n          GH_TOKEN: ${{ github.token }}'));
+    assert('C2-a-github-token-reference-added-is-H', isH(tokened, /secrets\.\*|github\.token/), show(tokened));
+    assert('C2-a-secrets-reference-added-is-H', isH(tierOf(edit('      - run: pnpm vitest run', '      - run: pnpm vitest run\n        env:\n          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}')), /secrets\.\*/));
+    assert('C2-pull_request_target-is-H', isH(tierOf(edit('  merge_group:', '  merge_group:\n  pull_request_target:')), /pull_request_target/));
+    assert('C2-a-uses-no-workflow-on-the-base-uses-is-H', isH(tierOf(edit('      - uses: actions/checkout@v7', '      - uses: actions/checkout@v7\n      - uses: someone/new-action@v1')), /not used anywhere on the base tree: `someone\/new-action`/));
+    assert('C2-a-deleted-job-is-H', isH(tierOf(BASE_WF.slice(0, BASE_WF.indexOf('  shards:'))), /a deleted job: `shards`/));
+    assert('C2-a-literal-check-run-name-changed-is-H', isH(tierOf(edit('    name: Build Core', '    name: Build Core v2')), /check-run name changed/));
+    assert('C2-a-new-continue-on-error-is-H', isH(tierOf(edit('        run: |', '        continue-on-error: true\n        run: |')), /new `continue-on-error`/));
+    assert('C2-an-if-that-disables-a-step-is-H', isH(tierOf(edit("        if: github.event_name != 'schedule'", '        if: false')), /`if:` added or changed/));
+    assert('C2-an-if-that-disables-a-job-is-H', isH(tierOf(edit('    timeout-minutes: 20', '    timeout-minutes: 20\n    if: false')), /`if:` added or changed .*`job:build`/));
+
+    // The contract review's holes (FAIL at d51132be): each is H now, pinned with the shape that slipped past.
+    const GATE_STEP = "      - name: Gate\n        if: github.event_name != 'schedule'\n";
+    const renamedDummy = tierOf(edit(GATE_STEP, "      - name: Gate2\n        if: false\n").replace('      - name: Build with the cache token', '      - name: Gate\n        run: echo ok\n      - name: Build with the cache token'));
+    assert('⛔ M1-a-renamed-gate-step-given-if-false-beside-a-dummy-under-the-old-name-is-H', isH(renamedDummy, /`if:` added or changed in a job that already ran: `job:build\/step:Gate2`/), show(renamedDummy));
+    const idDummy = tierOf(edit(GATE_STEP, "      - id: gate2\n        name: Gate\n        if: false\n"));
+    assert('⛔ M1-a-gate-step-re-keyed-by-an-id-and-given-if-false-is-H', isH(idDummy, /`if:` added or changed in a job that already ran/), show(idDummy));
+    const newStepIf = tierOf(edit('      - run: pnpm vitest run', "      - run: pnpm vitest run\n      - name: Extra\n        if: github.ref == 'refs/heads/main'\n        run: echo extra"));
+    assert('⛔ M1-a-new-step-with-its-own-if-inside-an-existing-job-is-H', isH(newStepIf, /in a job that already ran: `job:shards\/step:Extra`/), show(newStepIf));
+    const flowStep = tierOf(edit(GATE_STEP, '      - { name: Gate, if: false }\n'));
+    assert('⛔ M2a-a-flow-mapped-step-is-refused-and-H', isH(flowStep, /does not parse .*a flow mapping/), show(flowStep));
+    assert('M2a-an-empty-flow-mapping-and-an-expression-still-parse', workflowFacts(edit('  merge_group:', '  merge_group: {}')).ok === true && workflowFacts(edit('    runs-on: ubuntu-latest\n    timeout', "    runs-on: ${{ inputs.os || 'ubuntu-latest' }}\n    timeout")).ok === true);
+    const escaped = tierOf(edit("        if: github.event_name != 'schedule'", '        "i\\x66": false'));
+    assert('⛔ M2b-a-double-quoted-escape-spelling-a-key-is-refused-and-H', isH(escaped, /does not parse .*double-quoted escape/), show(escaped));
+    const escapedValue = tierOf(edit('          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}', '          TURBO_TOKEN: "${{ secre\\x74s.TURBO_TOKEN }}"'));
+    assert('⛔ M2b-an-escape-inside-a-value-is-refused-too', isH(escapedValue, /does not parse .*double-quoted escape/), show(escapedValue));
+    for (const spelling of ['${{ Secrets.NPM_TOKEN }}', '${{ SECRETS.NPM_TOKEN }}', "${{ github['token'] }}", '${{ GitHub.Token }}', '${{ github . token }}']) {
+      const r = tierOf(edit('      - run: pnpm vitest run', `      - run: pnpm vitest run\n        env:\n          T: ${spelling}`));
+      assert(`⛔ M2c-a-credential-spelled-${spelling}-is-H`, isH(r, /token reference added, changed or moved/), show(r));
+    }
+    const explicitKey = tierOf(edit('    timeout-minutes: 20\n', '    timeout-minutes: 20\n    ? permissions\n    : write-all\n'));
+    assert('⛔ M2d-an-explicit-key-line-is-refused-and-H', isH(explicitKey, /does not parse .*YAML indicator/), show(explicitKey));
+    const valuedParent = tierOf(edit('    name: Build Core\n', '    name: Build Core\n      if: false\n'));
+    assert('⛔ M2d-a-child-under-a-node-with-a-scalar-value-is-refused-and-H', isH(valuedParent, /does not parse/), show(valuedParent));
+    assert('M2d-a-plain-scalar-continuation-still-reads', workflowFacts(edit('    name: Build Core\n', '    name: Build\n      Core\n')).ok === true);
+    // The delta review's holes (FAIL at 87f686fc): a gate moved into a new job that never runs; two token spellings.
+    const GATE_BLOCK = "      - name: Gate\n        if: github.event_name != 'schedule'\n        run: |\n          # the gate\n          pnpm check:generated\n          node scripts/check-required-contexts.mjs\n";
+    const movedOff = tierOf(`${edit(GATE_BLOCK, '')}  gate2:\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n${GATE_BLOCK}`);
+    assert('⛔ D1-a-gate-step-moved-into-a-new-job-with-if-false-is-H', isH(movedOff, /an existing job no longer holds `check:generated`: `build`/), show(movedOff));
+    const movedBehind = tierOf(`${edit(GATE_BLOCK, '')}  opt-in:\n    if: contains(github.event.pull_request.labels.*.name, 'x')\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo opt\n  gate2:\n    needs: [opt-in]\n    runs-on: ubuntu-latest\n    steps:\n${GATE_BLOCK}`);
+    assert('⛔ D1-a-gate-step-moved-into-a-new-job-behind-an-opt-in-needs-is-H', isH(movedBehind, /an existing job no longer holds `scripts\/check-required-contexts\.mjs`: `build`/), show(movedBehind));
+    const actionMoved = tierOf(`${edit("      - name: Restore cache\n        uses: actions/cache@v4\n        with:\n          key: core-${{ hashFiles('pnpm-lock.yaml') }}\n", '')}  cache2:\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/cache@v4\n`);
+    assert('⛔ D1-a-uses-moved-out-of-an-existing-job-is-H', isH(actionMoved, /an existing job no longer holds `uses: actions\/cache`: `build`/), show(actionMoved));
+    for (const spelling of ['${{ toJSON(github) }}', "${{ github[format('tok{0}', 'en')] }}"]) {
+      const r = tierOf(edit('      - run: pnpm vitest run', `      - run: pnpm vitest run\n        env:\n          T: ${spelling}`));
+      assert(`⛔ D2-the-job-token-reached-as-${spelling}-is-H`, isH(r, /token reference added, changed or moved/), show(r));
+    }
+    const addedNeeds = tierOf(edit('    needs: [build]', '    needs: [build, opt-in]'));
+    assert('⛔ S1-a-needs-added-on-an-existing-job-is-H', isH(addedNeeds, /`needs:` changed: `shards` \[build\] → \[build, opt-in\]/), show(addedNeeds));
+    // The review nits N5: gate spellings WORKFLOW_INVOCATIONS did not see — each moved out of its job is H.
+    const GATE_LINE = '          node scripts/check-required-contexts.mjs\n';
+    for (const [spelling, token] of [
+      ['git diff --exit-code -- packages/spec/json-schema', 'git diff --exit-code -- packages/spec/json-schema'],
+      ['if ! git diff --quiet -- sdui.manifest.json; then exit 1; fi', 'git diff --quiet -- sdui.manifest.json'],
+      ['npx --yes publint@0.3.2 --strict', 'npx publint'],
+      ['npx -y "@arethetypeswrong/cli@0.17.0" --pack .', 'npx @arethetypeswrong/cli'],
+      ['node ui/e2e/check-gate.mjs --strict', 'node ui/e2e/check-gate.mjs'],
+      ['bash ./tools/verify.sh "$RUNNER_TEMP"', 'bash tools/verify.sh'],
+    ]) {
+      const base = edit(GATE_LINE, `${GATE_LINE}          ${spelling}\n`);
+      const moved = tierOf(`${base.replace(`          ${spelling}\n`, '')}  gate2:\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: ${spelling}\n`, { base });
+      const re = new RegExp(`an existing job no longer holds \`${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\`: \`build\``);
+      assert(`⛔ N5-a-gate-spelled-${token}-moved-out-of-its-job-is-H`, isH(moved, re), show(moved));
+    }
+    const npxBase = edit(GATE_LINE, `${GATE_LINE}          npx --yes publint@0.3.2 --strict\n          node ./tools/gate.mjs\n`);
+    const npxBumped = tierOf(npxBase.replace('publint@0.3.2', 'publint@0.3.3').replace('node ./tools/gate.mjs', 'node tools/gate.mjs'), { base: npxBase });
+    assert('N5-near-miss-an-npx-version-bump-and-a-dropped-dot-slash-are-S', isS(npxBumped), show(npxBumped));
+
+    // The near-misses: each is Tier S.
+    const BUILD_RUN = '        run: pnpm turbo run build --filter=@objectstack/spec';
+    const reordered = edit(
+      "      - name: Gate\n        if: github.event_name != 'schedule'\n        run: |\n          # the gate\n          pnpm check:generated\n          node scripts/check-required-contexts.mjs\n",
+      '',
+    ).replace(`${BUILD_RUN}\n`, `${BUILD_RUN}\n` + "      - name: Gate\n        if: github.event_name != 'schedule'\n        run: |\n          # the gate\n          pnpm check:generated\n          node scripts/check-required-contexts.mjs\n");
+    assert('near-miss-a-moved-if-that-disables-nothing-is-S', reordered !== BASE_WF && isS(tierOf(reordered)), show(tierOf(reordered)));
+    assert('near-miss-a-uses-bump-of-an-action-already-in-use-is-S', isS(tierOf(edit('actions/cache@v4', 'actions/cache@v5'))), show(tierOf(edit('actions/cache@v4', 'actions/cache@v5'))));
+    assert('near-miss-a-timeout-edit-is-S', isS(tierOf(edit('timeout-minutes: 20', 'timeout-minutes: 30'))));
+    assert('near-miss-a-path-filter-edit-is-S', isS(tierOf(edit("      - 'packages/**'", "      - 'packages/**'\n      - 'ui/**'"))));
+    assert('near-miss-a-shard-count-in-a-computed-matrix-name-is-S', isS(tierOf(edit('(${{ matrix.shard }}/16)', '(${{ matrix.shard }}/20)'))), show(tierOf(edit('(${{ matrix.shard }}/16)', '(${{ matrix.shard }}/20)'))));
+    assert('near-miss-a-cache-key-edit-is-S', isS(tierOf(edit("key: core-${{ hashFiles('pnpm-lock.yaml') }}", "key: core-v2-${{ hashFiles('pnpm-lock.yaml') }}"))));
+    assert('near-miss-a-comment-edit-is-S', isS(tierOf(edit('          # the gate', '          # the gate, reworded'))) && isS(tierOf(edit('jobs:', '# a note\njobs:'))));
+    assert('near-miss-a-new-job-with-a-fresh-name-and-its-own-if-is-S', isS(tierOf(`${BASE_WF}  extra:\n    name: Extra advisory\n    runs-on: ubuntu-latest\n    steps:\n      - name: report\n        if: always()\n        run: pnpm check:extra\n`)));
+
+    // Biased to H (each named in the report).
+    assert('biased-an-added-or-true-is-H', isH(tierOf(edit('          pnpm check:generated', '          pnpm check:generated || true')), /can skip a check/));
+    assert('biased-a-dropped-gate-invocation-is-H', isH(tierOf(edit('          node scripts/check-required-contexts.mjs\n', '')), /gate invocation dropped/));
+    assert('biased-a-changed-step-that-holds-a-secret-is-H', isH(tierOf(edit('--filter=@objectstack/spec', '--filter=@objectstack/core')), /already holds a secret or a write token/));
+    assert('biased-a-needs-that-lost-a-job-is-H', isH(tierOf(edit('    needs: [build]\n', '')), /`needs:` changed: `shards` \[build\] → \[\]/));
+    assert('biased-a-changed-trigger-set-is-H', isH(tierOf(edit('  merge_group:\n', '')), /trigger set changed/));
+    assert('biased-a-new-job-taking-a-name-already-in-use-is-H', isH(tierOf(`${BASE_WF}  again:\n    name: Build Core\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n`), /already in use/));
+
+    // Fail closed.
+    assert('closed-an-unparseable-head-is-H', isH(tierOf(edit('jobs:', 'jobs: &anchor')), /head copy does not parse/) && isH(tierOf(edit('    runs-on: ubuntu-latest\n    timeout', '\truns-on: x\n    timeout')), /does not parse/));
+    assert('closed-a-new-a-deleted-and-a-non-yaml-file-are-H', isH(tierOf(BASE_WF, { base: null }), /new workflow file/) && isH(tierOf(null), /deleted workflow file/) && isH(tierOf('x', { path: `${WORKFLOWS_PREFIX}notes.md` }), /not a `.yml`/));
+    assert('closed-no-inventory-is-H', isH(tierOf(edit('timeout-minutes: 20', 'timeout-minutes: 30'), { inventory: null }), /no inventory/));
+    const fakeGit = (tree) => (argv) => {
+      // ls-tree honours its pathspecs (argv after `--`), as git does: the inventory's directory list is under test.
+      if (argv[0] === 'ls-tree') return Object.keys(tree[argv[3]] ?? (() => { throw new Error(`unknown revision ${argv[3]}`); })()).filter((p) => argv.slice(5).some((d) => p.startsWith(d.endsWith('/') ? d : `${d}/`))).join('\n');
+      const [rev, path] = argv[1].split(':');
+      if (tree[rev]?.[path] === undefined) throw new Error(`fatal: path '${path}' does not exist in '${rev}'`);
+      return tree[rev][path];
+    };
+    const TREES = { b: { [WF]: BASE_WF }, h: { [WF]: edit('timeout-minutes: 20', 'timeout-minutes: 30') }, x: { [WF]: edit('        run: |', '        continue-on-error: true\n        run: |') } };
+    const readS = readWorkflowDiff({ paths: [WF, 'README.md'], base: 'b', head: 'h', git: fakeGit(TREES) });
+    const readH = readWorkflowDiff({ paths: [WF], base: 'b', head: 'x', git: fakeGit(TREES) });
+    assert('readWorkflowDiff-classifies-only-the-workflow-paths-it-read', readS.measured === true && readS.files.length === 1 && readS.files[0].tier === GOVERNED_TIER_S && readH.files[0].tier === GOVERNED_TIER_H, JSON.stringify(readS));
+    // The review nit N3: an action used only under `.github/actions/**` (no register row) vouches for nothing.
+    const ACTION = '.github/actions/setup/action.yml';
+    const ACTION_TEXT = "name: setup\nruns:\n  using: composite\n  steps:\n    - uses: someone/composite-only@v1\n";
+    const ADOPT = (u) => edit('      - uses: actions/checkout@v7\n', `      - uses: actions/checkout@v7\n      - uses: ${u}\n`);
+    const ADOPTING = { b: { [WF]: BASE_WF, [ACTION]: ACTION_TEXT }, n: { [WF]: ADOPT('someone/composite-only@v1'), [ACTION]: ACTION_TEXT }, c: { [WF]: ADOPT('actions/cache@v4'), [ACTION]: ACTION_TEXT } };
+    const adopted = readWorkflowDiff({ paths: [WF], base: 'b', head: 'n', git: fakeGit(ADOPTING) });
+    assert('⛔ N3-a-workflow-adopting-an-action-used-only-under-github-actions-on-the-base-is-H', adopted.measured === true && isH(adopted.files[0], /not used anywhere on the base tree: `someone\/composite-only`/), JSON.stringify(adopted.files));
+    const reused = readWorkflowDiff({ paths: [WF], base: 'b', head: 'c', git: fakeGit(ADOPTING) });
+    assert('N3-control-an-action-a-base-workflow-already-uses-is-S', reused.measured === true && isS(reused.files[0]), JSON.stringify(reused.files));
+    const noBase = readWorkflowDiff({ paths: [WF], base: null, head: 'h', git: fakeGit(TREES) });
+    const badRev = readWorkflowDiff({ paths: [WF], base: 'gone', head: 'h', git: fakeGit(TREES) });
+    assert('closed-a-missing-base-or-a-git-failure-is-UNMEASURED', noBase.measured === false && /no base commit/.test(noBase.reason) && badRev.measured === false && /unknown revision gone/.test(badRev.reason), JSON.stringify([noBase.reason, badRev.reason]));
+    assert('closed-an-unmeasured-reading-or-none-is-H-and-a-path-it-did-not-read-is-H', [noBase, null, undefined].every((r) => governedTierFor([WF], REPO, GOVERNED_SURFACES, r) === GOVERNED_TIER_H) && workflowSplitVerdict([WF, `${WORKFLOWS_PREFIX}lint.yml`], readS).tier === GOVERNED_TIER_H && workflowSplitVerdict([], readS).tier === GOVERNED_TIER_H);
+    assert('mergeWorkflowReadings-H-wins-a-path-read-twice-and-unmeasured-wins-the-set', mergeWorkflowReadings([readS, readH]).files[0].tier === GOVERNED_TIER_H && mergeWorkflowReadings([readS, noBase]).measured === false && mergeWorkflowReadings([readS]).files[0].tier === GOVERNED_TIER_S && mergeWorkflowReadings([]) === null);
+
+    // The verdict: the split reaches testVerdict and governedTierFor, ALL-not-ANY still holds, and the scope holds.
+    assert('a-Tier-S-reading-makes-a-workflow-only-PR-Tier-S-still-GOVERNED-exit-3', (({ governed, tier, humanMerge }) => governed && tier === GOVERNED_TIER_S && humanMerge)(testVerdict([WF], { repo: REPO, workflowDiff: readS })) && governedTierFor([WF], REPO, GOVERNED_SURFACES, readS) === GOVERNED_TIER_S);
+    assert('beside-a-claude-path-it-stays-S-beside-AGENTS-md-it-is-H', testVerdict([WF, '.claude/agents/os-dev.md'], { repo: REPO, workflowDiff: readS }).tier === GOVERNED_TIER_S && testVerdict([WF, 'AGENTS.md'], { repo: REPO, workflowDiff: readS }).tier === GOVERNED_TIER_H);
+    assert('the-same-reading-moves-nothing-in-objectui-or-cloud-whose-guards-have-no-split-arm', ['objectui', 'cloud'].every((r) => testVerdict([WF], { repo: r, workflowDiff: readS }).tier === GOVERNED_TIER_H));
+    assert('no-reading-is-byte-identical-to-before-for-a-path-only-caller', testVerdict([WF], { repo: REPO }).tier === GOVERNED_TIER_H && (() => { const m = governedPathsIn(['AGENTS.md', '.claude/x.md'], REPO); return applyWorkflowSplit(m, REPO, readS).every((s, i) => s === m[i]); })());
+    const textS = renderTestVerdict(testVerdict([WF], { repo: REPO, workflowDiff: readS }));
+    const textH = renderTestVerdict(testVerdict([WF], { repo: REPO, workflowDiff: readH }));
+    const textN = renderTestVerdict(testVerdict([WF], { repo: REPO }));
+    assert('the-words-name-the-split-in-all-three-readings', /Tier S\(席内达档复核落地\)/.test(textS) && /Tier S by content/.test(textS) && /Tier H by content/.test(textH) && /new `continue-on-error`/.test(textH) && /content NOT MEASURED/.test(textN) && /landing tier: H/.test(textN), `${textS}\n${textH}\n${textN}`);
+    assert('a-verdict-with-no-workflow-hit-prints-no-split-line', !/split \(ruling record/.test(renderTestVerdict(testVerdict(['AGENTS.md'], { repo: REPO }))) && renderWorkflowSplitLines([]) === '');
+    const pr = (over = {}) => pullWorkflowDiff({ derivation: { pull: 7, headSha: 'a'.repeat(40), baseSha: 'b'.repeat(40) }, paths: [WF], sameCheckout: true, run: () => ({ ok: false, out: '' }), git: () => '', ...over });
+    assert('--pr-reads-the-split-only-from-a-checkout-holding-both-commits-else-UNMEASURED', pr().measured === false && /not in this checkout/.test(pr().reason) && pr({ sameCheckout: false }).measured === false && pr({ derivation: { pull: 7 } }).measured === false, JSON.stringify([pr().reason, pr({ sameCheckout: false }).reason]));
+  }
+
   battery('the nested `ui/` workspace rows, on the register (#25712)');
   const UI_ROWS = GOVERNED_SURFACES.filter((s) => s.id.startsWith('ui-'));
   const ROOT_ROWS = Object.freeze(GOVERNED_SURFACES.filter((s) => !s.id.startsWith('ui-')));

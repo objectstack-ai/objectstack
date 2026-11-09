@@ -73,8 +73,8 @@ async function stage() {
     );
 
   const signUp = async (email: string, name: string) => {
-    await inviteForAudienceGate(engine, email);
-    const res = await direct('POST', '/sign-up/email', { email, password: PASSWORD, name });
+    const invitationId = await inviteForAudienceGate(engine, email);
+    const res = await direct('POST', '/sign-up/email', { email, password: PASSWORD, name, invitationId });
     expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
     const user = (engine.tables.get('sys_user') ?? []).find((u: any) => u.email === email);
     expect(user, `sign-up did not create ${email}`).toBeDefined();

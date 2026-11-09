@@ -42,7 +42,11 @@
  *    circuits on `hasPendingInvitation` BEFORE the posture switch, so a
  *    self-serve creation holding a pending, unexpired `sys_invitation`
  *    (`audience-posture.ts`, "The invitation carve-out") is admitted under
- *    every posture in `AUDIENCE_POSTURES`. No door needs widening. ⚠️ But the
+ *    every posture in `AUDIENCE_POSTURES`. No door needs widening. Under
+ *    `invite_only` a sign-up holds it only by presenting it — the row's `id`
+ *    as the body's `invitationId` (`presented-invitation.ts`) — so the
+ *    message has the operator give the row an id of their own and send it
+ *    with the sign-up. ⚠️ But the
  *    carve-out is an ADMISSION verdict and NOT a verification bypass, so the
  *    INVITED login meets the same email-verification rule as any sign-up
  *    (`resolveEmailVerificationRequirement`, the one resolver the wiring and
@@ -535,11 +539,14 @@ export function resolveNoSignInAccountReport(
     'exists who could send an invitation. Boot continues and this deployment will keep LOOKING healthy — ' +
     'its only symptom is a 401 on credentials nobody holds. RECOVER IT FROM OUTSIDE THE RUNNING ' +
     'PRODUCT, and the path that works is ONE ROW: INVITE ONE ADDRESS — write a pending ' +
-    `'${SystemObjectName.INVITATION}' row directly against the store ('email' a LOWERCASE address ` +
+    `'${SystemObjectName.INVITATION}' row directly against the store ('id' a long random value of ` +
+    "your own, which the sign-up presents; 'email' a LOWERCASE address " +
     `this directory does NOT already hold, 'status' 'pending', a future 'expires_at', 'inviter_id' ` +
     `the id of any existing '${SystemObjectName.USER}' row — the pending-invitation lookup ` +
     'lowercases the address it searches for, so a mixed-case row is never found), then have that ' +
-    'person register through the ordinary sign-up endpoint. The invitation carve-out admits that ' +
+    "person register through the ordinary sign-up endpoint, sending that row's 'id' as " +
+    "'invitationId' beside the email: under 'invite_only' a sign-up is admitted only by the " +
+    'invitation it presents. The invitation carve-out admits that ' +
     'ONE creation under EVERY audience posture, so no door needs widening — but it is an ADMISSION ' +
     'verdict, not a verification bypass: the INVITED login meets the same email-verification rule as ' +
     "any sign-up. Under 'email_domain' verification is always ON; under 'open' it is ON unless the " +

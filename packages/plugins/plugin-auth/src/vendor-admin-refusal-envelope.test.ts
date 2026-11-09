@@ -241,8 +241,8 @@ describe('#10349 — through AuthManager.handleRequest on the real vendor pipeli
     ]) {
       // [#11739] default posture invite_only: users beyond the first enter
       // through the invitation carve-out (see audience-gate-test-support).
-      await inviteForAudienceGate(engine, email);
-      await post(manager, '/sign-up/email', { email, password: PASSWORD, name });
+      const invitationId = await inviteForAudienceGate(engine, email);
+      await post(manager, '/sign-up/email', { email, password: PASSWORD, name, invitationId });
     }
     const rows = (engine.tables.get('sys_user') ?? []) as any[];
     const idFor = (email: string) => String(rows.find((r) => r.email === email)!.id);

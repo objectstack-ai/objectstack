@@ -93,6 +93,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemReadContext } from './objectql-adapter.js';
+import { isPresentedInvitationPending } from './presented-invitation.js';
 import { type ExternalDirectoryDoorDeps } from './external-directory-door.js';
 import { roleChangeGrantDepsFor, type RoleChangeGrantDeps } from './role-change-granted-set.js';
 import { isExternalMembershipRole } from './external-membership.js';
@@ -254,6 +255,7 @@ import { resolvePasswordHasher } from './auth-manager-password-hasher.js';
 // two arrows that moved with it.
 import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-instance.js';
 import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type SsoCallbackRequest } from './sso-oidc-refusal-cause.js';
+import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -262,6 +264,7 @@ import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list
 import { resolveTurnstileKeys } from './turnstile-sign-up.js';
 import { assertTrustedAppSchemes, registeredAppSchemesOf } from './one-time-token-handoff.js';
 import type { MintScimConnectionCredentialInput, MintedScimConnectionCredential } from './scim-connection-service.js';
+import type { OrganizationBoundaryJudge } from './scim-group-projection.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -791,6 +794,17 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * authority it is deliberately denied elsewhere.
    */
   invitationPlacement?: () => Promise<InvitationPlacementServiceLike | undefined>;
+
+  /**
+   * [ADR-0090 D12] Lazy accessor for the `security` service's
+   * `organizationBoundaryFailure` member (plugin-security). Wired by
+   * `AuthPlugin`; lazy because plugin-security starts after plugin-auth. The
+   * identity-provider group mapping door judges a mapped set by it at save, and
+   * the SCIM group projection re-judges at grant time. Absent (an embedding
+   * without plugin-security) ⇒ no set can be shown inside the boundary: a
+   * mapping save is refused and nothing is granted.
+   */
+  organizationBoundary?: () => Promise<OrganizationBoundaryJudge | undefined>;
 
   onInvitationAccepted?: (data: {
     invitationId?: string;
@@ -1991,6 +2005,7 @@ export class AuthManager {
       isPlatformAdminUserId: (...a) => this.isPlatformAdminUserId(...a),
       isSsoWired: (...a) => this.isSsoWired(...a),
       linkingContext: (...a) => this.linkingContext(...a),
+      logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
       recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
       resolveActor: (...a) => this.resolveActor(...a),
       resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
@@ -2724,23 +2739,27 @@ export class AuthManager {
    * `data.user` here is `internalAdapter.createUser`'s own input, not the raw
    * request body, so it never carries an undeclared key. That is a plain read
    * of an already-parsed value, not a re-derived I/O probe, so it does not
-   * reopen what #11767 closed.
+   * reopen what #11767 closed. The invitation a sign-up presents is the second
+   * such read, for the same reason (`presented-invitation.ts`): the id is a
+   * `ctx.body` field, and the row it names is read on the same ctx-independent
+   * data path as the other probes ({@link hasPresentedPendingInvitation}).
    */
   private validateAudienceAdmission(
     data: {
       user?: Record<string, unknown>;
-      source?: { action?: string; method?: string; oauth?: { providerId?: string } };
+      source?: { action?: string; method?: string; oauth?: { providerId?: string }; sso?: { providerId?: string } };
     },
     ctx?: unknown,
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
     // [#25224 cut 8] The body moved to `auth-manager-membership-admission.ts` (see `MembershipAdmissionHost`).
     const readConfig = () => this.config;
-    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
+    const host: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'> = {
       audienceLogError: (...a) => this.audienceLogError(...a),
       get config() { return readConfig(); },
       enterpriseOAuthProviderIds: (...a) => this.enterpriseOAuthProviderIds(...a),
       getAudience: (...a) => this.getAudience(...a),
       hasPendingInvitationFor: (...a) => this.hasPendingInvitationFor(...a),
+      hasPresentedPendingInvitation: (...a) => this.hasPresentedPendingInvitation(...a),
       isBootstrapCreation: (...a) => this.isBootstrapCreation(...a),
       isOperatorProvisioning: (...a) => this.isOperatorProvisioning(...a),
       selfRegistrationSetResolvable: (...a) => this.selfRegistrationSetResolvable(...a),
@@ -2895,6 +2914,16 @@ export class AuthManager {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * The invitation a sign-up PRESENTS admits it: the `sys_invitation` row the
+   * presented id names is pending, unexpired and addressed to `email`. The
+   * rule, and why every other answer is `false` (fail closed, like
+   * {@link hasPendingInvitationFor}), live in `presented-invitation.ts`.
+   */
+  private hasPresentedPendingInvitation(invitationId: string | undefined, email: string): Promise<boolean> {
+    return isPresentedInvitationPending(this.config.dataEngine, invitationId, email);
   }
 
   /**
@@ -3983,6 +4012,20 @@ export class AuthManager {
    * URL, read from the relay state before better-auth consumes it.
    */
   private runSsoCallback(callback: SsoCallbackRequest, run: () => Promise<Response>): Promise<Response> {
+    // A SAML ACS request runs with its provider's IdP-initiated toggle in
+    // scope: the vendor's one plugin-wide option answers it per provider
+    // (`sso-sign-in-options.ts`, ruling record 6718355623).
+    const scoped =
+      callback.protocol === 'saml'
+        ? async (): Promise<Response> => {
+            const engine = this.config.dataEngine;
+            const options = await readSsoProviderSignInOptions(
+              engine ? (withSystemReadContext(engine) as never) : undefined,
+              callback.providerId,
+            );
+            return runWithSamlIdpInitiated(options.allowIdpInitiated, run);
+          }
+        : run;
     return runSsoCallbackScope(
       callback,
       this.config.logger,
@@ -3991,7 +4034,7 @@ export class AuthManager {
         const context = (await auth.$context) as SamlLandingContext;
         return readSamlAcsLanding(context, saml.providerId, saml.request);
       },
-      run,
+      scoped,
     );
   }
 
@@ -4639,6 +4682,10 @@ export class AuthManager {
    * the Console's withdraw (`authorized-clients-withdraw.ts`) revokes the same
    * grant the same way. A server-only
    * `skip_consent` client has no consent row and is admitted without one.
+   * The same read refuses a token whose client is disabled, or whose client
+   * row is gone (objectstack-ai/cloud#3820, card 2): disabling a client
+   * refuses its outstanding tokens on their next call, as the provider
+   * already refuses it new ones, and enabling it again serves them again.
    *
    * The caller (runtime dispatcher) maps the returned principal through
    * `resolveAuthzContext` — the single shared authorization resolver — so
@@ -5519,8 +5566,12 @@ export class AuthManager {
    * `admin-revoke-user-session-match-guard.ts`.
    */
   private assertAdminRevokeUserSessionIdentifiesRecord(ctx: any): Promise<void> {
-    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts`; it reads no member of this class.
-    return assertAdminRevokeUserSessionIdentifiesRecord(ctx);
+    // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
+    // It asks `resolveActor` for a caller signed in by bearer alone.
+    const host: Pick<ActorGuardHost, 'resolveActor'> = {
+      resolveActor: (...a) => this.resolveActor(...a),
+    };
+    return assertAdminRevokeUserSessionIdentifiesRecord.call(host, ctx);
   }
 
   /**
@@ -6716,6 +6767,27 @@ export class AuthManager {
   ): Promise<MintedScimConnectionCredential> {
     const { mintScimConnectionCredential } = await import('./scim-connection-service.js');
     return mintScimConnectionCredential(engine as never, this.resolveAuthSecret(), input);
+  }
+
+  /** The `security` service's organization-boundary predicate ({@link AuthManagerOptions.organizationBoundary}), or `undefined`. */
+  public async organizationBoundaryJudge(): Promise<OrganizationBoundaryJudge | undefined> {
+    return (await this.config.organizationBoundary?.().catch(() => undefined)) ?? undefined;
+  }
+
+  /**
+   * Re-run the SCIM group projection for every user of one provisioning
+   * domain (the vendor's server-only `reconcileSCIMProjection`), so a saved or
+   * deleted `sys_idp_group_mapping` row reaches the members a group already
+   * has. The only caller is the platform-admin group-mapping door
+   * (`idp-group-mapping-admin.ts`).
+   */
+  public async reconcileScimProjectionDomain(provisioningDomainId: string): Promise<{ reconciledUsers: number }> {
+    const auth = await this.getOrCreateAuth();
+    const reconcile = (auth as { api?: { reconcileSCIMProjection?: (input: unknown) => Promise<unknown> } }).api
+      ?.reconcileSCIMProjection;
+    if (typeof reconcile !== 'function') throw new Error('[auth] SCIM projection reconcile is not mounted (SCIM is off)');
+    const result = (await reconcile({ body: { provisioningDomainId } })) as { reconciledUsers?: unknown };
+    return { reconciledUsers: Number(result?.reconciledUsers ?? 0) };
   }
 
   /**

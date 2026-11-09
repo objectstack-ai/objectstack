@@ -17,6 +17,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/cloud-connection/src/connection-credential-ledger.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/cloud-connection/src/connection-credential-ledger.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/cloud-connection/src/marketplace-install-local-install-modes.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2039,6 +2049,11 @@
     {
       "file": "packages/metadata-protocol/src/protocol.seed-external-id-refusal.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.seed-list-row-name.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -5273,6 +5288,11 @@
     },
     {
       "file": "packages/services/service-automation/src/builtin/notify-email-field-recipient.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-email-field.shared-redis.integration.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

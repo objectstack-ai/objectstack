@@ -599,6 +599,7 @@ export const ERROR_CODE_LEDGER = {
     'ASYNC_NOT_SUPPORTED',
     'AUTH_CONFIG_ERROR',
     'CREATE_FAILED',
+    'CREDENTIALS_NAME_DIFFERENT_ACCOUNTS', // 401, before every gate and the endpoint: the request's session cookie and its bearer token name two different signed-in accounts, so it is refused and nothing runs for either; an auth request is judged and executed as one account (one credential, one account, or a credential naming no live account is unaffected)
     'DOMAIN_VERIFICATION_DISABLED', // domain verification is off on this deployment
     'DOMAIN_VERIFICATION_FAILED', // pass-through from better-auth
     'EMAIL_DOMAIN_NOT_ALLOWED',   // [#11739] audience posture email_domain: the address's domain is off the allowlist
@@ -1359,6 +1360,18 @@ export const ERROR_CODE_LEDGER = {
     'MARKETPLACE_PROXY_FAILED',
     'MARKETPLACE_STORAGE_FAILED',    // install-record read/write failed
     'MARKETPLACE_UNAVAILABLE',
+    // [cloud#3814 R6] install-local refused `POST` (install) and `DELETE …/:manifestId`
+    // (uninstall), 409, on the plugin's OWN Hono routes, right after admission
+    // and before the body or the ledger is read, because the deployment
+    // declares several replicas on the Redis cluster driver
+    // (`declaresMultiReplicaOnRedis`, `@objectstack/service-cluster`): these
+    // doors change only the serving replica's own ledger and kernel, so the
+    // other replicas would never see the change. The message names the
+    // maintenance-window recipe; nothing is written. The string is spelled
+    // once in `@objectstack/service-cluster` (a shared constant one package
+    // over; see PROVENANCE_WAIVERS), so every package-change door refusing
+    // under the same condition answers the same code.
+    'MULTI_REPLICA_PACKAGE_CHANGE_REFUSED',
     'NOTHING_TO_PURGE',              // package declares no seed datasets
     // [#28410, ADR-0146 D2] install-local refused a managed install whose items
     // the override write gate refuses (step 2d, `marketplace-install-local-plugin.ts`),
@@ -2166,6 +2179,16 @@ export type ProvenanceWaiver = z.input<typeof ProvenanceWaiverSchema>;
 export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
   {
     package: '@objectstack/metadata-core',
+    code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',
+    registeredUnder: '@objectstack/cloud-connection',
+    reason: 'Shared verdict one package over (#31526): metadata-core\'s `package-upgrade-verdict.ts` ' +
+      'defines the constant beside `schemaUpgradeVerdict` so every install door applies one rule and ' +
+      'mints one token, but metadata-core has no HTTP door. The refusal ships on the wire from ' +
+      'install-local\'s own Hono route (`marketplace-install-local-plugin.ts`), the cloud-connection ' +
+      'row\'s emitter, which imports the constant; a host\'s install door forwards the same verdict.',
+  },
+  {
+    package: '@objectstack/metadata-core',
     code: 'UPDATE_ID_MISMATCH',
     registeredUnder: '@objectstack/objectql',
     reason: 'Shared constructor one package over: metadata-core\'s ' +
@@ -2241,6 +2264,17 @@ export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
       'BOTH doors recognise one shape and answer it 400 with its `fields[]`, never 500; the ' +
       'throws are served under the emitting doors\' own registrations (runtime\'s ' +
       'dispatcher exits, rest\'s `mapDataError` — both packages list the code).',
+  },
+  {
+    package: '@objectstack/service-cluster',
+    code: 'MULTI_REPLICA_PACKAGE_CHANGE_REFUSED',
+    registeredUnder: '@objectstack/cloud-connection',
+    reason: 'Shared constant one package over: `MULTI_REPLICA_PACKAGE_CHANGE_REFUSED` ' +
+      '(multi-replica.ts) spells the string beside `declaresMultiReplicaOnRedis`, the one ' +
+      'condition every multi-replica refusal keys on, so the doors refusing a package change ' +
+      'under it answer one code; the stamps are the marketplace install-local install and ' +
+      'uninstall 409s (`marketplace-install-local-plugin.ts`), on the plugin\'s own Hono ' +
+      'routes — the cloud-connection row records that door. Service-cluster ships no door.',
   },
   {
     package: '@objectstack/types',

@@ -266,7 +266,7 @@ const DOORS: readonly Door[] = [
     where: () => ({ [JSON_COL]: { $empty: false } }),
     secrets: [JSON_COL],
     klass: 'whose empty list is tested with a JSON function that differs per SQL dialect',
-    // A knex client this driver does not model (mssql, oracle) reads as the
+    // A knex client this driver does not model (oracledb, for one) reads as the
     // `'unknown'` dialect, where the multi-value row has no construct.
     setup: (driver) => {
       Object.defineProperty(driver, 'dialectName', { get: () => 'unknown', configurable: true });
@@ -291,6 +291,33 @@ const DOORS: readonly Door[] = [
     klass: 'with an empty-string comparand on an Oracle table',
     setup: (driver) => {
       Object.defineProperty(driver, 'isOracle', { get: () => true, configurable: true });
+    },
+  },
+  // ── #31390: a RAW(16) uuid column's comparand must be uuid text ──────────
+  {
+    builder: 'assertOracleUuidComparand',
+    where: () => ({ [POLICY_COL]: SECRET }),
+    secrets: [POLICY_COL],
+    klass: 'compares a uuid column with a value that is not a uuid',
+    // The fixture is SQLite; the refusal reads the dialect and the catalog's
+    // RAW(16) reading for the object, both set here.
+    setup: (driver) => {
+      Object.defineProperty(driver, 'isOracle', { get: () => true, configurable: true });
+      (driver as unknown as { oracleRawUuidFieldsByObject: Map<string, ReadonlySet<string>> })
+        .oracleRawUuidFieldsByObject.set('deal', new Set([POLICY_COL]));
+    },
+  },
+  // ── #31327: JSON-array membership on SQL Server, refused rather than guessed ──
+  {
+    builder: 'jsonMembershipUnsupportedDialectError',
+    where: () => ({ [JSON_COL]: { $contains: SECRET } }),
+    secrets: [JSON_COL],
+    klass: 'targets a multi-value (JSON-array) field',
+    // The federation-only `mssql` dialect has no element-membership construct
+    // here; a substring LIKE over the serialized list would answer a
+    // different question, so the seam refuses it.
+    setup: (driver) => {
+      Object.defineProperty(driver, 'dialectName', { get: () => 'mssql', configurable: true });
     },
   },
 ];

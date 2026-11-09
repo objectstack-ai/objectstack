@@ -946,7 +946,7 @@
       "title": "Package lifecycle: disable stops serving, enable restores, uninstall de-registers, commits grow per publish and revert restores the prior published shape",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -965,7 +965,7 @@
         "disable: PATCH /api/v1/packages/:id/disable → capture; then GET /api/v1/data/<probe_object> and the probe routes → now 404/403 (stopped serving); /meta/app no longer lists its nav",
         "enable: PATCH /api/v1/packages/:id/enable → capture; the object/nav/routes serve again (restore)",
         "commits grow per publish: GET /api/v1/packages/:id/commits before and after a second publish — the list grows by exactly one entry; capture both listings",
-        "revert restores the prior published shape: change the probe (e.g. add a field) and publish, then POST /api/v1/packages/:id/commits/:commitId/revert (or POST /api/v1/packages/:id/revert) → GET the /published shape and confirm it is back to the prior commit",
+        "revert restores the prior published shape: change the probe (e.g. add a field) and publish, then POST /api/v1/packages/:id/commits/:commitId/revert (or POST /api/v1/packages/:id/revert) → GET /api/v1/meta/TYPE/NAME of the changed item and confirm it is back to the prior commit (there is no package-level published read: GET /api/v1/packages/ID/published answers 404 ENDPOINT_NOT_FOUND)",
         "uninstall: DELETE /api/v1/packages/:id → capture; GET /api/v1/meta no longer lists the probe object/kinds and GET /api/v1/packages no longer lists the package",
         "both-sides deny: attempt PATCH /disable and DELETE against a READ-ONLY code package (a platform package or the showcase's own) → refused server-side (ADR-0070); capture the refusal"
       ],
@@ -995,15 +995,15 @@
           "evidence": "the two commit listings"
         },
         {
-          "clause": "revert RESTORES the prior published shape: POST /packages/:id/commits/:commitId/revert (or /revert) returns the published metadata to the prior commit, and a subsequent /published read matches the pre-change shape",
+          "clause": "revert RESTORES the prior published shape: POST /packages/:id/commits/:commitId/revert (or /revert) returns the published metadata to the prior commit, and a subsequent GET /api/v1/meta/TYPE/NAME read matches the pre-change shape",
           "oracle": "api",
-          "verify": "the pre-change /published read equals the post-revert /published read",
-          "evidence": "the pre/post published reads"
+          "verify": "the pre-change GET /api/v1/meta/TYPE/NAME read equals the post-revert one",
+          "evidence": "the pre/post meta reads"
         },
         {
-          "clause": "the disabled package's surface is gone from the console — its nav entry is absent and a stale deep-link to its object shows a named not-found inside the shell, never a dead white page",
+          "clause": "the disabled package's surface is gone from the console — its nav entry is absent and a stale deep-link to its object shows a named not-found state, not a white page (the app-level one is a full-screen named state, 'This app can't be opened')",
           "oracle": "screenshot",
-          "verify": "screenshot the console after disable (nav absent), then open BOTH stale deep-link shapes captured before the disable — the probe object's list, /_console/apps/APP/OBJECT, and one of its records, /_console/apps/APP/OBJECT/record/ID, APP being the probe app — and screenshot each: each shows a named not-found inside the shell",
+          "verify": "screenshot the console after disable (nav absent), then open BOTH stale deep-link shapes captured before the disable — the probe object's list, /_console/apps/APP/OBJECT, and one of its records, /_console/apps/APP/OBJECT/record/ID, APP being the probe app — and screenshot each: each shows a named not-found state, not a white page",
           "evidence": "the nav screenshot + one screenshot per deep-link shape"
         },
         {
@@ -1044,6 +1044,12 @@
           "date": "2026-10-31",
           "change": "steps[0] names the spellings the probe drafts need and acceptance[5].verify names both deep-link shapes. Checklist-accuracy finding of QA run #27441 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): steps[0]'s \"nav entry\" did not say it is an app item, nor that the probe object needs the package namespace prefix (validateObjectNamespacePrefix) or which values sharingModel takes (OWDModel); acceptance[5] named one stale deep-link where the console routes two, the object list and the record (ui/packages/app-shell/src/console/AppContent.tsx). The clauses are unchanged. Re-read at 3fd80337",
           "ref": "#27441"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-08",
+          "change": "steps[5] and acceptance[4] compare GET /api/v1/meta/TYPE/NAME before and after the revert: GET /api/v1/packages/ID/published answers 404 ENDPOINT_NOT_FOUND. acceptance[5] asks for a named not-found state, not a white page: the app-level not-found is a full-screen named state ('This app can't be opened'). Checklist-accuracy findings of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },
@@ -2562,10 +2568,10 @@
     },
     {
       "id": "platform-core.url-overlay-contract",
-      "title": "Reserved URL params (ADR-0054 C3): recordId drawer and form overlay push so Back closes them, tab/palette/shortcuts replace so Back never pages through chrome, formObject/formLink pre-link a child create, ?tab cold-loads, the from trail keeps a clickable path back, and a recordId+recordObject mismatch fails closed",
+      "title": "Reserved URL params (ADR-0054 C3): recordId drawer and form overlay push so Back closes them, record tabs push one entry on leaving Overview and replace after it, palette/shortcuts replace so Back never pages through chrome, formObject/formLink pre-link a child create, ?related cold-loads a record tab, the from trail keeps a clickable path back, and a recordId+recordObject mismatch fails closed",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -2582,7 +2588,7 @@
         "record drawer: on an object list, open a record that renders in the drawer — the URL gains ?recordId=<id> as a PUSHED entry; press browser Back — the drawer closes and the list is still there (one history entry consumed, no page change)",
         "form overlay create: trigger a create that uses the global overlay — ?form=new pushes; fill nothing; Back closes the overlay; re-open and confirm ?form=<recordId> (edit) behaves the same",
         "child pre-link: from a parent record, create a subtable child via the overlay — capture ?form=new&formObject=<childObject>&formLink=<fkField>:<parentId>; the FK field arrives pre-linked to the parent; RELOAD the URL cold — the pre-link survives (refresh-safe by construction: the state is the URL)",
-        "tab cold-load: copy a record URL, append ?tab=related (or a related:<child> value), open in a fresh tab — the detail lands on that tab; now switch tabs in-page several times and press Back ONCE — you leave the record (or close the prior overlay), you do NOT step back through tab selections (tab REPLACEs)",
+        "tab cold-load: copy a showcase account record URL, append ?related=showcase_contact.account, open in a fresh tab (a cold load lands on that tab); switch tabs several times and press Back once: you return to the record's Overview in one step, never back through tab selections",
         "palette/shortcuts chrome: open ?palette=1 and ?shortcuts=1 overlays, close them, and confirm Back never replays them (replace semantics — useUrlOverlay defaults to replace)",
         "drill trail: from a record, drill into a related record by FOLLOWING the link's href (open it as a page): a plain click on a lookup or related-record link opens the record in the peek drawer and adds no from=, while the href carries the from= trail (recordPath in ui/packages/app-shell/src/views/RelatedRecordActionsBridge.tsx; the drawer's open-as-full-page builds the same trail, expandedRecordPath in recordDrawerStack.tsx). The drilled page's URL carries from=…; the drilled record shows an inline '← PARENT' back link above its body (the top bar draws no record crumb since objectui#12461 — objectui packages/app-shell/src/views/RecordDetailView.tsx), and clicking it navigates to the parent, whose own back link carries the rest of the trail",
         "cross-object refusal (#4292): take a real record id of object A; navigate to /forms/<formName>?recordId=<idOfA>&recordObject=<objectB> — the route renders an ERROR state; capture the network: NO /data/ read was issued for the mismatched pair (the refusal precedes the read, so nothing is read and nothing can be written); control: the same URL with the AGREEING recordObject loads and prefills normally",
@@ -2596,13 +2602,13 @@
           "evidence": "the before/Back screenshot pairs with URLs"
         },
         {
-          "clause": "passive/chrome state REPLACEs: tab switches, the palette and the shortcuts dialog never stack history — one Back after N tab switches leaves the page rather than stepping through selections",
+          "clause": "record tabs and chrome never stack history: tab switches add at most one entry (the first leave of Overview); palette and shortcuts add none — one Back after N tab switches returns to the record's Overview rather than stepping through selections",
           "oracle": "screenshot",
-          "verify": "N in-page tab switches + palette/shortcuts open-close, then a single Back — the resulting location proves no chrome entry was on the stack",
+          "verify": "N in-page tab switches + palette/shortcuts open-close, then a single Back — the resulting location (the record's Overview) proves at most the one tab entry and no chrome entry was on the stack",
           "evidence": "the switch sequence + the post-Back location"
         },
         {
-          "clause": "?tab cold-loads: a fresh navigation to <record>?tab=<value> lands directly on that tab (URL-addressable state, not just an in-page echo)",
+          "clause": "?related=OBJECT.FIELD cold-loads the tab: a fresh navigation to <record>?related=<object>.<field> lands directly on that related tab (URL-addressable state, not just an in-page echo)",
           "oracle": "screenshot",
           "verify": "fresh-tab open of the copied URL shows the named tab active",
           "evidence": "the cold-load screenshot"
@@ -2627,7 +2633,7 @@
         }
       ],
       "negative": [
-        "Back paging through tab switches or re-opening the palette is a FAIL of the push-vs-replace rule — the registry's own table states which params push and which replace",
+        "Back paging through tab switches (any entry beyond the one the first leave of Overview pushes) or re-opening the palette is a FAIL of the push-vs-replace rule — the registry's own table states which params push and which replace",
         "a mismatched recordObject EDITING the same-id row of the wrong object is the silent-wrong-write #4292 closed — any /data read or write on the mismatch is a FAIL even if an error eventually renders",
         "a page-scoped param reusing a reserved name (a view that repurposes ?recordId or ?form) is a contract violation — capture and file, the registry exists to make this a review-time offence",
         "drawer/overlay state that survives only in memory (a cold reload of the captured URL losing the overlay or the pre-link) breaks URL-addressable state — FAIL"
@@ -2667,6 +2673,12 @@
           "date": "2026-10-31",
           "change": "steps[5] says how to drive the drill. Checklist-accuracy finding of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): a plain click on a lookup or related link opens the record peek drawer with no from=, and the trail lives on the link's href, so a runner who clicked saw no from= on the URL. acceptance[4] is unchanged. Re-read at 3fd80337",
           "ref": "#27438"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-08",
+          "change": "steps[3], acceptance[1] (clause, verify), acceptance[2].clause and negative[0] re-pointed from ?tab= to ?related=, plus the title (an accepted extension in the same item, so it does not contradict the clauses). Stale-spec finding of QA run #31486 (subject 0647dabb, rule R-2): the record page addresses its tabs with ?related=OBJECT.FIELD (RECORD_RELATED_ENLARGE_PARAM in ui/packages/app-shell/src/urlParams.ts; RecordDetailView.tsx openEnlargedRelated/closeEnlargedRelated). Leaving Overview pushes one history entry, moving between tabs replaces it, and Back, Esc or Overview return to the record in one step, so one Back after N switches lands on Overview, not off the page. ?tab= is not read on a columns record page; it still syncs a page that declares its own tabs (withPageTabsUrlSync), which this item does not drive. The capability holds; only the parameter and the one-entry push changed. Re-read at 4894cfe1",
+          "ref": "#31498"
         }
       ]
     },
@@ -3056,7 +3068,7 @@
       "title": "Seed mode matrix (insert/update/upsert/replace/ignore): each mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and `replace` inserts and deletes nothing, DECLARED and IMPLEMENTED alike (no caller clears the table): its posture is scored as bare insert, never ticked as scoped deletion",
       "since": "v15",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -3073,7 +3085,7 @@
         ]
       },
       "steps": [
-        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — a draft without one is accepted, but its publish is refused (publish-drafts answers outcome 'refused', failed[0] code INVALID_METADATA, rule security-owd-unset) and so is an active save (422 INVALID_METADATA, rule security-owd-unset)) into the writable package and publish, named with that package's namespace prefix: NS_SHORT, where NS is the package manifest's namespace, which a package created without one derives from its id's last segment (com.objectstack.qa.seedmodes gives seedmodes; packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId). An unprefixed draft is accepted, and its publish is refused 422 NAMESPACE_PREFIX with the spelling to use (packages/spec/src/kernel/namespace-prefix.ts#validateObjectNamespacePrefix, ADR-0129 D2); note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
+        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — a draft without one is accepted, but its publish is refused (publish-drafts answers outcome 'refused', failed[0] code INVALID_METADATA, rule security-owd-unset) and so is an active save (422 INVALID_METADATA, rule security-owd-unset)) into the writable package and publish, named with that package's namespace prefix: NS_SHORT, where NS is the package manifest's namespace, which a package created without one derives from its id's last segment (com.objectstack.qa.seedmodes gives seedmodes; packages/spec/src/kernel/namespace-prefix.ts#deriveNamespaceFromPackageId). An unprefixed draft is accepted, and its publish is refused 422 NAMESPACE_PREFIX with the spelling to use (packages/spec/src/kernel/namespace-prefix.ts#validateObjectNamespacePrefix, ADR-0129 D2); the refusal fails the whole publish-drafts batch (outcome 'refused', publishedCount 0), so every healthy draft beside it stays unpublished too; note `externalId` defaults to 'name' and `defaultMode` to 'ignore' (SeedLoaderRequestSchema)",
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
@@ -3084,7 +3096,7 @@
       ],
       "acceptance": [
         {
-          "clause": "upsert (the default) matches on externalId and does exactly create-or-update: unmatched rows insert, matched-and-different rows update IN PLACE (id stable), matched-and-identical rows SKIP as no-op replays — comparison covering only seed-declared fields so runtime edits to other columns never block the skip",
+          "clause": "upsert (declared explicitly: ignore is the default since PR #30152) matches on externalId and does exactly create-or-update: unmatched rows insert, matched-and-different rows update IN PLACE (id stable), matched-and-identical rows SKIP as no-op replays — comparison covering only seed-declared fields so runtime edits to other columns never block the skip",
           "oracle": "api",
           "verify": "the id/value table across the two upsert publishes from step 1; ids stable, values as authored, A untouched on the replay",
           "evidence": "the before/after row reads keyed by id"
@@ -3114,7 +3126,7 @@
           "evidence": "F's surviving read + G's read + the source excerpt"
         },
         {
-          "clause": "the mode vocabulary is the spec's own five and the resolution seam is one line: dataset.mode || config.defaultMode ('upsert'), through the single SeedLoaderService every path shares (boot, publish, dispatcher) — the enumSource pin fails this item when a sixth mode lands",
+          "clause": "the mode vocabulary is the spec's own five and the resolution seam is one line: dataset.mode || config.defaultMode ('ignore'), through the single SeedLoaderService every path shares (boot, publish, dispatcher) — the enumSource pin fails this item when a sixth mode lands",
           "oracle": "build",
           "verify": "SeedMode members at seed.zod.ts; the resolution at metadata-protocol/src/seed-loader.ts; the runtime re-export shim proving one implementation",
           "evidence": "the three source excerpts"
@@ -3127,7 +3139,7 @@
       "variants": [
         "mode insert — no matching, always writes (duplicates on replay unless the object's own unique constraint refuses)",
         "mode update — matched rows only; unmatched skipped, never created",
-        "mode upsert — create-or-update on externalId with no-op-replay skip (the default)",
+        "mode upsert — create-or-update on externalId with no-op-replay skip",
         "mode replace — bare insert, no matching, nothing deleted: DECLARED and IMPLEMENTED alike (the expected-posture clause)",
         "mode ignore — insert-if-absent; existing rows never rewritten"
       ],
@@ -3140,7 +3152,7 @@
       "source": [
         "packages/spec/src/data/seed.zod.ts#SeedMode (SeedMode — the five modes with their declared semantics, incl. replace's 'Insert every record, no match, deleting nothing: for a cache table the caller cleared'), (SeedSchema's mode description — replace 'does the same and deletes nothing: it is for a table the caller cleared')",
         "packages/metadata-protocol/src/seed-loader.ts#writeRecord (mode = dataset.mode || config.defaultMode), (existing-records preload for upsert/update/ignore ONLY — insert/replace never match), (writeRecord per-mode switch; the replace arm's bare insert + 'caller should have cleared the table' comment), (decideWriteAction — the batched mirror, replace → insert),+ (isNoOpReplay — seed-declared fields only, conservative on doubt)",
-        "packages/spec/src/data/seed-loader.zod.ts#defaultMode (defaultMode default 'upsert')",
+        "packages/spec/src/data/seed-loader.zod.ts#defaultMode (defaultMode is SeedSchema.shape.mode, default 'ignore')",
         "packages/metadata-protocol/src/protocol.ts#applySeedBodies+ (applySeedBodies — published seed bodies materialize through the same loader; failures returned, never thrown, surfaced as seedApplied)",
         "packages/runtime/src/seed-loader.ts#SeedLoaderService (the MOVED shim — one SeedLoaderService for every path)",
         "packages/spec/src/kernel/metadata-plugin.zod.ts#allowRuntimeCreate (seed: allowRuntimeCreate true — the scratch-draft fixture path)",
@@ -3188,6 +3200,12 @@
           "date": "2026-11-07",
           "change": "title, steps[5], acceptance[4].clause, variants[3] and source[0] re-worded: replace is now declared = implemented. #31099 (PR #31135) rewrote SeedMode's replace member and SeedSchema's mode description to what the loader does (insert every record, no match, deleting nothing), so the clause's 'declared ≠ implemented' posture went false and source[0] quoted the old delete-all-then-insert wording, which seed.zod.ts no longer holds. Read at base 658d84f5: seed.zod.ts SeedMode and SeedSchema mode describe text (no delete-all wording left), seed-loader.ts writeRecord's replace arm (bare insert, comment 'caller should have cleared the table') and decideWriteAction (replace routes to insert), and no other replace arm on the seed path (packages/cli/src/commands/diff.ts only words a plan line). The probe and its verdicts are unchanged: F survives, G is inserted, nothing is ticked as scoped deletion",
           "ref": "#31140"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-08",
+          "change": "steps[0], acceptance[0].clause and acceptance[5].clause re-pointed to the ignore default, plus variants[2] and source[2] (an accepted extension in the same item, so it does not contradict the clauses). Stale-spec finding of QA run #31486 (subject 0647dabb, rule R-1, acceptance[5]): PR #30152 made a seed create-only by default, an omitted mode is ignore. Read at 4894cfe1: packages/spec/src/data/seed.zod.ts SeedSchema mode is SeedMode.default('ignore'); seed-loader.zod.ts SeedLoaderConfigSchema defaultMode is SeedSchema.shape.mode; the seam in packages/metadata-protocol/src/seed-loader.ts writeRecord is unchanged (dataset.mode || config.defaultMode). steps[0] also carries the run's note that an unprefixed draft fails the whole publish-drafts batch (outcome 'refused', publishedCount 0; protocol.ts publishPackageDrafts pre-flight). Every probe step declares its mode, so no verdict moves",
+          "ref": "#31497"
         }
       ]
     },

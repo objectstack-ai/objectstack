@@ -435,6 +435,15 @@ const pt = {
       available: 'Disponíveis',
       all: 'Todas as moedas (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Convertido à taxa {{rate}} em {{date}}',
+      homeCurrency: 'Na moeda base (taxa 1)',
+      preview: '≈ {{amount}} à taxa {{rate}} em {{date}}',
+      previewSame: '≈ {{amount}} (moeda principal)',
+      awaitingRate: 'Não há taxa de {{currency}} em ou antes de {{date}}: não é possível salvar até que uma seja adicionada',
+      awaitingDate: 'Informe a data do documento para ver o valor na moeda principal',
+      rateUnreadable: 'Convertido para a moeda principal ao salvar',
+    },
     boolean: {
       offBadge: "{{label}} — Desativado",
       completed: "Concluído",
@@ -719,6 +728,7 @@ const pt = {
       noSavedTemplates: "Sem modelos salvos",
       noneOption: "— Nenhum —",
       saveCurrent: "Salvar atual",
+      saveCurrentNeedsMapping: "Mapeie pelo menos uma coluna para salvar um modelo.",
       templateName: "Nome do modelo",
       save: "Salvar",
       deleteTemplate: "Excluir modelo",
@@ -798,6 +808,7 @@ const pt = {
     eventTitlePlaceholder: "Sobre o que é este evento?",
     creating: "Criando…",
     titleRequired: "O título é obrigatório",
+    rescheduleNotFound: "Este registro de {{object}} não existe mais ou você não tem mais acesso a ele.",
     a11y: {
       region: "Calendário",
       grid: "Grade do calendário",

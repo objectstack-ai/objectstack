@@ -432,6 +432,15 @@ const ja = {
       available: '利用可能',
       all: 'すべての通貨（ISO 4217）',
     },
+    currencyHome: {
+      convertedAt: '{{date}} のレート {{rate}} で換算',
+      homeCurrency: '基準通貨（レート 1）',
+      preview: '≈ {{amount}}（レート {{rate}}、{{date}}）',
+      previewSame: '≈ {{amount}}（基軸通貨）',
+      awaitingRate: '{{date}} 以前の {{currency}} のレートがありません。レートを追加するまで保存できません',
+      awaitingDate: '伝票日付を入力すると基軸通貨の金額が表示されます',
+      rateUnreadable: '保存時に基軸通貨へ換算されます',
+    },
     boolean: {
       offBadge: "{{label}} — オフ",
       completed: "完了",
@@ -703,6 +712,7 @@ const ja = {
       noSavedTemplates: "保存されたテンプレートはありません",
       noneOption: "— なし —",
       saveCurrent: "現在を保存",
+      saveCurrentNeedsMapping: "テンプレートを保存するには、列を 1 つ以上マッピングしてください。",
       templateName: "テンプレート名",
       save: "保存",
       deleteTemplate: "テンプレートを削除",
@@ -778,6 +788,7 @@ const ja = {
     eventTitlePlaceholder: "この予定の内容は？",
     creating: "作成中…",
     titleRequired: "タイトルは必須です",
+    rescheduleNotFound: "この{{object}}レコードは存在しないか、アクセス権がなくなりました。",
     a11y: {
       region: "カレンダー",
       grid: "カレンダーグリッド",

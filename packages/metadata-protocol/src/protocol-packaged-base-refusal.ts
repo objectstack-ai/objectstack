@@ -1115,7 +1115,8 @@ function articleFor(type: string): 'a' | 'an' {
  * The type list is N-08's (`@objectstack/spec/kernel`:
  * `OVERRIDE_TYPE_CLASSIFICATION`) and the pair predicate is the lookup's
  * (`isPairOf`, `@objectstack/metadata-core`), read, never re-derived.
- * `basedOn` is recorded and never judged.
+ * `basedOn` is recorded and never gates: no refusal here reads it, and its
+ * one reader is a base's upgrade plan, as advice (ADR-0146 D2, as amended).
  *
  * Order: a declaration is judged on its type first (D10 `object`, D6 and the
  * other excluded types, then D9's `flow` and `action`), then on who declares

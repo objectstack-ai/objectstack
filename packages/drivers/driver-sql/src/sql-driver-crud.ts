@@ -38,6 +38,7 @@ import {
   isUnresolvableColumnError,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
+import { oracleUuidReadForm } from './sql-driver-oracle-dialect.js';
 
 /**
  * The `SqlDriver` members the bodies of {@link CrudFacet} read — every one of
@@ -64,10 +65,16 @@ export interface CrudHost {
   getBuilder: SqlDriver['getBuilder'];
   injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
   readonly insertReturnsStoredRows: SqlDriver['insertReturnsStoredRows'];
+  readonly isMssql: SqlDriver['isMssql'];
+  readonly isOracle: SqlDriver['isOracle'];
   readonly isSqlite: SqlDriver['isSqlite'];
   readonly knex: SqlDriver['knex'];
   mapSortField: SqlDriver['mapSortField'];
+  oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   orderKeysFor: SqlDriver['orderKeysFor'];
+  primeMssqlGuidColumns: SqlDriver['primeMssqlGuidColumns'];
+  primeMssqlPagingKey: SqlDriver['primeMssqlPagingKey'];
+  primeOracleRawUuidColumns: SqlDriver['primeOracleRawUuidColumns'];
   readBackInsertedRows: SqlDriver['readBackInsertedRows'];
   remoteColumn: SqlDriver['remoteColumn'];
   resolveTenantField: SqlDriver['resolveTenantField'];
@@ -114,7 +121,15 @@ export class CrudFacet {
    * cited that as agreement, which it was not; objectstack#4419.) The
    * obligation the contract states is on `find`, and this keeps it there.
    */
-  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'mapSortField' | 'orderKeysFor' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlGuidColumns' | 'primeMssqlPagingKey' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    // [#31327] On SQL Server a federated object's paging key is read from the
+    // remote catalog before the ORDER BY is decided (`primeMssqlPagingKey`).
+    if (this.isMssql) await this.primeMssqlPagingKey(object);
+    // [#31395] …and which of its columns are GUIDs, before a text operator compiles.
+    if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
     // The whole ORDER BY, decided once: the caller's keys plus whatever this
     // driver has to add to make a paged read deterministic. Derived out here
     // rather than inside `buildBase` so the recovery ladder below can ask
@@ -140,8 +155,25 @@ export class CrudFacet {
           b.orderBy(this.remoteColumn(object, key.field, this.mapSortField(key.field)), key.direction);
         }
       }
+      // [#31327] SQL Server rejects `OFFSET n ROWS` without an ORDER BY (a
+      // syntax error, not a reshuffle). When nothing above ordered the read —
+      // a keyless federated table, or the #3821 rung that dropped the sort —
+      // `(SELECT NULL)` is the order that changes nothing but the statement's
+      // validity; the nondeterministic-paging warning has already been given.
+      if (this.isMssql && query.offset && !(withOrderBy && orderKeys.length > 0)) {
+        b.orderByRaw('(SELECT NULL)');
+      }
 
       // PAGINATION
+      if (this.isMssql && query.limit === 0) {
+        // [#31327] `FETCH NEXT 0 ROWS` is an error on SQL Server ("must be
+        // greater than zero"), where every other dialect answers `LIMIT 0`
+        // with no rows. Without the offset knex compiles `SELECT TOP (0)`,
+        // which is the same empty answer — and an offset into no rows is no
+        // rows.
+        b.limit(0);
+        return b;
+      }
       if (query.offset !== undefined) b.offset(query.offset);
       if (query.limit !== undefined) b.limit(query.limit);
 
@@ -249,7 +281,10 @@ export class CrudFacet {
   }
 
   /** The body of `SqlDriver#create`; the method's docblock there is its contract. */
-  static async create(this: Pick<CrudHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'decorateHashShadowDuplicate' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
+  static async create(this: Pick<CrudHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'collidingAutoNumberReservations' | 'decorateHashShadowDuplicate' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'isOracle' | 'primeOracleRawUuidColumns' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
+    // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
+    // the remote catalog before a comparand or a written value is bound.
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
     const { _id, ...rest } = data;
     const toInsert = { ...rest };
 
@@ -289,7 +324,13 @@ export class CrudFacet {
 
       try {
         if (this.insertReturnsStoredRows) {
-          const result = await builder.insert(formatted).returning('*');
+          // [#31327] On SQL Server `OUTPUT inserted.*` without `INTO` is refused
+          // on a table with an enabled trigger (error 334) — routine on an ERP
+          // table. knex's `includeTriggerModifications` routes the OUTPUT through
+          // a temp table, which SQL Server accepts on every table.
+          const result = await (this.isMssql
+            ? builder.insert(formatted).returning('*', { includeTriggerModifications: true })
+            : builder.insert(formatted).returning('*'));
           return this.formatOutput(object, result[0]);
         }
         await builder.insert(formatted);
@@ -387,7 +428,7 @@ export class CrudFacet {
    * Refused with {@link insertedRowsNotReadBackError}, never answered with the
    * payload: see that function for why.
    */
-  static async readBackInsertedRows(this: Pick<CrudHost, 'applyTenantScope' | 'formatOutput' | 'getBuilder' | 'remoteColumn' | 'resolveTenantField'>, object: string, writeTable: string, written: Record<string, any>[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async readBackInsertedRows(this: Pick<CrudHost, 'applyTenantScope' | 'formatOutput' | 'getBuilder' | 'oracleUuidBinding' | 'remoteColumn' | 'resolveTenantField'>, object: string, writeTable: string, written: Record<string, any>[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     if (written.length === 0) return [];
     const idColumn = this.remoteColumn(object, 'id', 'id');
     const tenantField = this.resolveTenantField(object);
@@ -409,15 +450,17 @@ export class CrudFacet {
       : { ...options };
     const builder = this.getBuilder(writeTable, options);
     this.applyTenantScope(builder, object, scopeOptions);
-    const stored: Record<string, any>[] = await builder.whereIn(
-      idColumn,
-      written.map((row) => row.id),
-    );
+    // [#31390] On Oracle a RAW(16) uuid key binds each id as `HEXTORAW(?)`, and
+    // reads back in the lowercase hyphenated form whatever form it was written in.
+    const keys = written.map((row) => this.oracleUuidBinding(object, 'id', row.id, 'comparand'));
+    const writtenKey = (row: Record<string, any>, i: number): string =>
+      keys[i] === row.id ? String(row.id) : oracleUuidReadForm(String(row.id));
+    const stored: Record<string, any>[] = await builder.whereIn(idColumn, keys as any[]);
     const byId = new Map<string, Record<string, any>>();
     for (const row of stored) byId.set(String(row[idColumn]), row);
-    const missing = written.filter((row) => !byId.has(String(row.id))).map((row) => row.id);
+    const missing = written.filter((row, i) => !byId.has(writtenKey(row, i))).map((row) => row.id);
     if (missing.length > 0) throw insertedRowsNotReadBackError(object, missing, written.length);
-    return written.map((row) => this.formatOutput(object, byId.get(String(row.id))));
+    return written.map((row, i) => this.formatOutput(object, byId.get(writtenKey(row, i))));
   }
 
   /** The body of `SqlDriver#ensureSequencesTable`; the method's docblock there is its contract. */

@@ -102,7 +102,7 @@ D2, D11). A `PUT` naming no package onto an item one installed read-only package
 `hotcrm` ships is refused `403 NOT_OVERRIDABLE`; for a type an override applies to,
 the sentence names the route: save it with `?package=hotcrm.custom`, the body
 declaring `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (`basedOn` is the
-`manifest.version` of `hotcrm` it was taken from, recorded and never judged). Only the pair declares an override: an item of any other
+`manifest.version` of `hotcrm` it was taken from, recorded and never a gate; an upgrade of `hotcrm` lists, as advice, each override whose `basedOn` is not the installed version or whose base item the upgrade changes). Only the pair declares an override: an item of any other
 package that depends on `hotcrm` and bears a `hotcrm` item's name is refused at save
 and publish, and its fix is a new name. A permission set, position or capability is
 never overridden: a permission set or position is copied under a new name, and a

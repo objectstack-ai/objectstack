@@ -125,7 +125,8 @@ what it holds; while it holds the App's pair namespace, the ensure door answers 
 than create the App's pair beside it. An item of the pair that bears a base item's name — for an
 `email_template`, one item per `(name, locale)`, the name **and** a locale the base ships — and
 declares in its body `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (the base's
-`manifest.id` and `manifest.version`; `basedOn` is recorded and never judged; schema:
+`manifest.id` and `manifest.version`; `basedOn` is recorded and never a gate, and the base's upgrade
+plan reads it only as advice; schema:
 [Override Declaration](/docs/references/kernel/override-declaration)) replaces the base's
 document **whole** for every read that serves the base's name
 ([ADR-0146 D8](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)):

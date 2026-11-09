@@ -1214,6 +1214,15 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   );
   const publishNoneReasonId = React.useId();
   const publishReadOnlyReasonId = React.useId();
+  // The reason a disabled Publish gives, or `null` when it gives none: the
+  // button is enabled, or a publish is in flight (a spinner, for a moment, not
+  // a state the author has to get out of). A read-only package outranks an
+  // empty ledger; with neither, the button is the primary action.
+  const publishDisabledReason: { id: string; text: string; testId?: string } | null = publishReadOnly
+    ? { id: publishReadOnlyReasonId, text: t('engine.studio.pkg.readonlyHint', locale) }
+    : !hasPending && !publishing
+      ? { id: publishNoneReasonId, text: t('engine.studio.publishNoneTitle', locale), testId: 'publish-none-reason' }
+      : null;
 
   // Builder → running-app bridge (Airtable's Launch): the builder edits the
   // package (the design surface), the app is its published front-end. If this
@@ -1512,22 +1521,10 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
         setChangesOpen(true);
       }}
       disabled={publishing || !hasPending || publishReadOnly}
-      aria-describedby={
-        publishReadOnly
-          ? publishReadOnlyReasonId
-          : !hasPending && !publishing
-            ? publishNoneReasonId
-            : undefined
-      }
-      // A read-only package's reason is the wrapper's (objectui#12303), not a
-      // `title` the disabled button can never show.
-      title={
-        publishReadOnly
-          ? undefined
-          : hasPending
-            ? t('engine.studio.publishTitle', locale)
-            : t('engine.studio.publishNoneTitle', locale)
-      }
+      aria-describedby={publishDisabledReason?.id}
+      // A disabled Publish's reason is its wrapper's (objectui#12303,
+      // objectstack#31495), never a `title` the disabled button cannot show.
+      title={hasPending && !publishReadOnly ? t('engine.studio.publishTitle', locale) : undefined}
       // objectui#8219 — the primary style is for a publish the author
       // CAN do. A disabled one (no draft, or a read-only package)
       // drops to an outline, instead of staying the loudest element
@@ -1539,7 +1536,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           ? 'border-transparent bg-primary text-primary-foreground disabled:opacity-50'
           : 'text-muted-foreground',
         // The wrapper takes the hover: the disabled button lets it through.
-        publishReadOnly && 'disabled:pointer-events-none',
+        publishDisabledReason && 'disabled:pointer-events-none',
       )}
     >
       {publishing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Rocket className="h-3.5 w-3.5" />}
@@ -1677,46 +1674,38 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                   </span>
                 )}
               </button>
-              {/* objectui#8219 — with nothing to publish, say so on the page;
-                  objectui#12459 moves the sentence off the strip into the
-                  Publish button's description, where readers and the tooltip
-                  still find it. */}
-              {!hasPending && !publishReadOnly && !publishing && (
-                <span
-                  id={publishNoneReasonId}
-                  className="sr-only"
-                  data-testid="publish-none-reason"
-                >
-                  {t('engine.studio.publishNoneTitle', locale)}
-                </span>
-              )}
-              {/* objectui#12303 — on a read-only package the reason rides the
-                  record page's Archive pattern (`DeclaredActionsBar`,
-                  objectui#11811) instead of a `title` on the disabled button:
-                  a natively disabled button fires no hover or focus, so the
-                  `title` reached no keyboard or assistive-tech user and Tab
-                  skipped Publish entirely. The wrapping span is the tooltip
-                  trigger and a tab stop, and the button and the span both
-                  point `aria-describedby` at an `sr-only` copy of the reason.
-                  objectstack#28562 — a read-only base with a customization
-                  package publishes that package's drafts, so it is not this. */}
-              {publishReadOnly ? (
+              {/* A disabled Publish says why, to the mouse, the keyboard and
+                  assistive tech alike — the record page's Archive pattern
+                  (`DeclaredActionsBar`, objectui#11811), for both reasons it
+                  can be off: a read-only package (objectui#12303) and nothing
+                  pending (objectui#8219, objectstack#31495). A natively
+                  disabled button fires no hover or focus, so the wrapping span
+                  is the tooltip trigger and a tab stop, and the button and the
+                  span both point `aria-describedby` at an `sr-only` copy of
+                  the reason. objectstack#28562 — a read-only base with a
+                  customization package publishes that package's drafts, so it
+                  is not read-only here. */}
+              {publishDisabledReason ? (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span
                         tabIndex={0}
-                        aria-describedby={publishReadOnlyReasonId}
+                        aria-describedby={publishDisabledReason.id}
                         data-disabled-reason=""
                         className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       >
                         {publishButton}
-                        <span id={publishReadOnlyReasonId} className="sr-only">
-                          {t('engine.studio.pkg.readonlyHint', locale)}
+                        <span
+                          id={publishDisabledReason.id}
+                          className="sr-only"
+                          data-testid={publishDisabledReason.testId}
+                        >
+                          {publishDisabledReason.text}
                         </span>
                       </span>
                     </TooltipTrigger>
-                    <TooltipContent>{t('engine.studio.pkg.readonlyHint', locale)}</TooltipContent>
+                    <TooltipContent>{publishDisabledReason.text}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               ) : (

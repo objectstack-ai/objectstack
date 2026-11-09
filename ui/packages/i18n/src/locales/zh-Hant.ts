@@ -445,6 +445,15 @@ const zhHant = {
       available: '可用',
       all: '全部幣種（ISO 4217）',
     },
+    currencyHome: {
+      convertedAt: '按匯率 {{rate}}（{{date}}）折算',
+      homeCurrency: '本位幣（匯率 1）',
+      preview: '≈ {{amount}}（按匯率 {{rate}}，{{date}}）',
+      previewSame: '≈ {{amount}}（本位幣）',
+      awaitingRate: '{{date}} 及之前沒有 {{currency}} 的匯率：新增匯率之前無法儲存',
+      awaitingDate: '填寫單據日期後顯示本位幣金額',
+      rateUnreadable: '儲存時折算為本位幣',
+    },
     boolean: {
       offBadge: '{{label}} — 已關閉',
       completed: '已完成',
@@ -594,6 +603,7 @@ const zhHant = {
       noSavedTemplates: '暫無儲存的模板',
       noneOption: '— 無 —',
       saveCurrent: '儲存當前對映',
+      saveCurrentNeedsMapping: '請至少對映一列，才能儲存為模板。',
       templateName: '模板名稱',
       save: '儲存',
       deleteTemplate: '刪除模板',
@@ -800,6 +810,7 @@ const zhHant = {
     eventTitlePlaceholder: '這個事件是關於什麼的？',
     creating: '建立中…',
     titleRequired: '請填寫標題',
+    rescheduleNotFound: '這條{{object}}記錄已不存在，或者您已無權訪問它。',
     a11y: {
       region: '日曆',
       grid: '日曆網格',

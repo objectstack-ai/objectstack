@@ -86,6 +86,10 @@ export * from './utils/datetime.js';
 // two doubles.
 export * from './utils/compensated-sum.js';
 export * from './utils/json-membership-sql.js';
+// [#31394] #6518's text-match construct table, moved from `driver-sql` for the
+// reason `json-membership-sql` above was: the analytics compilers need the same
+// arms and depend on no driver.
+export * from './utils/text-match-sql.js';
 // [#20889] What an aggregate ANSWERS and its `'number'` presenter, moved from
 // `driver-sql` so the analytics native-SQL face presents with the same rule.
 export * from './utils/aggregate-answer.js';

@@ -432,6 +432,15 @@ const ko = {
       available: '사용 가능',
       all: '모든 통화 (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: '{{date}} 환율 {{rate}}(으)로 환산',
+      homeCurrency: '기준 통화(환율 1)',
+      preview: '≈ {{amount}} (환율 {{rate}}, {{date}})',
+      previewSame: '≈ {{amount}} (기준 통화)',
+      awaitingRate: '{{date}} 이전의 {{currency}} 환율이 없습니다. 환율을 추가할 때까지 저장할 수 없습니다',
+      awaitingDate: '전표 날짜를 입력하면 기준 통화 금액이 표시됩니다',
+      rateUnreadable: '저장할 때 기준 통화로 환산됩니다',
+    },
     boolean: {
       offBadge: "{{label}} — 꺼짐",
       completed: "완료됨",
@@ -703,6 +712,7 @@ const ko = {
       noSavedTemplates: "저장된 템플릿 없음",
       noneOption: "— 없음 —",
       saveCurrent: "현재 저장",
+      saveCurrentNeedsMapping: "템플릿을 저장하려면 열을 하나 이상 매핑하세요.",
       templateName: "템플릿 이름",
       save: "저장",
       deleteTemplate: "템플릿 삭제",
@@ -778,6 +788,7 @@ const ko = {
     eventTitlePlaceholder: "이 일정은 어떤 내용인가요?",
     creating: "생성 중…",
     titleRequired: "제목을 입력하세요",
+    rescheduleNotFound: "이 {{object}} 레코드가 더 이상 존재하지 않거나 접근 권한이 없습니다.",
     a11y: {
       region: "캘린더",
       grid: "캘린더 그리드",

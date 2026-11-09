@@ -76,8 +76,15 @@ const CONTRACT_ONLY_SPELLINGS = ['sqlite3', 'better-sqlite3', 'mariadb', 'inmemo
  * table so a fourth withdrawn spelling cannot escape the refuse rows.
  */
 const WITHDRAWN_MEMORY_SPELLINGS = ['memory', 'mingo', 'in-memory'] as const;
-/** The spellings of the federation-only `oracle` row: a contract, never a selection. */
-const FEDERATION_ONLY_SPELLINGS = ['oracle', 'oracledb'] as const;
+/** The spellings of the federation-only rows, each to its id: a contract, never a selection. */
+const FEDERATION_ONLY_SPELLING_IDS = {
+  oracle: 'oracle',
+  oracledb: 'oracle',
+  mssql: 'mssql',
+  sqlserver: 'mssql',
+  tedious: 'mssql',
+} as const;
+const FEDERATION_ONLY_SPELLINGS = Object.keys(FEDERATION_ONLY_SPELLING_IDS) as (keyof typeof FEDERATION_ONLY_SPELLING_IDS)[];
 
 /** The engine's URL schemes, which both hosts recognise and refuse. */
 const WITHDRAWN_MEMORY_URLS = ['memory://', 'memory://named', 'mingo://', 'MINGO://upper'] as const;
@@ -216,7 +223,7 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
     expect(withdrawn).toEqual([...WITHDRAWN_MEMORY_SPELLINGS, 'inmemory', ...FEDERATION_ONLY_SPELLINGS].sort());
     for (const spelling of withdrawn) {
       expect(resolveDriverId(spelling), spelling).toBe(
-        (FEDERATION_ONLY_SPELLINGS as readonly string[]).includes(spelling) ? 'oracle' : 'memory',
+        (FEDERATION_ONLY_SPELLING_IDS as Record<string, string>)[spelling] ?? 'memory',
       );
       expect(resolveDatabaseDriverId(spelling), spelling).toBeUndefined();
     }
@@ -231,6 +238,14 @@ describe('driver vocabulary parity: `os start` and `os migrate` answer alike (#6
         expect(
           refusalMessage(() => resolveStorageDefinition(resolveDriverType(spelling, undefined), { isDev })),
           `os start (isDev=${isDev}) accepted '${spelling}'`,
+        ).not.toBeNull();
+        // Even WITH a database URL: the refusal is the driver's, not the
+        // missing target's (#31327).
+        expect(
+          refusalMessage(() =>
+            resolveStorageDefinition(resolveDriverType(spelling, undefined), { isDev, databaseUrl: 'tcp://erp-db.internal/ERP' }),
+          ),
+          `os start (isDev=${isDev}, with a URL) accepted '${spelling}'`,
         ).not.toBeNull();
       }
       process.env.OS_DATABASE_DRIVER = spelling;

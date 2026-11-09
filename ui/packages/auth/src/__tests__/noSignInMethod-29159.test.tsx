@@ -37,6 +37,9 @@ const SSO_ONLY_COPY = "Sign in with your organization's single sign-on";
 const BREAK_GLASS = { name: 'Use a password instead' } as const;
 const SSO_BUTTON = { name: 'Sign in with SSO' } as const;
 const PROVIDER_BUTTON = { name: /Continue with Acme IdP$/ } as const;
+const OTP_LINK = { name: 'Sign in with verification code' } as const;
+const PASSWORD_INSTEAD = { name: 'Sign in with password instead' } as const;
+const BACK_TO_SSO = { name: 'Back to single sign-on' } as const;
 const OIDC: AuthPublicConfig['socialProviders'] = [
   { id: 'acme-idp', name: 'Acme IdP', enabled: true, type: 'oidc' },
 ];
@@ -48,20 +51,25 @@ const PASSWORD_OFF_NOTHING_ELSE: AuthPublicConfig = {
   features: { sso: false, ssoEnforced: false },
 };
 
-function client(getConfig: AuthClient['getConfig']): AuthClient {
+function client(getConfig: AuthClient['getConfig'], overrides: Partial<AuthClient> = {}): AuthClient {
   return {
     signIn: vi.fn(),
     getSession: vi.fn().mockResolvedValue(null),
     getConfig,
     signInWithProvider: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
   } as unknown as AuthClient;
 }
 
-function renderLogin(config: AuthPublicConfig | Error, props: LoginFormProps = {}) {
+function renderLogin(
+  config: AuthPublicConfig | Error,
+  props: LoginFormProps = {},
+  overrides: Partial<AuthClient> = {},
+) {
   const getConfig =
     config instanceof Error ? vi.fn().mockRejectedValue(config) : vi.fn().mockResolvedValue(config);
   return render(
-    <AuthProvider authUrl="/api/auth" client={client(getConfig)}>
+    <AuthProvider authUrl="/api/auth" client={client(getConfig, overrides)}>
       <LoginForm registerUrl="/register" {...props} />
     </AuthProvider>,
   );
@@ -172,8 +180,8 @@ describe('LoginForm — doors the server does advertise stay usable', () => {
 
     expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
     expect(screen.queryByText(SSO_ONLY_COPY)).toBeNull();
-    fireEvent.click(screen.getByRole('button', BREAK_GLASS));
-    expect(await screen.findByRole('button', { name: 'Sign in with verification code' })).toBeTruthy();
+    // The phone ways in are on the first paint; the full matrix is below.
+    expect(screen.getByRole('button', OTP_LINK)).toBeTruthy();
   });
 
   it('falls back to the password form when the config fetch fails (break-glass beats lock-out)', async () => {
@@ -193,5 +201,137 @@ describe('LoginForm — doors the server does advertise stay usable', () => {
     expect(screen.getByLabelText('Email')).toBeTruthy();
     expect(screen.getByText('Sign up')).toBeTruthy();
     expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
+  });
+});
+
+/**
+ * The password door shut, no single sign-on offered or enforced, and a phone
+ * way in advertised: the card is not collapsed into the single sign-on view.
+ * The form holding the phone way in is the first paint, and no "Back to single
+ * sign-on" button is drawn, since there is no single sign-on to go back to.
+ * Cells with single sign-on keep their collapse and their back button.
+ */
+describe('LoginForm — password off, phone sign-in on, no single sign-on', () => {
+  /** The QA repro: `email_password_enabled` false on a boot with phone sign-in. */
+  const PHONE_ONLY: AuthPublicConfig = {
+    socialProviders: [],
+    emailPassword: { enabled: false },
+    features: { sso: false, ssoEnforced: false, phoneNumber: true, phoneNumberOtp: true },
+  };
+
+  it('draws the phone+password form and the verification-code way in on first paint, with no SSO view', async () => {
+    renderLogin(PHONE_ONLY);
+    await configResolved();
+
+    // The identifier the server still accepts is a phone number; email is refused.
+    expect(screen.getByLabelText('Phone number')).toBeTruthy();
+    expect(screen.queryByLabelText('Email or phone number')).toBeNull();
+    expect(screen.getByLabelText('Password')).toBeTruthy();
+    expect(screen.getByRole('button', OTP_LINK)).toBeTruthy();
+
+    expect(screen.queryByRole('button', BREAK_GLASS)).toBeNull();
+    expect(screen.queryByRole('button', BACK_TO_SSO)).toBeNull();
+    expect(screen.queryByText(SSO_ONLY_COPY)).toBeNull();
+    expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
+    // Sign-up and the password-form copy are email+password doors the server refuses.
+    expect(screen.queryByText('Sign up')).toBeNull();
+    expect(screen.queryByText(/Enter your email and password/)).toBeNull();
+  });
+
+  it('draws no back-to-SSO button in the verification-code form either, and switches back', async () => {
+    renderLogin(PHONE_ONLY, { hideHeader: true });
+    await configResolved();
+
+    fireEvent.click(screen.getByRole('button', OTP_LINK));
+    expect(await screen.findByLabelText('Verification code')).toBeTruthy();
+    expect(screen.queryByRole('button', BACK_TO_SSO)).toBeNull();
+    expect(screen.queryByText(SSO_ONLY_COPY)).toBeNull();
+
+    // Phone+password is a door the server accepts, so the switch back is offered.
+    fireEvent.click(screen.getByRole('button', PASSWORD_INSTEAD));
+    expect(await screen.findByLabelText('Password')).toBeTruthy();
+    expect(screen.queryByRole('button', BACK_TO_SSO)).toBeNull();
+  });
+
+  it('signs a phone number in with its password from the first paint', async () => {
+    const signIn = vi.fn();
+    const signInWithPhonePassword = vi
+      .fn()
+      .mockResolvedValue({ user: { id: 'u2' }, session: { token: 'pw-tok' } });
+    renderLogin(PHONE_ONLY, {}, { signIn, signInWithPhonePassword });
+    await configResolved();
+
+    fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '13800138000' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'S3cret!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+
+    await waitFor(() => expect(signInWithPhonePassword).toHaveBeenCalledWith('13800138000', 'S3cret!'));
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it('with phone OTP the only way in, opens on the verification-code form with no switch to a refused password form', async () => {
+    renderLogin({
+      socialProviders: [],
+      emailPassword: { enabled: false },
+      features: { sso: false, ssoEnforced: false, phoneNumber: false, phoneNumberOtp: true },
+    });
+    await configResolved();
+
+    expect(screen.getByLabelText('Phone number')).toBeTruthy();
+    expect(screen.getByLabelText('Verification code')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Get code' })).toBeTruthy();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(screen.queryByRole('button', PASSWORD_INSTEAD)).toBeNull();
+    expect(screen.queryByRole('button', BREAK_GLASS)).toBeNull();
+    expect(screen.queryByRole('button', BACK_TO_SSO)).toBeNull();
+  });
+
+  it('with phone+password the only way in, draws it with no verification-code link', async () => {
+    renderLogin({
+      socialProviders: [],
+      emailPassword: { enabled: false },
+      features: { sso: false, ssoEnforced: false, phoneNumber: true, phoneNumberOtp: false },
+    });
+    await configResolved();
+
+    expect(screen.getByLabelText('Phone number')).toBeTruthy();
+    expect(screen.getByLabelText('Password')).toBeTruthy();
+    expect(screen.queryByRole('button', OTP_LINK)).toBeNull();
+    expect(screen.queryByRole('button', BREAK_GLASS)).toBeNull();
+    expect(screen.queryByRole('button', BACK_TO_SSO)).toBeNull();
+  });
+
+  it('CONTROL: with SSO advertised as well, the card stays collapsed and the back button returns', async () => {
+    renderLogin({ ...PHONE_ONLY, features: { ...PHONE_ONLY.features, sso: true } });
+    await configResolved();
+
+    expect(screen.getByText(SSO_ONLY_COPY)).toBeTruthy();
+    expect(screen.getByRole('button', SSO_BUTTON)).toBeTruthy();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', BREAK_GLASS));
+    expect(await screen.findByLabelText('Password')).toBeTruthy();
+    expect(screen.getByRole('button', BACK_TO_SSO)).toBeTruthy();
+  });
+
+  it('CONTROL: under declared enforcement, the card stays collapsed and the back button returns', async () => {
+    renderLogin(
+      {
+        ...PHONE_ONLY,
+        socialProviders: OIDC,
+        features: { ...PHONE_ONLY.features, ssoEnforced: true },
+      },
+      { hideHeader: true },
+    );
+    await configResolved();
+
+    expect(screen.getByText(SSO_ONLY_COPY)).toBeTruthy();
+    expect(await screen.findByRole('button', PROVIDER_BUTTON)).toBeTruthy();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', BREAK_GLASS));
+    expect(await screen.findByLabelText('Password')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', BACK_TO_SSO));
+    await waitFor(() => expect(screen.queryByLabelText('Password')).toBeNull());
   });
 });

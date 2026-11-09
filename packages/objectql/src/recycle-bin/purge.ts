@@ -9,11 +9,12 @@
  * All three are dispatched through the middleware chain as the `purge`
  * operation, on the BUSINESS object the rows belong to, so the one grant that
  * authorizes the verb governs all three (`manageRecycleBin`, ADR-0148 D5, Q3
- * ruled A: only a recycle-bin manager deletes for good). Until
- * `@objectstack/plugin-security` maps the verb to that grant, its fail-closed
- * backstop for the destructive verbs (`DESTRUCTIVE_OPERATIONS`) refuses every
- * caller that is not the system. A composition without the security plugin
- * authorizes nothing, as for every other verb.
+ * ruled A: only a recycle-bin manager deletes for good).
+ * `@objectstack/plugin-security` maps the verb to that grant (#30237): a
+ * caller is admitted when its object permission folds to `manageRecycleBin`
+ * (`objectPermissionGrants`: read bounds it, `modifyAllRecords` implies it).
+ * A composition without the security plugin authorizes nothing, as for every
+ * other verb.
  *
  *   - `ObjectQL.delete(object, { where: { id }, permanent: true })`: the by-id
  *     delete, with its hooks, cascade and events, that writes no entry. Its
@@ -37,10 +38,31 @@
  * An entry is engine-owned bookkeeping, as at capture (`capture.ts`): it is
  * read and removed through the bin's driver, with the caller's driver options,
  * so the caller's organization scopes the read and the removal.
+ *
+ * ## The tenant wall (contract review 6689562965, should-fix 1)
+ *
+ * `purge` and `empty` carry neither an AST nor an id, so no predicate the
+ * security layer composes reaches the bin's driver: its scope is the driver
+ * options alone. Two rules keep that scope the wall's:
+ *
+ *   - a caller the wall DENIES (a walled posture and no organization to scope
+ *     by, e.g. no active organization under `isolated`) sees no entry: `purge`
+ *     answers `false` and `empty` answers `0`, before anything is read
+ *     ({@link recycleBinWallDenies}). The driver could not express that scope:
+ *     `deny` with no active organization projects to no scope at all, which
+ *     would reach every organization's entries;
+ *   - the removal is scoped by the verdict the security layer RECORDED on the
+ *     dispatch (`opCtx.tenantLayer0Verdict`) when it recorded one, as every
+ *     engine executor's driver call is, and by the engine's own verdict
+ *     otherwise. The entry read of `purge` runs before the dispatch, so it is
+ *     scoped by the engine's own verdict, which grants no exemption.
+ *
+ * The system is exempt from both, as from every wall.
  */
 
 import { RECYCLE_BIN_OBJECT } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { TenantLayer0VerdictSchema, type TenantLayer0Verdict } from '@objectstack/spec/security';
 import type { OperationContext } from '../engine-top-level.js';
 import { recycleBinTakesObject } from './capture.js';
 
@@ -48,14 +70,55 @@ import { recycleBinTakesObject } from './capture.js';
 export interface RecycleBinRemovalHost {
   readonly _registry: { getObject(name: string): unknown };
   getDriver(object: string): any;
-  buildDriverOptions(object: string, execCtx?: ExecutionContext): any;
+  buildDriverOptions(
+    object: string,
+    execCtx?: ExecutionContext,
+    base?: any,
+    scope?: { writeTarget?: boolean; recordedVerdict?: unknown },
+  ): any;
   executeWithMiddleware(ctx: OperationContext, executor: () => Promise<any>): Promise<any>;
+  /** The Layer 0 verdict over the engine's own facts (`engine-driver-options.ts`). */
+  engineLayer0Verdict(execCtx: ExecutionContext | undefined, activeOrganization: string | undefined): TenantLayer0Verdict;
+}
+
+/**
+ * Whether the tenant wall denies `context` every recycle-bin entry: its verdict
+ * is `deny`. The verdict is the one the security layer recorded on the
+ * dispatch when there is one (`recordedVerdict`, read as the driver reads it:
+ * a value that does not parse is absent), and otherwise the engine's own
+ * (`engineLayer0Verdict`), the verdict the driver options fall back to. The
+ * system is never denied.
+ *
+ * An entry carries no predicate a wall could compose a `deny` sentinel into,
+ * and `deny` with no active organization projects to NO driver scope
+ * (`driverReadScope`), so the bin's own doors answer it here: nothing visible.
+ */
+export function recycleBinWallDenies(
+  this: Pick<RecycleBinRemovalHost, 'engineLayer0Verdict'>,
+  context: ExecutionContext | undefined,
+  recordedVerdict?: unknown,
+): boolean {
+  if (context?.isSystem === true) return false;
+  const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
+  if (recorded?.success) return recorded.data.kind === 'deny';
+  const activeOrganization =
+    context?.tenantId !== undefined && context.tenantId !== null && String(context.tenantId) !== ''
+      ? String(context.tenantId)
+      : undefined;
+  return this.engineLayer0Verdict(context, activeOrganization).kind === 'deny';
 }
 
 /** The options `ObjectQL.purge` and `ObjectQL.empty` take. */
 export interface RecycleBinRemovalOptions {
   /** The caller; it scopes the entries to its organization and is authorized for `purge`. */
   context?: ExecutionContext;
+  /**
+   * `purge(entryId)` only: the object the caller addresses the entry under
+   * (the REST door's `/data/:object/recycle-bin/:entryId`). When given, an
+   * entry of another object is not found: the purge answers `false` and
+   * dispatches nothing.
+   */
+  object?: string;
 }
 
 /** How many entry ids one page of {@link emptyRecycleBin}'s fallback reads. */
@@ -73,8 +136,8 @@ export function recycleBinCallRefusal(message: string, developerMessage: string,
   return err;
 }
 
-/** The refusal for a platform object, whose deletes the bin never takes. */
-function platformObjectRefusal(object: string, param: string, what: string): Error {
+/** The refusal for a platform object, whose deletes the bin never takes (`list.ts` shares it). */
+export function recycleBinPlatformObjectRefusal(object: string, param: string, what: string): Error {
   return recycleBinCallRefusal(
     `'${object}' is a platform object: its deletes never enter the recycle bin, so ${what}.`,
     `${what.charAt(0).toUpperCase()}${what.slice(1)}: the recycle bin takes no object in the platform namespaces ` +
@@ -122,7 +185,7 @@ export function readPermanentDelete(
       'permanent',
     );
   }
-  if (!recycleBinTakesObject(object)) throw platformObjectRefusal(object, 'permanent', "'permanent' has nothing to skip");
+  if (!recycleBinTakesObject(object)) throw recycleBinPlatformObjectRefusal(object, 'permanent', "'permanent' has nothing to skip");
   return true;
 }
 
@@ -151,6 +214,7 @@ export async function purgeRecycleBinEntry(
   }
   if (!this._registry.getObject(RECYCLE_BIN_OBJECT)) return false;
   const context = options?.context;
+  if (recycleBinWallDenies.call(this, context)) return false;
   const driver = this.getDriver(RECYCLE_BIN_OBJECT);
   const rows = ((await driver.find(
     RECYCLE_BIN_OBJECT,
@@ -159,9 +223,16 @@ export async function purgeRecycleBinEntry(
   )) ?? []) as Array<Record<string, unknown>>;
   const entry = rows[0];
   if (entry?.id == null || typeof entry.object_name !== 'string' || entry.object_name === '') return false;
+  if (options?.object !== undefined && entry.object_name !== options.object) return false;
   const opCtx: OperationContext = { object: entry.object_name, operation: 'purge', options: { context }, context };
   return (await this.executeWithMiddleware(opCtx, async () => {
-    const removed = await driver.delete(RECYCLE_BIN_OBJECT, entry.id as string | number, this.buildDriverOptions(RECYCLE_BIN_OBJECT, opCtx.context));
+    const recordedVerdict = opCtx.tenantLayer0Verdict;
+    if (recycleBinWallDenies.call(this, opCtx.context, recordedVerdict)) return false;
+    const removed = await driver.delete(
+      RECYCLE_BIN_OBJECT,
+      entry.id as string | number,
+      this.buildDriverOptions(RECYCLE_BIN_OBJECT, opCtx.context, undefined, { recordedVerdict }),
+    );
     return removed === true || (typeof removed === 'number' && removed > 0);
   })) === true;
 }
@@ -189,13 +260,16 @@ export async function emptyRecycleBin(
       'object',
     );
   }
-  if (!recycleBinTakesObject(object)) throw platformObjectRefusal(object, 'object', 'there is nothing to empty');
+  if (!recycleBinTakesObject(object)) throw recycleBinPlatformObjectRefusal(object, 'object', 'there is nothing to empty');
   if (!this._registry.getObject(RECYCLE_BIN_OBJECT)) return 0;
   const context = options?.context;
+  if (recycleBinWallDenies.call(this, context)) return 0;
   const opCtx: OperationContext = { object, operation: 'purge', options: { context }, context };
   return await this.executeWithMiddleware(opCtx, async () => {
+    const recordedVerdict = opCtx.tenantLayer0Verdict;
+    if (recycleBinWallDenies.call(this, opCtx.context, recordedVerdict)) return 0;
     const driver = this.getDriver(RECYCLE_BIN_OBJECT);
-    const driverOptions = this.buildDriverOptions(RECYCLE_BIN_OBJECT, opCtx.context);
+    const driverOptions = this.buildDriverOptions(RECYCLE_BIN_OBJECT, opCtx.context, undefined, { recordedVerdict });
     const where = { object_name: object };
     if (typeof driver.deleteMany === 'function') {
       return (await driver.deleteMany(RECYCLE_BIN_OBJECT, { object: RECYCLE_BIN_OBJECT, where }, driverOptions)) as number;

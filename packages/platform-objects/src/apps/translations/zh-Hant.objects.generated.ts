@@ -1160,10 +1160,11 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "撤銷原因",
-        help: "金鑰被撤銷的原因，僅在它決定誰能恢復金鑰時記錄。管理員強制重設密碼：只有平台管理員能恢復該金鑰。組織成員資格已結束：擁有者已離開組織，任何人都不能恢復該金鑰，由組織成員建立新的金鑰。金鑰恢復後清除。從 API 金鑰清單撤銷的金鑰此項為空。",
+        help: "金鑰被撤銷的原因，僅在它決定誰能恢復金鑰時記錄。管理員強制重設密碼：只有平台管理員能恢復該金鑰。組織成員資格已結束：擁有者已離開組織，任何人都不能恢復該金鑰，由組織成員建立新的金鑰。已被管理員暫停：平台管理員撤銷了不屬於自己的金鑰，只有平台管理員能恢復該金鑰。金鑰恢復後清除。擁有者從 API 金鑰清單撤銷的金鑰此項為空。",
         options: {
           admin_password_reset: "管理員強制重設密碼",
-          organization_membership_ended: "組織成員資格已結束"
+          organization_membership_ended: "組織成員資格已結束",
+          administrator_suspended: "已被管理員暫停"
         }
       },
       key: {
@@ -2048,6 +2049,14 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML 設定",
         help: "JSON：entryPoint、cert、identifierFormat、對應（由 better-auth 管理）"
       },
+      allow_idp_initiated: {
+        label: "允許 IdP 發起的登入",
+        help: "接受從身分提供方發起的登入（未經請求的 SAML 回應，或不帶 state 的 OIDC 回呼），而非從本系統發起的登入。預設關閉：IdP 發起的 SAML 回應不對應本系統發出的任何請求。請透過「編輯登入選項」修改。"
+      },
+      allow_jit: {
+        label: "允許即時開通帳號",
+        help: "在僅限邀請的受眾策略下，為透過此提供方登入、但既無帳號也無邀請的人建立帳號。預設關閉：此類人員會被拒絕。其他策略照舊開通帳號。請透過「編輯登入選項」修改。"
+      },
       user_id: {
         label: "註冊者",
         help: "註冊該提供方的使用者"
@@ -2168,6 +2177,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "刪除 SSO 提供方",
         description: "刪除該 SSO 提供方嗎？其網域下的使用者將無法再透過它登入。",
         successMessage: "SSO 提供方已刪除"
+      },
+      edit_sso_sign_in_options: {
+        label: "編輯登入選項",
+        successMessage: "登入選項已儲存"
       }
     }
   },
@@ -2623,6 +2636,55 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       order_key: {
         label: "排序鍵",
         help: "由 @better-auth/scim 維護的派生穩定分頁鍵；請勿直接寫入。"
+      },
+      created_at: {
+        label: "建立時間"
+      },
+      updated_at: {
+        label: "更新時間"
+      }
+    },
+    _views: {
+      all: {
+        label: "全部"
+      }
+    }
+  },
+  sys_idp_group_mapping: {
+    label: "IdP 群組對應",
+    pluralLabel: "IdP 群組對應",
+    description: "將身分識別提供者的群組對應到其成員獲授予的權限集",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "來源類型",
+        help: "傳送該群組的來源：SCIM 連線，或登入時的 SSO 提供者。",
+        options: {
+          scim: "SCIM 連線",
+          sso: "SSO 提供者"
+        }
+      },
+      source_id: {
+        label: "來源 ID",
+        help: "該群組經由的 SCIM 連線 ID 或 SSO 提供者 ID，例如 \"okta-prod\"。"
+      },
+      group_external_id: {
+        label: "群組外部 ID",
+        help: "身分識別提供者傳送的群組 externalId。與顯示名稱擇一設定，不可同時設定。"
+      },
+      group_display_name: {
+        label: "群組顯示名稱",
+        help: "群組的 displayName，精確比對。對應未指定外部 ID 時使用。"
+      },
+      permission_set: {
+        label: "權限集",
+        help: "授予該群組成員的權限集。管理員權限集會被拒絕。"
+      },
+      organization_id: {
+        label: "組織",
+        help: "授權所在的組織：擁有該 SCIM 連線或 SSO 提供者的組織。"
       },
       created_at: {
         label: "建立時間"

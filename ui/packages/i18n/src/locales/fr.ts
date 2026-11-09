@@ -435,6 +435,15 @@ const fr = {
       available: 'Disponibles',
       all: 'Toutes les devises (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Converti au taux de {{rate}} du {{date}}',
+      homeCurrency: 'Dans la devise de référence (taux 1)',
+      preview: '≈ {{amount}} au taux {{rate}} le {{date}}',
+      previewSame: '≈ {{amount}} (devise principale)',
+      awaitingRate: 'Aucun taux {{currency}} au plus tard le {{date}} : l’enregistrement est refusé tant qu’aucun n’est ajouté',
+      awaitingDate: 'Renseignez la date du document pour voir le montant en devise principale',
+      rateUnreadable: 'Converti dans la devise principale à l’enregistrement',
+    },
     boolean: {
       offBadge: "{{label}} — Désactivé",
       completed: "Terminé",
@@ -719,6 +728,7 @@ const fr = {
       noSavedTemplates: "Aucun modèle enregistré",
       noneOption: "— Aucun —",
       saveCurrent: "Enregistrer le modèle actuel",
+      saveCurrentNeedsMapping: "Faites correspondre au moins une colonne pour enregistrer un modèle.",
       templateName: "Nom du modèle",
       save: "Enregistrer",
       deleteTemplate: "Supprimer le modèle",
@@ -798,6 +808,7 @@ const fr = {
     eventTitlePlaceholder: "De quoi s'agit-il ?",
     creating: "Création…",
     titleRequired: "Le titre est obligatoire",
+    rescheduleNotFound: "Cet enregistrement ({{object}}) n'existe plus, ou vous n'y avez plus accès.",
     a11y: {
       region: "Calendrier",
       grid: "Grille du calendrier",

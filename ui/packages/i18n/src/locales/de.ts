@@ -432,6 +432,15 @@ const de = {
       available: 'Verfügbar',
       all: 'Alle Währungen (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Umgerechnet zum Kurs {{rate}} vom {{date}}',
+      homeCurrency: 'In der Hauswährung (Kurs 1)',
+      preview: '≈ {{amount}} zum Kurs {{rate}} am {{date}}',
+      previewSame: '≈ {{amount}} (Hauswährung)',
+      awaitingRate: 'Kein {{currency}}-Kurs am oder vor dem {{date}}: Speichern wird abgelehnt, bis einer hinzugefügt ist',
+      awaitingDate: 'Belegdatum angeben, um den Betrag in der Hauswährung zu sehen',
+      rateUnreadable: 'Wird beim Speichern in die Hauswährung umgerechnet',
+    },
     boolean: {
       offBadge: "{{label}} — Aus",
       completed: "Abgeschlossen",
@@ -703,6 +712,7 @@ const de = {
       noSavedTemplates: "Keine gespeicherten Vorlagen",
       noneOption: "— Keine —",
       saveCurrent: "Aktuelle speichern",
+      saveCurrentNeedsMapping: "Ordnen Sie mindestens eine Spalte zu, um eine Vorlage zu speichern.",
       templateName: "Vorlagenname",
       save: "Speichern",
       deleteTemplate: "Vorlage löschen",
@@ -778,6 +788,7 @@ const de = {
     eventTitlePlaceholder: "Worum geht es bei diesem Termin?",
     creating: "Wird erstellt…",
     titleRequired: "Titel ist erforderlich",
+    rescheduleNotFound: "Dieser Datensatz ({{object}}) existiert nicht mehr, oder Sie haben keinen Zugriff mehr darauf.",
     a11y: {
       region: "Kalender",
       grid: "Kalenderraster",

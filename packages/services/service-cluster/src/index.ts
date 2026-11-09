@@ -47,6 +47,30 @@ export {
     type SplitBrainGuardEnv,
 } from './split-brain-guard.js';
 
+// [cloud#3814 R2/R3] Declared multi-replica over the Redis cluster driver: the
+// one switch every multi-replica behaviour keys on, and the code a door answers
+// when it refuses a package change under it.
+export {
+    MULTI_REPLICA_CLUSTER_DRIVER,
+    MULTI_REPLICA_PACKAGE_CHANGE_REFUSED,
+    declaresMultiReplicaOnRedis,
+    composedClusterDriver,
+} from './multi-replica.js';
+
+export {
+    offerClusterDriverConnection,
+    readClusterDriverConnection,
+    type ClusterDriverConnection,
+} from './driver-connection.js';
+
+export {
+    probeClusterDriverHealth,
+    DEFAULT_CLUSTER_PROBE_TIMEOUT_MS,
+    type ClusterDriverHealth,
+    type ClusterDriverUnreachableReason,
+    type ProbeClusterDriverHealthOptions,
+} from './driver-health.js';
+
 export { MetadataClusterBridgePlugin } from './metadata-cluster-bridge-plugin.js';
 
 // [#11968] The `authz.invalidated` bridge + the non-optional boot-time posture

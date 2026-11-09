@@ -1609,7 +1609,9 @@ jobs:
     # newest completed `schedule` or `push` runs of `CI` and `Lint & Type
     # Check` whose head is the version commit or a first-parent ancestor of it
     # must both have concluded `success` (a `cancelled` run carries no
-    # verdict). The selection rule and its pins live in
+    # verdict). A CI push run that borrowed the merge queue's verdict (#31519)
+    # is read with the queue run it names, which must be green on the same
+    # commit's first parent. The selection rule and its pins live in
     # scripts/ci/scheduled-full-run.mjs (HALF 3), whose --self-test lint.yml
     # runs; this job only calls it.
     #

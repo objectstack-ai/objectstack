@@ -1936,7 +1936,7 @@
       "title": "Self-signup gate: the default audience posture (invite_only) refuses at the server with a LOUD code, a pending invitation carves through, and OS_DISABLE_SIGNUP bounces the UI AND the endpoint — the console offers the register form only to a visitor the server would admit (an invitation redirect, or a deployment with no owner) and explains the by-invitation rule to everyone else; the form is never the gate",
       "since": "v17",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["anonymous uninvited registrant", "an invited email's registrant", "org admin (mints the invitation)", "env owner (sets OS_DISABLE_SIGNUP)"],
@@ -1944,7 +1944,7 @@
         "app": "showcase",
         "requires": [
           "the stock boot for the invite_only legs — an UNDECLARED audience resolves to posture invite_only (maintainer ruling 2026-08-24, epic #11723; audience-posture.ts), and the showcase declares none, so the refusal legs run on stock fixtures",
-          "a pending invitation for the carve-out leg — runtime-creatable: as admin, POST /api/v1/auth/organization/invite-member for a fresh email on the default org (the organization plugin defaults on, auth-manager.ts)",
+          "a pending invitation for the carve-out leg — runtime-creatable: as admin, POST /api/v1/auth/organization/invite-member for a fresh email on the default org (the organization plugin defaults on, auth-manager.ts); keep the `id` it answers, which the invited sign-up presents as `invitationId`",
           "a second boot with OS_DISABLE_SIGNUP=true exported for the disabled legs"
         ],
         "knownGaps": [
@@ -1957,9 +1957,9 @@
         "stock boot (the seeded admin exists, so the deployment has an owner): GET /api/v1/auth/config and record features.audiencePosture ('invite_only') and emailPassword.disableSignUp (false) — then confirm the login page offers NO generic sign-up link and /register renders the by-invitation notice (data-testid register-by-invitation — judge the testid and the absent form, not the notice's sentence, whose wording moves between console builds: the step used to quote 'not open on this environment', and the console pin 4016370a reads 'not open on this system') with NO form. The form is offered only where the server would admit the visitor: a visitor bounced from an invitation (/login?redirect=/accept-invitation/ID renders an 'Accept your invitation' card whose 'Create an account and join' link leads to /register; it does not forward there by itself) or a deployment with no owner yet (GET /api/v1/auth/bootstrap-status answers hasOwner false) — objectui decideSignUpOffer (objectui#11691, objectui#11705). The server side is unchanged and DELIBERATE: the posture does not force disableSignUp, because hiding the form outright would dead-end invited users (getPublicConfig comment, auth-manager.ts); the console reads both keys instead",
         "POST /api/v1/auth/sign-up/email directly for an UNINVITED address (the stock /register offers an uninvited visitor no form — step 1): capture the 403 with code SELF_REGISTRATION_CLOSED — a loud, deterministic refusal, NOT a synthetic 200. The sign-up route raises the audience refusal BEFORE better-auth's anti-enumeration shield can swallow a creation-seam 403 into a fake success (auth-manager.ts — the measured black-hole this ordering exists to prevent)",
         "confirm no sys_user row was created for the refused address (admin read)",
-        "carve-out: as admin mint an invitation for a fresh email, then sign up with EXACTLY that email on the same stock boot — admitted (a pending, unexpired sys_invitation trumps the posture; audience-posture.ts)",
+        "carve-out: as admin mint an invitation for a fresh email, then sign up with EXACTLY that email and the invitation's `id` as `invitationId` on the same stock boot — admitted (a pending, unexpired sys_invitation the sign-up presents trumps the posture; presented-invitation.ts). The same email WITHOUT the id answers 403 SELF_REGISTRATION_CLOSED, like an uninvited address",
         "disabled boot (OS_DISABLE_SIGNUP=true): GET /auth/config shows emailPassword.disableSignUp true; navigating to /register bounces to /login preserving ?redirect (RegisterPage's probe, apps/console/src/pages/auth/RegisterPage.tsx) and the login card withholds the register link (LoginPage registerUrl passed undefined, LoginPage.tsx)",
-        "fire POST /api/v1/auth/sign-up/email directly on the disabled boot anyway and capture the server-side refusal, from TWO addresses, because two gates answer and the first one wins: an UNINVITED address is refused first by the audience gate, 403 SELF_REGISTRATION_CLOSED (invite_only), before the toggle is consulted; an INVITED address (an org admin's pending invitation for it) passes the audience gate and reaches the toggle, 400 EMAIL_PASSWORD_SIGN_UP_DISABLED. Only the invited address proves OS_DISABLE_SIGNUP — env wins over config/settings (readDisableSignUpEnv: OS_AUTH_SIGNUP_ENABLED inverts and wins, then OS_DISABLE_SIGNUP — auth-manager.ts; wired, ssoOnly forces it true)",
+        "fire POST /api/v1/auth/sign-up/email directly on the disabled boot anyway and capture the server-side refusal, from TWO addresses, because two gates answer and the first one wins: an UNINVITED address is refused first by the audience gate, 403 SELF_REGISTRATION_CLOSED (invite_only), before the toggle is consulted; an INVITED address (an org admin's pending invitation for it, its `id` sent as `invitationId`) passes the audience gate and reaches the toggle, 400 EMAIL_PASSWORD_SIGN_UP_DISABLED. Only the invited address proves OS_DISABLE_SIGNUP — env wins over config/settings (readDisableSignUpEnv: OS_AUTH_SIGNUP_ENABLED inverts and wins, then OS_DISABLE_SIGNUP — auth-manager.ts; wired, ssoOnly forces it true)",
         "record the posture × outcome table for whichever variants this run's boots covered"
       ],
       "acceptance": [
@@ -1976,9 +1976,9 @@
           "evidence": "the refusal response + the row-absence read"
         },
         {
-          "clause": "the invitation carve-out admits: a sign-up whose email holds a pending, unexpired invitation completes on the same invite_only boot — which is exactly why the register form stays rendered under the closed posture",
+          "clause": "the invitation carve-out admits: a sign-up that presents a pending, unexpired invitation addressed to its email (its `id` as `invitationId`) completes on the same invite_only boot, and the same email without the id is refused SELF_REGISTRATION_CLOSED — which is exactly why the register form stays rendered under the closed posture",
           "oracle": "api",
-          "verify": "invite-member 2xx → the invitee's sign-up 2xx → get-session identifies the new user",
+          "verify": "invite-member 2xx (keep its `id`) → the invitee's sign-up presenting it 2xx → get-session identifies the new user; the same email's sign-up without the id 403 SELF_REGISTRATION_CLOSED",
           "evidence": "the invitation + sign-up + session trace"
         },
         {
@@ -2040,7 +2040,8 @@
           "date": "2026-10-27",
           "change": "steps[0] stops saying the login page forwards an invitation bounce to /register. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the console renders an 'Accept your invitation' card with a 'Create an account and join' link and no automatic forward. No clause changed",
           "ref": "#25807"
-        }
+        },
+        { "revision": 8, "date": "2026-11-08", "change": "The carve-out leg presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the invited registrant's sign-up sends the id invite-member answered as invitationId beside the email (in the carve-out step, the disabled-boot step and acceptance[2]), and the address alone is refused 403 SELF_REGISTRATION_CLOSED like an uninvited one" }
       ]
     },
     {
@@ -2048,7 +2049,7 @@
       "title": "Email verification loop: a challenged sign-up lands a captured verification mail, unverified sign-in is refused EMAIL_NOT_VERIFIED server-side, the link admits, resend works — and the default boot never challenges",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["a fresh registrant (unverified, then verified)", "admin (reads state)", "env owner (configures the verification boot)"],
@@ -2057,17 +2058,17 @@
         "requires": [
           "a VERIFICATION-ENABLED boot — no stock boot challenges. Two ways to arm it: (a) config emailAndPassword.requireEmailVerification:true + emailVerification.sendOnSignUp:true (wired at auth-manager.ts), or (b) a self-registration posture that FORCES requireEmailVerification on — email_domain always, open unless the deployment declared it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config). resolveEmailVerificationRequirement (audience-posture.ts) is the one rule the wiring and the /auth/config mirror both read; assertAudienceConfig refuses an explicit false under email_domain from any source, and under open when only the settings console stored it",
           "an ADMISSIBLE sign-up to feed the loop: on an (a)-style boot the default posture is still invite_only, so either mint a pending invitation for the test address first, or use a (b)-style open-posture boot (which must declare selfRegistrationPermissionSet)",
-          "the verification mail (template auth.verify_email) and its link CAPTURED, not sent — a stock boot sends through the dev `log` transport; the mail is read from its sys_email row (admin GET /api/v1/data/sys_email — body_text / body_html hold the rendered body and its link): the dev `log` transport is not an env switch (EMAIL_TRANSPORT_PROVIDERS is a const list of what the package can build, packages/plugins/plugin-email/src/transports/index.ts) and LogTransport logs only to, subject and hasText/hasHtml — never the body or the link (packages/plugins/plugin-email/src/email-service.ts) — same harness as identity-auth.self-service-password-reset"
+          "the verification mail (template auth.verify_email) and its link CAPTURED, not sent. A stock boot's dev `log` transport does not deliver it (#25060), so arm an SMTP sink first: run plugin-email's in-process fake ESMTP server under tsx (startFakeSmtp, packages/plugins/plugin-email/src/transports/fake-smtp.testkit.ts; a short driver that imports it and prints its port and captured messages), then as the admin PUT /api/settings/mail {provider: 'smtp', smtp_host: '127.0.0.1', smtp_port: PORT, smtp_secure: false, from_email, from_name} (packages/services/service-settings/src/manifests/mail.manifest.ts). The mail is identity mail, so it is recorded in sys_identity_email, not sys_email (IDENTITY_EMAIL_OBJECT, packages/plugins/plugin-email/src/email-log-objects.ts): read it from that row (admin GET /api/v1/data/sys_identity_email — body_text / body_html hold the rendered body and its link). The dev `log` transport is not an env switch (EMAIL_TRANSPORT_PROVIDERS is a const list of what the package can build, packages/plugins/plugin-email/src/transports/index.ts) and LogTransport logs only to, subject and hasText/hasHtml — never the body or the link (packages/plugins/plugin-email/src/email-service.ts) — same harness as identity-auth.self-service-password-reset"
         ],
         "knownGaps": [
           "no stock boot enables verification — the enabled legs need the bespoke config boot above and are blocked(fixture) without it; the default-boot never-challenges leg runs on stock fixtures",
-          "capturing the verification TOKEN means reading the mail's sys_email row (admin GET /api/v1/data/sys_email); a provider that persists no sys_email row blocks the link-admits and resend clauses only"
+          "capturing the verification TOKEN means reading the mail's sys_identity_email row (admin GET /api/v1/data/sys_identity_email) on the SMTP-sink boot of fixtures.requires[2]; a provider that persists no sys_identity_email row blocks the link-admits and resend clauses only"
         ]
       },
       "steps": [
-        "on the verification boot, sign up a fresh admissible address: the console routes to /verify-email-prompt after sign-up (RegisterPage header contract) and the verification mail is sent via template auth.verify_email — capture the link/token from its sys_email row (admin GET /api/v1/data/sys_email; the LogTransport line carries no link) (sendVerificationEmail, auth-manager.ts: template failures THROW into the log rather than silently dropping)",
+        "on the verification boot, sign up a fresh admissible address: the console routes to /verify-email-prompt after sign-up (RegisterPage header contract) and the verification mail is sent via template auth.verify_email — capture the link/token from its sys_identity_email row (admin GET /api/v1/data/sys_identity_email; the LogTransport line carries no link) (sendVerificationEmail, auth-manager.ts: template failures THROW into the log rather than silently dropping)",
         "attempt POST /api/v1/auth/sign-in/email for the unverified user: capture the refusal carrying EMAIL_NOT_VERIFIED, and in the browser confirm the login page redirects that error into /verify-email-prompt (objectui LoginPage.tsx: the onError of its LoginFormCard)",
-        "resend from the prompt page (useAuth().sendVerificationEmail → POST /api/v1/auth/send-verification-email, ledgered auth-route-ledger.ts) and capture the second mail from its own, newer sys_email row",
+        "resend from the prompt page (useAuth().sendVerificationEmail → POST /api/v1/auth/send-verification-email, ledgered auth-route-ledger.ts) and capture the second mail from its own, newer sys_identity_email row",
         "follow the captured link: the console's /verify-email consumes ?token= via GET /api/v1/auth/verify-email?token=… — better-auth serves the route as GET ONLY (a POST answers 404, objectui#11633), and sent WITHOUT callbackURL it answers JSON ({status: true, user: null} once the token verifies — no user object, 401 {code, message} for a garbage or expired one) instead of a 302, which is how the SPA keeps the post-verify UX (VerifyEmailPage.tsx; ledger row GET /api/v1/auth/verify-email) — and renders the success state",
         "sign in again with the same credentials: admitted; get-session identifies the user",
         "feed a garbage/expired token to /verify-email: the page renders its designed error state (named message, retry path), and the user's verification state is unchanged (sign-in still refused)",
@@ -2082,9 +2083,9 @@
           "evidence": "the refused sign-in + the session read"
         },
         {
-          "clause": "sendOnSignUp produces a real mail artifact: the sign-up lands an auth.verify_email templated mail at the log transport containing a working verification link",
+          "clause": "sendOnSignUp produces a real mail artifact: the sign-up lands an auth.verify_email templated mail at the SMTP sink (fixtures.requires[2]) containing a working verification link",
           "oracle": "log",
-          "verify": "the sys_email row the sign-up wrote (to = the address, the auth.verify_email render) carries a tokened verification link in its body (auth-manager.ts)",
+          "verify": "the sys_identity_email row the sign-up wrote (to = the address, the auth.verify_email render) carries a tokened verification link in its body (auth-manager.ts)",
           "evidence": "the captured transport output"
         },
         {
@@ -2096,7 +2097,7 @@
         {
           "clause": "resend issues a fresh working mail: the prompt page's resend lands a second capture whose link also verifies",
           "oracle": "log",
-          "verify": "the second sys_email row after POST /send-verification-email; verify with ITS token first, while the user is still unverified, and record the 200. A token presented after the user is already verified answers a silent 200 {status: true} too — consumed or not, there is no loud already-consumed refusal — so a success after the first verification proves nothing about the token; record that behaviour, do not score it",
+          "verify": "the second sys_identity_email row after POST /send-verification-email; verify with ITS token first, while the user is still unverified, and record the 200. A token presented after the user is already verified answers a silent 200 {status: true} too — consumed or not, there is no loud already-consumed refusal — so a success after the first verification proves nothing about the token; record that behaviour, do not score it",
           "evidence": "the second capture + the follow-up verify response"
         },
         {
@@ -2135,7 +2136,8 @@
         { "revision": 2, "date": "2026-09-28", "change": "restated the forced-verification wording to the shipped rule: email_domain always forces verification on; open forces it on unless the deployment declares it off (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false, or emailAndPassword.requireEmailVerification: false in the stack config); a false stored only through the settings console is refused under open. The (b) fixture, clause 6, the mirror negative and two source notes said every permitting posture forces it; the negative now names the open opt-out boot, which advertises false correctly, as not a FAIL. Steps, oracles and the other clauses are unchanged", "ref": "#20413" },
         { "revision": 3, "date": "2026-10-13", "change": "steps[3], acceptance[2].clause and source[4] name the GET verify-email the console uses (stale step, #23166 C2; parked on #23121, carried by #23169). POST /api/v1/auth/verify-email answers 404 — better-auth serves the route as GET only — and the console's VerifyEmailPage calls GET ?token= without a callbackURL, which answers JSON (objectui#11633, at 1fb1ced36243, still this repo's .objectui-sha). The route ledger already books only the GET row. QA run #23166 verified through GET and passed", "ref": "#23169" },
         { "revision": 4, "date": "2026-10-17", "change": "fixtures.requires[2], knownGaps[1], steps[0], [2] and [3] and acceptance[1].verify, [2].clause and [3].verify re-pointed (checklist-accuracy findings of the identity-auth slice report on #23878 (6216631966)). Three premises had moved: the dev transport logs no body or link, so the mail is captured from its sys_email row; verify-email answers {status: true, user: null}, so the step and clause no longer imply a user object; and a consumed token presented for an already-verified user answers a silent 200, so clause 3's 'or the first's already-consumed state is reported loudly' described a refusal that never happens — the resend is now proven by verifying with the resent token first. Not loosened: the resent mail must still carry a token that verifies", "ref": "#24036" },
-        { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). steps[1] and source[6] cited objectui LoginPage.tsx 346 and 360 in the comma-range spelling (authored in 45397edf53 as the list 339, 346 and 360). At the objectui pin that commit shipped, 9602dc820450, those lines were the onError redirect of EMAIL_NOT_VERIFIED to /verify-email-prompt and the named error copy; at the shipped pin 12dc7b47c340 the redirect sits in the onError of LoginPage.tsx's LoginFormCard, and the copy moved to app-shell's signInRefusalMessages. Both now say so. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" }
+        { "revision": 5, "date": "2026-10-20", "change": "line citations re-pointed — the comma-range spelling that round 7 of wave anchor #24579 named (18.0 sweep; round 7's report 6281433885, out_of_scope_findings[1]). steps[1] and source[6] cited objectui LoginPage.tsx 346 and 360 in the comma-range spelling (authored in 45397edf53 as the list 339, 346 and 360). At the objectui pin that commit shipped, 9602dc820450, those lines were the onError redirect of EMAIL_NOT_VERIFIED to /verify-email-prompt and the named error copy; at the shipped pin 12dc7b47c340 the redirect sits in the onError of LoginPage.tsx's LoginFormCard, and the copy moved to app-shell's signInRefusalMessages. Both now say so. objectui is read at the shipped pin 12dc7b47c340 and cited in prose, because no objectui anchor resolves in this gate. The spelling is what #13786's strip left when it removed only the first range of a ':A,B' list, and the line-citation limb reads only the colon spellings, so no gate caught it. Where the surrounding words still describe the range the strip removed, the new citation names that code too. No clause's assertion changed", "ref": "#24752" },
+        { "revision": 6, "date": "2026-11-08", "change": "fixtures.requires[2], knownGaps[1], steps[0], steps[2], acceptance[1].clause and .verify and acceptance[3].verify re-pointed: the verification mail is identity mail and lives in sys_identity_email, not sys_email, and the dev log transport does not deliver it (#25060), so the item arms an SMTP sink (plugin-email's fake-smtp.testkit.ts under tsx, then PUT /api/settings/mail). Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb), whose runner passed every clause on that recipe. Read at base 4894cfe1", "ref": "#31499" }
       ]
     },
     {

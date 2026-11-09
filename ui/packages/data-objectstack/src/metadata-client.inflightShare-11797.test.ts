@@ -94,7 +94,7 @@ describe('MetadataClient — concurrent identical GETs share one request (object
     await drain();
 
     expect(gets().map((r) => r.url.replace(BASE, ''))).toEqual([
-      '/api/v1/meta/_drafts?packageId=app.crm',
+      '/api/v1/meta/_drafts?package=app.crm',
       '/api/v1/meta/object?package=app.crm',
       '/api/v1/meta/object/crm_account',
     ]);

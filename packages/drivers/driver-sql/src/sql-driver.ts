@@ -294,7 +294,7 @@ import { SqliteSerialisationFacet } from './sql-driver-sqlite-serialisation.js';
 // [cloud#3652 D3] Declared renames: the methods of the same names below hand the bodies what they read (`DeclaredRenameHost`).
 import { DeclaredRenameFacet } from './sql-driver-declared-rename.js';
 import type { DeclaredRenameCarry, DeclaredRenamePlan } from './declared-rename.js';
-import { withOracleFederationClient } from './sql-driver-oracle-dialect.js';
+import { withOracleFederationClient, type OracleUuidBindingRole } from './sql-driver-oracle-dialect.js';
 // [#29520 codemod] The facets' hosts, one per driver, which the static block at the end of the class builds.
 import {
   aggregationHost, bulkOperationsHost, classHeadHost, columnCreationHost, crudHost, databaseHelpersHost,
@@ -318,6 +318,7 @@ export interface SqlDriverStaticsHost {
   readonly DIALECT_CONNECT_TIMEOUT: (typeof SqlDriver)['DIALECT_CONNECT_TIMEOUT'];
   readonly MAX_KEYABLE_VARCHAR_CHARS: (typeof SqlDriver)['MAX_KEYABLE_VARCHAR_CHARS'];
   readonly MAX_VARCHAR_CHARS: (typeof SqlDriver)['MAX_VARCHAR_CHARS'];
+  readonly MSSQL_FEDERATION_CLIENTS: (typeof SqlDriver)['MSSQL_FEDERATION_CLIENTS'];
   readonly MYSQL_EMIT_CLIENTS: (typeof SqlDriver)['MYSQL_EMIT_CLIENTS'];
   readonly MYSQL_ROW_BYTE_BUDGET: (typeof SqlDriver)['MYSQL_ROW_BYTE_BUDGET'];
   readonly MYSQL_TEXT_TEMPORAL_TYPES: (typeof SqlDriver)['MYSQL_TEXT_TEMPORAL_TYPES'];
@@ -927,6 +928,22 @@ export class SqlDriver implements IDataDriver {
   ]);
 
   /**
+   * SQL Server spellings — knex's `mssql` client over the `tedious` binding.
+   *
+   * NOT an emission set, and deliberately named apart from the three above:
+   * SQL Server is served for FEDERATION only (an ADR-0015 external datasource
+   * over tables that already exist). The driver reads and, under the ADR's
+   * double opt-in, writes those tables in T-SQL — `dialectName` answers
+   * `'mssql'` and every read-path construct has a SQL Server arm — but it never
+   * builds or alters a table there: {@link assertDialectEmits} refuses the DDL
+   * path for these clients by name, the same boundary the spec draws when it
+   * refuses a `managed` datasource on the `mssql` driver id.
+   */
+  private static readonly MSSQL_FEDERATION_CLIENTS: ReadonlySet<string> = new Set([
+    'mssql',
+  ]);
+
+  /**
    * The ONE declared extension over the emission sets above: knex clients this
    * driver recognises on the pg WIRE and deliberately does not emit DDL for.
    *
@@ -1028,6 +1045,14 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * Whether the underlying database is Microsoft SQL Server — federation only.
+   * See {@link MSSQL_FEDERATION_CLIENTS}.
+   */
+  protected get isMssql(): boolean {
+    return SqlDriver.MSSQL_FEDERATION_CLIENTS.has(SqlDriver.clientSpelling(this.config));
+  }
+
+  /**
    * [#21227] Whether this dialect's `INSERT … RETURNING *` answers the rows it
    * STORED.
    *
@@ -1039,6 +1064,13 @@ export class SqlDriver implements IDataDriver {
    * True for the SQLite and PostgreSQL families. knex compiles `RETURNING` for
    * both, and the row it answers is the stored one, server-side column defaults
    * included (measured on better-sqlite3 and on live PostgreSQL 16.14).
+   *
+   * True for SQL Server (#31327, federation only). It has no `RETURNING`
+   * either, but knex compiles `returning('*')` on the `mssql` client to
+   * `INSERT … OUTPUT inserted.* VALUES …`, which answers the stored row —
+   * column defaults included — in the same round trip. The doors pass knex's
+   * `includeTriggerModifications`, which routes the OUTPUT through a temp
+   * table: without `INTO`, SQL Server refuses it on a table with a trigger.
    *
    * False for the MySQL family, which has no `RETURNING`. knex's MySQL compiler
    * drops the clause with a `.returning() is not supported by mysql` warning and
@@ -1281,6 +1313,38 @@ export class SqlDriver implements IDataDriver {
    */
   protected nondeterministicPagingWarned = new Set<string>();
 
+  /**
+   * SQL Server (#31327): the federated table's own single-column primary key,
+   * as the LOGICAL field it maps to, per external object — or `null` when the
+   * table has none (a heap, a composite key, a view). Filled lazily by
+   * {@link primeMssqlPagingKey} the first time a page of the object is read;
+   * {@link paginationTieBreaker} answers from it. A federated table on the
+   * other dialects keeps the `null` it always had: this is the dialect whose
+   * `OFFSET … FETCH` is a syntax error without an ORDER BY, so the question
+   * "which column orders a page" has to have an answer here.
+   */
+  protected mssqlPagingKeyByObject = new Map<string, string | null>();
+
+  /**
+   * Oracle (#31390): per external object, the LOGICAL fields whose remote
+   * column is a `RAW(16)` uuid, read from the catalog by
+   * {@link primeOracleRawUuidColumns} the first time the object is read or
+   * written. A field here binds as `HEXTORAW(?)` ({@link oracleUuidBinding});
+   * an object with no entry binds every value as before. Empty on every other
+   * dialect.
+   */
+  protected oracleRawUuidFieldsByObject = new Map<string, ReadonlySet<string>>();
+
+  /**
+   * SQL Server (#31395): the REMOTE columns of a federated table that the
+   * remote catalog reports as `uniqueidentifier`, per object. Filled lazily by
+   * {@link primeMssqlGuidColumns} the first time a read compiles a text
+   * operator (`$contains` and its siblings, `$like` / `$ilike`) against the
+   * object; the filter compiler reads it to match such a column as its
+   * lower-case text. An object with no entry is matched as before.
+   */
+  protected mssqlGuidColumnsByObject = new Map<string, ReadonlySet<string>>();
+
   /** Deferred-DDL mode (#3917) — see {@link setDeferredDdl}. */
   protected deferredDdl = false;
 
@@ -1436,6 +1500,16 @@ export class SqlDriver implements IDataDriver {
       ...[...SqlDriver.MYSQL_EMIT_CLIENTS].map(
         (c): [string, { key: string; urlKey: string }] =>
           [c, { key: 'connectTimeout', urlKey: 'uri' }],
+      ),
+      // knex's `mssql` client reads `connectionTimeout` off the connection
+      // settings and hands it to tedious as `connectTimeout` (its own default
+      // is 15s — the pool backstop's value, so without this row the two
+      // would tie and the pool's misleading message would win). The URL slot
+      // is never used: the datasource factory builds SQL Server's connection
+      // as an object, because tedious reads no connection-string grammar.
+      ...[...SqlDriver.MSSQL_FEDERATION_CLIENTS].map(
+        (c): [string, { key: string; urlKey: string }] =>
+          [c, { key: 'connectionTimeout', urlKey: 'connectionString' }],
       ),
     ]);
 
@@ -1735,7 +1809,7 @@ export class SqlDriver implements IDataDriver {
     return CrudFacet.find.call(crudHost.of(this), object, query, options);
   }
 
-  private findRows(
+  private async findRows(
     object: string,
     query: DriverQuery,
     options?: DriverOptions,
@@ -1743,6 +1817,97 @@ export class SqlDriver implements IDataDriver {
   ): Promise<any[]> {
     // [#29520 codemod] The body moved to `sql-driver-crud.ts`, its docblock with it (see `CrudHost`).
     return CrudFacet.findRows.call(crudHost.of(this), object, query, options, singleRowLookup);
+  }
+
+  /**
+   * SQL Server (#31327): learn, once per object, which column a page of a
+   * FEDERATED table can be ordered by — the table's single-column primary key,
+   * read from the remote catalog (`sys.indexes`) and mapped back through the
+   * object's `external.columnMap` to the field that reads it.
+   *
+   * Why the driver reads it rather than being told: an external object's
+   * binding declares no key, and SQL Server refuses `OFFSET n ROWS` without an
+   * `ORDER BY` outright (it is not merely nondeterministic there, as it is on
+   * the other dialects). The card's rule is "use the key when none is given",
+   * and the catalog is where the key is.
+   *
+   * A table with no single-column key (a heap, a composite key, a view)
+   * records `null`: the read then keeps the nondeterministic-paging warning
+   * {@link orderKeysFor} already gives, and the statement is ordered by
+   * `(SELECT NULL)` only so SQL Server will accept the `OFFSET`. A failed
+   * catalog read records nothing, so the next read asks again.
+   */
+  protected async primeMssqlPagingKey(object: string): Promise<void> {
+    return FieldMappingFacet.primeMssqlPagingKey.call(fieldMappingHost.of(this), object);
+  }
+
+  /**
+   * Oracle (#31390): learn, once per object, which of a FEDERATED table's
+   * columns are `RAW(16)` uuids — read from the remote catalog
+   * (`oracleRawUuidColumns`) and mapped back through the object's
+   * `external.columnMap` to the fields that read them.
+   *
+   * Why the driver reads it rather than being told: nothing an author writes
+   * names the physical type. A `lookup` (or `text`) field is the exact pairing
+   * for a `VARCHAR2` uuid column and a `RAW(16)` one alike, and only the second
+   * needs its comparands and written values bound through `HEXTORAW`. The value
+   * is never the evidence: a uuid-shaped string in a text column stays text.
+   *
+   * Recorded once per object, so a read costs the catalog one statement for
+   * the object's lifetime in this driver (re-registering the object forgets
+   * it). A failed catalog read records nothing: the statement is then bound as
+   * before, and the next read asks again. A no-op on every other dialect, and
+   * for an object that was never registered as external.
+   */
+  protected async primeOracleRawUuidColumns(object: string): Promise<void> {
+    return FieldMappingFacet.primeOracleRawUuidColumns.call(fieldMappingHost.of(this), object);
+  }
+
+  /** The catalog read behind {@link primeOracleRawUuidColumns}: the remote table's `RAW(16)` column names. */
+  protected readOracleRawUuidColumns(remoteTable: string, remoteSchema: string | undefined): Promise<string[]> {
+    return FieldMappingFacet.readOracleRawUuidColumns.call(fieldMappingHost.of(this), remoteTable, remoteSchema);
+  }
+
+  /**
+   * Oracle (#31390): `value` as bound against `field` of `object` — through
+   * `HEXTORAW(?)` when the catalog reported the field's column as a `RAW(16)`
+   * uuid ({@link primeOracleRawUuidColumns}), refused when it is not uuid text
+   * (`INVALID_FILTER` for a comparand, `VALIDATION_ERROR` for a written value).
+   * Returned untouched for any other column, a null, and on every other
+   * dialect.
+   */
+  protected oracleUuidBinding(
+    object: string | null | undefined,
+    field: string,
+    value: unknown,
+    role: OracleUuidBindingRole,
+  ): unknown {
+    return FilterHelpersFacet.oracleUuidBinding.call(filterHelpersHost.of(this), object, field, value, role);
+  }
+
+  /**
+   * SQL Server (#31395): learn, once per object, which of a federated table's
+   * columns are `uniqueidentifier`, read from the remote catalog
+   * (`INFORMATION_SCHEMA.COLUMNS`), before a read compiles a text operator
+   * against it.
+   *
+   * Why the driver reads it rather than being told: a federated object
+   * declares a `uniqueidentifier` column as a `text` (or `lookup`) field, so
+   * nothing in the binding says the column is a GUID, and the comparand's shape
+   * is no evidence of the column's type. SQL Server renders a GUID as
+   * upper-case text while this driver reads one back lower-case
+   * (`lowerCaseGuids`), so a substring or pattern match must know which
+   * columns to match as their lower-case text, or a fragment copied from a
+   * read matches nothing.
+   *
+   * Asked only when `where` holds a text operator, for the object and for every
+   * composed `ReadableIds` leaf's object in it (their subqueries compile the
+   * same operators against their own tables). A failed catalog read records
+   * nothing, so the next read asks again; until then the columns are matched as
+   * before.
+   */
+  protected async primeMssqlGuidColumns(object: string, where: unknown): Promise<void> {
+    return FieldMappingFacet.primeMssqlGuidColumns.call(fieldMappingHost.of(this), object, where);
   }
 
   /**
@@ -2157,9 +2322,11 @@ export class SqlDriver implements IDataDriver {
     // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
     const readKnex = () => this.knex;
     const readSequencesHasKeyHash = () => this.sequencesHasKeyHash;
+    const readIsMysql = () => this.isMysql;
     const host: ThisParameterType<typeof getNextSequenceValue> = {
       attemptWithoutPoisoning: (...a) => this.attemptWithoutPoisoning(...a),
       ensureSequencesTable: (...a) => this.ensureSequencesTable(...a),
+      get isMysql() { return readIsMysql(); },
       get knex() { return readKnex(); },
       resolveSequenceTenantId: (...a) => this.resolveSequenceTenantId(...a),
       scanMaxNumericTail: (...a) => this.scanMaxNumericTail(...a),
@@ -4252,6 +4419,7 @@ export class SqlDriver implements IDataDriver {
     const readNumericFields = () => this.numericFields;
     const readNumericValueFields = () => this.numericValueFields;
     const readObjectByPhysicalTable = () => this.objectByPhysicalTable;
+    const readOracleRawUuidFieldsByObject = () => this.oracleRawUuidFieldsByObject;
     const readPhysicalSchemaByObject = () => this.physicalSchemaByObject;
     const readPhysicalTableByObject = () => this.physicalTableByObject;
     const readTenantFieldByTable = () => this.tenantFieldByTable;
@@ -4274,6 +4442,7 @@ export class SqlDriver implements IDataDriver {
       get numericFields() { return readNumericFields(); },
       get numericValueFields() { return readNumericValueFields(); },
       get objectByPhysicalTable() { return readObjectByPhysicalTable(); },
+      get oracleRawUuidFieldsByObject() { return readOracleRawUuidFieldsByObject(); },
       get physicalSchemaByObject() { return readPhysicalSchemaByObject(); },
       get physicalTableByObject() { return readPhysicalTableByObject(); },
       get tenantFieldByTable() { return readTenantFieldByTable(); },
@@ -5640,7 +5809,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectIndexes> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -5911,7 +6082,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectSchema> = {
+      get isMssql() { return readIsMssql(); },
       get dialectName() { return readDialectName(); },
       introspectColumns: (...a) => this.introspectColumns(...a),
       introspectForeignKeys: (...a) => this.introspectForeignKeys(...a),
@@ -6987,9 +7160,9 @@ export class SqlDriver implements IDataDriver {
     return FilterHelpersFacet.compileFilters.call(filterHelpersHost.of(this), builder, filters, options);
   }
 
-  private applyContainsLike(builder: any, method: string, field: string, value: unknown): void {
+  private applyContainsLike(builder: any, method: string, field: string, value: unknown, guidColumn = false): void {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts`, its docblock with it (see `FilterHelpersHost`).
-    return FilterHelpersFacet.applyContainsLike.call(filterHelpersHost.of(this), builder, method, field, value);
+    return FilterHelpersFacet.applyContainsLike.call(filterHelpersHost.of(this), builder, method, field, value, guidColumn);
   }
 
   /**
@@ -7025,6 +7198,7 @@ export class SqlDriver implements IDataDriver {
     field: string,
     value: unknown,
     negate: boolean,
+    subtree?: unknown,
   ): boolean {
     // [#25521 cut 16] The body moved to `sql-driver-predicate-emitters.ts` (see `PredicateEmitterHost`).
     const readDialectName = () => this.dialectName;
@@ -7033,7 +7207,7 @@ export class SqlDriver implements IDataDriver {
       get dialectName() { return readDialectName(); },
       isJsonColumn: (...a) => this.isJsonColumn(...a),
     };
-    return applyJsonMembership.call(host, builder, method, table, localField, field, value, negate);
+    return applyJsonMembership.call(host, builder, method, table, localField, field, value, negate, subtree);
   }
 
   /**
@@ -7130,13 +7304,14 @@ export class SqlDriver implements IDataDriver {
     shape: TextMatchShape,
     negate = false,
     fold = false,
+    guidColumn = false,
   ): void {
     // [#25521 cut 16] The body moved to `sql-driver-predicate-emitters.ts` (see `PredicateEmitterHost`).
     const readDialectName = () => this.dialectName;
     const host: ThisParameterType<typeof applyLike> = {
       get dialectName() { return readDialectName(); },
     };
-    return applyLike.call(host, builder, method, field, value, shape, negate, fold);
+    return applyLike.call(host, builder, method, field, value, shape, negate, fold, guidColumn);
   }
 
   /**
@@ -7155,13 +7330,14 @@ export class SqlDriver implements IDataDriver {
     field: string,
     pattern: string,
     fold: boolean,
+    guidColumn = false,
   ): void {
     // [#25521 cut 16] The body moved to `sql-driver-predicate-emitters.ts` (see `PredicateEmitterHost`).
     const readDialectName = () => this.dialectName;
     const host: ThisParameterType<typeof applyLikePattern> = {
       get dialectName() { return readDialectName(); },
     };
-    return applyLikePattern.call(host, builder, method, field, pattern, fold);
+    return applyLikePattern.call(host, builder, method, field, pattern, fold, guidColumn);
   }
 
   /**
@@ -7522,6 +7698,12 @@ export class SqlDriver implements IDataDriver {
    * by-id doors address), so that column orders its pages too: unkeyed ties
    * may reshuffle between executions, and a page walk then repeats and loses
    * rows.
+   *
+   * A second is not a guess either (#31327): on SQL Server, when the binding
+   * names no key, the table's own single-column primary key as its catalog
+   * reports it (`primeMssqlPagingKey`, mapped through the binding's
+   * `columnMap`). SQL Server's `OFFSET … FETCH` needs an ORDER BY, so this is
+   * what an unsorted page of a federated table is ordered by.
    *
    * Returns the LOGICAL field name; the call site maps it to a physical column
    * like any other sort key.
@@ -8756,7 +8938,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectColumnOrder> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -8776,7 +8960,9 @@ export class SqlDriver implements IDataDriver {
     // [#25521 cut 1] The body moved to `sql-driver-introspection.ts` (see `IntrospectionHost`).
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectColumns> = {
+      get isMssql() { return readIsMssql(); },
       introspectColumnOrder: (...a) => this.introspectColumnOrder(...a),
       get isSqlite() { return readIsSqlite(); },
       get knex() { return readKnex(); },
@@ -8809,7 +8995,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectForeignKeys> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -8847,7 +9035,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectPrimaryKeys> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -8924,7 +9114,9 @@ export class SqlDriver implements IDataDriver {
     const readIsPostgres = () => this.isPostgres;
     const readIsSqlite = () => this.isSqlite;
     const readKnex = () => this.knex;
+    const readIsMssql = () => this.isMssql;
     const host: ThisParameterType<typeof introspectUniqueConstraints> = {
+      get isMssql() { return readIsMssql(); },
       get isMysql() { return readIsMysql(); },
       get isPostgres() { return readIsPostgres(); },
       get isSqlite() { return readIsSqlite(); },
@@ -8943,6 +9135,7 @@ export class SqlDriver implements IDataDriver {
       DIALECT_CONNECT_TIMEOUT: { get: () => SqlDriver.DIALECT_CONNECT_TIMEOUT },
       MAX_KEYABLE_VARCHAR_CHARS: { get: () => SqlDriver.MAX_KEYABLE_VARCHAR_CHARS },
       MAX_VARCHAR_CHARS: { get: () => SqlDriver.MAX_VARCHAR_CHARS },
+      MSSQL_FEDERATION_CLIENTS: { get: () => SqlDriver.MSSQL_FEDERATION_CLIENTS },
       MYSQL_EMIT_CLIENTS: { get: () => SqlDriver.MYSQL_EMIT_CLIENTS },
       MYSQL_ROW_BYTE_BUDGET: { get: () => SqlDriver.MYSQL_ROW_BYTE_BUDGET },
       MYSQL_TEXT_TEMPORAL_TYPES: { get: () => SqlDriver.MYSQL_TEXT_TEMPORAL_TYPES },
@@ -8989,10 +9182,14 @@ export class SqlDriver implements IDataDriver {
       foldEmptyAggregateAnswers: (...a) => driver.foldEmptyAggregateAnswers(...a),
       get fractionalNumericFields() { return driver.fractionalNumericFields; },
       get getBuilder() { return driver.getBuilder.bind(driver); },
+      get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       get knex() { return driver.knex; },
       mapAggregateFunc: (...a) => driver.mapAggregateFunc(...a),
       get numericFields() { return driver.numericFields; },
       presentReadColumns: (...a) => driver.presentReadColumns(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
@@ -9010,8 +9207,13 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
       get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
+      get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
       get knex() { return driver.knex; },
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       resyncSequenceToDataMax: (...a) => driver.resyncSequenceToDataMax(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
@@ -9030,6 +9232,7 @@ export class SqlDriver implements IDataDriver {
       buildDateBucketExpr: (...a) => driver.buildDateBucketExpr(...a),
       get config() { return driver.config; },
       get isMysql() { return driver.isMysql; },
+      get isMssql() { return driver.isMssql; },
       get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
@@ -9078,10 +9281,16 @@ export class SqlDriver implements IDataDriver {
       get getBuilder() { return driver.getBuilder.bind(driver); },
       injectTenantOnInsert: (...a) => driver.injectTenantOnInsert(...a),
       get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
+      get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       orderKeysFor: (...a) => driver.orderKeysFor(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeMssqlPagingKey: (...a) => driver.primeMssqlPagingKey(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readBackInsertedRows: (...a) => driver.readBackInsertedRows(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
       resolveTenantField: (...a) => driver.resolveTenantField(...a),
@@ -9153,16 +9362,31 @@ export class SqlDriver implements IDataDriver {
       coercionKey: (...a) => driver.coercionKey(...a),
       distinctBackendFault: (...a) => driver.distinctBackendFault(...a),
       get getBuilder() { return driver.getBuilder.bind(driver); },
+      get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       presentReadValue: (...a) => driver.presentReadValue(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       readPresentationKind: (...a) => driver.readPresentationKind(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
     }));
     fieldMappingHost.install((driver) => ({
+      get columnFieldByObject() { return driver.columnFieldByObject; },
       get fieldColumnByObject() { return driver.fieldColumnByObject; },
+      introspectColumns: (...a) => driver.introspectColumns(...a),
+      introspectPrimaryKeys: (...a) => driver.introspectPrimaryKeys(...a),
+      get isOracle() { return driver.isOracle; },
+      get knex() { return driver.knex; },
       get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
+      get mssqlGuidColumnsByObject() { return driver.mssqlGuidColumnsByObject; },
+      get mssqlPagingKeyByObject() { return driver.mssqlPagingKeyByObject; },
       get nondeterministicPagingWarned() { return driver.nondeterministicPagingWarned; },
+      get oracleRawUuidFieldsByObject() { return driver.oracleRawUuidFieldsByObject; },
       paginationTieBreaker: (...a) => driver.paginationTieBreaker(...a),
+      get physicalSchemaByObject() { return driver.physicalSchemaByObject; },
+      get physicalTableByObject() { return driver.physicalTableByObject; },
+      readOracleRawUuidColumns: (...a) => driver.readOracleRawUuidColumns(...a),
     }));
     filterHelpersHost.install((driver) => ({
       applyContainsLike: (...a) => driver.applyContainsLike(...a),
@@ -9188,21 +9412,26 @@ export class SqlDriver implements IDataDriver {
       get datetimeFields() { return driver.datetimeFields; },
       filterColumnExpr: (...a) => driver.filterColumnExpr(...a),
       isJsonColumn: (...a) => driver.isJsonColumn(...a),
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
       get isOracle() { return driver.isOracle; },
       isNonTextColumn: (...a) => driver.isNonTextColumn(...a),
       get isSqlite() { return driver.isSqlite; },
       jsonColumnFieldClass: (...a) => driver.jsonColumnFieldClass(...a),
       get jsonFields() { return driver.jsonFields; },
+      get knex() { return driver.knex; },
       logWithheldFilterDiagnostic: (...a) => driver.logWithheldFilterDiagnostic(...a),
       get logger() { return driver.logger; },
       get managedObjectFields() { return driver.managedObjectFields; },
       mapSortField: (...a) => driver.mapSortField(...a),
       get mediaFields() { return driver.mediaFields; },
+      get mssqlGuidColumnsByObject() { return driver.mssqlGuidColumnsByObject; },
       needsLegacyDatetimeRepair: (...a) => driver.needsLegacyDatetimeRepair(...a),
       needsLegacyTimeRepair: (...a) => driver.needsLegacyTimeRepair(...a),
       get numericFields() { return driver.numericFields; },
       get objectByPhysicalTable() { return driver.objectByPhysicalTable; },
+      get oracleRawUuidFieldsByObject() { return driver.oracleRawUuidFieldsByObject; },
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       presentReadValue: (...a) => driver.presentReadValue(...a),
       get readableIdsDriverName() { return driver.readableIdsDriverName; },
       get readableIdsRefusalLog() { return driver.readableIdsRefusalLog; },
@@ -9251,6 +9480,7 @@ export class SqlDriver implements IDataDriver {
     }));
     managedDriftHost.install((driver) => ({
       introspectIndexes: (...a) => driver.introspectIndexes(...a),
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
       get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
@@ -9265,11 +9495,15 @@ export class SqlDriver implements IDataDriver {
       applyTenantScope: (...a) => driver.applyTenantScope(...a),
       get config() { return driver.config; },
       get getBuilder() { return driver.getBuilder.bind(driver); },
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
+      get isOracle() { return driver.isOracle; },
       get isPostgres() { return driver.isPostgres; },
       get isSqlite() { return driver.isSqlite; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
     }));
     rotationHost.install((driver) => ({
       assertSchemaMutable: (...a) => driver.assertSchemaMutable(...a),
@@ -9374,8 +9608,10 @@ export class SqlDriver implements IDataDriver {
       maxAutonumberCounter: (...a) => driver.maxAutonumberCounter(...a),
       mergeLandsInWrittenOrganization: (...a) => driver.mergeLandsInWrittenOrganization(...a),
       observedUpdatedAtColumn: (...a) => driver.observedUpdatedAtColumn(...a),
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       get organizationObjectRegistered() { return driver.organizationObjectRegistered; },
       get physicalTableByObject() { return driver.physicalTableByObject; },
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
       remoteColumn: (...a) => driver.remoteColumn(...a),
       resolveSequenceTenantId: (...a) => driver.resolveSequenceTenantId(...a),
       resolveTenantField: (...a) => driver.resolveTenantField(...a),
@@ -9402,6 +9638,7 @@ export class SqlDriver implements IDataDriver {
       get dateFields() { return driver.dateFields; },
       get datetimeFields() { return driver.datetimeFields; },
       get fileColumnsMoved() { return driver.fileColumnsMoved; },
+      get isMssql() { return driver.isMssql; },
       get isMysql() { return driver.isMysql; },
       get isOracle() { return driver.isOracle; },
       get isSqlite() { return driver.isSqlite; },
@@ -9409,6 +9646,8 @@ export class SqlDriver implements IDataDriver {
       get mediaFields() { return driver.mediaFields; },
       get numericFields() { return driver.numericFields; },
       get numericValueFields() { return driver.numericValueFields; },
+      get oracleRawUuidFieldsByObject() { return driver.oracleRawUuidFieldsByObject; },
+      oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),
       storageDatetimeValue: (...a) => driver.storageDatetimeValue(...a),
       get timeFields() { return driver.timeFields; },
       toDateOnly: (...a) => driver.toDateOnly(...a),
@@ -9431,8 +9670,12 @@ export class SqlDriver implements IDataDriver {
       buildWindowFunction: (...a) => driver.buildWindowFunction(...a),
       formatOutput: (...a) => driver.formatOutput(...a),
       get getBuilder() { return driver.getBuilder.bind(driver); },
+      get isMssql() { return driver.isMssql; },
+      get isOracle() { return driver.isOracle; },
       get knex() { return driver.knex; },
       mapSortField: (...a) => driver.mapSortField(...a),
+      primeMssqlGuidColumns: (...a) => driver.primeMssqlGuidColumns(...a),
+      primeOracleRawUuidColumns: (...a) => driver.primeOracleRawUuidColumns(...a),
     }));
   }
 }

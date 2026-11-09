@@ -58,7 +58,7 @@ function heldFetch() {
   return { held, reads };
 }
 
-const CRM = '/api/v1/meta/_drafts?packageId=app.crm';
+const CRM = '/api/v1/meta/_drafts?package=app.crm';
 const draft = (name: string) => ({ type: 'object', name, packageId: 'app.crm' });
 
 /**

@@ -22,6 +22,7 @@ import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } f
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { AuthSessionApi, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { PrimaryDatasourceVerdict } from '@objectstack/objectql';
+import { declaresMultiNode, probeClusterDriverHealth, type ClusterDriverHealth } from '@objectstack/service-cluster';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import type { ServiceInfo } from '@objectstack/spec/api';
 // [#20477] The caller's VETTED organization, read by the one helper `RestServer`
@@ -372,6 +373,23 @@ type PrimaryDatasourceReading =
     | { readonly kind: 'unresolved'; readonly reason: string };
 
 /**
+ * A `/ready` 200 body with the cluster driver's reading folded in (#31601).
+ *
+ * With no reading the body is returned AS GIVEN — the same object, no key
+ * added — so a deployment the reading does not apply to (single node, or no
+ * redis cluster driver) answers byte-identically to before. With one, the body
+ * gains a `cluster` entry, and an unreachable store turns `status` into
+ * `'degraded'` (PM decision D4: still 200 — see `clusterReadiness`).
+ */
+function withClusterReading<T extends { status: string }>(
+    body: T,
+    cluster: ClusterDriverHealth | undefined,
+): T | (Omit<T, 'status'> & { status: string; cluster: ClusterDriverHealth }) {
+    if (!cluster) return body;
+    return { ...body, status: cluster.reachable ? body.status : 'degraded', cluster };
+}
+
+/**
  * [#16402] What {@link HttpDispatcher.classifyService} answers — the classified
  * service lookup's three non-fault outcomes.
  *
@@ -445,6 +463,16 @@ export class HttpDispatcher {
      */
     private driverHealthMemo?: DriverReadiness & { at: number };
     private static readonly DRIVER_HEALTH_TTL_MS = 1_000;
+    /**
+     * Short-TTL memo for `/ready`'s cluster-driver probe (#31601), on the same
+     * TTL and for the same reason as {@link driverHealthMemo}: a replica polled
+     * every few seconds must not become a Redis round-trip per poll, and a
+     * store that is down must not cost every concurrent probe its own timeout.
+     * `reading` is `undefined` when the probe does not apply (see
+     * {@link clusterReadiness}) — memoized too, so the answer "not declared"
+     * costs nothing either.
+     */
+    private clusterHealthMemo?: { at: number; reading: ClusterDriverHealth | undefined };
     /**
      * When `true`, scoped data-plane routes enforce a
      * `sys_environment_member` lookup and return 403 for non-members.
@@ -844,7 +872,8 @@ export class HttpDispatcher {
                 }
                 const { unhealthy, primary } = await this.driverReadiness();
                 if (unhealthy.length === 0) {
-                    return { handled: true, response: this.success({ status: 'ready', state }) };
+                    const cluster = await this.clusterReadiness();
+                    return { handled: true, response: this.success(withClusterReading({ status: 'ready', state }, cluster)) };
                 }
                 // #13408: drain only when the PRIMARY datasource is the one
                 // that is down — or when we could not establish which
@@ -854,17 +883,18 @@ export class HttpDispatcher {
                 // reading (a resolved primary, absent from the unhealthy set),
                 // never the absence of a negative one.
                 if (primary?.kind === 'resolved' && !unhealthy.includes(primary.datasource)) {
+                    const cluster = await this.clusterReadiness();
                     return {
                         handled: true,
                         // The healthy 200 body is untouched — `degraded` appears
                         // only on this branch, so a probe consumer that never
                         // sees a degraded secondary sees exactly what it saw
                         // before #13408.
-                        response: this.success({
+                        response: this.success(withClusterReading({
                             status: 'ready',
                             state,
                             degraded: { drivers: unhealthy, primaryDatasource: primary.datasource },
-                        }),
+                        }, cluster)),
                     };
                 }
                 // Byte-identical to the pre-#13408 envelope, deliberately: this
@@ -942,6 +972,51 @@ export class HttpDispatcher {
             ? { unhealthy }
             : { unhealthy, primary: this.primaryDatasource() };
         this.driverHealthMemo = { at: Date.now(), ...reading };
+        return reading;
+    }
+
+    /**
+     * The cluster driver's reachability, for `/ready` (#31601) — or `undefined`
+     * when the reading does not apply, which leaves the body exactly as it was.
+     *
+     * Applies only behind BOTH halves of the cloud epic #3814 R3 ruling, read
+     * verbatim: 「同意：每张卡都只在"声明多副本并接上 Redis 驱动"时才生效」 —
+     * the operator DECLARES a multi-node deployment (`declaresMultiNode`, the
+     * same predicate the split-brain guard and the shared cache read), AND the
+     * registered `cluster` service runs the `redis` driver and offers its
+     * connection. A single-node boot never resolves the `cluster` service here,
+     * so its readiness probe does exactly the work it did before.
+     *
+     * ⭐ Reports, never drains — PM decision D4: an unreachable store answers
+     * 200 with `status: 'degraded'`, not 503. Every replica loses a shared store
+     * at the same moment, so a 503 here would take EVERY replica out of
+     * rotation and turn a degraded cluster into a total outage while the
+     * database, still the source of truth, can serve. Which is also why it is
+     * consulted only on the 200 branches: the booting / stopping 503 and the
+     * primary-datasource 503 are reached before it and stay byte-identical.
+     *
+     * Never throws: `probeClusterDriverHealth` answers every probe failure as a
+     * reading, and a `cluster` lookup that throws reads as "not applicable" —
+     * the declaration is still loud at boot, where the split-brain guard and
+     * the shared cache read it.
+     */
+    private async clusterReadiness(): Promise<ClusterDriverHealth | undefined> {
+        const memo = this.clusterHealthMemo;
+        if (memo && Date.now() - memo.at < HttpDispatcher.DRIVER_HEALTH_TTL_MS) {
+            return memo.reading;
+        }
+        let reading: ClusterDriverHealth | undefined;
+        if (declaresMultiNode(typeof process !== 'undefined' ? process.env : {})) {
+            let cluster: unknown;
+            try {
+                // [#5155] Host kernel — see the `/ready` handler.
+                cluster = (this.defaultKernel as any)?.getService?.('cluster');
+            } catch {
+                cluster = undefined;
+            }
+            reading = await probeClusterDriverHealth(cluster, 'redis');
+        }
+        this.clusterHealthMemo = { at: Date.now(), reading };
         return reading;
     }
 
@@ -1593,6 +1668,36 @@ export class HttpDispatcher {
         // `domains/automation-hooks.test.ts`.
         if (matchInboundHookRoute(path, method)) return null;
 
+        return this.judgeEnvironmentMembership(context);
+    }
+
+    /**
+     * The environment-membership check for a request a host serves OUTSIDE
+     * `dispatch()`: the declarative-endpoint step on the dispatcher plugin's
+     * fallback seam, which resolves the request through
+     * {@link resolveRequestScope} and so owes it the same check `dispatch()`
+     * runs after that resolution. A `403 PROJECT_MEMBERSHIP_REQUIRED` answer
+     * for a caller who is not a member of the resolved environment, else
+     * `null`; off when the host turned the check off.
+     *
+     * None of `dispatch()`'s path carve-outs apply: they name built-in routes
+     * (`/auth`, share links, the approval action page, the inbound hook), and
+     * a declared endpoint is none of them, whatever its path spells.
+     */
+    async environmentMembershipRefusal(
+        context: HttpProtocolContext,
+    ): Promise<{ status: number; body: any } | null> {
+        if (!this.enforceMembership) return null;
+        return this.judgeEnvironmentMembership(context);
+    }
+
+    /**
+     * The membership judgment both checks share: the caller this request
+     * resolved, against `sys_environment_member` for `context.environmentId`.
+     */
+    private async judgeEnvironmentMembership(
+        context: HttpProtocolContext,
+    ): Promise<{ status: number; body: any } | null> {
         const environmentId = context.environmentId;
         if (!environmentId) return null; // Unscoped legacy routes fall through.
 
@@ -1638,7 +1743,8 @@ export class HttpDispatcher {
         // without a cookie beside it) is the one judged, in the organization
         // its resolution vetted; which credential that was is the one reading
         // the api-action forward takes too (`admittingCredentialKind`). A
-        // session principal is judged by the session read above, as before.
+        // session principal is the user the session read above names, in the
+        // organization its resolution vetted (below).
         const resolved = context.executionContext;
         const admittedBy = admittingCredentialKind(context);
         if ((admittedBy === 'api_key' || admittedBy === 'oauth') && resolved?.userId) {
@@ -1647,6 +1753,13 @@ export class HttpDispatcher {
         } else if (sessionUnread) {
             // Auth resolution failed — do not block the request on RBAC.
             return null;
+        } else {
+            // A session principal acts in the organization its resolution
+            // vetted (`resolveAuthzContext`), the one every other door reads
+            // (`resolveActiveOrganizationId`).
+            activeOrganizationId = resolved?.userId !== undefined && resolved.userId === userId
+                ? resolved.tenantId
+                : undefined;
         }
 
         if (!userId) return null; // Anonymous requests — upstream auth will decide.

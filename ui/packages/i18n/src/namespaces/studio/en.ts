@@ -146,7 +146,7 @@ const STUDIO_EN: Record<string, string> = {
   'perm.cel.type.unknown': 'Unknown',
   'perm.cel.type.unknownHint':
     'the engine cannot prove a single type. Wrap operands in double() / int() / string() to pin it — only proven-Number formulas are offered as dataset measures.',
-  'perm.cel.saveBlocked': 'Fix the CEL syntax errors before saving.',
+  'perm.cel.saveBlocked': 'Fix the expression errors before saving.',
   // The editor's inspector-blocked Save title (objectui#6900, ruling 5831744213):
   // that channel carries more than CEL faults, so its copy names no one kind.
   'perm.inspector.saveBlocked': 'Fix the issues shown in the inspector before saving.',
@@ -500,6 +500,14 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.currency.createCodeField': 'Create currency field',
   'designer.field.currency.codeFieldLabel': 'Currency',
   'designer.field.currency.recordHint': 'Lists the text fields of this object whose value domain is ISO 4217 currency. Each record stores its own code there; the amount shows in that currency.',
+  'designer.field.currency.homeAmount': 'Home currency amount',
+  'designer.field.currency.homeField': 'Home amount field',
+  'designer.field.currency.homeFieldNone': '— Not stored —',
+  'designer.field.currency.rateDate': 'Document date',
+  'designer.field.currency.rateDateNone': '— Pick a date field —',
+  'designer.field.currency.rateField': 'Rate field',
+  'designer.field.currency.rateFieldNone': '— Pick a number field —',
+  'designer.field.currency.homeAmountHint': "When a record is saved, the server converts this amount into the organization's home currency at the exchange rate in force on the document date, and stores the result and the rate it used. Lists the read-only fields that can hold them: a dynamic-mode currency field for the amount, a number field for the rate.",
   // Object basics (no-selection default inspector)
   'designer.object.kind': 'Object',
   'designer.object.section.basic': 'Basic info',
@@ -2031,6 +2039,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.datasource.schemaModeExternalHint': 'Choose this to read a database that already holds your data. ObjectStack reads its tables as they are and never creates or changes them. After saving, Sync objects brings its tables in as objects, whose records are read-only.',
   'engine.datasource.schemaModeManagedHint': 'ObjectStack creates and changes this database’s tables to fit the objects stored in it. Use it only for an empty database set aside for ObjectStack: in an existing database, storing an object adds columns to the table of the same name. A managed datasource has no Sync objects.',
   'engine.datasource.schemaModeValidateOnlyHint': 'Reads an existing database the way External does, and never changes its tables. If you are unsure, choose External.',
+  'engine.datasource.schemaModeFederationOnly': 'Managed is not offered: this driver only connects to a database another system owns, and ObjectStack never creates or changes its tables.',
   'engine.datasource.noSyncManaged': 'No Sync objects: this datasource is managed, so ObjectStack creates its tables and there are none to bring in. To read an existing database’s tables, create a datasource for it with the schema mode External.',
   'engine.datasource.testConnection': 'Test connection',
   'engine.datasource.connectionFailed': 'Connection failed',

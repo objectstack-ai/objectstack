@@ -145,8 +145,8 @@ const signedUpOnce = (): Promise<Map<string, any[]>> =>
       [OWNER_EMAIL, 'Olivia Owner'],
       [ORG_ADMIN_EMAIL, 'Oscar OrgAdmin'],
     ]) {
-      await inviteForAudienceGate(manager, email);
-      const res = await direct(manager, '/sign-up/email', { email, password: PASSWORD, name });
+      const invitationId = await inviteForAudienceGate(manager, email);
+      const res = await direct(manager, '/sign-up/email', { email, password: PASSWORD, name, invitationId });
       expect(res.status, `sign-up ${email}: ${await res.clone().text()}`).toBe(200);
     }
     return template.tables as Map<string, any[]>;

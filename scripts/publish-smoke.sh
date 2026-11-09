@@ -42,7 +42,7 @@
 #                                                  (an UNINVITED second account)
 #   - POST /api/v1/auth/organization/invite-member → 200 (the operator path)
 #   - POST /api/v1/auth/sign-up/email            → 200   (the invitee, admitted
-#                                                  by the invitation carve-out)
+#                                                  by the invitation it presents)
 #   - POST /api/v1/auth/sign-in/email            → 200, session established
 #   - REST CRUD on the scaffolded object (POST/GET/PATCH/DELETE /api/v1/data/…)
 #   - zero error/fatal log lines in the PROBE window, and — in the boot window,
@@ -75,8 +75,9 @@
 #      SELF_REGISTRATION_CLOSED and status 403 ⇒ the closed-by-default posture
 #      is now load-bearing in CI: an accidental widening of the unauthenticated
 #      surface turns the RC red instead of shipping;
-#   3. the non-admin probe user arrives through the OPERATOR path (the
-#      invitation carve-out) before the session/CRUD probes run as before.
+#   3. the non-admin probe user arrives through the OPERATOR path (an
+#      invitation, which its sign-up presents) before the session/CRUD probes
+#      run as before.
 #
 # ⛔ Assert BEHAVIOUR, never a vendor-internal symbol. Wiring a release gate to
 # better-auth's own internals (dist line numbers, private helpers) is the shape
@@ -982,8 +983,9 @@ BODY="$SMOKE_ROOT/body.json"
 ADMIN_EMAIL="admin@objectos.ai"
 ADMIN_PASSWORD="admin123"
 # The non-admin probe user. Spelled once because the operator invitation and
-# the sign-up that redeems it MUST address the same mailbox — the carve-out is
-# a lookup for a pending `sys_invitation` row on exactly this address.
+# the sign-up that presents it MUST address the same mailbox — a self-serve
+# sign-up is admitted only by the invitation it presents, and that invitation
+# is addressed to exactly this address.
 USER_EMAIL="smoke@example.com"
 USER_PASSWORD="Sm0ke-Pass!42"
 
@@ -1108,8 +1110,8 @@ if [ "$AUDIENCE_POSTURE" = "invite_only" ]; then
   # (`SELF_REGISTRATION_CLOSED`), ⛔ never a vendor-internal symbol.
   #
   # A DIFFERENT address than the invited one below, on purpose: this probe must
-  # measure an uninvited self-registrant, and reusing the invitee's mailbox
-  # would let the carve-out answer instead of the posture.
+  # measure an uninvited self-registrant, so no invitation exists that could be
+  # presented for it.
   probe "POST /auth/sign-up/email (SECOND self-serve account, uninvited — must be REFUSED)" 403 \
     -X POST -H 'content-type: application/json' \
     -d "{\"name\":\"Uninvited Smoke\",\"email\":\"uninvited@example.com\",\"password\":\"$USER_PASSWORD\"}" \
@@ -1119,9 +1121,10 @@ if [ "$AUDIENCE_POSTURE" = "invite_only" ]; then
 
   # ── the operator path admits the probe user ───────────────────────────────
   # How a real operator adds a teammate on a fresh install: `invite_only` means
-  # BY INVITATION, and a self-serve sign-up whose address holds a pending,
-  # unexpired `sys_invitation` row is admitted under every posture (the
-  # invitation carve-out). The route runs as the signed-in admin against the
+  # BY INVITATION, and a self-serve sign-up is admitted only by the invitation
+  # it presents — the `id` invite-member answers, the last segment of the
+  # accept link, sent as `invitationId` beside the address; the address alone
+  # is refused. The route runs as the signed-in admin against the
   # default organization their session carries — cloud ADR-0081 D1 bootstraps that org
   # precisely so this path exists on a single-org install.
   #
@@ -1131,20 +1134,22 @@ if [ "$AUDIENCE_POSTURE" = "invite_only" ]; then
   # (`admin: pluginConfig.admin ?? scimEffective`, auth-manager.ts), so it
   # would answer 501 NOT_IMPLEMENTED on the very artifact under test. The
   # organization plugin IS on by default
-  # (`organization: pluginConfig.organization ?? true`), so the invitation
-  # carve-out is the operator path a fresh install actually ships.
-  log "Operator path (invitation carve-out) — how a fresh install adds its second user"
+  # (`organization: pluginConfig.organization ?? true`), so an invitation the
+  # sign-up presents is the operator path a fresh install actually ships.
+  log "Operator path (an invitation the sign-up presents) — how a fresh install adds its second user"
   probe "POST /auth/organization/invite-member (as the seeded admin)" 200 \
     -b "$COOKIES_ADMIN" \
     -X POST -H 'content-type: application/json' \
     -d "{\"email\":\"$USER_EMAIL\",\"role\":\"member\"}" \
     "$BASE_URL/api/v1/auth/organization/invite-member"
   assert_body '.status == "pending"' \
-    "invite-member answered 200 but persisted no pending invitation — the carve-out below would have nothing to redeem"
+    "invite-member answered 200 but persisted no pending invitation — the sign-up below would have nothing to present"
+  INVITATION_ID=$(jq -r '.id // empty' "$BODY")
+  [ -n "$INVITATION_ID" ] || fail "invite-member answered no id — the sign-up below has nothing to present"
 
-  probe "POST /auth/sign-up/email (invited user — admitted by the carve-out)" 200 \
+  probe "POST /auth/sign-up/email (invited user — presents the invitation)" 200 \
     -X POST -H 'content-type: application/json' \
-    -d "{\"name\":\"Smoke User\",\"email\":\"$USER_EMAIL\",\"password\":\"$USER_PASSWORD\"}" \
+    -d "{\"name\":\"Smoke User\",\"email\":\"$USER_EMAIL\",\"password\":\"$USER_PASSWORD\",\"invitationId\":\"$INVITATION_ID\"}" \
     "$BASE_URL/api/v1/auth/sign-up/email"
 else
   # ── legacy: an artifact that declares no closed posture ───────────────────

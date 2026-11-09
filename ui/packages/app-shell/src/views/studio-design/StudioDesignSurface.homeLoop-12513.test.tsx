@@ -122,6 +122,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -140,7 +143,7 @@ vi.stubGlobal(
   vi.fn(async (input: unknown) => {
     const url = String(input);
     if (url.startsWith('/api/v1/meta/_drafts')) {
-      const qs = new URL(url, 'http://x').searchParams.get('packageId');
+      const qs = new URL(url, 'http://x').searchParams.get('package');
       const drafts = server.drafts.filter((d) => !qs || d.packageId === qs);
       return new Response(JSON.stringify({ drafts }), { status: 200, headers: { 'content-type': 'application/json' } });
     }

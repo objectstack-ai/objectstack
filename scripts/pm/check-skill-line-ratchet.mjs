@@ -1391,7 +1391,15 @@ export const CEILINGS = new Map([
   // maintainer set directly), maintainer verbatim and untranslated:
   // 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
   // Measured delta +1 (99 → 100); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 100],
+  // Raised 100 → 101 under ruling record 6184799323 letter B — an ORDINARY
+  // raise, ⛔ not a cross-file move. Ruling of record 6722123324 (rule 7, the
+  // devx charter) ends 'Triage shows these metrics in the daily dashboard's
+  // lane section', and that line had no written home (#31558). The text is one
+  // line beside the daily-fire duties pointing at lanes/devx.md's metric line,
+  // never restating the six; no line of this file restates text another file
+  // carries, so a deletion would have dropped a live rule. Measured delta +1
+  // (100 → 101); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 101],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found

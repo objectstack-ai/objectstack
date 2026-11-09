@@ -134,6 +134,8 @@ describe('#14353 — the dead-end shape reports, by name, with consequence AND r
     // The primary way out, spelled as the one row an operator has to write.
     expect(msg).toContain('INVITE ONE ADDRESS');
     expect(msg).toContain(SystemObjectName.INVITATION);
+    // Under the default posture the sign-up presents the row it was invited by.
+    expect(msg).toContain("sending that row's 'id' as 'invitationId'");
     expect(msg).toContain("'pending'");
     expect(msg).toContain('expires_at');
     expect(msg).toContain('inviter_id');

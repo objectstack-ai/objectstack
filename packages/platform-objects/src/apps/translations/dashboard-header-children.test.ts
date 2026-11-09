@@ -29,6 +29,8 @@ import { arMetadataForms } from './ar.metadata-forms.generated.js';
 import { frMetadataForms } from './fr.metadata-forms.generated.js';
 import { ptBRMetadataForms } from './pt-BR.metadata-forms.generated.js';
 import { ruMetadataForms } from './ru.metadata-forms.generated.js';
+import { deMetadataForms } from './de.metadata-forms.generated.js';
+import { koMetadataForms } from './ko.metadata-forms.generated.js';
 
 const LOCALES = [
   { name: 'en', forms: enMetadataForms as Record<string, any> },
@@ -40,6 +42,8 @@ const LOCALES = [
   { name: 'fr', forms: frMetadataForms as Record<string, any> },
   { name: 'pt-BR', forms: ptBRMetadataForms as Record<string, any> },
   { name: 'ru', forms: ruMetadataForms as Record<string, any> },
+  { name: 'de', forms: deMetadataForms as Record<string, any> },
+  { name: 'ko', forms: koMetadataForms as Record<string, any> },
 ];
 
 const HEADER_CHILDREN = ['header.showTitle', 'header.showDescription', 'header.actions'];

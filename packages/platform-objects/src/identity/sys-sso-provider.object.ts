@@ -20,7 +20,8 @@ import { PLATFORM_ADMIN_SETTINGS_GATE } from './platform-admin-action-gate.js';
  * organizationId, domain.
  *
  * All mutations route through better-auth's `/api/v1/auth/sso/*` endpoints
- * (register / delete-provider) so config validation and secret handling run;
+ * (register / update-provider / delete-provider) so config validation and
+ * secret handling run;
  * the generic data layer is read-only (see `enable.apiMethods`).
  *
  * @namespace sys
@@ -256,6 +257,32 @@ export const SysSsoProvider = ObjectSchema.create({
         requiresConfirmation: true,
       },
     },
+    {
+      name: 'edit_sso_sign_in_options',
+      label: 'Edit Sign-In Options',
+      icon: 'settings',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      // The provider's two sign-in toggles (ruling record 6718355623 on the
+      // Enterprise SSO operator knobs), written through @better-auth/sso's own
+      // /sso/update-provider, which takes them as provider additional fields
+      // (plugin-auth `sso-sign-in-options.ts`). Its writers are the provider's
+      // writers: the vendor's provider-access check plus plugin-auth's
+      // held-caller refusal, so no `visible` term — the same door shape as
+      // `delete_sso_provider`. Both fields are `trackHistory`, so a change is
+      // recorded in the audit log. No `ai` block: it changes who can sign in,
+      // so it stays human-only (ADR-0011 bucket H's test).
+      target: '/api/v1/auth/sso/update-provider',
+      successMessage: 'Sign-in options saved',
+      refreshAfter: true,
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+        { name: 'allowIdpInitiated', field: 'allow_idp_initiated', defaultFromRow: true, required: false },
+        { name: 'allowJit', field: 'allow_jit', defaultFromRow: true, required: false },
+      ],
+    },
   ],
 
   listViews: {
@@ -264,7 +291,7 @@ export const SysSsoProvider = ObjectSchema.create({
       name: 'all',
       label: 'All',
       data: { provider: 'object', object: 'sys_sso_provider' },
-      columns: ['provider_id', 'issuer', 'domain', 'domain_verified', 'created_at'],
+      columns: ['provider_id', 'issuer', 'domain', 'domain_verified', 'allow_idp_initiated', 'allow_jit', 'created_at'],
       sort: [{ field: 'provider_id', order: 'asc' }],
       pagination: { pageSize: 50 },
       // Per-object empty state — the shared identity-object copy ("created
@@ -341,6 +368,29 @@ export const SysSsoProvider = ObjectSchema.create({
       internal: true,
       description: 'JSON: entryPoint, cert, identifierFormat, mapping (managed by better-auth)',
       group: 'Protocol',
+    }),
+
+    // Per-provider sign-in options (ruling record 6718355623), written as
+    // @better-auth/sso provider additional fields `allowIdpInitiated` /
+    // `allowJit` (plugin-auth `sso-sign-in-options.ts`). Both widen who can
+    // sign in, so both default OFF and both are `trackHistory`: a change
+    // writes its own audit-log line.
+    allow_idp_initiated: Field.boolean({
+      label: 'Allow IdP-Initiated Sign-In',
+      defaultValue: false,
+      trackHistory: true,
+      description:
+        'Accept a sign-in that starts at the identity provider (an unsolicited SAML response, or an OIDC callback with no state) instead of at this system. Off by default: an IdP-initiated SAML response is not bound to any request this system made. Change it with “Edit Sign-In Options”.',
+      group: 'Identity',
+    }),
+
+    allow_jit: Field.boolean({
+      label: 'Allow Just-in-Time Provisioning',
+      defaultValue: false,
+      trackHistory: true,
+      description:
+        'Under the invite-only audience posture, create an account for a person who signs in through this provider without an account or an invitation. Off by default: such a person is refused. Other postures provision as before. Change it with “Edit Sign-In Options”.',
+      group: 'Identity',
     }),
 
     user_id: Field.lookup('sys_user', {

@@ -440,6 +440,15 @@ const es = {
       available: 'Disponibles',
       all: 'Todas las monedas (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Convertido al tipo {{rate}} del {{date}}',
+      homeCurrency: 'En la moneda base (tipo 1)',
+      preview: '≈ {{amount}} al tipo {{rate}} el {{date}}',
+      previewSame: '≈ {{amount}} (moneda principal)',
+      awaitingRate: 'No hay tipo de {{currency}} en o antes del {{date}}: no se puede guardar hasta que se añada uno',
+      awaitingDate: 'Indique la fecha del documento para ver el importe en la moneda principal',
+      rateUnreadable: 'Se convierte a la moneda principal al guardar',
+    },
     boolean: {
       offBadge: "{{label}} — Desactivado",
       completed: "Completado",
@@ -724,6 +733,7 @@ const es = {
       noSavedTemplates: "Sin plantillas guardadas",
       noneOption: "— Ninguno —",
       saveCurrent: "Guardar actual",
+      saveCurrentNeedsMapping: "Asigne al menos una columna para guardar una plantilla.",
       templateName: "Nombre de la plantilla",
       save: "Guardar",
       deleteTemplate: "Eliminar plantilla",
@@ -803,6 +813,7 @@ const es = {
     eventTitlePlaceholder: "¿De qué trata este evento?",
     creating: "Creando…",
     titleRequired: "El título es obligatorio",
+    rescheduleNotFound: "Este registro de {{object}} ya no existe o ya no tienes acceso a él.",
     a11y: {
       region: "Calendario",
       grid: "Cuadrícula del calendario",

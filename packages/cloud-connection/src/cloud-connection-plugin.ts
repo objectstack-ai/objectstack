@@ -149,13 +149,28 @@ import {
 import type { AuthSessionApi, IAuthService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
+import {
+    CLOUD_BINDING_CREDENTIAL_SERVICE,
+    SHARED_CREDENTIAL_REFRESH_MS,
+    SharedConnectionCredentialLedger,
+    fileCredentialLedger,
+    sharesCloudBindingCredential,
+    type BindingCredentialEngine,
+    type CloudBindingCredentialReader,
+    type ConnectionCredentialLedger,
+} from './connection-credential-ledger.js';
+import { SysCloudBindingCredential } from './sys-cloud-binding-credential.object.js';
+import { declaresMultiNode } from '@objectstack/service-cluster';
 import { createCloudBinding } from './cloud-binding.js';
 import { CLOUD_BINDING_SERVICE, type ICloudBindingService } from '@objectstack/spec/contracts';
 import { CLOUD_CONNECTION_CAPABILITY, CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
 import { readJsonRequestBody } from './request-json-body.js';
 // [#30964] The install mode's one declaration, read by reference: never a copy of its two spellings.
 import { InstallModeSchema, type InstallMode } from '@objectstack/spec/kernel';
-import { INSTALL_LOCAL_DOOR_SERVICE, type InstallLocalDoor } from './install-local-door-service.js';
+import {
+    INSTALL_LOCAL_DOOR_SERVICE, grantRefusalEvent, recordUnmanagedImportEvent,
+    type InstallLocalDoor, type InstallLocalDoorGrant, type UnmanagedImportAuditSurface,
+} from './install-local-door-service.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
 
@@ -331,10 +346,26 @@ export interface CloudConnectionPluginConfig {
     singleEnvironment?: boolean;
     /**
      * Override the on-disk credential store location. Defaults to
-     * `<cwd>/.objectstack/cloud-connection.json` — where the bind flow
-     * persists the `oscc_…` runtime bearer for self-hosted runtimes.
+     * `<OS_HOME>/cloud-connection.json`, or `<cwd>/.objectstack/cloud-connection.json`
+     * when `OS_HOME` is unset — where the bind flow persists the `oscc_…`
+     * runtime bearer for self-hosted runtimes. The default moves a file an
+     * earlier release left under the working directory once, at boot; an
+     * explicit path moves nothing.
+     *
+     * A single node only: with several replicas declared over the Redis cluster
+     * driver the credential lives in the shared database row instead
+     * (`connection-credential-ledger.ts`), and this file is read once, to move
+     * a binding made before the deployment was scaled out.
      */
     credentialPath?: string;
+    /**
+     * How often, in ms, a replica re-reads the shared binding credential for
+     * the `cloud-binding` service's synchronous readers. Default
+     * {@link SHARED_CREDENTIAL_REFRESH_MS}. Read only when replicas are
+     * declared over the Redis cluster driver; a single node has nothing to
+     * re-read. The plugin's own doors re-read at every request regardless.
+     */
+    sharedCredentialRefreshMs?: number;
 }
 
 export class CloudConnectionPlugin implements Plugin {
@@ -342,10 +373,32 @@ export class CloudConnectionPlugin implements Plugin {
     readonly version = '0.3.0';
 
     /** Services init() registers on every path (ADR-0116). */
-    readonly providesServices = [CLOUD_BINDING_SERVICE];
+    readonly providesServices = [CLOUD_BINDING_SERVICE, CLOUD_BINDING_CREDENTIAL_SERVICE];
+
+    /**
+     * [#31554] Ordered after the data engine and the cluster service when
+     * either is composed (ADR-0116): `init()` reads the cluster driver to choose
+     * where the binding credential lives, and with replicas declared registers
+     * its object through the `manifest` service ObjectQL provides. Soft: a
+     * composition with neither is a single node, and the local file serves it.
+     */
+    readonly optionalDependencies = ['com.objectstack.engine.objectql', 'com.objectstack.service.cluster'];
 
     private readonly cfg: CloudConnectionPluginConfig;
+    /** The single node's credential file — and, scaled out, the binding a replica moves into the shared row once. */
     private readonly store: ConnectionCredentialStore;
+    /**
+     * [#31554] Where the binding credential is read and written: the file
+     * above on a single node, the shared database row when replicas are
+     * declared over the Redis cluster driver. Chosen once, in `init()`.
+     */
+    private ledger: ConnectionCredentialLedger;
+    /** The read half of {@link ledger}, registered as {@link CLOUD_BINDING_CREDENTIAL_SERVICE}; follows the ledger `init()` chose. */
+    private readonly credentialReader: CloudBindingCredentialReader;
+    /** The shared row's re-read for synchronous readers; set only on shared replicas. */
+    private refreshTimer: ReturnType<typeof setInterval> | undefined;
+    /** The last shared-read failure reported, so an outage is said once rather than once per re-read. */
+    private lastSharedReadFailure: string | undefined;
     /**
      * [#29920] This server's cloud binding: the ONE reader of the effective
      * control-plane credential. Registered as the `cloud-binding` service, and
@@ -356,26 +409,242 @@ export class CloudConnectionPlugin implements Plugin {
     constructor(config: CloudConnectionPluginConfig = {}) {
         this.cfg = config;
         this.store = new ConnectionCredentialStore(config.credentialPath);
+        this.ledger = fileCredentialLedger(this.store);
+        const plugin = this;
+        this.credentialReader = {
+            get shared() { return plugin.ledger.shared; },
+            read: () => plugin.ledger.read(),
+            load: () => plugin.ledger.load(),
+        };
         this.binding = createCloudBinding({
             controlPlaneApiKey: config.controlPlaneApiKey,
             controlPlaneUrl: config.controlPlaneUrl,
-            store: this.store,
+            store: { read: () => this.ledger.read() },
         });
     }
 
-    /** Registers the `cloud-binding` service; the HTTP wiring waits for kernel:ready. */
+    /**
+     * Registers the `cloud-binding` service and the credential reader, and
+     * chooses where the binding credential lives; the HTTP wiring waits for
+     * kernel:ready.
+     */
     init = async (ctx: PluginContext): Promise<void> => {
         ctx.registerService?.(CLOUD_BINDING_SERVICE, this.binding);
+        ctx.registerService?.(CLOUD_BINDING_CREDENTIAL_SERVICE, this.credentialReader);
+        this.moveLegacyCredentialFile(ctx);
+        this.ledger = this.chooseLedger(ctx);
     };
+
+    /**
+     * A single node's credential file follows `OS_HOME`
+     * (`resolveConnectionCredentialPath`); a release before that wrote it under
+     * the working directory. Move that file once, before anything reads the
+     * binding — the shared row's adoption at `kernel:ready` included — so the
+     * node stays bound across the upgrade. An explicit `credentialPath` moves
+     * nothing.
+     *
+     * A failed move is a consistency failure, not a choice: the binding is on
+     * disk where this node no longer reads it, so the node reports itself
+     * unbound and an online licence falls back to Community while everything
+     * else looks healthy. It is reported once, at `error`, with the fix.
+     */
+    private moveLegacyCredentialFile(ctx: PluginContext): void {
+        const from = this.store.legacyPath;
+        try {
+            const moved = this.store.moveLegacyFile();
+            if (moved) {
+                ctx.logger?.info?.(
+                    `[CloudConnectionPlugin] moved the cloud binding credential from ${moved.from} to ${moved.to}: `
+                        + 'the file now follows OS_HOME, so it survives a container recreate',
+                );
+            }
+        } catch (err) {
+            this.reportError(
+                ctx,
+                `[CloudConnectionPlugin] the cloud binding credential in ${from} could not be moved to ${this.store.path}, `
+                    + 'where this node now reads it, so the node reports itself unbound and an online licence falls back to '
+                    + 'Community. Move the file there by hand (mode 0600) and restart, or connect again (Setup, Cloud Connection): '
+                    + `${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
+    }
+
+    /** Stops the shared row's re-read. */
+    destroy = async (): Promise<void> => {
+        this.stopSharedRefresh();
+    };
+
+    /**
+     * [#31554] Where this boot keeps the binding credential.
+     *
+     * The shared database row exactly when BOTH hold
+     * ({@link sharesCloudBindingCredential}): replicas are declared
+     * (`declaresMultiNode`, the split-brain guard's own predicate) and the
+     * cluster service runs the Redis driver. Anything else — a single node, the
+     * in-process driver, any other driver — gets the local file with nothing
+     * registered, nothing logged and nothing read differently. Read in `init()`: the cluster plugin and ObjectQL init
+     * first when composed ({@link optionalDependencies}), so an absent cluster
+     * service here is a fact, not a race.
+     *
+     * Replicas declared over the Redis driver with no `manifest` service to
+     * register the object through is a consistency failure, not a choice: each
+     * replica would keep its own file, and a bind would reach one of them. It is
+     * reported once, at `error`, with the consequence and the fix, and the file
+     * serves this replica alone.
+     */
+    private chooseLedger(ctx: PluginContext): ConnectionCredentialLedger {
+        if (!declaresMultiNode(process.env)) return this.ledger;
+        let driver: string | undefined;
+        try {
+            const cluster = ctx.getService<{ driver?: unknown } | undefined>('cluster');
+            driver = typeof cluster?.driver === 'string' ? cluster.driver : undefined;
+        } catch { /* no cluster service composed */ }
+        if (!sharesCloudBindingCredential(process.env, driver)) return this.ledger;
+        try {
+            ctx.getService<{ register(m: unknown): void }>('manifest').register({
+                id: 'com.objectstack.cloud.connection.credential',
+                name: 'Cloud Binding Credential',
+                version: '1.0.0',
+                type: 'plugin',
+                scope: 'system',
+                // No `defaultDatasource`, deliberately: the row rides the
+                // engine's default datasource, the one `sys_secret` (the
+                // platform-objects manifest, which names none) seals its
+                // token into. So the row and its secret share one database —
+                // the one every replica connects to and the one the pre-boot
+                // read opens. Naming `cloud` here would split them on any
+                // deployment that registers a `cloud` datasource.
+                namespace: 'sys',
+                objects: [SysCloudBindingCredential],
+            });
+        } catch {
+            // The registry's own error is not interpolated: this is the line an
+            // operator acts on, and it must say what to do.
+            this.reportError(
+                ctx,
+                '[CloudConnectionPlugin] several replicas are declared over the Redis cluster driver, but no manifest '
+                    + 'service is composed to register the shared binding credential '
+                    + '(sys_cloud_binding_credential). Each replica keeps its own credential file, so a bind made on one '
+                    + 'replica is not seen by the others and their online licence checks present no credential. Compose the '
+                    + 'data engine (ObjectQL) on every replica, or declare a single replica.',
+            );
+            return this.ledger;
+        }
+        ctx.logger?.info?.(
+            '[CloudConnectionPlugin] several replicas are declared over the Redis cluster driver: the cloud binding '
+                + 'credential is kept in the shared database (sys_cloud_binding_credential), '
+                + 'encrypted with the host crypto provider, and every replica reads it',
+        );
+        return new SharedConnectionCredentialLedger(() => this.resolveDataEngine(ctx));
+    }
+
+    /**
+     * One `error` line, on the logger's own receiver (its channels are methods
+     * that reach for `this`); a logger without an `error` channel gets `warn`.
+     */
+    private reportError(ctx: PluginContext, message: string): void {
+        const logger = ctx.logger;
+        if (!logger) return;
+        if (typeof logger.error === 'function') logger.error(message);
+        else logger.warn?.(message);
+    }
+
+    /** The data engine the shared row is read and written through — ObjectQL, resolved at call time. */
+    private resolveDataEngine(ctx: PluginContext): BindingCredentialEngine | undefined {
+        for (const name of ['objectql', 'data']) {
+            try {
+                const engine = ctx.getService<BindingCredentialEngine | undefined>(name);
+                if (engine && typeof engine.find === 'function' && typeof engine.insert === 'function') return engine;
+            } catch { /* not registered under this name */ }
+        }
+        return undefined;
+    }
+
+    /**
+     * Re-read the shared row (a no-op on a single node). Never throws: a read
+     * that fails leaves the last copy in place and is reported once per
+     * distinct failure, at `error` — persisted and runtime state now disagree
+     * (a bind or an unbind made on a peer is not seen here) while this replica
+     * keeps looking healthy, so the line names that and the fix.
+     */
+    private async refreshShared(ctx: PluginContext): Promise<void> {
+        if (!this.ledger.shared) return;
+        try {
+            await this.ledger.load();
+            this.lastSharedReadFailure = undefined;
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (message === this.lastSharedReadFailure) return;
+            this.lastSharedReadFailure = message;
+            this.reportError(
+                ctx,
+                '[CloudConnectionPlugin] the shared cloud binding credential could not be read, so this replica keeps acting on '
+                    + 'the binding it last read: a bind or a disconnect made on another replica is not seen here until a read '
+                    + 'succeeds. Restore the database connection, and give every replica the same secret key (OS_SECRET_KEY '
+                    + `with the local crypto provider): ${message}`,
+            );
+        }
+    }
+
+    /**
+     * [#31554] At `kernel:ready` on shared replicas: move a binding a single
+     * node left in its file into the shared row (once, when the row is empty),
+     * read the row, and keep re-reading it for the synchronous readers.
+     */
+    private async startShared(ctx: PluginContext): Promise<void> {
+        const ledger = this.ledger;
+        if (!(ledger instanceof SharedConnectionCredentialLedger)) return;
+        try {
+            if (await ledger.adoptFrom(this.store)) {
+                ctx.logger?.info?.(
+                    `[CloudConnectionPlugin] moved the cloud binding credential from ${this.store.path} into the shared database; `
+                        + 'while several replicas are declared that file is not read again',
+                );
+            }
+        } catch (err) {
+            // Durability: the binding this node held is not where the replicas
+            // read it, and nothing else will say so.
+            this.reportError(
+                ctx,
+                `[CloudConnectionPlugin] the cloud binding credential in ${this.store.path} could not be moved into the shared `
+                    + 'database, so no replica presents it to the cloud. Connect again from any replica (Setup, Cloud '
+                    + `Connection): ${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
+        await this.refreshShared(ctx);
+        this.stopSharedRefresh();
+        const every = this.cfg.sharedCredentialRefreshMs ?? SHARED_CREDENTIAL_REFRESH_MS;
+        this.refreshTimer = setInterval(() => { void this.refreshShared(ctx); }, every);
+        this.refreshTimer.unref?.();
+        ctx.hook('kernel:shutdown', async () => { this.stopSharedRefresh(); });
+    }
+
+    private stopSharedRefresh(): void {
+        if (this.refreshTimer) clearInterval(this.refreshTimer);
+        this.refreshTimer = undefined;
+    }
 
     start = async (ctx: PluginContext): Promise<void> => {
         ctx.hook('kernel:ready', async () => {
+            // [#31554] Shared replicas read the binding before anything else:
+            // the `cloud-binding` service answers from that read whether or not
+            // the routes below mount.
+            await this.startShared(ctx);
             const httpServer: any = (() => { try { return ctx.getService('http-server'); } catch { return undefined; } })();
             if (!httpServer || typeof httpServer.getRawApp !== 'function') {
                 ctx.logger?.warn?.('[CloudConnectionPlugin] http-server unavailable — routes not mounted');
                 return;
             }
             const rawApp = httpServer.getRawApp();
+            /**
+             * [#31554] On shared replicas every door re-reads the binding the
+             * replicas share before it runs, so a bind or an unbind made on a
+             * peer is what this door acts on. A single node mounts each handler
+             * as it is: the file is read where the handler reads it.
+             */
+            const door = <H extends (c: any) => Promise<any>>(handler: H): H => (this.ledger.shared
+                ? (async (c: any) => { await this.refreshShared(ctx); return handler(c); }) as H
+                : handler);
             // Env vars are read here (not at construction) so a host can set
             // them between config load and kernel boot — preserves the
             // behavior of the original app-level wiring. [#30762] The URL is
@@ -462,7 +731,7 @@ export class CloudConnectionPlugin implements Plugin {
                 if (this.cfg.singleEnvironment) {
                     // A completed bind persisted the environment id — a
                     // self-hosted runtime needs no OS_ENVIRONMENT_ID after it.
-                    return this.store.read()?.environmentId || undefined;
+                    return this.ledger.read()?.environmentId || undefined;
                 }
                 try {
                     const envRegistry = ctx.getService<any>('env-registry');
@@ -687,9 +956,9 @@ export class CloudConnectionPlugin implements Plugin {
             // every caller; what it SERVES narrows to `bound` / `runtimeId` /
             // `provider` unless the caller holds `manage_platform_settings`
             // (#24148, #25119, `servedStatus`).
-            rawApp.get(`${CLOUD_CONNECTION_PREFIX}/status`, async (c: any) => {
+            rawApp.get(`${CLOUD_CONNECTION_PREFIX}/status`, door(async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
-                const stored = this.store.read();
+                const stored = this.ledger.read();
                 const runtimeId = stored?.runtimeId;
                 if (!environmentId && !this.cfg.singleEnvironment) {
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
@@ -732,13 +1001,13 @@ export class CloudConnectionPlugin implements Plugin {
                 }
                 const bound = Boolean(credential());
                 return serve({ environmentId: environmentId ?? null, runtimeId: runtimeId ?? null, bound, provider: 'objectstack-cloud', connection: null });
-            });
+            }));
 
             // POST /bind/start — begin a device-code bind. The runtime is the
             // genuine RFC 8628 client: it asks the cloud for a device + user
             // code, returns them to the Setup UI, and the operator approves in
             // the cloud console.
-            rawApp.post(`${CLOUD_CONNECTION_PREFIX}/bind/start`, async (c: any) => {
+            rawApp.post(`${CLOUD_CONNECTION_PREFIX}/bind/start`, door(async (c: any) => {
                 // [#23914] A declared JSON body that does not parse is refused 400,
                 // never read as no body (`./request-json-body.ts`).
                 const read = await readJsonRequestBody(c);
@@ -801,13 +1070,13 @@ export class CloudConnectionPlugin implements Plugin {
                     ctx.logger?.error?.('[CloudConnectionPlugin] bind/start failed', err instanceof Error ? err : new Error(String(err)));
                     return c.json({ success: false, error: { code: 'DEVICE_CODE_FAILED', message: String(err?.message ?? err) } }, 502);
                 }
-            });
+            }));
 
             // POST /bind/poll { device_code } — polls the cloud token endpoint.
             // While pending, returns { pending: true }. On success, exchanges
             // the operator token for a persisted sys_cloud_connection via the
             // control plane's /bind.
-            rawApp.post(`${CLOUD_CONNECTION_PREFIX}/bind/poll`, async (c: any) => {
+            rawApp.post(`${CLOUD_CONNECTION_PREFIX}/bind/poll`, door(async (c: any) => {
                 // [#23914] A declared JSON body that does not parse is refused 400,
                 // never read as no body (`./request-json-body.ts`).
                 const read = await readJsonRequestBody(c);
@@ -875,7 +1144,7 @@ export class CloudConnectionPlugin implements Plugin {
                     // runtime-identity-binding §2.3): hostname + version name
                     // the device; a stored runtime_id keeps the identity
                     // stable across re-binds (claim verified cloud-side).
-                    const stored = this.store.read();
+                    const stored = this.ledger.read();
                     const runtimeVersion = await reportedRuntimeVersion();
                     const bindResp = await fetch(`${cloudUrl}/api/v1/cloud-connection/bind`, {
                         method: 'POST',
@@ -891,13 +1160,14 @@ export class CloudConnectionPlugin implements Plugin {
                     });
                     const bindJson: any = await bindResp.json().catch(() => ({ success: false, error: 'bind failed (no body)' }));
                     // The bind response carries the one-time runtime bearer.
-                    // Persist it HERE (server-side, 0600 file) and STRIP it
-                    // from what goes back to the browser — the SPA never
-                    // holds the credential.
+                    // Persist it HERE (server-side: the 0600 file on a single
+                    // node, the shared encrypted row on declared replicas) and
+                    // STRIP it from what goes back to the browser — the SPA
+                    // never holds the credential.
                     const runtimeToken = bindJson?.data?.runtime_token;
                     if (bindResp.ok && typeof runtimeToken === 'string' && runtimeToken) {
                         try {
-                            this.store.write({
+                            await this.ledger.write({
                                 runtimeToken,
                                 runtimeId: bindJson?.data?.runtime_id ?? bindJson?.data?.connection?.runtime_id ?? undefined,
                                 environmentId: environmentId || undefined,
@@ -908,6 +1178,14 @@ export class CloudConnectionPlugin implements Plugin {
                             });
                         } catch (err: any) {
                             ctx.logger?.error?.('[CloudConnectionPlugin] failed to persist runtime credential', err instanceof Error ? err : new Error(String(err)));
+                            // [#31554] On shared replicas the store's refusal names
+                            // its remedy (a crypto provider, the data engine) and
+                            // never carries the bearer: hand it to the caller, so
+                            // the panel does not read "connected" over a binding
+                            // no replica holds. A single node answers as before.
+                            if (this.ledger.shared) {
+                                return c.json({ success: false, error: { code: 'ENVIRONMENT_BIND_FAILED', message: String(err?.message ?? err) } }, 503);
+                            }
                         }
                         delete bindJson.data.runtime_token;
                     }
@@ -916,14 +1194,14 @@ export class CloudConnectionPlugin implements Plugin {
                     ctx.logger?.error?.('[CloudConnectionPlugin] bind/poll failed', err instanceof Error ? err : new Error(String(err)));
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_BIND_FAILED', message: String(err?.message ?? err) } }, 502);
                 }
-            });
+            }));
 
             // POST /unbind — disconnect this runtime from the control plane.
             // Revokes the connection server-side (best-effort) and clears the
             // local credential. Requires an environment session holding
             // `manage_platform_settings`, mirroring bind/start. Refused on a
             // platform-managed runtime (ruling 甲, #25097), as both bind doors are.
-            rawApp.post(`${CLOUD_CONNECTION_PREFIX}/unbind`, async (c: any) => {
+            rawApp.post(`${CLOUD_CONNECTION_PREFIX}/unbind`, door(async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId && !this.cfg.singleEnvironment) {
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
@@ -958,25 +1236,25 @@ export class CloudConnectionPlugin implements Plugin {
                 // same registration (revive the revoked row) instead of
                 // piling up a new device per disconnect cycle — same as an
                 // iCloud device record surviving sign-out.
-                const residualId = this.store.read()?.runtimeId;
-                const cleared = (() => {
+                const residualId = this.ledger.read()?.runtimeId;
+                const cleared = await (async () => {
                     try {
                         if (residualId) {
-                            this.store.write({ runtimeToken: '', runtimeId: residualId });
+                            await this.ledger.write({ runtimeToken: '', runtimeId: residualId });
                             return true;
                         }
-                        return this.store.clear();
+                        return await this.ledger.clear();
                     } catch { return false; }
                 })();
                 return c.json({ success: true, data: { environmentId: environmentId ?? null, revoked, cleared } });
-            });
+            }));
 
             // POST /install { package_id, seed_sample_data?, install_mode? } — in-environment
             // marketplace install. Authorizes the caller against the
             // environment's own session (SSO-as-owner only ever admits org
             // owners/admins), then performs the install against the cloud
             // control plane using the env→cloud service credential.
-            rawApp.post(`${CLOUD_CONNECTION_PREFIX}/install`, async (c: any) => {
+            rawApp.post(`${CLOUD_CONNECTION_PREFIX}/install`, door(async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId) return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
 
@@ -1046,12 +1324,12 @@ export class CloudConnectionPlugin implements Plugin {
                     const json: any = await resp.json().catch(() => ({ success: false, error: 'install failed (no body)' }));
                     // [#30964] A control-plane refusal, and every managed answer, is relayed as it was.
                     if (installMode !== 'unmanaged' || !resp.ok || json?.success === false) return c.json(json, resp.status as any);
-                    return await copyOnUnmanagedGrant(c, { environmentId, packageId, seedSampleData, grant: json });
+                    return await copyOnUnmanagedGrant(c, { environmentId, packageId, seedSampleData, installerUserId: session.userId, grant: json });
                 } catch (err: any) {
                     ctx.logger?.error?.('[CloudConnectionPlugin] install failed', err instanceof Error ? err : new Error(String(err)));
                     return c.json({ success: false, error: { code: 'PLUGIN_INSTALL_FAILED', message: String(err?.message ?? err) } }, 502);
                 }
-            });
+            }));
 
             /**
              * [#30964, cloud#3624 ruling A] The copy an UNMANAGED grant asks for,
@@ -1069,14 +1347,47 @@ export class CloudConnectionPlugin implements Plugin {
              * cloud branch always has. Fail closed: an answer that does not echo
              * the mode, or names no version, copies nothing (502). A
              * `data.manifest` in the answer is never read.
+             *
+             * [#31481, ruling A「两边审计」] Every refusal after the grant leaves
+             * the environment's `package_unmanaged_import` failure row beside
+             * the control plane's grant row, through the environment's `audit`
+             * slot: this door's own two (the grant it cannot read, 502; no
+             * install-local door, 503) here, and the door's, which it audits
+             * itself when handed the grant ({@link InstallLocalDoor.install}).
              */
             const copyOnUnmanagedGrant = async (
                 c: any,
-                args: { environmentId: string; packageId: string; seedSampleData: boolean; grant: any },
+                args: { environmentId: string; packageId: string; seedSampleData: boolean; installerUserId: string; grant: any },
             ): Promise<Response> => {
-                const { environmentId, packageId, seedSampleData, grant } = args;
+                const { environmentId, packageId, seedSampleData, installerUserId, grant } = args;
                 const data = grant?.data;
                 const versionId = typeof data?.version_id === 'string' ? data.version_id.trim() : '';
+                const granted: InstallLocalDoorGrant = {
+                    packageId,
+                    ...(typeof data?.version === 'string' && data.version.trim() !== '' ? { version: data.version.trim() } : {}),
+                    environmentId,
+                    actor: installerUserId,
+                };
+                // The environment's own services: its kernel's, multi-tenant; the host's, single-environment.
+                let kernel: EnvironmentKernel | undefined;
+                if (!this.cfg.singleEnvironment) {
+                    try {
+                        kernel = await ctx.getService<EnvironmentKernelManager>('kernel-manager')?.getOrCreate?.(environmentId);
+                    } catch { /* no environment kernel */ }
+                }
+                const environmentService = async <T>(name: string): Promise<T | undefined> => {
+                    if (this.cfg.singleEnvironment) {
+                        try { return ctx.getService<T>(name); } catch { return undefined; }
+                    }
+                    let found: T | undefined;
+                    try { found = await kernel?.getServiceAsync?.<T>(name); } catch { /* not registered */ }
+                    if (!found) { try { found = kernel?.getService?.<T>(name); } catch { /* not registered */ } }
+                    return found;
+                };
+                const auditRefusal = async (errorCode: string, status: number): Promise<void> => {
+                    const audit = await environmentService<UnmanagedImportAuditSurface>('audit');
+                    await recordUnmanagedImportEvent(audit, ctx.logger, 'CloudConnectionPlugin', grantRefusalEvent(granted, errorCode, status));
+                };
                 // An answer with no `install_mode` at all may come from a control
                 // plane that does not read the param, and so may already have
                 // installed the package MANAGED; the refusal says so, so the
@@ -1094,6 +1405,7 @@ export class CloudConnectionPlugin implements Plugin {
                         `[CloudConnectionPlugin] the unmanaged install of ${packageId} in ${environmentId} was not copied: `
                         + `the control plane's grant could not be read (${unread}).${managedNote}`,
                     );
+                    await auditRefusal('PLUGIN_INSTALL_FAILED', 502);
                     return c.json({
                         success: false,
                         error: {
@@ -1103,18 +1415,9 @@ export class CloudConnectionPlugin implements Plugin {
                         },
                     }, 502);
                 }
-                let door: InstallLocalDoor | undefined;
-                try {
-                    if (this.cfg.singleEnvironment) {
-                        door = ctx.getService<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE);
-                    } else {
-                        const kernels = ctx.getService<EnvironmentKernelManager>('kernel-manager');
-                        const kernel = await kernels?.getOrCreate?.(environmentId);
-                        try { door = await kernel?.getServiceAsync?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ }
-                        if (!door) { try { door = kernel?.getService?.<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE); } catch { /* not registered */ } }
-                    }
-                } catch { /* no door */ }
+                const door = await environmentService<InstallLocalDoor>(INSTALL_LOCAL_DOOR_SERVICE);
                 if (!door || typeof door.install !== 'function') {
+                    await auditRefusal('SERVICE_UNAVAILABLE', 503);
                     return c.json({
                         success: false,
                         error: {
@@ -1137,7 +1440,8 @@ export class CloudConnectionPlugin implements Plugin {
                         ...(seedSampleData ? { seedSampleData: true } : {}),
                     }),
                 });
-                const answer = await door.install(request);
+                // The grant rides beside the request, so the door audits its own refusals of it.
+                const answer = await door.install(request, { grant: granted });
                 const body = await answer.json().catch(() => ({
                     success: false,
                     error: { code: 'PLUGIN_INSTALL_FAILED', message: `The unmanaged copy of '${packageId}' answered no body.` },
@@ -1150,7 +1454,7 @@ export class CloudConnectionPlugin implements Plugin {
             // failures to reach the control plane degrade to
             // `{ installed: false }` so the marketplace page renders (worst
             // case it offers an install the control plane upserts idempotently).
-            rawApp.get(`${CLOUD_CONNECTION_PREFIX}/installation`, async (c: any) => {
+            rawApp.get(`${CLOUD_CONNECTION_PREFIX}/installation`, door(async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId) {
                     // Self-hosted v2: cloud-side installation records are
@@ -1204,7 +1508,7 @@ export class CloudConnectionPlugin implements Plugin {
                     ctx.logger?.warn?.(`[CloudConnectionPlugin] installation probe failed: ${String(err?.message ?? err)}`);
                     return c.json({ success: true, data: { installed: false } });
                 }
-            });
+            }));
 
             // GET /installed — env's FULL installed set from the control
             // plane's `sys_package_installation`, so the Console "Installed"
@@ -1212,7 +1516,7 @@ export class CloudConnectionPlugin implements Plugin {
             // REST) — cloud ADR-0007 step ①. Degrades to an empty list when the
             // runtime is not cloud-connected or the control plane is
             // unreachable (never hard-fails the page).
-            rawApp.get(`${CLOUD_CONNECTION_PREFIX}/installed`, async (c: any) => {
+            rawApp.get(`${CLOUD_CONNECTION_PREFIX}/installed`, door(async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId) {
                     // Self-hosted v2: no env-scoped cloud install ledger —
@@ -1247,7 +1551,7 @@ export class CloudConnectionPlugin implements Plugin {
                     ctx.logger?.warn?.(`[CloudConnectionPlugin] installed-list failed: ${String(err?.message ?? err)}`);
                     return c.json({ success: true, data: { packages: [], total: 0, connected: true } });
                 }
-            });
+            }));
 
             // GET /org-packages — org-scoped catalog for the in-env
             // Marketplace's "Your organization" layer (cloud ADR-0007 step ②): the
@@ -1255,7 +1559,7 @@ export class CloudConnectionPlugin implements Plugin {
             // publisher can discover + install their private apps from inside
             // the environment. Forwards (service-key) to the control plane,
             // which derives the org from environment_id.
-            rawApp.get(`${CLOUD_CONNECTION_PREFIX}/org-packages`, async (c: any) => {
+            rawApp.get(`${CLOUD_CONNECTION_PREFIX}/org-packages`, door(async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId && !this.cfg.singleEnvironment) {
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
@@ -1288,7 +1592,7 @@ export class CloudConnectionPlugin implements Plugin {
                     ctx.logger?.warn?.(`[CloudConnectionPlugin] org-packages failed: ${String(err?.message ?? err)}`);
                     return c.json({ success: true, data: { items: [], total: 0, connected: true } });
                 }
-            });
+            }));
 
             ctx.logger?.info?.(`[CloudConnectionPlugin] mounted ${CLOUD_CONNECTION_PREFIX}/{status,bind/start,bind/poll,install,installation,installed,org-packages} → ${cloudUrl || '(cloud unconfigured)'}`);
         });

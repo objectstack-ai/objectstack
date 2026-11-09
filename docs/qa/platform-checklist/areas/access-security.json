@@ -9,7 +9,7 @@
       "title": "Row-level security: restricted member sees only their rows; admin sees all",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -27,7 +27,7 @@
         ]
       },
       "steps": [
-        "boot the showcase on its own port and file DB (dogfood skill §0); sign in as admin; sign up members A and B (fresh emails; invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)) — both hold only the everyone baseline showcase_member_default",
+        "boot the showcase on its own port and file DB (dogfood skill §0); sign in as admin; sign up members A and B (fresh emails; invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address answers the invitation's id, and a sign-up presenting it as invitationId is admitted while the address alone is refused (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)) — both hold only the everyone baseline showcase_member_default",
         "as A: POST /api/v1/data/showcase_private_note {\"title\": \"A note 1\"} and a second note; as B: POST one note — capture the returned ids",
         "as A: GET /api/v1/data/showcase_private_note (list); as B: same; capture both record sets",
         "as A: GET /api/v1/data/showcase_private_note/<B's id> (foreign by-id read); as A: PATCH /api/v1/data/showcase_private_note/<B's id> {\"body\": \"forged\"} (foreign by-id write)",
@@ -148,7 +148,8 @@
           "date": "2026-10-31",
           "change": "acceptance[4].verify names the adopted-row proof. In QA run #27409's `objectstack verify --rls` block, showcase_account's RLS proof rode a seeded row because the sweep's derived admin create was refused 400. Source agrees: packages/verify/src/rls.ts falls back to adopting an existing row when the app's validation rejects the derived body (the #7685 cascade-stopper, RlsResult target 'adopted', report suffix '[target adopted from existing rows — admin create failed (STATUS)]'), so the object and its dependents are probed instead of skipped. The verify text now says the adopted-row verdict stands, asks the run record to name the objects that rode one, and records that the derived-body 400 is not an RLS finding. No assertion is relaxed: summary.holes must still be 0. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488948228",
           "ref": "#27409"
-        }
+        },
+        { "revision": 11, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" }
       ]
     },
     {
@@ -156,7 +157,7 @@
       "title": "Write-path guards: readonly strip, owner_id forge/transfer denied, bulk validation",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -172,7 +173,7 @@
         ]
       },
       "steps": [
-        "boot the showcase on its own port and DB; admin session + two members Alice and Bob (fresh sign-ups — invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address admits the sign-up (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)); resolve their sys_user ids via the data API or objectql",
+        "boot the showcase on its own port and DB; admin session + two members Alice and Bob (fresh sign-ups — invite each one first — the stock showcase declares no auth.audience, so the invite_only default answers an uninvited POST /api/v1/auth/sign-up/email 403 SELF_REGISTRATION_CLOSED; an admin POST /api/v1/auth/organization/invite-member for the address answers the invitation's id, and a sign-up presenting it as invitationId is admitted while the address alone is refused (or admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true)); resolve their sys_user ids via the data API or objectql",
         "as admin (contact create is admin-side in the stock matrix): POST /api/v1/data/showcase_contact {\"name\": \"RO probe\", \"email\": \"ro-probe@verify.test\", \"lead_score\": 10} — forging the readonly field on INSERT; GET the row back",
         "PATCH the same contact with {\"lead_score\": 99}; GET again",
         "as Alice: POST /api/v1/data/showcase_private_note {\"title\": \"planted\", \"owner_id\": \"<Bob's id>\"} (insert forge); then POST a note with {\"owner_id\": \"<Alice's own id>\"} (explicit self-owner); then PATCH her own note with {\"owner_id\": \"<Bob's id>\"} (transfer) and with {\"owner_id\": null} (disown)",
@@ -291,7 +292,8 @@
           "date": "2026-10-27",
           "change": "Access-security pin upgrade, slice 1 (#26571; Tier 1 record #26468 scored the item PARTIAL). Pinned at the api oracle's layer (in-process HTTP): acceptance[0]'s droppedFields advertisement on the INSERT strip (showcase-static-readonly); acceptance[4]'s createMany owner stamping and negative[0]'s admin forge-insert and disown (owner-anchor-and-bulk-writes); acceptance[5]'s mixed updateMany per-row droppedFields and the line's product field, and acceptance[6]'s per-row validation under continueOnError with the default-stop contrast (showcase-readonly-when-parent). automated.ref now maps every clause to its case. No clause or status changed",
           "ref": "#26571"
-        }
+        },
+        { "revision": 9, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" }
       ]
     },
     {
@@ -499,7 +501,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -521,7 +523,7 @@
         ]
       },
       "steps": [
-        "boot the showcase on its own port and DB; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set with one sys_user_permission_set row. A live run writes it as the admin over HTTP: POST /api/v1/data/sys_user_permission_set {\"user_id\": MEMBER_ID, \"permission_set\": SET_NAME} answers 201 and the grant takes effect (QA run #28545; the object declares create among its apiMethods, packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts). The pins insert the same row in system context (showcase-permission-zoo.dogfood.test.ts, showcase-crud-persona-matrix.dogfood.test.ts). ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (a pending sys_invitation row admits the sign-up), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
+        "boot the showcase on its own port and DB; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set with one sys_user_permission_set row. A live run writes it as the admin over HTTP: POST /api/v1/data/sys_user_permission_set {\"user_id\": MEMBER_ID, \"permission_set\": SET_NAME} answers 201 and the grant takes effect (QA run #28545; the object declares create among its apiMethods, packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts). The pins insert the same row in system context (showcase-permission-zoo.dogfood.test.ts, showcase-crud-persona-matrix.dogfood.test.ts). ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (the sign-up presents the id it answers as invitationId; the address alone is refused), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
         "as admin (or a helper member), seed one FOREIGN-owned probe row per object under test (e.g. a showcase_private_note, showcase_inquiry, showcase_invoice + line, showcase_announcement owned by someone other than the persona)",
         "for every row of access-matrix.json drive all four verbs as that persona: POST /api/v1/data/<object> {minimal valid payload}, GET /api/v1/data/<object> + GET /api/v1/data/<object>/<probe id>, PATCH /api/v1/data/<object>/<own or probe id>, DELETE /api/v1/data/<object>/<id> — capture status + the top-level body.code for each cell (acceptance[1])",
         "for rows with viewAllRecords:true (auditor on showcase_inquiry/showcase_invoice/showcase_invoice_line/showcase_private_note): GET the foreign probe by id and list; for the SAME objects re-run as a persona whose row says viewAllRecords:false",
@@ -670,7 +672,8 @@
           "date": "2026-11-01",
           "change": "QA run #28545 (W3-C1R) finding: steps[0] and steps[6] described the set grant only as a system-context insert. steps[0] now names the live door, an admin POST /api/v1/data/sys_user_permission_set {user_id, permission_set} (201, effective, as #28545 drove it; sys-user-permission-set.object.ts declares create), and keeps the pins' system-context insert as theirs. steps[6] adds the delegate's POST /api/v1/data/sys_business_unit_member into bu_field_ops, the membership the pin places beside the grant (showcase-crud-persona-matrix.dogfood.test.ts). No clause changed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
-        }
+        },
+        { "revision": 13, "date": "2026-11-08", "change": "The invite step presents the invitation: under invite_only a self-serve sign-up is admitted only by the invitation it presents, so the sign-up sends the id invite-member answered as invitationId beside the email, and the address alone answers 403 SELF_REGISTRATION_CLOSED. Prose only; no clause changed" }
       ]
     },
     {
@@ -2319,7 +2322,7 @@
       "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2337,7 +2340,7 @@
       "steps": [
         "boot showcase with the console; admin session; provision member M granted a writable set S that WITHHOLDS a verb on an object (e.g. delete:false on showcase_task); as M create the showcase_task rows the DELETE probes below use — M's OWN rows, never seeded ids: a set silent on writeScope is owner-only (packages/plugins/plugin-security/src/permission-evaluator.ts getEffectiveScope), so a seeded task owned by someone else stays refused after the verb flips ON and confounds the verb with ownership",
         "baseline: as M, DELETE /api/v1/data/showcase_task/<one of M's own ids> — must be refused 403 (the withheld verb)",
-        "in the console Permission Matrix editor for S (Setup's metadata-admin door, which mounts the editor with no packageId), flip delete ON for showcase_task and Save. That Save is a plain PUT that lands state:'active' at once, not a draft: only a package-scoped editor (Studio's Access pillar, packageId set) saves with mode 'draft' (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx, the saveVersioned call; QA run #27441). Capture PUT /api/v1/meta/permission/S, then POST /api/v1/meta/permission/S/publish, which answers 404 code NO_DRAFT after that active save, per acceptance[1]; a run that edits through the package door instead publishes the pending draft and captures a 2xx",
+        "in the console Permission Matrix editor for S (Setup's metadata-admin door: /apps/setup/metadata/permission/S redirects to /_console/studio/~all/metadata/permission/S, which mounts the editor with no packageId and saves on an explicit Save), flip delete ON for showcase_task and Save. That Save is a plain PUT that lands state:'active' at once, not a draft: only a package-scoped editor (Studio's Access pillar, packageId set) saves with mode 'draft' (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.tsx, the saveVersioned call; QA run #27441). Capture PUT /api/v1/meta/permission/S, then POST /api/v1/meta/permission/S/publish, which answers 404 code NO_DRAFT after that active save, per acceptance[1]; a run that edits through the package door instead publishes the pending draft and captures a 2xx",
         "as M: DELETE /api/v1/data/showcase_task/<another of M's own ids> — must now be 2xx (access flipped)",
         "flip delete back OFF in the matrix and Save (active at once, as in steps[2]; publish only a package-door draft); as M: DELETE again — must be refused 403",
         "field-level half: flip an FLS bit (a showcase_project field editable:false→true) in the lower matrix and Save (as in steps[2]); as M PATCH that field — the write flips accordingly",
@@ -2431,6 +2434,12 @@
           "date": "2026-11-01",
           "change": "negative[2] moved to source[6]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-08",
+          "change": "steps[2]: /apps/setup/metadata/permission/NAME redirects to /_console/studio/~all/metadata/permission/NAME, where the editor uses an explicit Save. Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb). Read at base 4894cfe1",
+          "ref": "#31499"
         }
       ]
     },

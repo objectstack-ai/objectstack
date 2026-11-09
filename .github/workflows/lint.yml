@@ -5210,6 +5210,28 @@ jobs:
         continue-on-error: true
         run: pnpm --filter @objectstack/spec check:meta-url-spelling
 
+      # [#31518] The spec property-liveness ledger (packages/spec/liveness/)
+      # cites evidence files across the whole tree — packages/objectql,
+      # packages/runtime, ui/ and more — so a change that touches only a cited
+      # file can make a row stale. The two other places this command runs did
+      # not stop that from landing. `Spec property liveness`
+      # (spec-liveness-check.yml) is scoped by `paths:` to the spec side on
+      # pull_request and is not a required context, so its red merge_group run
+      # rides through the queue. The `local` vitest project's
+      # check-liveness.test.ts runs under `@objectstack/spec:test`, whose turbo
+      # hash does not cover the cited files, so a pull request that only moves
+      # code in a cited file replays it from the cache. Measured 2026-11-01..07:
+      # #30341 landed with its `Spec property liveness` queue run red, and
+      # main's tree failed this command until #30368; #30716's PR run replayed
+      # `spec:test` from the cache and its queue entry went red twice. This
+      # lane is unfiltered and required, so the same command now runs on every
+      # pull_request and merge_group. It reads source via tsx, needs no build,
+      # and takes about 4 s.
+      - name: Check every spec liveness citation still names its property
+        id: check-spec-liveness-citations
+        continue-on-error: true
+        run: pnpm --filter @objectstack/spec check:liveness
+
       # The two ADR-0087 D4 projections, under the #22449 B′ ruling. They are
       # generated where they ship — at publish, by scripts/release-spec-changes.sh,
       # which also verifies the packed copies against a fresh generation — so

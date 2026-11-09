@@ -139,6 +139,144 @@ export function oracleRaw16AsUuid(value: unknown): unknown {
 }
 
 /**
+ * Uuid text: the form the column reads back as ({@link oracleRaw16AsUuid}),
+ * 8-4-4-4-12 hexadecimal digits, or the same 32 digits undashed (the column's
+ * own hex form, which Oracle's `RAWTOHEX` prints) — either case.
+ */
+const UUID_TEXT = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})$/i;
+
+/**
+ * Uuid text (either accepted form) as the column reads it back: lowercase and
+ * hyphenated, what {@link oracleRaw16AsUuid} answers for the same 16 bytes.
+ */
+export function oracleUuidReadForm(text: string): string {
+  const hex = text.replace(/-/g, '').toLowerCase();
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** Where an {@link oracleUuidRawBinding} value goes: a WHERE comparand or a written column. */
+export type OracleUuidBindingRole = 'comparand' | 'write';
+
+/**
+ * The write half of {@link oracleRaw16AsUuid}: uuid text bound into a
+ * `RAW(16)` column, as a comparand or as a written value.
+ *
+ * Oracle refuses a text bind against a `RAW` column, so a `SYS_GUID()` key the
+ * driver had just READ as a uuid was refused the moment that same uuid came
+ * back as a filter or a write. It is bound as `HEXTORAW(?)` over its 32 hex
+ * digits, the inverse of what the read presents.
+ *
+ * Which columns take this is decided by the catalog, never by the value (see
+ * {@link oracleRawUuidColumns}): a text column that happens to hold uuids is
+ * bound as text, as before.
+ *
+ * A value that is not uuid text is refused before any statement is sent —
+ * Oracle would otherwise raise ORA-01465 on bad hex, or compare valid hex of
+ * another length and silently match nothing:
+ *
+ *  - a comparand answers `INVALID_FILTER` / 400 ({@link withheldFilterError},
+ *    the filter refusal family);
+ *  - a written value answers `VALIDATION_ERROR` / 400, the family the write
+ *    path refuses an unwritable value with.
+ *
+ * `null` never reaches here: the callers keep `IS NULL` and a null write as
+ * they were.
+ */
+export function oracleUuidRawBinding(
+  knexInstance: Knex,
+  field: string,
+  value: unknown,
+  role: OracleUuidBindingRole,
+): Knex.Raw {
+  if (isOracleUuidText(value)) {
+    return knexInstance.raw('HEXTORAW(?)', [value.replace(/-/g, '').toUpperCase()]);
+  }
+  if (role === 'comparand') {
+    // A by-key door's id has no filter subtree to carry a mark: withheld.
+    assertOracleUuidComparand('=', field, value);
+  }
+  const err = new Error(`The value written to field "${field}" ${NOT_A_UUID}`) as Error & {
+    code?: string;
+    status?: number;
+  };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
+/** Whether `value` is uuid text a `RAW(16)` column can be bound to — see {@link UUID_TEXT}. */
+export function isOracleUuidText(value: unknown): value is string {
+  return typeof value === 'string' && UUID_TEXT.test(value);
+}
+
+const NOT_A_UUID =
+  'is not a uuid. The column is a RAW(16) uuid on an Oracle table, and only uuid text ' +
+  '(8-4-4-4-12 hexadecimal digits, the form the column reads back as, or the same 32 digits undashed) ' +
+  'can be bound to it.';
+
+/**
+ * Refuses a comparison comparand against a `RAW(16)` uuid column that is not
+ * uuid text (`INVALID_FILTER` / 400, through {@link withheldFilterError} with
+ * the subtree it was raised from), for the comparison operators — the ones
+ * whose comparand is bound to the column ({@link ORACLE_EMPTY_STRING_SENSITIVE_OPERATORS}).
+ * A list comparand is judged member by member; a `null` member is left to the
+ * operator's own null handling.
+ *
+ * The pattern operators (`$contains`, `$like`, …) are not judged: their
+ * comparand is a text pattern, never bound to the column as a value, and they
+ * compile exactly as before.
+ */
+export function assertOracleUuidComparand(
+  operator: string,
+  field: string,
+  value: unknown,
+  subtree?: unknown,
+): void {
+  if (!ORACLE_EMPTY_STRING_SENSITIVE_OPERATORS.has(operator)) return;
+  const members = Array.isArray(value) ? value : [value];
+  if (members.every((m) => m === null || m === undefined || isOracleUuidText(m))) return;
+  throw withheldFilterError(
+    `This filter compares a uuid column with a value that ${NOT_A_UUID} The field is withheld from the message; ` +
+      'the full diagnostic is in the server log.',
+    `Field "${field}" is compared with a value that ${NOT_A_UUID}`,
+    subtree,
+  );
+}
+
+/**
+ * The `RAW(16)` columns of one remote table, read from the catalog
+ * (`ALL_TAB_COLUMNS`): the columns {@link oracleUuidRawBinding} binds.
+ *
+ * Read rather than declared because nothing an author writes says it: a
+ * `lookup` or `text` field is the exact pairing for a `VARCHAR2` uuid column
+ * and for a `RAW(16)` one alike, and only the second needs `HEXTORAW`.
+ *
+ * The owner is `remoteSchema` when the binding names one, else the owner
+ * spelled into `remoteName` (`OWNER.TABLE`), else the session's current
+ * schema — the resolution the statements themselves get.
+ */
+export async function oracleRawUuidColumns(
+  knexInstance: Knex,
+  remoteTable: string,
+  remoteSchema?: string,
+): Promise<string[]> {
+  let owner = remoteSchema;
+  let table = remoteTable;
+  if (!owner && remoteTable.includes('.')) {
+    const dot = remoteTable.indexOf('.');
+    owner = remoteTable.slice(0, dot);
+    table = remoteTable.slice(dot + 1);
+  }
+  const ownerSql = owner ? '?' : `SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')`;
+  const result = (await knexInstance.raw(
+    `SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS WHERE OWNER = ${ownerSql} AND TABLE_NAME = ? ` +
+      `AND DATA_TYPE = 'RAW' AND DATA_LENGTH = 16`,
+    owner ? [owner, table] : [table],
+  )) as unknown;
+  return Array.isArray(result) ? (result as Array<{ COLUMN_NAME: string }>).map((row) => row.COLUMN_NAME) : [];
+}
+
+/**
  * The `fetchTypeHandler` every statement this client runs is executed with
  * (unless a caller passed its own): zone-less `DATE` / `TIMESTAMP` columns
  * through {@link oracleWallClockAsUtc}, `RAW(16)` through
@@ -343,7 +481,12 @@ export function oracleUpsertUnsupportedError(object: string): Error {
  *  - JSON membership has no construct, and the caller refuses it on Oracle
  *    rather than falling back to a substring test over the JSON text
  *    (`applyJsonMembership`).
+ *
+ * SQL Server (#31327, also federation-only) maps to `'unknown'` too, but meets
+ * neither construct that way: its aggregand takes its own arm first
+ * (`mssqlAggregandOperandSql` — a `bit` must be cast before SUM / AVG), and
+ * JSON membership is refused on it the same way as on Oracle.
  */
 export function coreSqlDialectOf(dialect: SqlDialectName): 'sqlite' | 'postgres' | 'mysql' | 'unknown' {
-  return dialect === 'oracle' ? 'unknown' : dialect;
+  return dialect === 'oracle' || dialect === 'mssql' ? 'unknown' : dialect;
 }

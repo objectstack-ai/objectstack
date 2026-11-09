@@ -104,7 +104,7 @@ const pendingDraftReads = new WeakMap<typeof fetch, Map<string, Promise<unknown>
 let publishPulseObserved = false;
 
 function draftsUrl(packageId?: string | null): string {
-  return `/api/v1/meta/_drafts${packageId ? `?packageId=${encodeURIComponent(packageId)}` : ''}`;
+  return `/api/v1/meta/_drafts${packageId ? `?package=${encodeURIComponent(packageId)}` : ''}`;
 }
 
 function readDraftsPayload(url: string): Promise<unknown> {

@@ -3215,6 +3215,16 @@ export const DeleteDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('Object name'),
   id: z.string().describe('Deleted record ID'),
   success: z.boolean().describe('Whether deletion succeeded'),
+  /**
+   * [ADR-0148, #30237] The recycle-bin entry the delete wrote: the entry a
+   * client offers to undo (`POST /data/:object/recycle-bin/:entryId/restore`).
+   * Absent when the delete wrote none: a platform object (`sys_`, `cloud_`,
+   * `ai_`), a composition with no recycle bin, or a store that answered no
+   * entry id.
+   */
+  recycleBinEntryId: z.string().optional().describe(
+    'The recycle-bin entry this delete wrote, to restore it; absent when the delete wrote none',
+  ),
 }));
 
 // ==========================================

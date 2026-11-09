@@ -2741,21 +2741,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     text:
       'Finally, it retires the object-permission lifecycle bits `allowRestore` and '
       + '`allowPurge` (ADR-0049 enforce-or-remove; maintainer ruling 2026-08-26, '
-      + 'decision-inbox batch 5, which chose retiring the two bits over gating operations that do '
+      + 'decision-inbox batch 5, which chose retiring the two bits over gating operations that did '
       + 'not exist): the `restore` / '
-      + '`purge` ObjectQL operations the bits claimed to gate have never existed — no '
-      + 'destructive lifecycle verb is in the engine\'s dispatch vocabulary, which a test pins — '
+      + '`purge` ObjectQL operations the bits claimed to gate did not exist then — no '
+      + 'destructive lifecycle verb was in the engine\'s dispatch vocabulary — '
       + 'so granting the bits delivered nothing, and an author who declared '
       + '`allowPurge: false` believed a lock on GDPR hard-deletion existed when the '
       + 'operation itself did not. Both keys are retiredKey tombstones; the evaluator\'s '
-      + 'pre-mapping rows retired in the same batch (a dispatched `restore`/`purge` stays '
-      + 'denied fail-closed via the DESTRUCTIVE_OPERATIONS backstop, so there is no '
+      + 'pre-mapping rows retired in the same batch (a dispatched `restore`/`purge` stayed '
+      + 'denied fail-closed via the DESTRUCTIVE_OPERATIONS backstop, so there was no '
       + 'ungated window), and the mechanical conversion strips the keys from every object '
       + 'grant in `permissions[].objects` (pure lossless delete — they never had an '
       + 'effect to lose). `allowTransfer` is ENFORCED — the server guards who may rewrite a record\'s '
-      + 'owner — and stays. The keys return '
-      + 'with the M2 lifecycle initiative (feature + RBAC in one batch), which stays open as their '
-      + 'anchor.',
+      + 'owner — and stays. The keys do not return: the operations now exist with the recycle bin '
+      + '(ADR-0148), and their grants are the new keys `allowRestoreOwnDeleted` and '
+      + '`manageRecycleBin`.',
   },
   {
     id: 'permission-rls-tags-retired',

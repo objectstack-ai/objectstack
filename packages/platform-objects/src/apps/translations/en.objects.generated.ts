@@ -1160,10 +1160,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Revoke Reason",
-        help: "Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.",
+        help: "Why the key was revoked, where that decides who can restore it. Administrator password reset: only a platform administrator can restore the key. Organization membership ended: the owner left the organization, and no one can restore the key; a member creates a new one. Suspended by an administrator: a platform administrator revoked a key that is not theirs, and only a platform administrator can restore it. Cleared when the key is restored. Empty for a key its owner revoked from the API Keys list.",
         options: {
           admin_password_reset: "Administrator password reset",
-          organization_membership_ended: "Organization membership ended"
+          organization_membership_ended: "Organization membership ended",
+          administrator_suspended: "Suspended by an administrator"
         }
       },
       key: {
@@ -2048,6 +2049,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "SAML Config",
         help: "JSON: entryPoint, cert, identifierFormat, mapping (managed by better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Allow IdP-Initiated Sign-In",
+        help: "Accept a sign-in that starts at the identity provider (an unsolicited SAML response, or an OIDC callback with no state) instead of at this system. Off by default: an IdP-initiated SAML response is not bound to any request this system made. Change it with “Edit Sign-In Options”."
+      },
+      allow_jit: {
+        label: "Allow Just-in-Time Provisioning",
+        help: "Under the invite-only audience posture, create an account for a person who signs in through this provider without an account or an invitation. Off by default: such a person is refused. Other postures provision as before. Change it with “Edit Sign-In Options”."
+      },
       user_id: {
         label: "Registered By",
         help: "User who registered this provider"
@@ -2168,6 +2177,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Delete SSO Provider",
         description: "Delete this SSO provider? Users from its domain will no longer be able to sign in through it.",
         successMessage: "SSO provider deleted"
+      },
+      edit_sso_sign_in_options: {
+        label: "Edit Sign-In Options",
+        successMessage: "Sign-in options saved"
       }
     }
   },
@@ -2623,6 +2636,55 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       order_key: {
         label: "Order Key",
         help: "Derived stable-pagination key maintained by @better-auth/scim; do not write directly."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All"
+      }
+    }
+  },
+  sys_idp_group_mapping: {
+    label: "IdP Group Mapping",
+    pluralLabel: "IdP Group Mappings",
+    description: "Maps an identity provider group to the permission set its members are granted",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Source Kind",
+        help: "What sends the group: a SCIM connection, or an SSO provider at sign-in.",
+        options: {
+          scim: "SCIM Connection",
+          sso: "SSO Provider"
+        }
+      },
+      source_id: {
+        label: "Source ID",
+        help: "The SCIM connection ID or the SSO provider ID the group arrives through, e.g. \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "Group External ID",
+        help: "The group's externalId as the identity provider sends it. Set this or the display name, not both."
+      },
+      group_display_name: {
+        label: "Group Display Name",
+        help: "The group's displayName, matched exactly. Used when the mapping names no external ID."
+      },
+      permission_set: {
+        label: "Permission Set",
+        help: "The permission set a member of the group is granted. Administrator sets are refused."
+      },
+      organization_id: {
+        label: "Organization",
+        help: "The organization the grant is made in: the organization that owns the SCIM connection or the SSO provider."
       },
       created_at: {
         label: "Created At"

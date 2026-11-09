@@ -1160,10 +1160,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motivo da revogação",
-        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Limpo quando a chave é restaurada. Vazio para uma chave revogada na lista de Chaves de API.",
+        help: "Por que a chave foi revogada, quando isso decide quem pode restaurá-la. Redefinição de senha pelo administrador: somente um administrador da plataforma pode restaurar a chave. Fim da associação à organização: o proprietário saiu da organização e ninguém pode restaurar a chave; um membro cria uma nova. Suspensa por um administrador: um administrador da plataforma revogou uma chave que não é dele, e somente um administrador da plataforma pode restaurá-la. Limpo quando a chave é restaurada. Vazio para uma chave que o proprietário revogou na lista de Chaves de API.",
         options: {
           admin_password_reset: "Redefinição de senha pelo administrador",
-          organization_membership_ended: "Fim da associação à organização"
+          organization_membership_ended: "Fim da associação à organização",
+          administrator_suspended: "Suspensa por um administrador"
         }
       },
       key: {
@@ -2048,6 +2049,14 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Configuração SAML",
         help: "JSON: entryPoint, cert, identifierFormat, mapping (gerenciado pelo better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Permitir login iniciado pelo IdP",
+        help: "Aceita um login que começa no provedor de identidade (uma resposta SAML não solicitada ou um callback OIDC sem state) em vez de neste sistema. Desativado por padrão: uma resposta SAML iniciada pelo IdP não está vinculada a nenhuma solicitação feita por este sistema. Altere em “Editar opções de login”."
+      },
+      allow_jit: {
+        label: "Permitir provisionamento just-in-time",
+        help: "Na política de público somente por convite, cria uma conta para quem faz login por este provedor sem conta nem convite. Desativado por padrão: essa pessoa é recusada. As demais políticas provisionam como antes. Altere em “Editar opções de login”."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuário que registrou este provedor"
@@ -2168,6 +2177,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Excluir provedor de SSO",
         description: "Excluir este provedor de SSO? Os usuários do domínio dele não poderão mais entrar por meio dele.",
         successMessage: "Provedor de SSO excluído"
+      },
+      edit_sso_sign_in_options: {
+        label: "Editar opções de login",
+        successMessage: "Opções de login salvas"
       }
     }
   },
@@ -2623,6 +2636,55 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       order_key: {
         label: "Chave de ordenação",
         help: "Chave de paginação estável derivada, mantida pelo @better-auth/scim; não grave diretamente."
+      },
+      created_at: {
+        label: "Criado em"
+      },
+      updated_at: {
+        label: "Atualizado em"
+      }
+    },
+    _views: {
+      all: {
+        label: "Todos"
+      }
+    }
+  },
+  sys_idp_group_mapping: {
+    label: "Mapeamento de grupo do IdP",
+    pluralLabel: "Mapeamentos de grupo do IdP",
+    description: "Mapeia um grupo do provedor de identidade para o conjunto de permissões concedido aos seus membros",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Tipo de origem",
+        help: "O que envia o grupo: uma conexão SCIM ou um provedor SSO no login.",
+        options: {
+          scim: "Conexão SCIM",
+          sso: "Provedor SSO"
+        }
+      },
+      source_id: {
+        label: "ID de origem",
+        help: "O ID da conexão SCIM ou do provedor SSO pelo qual o grupo chega, por exemplo \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "ID externo do grupo",
+        help: "O externalId do grupo como o provedor de identidade o envia. Defina este ou o nome de exibição, não ambos."
+      },
+      group_display_name: {
+        label: "Nome de exibição do grupo",
+        help: "O displayName do grupo, com correspondência exata. Usado quando o mapeamento não indica um ID externo."
+      },
+      permission_set: {
+        label: "Conjunto de permissões",
+        help: "O conjunto de permissões concedido a um membro do grupo. Conjuntos de administrador são recusados."
+      },
+      organization_id: {
+        label: "Organização",
+        help: "A organização em que a concessão é feita: a organização proprietária da conexão SCIM ou do provedor SSO."
       },
       created_at: {
         label: "Criado em"

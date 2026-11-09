@@ -106,6 +106,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (the route modules import it lazily).
+import '@objectstack/objectql';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -157,6 +160,8 @@ const SLOT_FILES = [
     'user-work-routes.ts',
     // [#30675] The record-currency code backfill door (the SEVENTH consumer).
     'meta-record-currency-backfill-route.ts',
+    // [#30237] The recycle bin's doors (the EIGHTH consumer).
+    'recycle-bin-routes.ts',
 ] as const;
 const SOURCES = new Map<string, string>(SLOT_FILES.map((file) => [
     file, file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'),
@@ -235,12 +240,13 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // `meta-item-history-routes.ts`. [#30205] 6: a user's assigned work, its
         // one site in `user-work-routes.ts`, shared by both of its routes.
         // [#30675] 7: the record-currency code backfill door, its one site in
-        // `meta-record-currency-backfill-route.ts`.
+        // `meta-record-currency-backfill-route.ts`. [#30237] 8: the recycle
+        // bin's doors, one site in `recycle-bin-routes.ts` shared by all four.
         const sites = censusInvocationSites('objectQLProvider');
         // The message carries the sites, so a failure here hands the next
         // reader the new census instead of a bare number.
         expect(sites.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBeTruthy();
-        expect(sites).toHaveLength(7);
+        expect(sites).toHaveLength(8);
     });
 
     it('⭐ [#18559] ALL FIVE consumers reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
@@ -256,7 +262,7 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // the site rather than a bare number.
         expect(direct.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBe('');
         expect(direct).toHaveLength(0);
-        expect(viaSeam).toHaveLength(7);
+        expect(viaSeam).toHaveLength(8);
 
         // ⭐ CONTROL for the window predicate itself, on BOTH axes. It reads a
         // WINDOW of source text, so "3 of 3" is only a reading if the same

@@ -133,7 +133,7 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.cel.type.unknown': '未知',
   'perm.cel.type.unknownHint':
     '引擎无法证明唯一类型。用 double() / int() / string() 包裹操作数以固定类型——只有可证明为数字的公式才能作为数据集度量。',
-  'perm.cel.saveBlocked': '请先修复 CEL 语法错误再保存。',
+  'perm.cel.saveBlocked': '请先修复表达式错误再保存。',
   // objectui#6900 — 见英文表同名条目。
   'perm.inspector.saveBlocked': '请先修复检查器中列出的问题再保存。',
   'perm.cel.test.title': '测试策略',
@@ -421,6 +421,14 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.currency.createCodeField': '创建币种字段',
   'designer.field.currency.codeFieldLabel': '币种',
   'designer.field.currency.recordHint': '列出本对象中值域为 ISO 4217 币种的文本字段。每条记录在其中保存自己的币种代码，金额按该币种显示。',
+  'designer.field.currency.homeAmount': '本位币金额',
+  'designer.field.currency.homeField': '本位币金额字段',
+  'designer.field.currency.homeFieldNone': '— 不保存 —',
+  'designer.field.currency.rateDate': '单据日期',
+  'designer.field.currency.rateDateNone': '— 选择日期字段 —',
+  'designer.field.currency.rateField': '汇率字段',
+  'designer.field.currency.rateFieldNone': '— 选择数字字段 —',
+  'designer.field.currency.homeAmountHint': '保存记录时，服务端按单据日期当日生效的汇率把该金额折算为组织本位币，并保存折算结果与所用汇率。这里只列出可存放它们的只读字段：金额用动态模式的币种字段，汇率用数字字段。',
   // Object basics (no-selection default inspector)
   'designer.object.kind': '对象',
   'designer.object.section.basic': '基础信息',
@@ -1837,6 +1845,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.datasource.schemaModeExternalHint': '要读取已经存有数据的数据库，请选这一项。ObjectStack 按原样读取其中的表，绝不建表或改表。保存后，「同步对象」会把其中的表导入为对象，这些对象的记录只读。',
   'engine.datasource.schemaModeManagedHint': 'ObjectStack 会按存放在这里的对象建表、改表。只用于专门留给 ObjectStack 的空数据库：在现有数据库里，存放一个对象会给同名的表加列。托管数据源没有「同步对象」。',
   'engine.datasource.schemaModeValidateOnlyHint': '与「外部」一样读取现有数据库，绝不改表。拿不准时请选「外部」。',
+  'engine.datasource.schemaModeFederationOnly': '不提供「托管」：此驱动只连接由其他系统管理的数据库，ObjectStack 绝不在其中建表或改表。',
   'engine.datasource.noSyncManaged': '没有「同步对象」：这是托管数据源，表由 ObjectStack 创建，没有可导入的表。要读取现有数据库中的表，请为它新建一个结构模式为「外部」的数据源。',
   'engine.datasource.testConnection': '测试连接',
   'engine.datasource.connectionFailed': '连接失败',

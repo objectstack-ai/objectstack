@@ -71,13 +71,16 @@ export interface AuthContextValue {
    *  `callbackURL` is where the email-verification link lands — see
    *  `SignUpData.callbackURL` for the shape the server accepts.
    *  `captchaToken` is the Turnstile widget's token, sent only when the
-   *  server serves `features.turnstileSiteKey` (`SignUpData.captchaToken`). */
+   *  server serves `features.turnstileSiteKey` (`SignUpData.captchaToken`).
+   *  `invitationId` is the invitation the sign-up presents, from the link the
+   *  invitee arrived on (`SignUpData.invitationId`). */
   signUp: (
     name: string,
     email: string,
     password: string,
     callbackURL?: string,
     captchaToken?: string,
+    invitationId?: string,
   ) => Promise<{ requiresVerification: boolean }>;
   /** Sign out the current user */
   signOut: () => Promise<void>;

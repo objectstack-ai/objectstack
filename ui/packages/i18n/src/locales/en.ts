@@ -401,6 +401,18 @@ const en = {
       available: 'Available',
       all: 'All currencies (ISO 4217)',
     },
+    // ADR-0144 D5 — the home field's read-only hint: the rate and document date
+    // the engine converted the record's amount at (`CurrencyField`, the record page);
+    // and the live preview under the amount while it is edited (`homeAmountPreview.tsx`).
+    currencyHome: {
+      convertedAt: 'Converted at {{rate}} on {{date}}',
+      homeCurrency: 'In the home currency (rate 1)',
+      preview: '≈ {{amount}} at {{rate}} on {{date}}',
+      previewSame: '≈ {{amount}} (home currency)',
+      awaitingRate: 'No {{currency}} rate on or before {{date}}: saving is refused until one is added',
+      awaitingDate: 'Set the document date to see the home amount',
+      rateUnreadable: 'Converted to the home currency when you save',
+    },
     // objectui#13461 — names for icon-only buttons in the field widgets.
     masterDetail: {
       view: 'Open {{name}}',
@@ -853,6 +865,7 @@ const en = {
       noSavedTemplates: 'No saved templates',
       noneOption: '— None —',
       saveCurrent: 'Save current',
+      saveCurrentNeedsMapping: 'Map at least one column to save a template.',
       templateName: 'Template name',
       save: 'Save',
       deleteTemplate: 'Delete template',
@@ -1046,6 +1059,10 @@ const en = {
     eventTitlePlaceholder: 'What\'s this event about?',
     creating: 'Creating…',
     titleRequired: 'Title is required',
+    // A drag-to-reschedule the server refused because the record is gone for
+    // this session: deleted, or no longer visible to it. `{{object}}` is the
+    // object's label; with none to show, `form.recordNotFoundOrHidden` is used.
+    rescheduleNotFound: 'This {{object}} record no longer exists, or you no longer have access to it.',
     a11y: {
       region: 'Calendar',
       grid: 'Calendar grid',

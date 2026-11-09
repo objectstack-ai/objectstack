@@ -82,6 +82,7 @@ import {
   buildTwoFactorPluginSchema,
 } from './auth-schema-config.js';
 import { isPlaceholderEmail } from './placeholder-email.js';
+import { SSO_PROVIDER_SIGN_IN_FIELDS, ssoSamlOptions } from './sso-sign-in-options.js';
 import { logAfterResponseSendFailure, sendAfterResponseOnPublicDoor } from './run-after-response.js';
 import {
   ONE_TIME_TOKEN_EXPIRES_IN_MINUTES,
@@ -763,9 +764,40 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
     // external IdP's email domain be DNS-verified before it may complete a
     // login — preventing an org admin from registering a provider for a domain
     // they don't control. Off by default to preserve the register→login flow.
+    //
+    // Per-provider sign-in options (ruling record 6718355623, `sso-sign-in-options.ts`):
+    // `allowIdpInitiated` and `allowJit` are provider additional fields, both
+    // OFF by default, so the vendor's own register / update-provider doors
+    // write them. `saml` hands the vendor its one IdP-initiated option as a
+    // getter that answers the ACS request's own provider.
+    //
+    // IdP group → permission set (the same ruling, item 3; `sso-group-projection.ts`):
+    // every sign-in's group claim (`userInfo.groups`, filled by the provider's own
+    // `mapping.extraFields.groups`) is matched against the provider's
+    // `sys_idp_group_mapping` rows, the SCIM half's one model, and only ordinary
+    // permission sets inside the organization boundary are granted. On EVERY
+    // sign-in, so the grants follow the IdP's groups; a failure is logged and
+    // never fails the sign-in.
+    const { createSsoGroupProvisioner } = await import('./sso-group-projection.js');
     return sso({
       organizationProvisioning: { defaultRole: 'member' },
       ...(enabled.ssoDomainVerification ? { domainVerification: { enabled: true } } : {}),
+      saml: ssoSamlOptions(),
+      schema: { ssoProvider: { additionalFields: SSO_PROVIDER_SIGN_IN_FIELDS } },
+      provisionUser: createSsoGroupProvisioner({
+        getEngine: () => this.getDataEngine(),
+        boundary: async () => (await this.config.organizationBoundary?.().catch(() => undefined)) ?? undefined,
+        warn: (message) => this.config.logger?.warn?.(message),
+        // The host logger carries `error` though the config type names only
+        // `info`/`warn` (as `logAfterResponseSendFailure` reads it); with none,
+        // the console's error stream, never a lower level.
+        error: (message) => {
+          const sink = this.config.logger as { error?: (msg: string) => void } | undefined;
+          if (typeof sink?.error === 'function') sink.error(message);
+          else console.error(message);
+        },
+      }),
+      provisionUserOnEveryLogin: true,
     });
     });
   }
@@ -797,6 +829,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
       const { verifyScimBearerToken, recordScimRequestConnection } = await import(
         './scim-connection-service.js'
       );
+      const { createScimGroupProjection } = await import('./scim-group-projection.js');
       const secret = this.resolveAuthSecret();
       return scim({
         connections: [],
@@ -835,6 +868,15 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         identity: {
           reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
         },
+        // [ADR-0134 D4, filled for permission sets] A pushed group grants the
+        // permission sets its `sys_idp_group_mapping` rows name, inside the
+        // SCIM transaction; an unmapped group grants nothing, and no mapping
+        // can name an administrator set. See `scim-group-projection.ts`.
+        projection: createScimGroupProjection({
+          getEngine: () => this.getDataEngine(),
+          boundary: async () => (await this.config.organizationBoundary?.().catch(() => undefined)) ?? undefined,
+          warn: (message) => this.config.logger?.warn?.(message),
+        }),
       });
     });
   }

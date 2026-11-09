@@ -96,6 +96,18 @@ import {
   type BareNameHolder,
   type BareNameOneHolderType,
 } from './bare-name-one-holder.js';
+// [ADR-0150 D2, child N] Inside one namespace, a `(type, name)` of the twelve
+// uncovered bucket 2/3 types has one package holder — the one predicate the
+// package door and `os validate` both ask (module doc).
+import {
+  isNamespaceJudged,
+  namespaceNameConflictMessage,
+  namespaceNameConflicts,
+  namespacePackageOf,
+  type NamespaceNameConflict,
+  type NamespacePackage,
+  type NamespaceUniqueType,
+} from './namespace-co-owner-names.js';
 // One default record page per object per deployment — the holders and the one
 // place a manifest's default record pages are read from (module doc).
 import {
@@ -3240,6 +3252,57 @@ export class ArtifactObjectNameConflictError extends Error {
 }
 
 /**
+ * [ADR-0150 D2, child N] Raised when a package declares an item of one of the
+ * twelve uncovered bucket 2/3 types — sharing rule, queue, assignment rule,
+ * hook, job, app, page, dashboard, report, book, analytics cube, tool — under a
+ * name another package of its namespace already holds, at the package door
+ * (`namespace-co-owner-names.ts` states the rule, the holders and what it does
+ * not judge). `os validate` prints the same sentence for the same predicate.
+ *
+ * {@link ArtifactObjectNameConflictError}'s sibling in placement — it sits
+ * right after the ADR-0130 D3 object check, ahead of every mutation — and
+ * {@link BareNameConflictError}'s in its envelope and code: `code:
+ * 'NAMESPACE_CONFLICT'`, `status: 422`, because the condition is the one the
+ * namespace gate registers that code for, "a name in a namespace is already
+ * taken", and so is the remedy: rename, or leave one package out. No code is
+ * minted.
+ *
+ * Every conflict the install carries is listed — `conflicts` — and each names
+ * EVERY package of the namespace that already holds the name (red line 2:
+ * ambiguity is reported, never guessed). The top-level fields repeat the first.
+ */
+export class NamespaceNameConflictError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** Every `(type, name)` this install would have held twice inside its namespace, in declaration order. */
+  readonly conflicts: readonly NamespaceNameConflict[];
+  /** The namespace. */
+  readonly namespace: string;
+  /** The first conflict's type. */
+  readonly itemType: NamespaceUniqueType;
+  /** The first conflict's name. */
+  readonly itemName: string;
+  /** The package whose install this refusal stopped. */
+  readonly incomingPackageId: string;
+  /** The first conflict's existing holders, every one of them. */
+  readonly existingPackageIds: readonly string[];
+
+  constructor(conflicts: readonly NamespaceNameConflict[]) {
+    const [first] = conflicts;
+    super(namespaceNameConflictMessage(conflicts));
+    this.name = 'NamespaceNameConflictError';
+    this.conflicts = conflicts;
+    this.namespace = first.namespace;
+    this.itemType = first.type;
+    this.itemName = first.name;
+    this.incomingPackageId = first.incomingPackageId;
+    this.existingPackageIds = first.existingPackageIds;
+  }
+}
+
+/**
  * [ADR-0029 D3] The cross-package ownership refusal: a package claims `own`
  * on an object name that a DIFFERENT package already owns. Raised by
  * {@link SchemaRegistry.registerObject} — the single-owner-per-object-name
@@ -3531,6 +3594,20 @@ function entriesOfMember(
 ): BundleEntry[] {
   const wanted = member.trim() || disc.canonical;
   return entries.filter((e) => (discriminatorValue(e.item, disc.field) || disc.canonical) === wanted);
+}
+
+/**
+ * [#31575] One answer out of bundle `entries` already in tier order, as
+ * {@link SchemaRegistry.getItem} picks it: the named `member`, else the
+ * canonical member, else the first entry.
+ */
+function pickBundleMember<T>(
+  entries: readonly BundleEntry[],
+  disc: { field: string; canonical: string },
+  member: string | undefined,
+): T | undefined {
+  if (member !== undefined) return entriesOfMember(entries, disc, member)[0]?.item as T | undefined;
+  return (entriesOfMember(entries, disc, disc.canonical)[0] ?? entries[0])?.item as T | undefined;
 }
 
 /**
@@ -3950,8 +4027,10 @@ export class SchemaRegistry {
    * object's contributor list (an `extend` or overlay layer of another package
    * or a tenant sits in it and is put back unchanged), a namespace's owners,
    * an item slot (the package record included), this package's picklist
-   * extension of one list, and the security catalog and default record page
-   * claims the package door records. Nothing the run does not write is
+   * extension of one list, the security catalog and default record page
+   * claims the package door records, each app's navigation contributions, and
+   * every entry outside the registry a caller records through
+   * {@link recordRestoreOnRefusal}. Nothing the run does not write is
    * recorded or put back. After a restore every merged object is
    * re-resolved, since a fold computed during the run may have read an entry
    * the restore put back.
@@ -3960,7 +4039,9 @@ export class SchemaRegistry {
    * {@link unregisterObject} and the overlay removals are never journaled.
    * Synchronous by contract: `register` must not return a promise, so no
    * other caller's write can land between the run's writes and its restore.
-   * A nested call joins the run that is already open.
+   * A nested call joins the run that is already open: the engine's `manifest`
+   * service registers every package of one artifact (and its residual) in ONE
+   * run, so a refusal of any of them puts back all of them.
    */
   restoringOnRefusal<T>(register: () => T): T {
     if (this.restorePoint) return register();
@@ -3979,6 +4060,31 @@ export class SchemaRegistry {
     } finally {
       this.restorePoint = undefined;
     }
+  }
+
+  /**
+   * Record an entry that lives OUTSIDE this registry — an engine map a package
+   * body writes beside the registry (its manifest, its datasource definitions)
+   * — before the open {@link restoringOnRefusal} run's first write to it, so a
+   * refusal later in the same run puts it back with the registry's own
+   * entries. `capture` reads the entry as it is now and returns how to put it
+   * back; it is called once per `key` per run. Outside a run it records
+   * nothing, as the registry's own entries are not recorded either.
+   */
+  recordRestoreOnRefusal(key: string, capture: () => () => void): void {
+    this.restorePoint?.note(`outside\u0000${key}`, capture);
+  }
+
+  /** Record one app's list of navigation contributions before its first write. */
+  private noteAppNavContributions(app: string): void {
+    this.restorePoint?.note(`navContributions\u0000${app}`, () => {
+      const saved = this.appNavContributions.get(app);
+      const copy = saved ? [...saved] : undefined;
+      return () => {
+        if (copy) this.appNavContributions.set(app, copy);
+        else this.appNavContributions.delete(app);
+      };
+    });
   }
 
   /** Record an object's contributor list (and each contributor's mutable slots) before its first write. */
@@ -8174,6 +8280,162 @@ export class SchemaRegistry {
     return undefined;
   }
 
+  // ==========================================
+  // Package-scoped addressing (ADR-0150 D3/D4, #31575)
+  // ==========================================
+  //
+  // The registry half of the shared package-scoped resolver
+  // (`package-scoped-resolver.ts`): who holds a name, one package's item of it
+  // with the per-package overlay slot applied, and the environment's own item.
+  // ⛔ Additive and read-only: no reader is switched to these, and {@link getItem}
+  // keeps its bare-slot-first answer for every caller (ADR-0150 Execution plan,
+  // child R: "not wired to any reader yet").
+
+  /**
+   * [ADR-0150 D4, "registry overlay slot (ADR-0005)"] The package a bare-slot
+   * entry of `(type, name)` customizes — the per-package overlay slot.
+   *
+   * The registry still stores ONE bare slot per name (every `sys_metadata`
+   * hydration and write-through writes it, and {@link getItem} serves it first
+   * to every caller). What changes here is what that entry is BOUND to: an
+   * overlay binds to the `(package, name)` it customizes, so a package-scoped
+   * read of another package's same-named item never sees it.
+   *
+   * The binding is the entry's `_packageId` — the stored row's `package_id`
+   * column, or the artifact envelope the hydration grafted onto it (ADR-0010
+   * §3.3; `withRowBinding` drops a body's own stamp for a package-less row) —
+   * read as follows:
+   *
+   *  - none, `''` or the `sys_metadata` sentinel (a package-less row), when no
+   *    package holds the name in a composite slot → `null`: the environment's
+   *    own item (ADR-0150 D1 bucket 4);
+   *  - a package-less row when exactly one package holds the name → that
+   *    package: "a package-less row that bears a package-held name is a
+   *    customization, never a second item" (ADR-0150 D3), the ADR-0005
+   *    overlay of the one holder, read at call time, so a package installed
+   *    after the row was saved makes it that package's overlay;
+   *  - a package-less row when two or more packages hold the name →
+   *    `undefined`: a customization of a name it cannot say whose, so it binds
+   *    to no package and is no environment item either (never a guess);
+   *  - a package that holds the name in its composite slot → that package
+   *    (an ADR-0005 overlay of its item);
+   *  - a paired `<base>.custom` package holding no composite slot of the name,
+   *    whose base does → the base (ADR-0146 D9: the pair's declared override
+   *    customizes its base's item);
+   *  - any other package → that package: its own stored item of the name.
+   *
+   * `holders` is the composite holder set, passed in when the caller already
+   * has it.
+   */
+  private overlaySlotBinding(item: unknown, name: string, collection: Map<string, any>, holders?: ReadonlySet<string>): string | null | undefined {
+    const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    const composite = holders ?? new Set(this.compositeHoldersOf(collection, name));
+    if (typeof stamped !== 'string' || stamped === '' || stamped === 'sys_metadata') {
+      if (composite.size === 0) return null;
+      return composite.size === 1 ? [...composite][0] : undefined;
+    }
+    if (composite.has(stamped)) return stamped;
+    const base = customizationBasePackageId(stamped);
+    if (base !== null && composite.has(base)) return base;
+    return stamped;
+  }
+
+  /**
+   * The packages holding `(type, name)` through a composite
+   * `<packageId>:<name>` slot, in the item store's order — the registry's
+   * identity key (ADR-0150 D2), read off the KEY, as {@link getItem}'s
+   * prefer-local reads it. A bundled type's members are one holder.
+   */
+  private compositeHoldersOf(collection: Map<string, any>, name: string): string[] {
+    const holders = new Set<string>();
+    const suffix = `:${name}`;
+    for (const key of collection.keys()) {
+      const base = bundleBaseKey(key);
+      if (base !== name && base.endsWith(suffix)) holders.add(base.slice(0, -suffix.length));
+    }
+    return [...holders];
+  }
+
+  /**
+   * [ADR-0150 D3] Every package that holds `(type, name)`, in the item store's
+   * order: each composite `<packageId>:<name>` slot, then the package a
+   * bare-slot entry is its own stored item of ({@link overlaySlotBinding}) when
+   * that package holds no composite slot. An overlay of a package's item adds
+   * no holder (it is that package's item), a package-less row over a held name
+   * adds none (ADR-0150 D3: a customization, never a second item), and the
+   * environment's own item is no package holder ({@link getEnvironmentScopedItem}).
+   *
+   * Every package, overridable baselines included: the resolver ranks them
+   * (`package-scoped-resolver.ts`). An object is not addressed by package
+   * (ADR-0150 D1 bucket 1) and answers `[]`.
+   */
+  packageScopedHoldersOf(type: string, name: string): string[] {
+    const collection = this.metadata.get(type);
+    if (!collection) return [];
+    const composite = this.compositeHoldersOf(collection, name);
+    const holders = new Set(composite);
+    const compositeSet = new Set(composite);
+    for (const { item } of this.bareSlotEntriesOf(type, collection, name)) {
+      const bound = this.overlaySlotBinding(item, name, collection, compositeSet);
+      if (typeof bound === 'string') holders.add(bound);
+    }
+    return [...holders];
+  }
+
+  /**
+   * [ADR-0150 D3/D4] Package `packageId`'s item of `(type, name)`: the bare-slot
+   * entry when it binds to `packageId` (its ADR-0005 overlay, or its own
+   * stored item — {@link overlaySlotBinding}), else its composite slot. ⛔ Never
+   * another package's overlay and never the environment's own item: overlaying
+   * one package's item never shadows another package's same-named item, which
+   * is the one difference from {@link getItem}'s bare-slot-first answer.
+   *
+   * @param member - As on {@link getItem}: one bundle member, for a type whose
+   *   identity is a pair; omitted, the canonical member first.
+   */
+  getPackageScopedItem<T>(type: string, name: string, packageId: string, member?: string): T | undefined {
+    const collection = this.metadata.get(type);
+    if (!collection) return undefined;
+    const holders = new Set(this.compositeHoldersOf(collection, name));
+    const bound = this.bareSlotEntriesOf(type, collection, name)
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) {
+      const { local } = collectBundle(collection, name, disc, packageId);
+      return pickBundleMember<T>([...bound, ...local], disc, member);
+    }
+    if (bound.length > 0) return bound[0].item as T;
+    return collection.get(`${packageId}:${name}`) as T | undefined;
+  }
+
+  /**
+   * [ADR-0150 D1 bucket 4, D3] The environment's own item of `(type, name)`:
+   * the bare-slot entry when it binds to no package ({@link overlaySlotBinding}
+   * answers `null`) — an item authored in this environment, in the implicit
+   * environment package, under a name no package holds. `undefined` when the
+   * bare slot is empty, holds a package's overlay, or holds a package-less
+   * row over a name packages hold (a customization, never a second item).
+   *
+   * @param member - As on {@link getItem}.
+   */
+  getEnvironmentScopedItem<T>(type: string, name: string, member?: string): T | undefined {
+    const collection = this.metadata.get(type);
+    if (!collection) return undefined;
+    const holders = new Set(this.compositeHoldersOf(collection, name));
+    const unbound = this.bareSlotEntriesOf(type, collection, name)
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === null);
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) return pickBundleMember<T>(unbound, disc, member);
+    return unbound[0]?.item as T | undefined;
+  }
+
+  /** The bare-slot entries of `(type, name)`: one, or a bundle's members, canonical first. */
+  private bareSlotEntriesOf(type: string, collection: Map<string, any>, name: string): BundleEntry[] {
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (disc) return collectBundle(collection, name, disc).bare;
+    return collection.has(name) ? [{ key: name, item: collection.get(name) }] : [];
+  }
+
   /**
    * Artifact-only lookup (ADR-0010 §3.3). Unlike {@link getItem} — which
    * returns the plain-key entry first, so a runtime/DB-rehydrated row
@@ -8662,6 +8924,14 @@ export class SchemaRegistry {
     // behind — the same disposition the namespace gate above has.
     this.refuseCoOwnedObjectNameCollision(manifest, selfId, coOwners);
 
+    // [ADR-0150 D2, child N] The object rule above, extended to the twelve
+    // bucket 2/3 types phase 1 does not cover: inside one namespace, a
+    // `(type, name)` has one package holder, so that NAMESPACE/NAME names one
+    // item (`namespace-co-owner-names.ts`). Ahead of every mutation, like the
+    // check above; at every install, boot included, like it; with no
+    // `collisionPolicy` downgrade, like the bare-name rule below.
+    this.refuseNamespaceNameConflicts(manifest);
+
     // The security catalog's one-name-one-holder rule (ADR-0048 §3.4 narrowed
     // for positions, permission sets and capabilities; maintainer ruling Q4 = A
     // on #15196) — also ahead of every mutation, for the same reason. No
@@ -8896,6 +9166,34 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0150 D2, child N] Refuse an install whose package declares an item of
+   * a covered type under a name another installed package of its namespace
+   * already holds (`namespace-co-owner-names.ts`).
+   *
+   * The sitting holders are the installed package records — their manifests,
+   * as {@link installPackage} recorded them — of the incoming package's
+   * namespace: the record is the one place every door's install lands, so an
+   * uninstall takes its names with it and nothing else is kept. The same
+   * package's own record is never a second holder (a reload, a re-install or
+   * an upgrade).
+   *
+   * @throws {NamespaceNameConflictError} ADR-0112 envelope, naming every holder.
+   */
+  private refuseNamespaceNameConflicts(manifest: ObjectStackManifest): void {
+    const incoming = namespacePackageOf(manifest);
+    if (incoming === undefined || !isNamespaceJudged(incoming.namespace) || incoming.names.length === 0) return;
+    const sitting: NamespacePackage[] = [];
+    for (const record of this.metadata.get('package')?.values() ?? []) {
+      const recorded = (record as InstalledPackage | undefined)?.manifest;
+      if (recorded?.namespace !== incoming.namespace) continue;
+      const holder = namespacePackageOf(recorded);
+      if (holder !== undefined) sitting.push(holder);
+    }
+    const conflicts = namespaceNameConflicts(incoming, sitting);
+    if (conflicts.length > 0) throw new NamespaceNameConflictError(conflicts);
+  }
+
+  /**
    * Withdraw an installed package: its objects, namespace, items, catalog
    * claims and record (each step's reason is on it below).
    *
@@ -9094,6 +9392,7 @@ export class SchemaRegistry {
     packageId?: string,
   ): void {
     if (!contribution || !contribution.app) return;
+    this.noteAppNavContributions(contribution.app);
     const list = this.appNavContributions.get(contribution.app) ?? [];
     list.push({
       packageId,
@@ -9141,6 +9440,10 @@ export class SchemaRegistry {
       });
       incoming.set(contribution.app, list);
     }
+    for (const [app, list] of this.appNavContributions) {
+      if (list.some((c) => c.packageId === packageId)) this.noteAppNavContributions(app);
+    }
+    for (const app of incoming.keys()) this.noteAppNavContributions(app);
     for (const [app, list] of [...this.appNavContributions]) {
       const at = list.findIndex((c) => c.packageId === packageId);
       if (at === -1) continue;

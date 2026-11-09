@@ -1160,10 +1160,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_reason: {
         label: "Motif de la révocation",
-        help: "Motif de la révocation de la clé, lorsqu'il détermine qui peut la restaurer. Réinitialisation du mot de passe par un administrateur : seul un administrateur de la plateforme peut restaurer la clé. Fin de l'appartenance à l'organisation : le propriétaire a quitté l'organisation et personne ne peut restaurer la clé ; un membre en crée une nouvelle. Effacé lorsque la clé est restaurée. Vide pour une clé révoquée depuis la liste Clés API.",
+        help: "Motif de la révocation de la clé, lorsqu'il détermine qui peut la restaurer. Réinitialisation du mot de passe par un administrateur : seul un administrateur de la plateforme peut restaurer la clé. Fin de l'appartenance à l'organisation : le propriétaire a quitté l'organisation et personne ne peut restaurer la clé ; un membre en crée une nouvelle. Suspendue par un administrateur : un administrateur de la plateforme a révoqué une clé qui ne lui appartient pas, et seul un administrateur de la plateforme peut la restaurer. Effacé lorsque la clé est restaurée. Vide pour une clé que son propriétaire a révoquée depuis la liste Clés API.",
         options: {
           admin_password_reset: "Réinitialisation du mot de passe par un administrateur",
-          organization_membership_ended: "Fin de l'appartenance à l'organisation"
+          organization_membership_ended: "Fin de l'appartenance à l'organisation",
+          administrator_suspended: "Suspendue par un administrateur"
         }
       },
       key: {
@@ -2048,6 +2049,14 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Configuration SAML",
         help: "JSON : entryPoint, cert, identifierFormat, mappage (géré par better-auth)"
       },
+      allow_idp_initiated: {
+        label: "Autoriser la connexion initiée par l’IdP",
+        help: "Accepter une connexion qui commence chez le fournisseur d’identité (une réponse SAML non sollicitée, ou un rappel OIDC sans state) plutôt que dans ce système. Désactivé par défaut : une réponse SAML initiée par l’IdP n’est liée à aucune requête émise par ce système. Modifiez-le avec « Modifier les options de connexion »."
+      },
+      allow_jit: {
+        label: "Autoriser le provisionnement juste-à-temps",
+        help: "Avec la politique d’audience sur invitation uniquement, créer un compte pour une personne qui se connecte via ce fournisseur sans compte ni invitation. Désactivé par défaut : cette personne est refusée. Les autres politiques provisionnent comme avant. Modifiez-le avec « Modifier les options de connexion »."
+      },
       user_id: {
         label: "Enregistré par",
         help: "Utilisateur qui a enregistré ce fournisseur"
@@ -2168,6 +2177,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Supprimer le fournisseur SSO",
         description: "Supprimer ce fournisseur SSO ? Les utilisateurs de son domaine ne pourront plus se connecter par son intermédiaire.",
         successMessage: "Fournisseur SSO supprimé"
+      },
+      edit_sso_sign_in_options: {
+        label: "Modifier les options de connexion",
+        successMessage: "Options de connexion enregistrées"
       }
     }
   },
@@ -2623,6 +2636,55 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       order_key: {
         label: "Clé d’ordre",
         help: "Clé de pagination stable dérivée, maintenue par @better-auth/scim ; ne pas écrire directement."
+      },
+      created_at: {
+        label: "Créé le"
+      },
+      updated_at: {
+        label: "Mis à jour le"
+      }
+    },
+    _views: {
+      all: {
+        label: "Tous"
+      }
+    }
+  },
+  sys_idp_group_mapping: {
+    label: "Correspondance de groupe IdP",
+    pluralLabel: "Correspondances de groupe IdP",
+    description: "Associe un groupe du fournisseur d’identité à l’ensemble d’autorisations accordé à ses membres",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      source_kind: {
+        label: "Type de source",
+        help: "Ce qui envoie le groupe : une connexion SCIM, ou un fournisseur SSO à la connexion.",
+        options: {
+          scim: "Connexion SCIM",
+          sso: "Fournisseur SSO"
+        }
+      },
+      source_id: {
+        label: "ID de source",
+        help: "L’ID de la connexion SCIM ou du fournisseur SSO par lequel le groupe arrive, p. ex. \"okta-prod\"."
+      },
+      group_external_id: {
+        label: "ID externe du groupe",
+        help: "L’externalId du groupe tel que l’envoie le fournisseur d’identité. Renseignez-le ou le nom d’affichage, pas les deux."
+      },
+      group_display_name: {
+        label: "Nom d’affichage du groupe",
+        help: "Le displayName du groupe, en correspondance exacte. Utilisé quand la correspondance ne nomme aucun ID externe."
+      },
+      permission_set: {
+        label: "Ensemble d’autorisations",
+        help: "L’ensemble d’autorisations accordé à un membre du groupe. Les ensembles administrateur sont refusés."
+      },
+      organization_id: {
+        label: "Organisation",
+        help: "L’organisation dans laquelle l’attribution est faite : celle qui possède la connexion SCIM ou le fournisseur SSO."
       },
       created_at: {
         label: "Créé le"

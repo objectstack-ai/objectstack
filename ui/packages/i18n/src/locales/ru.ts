@@ -441,6 +441,15 @@ const ru = {
       available: 'Доступные',
       all: 'Все валюты (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'Пересчитано по курсу {{rate}} на {{date}}',
+      homeCurrency: 'В базовой валюте (курс 1)',
+      preview: '≈ {{amount}} по курсу {{rate}} на {{date}}',
+      previewSame: '≈ {{amount}} (основная валюта)',
+      awaitingRate: 'Нет курса {{currency}} на {{date}} или ранее: сохранение невозможно, пока курс не добавлен',
+      awaitingDate: 'Укажите дату документа, чтобы увидеть сумму в основной валюте',
+      rateUnreadable: 'Будет пересчитано в основную валюту при сохранении',
+    },
     boolean: {
       offBadge: "{{label}} — Выкл.",
       completed: "Выполнено",
@@ -738,6 +747,7 @@ const ru = {
       noSavedTemplates: "Нет сохранённых шаблонов",
       noneOption: "— Нет —",
       saveCurrent: "Сохранить текущий",
+      saveCurrentNeedsMapping: "Сопоставьте хотя бы один столбец, чтобы сохранить шаблон.",
       templateName: "Название шаблона",
       save: "Сохранить",
       deleteTemplate: "Удалить шаблон",
@@ -821,6 +831,7 @@ const ru = {
     eventTitlePlaceholder: "О чём это событие?",
     creating: "Создание…",
     titleRequired: "Укажите название",
+    rescheduleNotFound: "Эта запись ({{object}}) больше не существует, или у вас больше нет к ней доступа.",
     a11y: {
       region: "Календарь",
       grid: "Сетка календаря",

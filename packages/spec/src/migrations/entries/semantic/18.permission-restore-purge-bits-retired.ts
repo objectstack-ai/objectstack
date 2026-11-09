@@ -13,28 +13,33 @@ export const entry: SemanticMigration = {
   id: 'permission-restore-purge-bits-retired',
   surface: 'permission.objects.<object>.allowRestore / permission.objects.<object>.allowPurge — '
     + 'the object-permission bits for undelete and hard delete',
-  replacement: '(removed — the `restore` and `purge` operations they claimed to gate do not '
-    + 'exist.) A dispatched `restore` or `purge` is denied fail-closed by the permission '
-    + 'evaluator\'s destructive-operation backstop for every principal. The bits return together '
-    + 'with the operations they gate. `allowTransfer`, the third lifecycle bit, is enforced and '
-    + 'stays.',
+  replacement: '(removed — the `restore` and `purge` operations they claimed to gate did not '
+    + 'exist when they were retired.) The operations now exist with the recycle bin (ADR-0148), '
+    + 'and their grants are new keys: `allowRestoreOwnDeleted` (restore the entries you deleted) '
+    + 'and `manageRecycleBin` (restore any entry, purge an entry, empty an object\'s entries, and '
+    + 'the permanent delete). The retired keys do not return. `allowTransfer`, the third '
+    + 'lifecycle bit, is enforced and stays.',
   reason: 'The D2 conversion `permission-allow-restore-purge-removed` deletes both keys from every '
     + 'object permission in author sources (both values, `true` included), and the delete is '
-    + 'lossless: no destructive lifecycle verb is in the engine\'s dispatch vocabulary, so a grant '
-    + 'delivered nothing and a denial locked nothing — every such request was, and stays, denied. '
+    + 'lossless: no destructive lifecycle verb was in the engine\'s dispatch vocabulary when the '
+    + 'keys were retired, so a grant delivered nothing and a denial locked nothing — every such '
+    + 'request was denied, and no reader of the keys exists now. '
     + 'The judgment is about what people believed. An admin who wrote `allowPurge: false` believed '
     + 'a lock existed; an admin who wrote `allowPurge: true` for a compliance role believed that '
     + 'role could hard-delete a record on request — a GDPR erasure, for instance. Neither was ever '
     + 'true. Any process, runbook or audit statement that relies on either belief needs another '
-    + 'path, and deciding that path is a governance decision no conversion can make. Separately, '
+    + 'path, and deciding that path is a governance decision no conversion can make. For undelete '
+    + 'and purge the recycle bin (ADR-0148) now offers one, through `allowRestoreOwnDeleted` and '
+    + '`manageRecycleBin`; who holds them is still that decision. Separately, '
     + 'an artifact built by the 17.x toolchain carries both keys materialized as the literal '
     + '`false`; that one value is tolerated at load as inert residue and stripped, and every '
     + 'other value — `true`, or a string or number spelling — is refused with the prescription.',
   acceptanceCriteria: 'No authored object permission carries `allowRestore` or `allowPurge`; the '
-    + 'parse refuses any value but the tolerated `false` residue. Access decisions are unchanged: '
-    + 'a request for `restore` or `purge` is denied for every principal before and after the '
-    + 'upgrade, and `allowTransfer` behaves as before. Every documented process that assumed a '
-    + 'restore or purge grant — an erasure-request runbook, an access review, an audit control — '
-    + 'names the mechanism it actually uses instead.',
+    + 'parse refuses any value but the tolerated `false` residue. Stripping the keys changes no '
+    + 'access decision: nothing reads them, so a request for `restore` or `purge` is answered the '
+    + 'same with or without them (by the recycle bin\'s grants, `allowRestoreOwnDeleted` and '
+    + '`manageRecycleBin`), and `allowTransfer` behaves as before. Every documented process that '
+    + 'assumed a restore or purge grant — an erasure-request runbook, an access review, an audit '
+    + 'control — names the mechanism it actually uses instead.',
   relevantWhen: { kind: 'stack-declares', keys: ['permissions'] },
 };

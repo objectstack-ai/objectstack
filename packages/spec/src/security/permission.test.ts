@@ -464,11 +464,12 @@ describe('an object permission that edits or deletes a record also reads it', ()
 describe('allowRestore / allowPurge are RETIRED (ADR-0049)', () => {
   // Removed by the 2026-08-26 maintainer ruling accepting #1883's
   // recommendation B: the `restore`/`purge` ObjectQL operations the bits
-  // claimed to gate have never existed (no destructive lifecycle verb in the
+  // claimed to gate did not exist then (no destructive lifecycle verb in the
   // engine's dispatch vocabulary — the #8106 pin), so granting them delivered
   // nothing. The tombstone keeps the removal audible instead of silently
-  // stripping an authored value; the keys return with the M2 lifecycle
-  // initiative (#1883 stays open).
+  // stripping an authored value. The keys do not return: `restore`/`purge`
+  // now exist with the recycle bin (ADR-0148) and read the new keys
+  // `allowRestoreOwnDeleted` / `manageRecycleBin`.
 
   it('absent parses clean — no defaults materialize for the retired keys', () => {
     const parsed = ObjectPermissionSchema.parse({ allowRead: true });
@@ -487,7 +488,11 @@ describe('allowRestore / allowPurge are RETIRED (ADR-0049)', () => {
       expect(messages).toContain('ObjectQL operation it claimed');
       expect(messages).toContain('removed in @objectstack/spec 17');
       expect(messages).toContain('Delete the key');
-      expect(messages).toContain('M2');
+      // [#30237, consent 6720657486] The operation exists now: the prescription
+      // names the new spelling of its grant, never a return of this key.
+      expect(messages).toContain('ADR-0148');
+      expect(messages).toContain('`manageRecycleBin`');
+      expect(messages).not.toContain('M2');
     }
   });
 
@@ -519,7 +524,10 @@ describe('allowRestore / allowPurge are RETIRED (ADR-0049)', () => {
       const r = ObjectPermissionSchema.safeParse({ [key]: true } as never);
       expect(r.success).toBe(false);
       const messages = r.error!.issues.map((i) => i.message).join('\n');
-      expect(messages).toContain('ObjectQL operation it claimed');
+      expect(messages).toContain(`was the alias of \`objects.<object>.${key === 'restore' ? 'allowRestore' : 'allowPurge'}\``);
+      expect(messages).toContain('Delete the key');
+      // [#30237, consent 6720657486] …and names the grant that gates the verb now.
+      expect(messages).toContain('`manageRecycleBin`');
       expect(messages).not.toContain(`\`${key}\` → \``);
     }
   });
@@ -1517,6 +1525,31 @@ describe('objectPermissionGrants — the fold, not the bare bit', () => {
     // An object no permission set mentions is an object with no grant.
     expect(objectPermissionGrants(undefined, 'allowRead')).toBe(false);
     expect(objectPermissionGrants({}, 'allowRead')).toBe(false);
+  });
+
+  it('[#30237 Q5 = A] folds the recycle-bin keys: bounded by read; manage implies restoring your own; modifyAll implies both; allowDelete implies neither', () => {
+    // Each grant is bounded by read.
+    expect(objectPermissionGrants({ allowRestoreOwnDeleted: true }, 'allowRestoreOwnDeleted')).toBe(false);
+    expect(objectPermissionGrants({ allowRead: true, allowRestoreOwnDeleted: true }, 'allowRestoreOwnDeleted')).toBe(true);
+    expect(objectPermissionGrants({ manageRecycleBin: true }, 'manageRecycleBin')).toBe(false);
+    expect(objectPermissionGrants({ allowRead: true, manageRecycleBin: true }, 'manageRecycleBin')).toBe(true);
+    expect(objectPermissionGrants({ viewAllRecords: true, manageRecycleBin: true }, 'manageRecycleBin')).toBe(true);
+    // The manager bit implies restoring your own; the reverse does not hold.
+    expect(objectPermissionGrants({ allowRead: true, manageRecycleBin: true }, 'allowRestoreOwnDeleted')).toBe(true);
+    expect(objectPermissionGrants({ allowRead: true, allowRestoreOwnDeleted: true }, 'manageRecycleBin')).toBe(false);
+    // modifyAllRecords implies both; viewAllRecords implies neither.
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'allowRestoreOwnDeleted')).toBe(true);
+    expect(objectPermissionGrants({ modifyAllRecords: true }, 'manageRecycleBin')).toBe(true);
+    expect(objectPermissionGrants({ viewAllRecords: true }, 'allowRestoreOwnDeleted')).toBe(false);
+    expect(objectPermissionGrants({ viewAllRecords: true }, 'manageRecycleBin')).toBe(false);
+    // allowDelete implies neither.
+    expect(objectPermissionGrants({ allowRead: true, allowDelete: true }, 'allowRestoreOwnDeleted')).toBe(false);
+    expect(objectPermissionGrants({ allowRead: true, allowDelete: true }, 'manageRecycleBin')).toBe(false);
+    // The bin keys widen no CRUD verb.
+    const binOnly = { allowRead: true, allowRestoreOwnDeleted: true, manageRecycleBin: true };
+    for (const verb of ['allowCreate', 'allowEdit', 'allowDelete', 'allowTransfer', 'allowExport'] as const) {
+      expect(objectPermissionGrants(binOnly, verb)).toBe(false);
+    }
   });
 });
 

@@ -202,6 +202,13 @@ export const NotificationPreference = ObjectSchema.create({
         quiet_hours: Field.json({
             label: 'Quiet Hours',
             required: false,
+            // [#30208 row 6, #31426] The widget hint names the console's
+            // quiet-hours control (#31421): a time-zone picker and two times
+            // over the same stored `{ tz?, start: 'HH:MM', end: 'HH:MM' }`.
+            // The field stays `json`, nothing new is refused, and an
+            // unregistered widget degrades to the JSON editor.
+            // `notification-preference-topic-channel-help.test.ts` pins it.
+            widget: 'quiet-hours',
             description:
                 'A daily window when notifications are held and delivered when it ends, for example ' +
                 '{ "tz": "Europe/Berlin", "start": "22:00", "end": "07:00" }. Times are HH:MM in that time zone (UTC when tz is left out), ' +

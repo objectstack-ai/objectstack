@@ -96,6 +96,35 @@ export {
 // stay private to the engine.
 export { findPackageHeldSecurityCatalogNames } from './registry.js';
 
+// [#31575, ADR-0150 D3/D4] The ONE package-scoped resolver for behavioural
+// metadata: the caller package's own item, else the unique holder in its
+// declared dependency closure (plus `sys`), else a refusal naming every
+// candidate. Exported for the readers epic #31527's later children switch to
+// it (runtime indexes, doors, stored references); no reader calls it yet. On
+// this barrel only: it reads `@objectstack/metadata-protocol`'s closure, which
+// the lean `./core` entry never imports (ADR-0076 D2).
+export {
+  resolvePackageScopedName,
+  packageResolutionClosure,
+  packageScopedRefusalMessage,
+  describePackageScopedHolder,
+  isPackageScopedType,
+  isPlatformRequestedBareName,
+  PACKAGE_SCOPED_TYPES,
+  PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE,
+  KERNEL_NAMESPACE,
+} from './package-scoped-resolver.js';
+export type {
+  PackageScopedType,
+  PackageScopedHolder,
+  PackageScopedQuery,
+  PackageScopedRegistry,
+  PackageScopedResolution,
+  PackageScopedResolutionStep,
+  PackageScopedRefusal,
+  PackageScopedRefusalReason,
+} from './package-scoped-resolver.js';
+
 // [#15204 W2] Every `(type, name)` a manifest declares, read from the sources
 // the engine's registration seams read. Exported for the install-local door
 // (`@objectstack/cloud-connection`), which refuses a catalog-carrying package
@@ -133,6 +162,22 @@ export type {
 // words. A consumer calls this; it does not re-derive the check.
 export { viewContainerNameRefusal } from './view-container-name-refusal.js';
 export type { ViewContainerNameRefusal } from './view-container-name-refusal.js';
+// [ADR-0150 D2, child N] Inside one namespace, a `(type, name)` of the twelve
+// uncovered bucket 2/3 types has one package holder. Exported because
+// `os validate` is the second door that asks it — of an artifact's packages, in
+// the order the boot installs them — and it must answer with the package door's
+// predicate and sentence. A consumer calls these; it does not re-derive the rule.
+export {
+  NAMESPACE_UNIQUE_TYPES,
+  namespacePackageOf,
+  namespaceNameConflicts,
+  namespaceNameConflictMessage,
+} from './namespace-co-owner-names.js';
+export type {
+  NamespaceNameConflict,
+  NamespacePackage,
+  NamespaceUniqueType,
+} from './namespace-co-owner-names.js';
 
 // [ADR-0130 D4] The residual-picklist refusal the `manifest` service throws: a
 // composed stack's top-level picklist that no package body declares and no
@@ -634,6 +679,8 @@ export { parseLifecycleDuration } from './lifecycle/duration.js';
 export type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 export type { RecycleBinRemovalOptions } from './recycle-bin/purge.js';
 export type { RecycleBinRestoreOptions, RecycleBinRestoreResult } from './recycle-bin/restore.js';
+export type { RecycleBinDeleteObservability, RecycleBinListOptions, RecycleBinListResult, RecycleBinListedEntry } from './recycle-bin/list.js';
+export { RECYCLE_BIN_LIST_DEFAULT_LIMIT, RECYCLE_BIN_LIST_MAX_LIMIT } from './recycle-bin/list.js';
 // [ADR-0148 D3, ruling A recorded in 6691358077] The one refusal of an
 // app-authored permanent delete: the engine applies it to an app-authored
 // hook's api, and the runtime's sandbox to every body's.

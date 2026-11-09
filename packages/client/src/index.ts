@@ -249,6 +249,36 @@ export interface UserWorkTransferReport {
   remaining: number;
 }
 
+/**
+ * [#30237] One page of `recycleBin.list`: an object's recycle-bin entries,
+ * newest first. Each snapshot row carries only the fields the caller may see
+ * on its object.
+ */
+export interface RecycleBinPage {
+  object: string;
+  entries: Array<{
+    id: string;
+    object: string;
+    recordId: string;
+    recordCount: number;
+    deletedBy: string | null;
+    deletedAt: string | null;
+    retentionDays: number | null;
+    purgeAfter: string | null;
+    rows: Array<{ object: string; id: string; values: Record<string, unknown> }>;
+  }>;
+  hasMore: boolean;
+}
+
+/** [#30237] `recycleBin.restore`'s answer: the entry restored and every record written back. */
+export interface RecycleBinRestoreReport {
+  entryId: string;
+  object: string;
+  recordId: string;
+  rows: Array<{ object: string; id: string }>;
+  relinked: number;
+}
+
 export interface ClientConfig {
   baseUrl: string;
   token?: string;
@@ -643,6 +673,12 @@ export interface DeleteDataResult {
   object: string;
   id: string;
   success: boolean;
+  /**
+   * [#30237] The recycle-bin entry the delete wrote: pass it to
+   * `recycleBin.restore(object, recycleBinEntryId)` to undo the delete. Absent
+   * when the delete wrote none (a platform object, or no recycle bin).
+   */
+  recycleBinEntryId?: string;
 }
 
 export interface StandardError {
@@ -2281,11 +2317,14 @@ export class ObjectStackClient {
     /**
      * ADR-0033: pending drafts — metadata authored (e.g. by an AI) but not
      * yet published, which the active-only item lists hide.
+     *
+     * `opts.packageId` goes on the wire as `?package=`, the spelling every
+     * `/meta` read takes; the door refuses the retired `?packageId=`.
      */
     listDrafts: async (opts?: { packageId?: string; type?: string }): Promise<ListDraftsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
-        if (opts?.packageId) params.set('packageId', opts.packageId);
+        if (opts?.packageId) params.set('package', opts.packageId);
         if (opts?.type) params.set('type', opts.type);
         const qs = params.toString();
         const res = await this.fetch(`${this.baseUrl}${route}/_drafts${qs ? `?${qs}` : ''}`);
@@ -5246,6 +5285,10 @@ export class ObjectStackClient {
      *
      * ⚠️ `data.session` is undelivered here for the same measured reason as on
      * `login`: `/sign-up/email` serves no session object. See that method.
+     *
+     * Under the `invite_only` audience posture a sign-up is admitted only by
+     * the invitation it presents: pass its id (the last segment of the accept
+     * link) as `request.invitationId`.
      */
     register: async (request: RegisterRequest): Promise<SessionResponse> => {
       const route = this.getRoute('auth');
@@ -6927,6 +6970,62 @@ export class ObjectStackClient {
       const body = await this.unwrapResponse<{ data?: ApprovalActionRow[] } | ApprovalActionRow[]>(res);
       return Array.isArray(body) ? body : (body?.data ?? []);
     }
+  };
+
+  /**
+   * [#30237, ADR-0148] The recycle bin, one object at a time, under the data
+   * surface. A delete of a business record keeps it here until its retention
+   * ends: `restore` writes an entry back, `purge` and `empty` remove entries
+   * for good. Listing, purging and emptying need `manageRecycleBin` on the
+   * object; restoring needs `allowRestoreOwnDeleted`, and `manageRecycleBin`
+   * for an entry someone else deleted.
+   */
+  recycleBin = {
+    /** One page of the object's entries, newest first (`limit` 1 to 200, default 50). */
+    list: async (object: string, opts?: { limit?: number; offset?: number }): Promise<RecycleBinPage> => {
+        const route = this.getRoute('data');
+        const params = new URLSearchParams();
+        if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+        if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
+        const qs = params.toString();
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(object)}/recycle-bin${qs ? `?${qs}` : ''}`);
+        return this.unwrapResponse<RecycleBinPage>(res);
+    },
+
+    /**
+     * Restore one entry: its records come back under their original ids. 409
+     * names why an entry cannot come back (`RESTORE_UNIQUE_VALUE_TAKEN`,
+     * `RESTORE_PARENT_PURGED`, `RESTORE_PARENT_IN_RECYCLE_BIN`,
+     * `RESTORE_PACKAGE_UNINSTALLED`).
+     */
+    restore: async (object: string, entryId: string): Promise<RecycleBinRestoreReport> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/recycle-bin/${encodeURIComponent(entryId)}/restore`,
+            { method: 'POST' },
+        );
+        return this.unwrapResponse<RecycleBinRestoreReport>(res);
+    },
+
+    /** Purge one entry: its records can no longer be restored. */
+    purge: async (object: string, entryId: string): Promise<{ object: string; entryId: string; purged: true }> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/recycle-bin/${encodeURIComponent(entryId)}`,
+            { method: 'DELETE' },
+        );
+        return this.unwrapResponse<{ object: string; entryId: string; purged: true }>(res);
+    },
+
+    /** Empty the object's recycle bin: purge every entry the caller's organization holds. */
+    empty: async (object: string): Promise<{ object: string; removed: number }> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/recycle-bin`,
+            { method: 'DELETE' },
+        );
+        return this.unwrapResponse<{ object: string; removed: number }>(res);
+    },
   };
 
   /**

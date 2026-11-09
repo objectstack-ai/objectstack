@@ -55,7 +55,15 @@ import {
   presentAuditTimestampOutput, reduceFilterKey, reduceFilterNode, refusalSubtree, retiredFilterOperatorError,
   unsupportedFilterError, unsupportedFilterOperatorError, withheldFilterDiagnosticOf,
 } from './sql-driver-top-level.js';
-import { assertOracleComparandNotEmptyString, oracleDayBinding, oracleInstantBinding } from './sql-driver-oracle-dialect.js';
+import {
+  assertOracleComparandNotEmptyString,
+  assertOracleUuidComparand,
+  isOracleUuidText,
+  oracleDayBinding,
+  oracleInstantBinding,
+  oracleUuidRawBinding,
+} from './sql-driver-oracle-dialect.js';
+import type { OracleUuidBindingRole } from './sql-driver-oracle-dialect.js';
 import { jsonMembershipUnsupportedOnOracleError } from './sql-driver-predicate-emitters.js';
 import type { ReadPresentationKind } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
@@ -91,21 +99,26 @@ export interface FilterHelpersHost {
   readonly datetimeFields: SqlDriver['datetimeFields'];
   filterColumnExpr: SqlDriver['filterColumnExpr'];
   isJsonColumn: SqlDriver['isJsonColumn'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly isMysql: SqlDriver['isMysql'];
   isNonTextColumn: SqlDriver['isNonTextColumn'];
   readonly isOracle: SqlDriver['isOracle'];
   readonly isSqlite: SqlDriver['isSqlite'];
   jsonColumnFieldClass: SqlDriver['jsonColumnFieldClass'];
   readonly jsonFields: SqlDriver['jsonFields'];
+  readonly knex: SqlDriver['knex'];
   logWithheldFilterDiagnostic: SqlDriver['logWithheldFilterDiagnostic'];
   readonly logger: SqlDriver['logger'];
   readonly managedObjectFields: SqlDriver['managedObjectFields'];
   mapSortField: SqlDriver['mapSortField'];
   readonly mediaFields: SqlDriver['mediaFields'];
+  readonly mssqlGuidColumnsByObject: SqlDriver['mssqlGuidColumnsByObject'];
   needsLegacyDatetimeRepair: SqlDriver['needsLegacyDatetimeRepair'];
   needsLegacyTimeRepair: SqlDriver['needsLegacyTimeRepair'];
   readonly numericFields: SqlDriver['numericFields'];
   readonly objectByPhysicalTable: SqlDriver['objectByPhysicalTable'];
+  readonly oracleRawUuidFieldsByObject: SqlDriver['oracleRawUuidFieldsByObject'];
+  oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   presentReadValue: SqlDriver['presentReadValue'];
   readonly readableIdsDriverName: SqlDriver['readableIdsDriverName'];
   readonly readableIdsRefusalLog: SqlDriver['readableIdsRefusalLog'];
@@ -126,6 +139,13 @@ export interface FilterHelpersHost {
 
 /** The bodies of the "Filter helpers" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class FilterHelpersFacet {
+  /** The body of `SqlDriver#oracleUuidBinding`; the method's docblock there is its contract. */
+  static oracleUuidBinding(this: Pick<FilterHelpersHost, 'isOracle' | 'knex' | 'oracleRawUuidFieldsByObject'>, object: string | null | undefined, field: string, value: unknown, role: OracleUuidBindingRole): unknown {
+    if (!this.isOracle || !object || value === null || value === undefined) return value;
+    if (this.oracleRawUuidFieldsByObject.get(object)?.has(field) !== true) return value;
+    return oracleUuidRawBinding(this.knex, field, value, role);
+  }
+
   /** The body of `SqlDriver#tableNameForBuilder`; the method's docblock there is its contract. */
   static tableNameForBuilder(builder: any): string | null {
     const t = builder?._single?.table;
@@ -154,17 +174,37 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#coerceFilterValue`; the method's docblock there is its contract. */
-  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'isOracle' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
+  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'isMssql' | 'isOracle' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
     if (value == null || !table) return value;
     if (Array.isArray(value)) return value.map((v) => this.coerceFilterValue(table, field, v));
 
+    // [#31390] Oracle: a comparand against a `RAW(16)` uuid column (as the
+    // catalog reports it — `SqlDriver#primeOracleRawUuidColumns`) binds as
+    // `HEXTORAW(?)`. A comparison comparand that is not uuid text was refused
+    // before this (`assertOracleUuidComparand`); a pattern operator's text is
+    // computed here too but never bound as the value, so it is left as it is.
+    if (this.isOracle && this.oracleRawUuidFieldsByObject.get(table)?.has(field) === true) {
+      return isOracleUuidText(value) ? this.oracleUuidBinding(table, field, value, 'comparand') : value;
+    }
+
     const kind = this.temporalFieldKind(table, field);
-    // [#31328] A `Date` against a NON-temporal column on Oracle: the client
-    // binds a Date as TIMESTAMP WITH TIME ZONE, and Oracle answers that by
-    // converting the COLUMN (`TO_TIMESTAMP_TZ(label)`), which raises on any
-    // text that is not a timestamp. Every other dialect compares the text the
-    // Date serialises to; Oracle is handed that text (the canonical instant).
-    if (!kind) return this.isOracle && value instanceof Date ? canonicalUtcDatetime(value) : value;
+    if (!kind) {
+      // [#31328] A `Date` against a NON-temporal column on Oracle: the client
+      // binds a Date as TIMESTAMP WITH TIME ZONE, and Oracle answers that by
+      // converting the COLUMN (`TO_TIMESTAMP_TZ(label)`), which raises on any
+      // text that is not a timestamp. Every other dialect compares the text the
+      // Date serialises to; Oracle is handed that text (the canonical instant).
+      if (this.isOracle && value instanceof Date) return canonicalUtcDatetime(value);
+      // [#31327] SQL Server, the same failure by another route: tedious binds a
+      // JS `Date` as a `datetime` parameter, and `datetime` outranks `nvarchar`
+      // in SQL Server's type precedence — so `text_col >= @date` converts the
+      // COLUMN and fails ("Conversion failed when converting date and/or time
+      // from character string") on any row that is not a date. Bound as its
+      // canonical UTC text instead, the comparison is the text comparison the
+      // other dialects make.
+      if (this.isMssql && value instanceof Date) return this.storageDatetimeValue(value);
+      return value;
+    }
     if (kind === 'datetime') return this.storageDatetimeValue(value);
     // `Field.time` (#3994) takes the same treatment for the same reason: the
     // comparand must be the canonical time-of-day text the column stores.
@@ -518,7 +558,7 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#compileFilters`; the method's docblock there is its contract. */
-  static compileFilters(this: Pick<FilterHelpersHost, 'applyFilterCondition' | 'applyNormalizedComparison' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isOracle' | 'remoteColumn'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
+  static compileFilters(this: Pick<FilterHelpersHost, 'applyFilterCondition' | 'applyNormalizedComparison' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isOracle' | 'oracleRawUuidFieldsByObject' | 'remoteColumn'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
     if (!filters) return;
 
     // [#5158] `where` is a `FilterCondition` OBJECT. It always was — the spec
@@ -592,6 +632,10 @@ export class FilterHelpersFacet {
         // the issue measured as silently answering zero rows on an array column.
         this.assertOperatorAppliesToColumn(table, key, column, '=', true, refusalSubtree(value, filters));
         if (this.isOracle) assertOracleComparandNotEmptyString('=', key, value, refusalSubtree(value, filters));
+        // [#31390] A RAW(16) uuid column's comparand must be uuid text.
+        if (this.isOracle && this.oracleRawUuidFieldsByObject.get(table ?? '')?.has(key) === true) {
+          assertOracleUuidComparand('=', key, value, refusalSubtree(value, filters));
+        }
         const coerced = this.coerceFilterValue(table, key, value);
         const expr = this.filterColumnExpr(table, key, column);
         if (expr && this.applyNormalizedComparison(builder, 'and', expr, '=', coerced)) continue;
@@ -616,12 +660,12 @@ export class FilterHelpersFacet {
    * because SQLite does not honour a default escape character (MySQL/Postgres do,
    * but the explicit clause is correct for all three).
    */
-  static applyContainsLike(this: Pick<FilterHelpersHost, 'applyLike'>, builder: any, method: string, field: string, value: unknown): void {
-    this.applyLike(builder, method, field, value, 'contains');
+  static applyContainsLike(this: Pick<FilterHelpersHost, 'applyLike'>, builder: any, method: string, field: string, value: unknown, guidColumn = false): void {
+    this.applyLike(builder, method, field, value, 'contains', false, false, guidColumn);
   }
 
   /** The body of `SqlDriver#applyFilterCondition`; the method's docblock there is its contract. */
-  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
+  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isMssql' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'mssqlGuidColumnsByObject' | 'oracleRawUuidFieldsByObject' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
     builder: Knex.QueryBuilder,
     condition: any,
     logicalOp: 'and' | 'or' = 'and',
@@ -753,6 +797,11 @@ export class FilterHelpersFacet {
         // Non-null only for a SQLite `Field.datetime`, whose two stored forms
         // (INTEGER epoch / ISO TEXT) must be unified before comparing (#3912).
         const columnExpr = this.filterColumnExpr(table, localField, field);
+        // [#31395] A SQL Server `uniqueidentifier` column, as the remote catalog
+        // reported it (`primeMssqlGuidColumns`): the text operators below match
+        // it as its lower-case text, the form a read answers.
+        const guidColumn =
+          this.isMssql && table !== null && this.mssqlGuidColumnsByObject.get(table)?.has(field) === true;
         for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
           // [ADR-0139 D3] The composed `ReadableIds` leaf — the one non-list a
@@ -847,6 +896,10 @@ export class FilterHelpersFacet {
             if ((op === '$contains' || op === '$notContains') && this.isJsonColumn(table, localField)) {
               throw jsonMembershipUnsupportedOnOracleError(localField, refusalSubtree(value, condition));
             }
+            // [#31390] A RAW(16) uuid column's comparison comparand must be uuid text.
+            if (this.oracleRawUuidFieldsByObject.get(table ?? '')?.has(localField) === true) {
+              assertOracleUuidComparand(op, localField, opValue, refusalSubtree(value, condition));
+            }
           }
           const coerced = this.coerceFilterValue(table, localField, opValue);
           if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, op, coerced)) continue;
@@ -909,8 +962,8 @@ export class FilterHelpersFacet {
             // through to the substring emitter for every scalar string column,
             // which is the other half of the sentence the spec now states.
             case '$contains':
-              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, false)) {
-                this.applyContainsLike(builder, method, field, opValue);
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, false, value)) {
+                this.applyContainsLike(builder, method, field, opValue, guidColumn);
               }
               break;
             // [#5702] The case-INSENSITIVE twin of `$contains`, and the
@@ -920,7 +973,7 @@ export class FilterHelpersFacet {
             // only the comparand compares a folded needle against a raw column
             // and matches just the rows that were already lower-case.
             case '$icontains':
-              this.applyLike(builder, method, field, opValue, 'contains', false, true);
+              this.applyLike(builder, method, field, opValue, 'contains', false, true, guidColumn);
               break;
             case '$notContains':
               // [commit e04a0aff2] The exact complement of the arm above, on the same
@@ -930,19 +983,19 @@ export class FilterHelpersFacet {
               // the substring emitter would make the pair non-complementary on
               // every JSON column — `['redwood']` would answer neither
               // `$contains: 'red'` nor `$notContains: 'red'`.
-              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, true)) {
+              if (!this.applyJsonMembership(builder, method, table, localField, field, opValue, true, value)) {
                 // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and
                 // "does not contain" is true of a value that is not there.
                 this.applyNullSafeNegative(builder, method, field, (qb) =>
-                  this.applyLike(qb, 'orWhere', field, opValue, 'contains', true),
+                  this.applyLike(qb, 'orWhere', field, opValue, 'contains', true, false, guidColumn),
                 );
               }
               break;
             case '$startsWith':
-              this.applyLike(builder, method, field, opValue, 'starts');
+              this.applyLike(builder, method, field, opValue, 'starts', false, false, guidColumn);
               break;
             case '$endsWith':
-              this.applyLike(builder, method, field, opValue, 'ends');
+              this.applyLike(builder, method, field, opValue, 'ends', false, false, guidColumn);
               break;
             // [#7536] The pattern pair. NOT `applyLike`: that method escapes the
             // comparand and wraps it in the shape's wildcards, which is the
@@ -957,10 +1010,10 @@ export class FilterHelpersFacet {
             // and a pattern is not a value of that type — coercing it would
             // rewrite the pattern text.
             case '$like':
-              this.applyLikePattern(builder, method, field, opValue as string, false);
+              this.applyLikePattern(builder, method, field, opValue as string, false, guidColumn);
               break;
             case '$ilike':
-              this.applyLikePattern(builder, method, field, opValue as string, true);
+              this.applyLikePattern(builder, method, field, opValue as string, true, guidColumn);
               break;
             case '$between': {
               const arr = Array.isArray(coerced) ? coerced : [];
@@ -1038,6 +1091,10 @@ export class FilterHelpersFacet {
           table, localField, field, '=', true, refusalSubtree(value, condition),
         );
         if (this.isOracle) assertOracleComparandNotEmptyString('=', localField, value, refusalSubtree(value, condition));
+        // [#31390] A RAW(16) uuid column's comparand must be uuid text.
+        if (this.isOracle && this.oracleRawUuidFieldsByObject.get(table ?? '')?.has(localField) === true) {
+          assertOracleUuidComparand('=', localField, value, refusalSubtree(value, condition));
+        }
         const coerced = this.coerceFilterValue(table, localField, value);
         const columnExpr = this.filterColumnExpr(table, localField, field);
         if (columnExpr && this.applyNormalizedComparison(builder, logicalOp, columnExpr, '=', coerced)) continue;

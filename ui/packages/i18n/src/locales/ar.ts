@@ -450,6 +450,15 @@ const ar = {
       available: 'المتاحة',
       all: 'كل العملات (ISO 4217)',
     },
+    currencyHome: {
+      convertedAt: 'محوّل بسعر {{rate}} بتاريخ {{date}}',
+      homeCurrency: 'بالعملة الأساسية (السعر 1)',
+      preview: '≈ {{amount}} بسعر {{rate}} في {{date}}',
+      previewSame: '≈ {{amount}} (العملة الأساسية)',
+      awaitingRate: 'لا يوجد سعر لـ {{currency}} في {{date}} أو قبله: يُرفض الحفظ حتى تتم إضافة سعر',
+      awaitingDate: 'أدخل تاريخ المستند لرؤية المبلغ بالعملة الأساسية',
+      rateUnreadable: 'يُحوَّل إلى العملة الأساسية عند الحفظ',
+    },
     boolean: {
       offBadge: "{{label}} — إيقاف",
       completed: "مكتمل",
@@ -773,6 +782,7 @@ const ar = {
       noSavedTemplates: "لا قوالب محفوظة",
       noneOption: "— لا شيء —",
       saveCurrent: "حفظ الحالي",
+      saveCurrentNeedsMapping: "عيّن عمودًا واحدًا على الأقل لحفظ قالب.",
       templateName: "اسم القالب",
       save: "حفظ",
       deleteTemplate: "حذف القالب",
@@ -864,6 +874,7 @@ const ar = {
     eventTitlePlaceholder: "ما موضوع هذا الحدث؟",
     creating: "جارٍ الإنشاء…",
     titleRequired: "العنوان مطلوب",
+    rescheduleNotFound: "سجل {{object}} هذا لم يعد موجودًا، أو لم يعد لديك إذن للوصول إليه.",
     a11y: {
       region: "التقويم",
       grid: "شبكة التقويم",

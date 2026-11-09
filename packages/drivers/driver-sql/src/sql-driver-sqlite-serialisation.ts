@@ -47,6 +47,7 @@ export interface SqliteSerialisationHost {
   readonly dateFields: SqlDriver['dateFields'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
   readonly fileColumnsMoved: SqlDriver['fileColumnsMoved'];
+  readonly isMssql: SqlDriver['isMssql'];
   readonly isMysql: SqlDriver['isMysql'];
   readonly isOracle: SqlDriver['isOracle'];
   readonly isSqlite: SqlDriver['isSqlite'];
@@ -54,6 +55,8 @@ export interface SqliteSerialisationHost {
   readonly mediaFields: SqlDriver['mediaFields'];
   readonly numericFields: SqlDriver['numericFields'];
   readonly numericValueFields: SqlDriver['numericValueFields'];
+  readonly oracleRawUuidFieldsByObject: SqlDriver['oracleRawUuidFieldsByObject'];
+  oracleUuidBinding: SqlDriver['oracleUuidBinding'];
   storageDatetimeValue: SqlDriver['storageDatetimeValue'];
   readonly timeFields: SqlDriver['timeFields'];
   toDateOnly: SqlDriver['toDateOnly'];
@@ -64,7 +67,7 @@ export interface SqliteSerialisationHost {
 /** The bodies of the "SQLite serialisation" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class SqliteSerialisationFacet {
   /** The body of `SqlDriver#formatInput`; the method's docblock there is its contract. */
-  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'datetimeFields' | 'fileColumnsMoved' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
+  static formatInput(this: Pick<SqliteSerialisationHost, 'dateFields' | 'datetimeFields' | 'fileColumnsMoved' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'timeFields' | 'toDateOnly' | 'undeclaredAuditTimestampFields'>, object: string, data: any): any {
     let copy: any = data;
     let copied = false;
 
@@ -257,6 +260,23 @@ export class SqliteSerialisationFacet {
       }
     }
 
+    // [#31390] Oracle: a field over a `RAW(16)` uuid column (as the catalog
+    // reports it — `SqlDriver#primeOracleRawUuidColumns`) is written as
+    // `HEXTORAW(?)` over the uuid's hex digits, and a value that is not uuid
+    // text is refused before the statement is built. No other dialect, and no
+    // other Oracle column, reaches this arm.
+    if (this.isOracle && copy && typeof copy === 'object') {
+      const rawUuidFields = this.oracleRawUuidFieldsByObject.get(object);
+      if (rawUuidFields && rawUuidFields.size > 0) {
+        for (const field of rawUuidFields) {
+          const v = copy[field];
+          if (v === undefined || v === null) continue;
+          if (!copied) { copy = { ...copy }; copied = true; }
+          copy[field] = this.oracleUuidBinding(object, field, v, 'write');
+        }
+      }
+    }
+
     if (!this.isSqlite) return copy;
 
     // Safety net: better-sqlite3 can only bind numbers/strings/bigints/buffers/
@@ -275,7 +295,7 @@ export class SqliteSerialisationFacet {
   }
 
   /** The body of `SqlDriver#formatOutput`; the method's docblock there is its contract. */
-  static formatOutput(this: Pick<SqliteSerialisationHost, 'booleanFields' | 'columnFieldByObject' | 'dateFields' | 'datetimeFields' | 'isMysql' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'timeFields' | 'toDateOnly' | 'toTimeOnly'>, object: string, data: any): any {
+  static formatOutput(this: Pick<SqliteSerialisationHost, 'booleanFields' | 'columnFieldByObject' | 'dateFields' | 'datetimeFields' | 'isMssql' | 'isMysql' | 'isOracle' | 'isSqlite' | 'jsonFields' | 'mediaFields' | 'numericFields' | 'numericValueFields' | 'timeFields' | 'toDateOnly' | 'toTimeOnly'>, object: string, data: any): any {
     if (!data) return data;
 
     // External columnMap (ADR-0015): rename physical remote-column keys to local
@@ -293,7 +313,12 @@ export class SqliteSerialisationFacet {
       }
     }
 
-    if (this.isSqlite) {
+    // [#31327] SQL Server too: a federated JSON field lives in an `nvarchar`
+    // column (SQL Server has no JSON type), so the client hands back the stored
+    // TEXT exactly as SQLite does, and the same inverse applies. The catch below
+    // is then also what keeps a remote column holding plain, non-JSON text
+    // readable as that text.
+    if (this.isSqlite || this.isMssql) {
       // The exact inverse of `formatInput`'s `JSON.stringify` (commit 4045b954d). Postgres
       // and MySQL need no arm here because their clients already parse a native
       // `json`/`jsonb` column; SQLite hands back the stored TEXT, so the driver

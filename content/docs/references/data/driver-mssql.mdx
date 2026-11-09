@@ -1,0 +1,64 @@
+---
+title: Driver Mssql schema — Data Protocol reference
+navTitle: Driver Mssql
+description: "Microsoft SQL Server driver configuration — the config slot of a datasource whose driver resolves to mssql (sqlserver / tedious)."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Microsoft SQL Server driver configuration — the `config` slot of a
+`datasource` whose `driver` resolves to `mssql` (`sqlserver` / `tedious`).
+
+FEDERATION ONLY. SQL Server is served by `@objectstack/driver-sql` over
+knex's `mssql` client (the `tedious` binding) for an ADR-0015 external
+datasource — `schemaMode: 'external'` or `'validate-only'` — whose tables
+already exist and are read (and, with `external.allowWrites`, written) in
+place. The platform does not build its own schema on SQL Server, so a
+`managed` datasource declaring this driver is refused at parse
+(`DriverVocabularyEntry.federationOnly`), and no boot host offers it as the
+platform database. The usual reason to point a datasource here is an older
+line-of-business system (an ERP, a MES, a HIS) whose database is federated
+in place rather than migrated.
+
+Every key here is read by `createDefaultDatasourceDriverFactory`
+(→ `SqlDriver`, knex `mssql`). There is no `url`: `tedious` reads no
+connection-string grammar, so a URL key would have to be parsed by a second
+grammar the client never sees — the discrete fields are the shape it takes.
+There is no `autoMigrate` either: it governs DDL the platform emits, and on
+SQL Server it emits none.
+
+<Callout type="info">
+**Source:** `packages/spec/src/data/driver/mssql.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { MssqlConfigSchema } from '@objectstack/spec/data';
+import type { MssqlConfig } from '@objectstack/spec/data';
+
+// Validate data
+const result = MssqlConfigSchema.parse(data);
+```
+
+---
+
+## MssqlConfig
+
+Microsoft SQL Server connection configuration (federation only)
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **host** | `string` | ✅ | Host address |
+| **port** | `integer` | optional (default: `1433`) | Port number |
+| **instanceName** | `string` | optional | Named instance, resolved through the SQL Server Browser service (leave unset for the default instance) |
+| **database** | `string` | ✅ | Database name |
+| **username** | `string` | optional | SQL authentication login |
+| **password** | `never` | optional | Set through the connection form's secret field or `external.credentialsRef` — encrypted into `sys_secret`, never stored in `config`. A datasource defined in code (`defineDatasource`) leaves the credential out of the declaration: it is read at connect time from the runtime environment variable derived from the datasource name (`OS_DATASOURCE_WAREHOUSE_PASSWORD` for a datasource named `warehouse`), which `os serve` / `os start` honour by default (`OS_DATASOURCE_ENV_CREDENTIALS=on`). |
+| **ssl** | `boolean` | optional | Enable TLS. Certificates go in the datasource-level `ssl` block. |
+
+
+---
+

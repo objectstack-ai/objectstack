@@ -445,6 +445,15 @@ const zh = {
       available: '可用',
       all: '全部币种（ISO 4217）',
     },
+    currencyHome: {
+      convertedAt: '按汇率 {{rate}}（{{date}}）折算',
+      homeCurrency: '本位币（汇率 1）',
+      preview: '≈ {{amount}}（按汇率 {{rate}}，{{date}}）',
+      previewSame: '≈ {{amount}}（本位币）',
+      awaitingRate: '{{date}} 及之前没有 {{currency}} 的汇率：添加汇率之前无法保存',
+      awaitingDate: '填写单据日期后显示本位币金额',
+      rateUnreadable: '保存时折算为本位币',
+    },
     boolean: {
       offBadge: '{{label}} — 已关闭',
       completed: '已完成',
@@ -594,6 +603,7 @@ const zh = {
       noSavedTemplates: '暂无保存的模板',
       noneOption: '— 无 —',
       saveCurrent: '保存当前映射',
+      saveCurrentNeedsMapping: '请至少映射一列，才能保存为模板。',
       templateName: '模板名称',
       save: '保存',
       deleteTemplate: '删除模板',
@@ -800,6 +810,7 @@ const zh = {
     eventTitlePlaceholder: '这个事件是关于什么的？',
     creating: '创建中…',
     titleRequired: '请填写标题',
+    rescheduleNotFound: '这条{{object}}记录已不存在，或者您已无权访问它。',
     a11y: {
       region: '日历',
       grid: '日历网格',

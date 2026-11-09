@@ -345,7 +345,10 @@ export const PLATFORM_PLUGIN_WIRED_RUNTIMES: Readonly<Record<string, PlatformPlu
  * only when `audit` does; `sms` has no provider package in that image at all.
  *
  * This is the FLOOR, not the ceiling: a host may mount more (cloud adds
- * `observability`), and `objectstack serve --preset minimal` opts out entirely.
+ * `observability`), and `objectstack serve --preset minimal` opts out of the
+ * slate, though not of all of it: `resolveServedCapabilities` (`@objectstack/core`)
+ * still mounts `job` and `queue` first when `email`, `approvals` or `auth` is
+ * present, and mounts `email` whenever `auth` is.
  */
 export const PLATFORM_ALWAYS_ON_CAPABILITIES: readonly string[] = Object.freeze([
   // Order is a CONTRACT, not a count. `queue`/`job`/`cache`/`settings` are the
