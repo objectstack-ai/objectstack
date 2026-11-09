@@ -155,7 +155,17 @@ describe('os serve ↔ multi-node gate', () => {
     // desired count, identical in every replica, not a live membership count —
     // which is right for an advisory message about the operator's own
     // configuration, and is NOT sufficient for enforcement.
-    expect(MASKED_SERVE_SOURCE).toMatch(/checkMultiNodeAllowed\(\s*Number\(process\.env\.OS_CLUSTER_REPLICAS\)\s*\)/);
+    //
+    // The count is asked through the one reading of the declaration
+    // (`declaresMultiNode`, both spellings): a topology declared only as
+    // `OS_EXPECT_MULTI_NODE=true` carries no count, and asked with the bare
+    // `NaN` the gate read it as "not declared". ⛔ No second parse of that
+    // spelling here — the shared predicate is the only reader.
+    expect(MASKED_SERVE_SOURCE).toMatch(
+      /const __requestedNodes =\s*declaresMultiNode\(process\.env\)\s*&&\s*!declaresMultiNode\(\{\s*OS_CLUSTER_REPLICAS:\s*process\.env\.OS_CLUSTER_REPLICAS\s*\}\)\s*\?\s*2\s*:\s*Number\(process\.env\.OS_CLUSTER_REPLICAS\);/,
+    );
+    expect(MASKED_SERVE_SOURCE).toMatch(/checkMultiNodeAllowed\(\s*__requestedNodes\s*\)/);
+    expect(MASKED_SERVE_SOURCE).not.toMatch(/process\.env\.OS_EXPECT_MULTI_NODE/);
   });
 
   it('types the dynamic import with the mirrored verdict, not an inline literal', () => {

@@ -3120,6 +3120,14 @@ export default class Serve extends Command {
         // that is the instance `defineCluster()` consults (#13330).
         const __clusterModule = (await importFromHost(__clusterPkg)) as {
           checkMultiNodeAllowed: (requested?: number) => MultiNodeGateVerdict;
+          /**
+           * The ONE reading of "did the operator declare a multi-node
+           * topology" — both spellings, `OS_CLUSTER_REPLICAS>1` and
+           * `OS_EXPECT_MULTI_NODE=true` — owned by the split-brain guard and
+           * shared by every multi-replica reader. Required: it predates the
+           * gate's count parameter, so no app pins a service-cluster without it.
+           */
+          declaresMultiNode: (env: { OS_EXPECT_MULTI_NODE?: string; OS_CLUSTER_REPLICAS?: string }) => boolean;
           /** Optional: an app on a pre-#13330 `service-cluster` does not have it. */
           listClusterDrivers?: () => string[];
           // Optional: an app may pin an older service-cluster that predates
@@ -3128,7 +3136,7 @@ export default class Serve extends Command {
             importer: (specifier: string) => Promise<unknown>,
           ) => Promise<unknown>;
         };
-        const { checkMultiNodeAllowed, mountMultiNodeGateFromHost } = __clusterModule;
+        const { checkMultiNodeAllowed, declaresMultiNode, mountMultiNodeGateFromHost } = __clusterModule;
         // [#13537] Mount the distribution's gate on EVERY boot route, BEFORE
         // consulting it. Registration used to depend on one app config file
         // executing (the EE config calling `registerMultiNodeGate`), so the
@@ -3163,7 +3171,33 @@ export default class Serve extends Command {
         // `Number(undefined)` is `NaN`, which the gate normalizes to "not
         // declared" — normalization lives at the seam on purpose, so there is
         // deliberately no `?? 0` or pre-parse here.
-        const __gate = checkMultiNodeAllowed(Number(process.env.OS_CLUSTER_REPLICAS));
+        //
+        // ⛔ But the count is only ONE of the two spellings of the declaration.
+        // `OS_EXPECT_MULTI_NODE=true` declares multi-node with NO count, and
+        // asked with `NaN` the gate read that topology as "not declared": with
+        // no gate registered the boot then ran the remote driver multi-node,
+        // exactly what the fail-closed default exists to refuse — while the
+        // same deployment spelled `OS_CLUSTER_REPLICAS=2` was refused. So the
+        // topology is read through `declaresMultiNode` (the split-brain guard's
+        // reading, never a second parse of either spelling here), and the
+        // count spelling is asked on its own only to learn whether a count was
+        // given:
+        //   - not declared            → the raw count, as before (NaN / 0 / 1);
+        //   - declared WITH a count   → that count, as before;
+        //   - declared, count unknown → 2, the smallest count that IS
+        //     multi-node. The gate takes a desired count and has no
+        //     "declared, uncounted" input: `undefined` and every non-finite or
+        //     non-positive value mean "not declared", and 1 is single-node.
+        //     2 claims the least: a no-gate boot is refused as for any declared
+        //     topology, and a cap-aware gate is asked about the minimum it would
+        //     have to admit. Telemetry still reads `OS_CLUSTER_REPLICAS` itself,
+        //     so no `cluster_declared_nodes` series is invented from this 2.
+        const __requestedNodes =
+          declaresMultiNode(process.env)
+          && !declaresMultiNode({ OS_CLUSTER_REPLICAS: process.env.OS_CLUSTER_REPLICAS })
+            ? 2
+            : Number(process.env.OS_CLUSTER_REPLICAS);
+        const __gate = checkMultiNodeAllowed(__requestedNodes);
         // Held for BOTH branches below: an outright denial is as much an
         // operator-facing reading as a licensed overflow, and only one of the
         // two currently reaches a log line an operator is likely to still have.
