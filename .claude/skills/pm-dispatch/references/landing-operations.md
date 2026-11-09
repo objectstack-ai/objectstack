@@ -30,6 +30,11 @@
 - 新签名 ⇒ ⛔ 不重投,PR 与其 `Fixes` 卡各留完整签名与初判;下条三事实全立可重投一次。
 - 三事实:失败文件 import 闭包与 diff 不相交、队列基座同 shard 绿、首错是超时非断言。
 - 每次处置留审计评论,重投写签名与台账依据或三行回执;同签名再弹即停,交下一席重诊。
+- 插队(中继 `pr_enqueue_front`)限 ACCEPT 后三因之一,⛔ 不为图快越过同事:
+- (a) 它带着正把**他人** PR 踢出队列的签名之修复;(c) 账户主人点名要它插队;
+- (b) 它是他车道 PR/卡具名前置(`Blocked-by`/串行行),该线经维护者或账户主人定为最高优先。
+- 送出前先在 PR 贴审计评论点名字母与依据;一笔一 PR,同仓同时至多一个插队者在队。
+- 中继另拒 draft、head 已移与 AGENTS.md §7 三类;读回非队首即 FAILED,⛔ 不重发,报维护者。
 - PR 侧红(非队列)同在本窗口处置:义务与三步只住 `platform-readings.md`「红检查先读日志」。
 - 挂 auto-merge/入队前读 K = `git rev-list --count --first-parent PRBASE..origin/main`。
 - PRBASE = 末次绿 PR 跑 Test Core 所印 `Affected-set diff base`,⛔ 不取该跑起始时刻。
