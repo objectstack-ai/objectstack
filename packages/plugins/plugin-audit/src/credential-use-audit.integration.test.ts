@@ -292,10 +292,23 @@ describe('[#31796] an API key admitting a request leaves one credential_use row 
 });
 
 describe('[#31796] CONTROL: the ledger changes no admission', () => {
+  // Its own pair of engines: core says a failed stamp ONCE per data engine, so
+  // on an engine an earlier test already stamped, a ledger that broke the stamp
+  // would leave nothing for this pin to see.
+  let fresh: { audited: Rig; plain: Rig };
+  beforeAll(async () => {
+    fresh = { audited: await boot(true), plain: await boot(false) };
+  }, 120_000);
+  afterAll(async () => {
+    for (const rig of [fresh?.audited, fresh?.plain]) {
+      if (rig) await Promise.race([rig.kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+    }
+  }, 30_000);
+
   it('the verdict, the resolved context and the stamped key row are identical with and without it', async () => {
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const answers: unknown[][] = [];
-    for (const rig of [audited, plain]) {
+    for (const rig of [fresh.audited, fresh.plain]) {
       const raw = await mintKey(rig.engine, 'key_control');
       vi.setSystemTime(T0);
       const admission = await resolveApiKeyAdmission(rig.engine, { 'x-api-key': raw }, T0, undefined, undefined, undefined);
@@ -318,7 +331,7 @@ describe('[#31796] CONTROL: the ledger changes no admission', () => {
     expect((answers[0][0] as { outcome: string }).outcome).toBe('admitted');
     // The ledger never made the stamp fail, and its row landed on the audited side.
     expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('API key use NOT recorded'))).toEqual([]);
-    expect((await credentialUseRows(audited.engine)).filter((r) => r.record_id === 'key_control')).toHaveLength(1);
+    expect((await credentialUseRows(fresh.audited.engine)).filter((r) => r.record_id === 'key_control')).toHaveLength(1);
   });
 });
 
