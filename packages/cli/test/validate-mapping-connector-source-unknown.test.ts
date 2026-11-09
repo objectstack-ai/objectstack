@@ -17,6 +17,13 @@
  * The same stack's second mapping names the declared `rest` connector
  * `crm_api`: no finding at its path. One spawn carries both legs.
  *
+ * ## The provider pair
+ *
+ * `@objectstack/lint` cannot import `@objectstack/service-automation`, so the
+ * rule keeps its own copy of the providers a pull reads through. This package
+ * depends on both, so the parity case below goes red the day the pull's pair
+ * changes and the lint copy does not.
+ *
  * The CLI runs through `bin/run-dev.js` (the source entry), and
  * `@objectstack/lint` resolves through `exports` to `dist/`, so the lint
  * package must be built for this file to see the rule.
@@ -30,6 +37,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
 import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
+import { CONNECTOR_SOURCE_PROVIDERS } from '@objectstack/lint';
+import { CONNECTOR_PULL_PROVIDERS } from '@objectstack/service-automation';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
@@ -121,4 +130,10 @@ describe('`os validate` resolves a mapping\'s connectorSource.connector', () => 
     // An advisory: the stack still validates (the connector universe reaches past this stack).
     expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
   }, SPAWN_TIMEOUT_MS);
+});
+
+describe('the lint rule\'s provider pair is the connector pull\'s', () => {
+  it('CONNECTOR_SOURCE_PROVIDERS (lint) equals CONNECTOR_PULL_PROVIDERS (service-automation)', () => {
+    expect([...CONNECTOR_SOURCE_PROVIDERS]).toEqual([...CONNECTOR_PULL_PROVIDERS]);
+  });
 });
