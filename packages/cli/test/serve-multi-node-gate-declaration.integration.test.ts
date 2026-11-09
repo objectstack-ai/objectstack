@@ -46,6 +46,16 @@
  * declared topology that reaches it; case 4 therefore sets
  * `OS_ALLOW_MEMORY_CLUSTER_MULTINODE=true` (the guard's own escape hatch) so
  * that "admitted by the gate" can be read as a completed boot.
+ *
+ * ## Several replicas over a database local to each one (second `describe`)
+ *
+ * The same fixture and declaration, read by a second refusal: several replicas
+ * declared over redis (`declaresMultiReplicaOnRedis`) cannot each open their
+ * own SQLite or sqlite-wasm file, so `serve` refuses the boot with exit 1 and
+ * names a Postgres `OS_DATABASE_URL`, ahead of the split-brain guard. The
+ * CONTROL boots the same `file:` database with nothing declared. Which
+ * resolutions count as local (libSQL over a server URL does not) is pinned
+ * beside `serve.ts`, in `serve-multi-replica-local-database.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -237,5 +247,73 @@ describe('os serve → multi-node gate reads both spellings of the declaration',
     expect(out).toContain(`${GATE_ASKED} 2`);
     expect(out).not.toContain(GATE_DENIAL);
     expect(booted).toBe(true);
+  }, BOOT_TIMEOUT);
+});
+
+/** The local-database refusal (`multiReplicaLocalDatabaseRefusal` in `serve.ts`), by its opening words. */
+const LOCAL_DATABASE_REFUSAL = '[database] Refusing to start: several replicas are declared';
+
+/** The remedy that refusal names. */
+const POSTGRES_REMEDY = 'OS_DATABASE_URL=postgres://';
+
+/**
+ * Boot once and let the child run until it prints its banner or EXITS on its
+ * own, so a refusal's exit code is the child's and not a signal's.
+ */
+async function bootToExit(prefix: string, env: Record<string, string | undefined>) {
+  const dir = writeApp(prefix, false);
+  const run = await runServe(dir, [], {
+    waitFor: /Press Ctrl\+C to stop/,
+    timeoutMs: 150_000,
+    env: {
+      OS_CLUSTER_DRIVER: DRIVER_NAME,
+      OS_EXPECT_MULTI_NODE: undefined,
+      OS_CLUSTER_REPLICAS: undefined,
+      OS_ALLOW_MEMORY_CLUSTER_MULTINODE: undefined,
+      OS_DATABASE_URL: undefined,
+      OS_DATABASE_DRIVER: undefined,
+      DATABASE_URL: undefined,
+      TURSO_DATABASE_URL: undefined,
+      // `<app>` in a value is the fixture app's own directory.
+      ...Object.fromEntries(Object.entries(env).map(([key, value]) => [key, value?.replace('<app>', dir)])),
+    },
+  });
+  return { out: `${run.stderr}\n${run.stdout}`, booted: run.port !== undefined, exitCode: run.exitCode };
+}
+
+describe('os serve → several replicas declared over redis refuse a database local to each replica', () => {
+  it('REFUSES OS_DATABASE_URL=file:… with OS_CLUSTER_REPLICAS=2 — exit 1, naming a Postgres OS_DATABASE_URL', async () => {
+    const { out, booted, exitCode } = await bootToExit('db-file', {
+      OS_DATABASE_URL: 'file:<app>/app.db',
+      OS_CLUSTER_REPLICAS: '2',
+    });
+
+    expect(out).toContain(LOCAL_DATABASE_REFUSAL);
+    expect(out).toContain(POSTGRES_REMEDY);
+    expect(booted).toBe(false);
+    expect(exitCode).toBe(1);
+    // Refused before the boot reached the split-brain guard: the database is
+    // the cause named, the guard's own refusal is not the one printed.
+    expect(out).not.toContain(GUARD_REFUSAL);
+  }, BOOT_TIMEOUT);
+
+  it('REFUSES the SQLite default (no OS_DATABASE_URL) and sqlite-wasm the same way', async () => {
+    for (const [prefix, url] of [['db-default', undefined], ['db-wasm', 'file:<app>/app.wasm.db']] as const) {
+      const { out, booted, exitCode } = await bootToExit(prefix, {
+        ...(url ? { OS_DATABASE_URL: url } : {}),
+        OS_CLUSTER_REPLICAS: '2',
+      });
+      expect(out, prefix).toContain(LOCAL_DATABASE_REFUSAL);
+      expect(out, prefix).toContain(POSTGRES_REMEDY);
+      expect(booted, prefix).toBe(false);
+      expect(exitCode, prefix).toBe(1);
+    }
+  }, BOOT_TIMEOUT * 2);
+
+  it('CONTROL: the same file: database with nothing declared boots as before', async () => {
+    const { out, booted } = await bootToExit('db-file-single', { OS_DATABASE_URL: 'file:<app>/app.db' });
+
+    expect(booted).toBe(true);
+    expect(out).not.toContain(LOCAL_DATABASE_REFUSAL);
   }, BOOT_TIMEOUT);
 });

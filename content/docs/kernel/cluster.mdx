@@ -825,8 +825,11 @@ ObjectStack deployments: it accepts a pre-built ioredis client via
 Redis consumer (the `service-cache` Redis adapter is still a skeleton, so
 there is nothing to share with yet); it gives native semantics for every
 primitive (SET NX/Lua/INCRBY/PUBLISH); and it decouples cluster transport from
-the choice of database driver (SQL / Turso / Postgres / SQLite all work the
-same).
+the choice of database driver (Postgres, MySQL and a libSQL server all work
+the same). The one database it cannot sit beside is one local to each replica:
+with several replicas declared over `redis`, a SQLite, sqlite-wasm or libSQL
+`file:` primary is refused at boot, because each replica would open its own
+copy.
 
 A `postgres` driver would remain a viable "single binary, single dependency"
 choice for small deployments that already run Postgres and want to avoid

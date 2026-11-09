@@ -902,6 +902,12 @@ export interface ServeRun {
    * an earlier line, as `serve-no-artifact`'s refusals do).
    */
   port: number | undefined;
+  /**
+   * The child's own exit code when it EXITED on its own before `waitFor`
+   * matched — a boot that refused and exited — and `null` when `runServe`
+   * stopped it (a signal sets no code). Read only after the child is gone.
+   */
+  exitCode: number | null;
 }
 
 /**
@@ -1078,16 +1084,17 @@ export function runServe(
       }
       const what = 'os serve (bin/run-dev.js, via runServe)';
       const output = stdout + stderr;
+      const exitCode = child.exitCode;
       if (requested === undefined) {
         // Kernel-assigned (#24342): no `portContentionError()` — this child was
         // handed no number to lose, so a port it could not bind is not that race.
         if (boundPortFromBanner(output).state === 'no-banner') {
-          resolveRun({ stdout, stderr, port: undefined });
+          resolveRun({ stdout, stderr, port: undefined, exitCode });
           return;
         }
         const bound = readKernelAssignedPort(output, what);
         if (bound instanceof Error) rejectRun(bound);
-        else resolveRun({ stdout, stderr, port: bound });
+        else resolveRun({ stdout, stderr, port: bound, exitCode });
         return;
       }
       const contended = portContentionError(output, what, requested);
@@ -1105,7 +1112,7 @@ export function runServe(
         return;
       }
       const readback = boundPortFromBanner(output);
-      resolveRun({ stdout, stderr, port: readback.state === 'bound' ? readback.port : undefined });
+      resolveRun({ stdout, stderr, port: readback.state === 'bound' ? readback.port : undefined, exitCode });
     };
 
     const timer = setTimeout(
