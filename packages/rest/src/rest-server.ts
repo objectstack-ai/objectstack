@@ -370,6 +370,7 @@ import {
 // [#23050 slice 13b] The `/meta` per-item reads (`/references`, `/layers`, the book tree
 // and the item read) moved to their own module — see its header.
 import { registerMetaItemReadRoutes, type MetaItemReadRouteHost } from './meta-item-read-routes.js';
+import { registerMetaQualifiedItemRoute } from './meta-qualified-item-route.js';
 // [#23050 slice 13c] The `/meta` per-item writes (the item save and the reset) moved to
 // their own module — see its header.
 import { registerMetaItemWriteRoutes, type MetaItemWriteRouteHost } from './meta-item-write-routes.js';
@@ -5573,7 +5574,7 @@ export class RestServer {
             metaItemAnswerSources: (...a) => this.metaItemAnswerSources(...a),
             sendMetaReadRefusal: (...a) => RestServer.sendMetaReadRefusal(...a),
         };
-        registerMetaItemReadRoutes.call(itemReadHost, scope);
+        const readMetaItem = registerMetaItemReadRoutes.call(itemReadHost, scope);
 
         // [#27627] The app metadata bundle (`GET {metaPath}/app/:appId/bundle`), in
         // `meta-app-bundle-routes.ts`: every member is the item read's own answer,
@@ -5694,6 +5695,19 @@ export class RestServer {
             metaListSource: (...a) => this.metaListSource(...a),
         };
         registerMetaItemPublishedRoute.call(itemPublishedHost, scope);
+
+        // [ADR-0150 D5, epic #31527 child G1] The qualified by-name read,
+        // `GET /meta/:type/:ns/:name`, answered through the item read's own
+        // handler. ⛔ LAST, after every `/meta` route above: the route
+        // manager's first match must be each literal three-segment sibling
+        // (`/history`, `/audit`, `/diff`, `/published`, `/references`,
+        // `/layers`, `/publish`, `/rollback`, `book/:name/tree`), which keep
+        // their routes (ruling Q1 on #31691).
+        registerMetaQualifiedItemRoute.call(
+            { routeManager: this.routeManager, resolveProtocol: (...a) => this.resolveProtocol(...a) },
+            scope,
+            readMetaItem,
+        );
 
         // ── RETIRED: the compound `/:type/:section/:name` arities ──────────
         //

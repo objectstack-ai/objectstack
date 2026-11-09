@@ -58,6 +58,7 @@
  * the signal to re-pick the fixtures, not to delete the assertion.
  */
 import { describe, expect, it } from 'vitest';
+import '@objectstack/lint';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
@@ -356,6 +357,9 @@ describe('#9157 — the population, re-derived from the code rather than from th
         // one: a shrinking population would otherwise satisfy the emptiness
         // assertion above forever.
         expect(folded.sort()).toEqual([
+            // [ADR-0150 D5, #31691 G1] The environment qualifier of the
+            // qualified by-name path — the door hands it the type it was asked.
+            'admitEnvironmentQualifier',
             'auditMetaItem',
             'deleteMetaItem',
             'diffMetaItem',
@@ -385,6 +389,8 @@ describe('#9157 — the population, re-derived from the code rather than from th
             // packages hold — the door hands it the type the request named.
             'packagelessLayeredReadRefusal',
             'publishMetaItem',
+            // [ADR-0150 D5, #31691 G1] The qualified path's address reading.
+            'resolveMetaItemAddress',
             'rollbackMetaItem',
             'saveMetaItem',
             'tenantAuthoredWriteRefusal',

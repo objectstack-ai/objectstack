@@ -59,7 +59,7 @@ import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-companion.js';
-import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationBasePackageId, findNamespaceObjectNameClashes, type NamespaceObjectNameClash, type ObjectNameHolder, type NamespaceHolder } from '@objectstack/spec/kernel';
+import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, InstalledPackageSourceSchema, type InstalledPackageSource, checkFieldCompleteness, customizationBasePackageId, findNamespaceObjectNameClashes, type NamespaceObjectNameClash, type ObjectNameHolder, type NamespaceHolder, validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 import { DEFAULT_FLOW_FUNCTION_EFFECT } from '@objectstack/spec/automation';
 import { AppSchema, ActionSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -3371,6 +3371,38 @@ export class NamespaceObjectNameConflictError extends Error {
 }
 
 /**
+ * [ADR-0150 D5, child G1] Raised when a package declares a namespace that
+ * spells a literal segment of the REST address grammar (`trigger`, `hooks`,
+ * `global`, … — `NAMESPACE_REFUSED_LITERALS`, `spec/kernel/address-grammar.ts`).
+ * The router reads a literal before any namespace, so every qualified address
+ * of such a package (`/automation/trigger/<name>` read as the trigger door,
+ * not the namespace `trigger`) would reach something else. The sentence is the
+ * spec's (`validateNamespaceNotAddressLiteral`), naming the literal and the
+ * doors that serve it.
+ *
+ * Same envelope and code as {@link NamespaceObjectNameConflictError}: `code:
+ * 'NAMESPACE_CONFLICT'`, `status: 422` — the namespace position already reads
+ * this string as something else, and the remedy is a rename. No code is minted.
+ */
+export class NamespaceAddressLiteralError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** The namespace the package declared. */
+  readonly namespace: string;
+  /** The package whose install this refusal stopped. */
+  readonly incomingPackageId: string;
+
+  constructor(namespace: string, message: string, incomingPackageId: string) {
+    super(`Package '${incomingPackageId}': ${message}`);
+    this.name = 'NamespaceAddressLiteralError';
+    this.namespace = namespace;
+    this.incomingPackageId = incomingPackageId;
+  }
+}
+
+/**
  * [ADR-0150 D2, child N] Raised when a package declares an item of one of the
  * twelve uncovered bucket 2/3 types — sharing rule, queue, assignment rule,
  * hook, job, app, page, dashboard, report, book, analytics cube, tool — under a
@@ -4841,6 +4873,24 @@ export class SchemaRegistry {
    * both refuse a new holder.
    */
   private bareNameHoldersSealed = false;
+
+  /** The packages already warned that their namespace spells an address literal. */
+  private readonly addressLiteralNamespaceWarned = new Set<string>();
+
+  /**
+   * [ADR-0150 D5, child G1] Warn, once per package, that an installed
+   * package's namespace spells an address-grammar literal: it keeps booting,
+   * its items are read with `?package=<id>`, and the remedy is a rename.
+   */
+  private warnAddressLiteralNamespaceOnce(packageId: string, refusal: string): void {
+    if (this.addressLiteralNamespaceWarned.has(packageId)) return;
+    this.addressLiteralNamespaceWarned.add(packageId);
+    console.warn(
+      `[Registry] Package '${packageId}' is installed under a namespace the address grammar reads as a route. `
+        + `${refusal} It keeps booting: its items are read with \`?package=${packageId}\`, and a new install `
+        + `of this namespace is refused. Renaming the namespace gives the package its qualified address.`,
+    );
+  }
 
   /** Has the cold boot sealed the bare-name holders (the doors now refuse)? */
   get bareNameHoldersAreSealed(): boolean {
@@ -9135,6 +9185,36 @@ export class SchemaRegistry {
     // check above; at every install, boot included, like it; with no
     // `collisionPolicy` downgrade, like the bare-name rule below.
     this.refuseNamespaceNameConflicts(manifest);
+
+    // [ADR-0150 D5, child G1] A namespace never spells a literal segment of
+    // the REST address grammar: the router reads the literal first, so the
+    // package's qualified addresses would reach another door. Ahead of every
+    // mutation, with no `collisionPolicy` downgrade — at the running install
+    // door only.
+    //
+    // A package the boot registers keeps booting: no release before this rule
+    // refused one, and what the literal costs it is its qualified path alone,
+    // which never existed before the rule did. Two readings name it, the
+    // bare-name rule's (`refuseBareNameConflicts`): until the cold boot seals
+    // the holders, every package registering is one the deployment holds
+    // (installed, or shipped in its code); after it, a package already
+    // registered under its own id AND the same namespace is a reload, a
+    // re-install or an upgrade (the namespace gate's same-package reading
+    // above). An upgrade that MOVES to a literal namespace is a new occupation
+    // of it and is refused. A held package is warned once and installs; it is
+    // read by `?package=`.
+    {
+      const literalRefusal = validateNamespaceNotAddressLiteral(manifest.namespace);
+      if (literalRefusal) {
+        const packageId = selfId ?? manifest.id;
+        const alreadyHeld = !this.bareNameHoldersSealed
+          || this.getPackage(packageId)?.manifest?.namespace === manifest.namespace;
+        if (!alreadyHeld) {
+          throw new NamespaceAddressLiteralError(manifest.namespace as string, literalRefusal, packageId);
+        }
+        this.warnAddressLiteralNamespaceOnce(packageId, literalRefusal);
+      }
+    }
 
     // [ADR-0150 D6, child K] A namespace never equals an object name, in
     // either direction, and no object is short-named `custom` — the spec's one
