@@ -207,6 +207,92 @@ export function apiKeyLifecyclePolicySourceOf(
   return () => service.resolveApiKeyLifecyclePolicy!();
 }
 
+// ── [#23367, ADR-0151 D4] The life a key is signed with ──────────────────────
+//
+// The one rule every door that mints a key applies — `POST /keys` for the
+// caller's own key, and the AI service account key door — so a person's key
+// and an account's key are bound by the same default life and the same
+// ceiling. Two steps, because the doors read the request before they read the
+// policy (a body that does not parse is refused without asking the auth
+// service, whose outage answers 503).
+
+/**
+ * [#23367] The clock skew the ceiling forgives. A client that computes "one
+ * year from now" on its own clock and sends it is asking for exactly the
+ * ceiling; a client clock a few seconds ahead of the server's must not turn
+ * that into a refusal.
+ */
+const API_KEY_EXPIRY_CEILING_SKEW_MS = 60_000;
+
+/** [#23367] The ceiling refusal's code (ADR-0112 ledger). */
+export const API_KEY_EXPIRY_TOO_LONG_CODE = 'API_KEY_EXPIRY_TOO_LONG';
+
+/** A refused signing: always `400`, with the code and the located message. */
+export interface ApiKeyExpiryRefusal {
+  ok: false;
+  status: 400;
+  code: 'VALIDATION_ERROR' | typeof API_KEY_EXPIRY_TOO_LONG_CODE;
+  message: string;
+}
+
+/**
+ * Step 1, the request: the `expires_at` a caller asked for, as epoch
+ * milliseconds, or `undefined` when it asked for none (absent or empty). A
+ * number below 1e12 is read as seconds, a larger one as milliseconds. A value
+ * that does not parse as a date, or is not in the future, is refused `400
+ * VALIDATION_ERROR`.
+ */
+export function readRequestedApiKeyExpiry(
+  requested: unknown,
+  nowMs: number,
+): { ok: true; requestedMs?: number } | ApiKeyExpiryRefusal {
+  if (requested == null || requested === '') return { ok: true };
+  const ms = typeof requested === 'number'
+    ? (requested < 1e12 ? requested * 1000 : requested)
+    : Date.parse(String(requested));
+  if (Number.isNaN(ms)) {
+    return { ok: false, status: 400, code: 'VALIDATION_ERROR', message: 'Invalid expires_at: must be a parseable date' };
+  }
+  if (ms <= nowMs) {
+    return { ok: false, status: 400, code: 'VALIDATION_ERROR', message: 'Invalid expires_at: must be in the future' };
+  }
+  return { ok: true, requestedMs: ms };
+}
+
+/**
+ * Step 2, the policy: the `expires_at` the key is signed with. No date asked
+ * for gets the policy's default life (never a permanent key), or no expiry
+ * when no policy is configured (a kernel with no `auth` service has no auth
+ * configuration). A date further away than the policy's ceiling is refused
+ * `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date that would be
+ * accepted; exactly the ceiling is accepted.
+ */
+export function signApiKeyExpiry(
+  policy: ApiKeyLifecyclePolicy | undefined,
+  requestedMs: number | undefined,
+  nowMs: number,
+): { ok: true; expiresAt?: string } | ApiKeyExpiryRefusal {
+  if (requestedMs === undefined) {
+    return policy
+      ? { ok: true, expiresAt: new Date(nowMs + policy.defaultExpiryDays * DAY_MS).toISOString() }
+      : { ok: true };
+  }
+  if (policy && requestedMs > nowMs + policy.maxExpiryDays * DAY_MS + API_KEY_EXPIRY_CEILING_SKEW_MS) {
+    const latest = new Date(nowMs + policy.maxExpiryDays * DAY_MS).toISOString();
+    return {
+      ok: false,
+      status: 400,
+      code: API_KEY_EXPIRY_TOO_LONG_CODE,
+      message:
+        `expires_at ${new Date(requestedMs).toISOString()} is further away than this deployment allows: the `
+        + `Authentication API key policy's Maximum key lifetime is ${policy.maxExpiryDays} days, so the `
+        + `latest expiry a key signed now may have is ${latest}. Ask for that date or an earlier one, and `
+        + 'rotate the key before it expires.',
+    };
+  }
+  return { ok: true, expiresAt: new Date(requestedMs).toISOString() };
+}
+
 /**
  * [#23367] The three lifecycle refusals, each declared as its wire pair — the
  * ADR-0112 code (registered under `@objectstack/core`) beside the status it

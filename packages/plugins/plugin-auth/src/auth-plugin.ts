@@ -4105,6 +4105,89 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // ADR-0151 D1/D4 — register an AI service account, and mint its keys.
+    //
+    // A person signed in, read from the better-auth session, so an API key
+    // never reaches these routes and an AI service account (which never holds
+    // a session) never calls them. Anonymous is 401, a held session is refused
+    // with its posture; who may act (an organization or platform
+    // administrator; for a key, also the account's owner) is the handler's
+    // to judge, against `sys_member` (service-account-doors.ts). Writes run
+    // as the system, attributed to the person.
+    const serviceAccountCaller = async (
+      c: any,
+    ): Promise<import('./service-account-doors.js').ServiceAccountCaller | Response> => {
+      const authApi = await this.authManager!.getApi();
+      const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+      const user = session?.user;
+      if (!user?.id) {
+        return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in first' } }, 401);
+      }
+      const held = judgeHeldSession(user);
+      if (held) return c.json(held.body, held.status);
+      const activeOrganizationId = (session?.session as { activeOrganizationId?: unknown } | undefined)?.activeOrganizationId;
+      const impersonatedBy = session?.session?.impersonatedBy;
+      return {
+        id: user.id,
+        isPlatformAdmin: isPlatformAdminUser(user),
+        activeOrganizationId: typeof activeOrganizationId === 'string' && activeOrganizationId !== '' ? activeOrganizationId : null,
+        ...(typeof impersonatedBy === 'string' && impersonatedBy.trim() !== '' ? { impersonatedBy: impersonatedBy.trim() } : {}),
+      };
+    };
+    const serviceAccountDeps = (): import('./service-account-doors.js').ServiceAccountDoorDeps => ({
+      getDataEngine: () => this.authManager!.getDataEngine() as any,
+      addMember: async ({ userId, organizationId }) => {
+        const authApi: any = await this.authManager!.getApi();
+        await authApi.addMember({ body: { userId, role: 'member', organizationId } });
+      },
+      runAtomically: async <T,>(work: () => Promise<T>): Promise<T> => {
+        const engine = this.authManager!.getDataEngine() as
+          | { transaction?: <R>(callback: (trxCtx: any, info: any) => Promise<R>) => Promise<R> }
+          | undefined;
+        if (typeof engine?.transaction !== 'function') return work();
+        return engine.transaction(async () => work());
+      },
+      resolveApiKeyLifecyclePolicy: () => this.authManager!.resolveApiKeyLifecyclePolicy(),
+    });
+    const serviceAccountRoute = (
+      path: string,
+      run: (
+        deps: import('./service-account-doors.js').ServiceAccountDoorDeps,
+        caller: import('./service-account-doors.js').ServiceAccountCaller,
+        request: Request,
+      ) => Promise<import('./admin-user-endpoints.js').EndpointResult>,
+    ): void => {
+      rawApp.post(`${basePath}/service-account/${path}`, async (c: any) => {
+        try {
+          const caller = await serviceAccountCaller(c);
+          if (caller instanceof Response) return caller;
+          const { status, body } = await runAttributedToUser(caller, () => run(serviceAccountDeps(), caller, c.req.raw));
+          return c.json(body, status as any);
+        } catch (error) {
+          // An unreadable membership or policy is an outage, never a caller
+          // without standing: answered 503 in the shared seam's words.
+          if (isAuthzStoreUnavailableError(error)) {
+            return c.json(
+              { success: false, error: { code: AUTHZ_STORE_UNAVAILABLE_CODE, message: AUTHZ_STORE_UNAVAILABLE_MESSAGE } },
+              AUTHZ_STORE_UNAVAILABLE_STATUS,
+            );
+          }
+          const err = error instanceof Error ? error : new Error(String(error));
+          ctx.logger.error(`[AuthPlugin] service-account/${path} failed`, err);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'The request could not be completed.' } }, 500);
+        }
+      });
+    };
+    serviceAccountRoute('register', async (deps, caller, request) => {
+      const { runRegisterServiceAccount } = await import('./service-account-doors.js');
+      return runRegisterServiceAccount(deps, caller, request);
+    });
+    serviceAccountRoute('create-key', async (deps, caller, request) => {
+      const { runCreateServiceAccountKey } = await import('./service-account-doors.js');
+      return runCreateServiceAccountKey(deps, caller, request);
+    });
+
+    // ────────────────────────────────────────────────────────────────────
     // [#30398] ADR-0069 D5 — admin: the caller's own address as the
     // `auth.allowed_ip_ranges` save check and the sign-in gate judge it, so
     // Setup can show it before a save rather than the save refusal naming it

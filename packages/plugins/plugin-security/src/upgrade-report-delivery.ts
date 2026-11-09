@@ -45,6 +45,15 @@
  *    the same two that answer the membership check. A set authored to read
  *    `sys_notification` some other way is not read.
  *
+ * ## An AI service account is never an administrator here
+ *
+ * [ADR-0151 D3] An AI service account (a `sys_user` row of kind `agent`)
+ * holds no administrator standing whatever its grade or grants say, and it
+ * has no inbox a person reads. So it is never a recipient under `single`, and
+ * never counted as an administrator of the owner organization under a wall:
+ * the people found are read once more, by id, and every account among them is
+ * dropped. A composition with no `sys_user` drops nobody.
+ *
  * ## Never throws
  *
  * A read or a delivery that did not happen is said in the log with its cause.
@@ -52,6 +61,7 @@
  */
 
 import {
+  isAgentAccountRow,
   readDefaultOrganizationId,
   resolvePlatformAdminEmails,
   type PlatformAdminEmailConfig,
@@ -65,6 +75,7 @@ import { resolvePlatformAdminStanding } from './platform-admin-service.js';
 
 const ORGANIZATION_OBJECT = 'sys_organization';
 const MEMBER_OBJECT = 'sys_member';
+const USER_OBJECT = 'sys_user';
 const SYSTEM_CTX = { isSystem: true } as const;
 
 /** The grants that make their holder an administrator of the organization they are scoped to. */
@@ -154,6 +165,21 @@ function rowsOf(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object') : [];
 }
 
+/**
+ * [ADR-0151 D3] `ids` without the AI service accounts among them, read by id
+ * as the system. A read that throws propagates, as every read here does.
+ */
+async function withoutAgentAccounts(engine: UpgradeReportEngine, ids: readonly string[]): Promise<string[]> {
+  if (ids.length === 0 || !engine.getObject(USER_OBJECT)) return [...ids];
+  const rows = rowsOf(await engine.find(USER_OBJECT, {
+    where: { id: { $in: [...ids] } },
+    limit: ids.length,
+    context: SYSTEM_CTX,
+  }));
+  const accounts = new Set(rows.filter(isAgentAccountRow).map((row) => idOf(row.id)));
+  return ids.filter((id) => !accounts.has(id));
+}
+
 function logError(logger: UpgradeReportLogger | undefined, message: string, meta: Record<string, unknown>): void {
   if (logger?.error) logger.error(message, undefined, meta);
   else logger?.warn(message, meta);
@@ -162,7 +188,8 @@ function logError(logger: UpgradeReportLogger | undefined, message: string, meta
 /**
  * The people who can act on a deployment-level finding under `single`: any
  * configured platform operator and every holder of the Default Organization's
- * `admin_full_access` grant. A read that throws propagates.
+ * `admin_full_access` grant who is a person (an AI service account never is
+ * a recipient, ADR-0151 D3). A read that throws propagates.
  */
 export async function resolveUpgradeReportAudience(engine: UpgradeReportEngine): Promise<UpgradeReportAudience> {
   const recipients = [...resolvePlatformAdminEmails().emails];
@@ -174,10 +201,12 @@ export async function resolveUpgradeReportAudience(engine: UpgradeReportEngine):
     limit: 10000,
     context: SYSTEM_CTX,
   });
+  const granted: string[] = [];
   for (const row of rowsOf(grants)) {
     const userId = idOf(row.user_id);
-    if (userId !== undefined && !recipients.includes(userId)) recipients.push(userId);
+    if (userId !== undefined && !recipients.includes(userId) && !granted.includes(userId)) granted.push(userId);
   }
+  recipients.push(...(await withoutAgentAccounts(engine, granted)));
   return { recipients, organizationId };
 }
 
@@ -269,7 +298,9 @@ export async function auditOwnerOrganization(
     const set = g[GRANT_SET_NAME_FIELD];
     if (userId !== undefined && typeof set === 'string' && ADMINISTRATOR_SETS.has(set)) administrators.add(userId);
   }
-  const nonOperatorAdministrators = [...administrators].filter((id) => !operatorIds.has(id)).sort();
+  const nonOperatorAdministrators = (await withoutAgentAccounts(engine, [...administrators]))
+    .filter((id) => !operatorIds.has(id))
+    .sort();
   return { unreachedOperators, nonOperatorAdministrators };
 }
 
