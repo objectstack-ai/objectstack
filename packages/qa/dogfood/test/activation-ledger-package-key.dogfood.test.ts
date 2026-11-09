@@ -14,7 +14,8 @@
 //
 //  - the key, on both drivers the harness boots (`sqlite-wasm`, the SQL
 //    driver, and `memory`): two packages may each hold a row of one name, one
-//    package may not hold two;
+//    package may not hold two; and, on the SQL driver, rows naming no package
+//    stay one per name, which the boot's package-less index enforces;
 //  - the backfill, on the SQL driver across restarts of one database file: a
 //    row written with no package for a showcase flow names the showcase
 //    package after the next boot, a position row stays as it is (positions are
@@ -92,6 +93,24 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
             });
             expect(rows).toHaveLength(1);
         });
+
+        // Rows naming no package are exempt from the NULL-distinct declared key;
+        // on SQL the boot's package-less index (metadata-protocol) keeps them to
+        // one per (metadata_type, name). The memory driver enforces declared
+        // indexes only — single-process, never multi-replica — so it is not
+        // asked here (a stated gap, PR body).
+        it.skipIf(databaseDriver === 'memory')(
+            'a second row naming no package for one (metadata_type, name) is refused — written past the store, straight to the engine',
+            async () => {
+                const bare = { metadata_type: 'flow', name: `${NAME}_bare`, active: false };
+                expect(await refusalOf(ql.insert(LEDGER, bare, { context: SYSTEM_CTX }))).toBe('accepted');
+                expect(await refusalOf(ql.insert(LEDGER, { ...bare, active: true }, { context: SYSTEM_CTX })))
+                    .toEqual({ code: 'DUPLICATE_RECORD', status: 409 });
+
+                const rows = await ql.find(LEDGER, { where: { metadata_type: 'flow', name: `${NAME}_bare` }, context: SYSTEM_CTX });
+                expect(rows).toHaveLength(1);
+            },
+        );
     });
 }
 

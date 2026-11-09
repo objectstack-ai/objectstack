@@ -253,7 +253,7 @@ describe('#8928 os migrate duplicates — the report document', () => {
     });
   });
 
-  it('names the four kernel:ready indexes, and the migration behind each — none for the retired sys_view_definition (ADR-0131 D13)', async () => {
+  it('names the five kernel:ready indexes, and the migration behind each — none for the retired sys_view_definition (ADR-0131 D13)', async () => {
     const report = await collect();
     expect(
       report.runtimeIndexPreflight.map((p) => `${p.migration}:${p.table}:${p.index}`),
@@ -264,6 +264,9 @@ describe('#8928 os migrate duplicates — the report document', () => {
       // One admin-global default (an empty User) per (organization, topic,
       // channel): service-messaging's preference table, ADR-0118 D1.
       'ensureNotificationPreferenceIdentityIndex:sys_notification_preference:uniq_sys_notification_preference_a22d7d27',
+      // One package-less activation row per (metadata_type, name), ADR-0150 D4:
+      // an index added beside the ledger's declared key, under its own name.
+      'ensureActivationLedgerPackagelessIndex:sys_metadata_activation:uniq_sys_metadata_activation_packageless',
     ]);
   });
 

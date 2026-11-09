@@ -20,9 +20,12 @@
  * declared UNIQUE that is not a superset, keep reading as orphans exactly as
  * before; a live field-level unique is never read as superseded.
  *
- * The arm was ablated once (its call removed, so the ledger case fell back to
- * the orphan arm; the first two pins and the upgrade-harness dogfood pins read
- * red, restored); the readings are in the PR body, not kept as test files.
+ * When a gained column is nullable the arm also requires the partial UNIQUE
+ * guard on the narrower key (`metadata-protocol`'s package-less index), because
+ * without it the old index is the only rule keeping NULL rows to one.
+ *
+ * The arm and its guard rule were each ablated (readings in the PR body, not
+ * kept as test files).
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -35,6 +38,9 @@ const NEW = 'uniq_sys_metadata_activation_metadata_type_package_id_name';
 const ledgerColumns = new Set(['id', 'metadata_type', 'package_id', 'name', 'active']);
 const ledgerIndexes = [{ fields: ['metadata_type', 'package_id', 'name'], unique: 'global' as const }];
 const plain = (name: string, columns: string[], unique = true): PhysicalIndex => ({ name, columns, unique });
+/** The package-less guard `metadata-protocol` builds at boot: a partial UNIQUE on the narrower key. */
+const GUARD_NAME = 'uniq_sys_metadata_activation_packageless';
+const guard: PhysicalIndex = { name: GUARD_NAME, columns: ['metadata_type', 'name'], unique: true, partial: true };
 
 /** The differ's verdict over the ledger as this release declares it, composed as `detectTableIndexDrift` composes it. */
 const diff = (physical: PhysicalIndex[]) =>
@@ -54,7 +60,7 @@ const diff = (physical: PhysicalIndex[]) =>
 
 describe('the widening arm — pure function', () => {
   it('reads the activation ledger\'s old two-part UNIQUE as superseded: one SAFE replace, no drop_index', () => {
-    const entries = diff([plain(OLD, ['metadata_type', 'name']), plain(NEW, ['metadata_type', 'package_id', 'name'])]);
+    const entries = diff([plain(OLD, ['metadata_type', 'name']), plain(NEW, ['metadata_type', 'package_id', 'name']), guard]);
 
     expect(entries.map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
     expect(entries[0].op).toMatchObject({
@@ -65,6 +71,41 @@ describe('the widening arm — pure function', () => {
     });
     expect(entries[0].message).toContain('pure relaxation');
     expect(entries[0].message).toContain('package_id');
+    // The gained column is nullable here, so the message says what the wider
+    // key stops constraining: rows whose package_id is NULL.
+    expect(entries[0].message).toContain('package_id is nullable');
+    expect(entries[0].message).toContain('a row whose package_id is NULL is constrained by the new key no longer');
+    expect(entries[0].message).toContain('The partial UNIQUE on (metadata_type, name) that stands beside it');
+  });
+
+  it('a nullable gained column with NO partial guard beside it is not a relaxation: the old index is KEPT — no replace, no orphan drop', () => {
+    // Without the package-less index, dropping (metadata_type, name) would drop
+    // the only rule keeping rows with a NULL package_id to one per name. So the
+    // plan offers nothing for it — not the safe replace, and not the orphan
+    // arm's destructive drop either — and a later plan, once the boot has built
+    // the guard, offers the replace.
+    expect(diff([plain(OLD, ['metadata_type', 'name']), plain(NEW, ['metadata_type', 'package_id', 'name'])])).toEqual([]);
+    // A plain (non-partial) unique on the narrower columns is not the guard.
+    expect(legacyUniqueReplacements({
+      table: LEDGER, fields: {}, tenantField: null, physicalColumns: ledgerColumns, declaredIndexes: ledgerIndexes,
+      physical: [plain(OLD, ['metadata_type', 'name']), plain('uniq_other', ['metadata_type', 'name'])],
+    })).toEqual([expect.objectContaining({ legacyNames: [OLD], kept: true })]);
+  });
+
+  it('a gained column the object declares required carries no NULL warning', () => {
+    const physical = [plain(OLD, ['metadata_type', 'name']), plain(NEW, ['metadata_type', 'package_id', 'name'])];
+    const [entry] = diffManagedIndexes({
+      table: LEDGER,
+      expected: [{ name: NEW, columns: ['metadata_type', 'package_id', 'name'], unique: true }],
+      legacy: legacyUniqueReplacements({
+        table: LEDGER, fields: { package_id: { type: 'text', required: true } }, tenantField: null,
+        physicalColumns: ledgerColumns, declaredIndexes: ledgerIndexes, physical,
+      }),
+      physical,
+    });
+    expect(entry.op.type).toBe('replace_unique_index');
+    expect(entry.message).toContain('pure relaxation');
+    expect(entry.message).not.toContain('nullable');
   });
 
   it('a generated UNIQUE on other columns still reads as an orphan: drop_index, destructive', () => {
@@ -96,7 +137,7 @@ describe('the widening arm — pure function', () => {
   it('runs on a table with NO tenant column — the tenant arms still return nothing there', () => {
     const out = legacyUniqueReplacements({
       table: LEDGER, fields: {}, tenantField: null, physicalColumns: ledgerColumns, declaredIndexes: ledgerIndexes,
-      physical: [plain(OLD, ['metadata_type', 'name'])],
+      physical: [plain(OLD, ['metadata_type', 'name']), guard],
     });
     expect(out).toEqual([
       expect.objectContaining({ legacyNames: [OLD], legacyColumns: ['metadata_type', 'name'], widenedBy: ['package_id'] }),
@@ -166,8 +207,12 @@ describe('the widening arm — a real SQLite database built with the old key', (
     // The database an earlier release built…
     await driver.initObjects(ledger([{ fields: ['metadata_type', 'name'], unique: 'global' }]) as any);
     expect(await indexNames()).toEqual([OLD]);
-    // …booted by this release's declaration.
+    // …booted by this release's declaration, with the package-less guard the
+    // metadata-protocol boot migration builds beside it.
     await driver.initObjects(ledger(ledgerIndexes) as any);
+    await (driver as any).knex.raw(
+      `CREATE UNIQUE INDEX ${GUARD_NAME} ON ${LEDGER} (metadata_type, name) WHERE package_id IS NULL`,
+    );
 
     const drift = (await driver.detectManagedDrift()).filter((e) => e.table === LEDGER);
     expect(drift.map((e) => [e.op.type, e.category])).toEqual([['replace_unique_index', 'safe']]);
@@ -175,7 +220,7 @@ describe('the widening arm — a real SQLite database built with the old key', (
     const { applied, skipped } = await driver.applyMigrationEntries(drift);
     expect(skipped).toEqual([]);
     expect(applied).toHaveLength(1);
-    expect(await indexNames()).toEqual([NEW]);
+    expect(await indexNames()).toEqual([NEW, GUARD_NAME].sort());
     expect((await driver.detectManagedDrift()).filter((e) => e.table === LEDGER)).toEqual([]);
 
     const k = (driver as any).knex;
@@ -184,5 +229,8 @@ describe('the widening arm — a real SQLite database built with the old key', (
     await expect(
       k(LEDGER).insert({ id: 'c', metadata_type: 'flow', name: 'x', package_id: 'com.acme.alpha', active: true }),
     ).rejects.toThrow(/UNIQUE/);
+    // …and the guard still keeps rows with no package to one per name.
+    await k(LEDGER).insert({ id: 'd', metadata_type: 'flow', name: 'x', active: false });
+    await expect(k(LEDGER).insert({ id: 'e', metadata_type: 'flow', name: 'x', active: true })).rejects.toThrow(/UNIQUE/);
   });
 });

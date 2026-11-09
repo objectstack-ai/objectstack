@@ -81,9 +81,11 @@
  * may each hold a row for an item of the same name, one package may not hold
  * two. `package_id` is null for an item no package holds (an environment-
  * authored position, permission set or action), and SQL `UNIQUE` is
- * NULL-distinct, so for those rows the key constrains nothing and the one-row
- * property rests on this module's read-then-write (`setActive`), on every
- * driver. Rows written before the key carried the package may have a null
+ * NULL-distinct, so for those rows the key constrains nothing. A runtime index
+ * keeps them to one per `(metadata_type, name)` (`metadata-protocol`'s
+ * `activation-ledger-packageless-index.ts`, and `driver-mongodb`'s copy), and
+ * this module's read-then-write (`setActive`) keeps to it on every driver,
+ * including the memory driver, which has no such index. Rows written before the key carried the package may have a null
  * `package_id` for an item a package holds: {@link backfillActivationLedgerPackages}
  * binds each one to its one holder and reports the rest, never guessing.
  */

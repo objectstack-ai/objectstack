@@ -174,10 +174,14 @@ export const SysMetadataActivation = ObjectSchema.create({
     // relaxes the key, so the new index cannot fail on rows the old one held.
     //
     // ⚠️ NULL-distinct: SQL `UNIQUE` exempts a row whose key part is NULL, and
-    // the memory driver follows SQL. An environment-authored item's row has a
-    // NULL `package_id`, so for those rows this index constrains nothing; the
-    // one-row property rests on the ledger's single writer, which reads by
-    // `(metadata_type, name)` before it inserts (`metadata-activation-store.ts`).
+    // the memory and MongoDB drivers follow SQL. An environment-authored item's
+    // row has a NULL `package_id`, so for those rows this index constrains
+    // nothing. They keep one row per `(metadata_type, name)` through an index
+    // `IndexSchema` cannot declare, `uniq_sys_metadata_activation_packageless`:
+    // `metadata-protocol` builds it at boot on SQL
+    // (`activation-ledger-packageless-index.ts`) and `driver-mongodb` at
+    // collection sync. Not on MariaDB, and not on the memory driver, which
+    // enforces declared indexes only (single-process, never multi-replica).
     //
     // ⛔ Not bare `unique: true`. On a DECLARED index that is the positional
     // spelling of `'global'` (ADR-0120 D1) — the same materialized shape, but
