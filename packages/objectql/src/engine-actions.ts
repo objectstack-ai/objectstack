@@ -54,6 +54,43 @@ export interface ActionHandlerEntry {
 }
 
 /**
+ * [ADR-0150 D4, #31673] Is `owner` a plugin's, not a package's (`app:<id>`)
+ * nor the environment's (none, or the authored-action resync's
+ * `metadata-service`)?
+ */
+function isPluginHandlerOwner(owner: string | undefined): owner is string {
+  return owner !== undefined
+    && actionHandlerCoordinate(owner) !== ENVIRONMENT_ACTION_COORDINATE
+    && handlerOwnerPackageId(owner) === owner;
+}
+
+/**
+ * [ADR-0150 D2/D5, #31673] A call naming package P reached no handler of P's
+ * own under the key, and two or more plugin handlers hold it: the refusal
+ * names every owner and picks none. `RESOURCE_CONFLICT` / 409, the standard
+ * catalog's member for an ambiguity the environment's state causes (the
+ * declaration door's own answer); no code minted. ⛔ Unexported, like the
+ * registry's refusals: a consumer compares `code`, never `instanceof`.
+ */
+class ActionHandlerAmbiguityError extends Error {
+  readonly code = 'RESOURCE_CONFLICT';
+  readonly status = 409;
+  readonly httpStatus = 409;
+  /** Every plugin owner holding a handler under the key, in registration order of their slots. */
+  readonly owners: readonly string[];
+
+  constructor(key: string, packageId: string, owners: readonly string[]) {
+    super(
+      `Action handler '${key}' is ambiguous for package '${packageId}': it registers none of its own, and `
+      + `${owners.length} plugins register one (${owners.map((o) => `'${o}'`).join(', ')}). Refusing rather than `
+      + 'running one of them. Register the handler from the package that declares the action, or from one plugin.',
+    );
+    this.name = 'ActionHandlerAmbiguityError';
+    this.owners = owners;
+  }
+}
+
+/**
  * [ADR-0150 D4, #31673] What a call of `ObjectQL#executeAction` says about
  * who is calling.
  */
@@ -230,23 +267,32 @@ export class ActionsFacet {
 
   /**
    * [ADR-0150 D4, #31673] The handler a call naming package `packageId` runs
-   * under `key`: that package's own; else, when exactly ONE host-bound
-   * handler is registered under the key — bound by host code or a plugin, not
-   * by a package (`app:<id>`, {@link handlerOwnerPackageId}) — that one: a
-   * declaration's `target` is commonly bound by host code, so it is the
-   * handler the declaration reaches, not a pick; else none. ⛔ Never another
-   * package's handler, and never one of two host-bound handlers: that is the
-   * guess ADR-0150's red lines refuse.
+   * under `key`: that package's own; else, when exactly ONE plugin-registered
+   * handler is held under the key, that one. A declaration's `target` is
+   * commonly bound by platform plugin code, so that handler is the one the
+   * declaration reaches, not a pick. Plugin-registered means a plugin owner:
+   * never a package's (`app:<id>`, {@link handlerOwnerPackageId}), and never
+   * the environment's slot (no owner, or the authored-action resync's
+   * `metadata-service`), whose handlers belong to the environment's own
+   * declarations. Two or more plugin handlers are refused naming every owner
+   * ({@link ActionHandlerAmbiguityError}, 409 `RESOURCE_CONFLICT`), never
+   * reported as absence; none is `undefined` (the caller's "not found").
+   * ⛔ Never another holder's handler, and never a pick between candidates:
+   * that is the guess ADR-0150's red lines refuse.
    */
   static packageScopedHandler(this: Pick<ActionsHost, 'packageActions'>, key: string, packageId: string): ActionHandlerEntry | undefined {
     const own = this.packageActions.get(packageId)?.get(key);
     if (own !== undefined) return own;
-    const hostBound: ActionHandlerEntry[] = [];
-    for (const slot of this.packageActions.values()) {
+    const pluginBound: ActionHandlerEntry[] = [];
+    for (const [coordinate, slot] of this.packageActions) {
+      if (coordinate === ENVIRONMENT_ACTION_COORDINATE) continue;
       const entry = slot.get(key);
-      if (entry !== undefined && handlerOwnerPackageId(entry.package ?? '') === (entry.package ?? '')) hostBound.push(entry);
+      if (entry !== undefined && isPluginHandlerOwner(entry.package)) pluginBound.push(entry);
     }
-    return hostBound.length === 1 ? hostBound[0] : undefined;
+    if (pluginBound.length > 1) {
+      throw new ActionHandlerAmbiguityError(key, packageId, pluginBound.map((entry) => entry.package as string));
+    }
+    return pluginBound[0];
   }
 
   /** The body of `ObjectQL#listRegisteredActions`; the method's docblock there is its contract. */

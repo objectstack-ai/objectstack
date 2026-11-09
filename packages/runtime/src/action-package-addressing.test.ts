@@ -130,6 +130,29 @@ describe('ADR-0150 D3/D4 — a caller that names its package', () => {
     });
 });
 
+describe('ADR-0150 D5 — the handler half of a package caller\'s dispatch', () => {
+    it('two plugin handlers and none of the package\'s own: the refusal surfaces as 409 RESOURCE_CONFLICT, never as "no handler"', async () => {
+        install(A);
+        ship(A);
+        engine.registerAction(OBJECT, 'approve', () => 'one', 'com.acme.plugin-one');
+        engine.registerAction(OBJECT, 'approve', () => 'two', 'com.acme.plugin-two');
+        const declaration = await resolve(A);
+        expect(declaration.packageId).toBe(A);
+        const refusal = await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, declaration.packageId)
+            .then(() => undefined, (err: any) => err);
+        expect(refusal).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+        for (const owner of ['com.acme.plugin-one', 'com.acme.plugin-two']) expect(refusal.message).toContain(owner);
+    });
+
+    it('never dispatches the environment\'s handler for a package holder\'s declaration', async () => {
+        install(A);
+        ship(A);
+        engine.registerAction(OBJECT, 'approve', () => 'environment', 'metadata-service');
+        const declaration = await resolve(A);
+        expect(await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, declaration.packageId)).toEqual({ dispatched: false });
+    });
+});
+
 describe('[#31697 interim] a caller that names no package', () => {
     it('resolves and dispatches exactly as before: no refusal, no package, the last registered handler runs', async () => {
         install(A);

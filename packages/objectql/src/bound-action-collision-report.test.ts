@@ -287,20 +287,41 @@ describe('ObjectQL action handlers keyed (package, objectName, name)', () => {
         await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).rejects.toThrow(/not found/);
     });
 
-    it('a call naming a package with no handler of its own runs the ONE handler under the key — a host-bound target', async () => {
+    it('a call naming a package with no handler of its own runs the ONE plugin-registered handler under the key', async () => {
         const engine = new ObjectQL();
-        engine.registerAction('bc_org', 'rename', () => 'host');
-        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('host');
+        engine.registerAction('bc_org', 'rename', () => 'plugin', 'com.test.plugin');
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('plugin');
     });
 
-    it('never runs another package\'s handler, nor one of two host-bound handlers', async () => {
+    it('never runs another package\'s handler', async () => {
         const engine = new ObjectQL();
         engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
         await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: 'com.test.third' })).rejects.toThrow(/not found/);
-        engine.registerAction('bc_org', 'rename', () => 'host');
-        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: 'com.test.third' })).toBe('host');
-        engine.registerAction('bc_org', 'rename', () => 'plugin', 'com.test.plugin');
-        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: 'com.test.third' })).rejects.toThrow(/not found/);
+    });
+
+    it('never runs the environment\'s handler for another holder\'s declaration — authored resync or owner-less', async () => {
+        // B's declaration resolved, B registered no handler, and the
+        // environment's own same-key action has one: that is not B's code.
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'environment', 'metadata-service');
+        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).rejects.toThrow(/not found/);
+        engine.registerAction('bc_org', 'rename', () => 'owner-less');
+        await expect(engine.executeAction('bc_org', 'rename', {}, { packageId: TWIN })).rejects.toThrow(/not found/);
+        // Control: the no-package call still runs the environment's slot, as before.
+        expect(await engine.executeAction('bc_org', 'rename', {})).toBe('owner-less');
+    });
+
+    it('refuses 409 RESOURCE_CONFLICT naming every owner when two plugins hold the key — never "not found", never a pick', async () => {
+        const engine = new ObjectQL();
+        engine.registerAction('bc_org', 'rename', () => 'one', 'com.test.plugin-one');
+        engine.registerAction('bc_org', 'rename', () => 'two', 'com.test.plugin-two');
+        const refusal = await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER }).then(() => undefined, (err: any) => err);
+        expect(refusal).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409, owners: ['com.test.plugin-one', 'com.test.plugin-two'] });
+        for (const owner of ['com.test.plugin-one', 'com.test.plugin-two', OWNER]) expect(refusal.message).toContain(owner);
+        expect(refusal.message).not.toMatch(/not found/);
+        // A package's own handler still answers for it.
+        engine.registerAction('bc_org', 'rename', () => 'owner', `app:${OWNER}`);
+        expect(await engine.executeAction('bc_org', 'rename', {}, { packageId: OWNER })).toBe('owner');
     });
 
     it('handlers on two objects under one name are two keys for every caller', async () => {
