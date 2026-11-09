@@ -196,7 +196,41 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                 if (!dataset && body.datasetName) {
                     const p = await this.resolveProtocol(environmentId, req);
                     const datasetRequest: GetMetaItemsRequest = { type: 'dataset', previewDrafts };
-                    const items: any = await p.getMetaItems?.(datasetRequest).catch(() => null);
+                    // [#31774] A read that FAILED is not a read that came
+                    // back without the name. The `.catch(() => null)` that
+                    // stood here turned a metadata-store outage into an
+                    // empty list, so the door answered `404 "Dataset … not
+                    // found."`: a dashboard told its user the dataset was
+                    // gone, and the operator read a 404 instead of an
+                    // outage. The AI tool `query_dataset` answers the same
+                    // failed read `503 SERVICE_UNAVAILABLE`, so this door
+                    // does too.
+                    //
+                    // The refusal is THROWN, declared, into this handler's
+                    // own catch, never answered by hand: its declared-5xx arm
+                    // (`declaredServerFaultAnswer`, #11718) is the one this
+                    // door already answers every producer-declared 503 with,
+                    // and its `logError` runs first, so the store's own text
+                    // — withheld from the client like every 5xx's (#5437) —
+                    // reaches the operator on `cause`. `refusal: true` lets
+                    // the sentence below, which this code wrote for the
+                    // caller, through that arm.
+                    //
+                    // Unchanged: a read that succeeds without the name is the
+                    // `404` below, and a protocol with no `getMetaItems` at
+                    // all reads no list and answers that same `404`.
+                    let items: any;
+                    try {
+                        items = await p.getMetaItems?.(datasetRequest);
+                    } catch (readError) {
+                        throw Object.assign(
+                            new Error(
+                                `The dataset "${body.datasetName}" could not be resolved: the dataset read failed. `
+                                + 'This is a server-side fault, not a missing dataset.',
+                            ),
+                            { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true, cause: readError },
+                        );
+                    }
                     const list = Array.isArray(items?.items) ? items.items : (Array.isArray(items) ? items : []);
                     dataset = list.find((d: any) => d?.name === body.datasetName);
                     if (!dataset) {
