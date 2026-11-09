@@ -74,12 +74,44 @@
  * Whether an upgrade is refused for a rename or a type change (epic
  * cloud#3652 Q3) is install-local's verdict, not this command's: a refusal it
  * answers is printed and stops the deploy like any other.
+ *
+ * ## Showing the plan before the install (epic cloud#3652 Q3)
+ *
+ * The plan is printed by the shared printer (`utils/upgrade-plan.ts`), the one
+ * `os package install --dry-run` prints with. A plan with only additions and
+ * declared renames installs with no question asked, so the `d` key in
+ * `os dev` stays one key press. Around it, on a self-hosted runtime target:
+ *
+ *   - `--dry-run` stops after the plan: build, dry run, plan printed, and
+ *     nothing installed. It also says whether the install would stop for a
+ *     confirmation, read with the framework's own verdict function off the
+ *     plan the runtime answered; the token comes only from the install's
+ *     refusal.
+ *   - On a terminal (stdin and stdout both a TTY, so also under the `d` key,
+ *     which hands the terminal to this command while it runs), the Q3
+ *     refusal is followed by a question: yes sends the same install again
+ *     with the finding-set token the refusal carried; anything else deploys
+ *     nothing and exits 1. Never asked off a terminal or under `--json`.
+ *   - `--json` prints ONE document on stdout — the plan, the result and, when
+ *     the runtime refused, the refusal beside it — and every human line goes
+ *     to stderr. A refusal or a failure exits non-zero.
+ *
+ * ⛔ No `--rename` flag (epic ruling D3): a rename is declared in the package,
+ * on the new field's `renamedFrom`, and the refusal says so.
+ *
+ * The ObjectOS Cloud target does not read a plan yet: `--dry-run` and
+ * `--json` are refused there by name before anything is sent, as the
+ * self-hosted confirmations are, because a flag that previews nothing must
+ * never let a deploy through.
  */
 
 import { readFile } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import { Command, Flags } from '@oclif/core';
-import { printError, printHeader, printStep, printSuccess, printWarning, isExitSignal } from '../utils/format.js';
+import { emitJson, printError, printHeader, printStep, printSuccess, printWarning, isExitSignal } from '../utils/format.js';
+import { reserveStdoutForJson } from '../utils/json-stdout.js';
+import { canAskOnTerminal, askYesNo } from '../utils/terminal-confirm.js';
+import { previewSchemaUpgradeStop } from '../utils/upgrade-plan.js';
 import { DEFAULT_CLOUD_URL, resolveCloudCredential } from '../utils/cloud-config.js';
 import { describeEnvironment, resolveInstallTarget } from '../utils/install-target.js';
 import { compileForDeploy } from '../utils/deploy-build.js';
@@ -88,7 +120,7 @@ import { fetchEnvironmentOrigin, waitUntilServed, wakeEnvironment, type ServedVe
 import { activeRuntimeTarget } from '../utils/runtime-target.js';
 import type { RuntimeTarget } from '../utils/cloud-config.js';
 import PackagePublish from './package/publish.js';
-import PackageInstall from './package/install.js';
+import PackageInstall, { type PackageInstallOutcome } from './package/install.js';
 
 /** The artifact the build writes and the publish reads — `os build`'s default output. */
 export const DEPLOY_ARTIFACT = 'dist/objectstack.json';
@@ -98,6 +130,31 @@ export const DEPLOY_POLL_INTERVAL_MS = 3_000;
 
 /** The install confirmations this command passes through to a self-hosted runtime's install. */
 const CONFIRMATION_FLAGS = ['confirm-global-uniques', 'confirm-access-upgrade', 'confirm-upgrade'] as const;
+
+/** The flags only a self-hosted runtime target reads; the ObjectOS Cloud target refuses each by name. */
+const RUNTIME_ONLY_FLAGS = [...CONFIRMATION_FLAGS, 'dry-run', 'json'] as const;
+
+/**
+ * `os deploy --json`'s one document (a self-hosted runtime target).
+ *
+ * `plan` and `environment` are the runtime's dry-run reading, verbatim;
+ * `refusal` is the runtime's error envelope, verbatim, when it refused;
+ * `wouldStop` is the dry run's preview of the Q3 findings the install would
+ * ask to confirm (`null`: the plan could not be read for it); `confirm` is
+ * the command that confirms exactly the refused Q3 findings.
+ */
+export interface DeployDocument {
+  target: 'runtime' | 'cloud';
+  url: string | null;
+  result: 'planned' | 'installed' | 'refused' | 'failed';
+  package: { manifestId: string; version: string; installedVersion: string | null } | null;
+  plan: unknown;
+  environment: unknown;
+  wouldStop: Array<{ kind?: string; describe?: string }> | null;
+  refusal: { status: number; code: string | null; message: string; details: unknown } | null;
+  confirm: string | null;
+  error: string | null;
+}
 
 /** The given confirmations as `os package install` argv: a switch as itself, a token after its flag. */
 function confirmationArgv(flags: { [K in (typeof CONFIRMATION_FLAGS)[number]]?: string | boolean }): string[] {
@@ -120,6 +177,8 @@ export default class Deploy extends Command {
     '$ os deploy --confirm-global-uniques                 # self-hosted: confirm installation-wide uniques',
     '$ os deploy --confirm-access-upgrade <finding-set>   # self-hosted: confirm the findings the runtime printed',
     '$ os deploy --confirm-upgrade <finding-set>          # self-hosted: confirm the schema findings the runtime printed',
+    '$ os deploy --dry-run                                # self-hosted: print the upgrade plan, install nothing',
+    '$ os deploy --json                                   # self-hosted: the plan and the result as one JSON document',
   ];
 
   static override flags = {
@@ -177,10 +236,25 @@ export default class Deploy extends Command {
         + "that is not safe) with the finding-set token the runtime's refusal printed (as `os package install "
         + '--confirm-upgrade`)',
     }),
+    // [epic cloud#3652 Q3, #30887] The plan without the install.
+    'dry-run': Flags.boolean({
+      description:
+        'Self-hosted runtime target: build, print the upgrade plan of the installed version against this build, '
+        + 'say whether the install would stop for a confirmation, and install nothing',
+      default: false,
+    }),
+    json: Flags.boolean({
+      description:
+        'Self-hosted runtime target: print one JSON document on stdout (the plan, the result and any refusal); '
+        + 'progress goes to stderr, and a refusal or a failure exits non-zero',
+      default: false,
+    }),
   };
 
   async run(): Promise<void> {
     const { flags } = await this.parse(Deploy);
+    // `--json`: stdout carries the one document; every human line goes to stderr.
+    if (flags.json) reserveStdoutForJson();
     printHeader('Deploy');
 
     try {
@@ -188,15 +262,21 @@ export default class Deploy extends Command {
       // cloud environment was named.
       const runtime = flags.env ? undefined : await activeRuntimeTarget();
       if (runtime) {
-        await this.deployToRuntime(runtime, confirmationArgv(flags));
+        await this.deployToRuntime(runtime, confirmationArgv(flags), { dryRun: flags['dry-run'], json: flags.json });
         return;
       }
-      for (const flag of CONFIRMATION_FLAGS) {
+      for (const flag of RUNTIME_ONLY_FLAGS) {
         if (flags[flag] === undefined || flags[flag] === false) continue;
-        printError(
-          `\`--${flag}\` confirms a self-hosted runtime's refusal; the deploy target is ObjectOS Cloud. `
-          + 'Drop the flag, or record the runtime with `os environments use-runtime <url> --token <key>`.',
-        );
+        const message = (CONFIRMATION_FLAGS as readonly string[]).includes(flag)
+          ? `\`--${flag}\` confirms a self-hosted runtime's refusal; the deploy target is ObjectOS Cloud. `
+            + 'Drop the flag, or record the runtime with `os environments use-runtime <url> --token <key>`.'
+          : `\`--${flag}\` reads a self-hosted runtime's upgrade plan; the deploy target is ObjectOS Cloud, `
+            + 'whose plan this command does not read yet, so nothing was built or sent. Drop the flag, or record the '
+            + 'runtime with `os environments use-runtime <url> --token <key>`.';
+        printError(message);
+        if (flags.json) {
+          await emitJson(deployDocument({ target: 'cloud', result: 'failed', error: message }));
+        }
         this.exit(1);
         return;
       }
@@ -315,62 +395,162 @@ export default class Deploy extends Command {
     } catch (error) {
       if (isExitSignal(error)) throw error;
       printError((error as Error).message);
+      // Only a self-hosted target reaches here under `--json` (the cloud one refuses the flag first).
+      if (flags.json) await emitJson(deployDocument({ target: 'runtime', result: 'failed', error: (error as Error).message }));
       this.exit(1);
     }
   }
 
   /**
    * The self-hosted half (the header's "A self-hosted runtime target"):
-   * build → dry run (plan printed) → install → the `hotLoaded` answer.
+   * build → dry run (plan printed) → install → the `hotLoaded` answer, with
+   * `--dry-run`, the terminal confirmation and `--json` from the header's
+   * "Showing the plan before the install".
    */
-  private async deployToRuntime(runtime: RuntimeTarget, confirmations: string[]): Promise<void> {
+  private async deployToRuntime(
+    runtime: RuntimeTarget,
+    confirmations: string[],
+    mode: { dryRun: boolean; json: boolean },
+  ): Promise<void> {
+    const doc: DeployDocument = deployDocument({ target: 'runtime', url: runtime.url });
+    // Every way out: the document under `--json`, then the exit code.
+    const finish = async (code: number, update: Partial<DeployDocument>): Promise<void> => {
+      Object.assign(doc, update);
+      if (mode.json) await emitJson(doc);
+      if (code !== 0) this.exit(code);
+    };
+
     printStep(`Deploying to the self-hosted runtime ${runtime.url} (os environments use-runtime)`);
 
     printStep('Building...');
     const artifactPath = resolvePath(process.cwd(), DEPLOY_ARTIFACT);
-    if (compileForDeploy(artifactPath) !== 0) {
-      printError('The build failed — fix the errors above, then run `os deploy` again. Nothing was installed.');
-      this.exit(1);
+    if (compileForDeploy(artifactPath, { stdoutToStderr: mode.json }) !== 0) {
+      const message = 'The build failed — fix the errors above, then run `os deploy` again. Nothing was installed.';
+      printError(message);
+      await finish(1, { result: 'failed', error: message });
       return;
     }
 
-    const install = async (extra: string[]) => {
+    // The embedded install prints its own answers and refusals, and ends a
+    // refused call with its own exit; that exit is caught here so this command
+    // decides what follows (the question, the document) and exits once.
+    const install = async (extra: string[]): Promise<{ outcome: PackageInstallOutcome | undefined; stopped: boolean }> => {
       const command = new PackageInstall(
         [artifactPath, '--url', runtime.url, '--token', runtime.token, ...extra],
         this.config,
       );
       command.retryCommand = 'os deploy';
       command.embedded = true;
-      await command.run();
-      return command.outcome;
+      try {
+        await command.run();
+        return { outcome: command.outcome, stopped: false };
+      } catch (error) {
+        if (!isExitSignal(error)) throw error;
+        return { outcome: command.outcome, stopped: true };
+      }
     };
+    const refusalOf = (outcome: PackageInstallOutcome | undefined): Partial<DeployDocument> =>
+      outcome?.kind === 'refused'
+        ? {
+          result: 'refused',
+          refusal: { status: outcome.status, code: outcome.code, message: outcome.message, details: outcome.details },
+          confirm: outcome.schemaUpgrade ? `os deploy --confirm-upgrade ${outcome.schemaUpgrade.findingSet}` : null,
+        }
+        : { result: 'failed' };
 
     console.log('');
     printStep(`Asking ${runtime.url} for the upgrade plan (dry run — nothing is installed)...`);
-    const plan = await install(['--dry-run']);
-    if (plan?.kind !== 'dry-run') {
-      printError(`${runtime.url} did not answer the dry run with a plan, so nothing more was sent. Upgrade the runtime, then run \`os deploy\` again.`);
-      this.exit(1);
+    const dry = await install(['--dry-run']);
+    const plan = dry.outcome;
+    if (dry.stopped || plan?.kind !== 'dry-run') {
+      // A refusal is printed by the install above; anything else is said here.
+      const message = dry.stopped
+        ? `${runtime.url} did not answer the dry run with a plan (see above), so nothing more was sent.`
+        : `${runtime.url} did not answer the dry run with a plan, so nothing more was sent. Upgrade the runtime, then run \`os deploy\` again.`;
+      if (!dry.stopped) printError(message);
+      await finish(1, { ...refusalOf(plan), error: message });
+      return;
+    }
+    const wouldStop = previewSchemaUpgradeStop(plan.manifestId, plan) ?? null;
+    Object.assign(doc, {
+      package: { manifestId: plan.manifestId, version: plan.version, installedVersion: plan.installedVersion },
+      plan: plan.plan,
+      environment: plan.environment,
+      wouldStop,
+    });
+
+    if (mode.dryRun) {
+      if (wouldStop && wouldStop.length > 0) {
+        printWarning(`Deploying this build would stop for your confirmation — ${wouldStop.length} finding(s):`);
+        for (const finding of wouldStop) console.log(`    • ${finding.describe ?? JSON.stringify(finding)}`);
+        console.log("  If a field was renamed, declare its old key in the new field's `renamedFrom` and rebuild; or run "
+          + '`os deploy` and confirm the findings it lists.');
+      } else if (wouldStop) {
+        console.log('  Nothing in this plan asks for a confirmation: `os deploy` installs it as it is.');
+      }
+      printSuccess(`Dry run: nothing was installed into ${runtime.url}. Run \`os deploy\` without --dry-run to install it.`);
+      await finish(0, { result: 'planned' });
       return;
     }
 
     printStep(`Installing ${plan.manifestId} ${plan.version} into ${runtime.url}...`);
-    const outcome = await install(confirmations);
-    if (outcome?.kind !== 'installed') {
-      printError(`${runtime.url} did not answer the install as a managed package install, so this cannot say ${plan.manifestId} is live (see above).`);
-      this.exit(1);
+    let run = await install(confirmations);
+    // The Q3 stop, on a terminal: ask, and on yes send the same install with
+    // the refusal's own token — the one that confirms exactly what it listed.
+    if (run.stopped && run.outcome?.kind === 'refused' && run.outcome.schemaUpgrade && !mode.json && canAskOnTerminal()) {
+      const token = run.outcome.schemaUpgrade.findingSet;
+      console.log('');
+      if (!(await askYesNo('  Deploy anyway, accepting each finding as listed? [y/N] '))) {
+        printError(`Nothing was deployed to ${runtime.url}.`);
+        this.exit(1);
+        return;
+      }
+      printStep(`Installing ${plan.manifestId} ${plan.version} into ${runtime.url}, confirming those findings...`);
+      run = await install([...withoutFlag(confirmations, 'confirm-upgrade'), '--confirm-upgrade', token]);
+    }
+    const outcome = run.outcome;
+    if (run.stopped || outcome?.kind !== 'installed') {
+      const message = `${runtime.url} did not answer the install as a managed package install, so this cannot say ${plan.manifestId} is live (see above).`;
+      if (!run.stopped) printError(message);
+      await finish(1, { ...refusalOf(outcome), error: run.stopped ? `${runtime.url} did not install ${plan.manifestId} (see above).` : message });
       return;
     }
     if (!outcome.hotLoaded) {
-      printError(
-        `${runtime.url} recorded ${outcome.manifestId} ${outcome.version}, but its running kernel could not load it, so `
-        + 'it is not live: it loads when the runtime restarts. Fix the cause above, then run `os deploy` again.',
-      );
-      this.exit(1);
+      const message = `${runtime.url} recorded ${outcome.manifestId} ${outcome.version}, but its running kernel could not load it, so `
+        + 'it is not live: it loads when the runtime restarts. Fix the cause above, then run `os deploy` again.';
+      printError(message);
+      await finish(1, { result: 'failed', error: message });
       return;
     }
     printSuccess(`Live: ${runtime.url} now serves ${outcome.manifestId} ${outcome.version}.`);
+    await finish(0, { result: 'installed' });
   }
+}
+
+/** A {@link DeployDocument} with every key present: what is not known is `null`. */
+function deployDocument(fields: Partial<DeployDocument> & Pick<DeployDocument, 'target'>): DeployDocument {
+  return {
+    url: null,
+    result: 'failed',
+    package: null,
+    plan: null,
+    environment: null,
+    wouldStop: null,
+    refusal: null,
+    confirm: null,
+    error: null,
+    ...fields,
+  };
+}
+
+/** `argv` without `--flag` and the value after it. */
+function withoutFlag(argv: string[], flag: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === `--${flag}`) { i++; continue; }
+    out.push(argv[i]);
+  }
+  return out;
 }
 
 /** Print the wait's verdict; return the exit code it means. */
