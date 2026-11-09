@@ -44,6 +44,9 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
 import { collectJobsWithoutBody, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+// The source under test reaches `@objectstack/metadata` by dynamic import
+// (`app-plugin.ts`); paid here, at collection, not inside a case's clock.
+import '@objectstack/metadata';
 import { withScheduledWorkOn } from './scheduled-work.test-support.js';
 
 withScheduledWorkOn();
