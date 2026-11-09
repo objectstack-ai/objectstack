@@ -50,6 +50,7 @@
     "AudienceBindingSuggestion": "src/contracts/security-service.ts#AudienceBindingSuggestion (type)",
     "AudienceBindingSuggestionFilter": "src/contracts/security-service.ts#AudienceBindingSuggestionFilter (interface)",
     "AudienceBindingSuggestionSync": "src/contracts/security-service.ts#AudienceBindingSuggestionSync (interface)",
+    "AuthRequestTransport": "src/contracts/auth-service.ts#AuthRequestTransport (interface)",
     "AuthResult": "src/contracts/auth-service.ts#AuthResult (interface)",
     "AuthSession": "src/contracts/auth-service.ts#AuthSession (interface)",
     "AuthSessionApi": "src/contracts/auth-service.ts#AuthSessionApi (interface)",

@@ -19,6 +19,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// Paid at collection, not inside a clocked case: the REST server's routes load it lazily.
+import '@objectstack/objectql';
 import { currentCredentialUseClient, hashApiKey } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 
