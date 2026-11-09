@@ -2350,8 +2350,18 @@ export async function resolveUserAuthzGrants(
   // [ADR-0151 D3] An AI service account carries no system permission, from
   // any set it holds: an action gated by one is closed to it until a decision
   // widens the agent ceiling. The sets themselves stay on `permissions` and are
-  // clamped where they are evaluated.
-  if (agentAccount) grants.systemPermissions = [];
+  // clamped where they are evaluated — except the administrative ones. Standing
+  // is still read by NAME in places (the approvals override arms and the
+  // `admin_rescue` slate, the access explainer's tenant-admin read), and the
+  // clamp clears bits, not names, so an account never carries
+  // `admin_full_access` or an organization-administrator set at all: an
+  // administrative grant is a person's to hold.
+  if (agentAccount) {
+    grants.systemPermissions = [];
+    grants.permissions = grants.permissions.filter(
+      (n) => n !== ADMIN_FULL_ACCESS && !ORGANIZATION_ADMIN_GRANTS.includes(n),
+    );
+  }
 
   // 6c. Project the derived platform_admin built-in role (leads the list).
   if (hasPlatformAdminGrant && !grants.positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)) {

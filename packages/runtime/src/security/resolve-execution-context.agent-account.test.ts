@@ -17,7 +17,8 @@
  *   `u_mia`, a plain member of org_alpha. It holds `crm_lead_reader` and
  *   `crm_lead_super` in org_alpha, and — as no registration door would ever
  *   write, but a store can hold — `admin_full_access` owned by the Default
- *   Organization: the row that anchors platform standing for a person.
+ *   Organization: the row that anchors platform standing for a person. The
+ *   account never carries that name, so it is never held.
  * - `crm_lead_super` breaches the agent ceiling: View All, Modify All,
  *   transfer and the recycle bin on `crm_lead`, a system permission and an
  *   admin scope. It is the set "assigned, then edited": the refusal at
@@ -248,7 +249,10 @@ describe('[ADR-0151 D3] an AI service account\'s key admits the account itself',
       expect(lead?.[bit], bit).not.toBe(true);
     }
     const held = await r.sets(ctx);
-    expect(held.map((s) => s.name)).toEqual(expect.arrayContaining(['crm_lead_super', 'admin_full_access']));
+    // The breaching set is held (and clamped); the administrative set the
+    // store also holds for it is never held at all: standing is read by name too.
+    expect(held.map((s) => s.name)).toContain('crm_lead_super');
+    expect(held.map((s) => s.name)).not.toContain('admin_full_access');
     for (const s of held) {
       expect(s.systemPermissions ?? [], s.name).toEqual([]);
       expect((s as any).adminScope, s.name).toBeUndefined();

@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
+import { ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec/identity';
 import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { hasPlatformAdminStanding, isAgentAccountRow, resolveAuthzContext, resolveUserAuthzGrants } from './resolve-authz-context.js';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
@@ -84,8 +85,11 @@ describe('[ADR-0151 D3] resolveUserAuthzGrants — an AI service account', () =>
     expect(grants.positions).not.toContain('everyone');
     expect(grants.positions).not.toContain('platform_admin');
     expect(grants.permissions).not.toContain('everyone_reader');
-    // Its explicit grants stay named: they are clamped where they are evaluated.
-    expect(grants.permissions).toEqual(expect.arrayContaining(['ops_tools', 'admin_full_access']));
+    // Its ordinary grants stay named (they are clamped where they are
+    // evaluated); an administrative set never does, since standing is also
+    // read by name.
+    expect(grants.permissions).toContain('ops_tools');
+    expect(grants.permissions).not.toContain('admin_full_access');
     expect(grants.systemPermissions).toEqual([]);
     expect(grants.posture).toBe('MEMBER');
   });
@@ -107,10 +111,26 @@ describe('[ADR-0151 D3] resolveUserAuthzGrants — an AI service account', () =>
     t.sys_permission_set.push({ id: 'ps_org_admin', name: 'organization_admin' });
     const account = await resolveUserAuthzGrants(makeQl(t), 'u_bot', { tenantId: 'org_a', nowMs: NOW });
     const person = await resolveUserAuthzGrants(makeQl(t), 'u_mia', { tenantId: 'org_a', nowMs: NOW });
-    expect(account.permissions).toContain('organization_admin');
+    expect(account.permissions).not.toContain('organization_admin');
+    expect(person.permissions).toContain('organization_admin');
     expect(account.posture).toBe('MEMBER');
     expect(person.posture).not.toBe('MEMBER');
     expect(person.posture).not.toBe('PLATFORM_ADMIN');
+  });
+
+  it('never carries an administrative set by name, on any spelling of the organization-administrator rung, while a person keeps it', async () => {
+    for (const name of ORGANIZATION_ADMIN_GRANTS) {
+      const t = tables();
+      t.sys_user_permission_set = [
+        { user_id: 'u_bot', permission_set: name, organization_id: 'org_a' },
+        { user_id: 'u_mia', permission_set: name, organization_id: 'org_a' },
+      ];
+      t.sys_permission_set.push({ id: `ps_${name}`, name });
+      const account = await resolveUserAuthzGrants(makeQl(t), 'u_bot', { tenantId: 'org_a', nowMs: NOW });
+      const person = await resolveUserAuthzGrants(makeQl(t), 'u_mia', { tenantId: 'org_a', nowMs: NOW });
+      expect(account.permissions, name).not.toContain(name);
+      expect(person.permissions, name).toContain(name);
+    }
   });
 
   it('a seeded caller cannot skip the kind: the row is read whatever is seeded', async () => {
