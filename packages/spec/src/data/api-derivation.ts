@@ -138,7 +138,11 @@ interface DerivationRule {
  *   retired by #2377/ADR-0049 with no runtime consumer); the bin shipped with
  *   #30237, so they are live derived verbs. Who may restore or purge is the
  *   security layer's question (`allowRestoreOwnDeleted`, `manageRecycleBin`);
- *   this table only says whether the object's API exposes the verb.
+ *   this table only says whether the object's API exposes the verb. A platform
+ *   object (`sys_`, `cloud_`, `ai_`) has no bin (ADR-0148 D5): its bin doors
+ *   refuse whatever `apiMethods` says, and the effective `apiOperations`
+ *   annotation withholds the two verbs there. This table cannot see that, since
+ *   it reads `enable` and never the object's name.
  */
 export const API_METHOD_DERIVATION: Record<LegacyApiMethod, DerivationRule> = {
   upsert: { all: ['create', 'update'] },
