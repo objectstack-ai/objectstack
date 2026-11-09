@@ -390,7 +390,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
           },
           total_amount: {
             label: '总金额',
-            description: '所有商机金额之和，涵盖所有阶段：在途、赢单与输单都计入。它是漏斗金额，不是已确认收入；赢单收入是限定在赢单阶段的这一合计。',
+            description: '所有商机金额之和，涵盖所有阶段：在途、赢单与输单都计入，因此它既不是在途漏斗金额，也不是已确认收入。在途漏斗是限定在三个在途阶段的这一合计；赢单收入是限定在赢单阶段的这一合计。',
           },
           avg_amount: {
             label: '平均成交额',

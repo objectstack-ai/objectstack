@@ -80,9 +80,10 @@ export const OpportunityDataset = defineDataset({
       field: 'amount',
       format: '0,0',
       description:
-        'The sum of the Amount of every opportunity, at every stage: open, won and lost alike. It is pipeline '
-        + 'value, not booked revenue; won revenue is this total narrowed to the Closed Won stage.',
-      synonyms: ['pipeline value', 'deal value', 'opportunity amount', '商机金额', '金额合计', '漏斗金额'],
+        'The sum of the Amount of every opportunity at every stage, open, won and lost alike, so it is neither '
+        + 'the open pipeline nor booked revenue. Open pipeline is this total narrowed to the three open stages; '
+        + 'won revenue is it narrowed to Closed Won.',
+      synonyms: ['deal value', 'opportunity amount', '商机金额', '金额合计'],
     },
     {
       name: 'avg_amount',
@@ -93,7 +94,7 @@ export const OpportunityDataset = defineDataset({
       description:
         'The average Amount of one opportunity, at every stage: open, won and lost alike. '
         + 'Opportunities with no amount entered are left out of the average.',
-      synonyms: ['average deal value', 'average opportunity amount', '平均成交额', '平均商机金额'],
+      synonyms: ['average deal value', 'average opportunity amount', '平均商机金额'],
     },
   ],
 });
