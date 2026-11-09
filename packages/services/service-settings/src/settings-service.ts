@@ -19,6 +19,11 @@ import {
   firstMapShapeMiss,
   mapMissSentence,
 } from './map-shape.js';
+import type { IPubSub } from '@objectstack/spec/contracts';
+import {
+  SETTINGS_CHANGE_CLUSTER_CHANNEL,
+  type ClusterSettingsChangePayload,
+} from './settings-cluster-channel.js';
 import {
   type CryptoAdapter,
   NoopCryptoAdapter,
@@ -1017,6 +1022,12 @@ export class SettingsService {
     ns?: string;
     handler: SettingsChangeHandler;
   }>();
+  /** The cluster transport, when a bridge attached one (the settings lane). */
+  private clusterPubSub?: IPubSub;
+  /** This node's cluster id: stamps `originNode` for loopback suppression. */
+  private clusterNodeId?: string;
+  /** Disposer for the cluster subscription, when attached. */
+  private clusterUnsubscribe?: () => void;
 
   constructor(opts: SettingsServiceOptions = {}) {
     this.engine = opts.engine;
@@ -1078,6 +1089,11 @@ export class SettingsService {
     // provider settings) can re-fetch with real DB-backed values rather
     // than only the in-memory defaults that were visible at
     // `kernel:ready` ordering before the engine was wired.
+    this.emitEveryNamespace();
+  }
+
+  /** One local `key: '*'` change per registered namespace: every subscriber re-reads. */
+  private emitEveryNamespace(): void {
     for (const ns of this.registry.keys()) {
       this.emitChange({
         namespace: ns,
@@ -1326,6 +1342,119 @@ export class SettingsService {
       } catch {
         // Swallow — never break the writer because a listener misbehaves.
       }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Cluster lane: settings changes reach every replica
+  // ---------------------------------------------------------------------
+
+  /**
+   * Attach a cluster pub/sub transport so this replica's settings writes fan
+   * out on {@link SETTINGS_CHANGE_CLUSTER_CHANNEL} and a peer's writes reach
+   * this replica's `settings:changed` subscribers. Called by
+   * `MetadataClusterBridgePlugin` in `@objectstack/service-cluster` (its fifth
+   * lane) once per boot at `kernel:ready`, and only where the deployment
+   * declares several replicas over the Redis cluster driver; a single node
+   * never attaches, so it emits exactly what it emitted before. Only `IPubSub`
+   * crosses this seam: this package takes no dependency on the cluster
+   * service. Idempotent on the `(pubsub, nodeId)` pair.
+   *
+   * Receipt re-emits, it never re-publishes: a peer's change is announced to
+   * the LOCAL subscribers only, so no replica echoes what it received and the
+   * bus carries one message per write. The payload is an address; every
+   * subscriber re-reads the shared store, which holds the value.
+   *
+   * @returns a disposer that detaches the lane.
+   */
+  attachSettingsChangePubSub(pubsub: IPubSub, nodeId: string): () => void {
+    if (this.clusterPubSub === pubsub && this.clusterNodeId === nodeId) {
+      return () => this.detachSettingsChangePubSub();
+    }
+    this.detachSettingsChangePubSub();
+    this.clusterPubSub = pubsub;
+    this.clusterNodeId = nodeId;
+    this.clusterUnsubscribe = pubsub.subscribe<ClusterSettingsChangePayload>(
+      SETTINGS_CHANGE_CLUSTER_CHANNEL,
+      (msg) => {
+        const p = msg.payload;
+        // Loopback guard: this node's own subscribers heard the write at the
+        // door that persisted it.
+        if (p?.originNode && p.originNode === this.clusterNodeId) return;
+        if (typeof p?.namespace !== 'string' || p.namespace.length === 0) return;
+        if (typeof p.key !== 'string' || p.key.length === 0) return;
+        if (p.action !== 'set' && p.action !== 'reset') return;
+        if (typeof p.scope !== 'string') return;
+        this.emitChange({
+          namespace: p.namespace,
+          key: p.key,
+          scope: p.scope,
+          action: p.action,
+          at: typeof p.at === 'string' ? p.at : new Date().toISOString(),
+        });
+      },
+    );
+    return () => this.detachSettingsChangePubSub();
+  }
+
+  /** Tear down the cluster wiring. Safe to call multiple times. */
+  detachSettingsChangePubSub(): void {
+    if (this.clusterUnsubscribe) {
+      try {
+        this.clusterUnsubscribe();
+      } catch {
+        /* idempotent */
+      }
+      this.clusterUnsubscribe = undefined;
+    }
+    this.clusterPubSub = undefined;
+    this.clusterNodeId = undefined;
+  }
+
+  /**
+   * The `cluster.resync` answer for the settings lane: the cluster driver's
+   * connection came back after an outage, during which any change a peer
+   * published was lost (the bus is at-most-once). Which namespaces changed is
+   * what the lost signals carried, so every registered namespace is announced
+   * locally (`key: '*'`, the shape the engine bind uses) and every subscriber
+   * re-reads the shared store. Local only, never published. A no-op until a
+   * transport is attached.
+   */
+  async resyncSettingsChangePubSub(): Promise<void> {
+    if (!this.clusterPubSub) return;
+    this.emitEveryNamespace();
+  }
+
+  /**
+   * The cluster half of a write: publish the change's ADDRESS to peers.
+   * Best-effort and fire-and-forget: a publish failure never fails the write
+   * it announces (the row is persisted and this replica's subscribers already
+   * heard it). No-op until a bridge attaches a transport.
+   */
+  private publishSettingsChange(event: SettingsChangeEvent): void {
+    const pubsub = this.clusterPubSub;
+    if (!pubsub) return;
+    // Spelled field by field so nothing but the address can ride along.
+    const payload: ClusterSettingsChangePayload = {
+      originNode: this.clusterNodeId,
+      namespace: event.namespace,
+      key: event.key,
+      scope: event.scope,
+      action: event.action,
+      at: event.at,
+    };
+    const warn = (err: unknown) =>
+      this.logger?.warn?.(
+        `settings: publishing the change to ${event.namespace}.${event.key} to peer replicas failed (${String(
+          (err as { message?: unknown } | undefined)?.message ?? err,
+        )}); peers pick it up on their next reload or restart`,
+      );
+    try {
+      void pubsub
+        .publish(SETTINGS_CHANGE_CLUSTER_CHANNEL, payload, { partitionKey: `settings:${event.namespace}` })
+        .catch(warn);
+    } catch (err) {
+      warn(err);
     }
   }
 
@@ -3141,13 +3270,15 @@ export class SettingsService {
         }
       }
 
-      this.emitChange({
+      const change: SettingsChangeEvent = {
         namespace,
         key,
         scope,
         action: isNull ? 'reset' : 'set',
         at: new Date().toISOString(),
-      });
+      };
+      this.emitChange(change);
+      this.publishSettingsChange(change);
     }
 
     // Re-resolve so callers see the post-write effective values.
