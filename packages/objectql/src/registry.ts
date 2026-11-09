@@ -598,7 +598,8 @@ const NO_PACKAGE_REFERRER: PicklistReferrer = () => [null];
 
 /** Are two package-scoped holders the same one? */
 function sameHolder(a: PackageScopedHolder, b: PackageScopedHolder): boolean {
-  return a.kind === 'environment' ? b.kind === 'environment' : b.kind === 'package' && a.packageId === b.packageId;
+  if (a.kind === 'package') return b.kind === 'package' && a.packageId === b.packageId;
+  return a.kind === b.kind;
 }
 
 /** The `picklist` a body's field declares (name-keyed or array-spelled), when it declares one. */
@@ -9897,7 +9898,10 @@ export class SchemaRegistry {
     }
     const pendingHolders = (type: string, name: string): ReadonlySet<string> =>
       (type === 'picklist' ? pendingLists.get(name) : undefined) ?? new Set();
-    return {
+    // A residual owner's declared dependencies (ADR-0130 D4) are read by the
+    // one closure walk through the registry it is handed — this view too.
+    const view: PackageScopedRegistry & Pick<SchemaRegistry, 'residualOwnerDependenciesOf'> = {
+      residualOwnerDependenciesOf: (id) => this.residualOwnerDependenciesOf(id),
       getPackage: (id) => pending.get(id) ?? this.getPackage(id),
       getAllPackages: () => [
         ...this.getAllPackages().filter((row) => !pending.has(artifactPackageId(row.manifest) ?? '')),
@@ -9912,6 +9916,7 @@ export class SchemaRegistry {
           : this.getPackageScopedItem<T>(type, name, packageId, member),
       getEnvironmentScopedItem: (type, name, member) => this.getEnvironmentScopedItem(type, name, member),
     };
+    return view;
   }
 
   /**

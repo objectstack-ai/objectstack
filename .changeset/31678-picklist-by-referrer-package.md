@@ -13,7 +13,7 @@ Metadata-protocol: none
 **BREAKING** for a field whose `picklist` names a list its own package cannot reach (`@objectstack/objectql`). A field's `picklist` now resolves from the package that declares the field: that package's own list, else the one package in its declared dependency closure (`manifest.dependencies`, plus the platform's `sys` packages) that holds the name, else nothing. Two kinds of reference that used to be served now are not:
 
 - a field of a package whose list only an environment-authored item holds (one created in this environment, bound to no package);
-- a field of a package whose list another package holds, when the field's package does not declare a dependency on it.
+- a field of a package whose list another package holds, when the field's package does not declare a dependency on it. Two packages shipped in one artifact are no exception: a sibling's list needs a declared dependency too.
 
 Before, either field was served that list's options. After, it is served with no options and its values are refused, and the boot names each one in a warning instead of failing. A package installed after the boot that carries such a reference is refused at install, naming every holder. The fix is one line: add the package that holds the list to the field's package `manifest.dependencies`, or declare the list in the field's own package.
 

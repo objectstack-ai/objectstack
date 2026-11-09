@@ -222,7 +222,7 @@ describe('ADR-0130 D4 — the manifest service registers the residual\'s objects
   // is outside its closure, and its list is refused.
   it('a residual object whose field names a picklist a BODY declares is served with that list', async () => {
     const { kernel } = await boot(registering('app', [
-      residualStack(noteObj(statusField), { dependencies: { [SERVICE_ID]: '^2.4.0' } }, { picklists: [statusList()] }),
+      residualStack(noteObj(statusField), { manifest: { ...app, id: RELEASE_ID, dependencies: { [SERVICE_ID]: '^2.4.0' } } }, { picklists: [statusList()] }),
     ]));
     const ql = engineOf(kernel);
     expect(ql.registry.getObjectOwner('acme_note')?.packageId).toBe(RELEASE_ID);
@@ -739,5 +739,23 @@ describe('[ADR-0130 D4, epic #31527 R2] the residual owner\'s declared dependenc
     expect(ql.registry.getPackage(RELEASE_ID)).toBeUndefined();
     expect(acmePackageIds(ql)).not.toContain(RELEASE_ID);
     expect(packageResolutionClosure(ql.registry, RELEASE_ID).has(SERVICE_ID)).toBe(true);
+  });
+
+  // [ADR-0150 D3] The install judge reads the closure through a view that
+  // overlays the pending artifact's manifests; that view must hand the walk the
+  // registered residual owner's dependencies too, or a package that reaches a
+  // list only THROUGH the residual owner is refused at install.
+  it('after start(), a package depending on the residual owner reaches the list its dependency holds', async () => {
+    const stack = residualStack(noteObj(), {}, { picklists: [statusList()] });
+    (stack as { manifest: Record<string, unknown> }).manifest.dependencies = { [SERVICE_ID]: '^2.0.0' };
+    const { kernel } = await boot(registering('test.residual-deps', [stack]));
+    const late = payload({
+      manifest: { id: 'com.example.late', name: 'late', namespace: 'late', version: '1.0.0', type: 'app', dependencies: { [RELEASE_ID]: '^1.0.0' } },
+      objects: [{ name: 'late_ticket', label: 'Ticket', sharingModel: 'private', fields: statusField }],
+    });
+    await (kernel.getService('manifest') as ManifestService).register(late);
+    const ql = engineOf(kernel);
+    expect(ql.registry.getObjectOwner('late_ticket')?.packageId).toBe('com.example.late');
+    expect(ql.registry.resolvePicklistOptions('acme_status', 'com.example.late')?.map((o) => o.value)).toEqual(['open']);
   });
 });
