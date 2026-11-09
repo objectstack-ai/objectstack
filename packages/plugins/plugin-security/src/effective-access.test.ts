@@ -251,3 +251,34 @@ describe('[ADR-0090 D6/D12] refusals: an unknown user is indistinguishable from 
     expect(await refusalOf(describeAs(host(ql, baseline), '', ADMIN))).toEqual(forbidden);
   });
 });
+
+describe('[ADR-0151 D3] an AI service account\'s effective access: its own grants, the agent floor as its default', () => {
+  it('lists its direct set and the restricted set as `default` — never the everyone anchor\'s sets or the member baseline', async () => {
+    const { ql, baseline } = defaultsDeployment({
+      sys_user: [
+        { id: 'u_bot', email: 'bot@agents.invalid', principal_kind: 'agent', accountable_user_id: 'u_member' },
+        { id: 'u_admin', email: 'admin@example.test' },
+      ],
+      sys_member: [
+        { user_id: 'u_bot', organization_id: ORG, role: 'member' },
+        { user_id: 'u_admin', organization_id: ORG, role: 'member' },
+      ],
+      sys_user_position: [],
+      sys_user_permission_set: [{ user_id: 'u_bot', permission_set: 'forecasting', organization_id: ORG }],
+    });
+    const answer = await describeAs(host(ql, baseline), 'u_bot', ADMIN);
+    expect(answer.positions).not.toContain('everyone');
+    expect(originsOf(answer)).toEqual({
+      forecasting: [{ kind: 'direct' }],
+      mcp_agent_restricted: [{ kind: 'default' }],
+    });
+  });
+
+  it('CONTROL: a person in the same deployment keeps the everyone anchor and the member baseline', async () => {
+    const { ql, baseline } = defaultsDeployment();
+    const answer = await describeAs(host(ql, baseline), 'u_member', ADMIN);
+    expect(answer.positions).toContain('everyone');
+    expect(originsOf(answer)).toMatchObject({ member_default: expect.arrayContaining([{ kind: 'default' }]) });
+    expect(Object.keys(originsOf(answer))).not.toContain('mcp_agent_restricted');
+  });
+});
