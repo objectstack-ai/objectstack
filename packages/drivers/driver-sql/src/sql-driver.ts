@@ -175,7 +175,8 @@ import {
 // `previewTimeConvergence`): the read-only plan of what the deferred schema sync would do.
 // [#25521 cut 19] And the declared column DEFAULT emission (`nowColumnDefault`, `applyDeclaredColumnDefault`):
 // what a field's `defaultValue` becomes in the DDL of a fresh or rebuilt column.
-import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
+import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyMigrationEntriesKeepingDeferral, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
+import type { ConcurrentIndexDeferral } from './pg-concurrent-index.js';
 // [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
 // `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
 // and `resyncSequenceToDataMax`); the methods of the same names below hand each body the members it reads
@@ -1365,22 +1366,27 @@ export class SqlDriver implements IDataDriver {
   private flushingDeferredDdl = false;
 
   /**
-   * #31901: the PostgreSQL concurrent index builds' shared state for this
-   * driver instance.
+   * #31901: the PostgreSQL concurrent index builds' one-wait window, shared by
+   * the builds of this driver instance (`ConcurrentIndexDeferral` holds the
+   * full semantics).
    *
-   * `deferredBy` is set by the first build whose lock wait times out. From then
-   * on every remaining concurrent build is deferred to the next sync with one
-   * log line each, and none of them waits again: `CREATE INDEX CONCURRENTLY`
-   * waits for every older transaction in the whole database, so one long read
-   * would otherwise hold the boot for the full bound once per missing index.
+   * The first build whose lock wait times out opens the window for one bound.
+   * While it is open, every other concurrent build is deferred to the next sync
+   * with one log line each and does not wait: `CREATE INDEX CONCURRENTLY` waits
+   * for every older transaction in the whole database, so one long read would
+   * otherwise hold the boot for the full bound once per missing index. The
+   * window closes itself when the bound has passed, so the process waits at
+   * most once per bound; {@link flushDeferredSchemaDdl} and
+   * {@link applyMigrationEntries} close it at entry.
    *
-   * `lockWaitMs` is the bound each build arms as `lock_timeout`. It is the
-   * driver's DDL lock-wait bound (`DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS`) and
-   * is not configuration: it is a field only so a test can wait seconds, not
-   * minutes.
+   * `lockWaitMs` is the bound each build arms as `lock_timeout`, and the
+   * window's length. It is the driver's DDL lock-wait bound
+   * (`DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS`) and is not configuration: it is a
+   * field only so a test can wait seconds, not minutes.
    */
-  protected readonly concurrentIndexState: { deferredBy: string | null; lockWaitMs: number } = {
+  protected readonly concurrentIndexState: ConcurrentIndexDeferral = {
     deferredBy: null,
+    deferredUntil: 0,
     lockWaitMs: DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS * 1000,
   };
 
@@ -5577,7 +5583,10 @@ export class SqlDriver implements IDataDriver {
     const readLogger = () => this.logger;
     const readSchemaMode = () => this.schemaMode;
     const host: ThisParameterType<typeof reconcileAndWarnDrift> = {
-      applyMigrationEntries: (...a) => this.applyMigrationEntries(...a),
+      // #31901: the boot's own reconcile, not an operator's run, so it goes in
+      // past the public method's window reset: resetting there would let every
+      // object's reconcile wait the full bound again.
+      applyMigrationEntries: (...a) => this.applyMigrationEntriesKeepingDeferral(...a),
       get autoMigrate() { return readAutoMigrate(); },
       detectTableDrift: (...a) => this.detectTableDrift(...a),
       get driftWarned() { return readDriftWarned(); },
@@ -5605,10 +5614,38 @@ export class SqlDriver implements IDataDriver {
     opts: { allowDestructive?: boolean } = {},
   ): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
     // [#25521 cut 10] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    // #31901: it closes the concurrent index builds' deferral window at entry.
     const readDialectName = () => this.dialectName;
     const readIsSqlite = () => this.isSqlite;
     const readLogger = () => this.logger;
+    const concurrentIndexState = this.concurrentIndexState;
     const host: ThisParameterType<typeof applyMigrationEntries> = {
+      applyDriftOpInPlace: (...a) => this.applyDriftOpInPlace(...a),
+      applyIndexDriftOp: (...a) => this.applyIndexDriftOp(...a),
+      assertSchemaMutable: (...a) => this.assertSchemaMutable(...a),
+      get concurrentIndexState() { return concurrentIndexState; },
+      get dialectName() { return readDialectName(); },
+      get isSqlite() { return readIsSqlite(); },
+      get logger() { return readLogger(); },
+      rebuildSqliteTablePatched: (...a) => this.rebuildSqliteTablePatched(...a),
+    };
+    return applyMigrationEntries.call(host, entries, opts);
+  }
+
+  /**
+   * {@link applyMigrationEntries} without its reset of the concurrent index
+   * builds' deferral window (#31901), for the boot's own drift reconcile
+   * ({@link reconcileAndWarnDrift}), which runs once per object inside one sync.
+   */
+  private applyMigrationEntriesKeepingDeferral(
+    entries: ManagedDriftEntry[],
+    opts: { allowDestructive?: boolean } = {},
+  ): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
+    // The body is in `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
+    const readDialectName = () => this.dialectName;
+    const readIsSqlite = () => this.isSqlite;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof applyMigrationEntriesKeepingDeferral> = {
       applyDriftOpInPlace: (...a) => this.applyDriftOpInPlace(...a),
       applyIndexDriftOp: (...a) => this.applyIndexDriftOp(...a),
       assertSchemaMutable: (...a) => this.assertSchemaMutable(...a),
@@ -5617,7 +5654,7 @@ export class SqlDriver implements IDataDriver {
       get logger() { return readLogger(); },
       rebuildSqliteTablePatched: (...a) => this.rebuildSqliteTablePatched(...a),
     };
-    return applyMigrationEntries.call(host, entries, opts);
+    return applyMigrationEntriesKeepingDeferral.call(host, entries, opts);
   }
 
   /**
@@ -9394,6 +9431,7 @@ export class SqlDriver implements IDataDriver {
       varcharColumnChars: (...a) => driver.varcharColumnChars(...a),
     }));
     deferredDdlHost.install((driver) => ({
+      get concurrentIndexState() { return driver.concurrentIndexState; },
       get deferredDdl() { return driver.deferredDdl; },
       set deferredDdl(v) { driver.deferredDdl = v; },
       get deferredSchemaObjects() { return driver.deferredSchemaObjects; },

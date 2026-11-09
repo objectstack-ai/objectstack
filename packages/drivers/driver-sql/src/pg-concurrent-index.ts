@@ -128,6 +128,53 @@ export async function invalidIndexNames(
   return new Set(rows.map((r) => String(r.name ?? '')).filter((n) => n.length > 0));
 }
 
+/**
+ * The deferral window the concurrent builds of one driver instance share.
+ *
+ * The engine calls the driver's sync once per object, so the driver never sees
+ * where a boot's pass begins or ends. The bound is therefore a time window, not
+ * a pass:
+ *
+ *   - The first build whose lock wait times out opens the window
+ *     ({@link openConcurrentIndexDeferral}) for `lockWaitMs`, the same bound the
+ *     build waited for.
+ *   - While the window is open, every other concurrent build defers to the next
+ *     sync at once, without waiting ({@link activeConcurrentIndexDeferral}).
+ *   - The window closes itself when its time is up: the next build after that
+ *     waits again, at most once more. So a process waits at most once per
+ *     window, however many indexes are missing, and a sync later in the same
+ *     process (a package install, say) is not held off until a restart.
+ *   - An operator's explicit run (`flushDeferredSchemaDdl`, the public
+ *     `applyMigrationEntries`) closes it at entry ({@link clearConcurrentIndexDeferral}),
+ *     so the run waits for itself instead of inheriting an earlier deferral.
+ */
+export interface ConcurrentIndexDeferral {
+  /** The index whose timed-out build opened the window, or `null` when it is closed. */
+  deferredBy: string | null;
+  /** `Date.now()` at which the window closes. */
+  deferredUntil: number;
+  /** The bound each build arms as `lock_timeout`, and the window's length. */
+  lockWaitMs: number;
+}
+
+/** Open the window after `what`'s build timed out: it lasts one lock-wait bound. */
+export function openConcurrentIndexDeferral(state: ConcurrentIndexDeferral, what: string, now = Date.now()): void {
+  state.deferredBy = what;
+  state.deferredUntil = now + state.lockWaitMs;
+}
+
+/** The build that opened the window while it is open; `null` (and the window closed) once its time is up. */
+export function activeConcurrentIndexDeferral(state: ConcurrentIndexDeferral, now = Date.now()): string | null {
+  if (state.deferredBy !== null && now >= state.deferredUntil) clearConcurrentIndexDeferral(state);
+  return state.deferredBy;
+}
+
+/** Close the window, whether or not it is open. */
+export function clearConcurrentIndexDeferral(state: ConcurrentIndexDeferral): void {
+  state.deferredBy = null;
+  state.deferredUntil = 0;
+}
+
 /** One index the concurrent path builds, as `syncDeclaredIndexes` normalized it. */
 export interface ConcurrentIndexSpec {
   table: string;

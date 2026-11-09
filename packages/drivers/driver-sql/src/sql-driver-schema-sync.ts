@@ -165,7 +165,7 @@ import { isUniqueViolationError } from '@objectstack/types';
 import type { Knex } from 'knex';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { carriesNullSafeTenantKeyPart, ceremonyOwnedDropFinding, describeMissingIndexColumns, diffManagedIndexes, diffManagedTable, diffUnbuildableIndexes, driftKey, expectedIndexes, fieldHasColumn, GLOBAL_TENANT, indexedKeyColumns, isCeremonyOwnedColumnDrop, isIndexDriftOp, isManagedIndexName, legacyUniqueReplacements, normalizeDeclaredIndex, type DeclaredIndexInput, type DriftOp, type ManagedDriftEntry, type PendingSchemaWork, type PhysicalColumn } from './schema-drift.js';
-import { attachUniqueConstraintSql, concurrentIndexSql, type ConcurrentIndexSpec, dropInvalidIndexSql, invalidIndexNames, isPostgresLockTimeout, withAutocommitSession, withLockTimeout } from './pg-concurrent-index.js';
+import { activeConcurrentIndexDeferral, attachUniqueConstraintSql, clearConcurrentIndexDeferral, concurrentIndexSql, type ConcurrentIndexSpec, dropInvalidIndexSql, invalidIndexNames, isPostgresLockTimeout, openConcurrentIndexDeferral, withAutocommitSession, withLockTimeout } from './pg-concurrent-index.js';
 import { isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan, type MediaColumnMovePlan, type MediaColumnMoveRefusal, type MediaColumnMoveScan } from './media-column-move.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
@@ -990,14 +990,20 @@ async function buildIndexConcurrently(
   const what = `${spec.unique ? 'UNIQUE ' : ''}index '${spec.name}' on "${spec.table}"`;
   const unenforced = spec.unique ? ' The uniqueness it declares is NOT enforced until then.' : '';
 
-  if (state.deferredBy !== null) {
+  // The one-wait window (`ConcurrentIndexDeferral`): for one lock-wait bound
+  // after a build timed out, every other concurrent build defers without
+  // waiting, so a process waits at most once per bound however many indexes
+  // are missing. The window closes itself when the bound has passed, and an
+  // operator's explicit run closes it at entry.
+  const deferredBy = activeConcurrentIndexDeferral(state);
+  if (deferredBy !== null) {
     if (this.flushingDeferredDdl) throw deferredDdlLockWaitError(spec.table, seconds, undefined, 'postgres');
     this.logDurabilityFailure(
-      `[sql-driver] ${what} was NOT built in this sync: the concurrent index build on ${state.deferredBy} ` +
-        `already timed out after ${seconds}s waiting for an older transaction, so every remaining concurrent ` +
-        `build is deferred to the next sync without waiting again.${unenforced} To build it now, end the ` +
+      `[sql-driver] ${what} was NOT built in this sync: the concurrent index build on ${deferredBy} ` +
+        `timed out less than ${seconds}s ago waiting for an older transaction, so the concurrent builds in that ` +
+        `window are deferred to the next sync without waiting again.${unenforced} To build it now, end the ` +
         `long-running transaction (pg_stat_activity, the oldest xact_start) and run "os migrate apply".`,
-      { tableName: spec.table, index: spec.name, unique: spec.unique, deferredBy: state.deferredBy },
+      { tableName: spec.table, index: spec.name, unique: spec.unique, deferredBy },
     );
     return 'not-built';
   }
@@ -1060,13 +1066,13 @@ async function buildIndexConcurrently(
     );
   } catch (e) {
     if (!isPostgresLockTimeout(e)) throw e;
-    state.deferredBy = `${what}`;
+    openConcurrentIndexDeferral(state, what);
     if (this.flushingDeferredDdl) throw deferredDdlLockWaitError(spec.table, seconds, e, 'postgres');
     this.logDurabilityFailure(
       `[sql-driver] ${what} was NOT built: the concurrent build timed out after ${seconds}s waiting for an older ` +
         `transaction. CREATE INDEX CONCURRENTLY waits for every transaction older than it, on any table of the ` +
-        `database. The boot carries on, and every remaining concurrent index build in this sync is deferred to the ` +
-        `next sync without waiting again.${unenforced} The next sync drops the INVALID index this left and builds ` +
+        `database. The boot carries on, and for the next ${seconds}s every other concurrent index build is deferred ` +
+        `to the next sync without waiting.${unenforced} The next sync drops the INVALID index this left and builds ` +
         `it again. To build it now, end the long-running transaction (pg_stat_activity, the oldest xact_start) and ` +
         `run "os migrate apply".`,
       String((e as any)?.message ?? e),
@@ -1369,8 +1375,26 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
   }
 }
 
-/** The body of `SqlDriver#applyMigrationEntries`; the method's docblock there is its contract. */
-export async function applyMigrationEntries(this: Pick<SchemaSyncHost, 'applyDriftOpInPlace' | 'applyIndexDriftOp' | 'assertSchemaMutable' | 'dialectName' | 'isSqlite' | 'logger' | 'rebuildSqliteTablePatched'>, entries: ManagedDriftEntry[], opts: { allowDestructive?: boolean } = {}): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
+/**
+ * The body of `SqlDriver#applyMigrationEntries`; the method's docblock there is
+ * its contract.
+ *
+ * #31901: an operator's run waits for itself. It closes the concurrent index
+ * builds' deferral window an earlier sync opened (`ConcurrentIndexDeferral`)
+ * at entry, unconditionally, then applies the entries.
+ */
+export async function applyMigrationEntries(this: Pick<SchemaSyncHost, 'applyDriftOpInPlace' | 'applyIndexDriftOp' | 'assertSchemaMutable' | 'concurrentIndexState' | 'dialectName' | 'isSqlite' | 'logger' | 'rebuildSqliteTablePatched'>, entries: ManagedDriftEntry[], opts: { allowDestructive?: boolean } = {}): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
+  clearConcurrentIndexDeferral(this.concurrentIndexState);
+  return applyMigrationEntriesKeepingDeferral.call(this, entries, opts);
+}
+
+/**
+ * {@link applyMigrationEntries} without its reset of the concurrent index
+ * builds' deferral window (#31901): the boot's own drift reconcile
+ * ({@link reconcileAndWarnDrift}) applies safe entries once per object inside
+ * one sync, and a reset there would let every object wait the full bound again.
+ */
+export async function applyMigrationEntriesKeepingDeferral(this: Pick<SchemaSyncHost, 'applyDriftOpInPlace' | 'applyIndexDriftOp' | 'assertSchemaMutable' | 'dialectName' | 'isSqlite' | 'logger' | 'rebuildSqliteTablePatched'>, entries: ManagedDriftEntry[], opts: { allowDestructive?: boolean } = {}): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
   this.assertSchemaMutable('reconcileManagedSchema');
   const allowDestructive = opts.allowDestructive === true;
 

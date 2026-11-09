@@ -16,8 +16,11 @@
  *     next sync, and the sync after that does nothing;
  *   - the build arms `lock_timeout` at the driver's DDL lock-wait bound. On a
  *     timeout boot logs and carries on, and `os migrate apply` refuses;
- *   - the first timeout defers every remaining concurrent build of the sync,
- *     so one long transaction costs one wait, not one wait per index;
+ *   - the first timeout opens a window of one bound in which every other
+ *     concurrent build defers without waiting, so one long transaction costs
+ *     one wait, not one wait per index. The window closes itself when the
+ *     bound has passed, and an operator's run (`flushDeferredSchemaDdl`,
+ *     `applyMigrationEntries`) closes it at entry and waits for itself;
  *   - CONTROL: a table the sync creates, and every other dialect, keep the
  *     plain path byte for byte.
  *
@@ -64,8 +67,8 @@ const UNIQUE_CODE = { fields: ['code'], unique: true };
 
 type Logged = { warn: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; debug: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 
-function newDriver(cell: DialectCell): { driver: SqlDriver; knex: Knex; ddl: string[]; log: Logged } {
-  const driver = new SqlDriver(cell.config() as any);
+function newDriver(cell: DialectCell, extra: Record<string, unknown> = {}): { driver: SqlDriver; knex: Knex; ddl: string[]; log: Logged } {
+  const driver = new SqlDriver({ ...(cell.config() as any), ...extra });
   const log: Logged = { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() };
   (driver as any).logger = log;
   const knex = (driver as any).knex as Knex;
@@ -238,13 +241,74 @@ function declarePostgresPins(cell: DialectCell): void {
         }
       }, 20_000);
 
+      it("under autoMigrate: 'safe', the boot's own drift reconcile keeps the window: still one wait", async () => {
+        // The reconcile applies a missing index as a safe drift entry after
+        // each object's sync. It must not close the window the way an
+        // operator's run does, or every object would wait the bound again.
+        const auto = newDriver(cell, { autoMigrate: 'safe' });
+        try {
+          (auto.driver as any).concurrentIndexState.lockWaitMs = 1500;
+          const started = Date.now();
+          await auto.driver.initObjects([objectOf(JOB, [BY_STAGE]) as any]);
+          await auto.driver.initObjects([objectOf(TASK, [BY_CODE]) as any]);
+          const elapsed = Date.now() - started;
+
+          expect(auto.ddl.filter((s) => /create (unique )?index concurrently/i.test(s))).toHaveLength(1);
+          expect(elapsed).toBeLessThan(2900);
+          expect(logged(auto.log.error)).toContain(`index '${nameOf(TASK, BY_CODE)}' on "${TASK}" was NOT built in this sync`);
+        } finally {
+          await auto.driver.disconnect();
+        }
+      }, 20_000);
+
+      it('after the window has passed, the next sync in the same process builds again', async () => {
+        await driver.initObjects([objectOf(JOB, [BY_STAGE]) as any]);
+        expect(concurrentCreates()).toHaveLength(1);
+        expect(await indexState(nameOf(JOB, BY_STAGE))).toEqual({ valid: false });
+
+        await reader!.commit();
+        // The window is one bound (1.5 s here) from the timeout: let it pass.
+        await new Promise((resolve) => setTimeout(resolve, 1700));
+        ddl.length = 0;
+        await driver.initObjects([objectOf(JOB, [BY_STAGE]) as any, objectOf(TASK, [BY_CODE]) as any]);
+
+        // Same driver, no restart: both are built, the INVALID one dropped first.
+        expect(ddl.some((s) => /^drop index concurrently if exists/i.test(s) && s.includes(nameOf(JOB, BY_STAGE)))).toBe(true);
+        expect(concurrentCreates()).toHaveLength(2);
+        expect(await indexState(nameOf(JOB, BY_STAGE))).toEqual({ valid: true });
+        expect(await indexState(nameOf(TASK, BY_CODE))).toEqual({ valid: true });
+      }, 20_000);
+
+      it('an operator run (applyMigrationEntries) does not inherit the window, and waits for itself', async () => {
+        await driver.initObjects([objectOf(JOB, [BY_STAGE]) as any]);
+        expect(concurrentCreates()).toHaveLength(1);
+
+        // Inside the window, the drift entry for the other table's missing index.
+        const entries = await (driver as any).detectTableDrift(TASK, objectOf(TASK).fields, [BY_CODE]);
+        expect(entries.map((e: any) => e.op.type)).toContain('create_index');
+        const started = Date.now();
+        await driver.applyMigrationEntries(entries);
+        const elapsed = Date.now() - started;
+
+        // It waited the bound itself instead of deferring at once.
+        expect(concurrentCreates()).toHaveLength(2);
+        expect(elapsed).toBeGreaterThanOrEqual(1400);
+        expect(logged(log.error)).toContain(`index '${nameOf(TASK, BY_CODE)}' on "${TASK}" was NOT built: the concurrent build timed out`);
+      }, 20_000);
+
       it('os migrate apply refuses with the lock-wait refusal instead of reporting success', async () => {
+        // A boot timeout first, so the flush starts inside an open window: it
+        // must still wait for itself (the refusal's cause is the 55P03 of its own
+        // wait), not refuse on the window an earlier sync opened.
+        await driver.initObjects([objectOf(TASK, [BY_CODE]) as any]);
+        expect(concurrentCreates()).toHaveLength(1);
         driver.setDeferredDdl(true);
         await driver.initObjects([objectOf(JOB, [BY_STAGE]) as any]);
         const err: any = await driver.flushDeferredSchemaDdl().then(
           () => null,
           (e) => e,
         );
+        expect(concurrentCreates()).toHaveLength(2);
         expect(err).not.toBeNull();
         expect(err.code).toBe('DATABASE_ERROR');
         expect(err.status).toBe(500);
