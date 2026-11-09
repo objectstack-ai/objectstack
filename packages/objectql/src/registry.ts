@@ -9199,9 +9199,25 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#31720] Record a registered residual as a holder of its namespace, so a
+   * package (or another stack's residual) registering AFTER it is judged
+   * against it too: the residual has no package record for the walk below to
+   * read. Called once the stack has registered whole — a refused one records
+   * nothing — and keyed by the residual's owner id, so the same stack
+   * registering again replaces its own entry. `undefined` records nothing.
+   */
+  recordResidualNamespaceHolder(residual: NamespacePackage | undefined): void {
+    if (residual === undefined || !isNamespaceJudged(residual.namespace)) return;
+    this.residualNamespaceHolders.set(residual.packageId, residual);
+  }
+
+  /** The residual holders {@link recordResidualNamespaceHolder} recorded, by owner id. */
+  private readonly residualNamespaceHolders = new Map<string, NamespacePackage>();
+
+  /**
    * The one walk both refusals above share: `incoming` against every installed
-   * package record of its namespace, read through the same predicate, thrown
-   * in one envelope.
+   * package record of its namespace and every recorded residual holder of it,
+   * read through the same predicate, thrown in one envelope.
    */
   private refuseNamespaceHolderConflicts(incoming: NamespacePackage | undefined): void {
     if (incoming === undefined || !isNamespaceJudged(incoming.namespace) || incoming.names.length === 0) return;
@@ -9211,6 +9227,9 @@ export class SchemaRegistry {
       if (recorded?.namespace !== incoming.namespace) continue;
       const holder = namespacePackageOf(recorded);
       if (holder !== undefined) sitting.push(holder);
+    }
+    for (const residual of this.residualNamespaceHolders.values()) {
+      if (residual.namespace === incoming.namespace) sitting.push(residual);
     }
     const conflicts = namespaceNameConflicts(incoming, sitting);
     if (conflicts.length > 0) throw new NamespaceNameConflictError(conflicts);

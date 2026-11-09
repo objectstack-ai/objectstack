@@ -208,6 +208,34 @@ describe('what the residual rule leaves alone', () => {
   });
 });
 
+describe('order does not decide', () => {
+  it('a package registered AFTER the stack, holding the residual\'s name, is refused at the package door, naming the residual\'s owner', async () => {
+    const { ql, register } = await boot();
+    expect((await register(stack('crm', [betaOf('crm')], residualOf('page'))))?.message).toBeUndefined();
+    const err = await register({ packages: [{ manifest: body(ALPHA, 'crm', { pages: [item('page', NAME, 'alpha')] }) }] });
+    expect([err?.code, err?.status], err?.message).toEqual(['NAMESPACE_CONFLICT', 422]);
+    expect(err?.conflicts).toEqual([
+      { namespace: 'crm', type: 'page', name: NAME, incomingPackageId: ALPHA, existingPackageIds: [RELEASE] },
+    ]);
+    expect(ql.registry.getPackage(ALPHA)).toBeUndefined();
+  });
+
+  it('CONTROL — the same stack registering again is not judged against its own residual', async () => {
+    const { register } = await boot();
+    const s = stack('crm', [betaOf('crm')], residualOf('page'));
+    expect((await register(s))?.message).toBeUndefined();
+    expect((await register(s))?.message).toBeUndefined();
+  });
+
+  it('CONTROL — a refused stack records no residual holder: the package after it installs', async () => {
+    const { register } = await withAlphaHolding('tool');
+    expect((await register(stack('crm', [betaOf('crm')], { ...residualOf('tool'), pages: [item('page', 'release_home', 'r')] })))?.code)
+      .toBe('NAMESPACE_CONFLICT');
+    const gamma = body('com.acme.gamma', 'crm', { dependencies: { [ALPHA]: '^1.0.0' }, pages: [item('page', 'release_home', 'gamma')] });
+    expect((await register({ packages: [{ manifest: gamma }] }))?.message).toBeUndefined();
+  });
+});
+
 describe('inside one artifact', () => {
   it('the residual never shares a covered name with one of the stack\'s own bodies: a body holding it claims the slot, so it is not residual', () => {
     for (const type of RESIDUAL_TYPES) {
