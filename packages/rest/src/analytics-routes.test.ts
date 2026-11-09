@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { RestServer } from './rest-server';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -257,5 +257,73 @@ describe('POST /analytics/dataset/query', () => {
     await route!.handler({ method: 'POST', params: {}, headers: {}, body: { dataset: inlineDataset, selection } } as any, res);
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('DATASET_INVALID');
+  });
+});
+
+// ── a FAILED saved-dataset read is not an absent dataset ─────────────────────
+// The `datasetName` lookup used to swallow a throwing `getMetaItems` into an
+// empty list, so a metadata-store outage answered `404 NOT_FOUND "Dataset …
+// not found."`: a dashboard told its user the dataset was gone, and the
+// operator read a 404 instead of an outage. The AI tool `query_dataset` answers
+// the same failed read `503 SERVICE_UNAVAILABLE`; this door now agrees.
+describe('POST /analytics/dataset/query — a failed saved-dataset read', () => {
+  let consoleError: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    // The harness silences this package's fault log; the outage must reach it.
+    vi.stubEnv('OS_REST_LOG', 'info');
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleError.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  const send = async (protocol: any, datasetName = 'sales') => {
+    const queryDataset = vi.fn().mockResolvedValue({ rows: [{ region: 'NA', revenue: 100 }], fields: [] });
+    const { route } = buildServer(async () => ({ queryDataset }), protocol);
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, headers: {}, body: { datasetName, selection } } as any, res);
+    return { res, queryDataset };
+  };
+
+  it('answers 503 SERVICE_UNAVAILABLE, not 404, when getMetaItems throws', async () => {
+    const outage = new Error('connect ECONNREFUSED 10.0.0.7:5432');
+    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockRejectedValue(outage) };
+    const { res, queryDataset } = await send(protocol);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body.code).toBe('SERVICE_UNAVAILABLE');
+    // The answer names the dataset and says the READ failed, never "not found".
+    expect(res.body.error).toMatch(/^The dataset "sales" could not be resolved: the dataset read failed\./);
+    expect(JSON.stringify(res.body)).not.toMatch(/not found/i);
+    // The store's own text is withheld from the client and kept for the operator.
+    expect(JSON.stringify(res.body)).not.toContain('ECONNREFUSED');
+    const logged = consoleError.mock.calls.flat();
+    expect(logged.some((a: any) => a?.cause === outage)).toBe(true);
+    expect(queryDataset).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a read that succeeds without the name still answers 404, byte-identical', async () => {
+    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...inlineDataset }] }) };
+    const { res, queryDataset } = await send(protocol, 'nope');
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual({ code: 'NOT_FOUND', message: 'Dataset "nope" not found.' });
+    expect(queryDataset).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a read that finds the name is served', async () => {
+    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...inlineDataset }] }) };
+    const { res, queryDataset } = await send(protocol);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.rows).toEqual([{ region: 'NA', revenue: 100 }]);
+    expect(queryDataset.mock.calls[0][0].name).toBe('sales');
+  });
+
+  it('CONTROL: a protocol with no getMetaItems keeps its answer, 404 NOT_FOUND', async () => {
+    const { getMetaItems: _absent, ...protocol } = mockProtocol();
+    const { res, queryDataset } = await send(protocol);
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toEqual({ code: 'NOT_FOUND', message: 'Dataset "sales" not found.' });
+    expect(queryDataset).not.toHaveBeenCalled();
   });
 });
