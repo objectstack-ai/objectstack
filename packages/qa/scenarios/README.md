@@ -250,8 +250,8 @@ npx @objectstack/scenarios help                                      # the comma
   mode scaffolds the project under that name, and template mode installs a template declaring it into a host named
   `host<code>` (the unmanaged copy keeps its namespace, and the install refuses one the host owns). The card's names are
   read relative to it (`account` → `democrm_account`), because a scaffolded project and the unmanaged install both
-  refuse bare object names. The build prompt asks for the prefix on EVERY item, and the scorer reports each bare
-  non-object item name as a failing Build check (`bare-name:<type>:<name>`), so such a build is never verified.
+  refuse bare object names. Views, docs, positions and capabilities (`<ns>.<short>`) keep the prefix too (ADR-0150 bucket 1 and
+  D7): the scorer reports each bare one as a failing Build check (`bare-name:<type>:<name>`); other items may be bare.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and loads a seed row as owned (`owner_id`) by a persona's user only when the row
   names that person (`rowOwner` in `prompts.ts`): it IS the persona's `record`, a declared direct lookup on it holds
