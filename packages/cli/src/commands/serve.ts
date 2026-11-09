@@ -283,9 +283,13 @@ const SERVE_INSTANCE_HOST: ServeInstanceHost = {
 /**
  * This process's `service.instance.id`: `<hostname>-<pid>`. The host name is
  * the pod name on Kubernetes and the container id under Compose; the pid tells
- * apart two replicas on one host, and in a container it is the same on every
- * restart (pid 1), so a restart does not open a new series. A host that reports
- * no name (or throws asking) falls back to a random id for this process.
+ * apart two replicas that share a host name within one PID namespace (two
+ * processes on one machine), and in a container it is the same on every
+ * restart (pid 1), so a restart does not open a new series. It does NOT tell
+ * apart two replicas that share a host name across PID namespaces (a fixed
+ * Compose `hostname:`, host-network containers): both are pid 1 and export one
+ * id, so such replicas need distinct host names. A host that reports no name
+ * (or throws asking) falls back to a random id for this process.
  */
 export function serveInstanceId(host: ServeInstanceHost = SERVE_INSTANCE_HOST): string {
   let name = '';
