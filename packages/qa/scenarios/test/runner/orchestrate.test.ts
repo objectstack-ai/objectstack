@@ -412,18 +412,16 @@ describe('runCard — the card’s own namespace, demo + code', () => {
     expect(ops.scaffolded).toEqual([]);
   });
 
-  it('a build naming a non-object item bare fails its Build half: one finding per item, and it is never verified', async () => {
+  it('a build naming a view bare fails its Build half, and is never verified; its bare dashboard is no finding (ADR-0150)', async () => {
     const { scenario, ops, driver } = setup({ bareItems: true });
     const run = await runCard(scenario, driver, ops, { modes: ['scratch', 'template'], admin: ADMIN, iterateRun: false });
     const sc = cardScorecard(run);
     expect(run.modes[0]!.build!.score!.expect.checks.every((c) => c.pass)).toBe(true); // every expected name is there…
-    expect(run.modes[0]!.build!.score!.naming.map((c) => c.check)).toEqual(['bare-name:dashboard:overview', 'bare-name:view:all_accounts']);
+    expect(run.modes[0]!.build!.score!.naming.map((c) => c.check)).toEqual(['bare-name:view:all_accounts']);
     expect(sc.modes[0]!.first.build!.degraded).toBe(true); // …and the build still fails
     expect(sc.modes[1]!.skipped).toMatch(/no verified build/);
     expect(sc.modes[0]!.findings).toEqual([
-      expect.stringMatching(/^build: bare item name dashboard overview \(.*`democrm_<short>`/),
-      expect.stringMatching(/^build: bare item name view all_accounts /),
-      expect.stringMatching(/^iterate build: bare item name dashboard overview /),
+      expect.stringMatching(/^build: bare item name view all_accounts \(.*`democrm_<short>`/),
       expect.stringMatching(/^iterate build: bare item name view all_accounts /),
     ]);
     expect(renderScorecard(sc)).toContain('- scratch finding: build: bare item name view all_accounts');
