@@ -185,6 +185,12 @@ export interface ScimRefusalAuditEventInput {
   /** The connection the bearer verified as; absent when it verified as none (a 401). */
   connectionId?: string;
   /**
+   * The organization the verified connection's credential belongs to; absent
+   * when the bearer verified as none or the credential names no organization.
+   * The row's `tenant_id`.
+   */
+  organizationId?: string;
+  /**
    * On a request whose bearer verified as no connection: which kind of
    * credential it presented — `scim_bearer` (one carrying the minted SCIM
    * prefix), `other`, or `none`. Nothing of the credential itself is kept.

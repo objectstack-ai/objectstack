@@ -36,6 +36,7 @@ const SYS = { isSystem: true } as const;
 function refusal(overrides: Partial<ScimRefusalAuditEvent> = {}): ScimRefusalAuditEvent {
   return {
     connectionId: 'okta-31829',
+    organizationId: 'org_31829',
     resource: 'Users',
     method: 'POST',
     status: 409,
@@ -83,7 +84,7 @@ describe('[#31829] the SCIM refusal writer on the real `audit` slot', () => {
     expect(typeof (audit as any).recordDataExport).toBe('function');
   });
 
-  it('a refusal on a verified connection writes ONE row naming it, the request, the status and the SCIM type', async () => {
+  it('a refusal on a verified connection writes ONE row naming it, its organization, the request, the status and the SCIM type', async () => {
     const before = (await rows()).length;
     await audit.recordScimRefusal(refusal());
     const after = await rows();
@@ -95,7 +96,7 @@ describe('[#31829] the SCIM refusal writer on the real `audit` slot', () => {
       actor: 'svc:scim:okta-31829',
       object_name: null,
       record_id: null,
-      tenant_id: null,
+      tenant_id: 'org_31829',
       ip_address: '203.0.113.7',
     });
     expect(row.old_value ?? null).toBeNull();
@@ -109,8 +110,10 @@ describe('[#31829] the SCIM refusal writer on the real `audit` slot', () => {
     });
   });
 
-  it('a 401 names no connection: actor null, `unknown`, and which kind of credential was presented', async () => {
+  it('a 401 names no connection: actor null, tenant null, `unknown`, and which kind of credential was presented', async () => {
     await audit.recordScimRefusal({
+      // An organization with no connection is not recorded: it rides only with one.
+      organizationId: 'org_31829',
       presentedCredential: 'scim_bearer',
       resource: 'Users',
       method: 'GET',
@@ -118,7 +121,7 @@ describe('[#31829] the SCIM refusal writer on the real `audit` slot', () => {
       ipAddress: '198.51.100.9',
     });
     const row = (await rows()).at(-1)!;
-    expect(row).toMatchObject({ actor: null, user_id: null, ip_address: '198.51.100.9' });
+    expect(row).toMatchObject({ actor: null, user_id: null, tenant_id: null, ip_address: '198.51.100.9' });
     expect(metadataOf(row)).toEqual({
       scim_connection_id: 'unknown',
       presented_credential: 'scim_bearer',
@@ -126,6 +129,12 @@ describe('[#31829] the SCIM refusal writer on the real `audit` slot', () => {
       method: 'GET',
       status: 401,
     });
+  });
+
+  it('a connection whose credential names no organization writes a deployment-level row (tenant null)', async () => {
+    await audit.recordScimRefusal(refusal({ connectionId: 'azure-31829', organizationId: undefined, status: 404, scimType: undefined }));
+    const row = (await rows()).at(-1)!;
+    expect(row).toMatchObject({ actor: 'svc:scim:azure-31829', tenant_id: null });
   });
 
   it('a row after a bounded burst carries the dropped count as `suppressed`', async () => {
@@ -171,6 +180,7 @@ describe('[#31829] the scim_refused row never carries what the request sent', ()
     const row = buildScimRefusalAuditRow(
       {
         connectionId: 'okta 31829; drop',
+        organizationId: 'org 31829; drop',
         presentedCredential: 'oss_scim_SECRET' as any,
         resource: 'Users/alice@example.com',
         method: 'brew',
@@ -182,7 +192,7 @@ describe('[#31829] the scim_refused row never carries what the request sent', ()
       },
       all,
     )!;
-    expect(row).toMatchObject({ actor: null, ip_address: null });
+    expect(row).toMatchObject({ actor: null, ip_address: null, tenant_id: null });
     expect(metadataOf(row)).toEqual({
       scim_connection_id: 'unknown',
       presented_credential: 'none',
@@ -196,6 +206,11 @@ describe('[#31829] the scim_refused row never carries what the request sent', ()
     const row = buildScimRefusalAuditRow(refusal(), (_o, field) => field !== 'actor')!;
     expect(row).not.toHaveProperty('actor');
     expect(metadataOf(row).scim_connection_id).toBe('okta-31829');
+  });
+
+  it('a malformed organization on a verified connection is not stamped', () => {
+    const row = buildScimRefusalAuditRow(refusal({ organizationId: 'org 31829; drop' }), all)!;
+    expect(row).toMatchObject({ actor: 'svc:scim:okta-31829', tenant_id: null });
   });
 });
 

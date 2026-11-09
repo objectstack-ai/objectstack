@@ -97,6 +97,19 @@ describe('[#31829] the event a refusal becomes', () => {
     });
   });
 
+  it('the organization rides only with a connection', () => {
+    const verified = scimRefusalEventFor(
+      { endpointPath: '/scim/v2/Users/x', method: 'GET', status: 404, connectionId: 'okta', organizationId: 'org_a' },
+      undefined,
+    );
+    expect(verified).toEqual({ connectionId: 'okta', organizationId: 'org_a', resource: 'Users', method: 'GET', status: 404 });
+    const unverified = scimRefusalEventFor(
+      { endpointPath: '/scim/v2/Users', method: 'GET', status: 401, organizationId: 'org_a', authorization: null },
+      undefined,
+    );
+    expect(unverified).not.toHaveProperty('organizationId');
+  });
+
   it('an unverified request names the credential kind instead of a connection', () => {
     const event = scimRefusalEventFor(
       { endpointPath: '/scim/v2/Users', method: 'GET', status: 401, authorization: 'Bearer oss_scim_XYZ' },

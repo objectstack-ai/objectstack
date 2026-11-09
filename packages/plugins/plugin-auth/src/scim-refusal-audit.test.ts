@@ -52,6 +52,7 @@ const AUTH = `${BASE}/api/v1/auth`;
 const SECRET = 'test-secret-at-least-32-chars-long-31829';
 const PASSWORD = 'correct-horse-battery-staple-31829';
 const CONNECTION = 'okta-31829';
+const ORG = 'org_31829';
 const CLIENT = '203.0.113.7';
 
 const USER_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:User';
@@ -125,7 +126,7 @@ async function boot(sinkShape: SinkShape = 'full'): Promise<Harness> {
 
   const { token } = await mintScimConnectionCredential(engine as never, SECRET, {
     connectionId: CONNECTION,
-    organizationId: 'org_31829',
+    organizationId: ORG,
   });
   return {
     engine,
@@ -207,7 +208,7 @@ describe('[#31829] each refused SCIM request hands the audit slot one event nami
     expect(res.status).toBe(409);
     await settle(h.refusals, 1);
     expect(h.refusals).toEqual([
-      { connectionId: CONNECTION, resource: 'Users', method: 'POST', status: 409, scimType: 'uniqueness', ipAddress: CLIENT },
+      { connectionId: CONNECTION, organizationId: ORG, resource: 'Users', method: 'POST', status: 409, scimType: 'uniqueness', ipAddress: CLIENT },
     ]);
   }, 60_000);
 
@@ -239,7 +240,7 @@ describe('[#31829] each refused SCIM request hands the audit slot one event nami
     expect(res.status).toBe(400);
     await settle(h.refusals, 1);
     expect(h.refusals).toEqual([
-      { connectionId: CONNECTION, resource: 'Users', method: 'PATCH', status: 400, scimType: 'invalidPath', ipAddress: CLIENT },
+      { connectionId: CONNECTION, organizationId: ORG, resource: 'Users', method: 'PATCH', status: 400, scimType: 'invalidPath', ipAddress: CLIENT },
     ]);
   }, 60_000);
 
@@ -249,7 +250,7 @@ describe('[#31829] each refused SCIM request hands the audit slot one event nami
     expect(res.status).toBe(404);
     await settle(h.refusals, 1);
     expect(h.refusals).toEqual([
-      { connectionId: CONNECTION, resource: 'Users', method: 'GET', status: 404, ipAddress: CLIENT },
+      { connectionId: CONNECTION, organizationId: ORG, resource: 'Users', method: 'GET', status: 404, ipAddress: CLIENT },
     ]);
   }, 60_000);
 
@@ -293,7 +294,7 @@ describe('[#31829] each refused SCIM request hands the audit slot one event nami
     // The answers themselves are the vendor's, untouched — the detail text is still there for the caller.
     expect(answers[1]).toContain('already exists');
     // Every event's keys are from the closed set.
-    const allowed = new Set(['connectionId', 'presentedCredential', 'resource', 'method', 'status', 'scimType', 'errorCode', 'ipAddress', 'suppressed']);
+    const allowed = new Set(['connectionId', 'organizationId', 'presentedCredential', 'resource', 'method', 'status', 'scimType', 'errorCode', 'ipAddress', 'suppressed']);
     for (const event of h.refusals) {
       expect(Object.keys(event).filter((k) => !allowed.has(k))).toEqual([]);
     }

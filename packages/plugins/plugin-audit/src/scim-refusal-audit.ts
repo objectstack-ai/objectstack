@@ -32,8 +32,12 @@
  *  - no `object_name` / `record_id`: the request was refused, so it is about
  *    no record, and the ledger's record read gate serves it under the
  *    ledger's own grant;
- *  - `tenant_id` NULL: the event names no organization (a deployment-level
- *    row, served to the platform administrator);
+ *  - `tenant_id`: the organization the verified connection's credential
+ *    belongs to, so an organization's administrators read their own
+ *    connection's refusals; NULL when the bearer verified as none (a 401 or a
+ *    request refused before the bearer was read) or the credential names no
+ *    organization — a deployment-level row, served to the platform
+ *    administrator;
  *  - `ip_address`: the client address plugin-auth established;
  *  - no `old_value` / `new_value`: a refusal is not a field diff;
  *  - `metadata`: `scim_connection_id` (the connection id, or `unknown` when
@@ -72,6 +76,8 @@ export type ScimPresentedCredential = 'scim_bearer' | 'other' | 'none';
 export interface ScimRefusalAuditEvent {
   /** The connection the bearer verified as; absent when it verified as none. */
   connectionId?: string;
+  /** The organization the connection's credential belongs to; the row's `tenant_id`. Ignored without `connectionId`. */
+  organizationId?: string;
   /** On an unverified request: which kind of credential it presented. */
   presentedCredential?: ScimPresentedCredential;
   /** The SCIM resource type addressed (`Users`, `Groups`, …), or `?`. */
@@ -151,6 +157,8 @@ export function buildScimRefusalAuditRow(
   const status = event?.status;
   if (typeof status !== 'number' || !Number.isInteger(status) || status < 400 || status > 599) return null;
   const connectionId = token(event.connectionId, CONNECTION_ID);
+  // The organization rides only with a verified connection.
+  const organizationId = connectionId ? token(event.organizationId, CONNECTION_ID) : undefined;
   const metadata: Record<string, unknown> = {
     [SCIM_CONNECTION_ID_KEY]: connectionId ?? UNKNOWN_SCIM_CONNECTION,
   };
@@ -184,8 +192,9 @@ export function buildScimRefusalAuditRow(
     new_value: null,
     ip_address: token(event.ipAddress, ADDRESS) ?? null,
     user_agent: null,
-    // [ADR-0131 D7] The event names no organization: a deployment-level row.
-    tenant_id: null,
+    // [ADR-0131 D7] The connection's organization; NULL (a deployment-level
+    // row) when no connection verified or its credential names none.
+    tenant_id: organizationId ?? null,
     metadata: safeStringify(metadata),
   };
   if (objectHasField('sys_audit_log', 'actor')) {

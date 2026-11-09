@@ -255,7 +255,10 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
               method: request.method,
               status: scimResponse.status,
               ...(scope.connectionId
-                ? { connectionId: scope.connectionId }
+                ? {
+                    connectionId: scope.connectionId,
+                    ...(scope.organizationId ? { organizationId: scope.organizationId } : {}),
+                  }
                 : { authorization: request.headers.get('authorization') }),
               ...(clientAddress ? { clientAddress } : {}),
             },

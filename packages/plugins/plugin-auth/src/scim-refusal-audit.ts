@@ -248,6 +248,8 @@ export interface ScimRefusalObservation {
   status: number;
   /** The connection the request's SCIM scope names, when the bearer verified as one. */
   connectionId?: string;
+  /** The organization the scope recorded beside the connection, when it recorded one. */
+  organizationId?: string;
   /** The request's `Authorization` header, read for its shape only (unverified requests). */
   authorization?: string | null;
   /** The client address `handleRequest` established. */
@@ -271,13 +273,22 @@ export function scimRefusalEventFor(
     && observation.connectionId.length <= CONNECTION_ID_LIMIT
       ? observation.connectionId
       : undefined;
+  // The organization rides only with a connection: a request whose bearer
+  // verified as none names no organization, whatever the observation says.
+  const organizationId =
+    connectionId
+    && typeof observation.organizationId === 'string'
+    && observation.organizationId.length > 0
+    && observation.organizationId.length <= CONNECTION_ID_LIMIT
+      ? observation.organizationId
+      : undefined;
   const fields = (body !== null && typeof body === 'object' ? body : {}) as { scimType?: unknown; code?: unknown };
   const scimType = typeof fields.scimType === 'string' && SCIM_TYPE.test(fields.scimType) ? fields.scimType : undefined;
   const errorCode = typeof fields.code === 'string' && ERROR_CODE.test(fields.code) ? fields.code : undefined;
   const ipAddress = canonicalClientAddress(observation.clientAddress);
   return {
     ...(connectionId
-      ? { connectionId }
+      ? { connectionId, ...(organizationId ? { organizationId } : {}) }
       : { presentedCredential: presentedCredentialOf(observation.authorization) }),
     resource: scimResourceOf(observation.endpointPath),
     method: SCIM_METHODS.has(method) ? method : '?',
