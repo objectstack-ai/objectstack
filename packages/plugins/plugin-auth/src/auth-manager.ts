@@ -39,6 +39,9 @@ import {
   // accessor every managed-mode judgement here asks, and nothing else.
   isCloudManaged,
   resolveUserAuthzGrants,
+  // [#31821] The client facts of an admitted MCP call, for its credential_use row.
+  credentialUseClientOf,
+  type CredentialUseClient,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
 import {
@@ -4752,13 +4755,26 @@ export class AuthManager {
    * Only an object this manager's verifier returned is recorded, and only
    * once; a hand-built principal, a copy, or the same object again records
    * nothing. Never throws: the stamp's failure is never the call's failure.
+   *
+   * [#31821] `transport` is the admitted request's headers and peer address.
+   * The address is established from them here, under this deployment's trust
+   * rule ({@link resolveClientAddress}), while the request is still the one
+   * being answered, and travels with the use to the stamp, so the
+   * `credential_use` row names where the call came from. Omitted: the row
+   * records the address as `not_supplied`.
    */
-  recordMcpAccessTokenUse(principal: { userId: string; scopes: string[]; clientId?: string; organizationId?: string }): void {
+  recordMcpAccessTokenUse(
+    principal: { userId: string; scopes: string[]; clientId?: string; organizationId?: string },
+    transport?: { headers?: Record<string, string | string[] | undefined>; remoteAddress?: string },
+  ): void {
     try {
       const verified = principal !== null && typeof principal === 'object' ? this.verifiedMcpPrincipals.get(principal) : undefined;
       if (!verified) return;
       this.verifiedMcpPrincipals.delete(principal);
-      this.scheduleMcpClientLastUse(principal, verified.issuedAt);
+      const client = transport && typeof transport === 'object'
+        ? credentialUseClientOf({ transport: 'http', address: this.resolveClientAddress(transport) }, transport.headers)
+        : undefined;
+      this.scheduleMcpClientLastUse(principal, verified.issuedAt, client);
     } catch {
       // Bookkeeping only: an admitted call is never refused for it.
     }
@@ -4780,6 +4796,7 @@ export class AuthManager {
   private scheduleMcpClientLastUse(
     principal: { userId: string; clientId?: string; organizationId?: string },
     issuedAt: number | undefined,
+    client: CredentialUseClient | undefined,
   ): void {
     if (!principal.clientId) return;
     const stamper = (this.mcpClientLastUse ??= new McpClientLastUseStamper(
@@ -4810,12 +4827,13 @@ export class AuthManager {
             clientId: use.clientId,
             ...(use.organizationId ? { organizationId: use.organizationId } : {}),
             usedAt: use.hour.toISOString(),
+            ...(use.client ? { client: use.client } : {}),
           });
         },
       },
     ));
     runAfterResponse(
-      () => stamper.record({ ...principal, ...(issuedAt !== undefined ? { issuedAt } : {}) }),
+      () => stamper.record({ ...principal, ...(issuedAt !== undefined ? { issuedAt } : {}), ...(client ? { client } : {}) }),
       () => {
         // `record` never rejects; its own failure report is above.
       },

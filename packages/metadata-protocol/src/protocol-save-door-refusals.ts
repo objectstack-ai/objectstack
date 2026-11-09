@@ -61,11 +61,12 @@ import {
 } from '@objectstack/spec/api';
 import { resolveItemLock, withItemLockFamily } from './item-lock.js';
 import type { ItemAddress } from './item-lock.js';
+import { isFederatedObject } from '@objectstack/core';
 import { itemDiscriminator } from '@objectstack/metadata-core';
 import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns, SeedSchema } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
-import { MetadataProtectionFields, validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
+import { MetadataProtectionFields, findNamespaceObjectNameClashes, validateObjectNamespacePrefix, type NamespaceHolder } from '@objectstack/spec/kernel';
 // [#29898] The one walk of which picklists an object body's fields name — the
 // boot audit's. (The `os validate` door reads the parsed artifact with its own
 // walk and agrees with this door by pin, not by sharing it.) ⛔ Never a second
@@ -729,7 +730,7 @@ export async function objectsBoundExternallyTo(
     const storedNames = new Set(stored.map((entry) => entry.name));
     const take = (name: string, obj: unknown) => {
         const o = obj as { datasource?: unknown; external?: unknown } | null | undefined;
-        if (o?.datasource === datasource && o.external !== undefined && o.external !== null) bound.set(name, o.external);
+        if (o?.datasource === datasource && isFederatedObject(o)) bound.set(name, o.external);
     };
     for (const entry of stored) take(entry.name, entry.data);
     const registry = this.engine.registry;
@@ -863,6 +864,71 @@ export function objectNamespacePrefixViolation(
     name: string, packageId: string | null | undefined): string | null {
     if (typeof packageId !== 'string' || packageId === '') return null;
     return validateObjectNamespacePrefix(name, this.engine?.registry?.getPackage?.(packageId)?.manifest?.namespace);
+}
+
+/**
+ * The body of `ObjectStackProtocolImplementation#objectNamespaceObjectNameClash`;
+ * the method's docblock there is its contract.
+ *
+ * [ADR-0150 D6, child K] The spec's predicate (`findNamespaceObjectNameClashes`)
+ * for one object this door is about to make live: its name against every
+ * namespace an installed package declares (a namespace never equals an object
+ * name), and against its own package's namespace + `_custom` (no object is
+ * short-named `custom`). The other direction — a new namespace equal to an
+ * object name — is the install door's: an authored package's namespace lands
+ * through `SchemaRegistry.installPackage`, which asks the same predicate.
+ * The object's own package never counts as a second holder of its namespace.
+ */
+export function objectNamespaceObjectNameClash(
+    this: Pick<SaveDoorRefusalHost, 'engine'>,
+    name: string, packageId: string | null | undefined): string | null {
+    return namespaceObjectNameClashOf(this.engine, name, packageId);
+}
+
+/**
+ * [ADR-0150 D6, child K] {@link objectNamespaceObjectNameClash} for a caller
+ * that holds the engine but no protocol — the `POST /packages/:id/publish`
+ * door (`@objectstack/runtime`), which judges a package's objects before
+ * `MetadataManager.publishPackage` makes them live (that class has no
+ * manifest, so it cannot name an installed namespace). One judge, one
+ * sentence, at every publish door: throws `NAMESPACE_CONFLICT` / 422 (the
+ * save door's envelope) naming every clash among `names`.
+ */
+export function refuseNamespaceObjectNameClashes(
+    engine: unknown, names: Iterable<string>, packageId: string | null | undefined): void {
+    const sentences: string[] = [];
+    for (const name of new Set(names)) {
+        const clash = namespaceObjectNameClashOf(engine, name, packageId);
+        if (clash) sentences.push(clash);
+    }
+    if (sentences.length === 0) return;
+    const err: any = new Error(sentences.join(' '));
+    err.code = 'NAMESPACE_CONFLICT';
+    err.status = 422;
+    throw err;
+}
+
+/** The verdict {@link refuseNamespaceObjectNameClashes} throws on, for one object name. */
+export function namespaceObjectNameClashOf(
+    engine: unknown, name: string, packageId: string | null | undefined): string | null {
+    const registry = (engine as { registry?: unknown } | null | undefined)?.registry as {
+        getPackage?: (id: string) => { manifest?: { namespace?: unknown } } | undefined;
+        getAllPackages?: () => Array<{ manifest?: { id?: unknown; namespace?: unknown } }>;
+    } | undefined;
+    const ownPackage = typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
+    const ownNamespace = ownPackage ? registry?.getPackage?.(ownPackage)?.manifest?.namespace : undefined;
+    const installedNamespaces: NamespaceHolder[] = [];
+    for (const record of registry?.getAllPackages?.() ?? []) {
+        const id = record?.manifest?.id;
+        const namespace = record?.manifest?.namespace;
+        if (typeof namespace !== 'string' || namespace === '' || id === ownPackage) continue;
+        installedNamespaces.push({ namespace, ...(typeof id === 'string' ? { packageId: id } : {}) });
+    }
+    const clashes = findNamespaceObjectNameClashes(
+        { objects: [{ name, ...(typeof ownNamespace === 'string' && ownNamespace !== '' ? { namespace: ownNamespace } : {}), ...(ownPackage ? { packageId: ownPackage } : {}) }] },
+        { namespaces: installedNamespaces },
+    );
+    return clashes.length > 0 ? clashes.map((c) => c.message).join(' ') : null;
 }
 
 /** The seed modes whose load matches incoming records to existing rows by the dataset's `externalId`. */

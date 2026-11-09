@@ -15,11 +15,15 @@
  * (`scopesToAgentPermissionSets`) and the shared assembler puts it on the
  * agent's context as `permissions`, with `principalKind: 'agent'`
  * (`assemble-execution-context.ts` in `@objectstack/core`). No assignment row
- * is read for it. And no `sys_user` row is an agent principal: a user row
- * signs in as a person. So every row of this table is a person's grant, and an
- * agent ceiling is not a person's set — the sentence ADR-0090 D12 (as amended
+ * is read for it. A `sys_user` row can be an agent principal too — an AI
+ * service account (ADR-0151, `principal_kind = agent`) — but its grants are
+ * ordinary assignments under the agent ceiling, never the OAuth agent's
+ * scope-derived sets (ADR-0151 D3: "the agent ceiling sets stay out of the
+ * assignment tables"). So no row of this table, a person's or an account's,
+ * holds an agent ceiling set — the sentence ADR-0090 D12 (as amended
  * 2026-10-17) states for the organization boundary's denylist, held here for
- * every writer.
+ * every writer. What an account may be assigned is judged on its own by
+ * `agent-account-grant-refusal.ts`.
  *
  * A non-system insert or update that would STORE an assignment naming one of
  * those sets is refused, for every caller, a platform administrator included.

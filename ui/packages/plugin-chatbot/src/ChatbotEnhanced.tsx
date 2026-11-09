@@ -47,7 +47,8 @@ import {
   MessageResponse,
   type MessageProps,
 } from './elements/message';
-import { RecordLinkContext } from './recordLink';
+import { ListLinkContext, RecordLinkContext } from './recordLink';
+import type { OpenListLink } from './recordLink';
 import { isHitlContinuation } from './hitlContinuation';
 import type { PublishHealth, PublishOutcome } from './publishHealth';
 import {
@@ -807,6 +808,13 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   onOpenBuilder?: (handoff: { prompt: string; packageId?: string }) => void;
   /** cloud#1658 — open the record an `open_record` hand-off points at. */
   onOpenRecord?: (handoff: { objectName: string; recordId: string; label?: string; reason?: string }) => void;
+  /**
+   * objectstack#31869 — open the list a `/list/OBJECT` link in an answer
+   * names: the object, and optionally a view and the Filter panel conditions.
+   * The host resolves the app and builds the list address from these values.
+   * Absent → a list link keeps the default link-safety dialog.
+   */
+  onOpenList?: OpenListLink;
   /** Heading for the ADR-0057 P4 "Open in Builder" handoff card (default "Build this in the Builder"). */
   builderHandoffTitleLabel?: string;
   /** Label for the handoff card's primary action button (default "Open in Builder →"). */
@@ -2283,6 +2291,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       builderHandoffSupersededTitle = 'A newer request is available',
       onOpenBuilder,
       onOpenRecord,
+      onOpenList,
       planExtendLabel,
       resolveAppLabel,
       planQuestionsLabel = 'Confirm before building',
@@ -4782,7 +4791,10 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                         // objectui#13037 — a record link in the answer opens
                         // the record through the same host opener as the
                         // `open_record` card.
+                        // objectstack#31869 — a list link the same way,
+                        // through the host's list opener.
                         <RecordLinkContext.Provider value={onOpenRecord ?? null}>
+                        <ListLinkContext.Provider value={onOpenList ?? null}>
                           {answerBlocks.map((block, i) =>
                             block.kind === 'charts' ? (
                               <AnswerCharts key={i} charts={block.charts} />
@@ -4800,6 +4812,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                               </React.Fragment>
                             ) : null,
                           )}
+                        </ListLinkContext.Provider>
                         </RecordLinkContext.Provider>
                       ) : null}
                       {!isUser && sources.length > 0 ? (
