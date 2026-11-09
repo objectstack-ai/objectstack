@@ -67,7 +67,7 @@ function check(dir: string, versions: readonly string[] = PUBLISHED) {
   return { findings, asked };
 }
 
-const codes = (fs: GalleryFinding[]) => fs.map((f) => f.code);
+const codes = (fs: GalleryFinding[]) => fs.map((f) => f.kind);
 const only = (fs: GalleryFinding[], code: FindingCode) => {
   expect(codes(fs)).toEqual(fs.map(() => code));
   return fs;
@@ -129,7 +129,7 @@ describe('checkGallery — complete app directories', () => {
   it('an entry with no directory', () => {
     const dir = tree();
     rmSync(join(dir, APP), { recursive: true });
-    expect(check(dir).findings).toEqual([{ code: 'app-missing', path: APP, message: `index.json lists \`${CARD_ID}\`, and there is no ${APP}/ directory` }]);
+    expect(check(dir).findings).toEqual([{ kind: 'app-missing', path: APP, message: `index.json lists \`${CARD_ID}\`, and there is no ${APP}/ directory` }]);
   });
 
   it.each([APP_LAYOUT.readme, APP_LAYOUT.runRecord, APP_LAYOUT.scorecardJson, APP_LAYOUT.scorecardMd, APP_LAYOUT.transcriptJson, APP_LAYOUT.transcriptMd])('an app directory without %s', (file) => {
@@ -211,13 +211,13 @@ describe('checkGallery — stray files, anywhere in the tree', () => {
     const dir = tree();
     mkdirSync(join(dir, APP, 'source', 'node_modules', 'left-pad'), { recursive: true });
     writeFileSync(join(dir, APP, 'source', 'node_modules', 'left-pad', 'index.js'), "module.exports = '/home/someone/x';\n");
-    expect(check(dir).findings).toEqual([{ code: 'node-modules', path: `${APP}/source/node_modules`, message: 'an installed dependency tree never belongs in the gallery' }]);
+    expect(check(dir).findings).toEqual([{ kind: 'node-modules', path: `${APP}/source/node_modules`, message: 'an installed dependency tree never belongs in the gallery' }]);
   });
 
   it('a symbolic link, which is not followed', () => {
     const dir = tree();
     symlinkSync('/etc', join(dir, APP, 'source', 'etc'));
-    expect(only(check(dir).findings, 'symlink').map((f) => f.path)).toEqual([`${APP}/source/etc`]);
+    expect(only(check(dir).findings, 'symbolic-link').map((f) => f.path)).toEqual([`${APP}/source/etc`]);
   });
 
   it.each([
@@ -251,7 +251,7 @@ describe('checkGallery — stray files, anywhere in the tree', () => {
 
 describe('every finding code has a case above', () => {
   it('the codes are the ones the header lists', () => {
-    expect([...FINDING_CODES]).toEqual(['index-json', 'app-missing', 'app-incomplete', 'app-screenshots', 'app-unlisted', 'framework-version', 'env-file', 'node-modules', 'symlink', 'local-path']);
+    expect([...FINDING_CODES]).toEqual(['index-json', 'app-missing', 'app-incomplete', 'app-screenshots', 'app-unlisted', 'framework-version', 'env-file', 'node-modules', 'symbolic-link', 'local-path']);
   });
 });
 
@@ -279,7 +279,7 @@ describe('export-gallery --check — the command line', () => {
       '.env: an environment file never belongs in the gallery'.replace(/^/, 'env-file '),
       `gallery check: 2 finding(s) · ${dir}`,
     ]);
-    expect(renderFinding({ code: 'env-file', path: '.env', message: 'a\n  b' })).toBe('env-file .env: a b');
+    expect(renderFinding({ kind: 'env-file', path: '.env', message: 'a\n  b' })).toBe('env-file .env: a b');
   });
 
   it('usage errors exit 2: no directory, a missing one, or another flag beside it', () => {

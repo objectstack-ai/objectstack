@@ -30,7 +30,7 @@
  *                     {@link FRAMEWORK_PACKAGE} published on npm.
  *   env-file          a file or directory whose name starts `.env`, anywhere.
  *   node-modules      a `node_modules` directory, anywhere.
- *   symlink           a symbolic link, anywhere: the exporter writes none, and
+ *   symbolic-link     a symbolic link, anywhere: the exporter writes none, and
  *                     the content scan below cannot see what one points at.
  *   local-path        a file whose text names an absolute path on a local
  *                     machine ({@link LOCAL_PATH}); the exporter redacts every
@@ -61,13 +61,14 @@ export const FINDING_CODES = [
   'framework-version',
   'env-file',
   'node-modules',
-  'symlink',
+  'symbolic-link',
   'local-path',
 ] as const;
 export type FindingCode = (typeof FINDING_CODES)[number];
 
 export interface GalleryFinding {
-  code: FindingCode;
+  /** Which finding it is, one of {@link FINDING_CODES}: a diagnostic code, never an ADR-0112 wire code. */
+  kind: FindingCode;
   /** Relative to the gallery root, forward slashes; `.` for the root itself. */
   path: string;
   message: string;
@@ -75,7 +76,7 @@ export interface GalleryFinding {
 
 /** One finding as the command line prints it: `CODE PATH: MESSAGE`, one line. */
 export function renderFinding(f: GalleryFinding): string {
-  return `${f.code} ${f.path}: ${f.message.replace(/\s*\n\s*/g, ' ')}`;
+  return `${f.kind} ${f.path}: ${f.message.replace(/\s*\n\s*/g, ' ')}`;
 }
 
 export interface CheckOptions {
@@ -112,13 +113,16 @@ const REQUIRED_FILES = [APP_LAYOUT.readme, APP_LAYOUT.runRecord, APP_LAYOUT.scor
 /** The file `source/` must hold: the project file the exporter refuses to export without (`source.ts`). */
 const SOURCE_REQUIRED = 'objectstack.config.ts';
 
+/** Records one finding of this kind. */
+type AddFinding = (kind: FindingCode, path: string, message: string) => void;
+
 const isDir = (p: string) => existsSync(p) && lstatSync(p).isDirectory();
 const isFile = (p: string) => existsSync(p) && lstatSync(p).isFile();
 
 /** Every finding on the gallery tree at `dir`, in a stable order: the index, the apps, then the tree scan. */
 export function checkGallery(dir: string, opts: CheckOptions): GalleryFinding[] {
   const findings: GalleryFinding[] = [];
-  const add = (code: FindingCode, path: string, message: string) => findings.push({ code, path, message });
+  const add: AddFinding = (kind, path, message) => void findings.push({ kind, path, message });
 
   // ── the index ────────────────────────────────────────────────────────────
   const indexFile = join(dir, 'index.json');
@@ -177,7 +181,7 @@ export function checkGallery(dir: string, opts: CheckOptions): GalleryFinding[] 
   return findings;
 }
 
-function checkScreenshots(dir: string, app: GalleryApp, add: (code: FindingCode, path: string, message: string) => void): void {
+function checkScreenshots(dir: string, app: GalleryApp, add: AddFinding): void {
   const rel = `apps/${app.id}/${APP_LAYOUT.screenshots}`;
   if (app.screenshots.length === 0) add('app-screenshots', rel, `index.json lists no screenshot for \`${app.id}\`: an app is shown with its screenshots`);
   const listed = new Set(app.screenshots.map((s) => s.path));
@@ -190,12 +194,12 @@ function checkScreenshots(dir: string, app: GalleryApp, add: (code: FindingCode,
   }
 }
 
-function scanTree(root: string, rel: string, add: (code: FindingCode, path: string, message: string) => void): void {
+function scanTree(root: string, rel: string, add: AddFinding): void {
   for (const e of readdirSync(join(root, rel), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
     const p = rel ? `${rel}/${e.name}` : e.name;
     if (!rel && e.name === '.git') continue;
     if (e.isSymbolicLink()) {
-      add('symlink', p, 'a symbolic link: the exporter writes none, and what it points at is not checked');
+      add('symbolic-link', p, 'a symbolic link: the exporter writes none, and what it points at is not checked');
       continue;
     }
     if (ENV_NAME.test(e.name)) add('env-file', p, 'an environment file never belongs in the gallery');
