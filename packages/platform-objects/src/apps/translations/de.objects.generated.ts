@@ -88,6 +88,18 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "KI-Zugriff",
         help: "Ob dieser Benutzer einen KI-Platz innehat. Ein Platz verleiht die Berechtigung `ai_seat`, die die KI-Assistenten in der App öffnet (Erstellen und Fragen). Wie viele Benutzer einen innehaben können, begrenzt die Zahl der Plätze in Ihrer Lizenz."
       },
+      principal_kind: {
+        label: "Prinzipaltyp",
+        help: "Ob dieser Benutzer eine Person oder ein KI-Dienstkonto ist. Ein KI-Dienstkonto meldet sich nie an und handelt nur über seine eigenen API-Schlüssel. Wird beim Anlegen des Benutzers festgelegt und ändert sich nie.",
+        options: {
+          human: "Person",
+          agent: "KI-Dienstkonto"
+        }
+      },
+      accountable_user_id: {
+        label: "Verantwortliche Person",
+        help: "Bei einem KI-Dienstkonto die dafür verantwortliche Person. Bei einer Person leer. Die eigenen Berechtigungen der verantwortlichen Person gehen nie auf das Konto über."
+      },
       image: {
         label: "Profilbild"
       },

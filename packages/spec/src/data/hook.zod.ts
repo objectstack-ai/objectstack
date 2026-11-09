@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
@@ -423,7 +424,7 @@ export const HookSchema = lazySchema(() => strictObject(
    * Unique identifier for the hook
    * Required for debugging and overriding.
    */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Hook unique name (snake_case)'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Hook unique name (snake_case)'),
 
   /**
    * Human readable label

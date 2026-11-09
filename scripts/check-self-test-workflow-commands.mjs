@@ -430,7 +430,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'current form, line start only': 3,
   'innocent output': 4,
   'prefilter reads CODE, never prose': 5,
-  'end to end on a real self-test that prints workflow-command prose': 5,
+  'end to end on a real self-test that prints workflow-command prose': 7,
   'the population is imported, never re-walked': 9,
   'the scripts/ population is declared here': 6,
 });
@@ -541,6 +541,13 @@ function selfTest() {
     ok(r.spawnError === null, `${target} --self-test could not be spawned: ${r.spawnError}`);
     ok(r.bytes > 0, `${target} --self-test printed nothing, so nothing was scanned`);
     ok(scanOutput(r.output).length === 0, `${target} --self-test still prints a line the runner would parse — this is the #11886 defect, live`);
+    // N1: the clean scan above is vacuous on token-free output, so the output
+    // must still CARRY the mid-line token the scan is meant to read as innocent.
+    const midLine = new RegExp(`^[ \\t]*[^\\s:][^\\n]*?${COLONS}[A-Za-z][\\w-]*[^\\n]*?${COLONS}`, 'm');
+    ok(midLine.test(r.output), `${target} --self-test no longer prints a mid-line workflow-command token, so the clean scan above passed vacuously`);
+    // N2: the specimen must be one this gate's real sweep runs, not a file only this case reads.
+    const population = collectPopulation();
+    ok(population.refusal === null && population.population.includes(target), `${target} is not in the collected population, so the end-to-end case scans a script the sweep never runs`);
   }
 
   // ── The population is the sibling gate's, and this file takes no walk (#15414) ──

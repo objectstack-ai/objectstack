@@ -53,12 +53,12 @@ const CREATED = 'dogfood_created_flow_20862';
 const META_STORED = 'dogfood_meta_stored_flow_20862';
 const REMOVED = 'dogfood_removed_flow_20862';
 /**
- * A name the engine registers and the store refuses: `FlowSchema.name` admits a
- * leading underscore, the metadata item-name grammar does not. So the engine's
- * registration succeeds and the save fails — a real store refusal, reached
- * through the public door.
+ * A name created with {@link gateRefused}'s definition: the engine registers it
+ * and the store's publish gate refuses the save, so the registration succeeds
+ * and the save fails — a real store refusal, reached through the public door.
+ * Letter-led, because a `_`-led flow name is refused before the engine (ADR-0150 D5).
  */
-const UNSAVABLE = '_dogfood_unsavable_flow_20862';
+const UNSAVABLE = 'dogfood_unsavable_flow_20862';
 
 const UPDATED_LABEL = 'Updated through the automation door';
 
@@ -161,10 +161,10 @@ describe('the /automation definition doors persist what they register (showcase,
     });
 
     it('a create whose save the store refuses answers the store\'s refusal and leaves no engine registration', async () => {
-        const created = await call('POST', '/automation', definition(UNSAVABLE));
+        const created = await call('POST', '/automation', gateRefused(UNSAVABLE));
 
-        expect(created.status, JSON.stringify(created.json)).toBe(400);
-        expect(dispatcherCode(created.json)).toBe('INVALID_REQUEST');
+        expect(created.status, JSON.stringify(created.json)).toBe(422);
+        expect(dispatcherCode(created.json)).toBe('INVALID_METADATA');
         expect((await call('GET', `/automation/${UNSAVABLE}`)).status).toBe(404);
     });
 

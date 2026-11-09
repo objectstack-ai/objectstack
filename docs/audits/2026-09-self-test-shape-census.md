@@ -373,7 +373,7 @@ tree against the ~30 s a per-PR gate can spend.
 | `scripts/pm/check-label-desc-cap.mjs` | ROSTER | HELD | ✗ check-label-desc-cap self-test: selfTest() returned without reaching i |
 | `scripts/pm/check-skill-id-lint.mjs` | ROSTER | HELD | ✗ check-skill-id-lint self-test: selfTest() returned without reaching it |
 | `scripts/pm/check-skill-line-ratchet.mjs` | ROSTER | HELD | ✗ check-skill-line-ratchet self-test: selfTest() returned without reachi |
-| `scripts/pm/ci-failure.mjs` | ROSTER | HELD | ✗ ci-failure self-test: selfTest() returned without reaching its verdict |
+| `scripts/pm/ci-failure.mjs` | ROSTER | HELD | ✗ ci-failure self-test: selfTest() returned without reaching its verdict (note: tool deleted in #31752) |
 | `scripts/pm/dispatch-gates.mjs` | NONE | HELD | ✗ dispatch-gates self-test: selfTest() returned without reaching its ver |
 | `scripts/pm/git-history.mjs` | ROSTER | HELD | ✗ git-history self-test: selfTest() returned without reaching its verdic |
 | `scripts/pm/release-rehearsal-clone.mjs` | ROSTER | HELD | ✗ release-rehearsal-clone self-test: selfTest() returned without reachin |

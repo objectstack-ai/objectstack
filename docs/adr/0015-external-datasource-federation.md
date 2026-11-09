@@ -4,7 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source of truth per metadata type)
 **Consumers**: `@objectstack/spec`, `@objectstack/runtime`, `@objectstack/objectql`, `@objectstack/plugins/driver-sql`, `@objectstack/services/service-ai`, `@objectstack/cli`, `../objectui`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note. #31328 (2026-11-08) — §4.6 names the `oracle` vocabulary, with how `NUMBER(p,s)` and `RAW(16)` are read, and its federation-only scope; §5.1 gains the federation-only arm of the DDL gate. #31327 (2026-11-08) — a second federation-only driver, SQL Server (`mssql`): §4.6 names the `mssql` vocabulary and its one dialect-only lossy rule, and the two dialects' lossy moves share one table; §5.1's federation-only arm names both drivers.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27), attribution only — see the note below. D7 (2026-10-29, ruling 6486136301 on #27298) — an API-backed datasource may borrow a declared connector instance's credential through `external.connector`; see the D7 note below. #27688 (2026-10-30), example only — §8's `credentialsRef` is a `sys_secret:` handle, the only form the shipped secret binder resolves; see the note under §8. #27917 (2026-10-30), dialect list only — §4.6 names the `odata` vocabulary the matrix gained with #27745. #28208 (2026-10-31, ruling 6525963988 on #27687) — a datasource defined in code reads its credential at connect from `OS_DATASOURCE_<NAME>_PASSWORD`, behind the host switch `OS_DATASOURCE_ENV_CREDENTIALS`; see the note under §10 and the correction in the D7 note. 2026-11-03 (maintainer ruling in the security channel, D1 = B, D2 = (c2)+(a)) — under a walled tenancy posture every external object states its organization scope, or the boot is refused by name; see the note under §10 and the sentence added to the D7 note. #31328 (2026-11-08) — §4.6 names the `oracle` vocabulary, with how `NUMBER(p,s)` and `RAW(16)` are read, and its federation-only scope; §5.1 gains the federation-only arm of the DDL gate. #31327 (2026-11-08) — a second federation-only driver, SQL Server (`mssql`): §4.6 names the `mssql` vocabulary and its one dialect-only lossy rule, and the two dialects' lossy moves share one table; §5.1's federation-only arm names both drivers. #31592 (2026-11-09) — §4.6: with the `HEXTORAW` bind of #31390 on `main`, an Oracle `RAW(16)` column backs a `lookup`, `master_detail` or `user` field exactly again; only its `text` pairing stays `'lossy'`.
 
 > **Amendment note D7 (2026-10-29, ruling 6486136301, letter A) — a second credential channel.**
 > §10 says credentials reach a datasource only through `credentialsRef`. That stays true for a
@@ -429,9 +429,11 @@ read before the matrix strips them (SQL Server's `(max)` length does not: an
 integral `NUMBER(p)` / `NUMBER(p,0)` (a negative scale counts its `p − s`
 digits) is `integer` up to nine digits and `bigint` beyond, `NUMBER(*,0)` —
 Oracle's `INTEGER` — included; a bare `NUMBER` is `decimal`. `RAW(16)` is
-`uuid`, any other `RAW` `binary`; on `oracle` every pairing over that `uuid` is
-judged `'lossy'`, not exact, because the driver reads it as a UUID string but
-cannot yet bind that string back to `RAW` for a filter or a write (#31390). `DATE` carries a time of day, so it is
+`uuid`, any other `RAW` `binary`. The driver reads it as a UUID string and binds
+that string back through `HEXTORAW` for a comparison, a write and a by-id key
+(#31390), so a `lookup`, `master_detail` or `user` field over it is exact; a
+`text` field over it stays `'lossy'` on `oracle`, because its pattern operators
+match the column's hex text, not the string it reads. `DATE` carries a time of day, so it is
 `datetime`. A pre-23ai flag column (`NUMBER(1)` / `CHAR(1)`) is judged as the
 integer or text it is, never coerced to `boolean`. The `oracle` and `mssql` driver ids
 serve federation only: a datasource naming either with `schemaMode: 'managed'`
@@ -443,7 +445,7 @@ sync would have nothing to send.
 names, and maps `timestamp` to binary, because on SQL Server it is the
 `rowversion` counter and not a date-time. A dialect moves a pairing to
 `'lossy'` in one table, `DIALECT_LOSSY_RULES`, and only ever toward `'lossy'`:
-`oracle` demotes the exact pairings of `uuid` (above), and `mssql` adds one, a
+`oracle` demotes the exact `text` pairing of `uuid` (above), and `mssql` adds one, a
 text column backing a `json`, `tags` or `multiselect` field, because SQL Server
 keeps JSON in `nvarchar(max)` and the SQL driver stores those fields there as
 JSON text (#31327).
