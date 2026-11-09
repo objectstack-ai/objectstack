@@ -27,6 +27,7 @@ import {
 import {
   unregisterGrantPermissionSetNameHooks,
 } from './grant-permission-set-name.js';
+import { unregisterPermissionSetPackageStamp } from './stored-permission-set-package-stamp.js';
 import {
   SHARING_RULES_SERVICE,
   type DeclaredSharingRuleReader,
@@ -2403,6 +2404,7 @@ export class SecurityPlugin implements Plugin {
   async destroy(): Promise<void> {
     for (const unsubscribe of this.metadataChangeUnsubscribes.splice(0)) unsubscribe();
     unregisterGrantPermissionSetNameHooks(this.ql);
+    unregisterPermissionSetPackageStamp(this.ql);
   }
 
   /**

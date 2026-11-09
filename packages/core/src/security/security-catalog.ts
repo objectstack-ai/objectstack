@@ -66,10 +66,17 @@
  * declared-closure walk, `packageResolutionClosure`
  * (`@objectstack/metadata-core`). ⛔ No second rule, no second closure.
  *
- *  - **Who asks.** A stored grant (`sys_user_permission_set`) carries only the
- *    name today (its package column is ADR-0150 D8's R1), so it — and every
- *    other by-name read with no position — resolves as a caller with no
- *    package. A position's `permissionSets` resolves from the package that
+ *  - **Who asks.** A stored reference that carries its package column
+ *    (ADR-0150 D8: a grant's `sys_user_permission_set.permission_set_package`,
+ *    R1; a suggestion's, R3) names the exact holder, passed as
+ *    {@link SecurityCatalogReferenceScope.packageId}: that package's set or
+ *    nothing. One whose column is null resolves by D3 from the package that
+ *    wrote it ({@link SecurityCatalogReferenceScope.callerPackageId}, R3's
+ *    `package_id`), or as a caller with no package (a grant, R1, and every
+ *    other by-name read with no position) — so two holders are refused,
+ *    naming every candidate, and never picked
+ *    ({@link storedPermissionSetScope} builds the scope from a row). A
+ *    position's `permissionSets` resolves from the package that
  *    declared the position (ADR-0150 D7), passed as
  *    {@link SecurityCatalogReferenceScope.position}. Three positions are the
  *    environment's reference instead, resolved as a caller with no package:
@@ -267,6 +274,36 @@ export interface SecurityCatalogReferenceScope {
    * for a permission set only.
    */
   readonly position?: SecurityCatalogEntry;
+  /**
+   * [ADR-0150 D8] The package a stored reference names beside the set — its
+   * `permission_set_package` column (R1, R3): the exact holder, never a
+   * caller. The answer is that package's set or not-found; no other holder
+   * stands in for it. Read for a permission set only, ahead of every other
+   * member here.
+   */
+  readonly packageId?: string;
+  /**
+   * [ADR-0150 D3] The package that WROTE a stored reference whose package
+   * column is null (R3's `package_id`): the set resolves from it, by D3.
+   * `null` is a caller with no package. Read for a permission set only,
+   * ahead of {@link SecurityCatalogReferenceScope.position}.
+   */
+  readonly callerPackageId?: string | null;
+}
+
+/**
+ * [ADR-0150 D8] The scope a stored reference to a permission set is read in:
+ * its package column when it carries one (the exact holder), else the
+ * package that wrote it (R3's `package_id`), else none — a caller with no
+ * package (R1). Blank values read as absent.
+ */
+export function storedPermissionSetScope(
+  packageColumn: unknown,
+  writerPackageId?: unknown,
+): SecurityCatalogReferenceScope | undefined {
+  if (typeof packageColumn === 'string' && packageColumn.trim() !== '') return { packageId: packageColumn.trim() };
+  if (typeof writerPackageId === 'string' && writerPackageId.trim() !== '') return { callerPackageId: writerPackageId.trim() };
+  return undefined;
 }
 
 /** [ADR-0150 D3] A by-name read's whole answer — a refusal included, naming every candidate. */
@@ -499,10 +536,26 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
     name: string,
     reference: SecurityCatalogReferenceScope | undefined,
   ): Promise<SecurityCatalogResolution> => {
+    const exact = reference?.packageId;
+    if (typeof exact === 'string' && exact !== '') {
+      // [ADR-0150 D8] The stored package column: that package's set, or
+      // nothing — never another holder of the name, and never the metadata
+      // service's by-name body.
+      let item: unknown;
+      try {
+        item = scope.getPackageScopedItem('permission', name, exact);
+      } catch (error) {
+        throw unreadable('registry', 'permission', error);
+      }
+      const definition = servable(item, name);
+      return definition ? { status: 'resolved', entry: entry('permission', definition, 'registry') } : { status: 'not-found' };
+    }
     let caller: string | null;
     let outcome: PackageScopedResolution;
     try {
-      caller = referenceCaller(scope, reference?.position);
+      caller = reference && 'callerPackageId' in reference
+        ? (reference.callerPackageId ?? null)
+        : referenceCaller(scope, reference?.position);
       outcome = resolvePackageScopedHolders(
         { type: 'permission', name, callerPackageId: caller },
         {

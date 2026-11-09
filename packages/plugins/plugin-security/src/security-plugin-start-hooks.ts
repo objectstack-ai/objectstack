@@ -51,6 +51,7 @@ import type { SecurityPlugin } from './security-plugin.js';
 import { POSITION_ASSIGNMENT_OBJECT, createPositionCatalogRefusal } from './position-catalog-refusal.js';
 import { registerGrantHolderMembershipRefusal } from './grant-holder-membership-refusal.js';
 import { registerGrantPermissionSetNameHooks } from './grant-permission-set-name.js';
+import { registerPermissionSetPackageStamp } from './stored-permission-set-package-stamp.js';
 import { registerAgentCeilingGrantRefusal } from './agent-ceiling-grant-refusal.js';
 import { registerAgentAccountGrantRefusal } from './agent-account-grant-refusal.js';
 import { reportCatalogReferences } from './catalog-reference-report.js';
@@ -128,6 +129,17 @@ export function registerStartHooks(
     ctx.logger.warn(
       '[security] the ObjectQL engine exposes no hook registry — a sys_user_permission_set write naming a ' +
         'permission set the security catalog does not hold is NOT refused',
+    );
+  }
+  // [ADR-0150 D8 R1/R3] Every write naming a permission set in a grant or a
+  // suggestion stamps `permission_set_package` with the set's holder, by the
+  // boot backfill's one rule, once the holders are sealed — the column the
+  // readers resolve the row by. Engine hooks; see
+  // `stored-permission-set-package-stamp.ts`.
+  if (!registerPermissionSetPackageStamp(ql)) {
+    ctx.logger.warn(
+      '[security] the ObjectQL engine exposes no hook registry — a grant or suggestion written now names no ' +
+        'permission-set package until the next boot binds it',
     );
   }
   // [ADR-0090 D10] A `sys_user_permission_set` row is a person's grant, and an

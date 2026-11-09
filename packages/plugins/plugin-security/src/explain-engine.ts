@@ -26,6 +26,7 @@ import {
   readDisabledCatalogNames,
   resolveUserAuthzGrants,
   securityCatalogReaderOf,
+  storedPermissionSetScope,
   vetOrganizationClaim,
 } from '@objectstack/core';
 import {
@@ -702,7 +703,9 @@ async function collectGrantProvenance(
       const held = new Set<string>();
       for (const g of [...expiredRows, ...activeRows]) {
         const n = grantSetNameOf(g) as string;
-        if (!held.has(n) && catalog && (await catalog.resolve('permission', n))) held.add(n);
+        // [ADR-0150 D8 R1] Asked as the resolver asks it: the package the
+        // grant names, else no caller (`storedPermissionSetScope`).
+        if (!held.has(n) && catalog && (await catalog.resolve('permission', n, storedPermissionSetScope((g as any).permission_set_package)))) held.add(n);
       }
       for (const g of expiredRows) {
         const n = grantSetNameOf(g) as string;
