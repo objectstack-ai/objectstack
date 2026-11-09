@@ -39,6 +39,7 @@ import {
   isMultiValueField,
 } from '@objectstack/spec/data';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
+import { SystemFieldName } from '@objectstack/spec/system';
 
 // ───────────────────────────────────────────────────────────────────────
 // Unique-scope vocabulary (ADR-0120)
@@ -2083,7 +2084,95 @@ function declaredIndexSet(args: {
     const norm = normalizeDeclaredIndex(table, idx, tenantField);
     if (norm) out.push(norm);
   }
+  out.push(...implicitReferenceIndexesOver(table, fields, tenantField, out));
   return out;
+}
+
+/**
+ * The field types whose single-valued column holds ONE related row's id: the
+ * column a read by parent filters on (#31882).
+ */
+const IMPLICIT_INDEX_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'user']);
+
+/**
+ * The platform's own system column names. The injection pass puts
+ * `created_by` / `updated_by` / `owner_id` / `owning_business_unit_id` on
+ * nearly every object, and the tenant column has the registry-provisioned
+ * tenant index already, so none of them is implicitly indexed (#31882 seat
+ * ruling, scope B: their write cost is not paid for by a measured read).
+ */
+const SYSTEM_COLUMN_NAMES: ReadonlySet<string> = new Set<string>(Object.values(SystemFieldName));
+
+/**
+ * Is this field a column the driver indexes without a declaration (#31882)?
+ * An authored, single-valued `master_detail` / `lookup` / `user` field: a read
+ * by parent (`controlled_by_parent`, a related list, the referential-integrity
+ * read on a parent delete) filters on exactly this column, and with no index
+ * it walks the whole organization or scans the table.
+ *
+ * Multi-valued references are JSON and are skipped. System columns
+ * ({@link SYSTEM_COLUMN_NAMES}) and the tenant column are skipped.
+ */
+export function isImplicitlyIndexedReference(name: string, field: any, tenantField: string | null): boolean {
+  if (!IMPLICIT_INDEX_REFERENCE_TYPES.has(String(field?.type ?? ''))) return false;
+  if (isMultiValueField({ type: String(field.type), multiple: field.multiple === true })) return false;
+  if (name === tenantField || SYSTEM_COLUMN_NAMES.has(name) || BUILTIN_COLUMNS.has(name)) return false;
+  return true;
+}
+
+/**
+ * The implicit non-unique `(column)` index each {@link isImplicitlyIndexedReference}
+ * field gets, unless a declared index (field-level `unique` included) already
+ * has that column as its LEADING key part.
+ *
+ * Named by {@link buildIndexName}, `idx_<table>_<column>`: the name an
+ * author's own `{ fields: [column] }` produces. So a later declaration
+ * converges on this index instead of building a second one, and the orphan
+ * pass ({@link isManagedIndexName}) recognises it. No organization key part:
+ * the related row's id is unique on its own, and a declared non-unique index
+ * never gets one either (ADR-0120 D1).
+ *
+ * It joins the declared set in {@link declaredIndexSet}, so the boot sync
+ * creates it, `os migrate plan` reports it as `create_index` on a database
+ * that lacks it, and the orphan pass never proposes dropping it.
+ */
+function implicitReferenceIndexesOver(
+  table: string,
+  fields: Record<string, any>,
+  tenantField: string | null,
+  declared: ReadonlyArray<ExpectedIndex>,
+): ExpectedIndex[] {
+  const leading = new Set(declared.map((i) => i.columns[0]));
+  const names = new Set(declared.map((i) => i.name));
+  const out: ExpectedIndex[] = [];
+  for (const [column, field] of Object.entries<any>(fields ?? {})) {
+    if (!isImplicitlyIndexedReference(column, field, tenantField) || leading.has(column)) continue;
+    const name = buildIndexName(table, [column], false);
+    if (names.has(name)) continue;
+    names.add(name);
+    out.push({ name, columns: [column], unique: false });
+  }
+  return out;
+}
+
+/**
+ * The implicit reference indexes for one object, against its declared set
+ * (see {@link implicitReferenceIndexesOver}). The boot sync
+ * (`syncTableIndexes`) adds these to what it materializes.
+ */
+export function implicitReferenceIndexes(args: {
+  table: string;
+  fields: Record<string, any>;
+  tenantField: string | null;
+  declaredIndexes?: DeclaredIndexInput[];
+}): ExpectedIndex[] {
+  const { table, fields, tenantField, declaredIndexes } = args;
+  const declared = uniqueIndexesFromFields(table, fields, tenantField);
+  for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
+    const norm = normalizeDeclaredIndex(table, idx, tenantField);
+    if (norm) declared.push(norm);
+  }
+  return implicitReferenceIndexesOver(table, fields, tenantField, declared);
 }
 
 /**
@@ -2214,19 +2303,15 @@ export function indexedKeyColumns(args: {
   tenantField: string | null;
   declaredIndexes?: DeclaredIndexInput[];
 }): Map<string, { unique: boolean }> {
-  const { table, fields, tenantField, declaredIndexes } = args;
   const out = new Map<string, { unique: boolean }>();
-  const record = (idx: ExpectedIndex) => {
+  // The one composition (implicit reference indexes included, #31882), so the
+  // columns this answers are exactly the ones the index sync keys.
+  for (const idx of declaredIndexSet(args)) {
     for (const column of idx.columns) {
       const prev = out.get(column);
       if (prev) prev.unique ||= idx.unique;
       else out.set(column, { unique: idx.unique });
     }
-  };
-  for (const idx of uniqueIndexesFromFields(table, fields, tenantField)) record(idx);
-  for (const idx of Array.isArray(declaredIndexes) ? declaredIndexes : []) {
-    const norm = normalizeDeclaredIndex(table, idx, tenantField);
-    if (norm) record(norm);
   }
   return out;
 }
