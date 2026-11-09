@@ -1601,3 +1601,29 @@ describe('create-user in multi-org mode: the new user joins the administrator\'s
     expect((action?.params ?? []).map((p) => p.name ?? p.field)).not.toContain('organizationId');
   });
 });
+
+describe("create-user: the must_change_password stamp names the administrator the route's scope carries", () => {
+  // `auth-plugin.ts` runs this door inside `runAttributedToUser(actor, …)`; the
+  // stamp builds its context with `authSystemWriteContext()`, so the
+  // `sys_user` write carries the administrator on the attribution channel
+  // (plugin-audit's `user_id` / `actor`) and still authorizes as the system.
+  it('inside the scope: attributed, still the system; outside it: the system alone', async () => {
+    const { runAttributedToUser } = await import('./auth-actor-attribution.js');
+    const stampContext = (m: ReturnType<typeof makeDeps>) => {
+      const stamp = callsOf(m.engineUpdate).filter(([object, row]) => object === 'sys_user' && 'must_change_password' in row);
+      expect(stamp).toHaveLength(1);
+      return (stamp[0] as unknown as [string, unknown, { context: Record<string, unknown> }])[2].context;
+    };
+
+    const scoped = makeDeps();
+    const res = await runAttributedToUser(ACTOR, () =>
+      runAdminCreateUser(scoped.deps, makeRequest({ email: 'new.user@example.com', generatePassword: true }), ACTOR),
+    );
+    expect(res.status).toBe(200);
+    expect(stampContext(scoped)).toEqual({ isSystem: true, positions: [], permissions: [], attributedUserId: ACTOR.id });
+
+    const bare = makeDeps();
+    expect((await runAdminCreateUser(bare.deps, makeRequest({ email: 'new.user@example.com', generatePassword: true }), ACTOR)).status).toBe(200);
+    expect(stampContext(bare)).toEqual({ isSystem: true, positions: [], permissions: [] });
+  });
+});
