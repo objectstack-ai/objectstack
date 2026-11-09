@@ -29,6 +29,11 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // ADR-0144 D5 — the home field's read-only hint (`HomeAmountHint`).
   'fields.currencyHome.convertedAt': 'Converted at {{rate}} on {{date}}',
   'fields.currencyHome.homeCurrency': 'In the home currency (rate 1)',
+  'fields.currencyHome.preview': '≈ {{amount}} at {{rate}} on {{date}}',
+  'fields.currencyHome.previewSame': '≈ {{amount}} (home currency)',
+  'fields.currencyHome.awaitingRate': 'No {{currency}} rate on or before {{date}}: saving is refused until one is added',
+  'fields.currencyHome.awaitingDate': 'Set the document date to see the home amount',
+  'fields.currencyHome.rateUnreadable': 'Converted to the home currency when you save',
   'fields.boolean.offBadge': '{{label}} — Off',
   'fields.boolean.completed': 'Completed',
   'fields.boolean.notCompleted': 'Not completed',

@@ -45,6 +45,10 @@
  *   - CONTROL, a register failure that declares no status (the runtime's own
  *     fault): the lenient answer it had — `200`, `hotLoaded: false`, ledgered —
  *     and the restart heals it: the next boot loads the package;
+ *   - (cloud#3814 R6) under declared replicas on the Redis cluster driver, the
+ *     install and uninstall doors refuse `409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED`
+ *     with nothing written, registered or withdrawn; on a single node, on the
+ *     in-process driver or with no cluster service they act as before;
  *   - (#31566) a ledger entry an earlier build wrote for a register the engine
  *     refuses: at boot nothing of it loads, and the listing marks it
  *     `notLoaded: { code, message }` from the refusal; a healthy entry and a
@@ -185,7 +189,7 @@ function serveVersions(versions: Record<string, Bag>) {
  * restart. `failRegisterOf` makes the engine's register throw an undeclared
  * fault for that one package id.
  */
-async function bootPlugin(failRegisterOf?: string, opts: { failSideEffectsOf?: string } = {}) {
+async function bootPlugin(failRegisterOf?: string, opts: { failSideEffectsOf?: string; clusterDriver?: string } = {}) {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false } as never);
     kernels.push(kernel);
     await kernel.use(new ObjectQLPlugin());
@@ -213,6 +217,8 @@ async function bootPlugin(failRegisterOf?: string, opts: { failSideEffectsOf?: s
             get manifests() { return (ql as unknown as { manifests: Map<string, unknown> }).manifests; },
             syncSchemas: async () => undefined,
         }),
+        // [cloud#3814 R6] The composed cluster service, by its driver, when a case names one.
+        ...(opts.clusterDriver === undefined ? {} : { cluster: { driver: opts.clusterDriver } }),
     };
     const ctx = {
         hook: (e: string, h: () => Promise<void>) => hooks.set(e, h),
@@ -558,4 +564,83 @@ describe('a ledgered entry whose register the engine refuses at boot is listed n
         expect(item).not.toHaveProperty('notLoaded');
         expect(item.withSampleData).toBe(false);
     });
+});
+
+describe('install-local refuses a package change under declared replicas on the Redis driver (cloud#3814 R6)', () => {
+    /** The two declarations the split-brain guard reads. */
+    const DECLARATIONS = [
+        { name: 'OS_CLUSTER_REPLICAS=3', key: 'OS_CLUSTER_REPLICAS', value: '3' },
+        { name: 'OS_EXPECT_MULTI_NODE=true', key: 'OS_EXPECT_MULTI_NODE', value: 'true' },
+    ] as const;
+    const HOLDER = `${HOLDER_ID}@1.0.0`;
+
+    function expectMultiReplicaRefusal(res: any, verb: 'Installing' | 'Uninstalling') {
+        expect(res.status, JSON.stringify(res.payload)).toBe(409);
+        expect(BaseResponseSchema.safeParse(res.payload).success).toBe(true);
+        expect(envelopeViolations(res.payload)).toEqual([]);
+        expect(ApiErrorSchema.safeParse(res.payload.error).success).toBe(true);
+        expect(res.payload.success).toBe(false);
+        expect(res.payload.error.code).toBe('MULTI_REPLICA_PACKAGE_CHANGE_REFUSED');
+        // The first sentence names the door; the recipe is the remedy an operator acts on.
+        expect(res.payload.error.message).toMatch(new RegExp(`^${verb} a package through install-local was refused: `));
+        expect(res.payload.error.message).toContain('run the install script, then restart every replica');
+    }
+
+    for (const d of DECLARATIONS) {
+        it(`${d.name}: POST is refused with the code, nothing ledgered or registered (inline and cloud branches)`, async () => {
+            vi.stubEnv(d.key, d.value);
+            serveVersions(VERSIONS);
+            const { ql, install, installFromCloud } = await bootPlugin(undefined, { clusterDriver: 'redis' });
+            const fetchedAtBoot = vi.mocked(fetch).mock.calls.length;
+
+            expectMultiReplicaRefusal(await install({ manifest: holderVersion() }), 'Installing');
+            expectMultiReplicaRefusal(await installFromCloud('v1-free'), 'Installing');
+
+            expect(ledger()).toEqual([]);
+            expect(ql.registry.getPackage(HOLDER_ID)).toBeUndefined();
+            expect(ql.registry.getPackage(INCOMING_ID)).toBeUndefined();
+            // Refused before the body is read: the cloud leg was never asked.
+            expect(vi.mocked(fetch).mock.calls.length).toBe(fetchedAtBoot);
+        });
+
+        it(`${d.name}: DELETE is refused with the code, the package still ledgered and still served`, async () => {
+            // Installed on a single node, then the deployment restarts with replicas declared.
+            await (await bootPlugin(undefined, { clusterDriver: 'redis' })).installHolder();
+            expect(ledger()).toEqual([HOLDER]);
+            vi.stubEnv(d.key, d.value);
+            const { ql, uninstall } = await bootPlugin(undefined, { clusterDriver: 'redis' });
+            expect(ql.registry.getPackage(HOLDER_ID)?.manifest?.version).toBe('1.0.0');
+
+            expectMultiReplicaRefusal(await uninstall(HOLDER_ID), 'Uninstalling');
+
+            expect(ledger()).toEqual([HOLDER]);
+            expect(ql.registry.getPackage(HOLDER_ID)?.manifest?.version).toBe('1.0.0');
+        });
+    }
+
+    const UNCHANGED = [
+        { title: 'a single node on the Redis driver', env: {}, clusterDriver: 'redis' },
+        { title: 'OS_CLUSTER_REPLICAS=1 on the Redis driver', env: { OS_CLUSTER_REPLICAS: '1' }, clusterDriver: 'redis' },
+        {
+            title: 'declared replicas on the in-process driver (the split-brain guard\'s escape hatch)',
+            env: { OS_CLUSTER_REPLICAS: '3', OS_ALLOW_MEMORY_CLUSTER_MULTINODE: 'true' }, clusterDriver: 'memory',
+        },
+        { title: 'declared replicas with no cluster service composed', env: { OS_CLUSTER_REPLICAS: '3' }, clusterDriver: undefined },
+    ] as const;
+
+    for (const u of UNCHANGED) {
+        it(`CONTROL — ${u.title}: install and uninstall act as before`, async () => {
+            for (const [k, v] of Object.entries(u.env)) vi.stubEnv(k, v);
+            const { ql, installHolder, uninstall } = await bootPlugin(undefined, { clusterDriver: u.clusterDriver });
+
+            await installHolder();
+            expect(ledger()).toEqual([HOLDER]);
+            expect(ql.registry.getPackage(HOLDER_ID)?.manifest?.version).toBe('1.0.0');
+
+            const res = await uninstall(HOLDER_ID);
+            expect(res.status, JSON.stringify(res.payload)).toBe(200);
+            expect(ledger()).toEqual([]);
+            expect(ql.registry.getPackage(HOLDER_ID)).toBeUndefined();
+        });
+    }
 });

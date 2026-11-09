@@ -2322,9 +2322,11 @@ export class SqlDriver implements IDataDriver {
     // [#25521 cut 11] The body moved to `sql-driver-autonumber.ts` (see `AutonumberHost`).
     const readKnex = () => this.knex;
     const readSequencesHasKeyHash = () => this.sequencesHasKeyHash;
+    const readIsMysql = () => this.isMysql;
     const host: ThisParameterType<typeof getNextSequenceValue> = {
       attemptWithoutPoisoning: (...a) => this.attemptWithoutPoisoning(...a),
       ensureSequencesTable: (...a) => this.ensureSequencesTable(...a),
+      get isMysql() { return readIsMysql(); },
       get knex() { return readKnex(); },
       resolveSequenceTenantId: (...a) => this.resolveSequenceTenantId(...a),
       scanMaxNumericTail: (...a) => this.scanMaxNumericTail(...a),
