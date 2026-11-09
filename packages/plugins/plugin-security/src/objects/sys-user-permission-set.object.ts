@@ -119,9 +119,11 @@ export const SysUserPermissionSet = ObjectSchema.create({
     // at boot from the set's one package holder
     // (`stored-permission-set-package-backfill.ts`) and stays empty for a set
     // the environment authored, the platform registered, two packages hold, or
-    // nothing holds. Nothing reads it yet and no writer stamps it: the grant
-    // still resolves by name, so a grant written after a boot is filled by the
-    // next one. Width: the package-id class (`sys_audience_binding_suggestion
+    // nothing holds. Every write that names a set stamps it by the same rule
+    // (`stored-permission-set-package-stamp.ts`), and the authorization
+    // resolver reads the set it names; a null or stale column resolves the name
+    // with no package (`storedPermissionSetScope`). Only a system writer writes
+    // it alone. Width: the package-id class (`sys_audience_binding_suggestion
     // .package_id`, `sys_metadata.package_id`).
     permission_set_package: Field.text({
       label: 'Permission Set Package',

@@ -272,8 +272,9 @@ describe('[ADR-0131 D3/D4] position-bound sets are the ones the position definit
 
 /**
  * [ADR-0150 D8 R1] A grant whose `permission_set_package` names its holder
- * reads that package's set; a null column resolves with no caller (D3), so a
- * name two packages hold confers nothing and nothing is picked.
+ * reads that package's set; a null column, and a stale one (its package no
+ * longer serves the set), resolves with no caller (D3), so a name two
+ * packages hold confers nothing and nothing is picked.
  */
 describe('[ADR-0150 D8 R1] a grant names its set\'s package beside its name', () => {
   const Q = 'com.acme.q';
@@ -323,9 +324,18 @@ describe('[ADR-0150 D8 R1] a grant names its set\'s package beside its name', ()
     expect(out.systemPermissions).toEqual([]);
   });
 
-  it('a column naming a package that does not hold the name confers nothing', async () => {
+  it('a stale column — the set moved to another package on an upgrade — still confers the set its one holder serves', async () => {
     const out = await resolveScoped([{ permission_set: 'solo', permission_set_package: R }]);
+    expect(out.permissions).toEqual(['solo']);
+    expect(out.systemPermissions).toEqual(['cap_solo']);
+    // Byte-identical to the unbound grant: a stale column is read as a null one.
+    expect(JSON.stringify(out)).toBe(JSON.stringify(await resolveScoped([{ permission_set: 'solo' }])));
+  });
+
+  it('⛔ a stale column on a name two packages hold confers nothing — never the first registered holder', async () => {
+    const out = await resolveScoped([{ permission_set: 'shared', permission_set_package: 'com.acme.gone' }]);
     expect(out.permissions).toEqual([]);
+    expect(out.systemPermissions).toEqual([]);
   });
 
   it('CONTROL — a name one package holds resolves byte-identically with its column or without it', async () => {

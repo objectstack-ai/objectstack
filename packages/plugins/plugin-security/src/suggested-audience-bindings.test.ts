@@ -1060,8 +1060,8 @@ describe('[ADR-0131 D5] the walled posture: deployment-level acceptance is host 
 
 /**
  * [ADR-0150 D8 R3] A suggestion reads the set its `permission_set_package`
- * names; a null column resolves from the suggesting package (`package_id`)
- * by D3. A name the rule refuses is never picked: the refusal names every
+ * names; a null column, and a stale one, resolves from the suggesting
+ * package (`package_id`) by D3. A name the rule refuses is never picked: the refusal names every
  * candidate and the operator's bind.
  */
 describe('[ADR-0150 D8 R3] a suggestion reads its set by its package column', () => {
@@ -1110,6 +1110,18 @@ describe('[ADR-0150 D8 R3] a suggestion reads its set by its package column', ()
     rows(ql).push(row('s_hr', HR, null));
     const { suggestion } = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 's_hr');
     expect(suggestion).toMatchObject({ status: 'confirmed' });
+  });
+
+  it('a stale column (its package no longer serves the set) reads as a null one, from the suggesting package', async () => {
+    const ql = scopedQl();
+    rows(ql).push(row('s_moved', HR, 'com.example.gone'), row('s_stale', SUITE, 'com.example.gone'));
+    const { suggestion } = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 's_moved');
+    expect(suggestion).toMatchObject({ status: 'confirmed' });
+    // ⛔ The same stale column where the suggesting package reaches two holders: refused, naming both.
+    const err = await confirmAudienceBindingSuggestion(makeDeps(ql), ADMIN_CTX, 's_stale').catch((e) => e);
+    expect(err).toBeInstanceOf(SuggestionStateError);
+    expect(err.message).toContain(CRM);
+    expect(err.message).toContain(HR);
   });
 
   it('⛔ a null column the rule refuses is a 409 naming every candidate and the bind — never the first holder', async () => {

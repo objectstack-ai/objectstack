@@ -131,9 +131,11 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
     // from the set's one package holder (`stored-permission-set-package-backfill.ts`);
     // empty when no single package holds the name. It reads equal to
     // `package_id` (the package that made the suggestion ships the set); a row
-    // where it does not is reported at boot, never rewritten. Nothing reads it
-    // yet and the suggestion sync does not stamp it: a suggestion is still
-    // confirmed by the set's name. Width: the package-id class, as `package_id`.
+    // where it does not is reported at boot, never rewritten. Every write that
+    // names a set stamps it (`stored-permission-set-package-stamp.ts`), and
+    // confirm, reopen and the everyone derivation read the set it names; a null
+    // or stale column reads by D3 from `package_id`
+    // (`storedPermissionSetScope`). Width: the package-id class, as `package_id`.
     permission_set_package: Field.text({
       label: 'Permission Set Package',
       required: false,

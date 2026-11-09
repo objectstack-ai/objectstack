@@ -1885,7 +1885,7 @@ export class SecurityPlugin implements Plugin {
     // An engine with no reader bound resolves an empty catalog — no position
     // distributes a set and no set grants — so a failure here is said at once.
     try {
-      bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: (ql as any).registry, metadata: metadata as any }));
+      bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: (ql as any).registry, metadata: metadata as any, logger: ctx.logger }));
     } catch (e) {
       ctx.logger.warn(
         '[security] the security catalog read was NOT bound to the ObjectQL engine: '

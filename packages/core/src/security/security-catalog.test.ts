@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   createSecurityCatalogReader,
   resolveCatalogReference,
@@ -460,14 +460,30 @@ describe('security catalog read — permission sets by (package, name) through t
       expect(await resolveCatalogReference(reader, 'permission', 'shared')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
     });
 
-    it('a column naming a package that does not hold the name is not-found: no other holder, environment item or metadata body stands in', async () => {
+    it('a stale column (its package no longer serves the set) reads as a null one: one holder grants, two are refused naming both — said once', async () => {
+      const warn = vi.fn();
       const reader = createSecurityCatalogReader({
         registry: stored(),
-        metadata: metadata({ permission: [{ name: 'q_only' }, { name: 'env_set' }, { name: 'meta_only' }] }),
+        metadata: metadata({ permission: [{ name: 'meta_only' }] }),
+        logger: { warn },
       });
-      for (const name of ['q_only', 'env_set', 'meta_only', 'shared']) {
-        expect(await resolveCatalogReference(reader, 'permission', name, storedPermissionSetScope('com.acme.gone'))).toEqual({ status: 'not-found' });
-      }
+      const gone = storedPermissionSetScope('com.acme.gone');
+      // The set moved to Q on an upgrade: the grant follows it, as an unbound one does.
+      expect((await reader.resolve('permission', 'q_only', gone))?.packageId).toBe(Q);
+      expect((await reader.resolve('permission', 'env_set', gone))?.definition).toEqual({ name: 'env_set' });
+      expect((await reader.resolve('permission', 'meta_only', gone))?.definition).toEqual({ name: 'meta_only' });
+      // ⛔ Two holders: refused, naming both — never the first registered.
+      const answer = await resolveCatalogReference(reader, 'permission', 'shared', gone);
+      expect(answer).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+      if (answer.status === 'refused') expect(answer.candidates).toEqual([expect.stringContaining(Q), expect.stringContaining(R)]);
+      // R3: a stale column is read from the writer, as its null column is.
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope('com.acme.gone', P)))?.definition.label).toBe('Q');
+      // Said once per (package, name), however often it is read.
+      await reader.resolve('permission', 'q_only', gone);
+      expect(warn.mock.calls.map(([, meta]) => `${meta.packageId}:${meta.name}`)).toEqual([
+        'com.acme.gone:q_only', 'com.acme.gone:env_set', 'com.acme.gone:meta_only', 'com.acme.gone:shared',
+      ]);
+      expect(warn.mock.calls[0][0]).toContain('os migrate stored-references');
     });
 
     it('a null column with two or more holders is refused, naming every candidate — never the first registered', async () => {
