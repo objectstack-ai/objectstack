@@ -210,7 +210,26 @@ jobs:
           REPLACE: ${{ inputs.replace_published && 'true' || 'false' }}
         run: |
           set -euo pipefail
-          DIGEST="$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // empty' || true)"
+          # Only the registry's own "no such tag" answer means unpublished. Any
+          # other failed read (a registry, token or network error) stops the job:
+          # read as unpublished it would rebuild and move the tag past both
+          # guards below. buildx prints that answer as `ERROR: REF: not found`:
+          # containerd's resolver (core/remotes/docker/resolver.go) wraps a 404
+          # for the tag as "REF: " plus errdefs.ErrNotFound, whose text is
+          # "not found", and buildx's main.go prefixes "ERROR: ".
+          ERR="$(mktemp)"
+          if READ="$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' 2>"$ERR")"; then
+            DIGEST="$(printf '%s' "$READ" | jq -r '.digest // empty')"
+            if [ -z "$DIGEST" ]; then
+              echo "::error::$REF was read, but the answer names no digest: $READ"
+              exit 1
+            fi
+          elif grep -Fq "$REF: not found" "$ERR"; then
+            DIGEST=""
+          else
+            echo "::error::cannot tell whether $REF is published, so nothing is built or moved. The registry read failed with: $(tr '\n' ' ' < "$ERR")"
+            exit 1
+          fi
           # A published digest is handed on whatever happens next: the digest-tag
           # step below keeps it served under a tag of its own.
           if [ -n "$DIGEST" ]; then echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"; fi
