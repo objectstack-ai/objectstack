@@ -26,6 +26,9 @@ import { currentCredentialUseClient, hashApiKey } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
 import { ENTITLED_ORGANIZATION, ENTITLED_USER, createSessionAuthService, createGrantsEngine } from './entitled-caller.fixture.js';
+// The admin service's SQLite filename check loads the SQL driver on first use;
+// paid here, at collection, never inside a case's clocked window.
+import '@objectstack/driver-sql';
 
 const KEY = 'osk_datasource_account_posture_pin';
 

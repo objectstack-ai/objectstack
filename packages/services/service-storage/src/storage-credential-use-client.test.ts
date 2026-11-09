@@ -54,6 +54,8 @@ function compose(opts: { gateActive: boolean }) {
     async find(object: string, q: { where?: Record<string, unknown>; limit?: number } = {}) {
       const rows = (tables[object] ?? []).filter((row) =>
         Object.entries(q.where ?? {}).every(([k, v]) => {
+          // A combinator this double does not implement is refused, never read as a field name.
+          if (k.startsWith('$')) throw new Error(`fixture engine: the where combinator '${k}' is not implemented`);
           if (v !== null && typeof v === 'object') return ((v as { $in?: unknown[] }).$in ?? []).includes(row[k]);
           return (v ?? null) === (row[k] ?? null);
         }),
