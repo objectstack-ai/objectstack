@@ -175,7 +175,7 @@ import {
 // `previewTimeConvergence`): the read-only plan of what the deferred schema sync would do.
 // [#25521 cut 19] And the declared column DEFAULT emission (`nowColumnDefault`, `applyDeclaredColumnDefault`):
 // what a field's `defaultValue` becomes in the DDL of a fresh or rebuilt column.
-import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
+import { applyDeclaredColumnDefault, applyDriftOpInPlace, applyIndexDriftOp, applyMigrationEntries, applyNullSafeUniquePreflight, backfillCanonicalDatetimes, backfillCanonicalJsonEncoding, backfillCanonicalTimes, convergeJsonColumn, countNonTemporalTextRows, createNullSafeUniqueIndex, DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS, detectManagedDrift, detectTableDrift, detectTableIndexDrift, ensureRotation, legacyMysqlTimeColumns, legacyMysqlTimestampColumns, nowColumnDefault, planMediaColumnMove, previewDatetimeConvergence, previewDeferredSchemaWork, previewTimeConvergence, rebuildSqliteTablePatched, reconcileAndWarnDrift, registerExternalObject, restoreBareIndexAfterFailedTighten, rotationColumnList, rotationShardKey, runWideningAlters, syncDeclaredIndexes, warnBuiltinColumnCollisions } from './sql-driver-schema-sync.js';
 // [#25521 cut 11] The autonumber sequence path (`getNextSequenceValue`, `fillAutoNumberFields`,
 // `issueAutonumbers`, `maxAutonumberCounter`, and the #5495 collision re-seed `collidingAutoNumberReservations`
 // and `resyncSequenceToDataMax`); the methods of the same names below hand each body the members it reads
@@ -1363,6 +1363,26 @@ export class SqlDriver implements IDataDriver {
    * neither path needs its own copy of the widening.
    */
   private flushingDeferredDdl = false;
+
+  /**
+   * #31901: the PostgreSQL concurrent index builds' shared state for this
+   * driver instance.
+   *
+   * `deferredBy` is set by the first build whose lock wait times out. From then
+   * on every remaining concurrent build is deferred to the next sync with one
+   * log line each, and none of them waits again: `CREATE INDEX CONCURRENTLY`
+   * waits for every older transaction in the whole database, so one long read
+   * would otherwise hold the boot for the full bound once per missing index.
+   *
+   * `lockWaitMs` is the bound each build arms as `lock_timeout`. It is the
+   * driver's DDL lock-wait bound (`DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS`) and
+   * is not configuration: it is a field only so a test can wait seconds, not
+   * minutes.
+   */
+  protected readonly concurrentIndexState: { deferredBy: string | null; lockWaitMs: number } = {
+    deferredBy: null,
+    lockWaitMs: DEFERRED_DDL_LOCK_WAIT_TIMEOUT_SECONDS * 1000,
+  };
 
   /** Backing field for {@link sqliteOpenedEmptyInMemory} (#6743). */
   private openedEmptyInMemory = false;
@@ -5941,9 +5961,11 @@ export class SqlDriver implements IDataDriver {
     declaredIndexes: any[] | undefined,
     tenantField: string | null,
     physicalColumns: Set<string>,
+    /** See {@link syncDeclaredIndexes}: `existingTable` selects the PostgreSQL concurrent build (#31901). */
+    options?: { existingTable?: boolean },
   ): Promise<void> {
     // [#29520 codemod] The body moved to `sql-driver-managed-drift.ts` (see `ManagedDriftHost`).
-    return ManagedDriftFacet.syncTableIndexes.call(managedDriftHost.of(this), tableName, fields, declaredIndexes, tenantField, physicalColumns);
+    return ManagedDriftFacet.syncTableIndexes.call(managedDriftHost.of(this), tableName, fields, declaredIndexes, tenantField, physicalColumns, options);
   }
 
   /**
@@ -6009,20 +6031,37 @@ export class SqlDriver implements IDataDriver {
      * The drift-op apply paths re-feed already-normalized shapes and pass none.
      */
     fields?: Record<string, any>,
+    /**
+     * #31901: `existingTable: true` when the table was there before this sync
+     * (boot over an existing table, a rotation shard that already exists, an
+     * `os migrate apply` index op). On PostgreSQL the missing indexes of such a
+     * table are built `CONCURRENTLY`, so writes are not blocked during the
+     * build. Absent or false keeps the plain path, which an empty table the
+     * sync just created takes at no cost.
+     */
+    options?: { existingTable?: boolean },
   ): Promise<void> {
     // [#25521 cut 9] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
     const readKnex = () => this.knex;
+    const readLogger = () => this.logger;
+    const readIsPostgres = () => this.isPostgres;
+    const readFlushingDeferredDdl = () => this.flushingDeferredDdl;
+    const concurrentIndexState = this.concurrentIndexState;
     const host: ThisParameterType<typeof syncDeclaredIndexes> = {
+      get concurrentIndexState() { return concurrentIndexState; },
       createHashShadowUniqueIndex: (...a) => this.createHashShadowUniqueIndex(...a),
       createNullSafeUniqueIndex: (...a) => this.createNullSafeUniqueIndex(...a),
       explainUnkeyableTextColumn: (...a) => this.explainUnkeyableTextColumn(...a),
+      get flushingDeferredDdl() { return readFlushingDeferredDdl(); },
       getExistingIndexNames: (...a) => this.getExistingIndexNames(...a),
+      get isPostgres() { return readIsPostgres(); },
       get knex() { return readKnex(); },
       logDurabilityFailure: (...a) => this.logDurabilityFailure(...a),
+      get logger() { return readLogger(); },
       probeNullSafeUniqueDuplicates: (...a) => this.probeNullSafeUniqueDuplicates(...a),
       resolveTenantField: (...a) => this.resolveTenantField(...a),
     };
-    return syncDeclaredIndexes.call(host, tableName, indexes, physicalColumns, tenantField, fields);
+    return syncDeclaredIndexes.call(host, tableName, indexes, physicalColumns, tenantField, fields, options);
   }
 
   /**
