@@ -176,6 +176,22 @@ export type {
 // words. A consumer calls this; it does not re-derive the check.
 export { viewContainerNameRefusal } from './view-container-name-refusal.js';
 export type { ViewContainerNameRefusal } from './view-container-name-refusal.js';
+// [ADR-0150 D2, child N] Inside one namespace, a `(type, name)` of the twelve
+// uncovered bucket 2/3 types has one package holder. Exported because
+// `os validate` is the second door that asks it — of an artifact's packages, in
+// the order the boot installs them — and it must answer with the package door's
+// predicate and sentence. A consumer calls these; it does not re-derive the rule.
+export {
+  NAMESPACE_UNIQUE_TYPES,
+  namespacePackageOf,
+  namespaceNameConflicts,
+  namespaceNameConflictMessage,
+} from './namespace-co-owner-names.js';
+export type {
+  NamespaceNameConflict,
+  NamespacePackage,
+  NamespaceUniqueType,
+} from './namespace-co-owner-names.js';
 
 // [ADR-0130 D4] The residual-picklist refusal the `manifest` service throws: a
 // composed stack's top-level picklist that no package body declares and no

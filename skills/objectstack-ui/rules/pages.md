@@ -143,11 +143,14 @@ Tags are the **registered components** (bare names: `<flex>`, `<grid>`, `<card>`
 set** (`<h1>`–`<h6>`, `<p>`, `<a>`, `<ul>/<ol>/<li>`, `<img>`, `<blockquote>`, `<strong>`,
 …). Props come from each component's registry `inputs` (e.g. `<text content=…>`,
 `<badge label=…>`). **No JavaScript** — `onClick`, `{expr}` logic and `.map()` are NOT
-available; use `kind:'react'` for those. `os build` parses the source and fails loudly
+available. `os build` parses the source and fails loudly
 on unknown tags / missing required props / forbidden constructs (event handlers,
 `dangerouslySetInnerHTML`).
 
+<!-- os:check -->
 ```typescript
+import { definePage } from '@objectstack/spec/ui';
+
 export const ReleaseNotesPage = definePage({
   name: 'crm_release_notes', label: 'Release Notes', type: 'home', kind: 'html',
   source: `
@@ -254,9 +257,11 @@ Rules:
   `element:button` — and style each block's root. (`page:card` etc. are fine for
   structure but style what you control.)
 
+<!-- os:check -->
 ```typescript
-// A styled pricing card — every block carries responsiveStyles + tokens.
-{
+import type { PageComponent } from '@objectstack/spec/ui';
+
+const card: PageComponent = {
   id: 'plan_solo', type: 'flex',
   responsiveStyles: {
     large: {
@@ -277,7 +282,7 @@ Rules:
         properties: { label: 'Upgrade', variant: 'primary', size: 'large' } },
     ],
   },
-}
+};
 ```
 
 **In the source tiers (`kind:'html'` / `kind:'react'`) the same rule holds — no
@@ -344,8 +349,7 @@ behind the screen is not.
 The viewer is **platform-level**: one global `/docs/<name>` route
 resolves any doc regardless of which app you came from. The URL is
 **single-coordinate** — no package or app prefix — so a doc has exactly
-one URL. Do **not** design per-app or per-package doc URLs; that gives one
-doc many addresses and breaks cross-references.
+one URL. Do **not** design per-app or per-package doc URLs.
 
 To surface a doc inside an app, add a `doc` navigation item (a `url` item is
 for an external or custom URL): `doc: '<name>'` opens that page,
@@ -353,17 +357,19 @@ for an external or custom URL): `doc: '<name>'` opens that page,
 in that book). It inherits the docs audience gate, and `os build` refuses a
 target the package lacks (`docs/nav-target`):
 
+<!-- os:check -->
 ```typescript
-navigation: [
+import type { NavigationItem } from '@objectstack/spec/ui';
+
+const navigation: NavigationItem[] = [
   { id: 'nav_help', type: 'doc', doc: 'crm_user_guide',
     label: 'User Guide', icon: 'book-open' },
-]
+];
 ```
 
 > **Live instances.** For a *live, interactive
 > instance* — a dashboard, a report, a record table — **don't embed it**:
-> link to it by URL and let the platform render it (one source, never a
-> stale copy).
+> link to it by URL and let the platform render it.
 
 ### Inline metadata views — the `metadata` fence (ADR-0051)
 

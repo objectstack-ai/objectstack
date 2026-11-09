@@ -84,6 +84,7 @@ export interface AutonumberHost {
   fillAutoNumberFields: SqlDriver['fillAutoNumberFields'];
   getNextSequenceValue: SqlDriver['getNextSequenceValue'];
   injectTenantOnInsert: SqlDriver['injectTenantOnInsert'];
+  readonly isMysql: SqlDriver['isMysql'];
   readonly issuedAutoNumbers: SqlDriver['issuedAutoNumbers'];
   readonly knex: SqlDriver['knex'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
@@ -95,7 +96,7 @@ export interface AutonumberHost {
 }
 
 /** The body of `SqlDriver#getNextSequenceValue`; the method's docblock there is its contract. */
-export async function getNextSequenceValue(this: Pick<AutonumberHost, 'attemptWithoutPoisoning' | 'ensureSequencesTable' | 'knex' | 'resolveSequenceTenantId' | 'scanMaxNumericTail' | 'sequenceKeyHash' | 'sequencesHasKeyHash'>, object: string, tableName: string, field: string, prefix: string, tenantField: string | null, tenantId: string | null, parentTrx?: Knex.Transaction, scope = '', suffix = ''): Promise<number> {
+export async function getNextSequenceValue(this: Pick<AutonumberHost, 'attemptWithoutPoisoning' | 'ensureSequencesTable' | 'isMysql' | 'knex' | 'resolveSequenceTenantId' | 'scanMaxNumericTail' | 'sequenceKeyHash' | 'sequencesHasKeyHash'>, object: string, tableName: string, field: string, prefix: string, tenantField: string | null, tenantId: string | null, parentTrx?: Knex.Transaction, scope = '', suffix = ''): Promise<number> {
   // Pass the caller's transaction so a cold-cache first write inside a batch
   // transaction ensures the table on the right connection instead of dead-
   // locking on a second one (SQLite pool max=1). `initObjects` normally warms
@@ -129,52 +130,128 @@ export async function getNextSequenceValue(this: Pick<AutonumberHost, 'attemptWi
 
   const runner: Knex | Knex.Transaction = parentTrx ?? this.knex;
 
-  return runner.transaction(async (trx) => {
-    // Lock the row (no-op on SQLite, real lock on Postgres/MySQL).
-    //
-    // Speculative, so it runs under a savepoint: `.forUpdate()` on a MISSING
-    // row does NOT throw on Postgres (measured: returns zero rows), so the
-    // fallback below is unreachable for the reason the old comment gave. It
-    // IS reachable for lock-level failures — deadlock (40P01), lock/statement
-    // timeout (55P03/57014) — and without the savepoint each of those turned
-    // into a `25P02` from the fallback SELECT, masking the real error.
-    let existing: any;
-    const locked = await this.attemptWithoutPoisoning(trx, (scoped) =>
-      scoped(SEQUENCES_TABLE).where(key).forUpdate().first(),
-    );
-    if (locked.ok) {
-      existing = locked.value;
-    } else {
-      // Fall back to a plain SELECT then rely on transaction isolation.
-      existing = await trx(SEQUENCES_TABLE).where(key).first();
-    }
+  // ## The cold seed is idempotent and comes BEFORE the locking read (#31608)
+  //
+  // The seed used to be speculative: `SELECT … FOR UPDATE` on the missing
+  // row, then an INSERT, recovering from the loser's unique violation. On
+  // MySQL 8 (InnoDB, REPEATABLE READ) that order deadlocks by construction —
+  // measured: the locking read on a missing key takes a next-key lock on the
+  // gap (`lock_mode X` on the supremum), gap locks do not conflict with each
+  // other, so every cold writer holds one, and each INSERT then waits on the
+  // others' gap lock for its insert intention. InnoDB answers
+  // `ER_LOCK_DEADLOCK` and rolls back the victim's WHOLE transaction, not to
+  // the savepoint (`ROLLBACK TO SAVEPOINT` then answers
+  // `ER_SP_DOES_NOT_EXIST`, which knex's MySQL client swallows). The recovery
+  // statements ran on regardless, in autocommit: the `FOR UPDATE` lock ended
+  // with its own statement, and
+  // every victim read the winner's counter and wrote the same `last_value + 1`
+  // — a lost update, issued as duplicate numbers.
+  //
+  // So: a plain read decides whether the row exists; a missing row is seeded
+  // by an idempotent INSERT, which a concurrent seeder never turns into an
+  // error and which no gap lock precedes; and only THEN is the row locked, by
+  // which point it exists, so the cold path is the warm path.
+  //
+  //  - Postgres and SQLite: `ON CONFLICT DO NOTHING`. The conflict target is
+  //    left out on purpose: `ON CONFLICT (cols)` raises `42P10` against the
+  //    interim four-column key an incomplete `ensureSequencesKeyHashShape`
+  //    migration leaves (see `attemptWithoutPoisoning`); the bare form matches
+  //    whichever unique key the table has.
+  //  - MySQL: a no-op `ON DUPLICATE KEY UPDATE`, NOT `INSERT IGNORE`. Measured
+  //    on 8.0 at 16 cold writers: `INSERT IGNORE` takes a SHARED lock on the
+  //    duplicate, two losers holding it each wait to upgrade it for the
+  //    `FOR UPDATE` below, and InnoDB rolls one back (8 to 14 deadlocks a
+  //    burst). `ON DUPLICATE KEY UPDATE` takes the EXCLUSIVE lock at once, so
+  //    the losers queue behind the seeder: 0 deadlocks. It also leaves every
+  //    other error loud, where `IGNORE` downgrades them to warnings.
+  const issue = (): Promise<number> =>
+    runner.transaction(async (trx) => {
+      const present = await trx(SEQUENCES_TABLE).where(key).first();
+      if (!present) {
+        const seedMax = await this.scanMaxNumericTail(
+          trx,
+          tableName,
+          field,
+          prefix,
+          tenantField,
+          resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
+          suffix,
+        );
+        const seed = trx(SEQUENCES_TABLE).insert({ ...insertRow, last_value: seedMax }).onConflict();
+        await (this.isMysql ? seed.merge({ object: trx.ref('object') }) : seed.ignore());
+      }
 
-    if (!existing) {
-      const seedMax = await this.scanMaxNumericTail(
-        trx,
-        tableName,
-        field,
-        prefix,
-        tenantField,
-        resolvedTenantId === GLOBAL_TENANT ? null : resolvedTenantId,
-        suffix,
+      // Lock the row (no-op on SQLite, real lock on Postgres/MySQL).
+      //
+      // Under a savepoint, so a lock-level failure on Postgres — deadlock
+      // (40P01), lock/statement timeout (55P03/57014) — does not turn into a
+      // `25P02` from the fallback SELECT and mask the real error. A failure
+      // that rolled back the whole transaction has no fallback: nothing the
+      // SELECT below reads would be locked any more, and its UPDATE would
+      // autocommit outside any transaction.
+      let existing: any;
+      const locked = await this.attemptWithoutPoisoning(trx, (scoped) =>
+        scoped(SEQUENCES_TABLE).where(key).forUpdate().first(),
       );
-      const initial = seedMax + 1;
-      const inserted = await this.attemptWithoutPoisoning(trx, (scoped) =>
-        scoped(SEQUENCES_TABLE).insert({ ...insertRow, last_value: initial }),
-      );
-      if (inserted.ok) return initial;
-      // Another writer raced us to the first INSERT. Fall through to
-      // the UPDATE path with the now-present row. This `SELECT … FOR UPDATE`
-      // blocks until the winner commits, so it sees the committed counter.
-      existing = await trx(SEQUENCES_TABLE).where(key).forUpdate().first();
-      if (!existing) throw inserted.error;
-    }
+      if (locked.ok) {
+        existing = locked.value;
+      } else {
+        if (rollsBackWholeTransaction(locked.error)) throw locked.error;
+        // Fall back to a plain SELECT then rely on transaction isolation.
+        existing = await trx(SEQUENCES_TABLE).where(key).first();
+      }
+      if (!existing) {
+        throw new Error(
+          `Cannot issue autonumber "${object}.${field}": its counter row in ${SEQUENCES_TABLE} ` +
+            `was seeded but is gone (deleted while this number was being issued).`,
+        );
+      }
 
-    const next = Number(existing.last_value) + 1;
-    await trx(SEQUENCES_TABLE).where(key).update({ last_value: next, updated_at: this.knex.fn.now() });
-    return next;
-  });
+      const next = Number(existing.last_value) + 1;
+      await trx(SEQUENCES_TABLE).where(key).update({ last_value: next, updated_at: this.knex.fn.now() });
+      return next;
+    });
+
+  // ⛔ Never retried inside a caller's transaction: the deadlock already rolled
+  // that transaction back, and the caller's earlier writes with it, so
+  // anything issued after it would autocommit outside the caller's unit of
+  // work. The caller gets the driver's own error to retry its whole unit.
+  if (parentTrx) return issue();
+  return issueOwningTransaction(issue);
+}
+
+/**
+ * How many times an issue the driver owns the transaction of is attempted when
+ * the server rolled that transaction back. Each retry starts from nothing, so
+ * it cannot double-issue; the bound only keeps a pathological lock storm from
+ * spinning forever, and then the server's own error is what surfaces.
+ */
+const WHOLE_ISSUE_ATTEMPTS = 5;
+
+/** Run `issue` (a whole transaction the driver owns), again while the server rolls it back. */
+async function issueOwningTransaction(issue: () => Promise<number>): Promise<number> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await issue();
+    } catch (error) {
+      if (attempt >= WHOLE_ISSUE_ATTEMPTS || !rollsBackWholeTransaction(error)) throw error;
+    }
+  }
+}
+
+/**
+ * Did the server roll back the WHOLE transaction, savepoints included?
+ *
+ * MySQL's `ER_LOCK_DEADLOCK` (errno 1213) does (measured on 8.0: a later
+ * `ROLLBACK TO SAVEPOINT` answers `ER_SP_DOES_NOT_EXIST`, and later statements
+ * autocommit). knex's MySQL client swallows that savepoint error and rejects
+ * with the deadlock itself, so the deadlock is what reaches this check. Postgres's deadlock (`40P01`) and lock timeouts abort only the
+ * current savepoint, which `attemptWithoutPoisoning` already recovers, so they
+ * are not this class and keep their existing handling.
+ */
+function rollsBackWholeTransaction(error: unknown): boolean {
+  const e = error as { code?: unknown; errno?: unknown } | null;
+  return !!e && (e.code === 'ER_LOCK_DEADLOCK' || e.errno === 1213);
 }
 
 /** The body of `SqlDriver#fillAutoNumberFields`; the method's docblock there is its contract. */
