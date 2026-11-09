@@ -57,6 +57,10 @@ import {
     ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
 } from '@objectstack/core';
 
+// Group F drives the real `HttpDispatcher`, whose reach loads
+// `@objectstack/metadata` lazily; pay that load during collection, never
+// inside a case's clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/metadata';
 import { ObjectKernel } from '@objectstack/core';
 import type { Plugin } from '@objectstack/core';
 
