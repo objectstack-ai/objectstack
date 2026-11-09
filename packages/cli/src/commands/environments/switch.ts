@@ -12,12 +12,14 @@ import { activateCloudDeployTarget } from '../../utils/runtime-target.js';
  *
  * Authenticates through `createControlPlaneApiClient` — `credentials.json`'s
  * session where it targets the server, else `cloud.json`'s (the order is
- * written once, there). Calls `POST /api/v1/cloud/environments/:id/activate`
- * to update the server-side session, then persists `activeEnvironmentId` into
+ * written once, there). Calls `POST /api/v1/cloud/environments/:id/activate`,
+ * which confirms the caller is a member of the environment and writes no
+ * server state, then persists `activeEnvironmentId` into
  * `~/.objectstack/credentials.json` so subsequent CLI commands (and any
  * client they create via `createApiClient`) automatically target this
  * environment — unless the switch ran on `cloud.json`'s session, whose server
- * is not the one `credentials.json` names.
+ * is not the one `credentials.json` names. The active environment lives only
+ * in those local files: the server keeps no record of it.
  *
  * When the control plane it just talked to IS the one `~/.objectstack/cloud.json`
  * records, the same id is written there as well, so `os package publish --install`
@@ -47,7 +49,7 @@ export default class EnvironmentsSwitch extends Command {
     url: Flags.string({ char: 'u', description: 'Server URL', env: 'OS_CLOUD_URL' }),
     token: Flags.string({ char: 't', description: 'Authentication token', env: 'OS_TOKEN' }),
     remote: Flags.boolean({
-      description: 'Also call /activate on the server (updates the session row)',
+      description: 'Also call /activate on the server to confirm access (writes no server state)',
       default: true,
       allowNo: true,
     }),
@@ -71,7 +73,7 @@ export default class EnvironmentsSwitch extends Command {
         await client.environments.activate(environment.id);
       }
 
-      // Cloud store first: the server session is already switched at this
+      // Cloud store first: the server has already confirmed access at this
       // point, so the publish-side record must not be lost to a failure in the
       // runtime store below (a user who only ran `os cloud login` has no
       // `credentials.json` at all).
@@ -105,7 +107,7 @@ export default class EnvironmentsSwitch extends Command {
         console.log('  ⚠ no local credential store to record it in — run `os login` or `os cloud login`');
       }
       if (!flags.remote) {
-        console.log('  (local only — server session unchanged)');
+        console.log('  (local only — access not confirmed on the server)');
       }
       console.log('');
     } catch (error: any) {
