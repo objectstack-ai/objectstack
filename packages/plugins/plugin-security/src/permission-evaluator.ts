@@ -125,6 +125,20 @@ export const MODIFY_ALL_WRITE_KEYS = new Set<ObjectPermissionVerbTarget>([
   }),
 ]);
 
+/**
+ * [ADR-0151 D3] The grant keys of the destructive class, derived from the same
+ * two constants as {@link MODIFY_ALL_WRITE_KEYS}: `transfer`, `restore` and
+ * `purge` read here as the bits that grant them. The agent ceiling clears
+ * them on every set an agent principal holds (`agent-ceiling-clamp.ts`), so a
+ * destructive operation added to the map and the set is clamped as well.
+ */
+export const DESTRUCTIVE_CLASS_KEYS: ReadonlySet<ObjectPermissionVerbTarget> = new Set<ObjectPermissionVerbTarget>(
+  [...DESTRUCTIVE_OPERATIONS].flatMap((op) => {
+    const key = OPERATION_TO_PERMISSION[op];
+    return key ? [key] : [];
+  }),
+);
+
 /** CRUD operation class an object-level `requiredPermissions` map keys on. */
 export type CrudBucket = 'read' | 'create' | 'update' | 'delete';
 

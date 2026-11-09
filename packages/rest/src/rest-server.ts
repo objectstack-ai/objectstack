@@ -3497,11 +3497,15 @@ export class RestServer {
                 accessToken: 'withhold',
                 // OAuth access tokens are honoured on the `/mcp` door alone
                 // (`acceptOAuthAccessToken`), precisely so coarse tool-family
-                // scopes cannot ride onto REST. [ADR-0090 D10 rule 5] The agent
-                // principal (`principalKind: 'agent'`, `onBehalfOf`,
-                // `oauthScopes`) is represented here for one caller only: an
-                // agent a forward credential carried. Its ceiling is derived
-                // from the consented scopes exactly as the MCP door derives it.
+                // scopes cannot ride onto REST. [ADR-0090 D10 rule 5] The
+                // OAuth-delegated agent principal (`principalKind: 'agent'`,
+                // `onBehalfOf`, `oauthScopes`) is represented here for one
+                // caller only: an agent a forward credential carried. Its
+                // ceiling is derived from the consented scopes exactly as the
+                // MCP door derives it. [ADR-0151 D3] An AI service account's
+                // own API key is the other agent provenance on this face: the
+                // assembler stamps it from the account's row, with no
+                // `onBehalfOf` and no OAuth input.
                 oauth: forwardAgent
                     ? {
                         userId: forwardAgent.userId,

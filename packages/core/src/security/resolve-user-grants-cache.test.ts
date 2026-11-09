@@ -432,7 +432,7 @@ describe("pin 4 — user X's envelope changes when user Y's sys_member row is wr
 // ── Pin 5 — seed isolation (#11633 B.2) ─────────────────────────────────────
 
 describe('pin 5 — seeds are part of the answer, so seeds are part of the key', () => {
-  it('different seedPermissions never see each other, ordering holds, and the suppressed sys_user read stays suppressed', async () => {
+  it('different seedPermissions never see each other, ordering holds, and the sys_user read is one per real resolution', async () => {
     cacheOn();
     const ql = makeSeamQl(adminTables());
     const seedsA: ResolveUserAuthzGrantsOptions = {
@@ -460,12 +460,15 @@ describe('pin 5 — seeds are part of the answer, so seeds are part of the key',
     const a2 = await resolveExpectingZeroReads(ql, 'u1', seedsA);
     expect(a2).toEqual(a1);
 
-    // The seeded-API-key path's SUPPRESSED `sys_user` read is preserved in the
-    // query multiset: email + ai_seat are seeded and no platform admins are
-    // declared, so NO resolution in this test may touch `sys_user` (#11633
-    // B.2's query-multiset half — the reason the seedless-envelope option was
-    // rejected; see the cache module's keying doc).
-    expect(ql.calls.every((c) => c.object !== 'sys_user')).toBe(true);
+    // The seeded-API-key path's `sys_user` read: [ADR-0151 D3] forced edit —
+    // it used to be SUPPRESSED here (email + ai_seat seeded, no platform admins
+    // declared, so no resolution touched `sys_user`). The row's
+    // `principal_kind` now decides whether the principal is an AI service
+    // account, which no seed carries, so each REAL resolution reads it once —
+    // A's and B's — and the cache hit reads nothing (asserted above). The
+    // query-multiset half of #11633 B.2 still holds: seeds never stand in for
+    // a read the resolution needs, and a hit never repeats one.
+    expect(ql.calls.filter((c) => c.object === 'sys_user')).toHaveLength(2);
   });
 });
 
