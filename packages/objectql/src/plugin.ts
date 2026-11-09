@@ -75,6 +75,7 @@ import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNam
 // connector, an email template, an agent, a skill, a tool) — the cold boot's seal and its one switch
 // (`bare-name-one-holder.ts`, "The cold boot").
 import { sealBareNameHoldersAtColdBoot } from './registry.js';
+import { backfillActivationLedgerAtBoot } from './activation-ledger-backfill.js';
 import { BARE_NAME_COLD_BOOT_MODE } from './bare-name-one-holder.js';
 import { planPackageUpgrade, type UpgradeServedOverride } from './package-upgrade-environment.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
@@ -1291,6 +1292,11 @@ export class ObjectQLPlugin implements Plugin {
         // hooks: there the doors never refuse.
         const registry = this.ql?.registry;
         if (registry) sealBareNameHoldersAtColdBoot(registry, BARE_NAME_COLD_BOOT_MODE, ctx.logger);
+        // [ADR-0150 D8 row R4] With the holders sealed, bind every activation
+        // ledger row that names no package to the one package that holds its
+        // item, and report the rows two packages hold (never guessed). Writes
+        // only `package_id`, so every later boot finds nothing new; never fatal.
+        await backfillActivationLedgerAtBoot(this.ql, registry, ctx.logger);
         // [ADR-0139 D5.2 / D5.3] A `controlled_by_parent` detail over a master
         // the engine composes no read over fails the boot, naming both and the
         // remedy. Judged HERE, not at `kernel:ready`: the object-scoped read

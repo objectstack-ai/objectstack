@@ -3,6 +3,7 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { IClusterService } from '@objectstack/spec/contracts';
 import { isInProcessClusterDriver } from './split-brain-guard.js';
+import { declaresMultiReplicaOnRedis } from './multi-replica.js';
 import { onClusterResync, type ClusterResyncEvent } from './cluster-resync.js';
 
 /**
@@ -34,8 +35,10 @@ function resyncSeamOf(owner: unknown, method: string): (() => unknown) | undefin
  * state-owner packages only need the `IPubSub` interface, which lives in
  * `@objectstack/spec/contracts`.
  *
- * FOUR lanes, late-bound independently at `kernel:ready`, because the state
- * that goes stale lives in four different owners (#13331, #13805, #27428):
+ * FIVE lanes, late-bound independently (lanes 1 to 4 at `kernel:ready`,
+ * lane 5 at `kernel:bootstrapped`), because the state
+ * that goes stale lives in five different owners (#13331, #13805, #27428,
+ * #31597):
  *
  *  1. **Metadata service** (`attachClusterPubSub()` — `metadata.changed`):
  *     replays watch events into peer `MetadataManager` caches
@@ -72,6 +75,17 @@ function resyncSeamOf(owner: unknown, method: string): (() => unknown) | undefin
  *     credential took effect on the replica that took the request, and an
  *     instance its upstream had refused stayed held on every other replica
  *     until a metadata reload or a restart.
+ *  5. **Settings service** (`attachSettingsChangePubSub()` —
+ *     `settings.changed`): fans a settings write out to peers, which emit
+ *     their own local `settings:changed` so every subscriber (auth posture,
+ *     password / session / MFA policy, organization access policy, mail, SMS,
+ *     storage, the AI provider) rebuilds from its OWN read of the shared
+ *     settings store. The message is an address, never a value. Without it
+ *     only the replica that took the write rebuilt, and every peer kept the
+ *     old configuration, security posture included, until restart. Unlike
+ *     lanes 1 to 4 it attaches only where the deployment DECLARES several
+ *     replicas over the Redis driver (`declaresMultiReplicaOnRedis`, cloud#3814
+ *     R3), so a single node never sees it.
  *
  * Activates each lane only when the cluster service and that lane's state
  * owner are present and expose the seam. Late binding is achieved via the
@@ -84,7 +98,9 @@ function resyncSeamOf(owner: unknown, method: string): (() => unknown) | undefin
  * `datasource.mutated` — payload shape defined by
  * `ClusterDatasourceMutationPayload` in `@objectstack/service-datasource`;
  * `connector-credential.mutated` — payload shape defined by
- * `ClusterConnectorCredentialMutationPayload` in `@objectstack/service-automation`.
+ * `ClusterConnectorCredentialMutationPayload` in `@objectstack/service-automation`;
+ * `settings.changed` — payload shape defined by
+ * `ClusterSettingsChangePayload` in `@objectstack/service-settings`.
  *
  * ## Resync after an outage
  *
@@ -97,7 +113,8 @@ function resyncSeamOf(owner: unknown, method: string): (() => unknown) | undefin
  *
  *  1. metadata service — `resyncClusterPubSub()`;
  *  3. datasource admin service — `resyncDatasourceMutationPubSub()`;
- *  4. automation service — `resyncConnectorCredentialPubSub()`.
+ *  4. automation service — `resyncConnectorCredentialPubSub()`;
+ *  5. settings service — `resyncSettingsChangePubSub()`.
  *
  * Lane 2 has no resync seam yet: its convergence is a per-item registry
  * write-through, and a full re-convergence of the registry is its own change.
@@ -115,6 +132,7 @@ export class MetadataClusterBridgePlugin implements Plugin {
     private detachMutation?: () => void;
     private detachDatasource?: () => void;
     private detachConnectorCredential?: () => void;
+    private detachSettings?: () => void;
     private detachResync?: () => void;
     private readonly laneResyncs: LaneResync[] = [];
 
@@ -133,9 +151,22 @@ export class MetadataClusterBridgePlugin implements Plugin {
             this.attachProtocolLane(ctx, cluster);
             this.attachDatasourceLane(ctx, cluster);
             this.attachConnectorCredentialLane(ctx, cluster);
-            if (this.laneResyncs.length > 0) {
-                this.detachResync = onClusterResync(cluster, (event) => this.resyncLanes(ctx, event));
+            this.subscribeResync(ctx, cluster);
+        });
+
+        // Lane 5 binds one phase later: the settings service binds its engine
+        // from its own `kernel:ready` hook, and a peer's change delivered
+        // before that bind would have every subscriber read the in-memory
+        // defaults (`check:settings-bind-window`).
+        ctx.hook('kernel:bootstrapped', async () => {
+            let cluster: IClusterService | undefined;
+            try {
+                cluster = ctx.getService<IClusterService>('cluster');
+            } catch {
+                return;
             }
+            this.attachSettingsLane(ctx, cluster);
+            this.subscribeResync(ctx, cluster);
         });
 
         ctx.hook('kernel:shutdown', async () => {
@@ -175,6 +206,15 @@ export class MetadataClusterBridgePlugin implements Plugin {
                 );
             }
             this.detachConnectorCredential = undefined;
+            try {
+                this.detachSettings?.();
+            } catch (err) {
+                ctx.logger.error(
+                    'MetadataClusterBridgePlugin: settings-lane detach error',
+                    err as Error,
+                );
+            }
+            this.detachSettings = undefined;
             this.detachResync?.();
             this.detachResync = undefined;
             this.laneResyncs.length = 0;
@@ -205,6 +245,16 @@ export class MetadataClusterBridgePlugin implements Plugin {
             `MetadataClusterBridgePlugin: resynced ${this.laneResyncs.map((l) => l.lane).join(', ')} after a ` +
                 `${event.outageMs} ms cluster outage (node=${event.nodeId})`,
         );
+    }
+
+    /**
+     * Subscribe to `cluster.resync` once, when at least one attached lane has a
+     * resync seam. The handler reads the lane list when the event fires, so a
+     * lane attached after the subscription is resynced too.
+     */
+    private subscribeResync(ctx: PluginContext, cluster: IClusterService): void {
+        if (this.detachResync || this.laneResyncs.length === 0) return;
+        this.detachResync = onClusterResync(cluster, (event) => this.resyncLanes(ctx, event));
     }
 
     /** Register `owner`'s resync seam `method` for `lane`, when the owner has one. */
@@ -453,6 +503,70 @@ export class MetadataClusterBridgePlugin implements Plugin {
         } catch (err) {
             ctx.logger.error(
                 'MetadataClusterBridgePlugin: connector-credential-lane attach failed',
+                err as Error,
+            );
+        }
+    }
+
+    /**
+     * Lane 5 — the settings service's `settings.changed` fan-out (#31597): the
+     * settings store adopting the family lanes 2 to 4 established.
+     *
+     * Attached at `kernel:bootstrapped`, after the settings service has bound
+     * its engine at `kernel:ready`, so no peer change reaches a subscriber that
+     * would read the pre-bind in-memory defaults.
+     *
+     * Duck-typed exactly like lanes 1 to 4 feature-detect their seams: this
+     * package must not depend on `@objectstack/service-settings`. The settings
+     * service publishes on the write door it already owns, and a peer emits
+     * its own local `settings:changed`, so every subscriber re-reads the
+     * shared store; a received change is never published again.
+     *
+     * Guarded on the declared multi-replica switch over Redis
+     * ({@link declaresMultiReplicaOnRedis}, cloud#3814 R3) rather than on the
+     * in-process driver alone: the single-node default emits exactly what it
+     * emitted before, and the split-brain guard is untouched (a declaration
+     * over the in-process driver still refuses the boot before this runs).
+     */
+    private attachSettingsLane(ctx: PluginContext, cluster: IClusterService): void {
+        let settings: unknown;
+        try {
+            settings = ctx.getService<unknown>('settings');
+        } catch {
+            ctx.logger.debug(
+                'MetadataClusterBridgePlugin: no "settings" service registered, skipping settings fan-out',
+            );
+            return;
+        }
+
+        const attach = (settings as { attachSettingsChangePubSub?: unknown })
+            .attachSettingsChangePubSub;
+        if (typeof attach !== 'function') {
+            ctx.logger.debug(
+                'MetadataClusterBridgePlugin: settings service does not expose attachSettingsChangePubSub(), skipping settings fan-out',
+            );
+            return;
+        }
+
+        if (!declaresMultiReplicaOnRedis(process.env, cluster.driver)) {
+            ctx.logger.debug(
+                `MetadataClusterBridgePlugin: no multi-replica deployment declared over the redis cluster driver (driver "${cluster.driver}"); settings fan-out skipped`,
+            );
+            return;
+        }
+
+        try {
+            this.detachSettings = (attach as (
+                pubsub: IClusterService['pubsub'],
+                nodeId: string,
+            ) => () => void).call(settings, cluster.pubsub, cluster.nodeId);
+            this.registerLaneResync('settings.changed', settings, 'resyncSettingsChangePubSub');
+            ctx.logger.info(
+                `MetadataClusterBridgePlugin: bridged settings.changed → cluster.pubsub (node=${cluster.nodeId})`,
+            );
+        } catch (err) {
+            ctx.logger.error(
+                'MetadataClusterBridgePlugin: settings-lane attach failed',
                 err as Error,
             );
         }

@@ -83,6 +83,7 @@ export {
     offerClusterDriverLiveness,
     onClusterResync,
     readClusterDriverHealth,
+    watchClusterDriverConnection,
     describeConnectionError,
     redactCredentials,
     type ClusterResyncEvent,

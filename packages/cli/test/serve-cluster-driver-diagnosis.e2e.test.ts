@@ -150,6 +150,11 @@ function clusterPackageSource(accessor: string | null): string {
     'export function checkMultiNodeAllowed() {\n'
     + '  return { allowed: true, refused: 0, capped: false };\n'
     + '}\n'
+    // `serve` reads the declared topology through this export before it asks
+    // the gate; no case here declares one.
+    + 'export function declaresMultiNode() {\n'
+    + '  return false;\n'
+    + '}\n'
     + (accessor === null
       ? ''
       : `export function listClusterDrivers() {\n  return ${accessor};\n}\n`)
@@ -384,9 +389,13 @@ describe('the fixture family isolates the accessor (vacuity guard)', () => {
 
     const gate = 'export function checkMultiNodeAllowed() {\n'
       + '  return { allowed: true, refused: 0, capped: false };\n'
+      + '}\n'
+      + 'export function declaresMultiNode() {\n'
+      + '  return false;\n'
       + '}\n';
-    // Every variant carries the same gate, so no boot can take the denial or
-    // licensed-overflow path instead of the driver reading.
+    // Every variant carries the same gate and the same (undeclared) topology,
+    // so no boot can take the denial or licensed-overflow path instead of the
+    // driver reading.
     for (const source of [registered, invisible, noAccessor]) {
       expect(source.startsWith(gate)).toBe(true);
     }

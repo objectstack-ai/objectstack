@@ -1012,7 +1012,7 @@ export async function detectTableIndexDrift(this: Pick<SchemaSyncHost, 'applyNul
     expected: expectedIndexes({ table: tableName, fields, tenantField, declaredIndexes, physicalColumns }),
     // `declaredIndexes` goes to BOTH: it is what the table should have, and
     // therefore also what must never be mistaken for legacy debt (#3955).
-    legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns, declaredIndexes }),
+    legacy: legacyUniqueReplacements({ table: tableName, fields, tenantField, physicalColumns, declaredIndexes, physical }),
     physical,
     // Indexes the framework built through raw DDL on this boot are its own to
     // manage — never this differ's to propose dropping (#4884).

@@ -17,7 +17,9 @@ import {
     onClusterResync,
     readClusterDriverHealth,
     redactCredentials,
+    watchClusterDriverConnection,
 } from './cluster-resync.js';
+import { EventEmitter } from 'node:events';
 import { defineCluster } from './cluster.js';
 
 function makeLiveness() {
@@ -161,6 +163,45 @@ describe('the offer on the cluster instance — onClusterResync / readClusterDri
         expect(typeof off).toBe('function');
         off();
         expect(handler).not.toHaveBeenCalled();
+        await cluster.close();
+    });
+});
+
+describe('watchClusterDriverConnection — a derived connection joins the driver\'s liveness', () => {
+    function connection(status?: string) {
+        return Object.assign(new EventEmitter(), { status });
+    }
+    const counts = (c: EventEmitter) => ['error', 'close', 'ready'].map((e) => c.listenerCount(e));
+
+    it('reports into the offered liveness as its source; the disposer detaches all three listeners', () => {
+        const cluster = {};
+        const { liveness, logger } = makeLiveness();
+        offerClusterDriverLiveness(cluster, liveness);
+        const conn = connection('ready');
+        const unwatch = watchClusterDriverConnection(cluster, conn, 'cache');
+        expect(readClusterDriverHealth(cluster)?.state).toBe('up');
+        expect(counts(conn)).toEqual([1, 1, 1]);
+
+        conn.emit('error', new Error('ECONNREFUSED'));
+        conn.emit('error', new Error('ECONNREFUSED'));
+        expect(readClusterDriverHealth(cluster)).toMatchObject({ state: 'down', outages: 1 });
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        conn.emit('ready');
+        expect(readClusterDriverHealth(cluster)?.state).toBe('up');
+
+        unwatch();
+        unwatch();
+        expect(counts(conn)).toEqual([0, 0, 0]);
+        conn.emit('close');
+        expect(readClusterDriverHealth(cluster)?.state).toBe('up');
+    });
+
+    it('CONTROL — no liveness offered (the memory driver): attaches nothing, the disposer is inert', async () => {
+        const cluster = defineCluster({ driver: 'memory' });
+        const conn = connection();
+        const unwatch = watchClusterDriverConnection(cluster, conn, 'cache');
+        expect(counts(conn)).toEqual([0, 0, 0]);
+        unwatch();
         await cluster.close();
     });
 });
