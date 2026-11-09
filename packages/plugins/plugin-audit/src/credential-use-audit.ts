@@ -408,6 +408,9 @@ export function installCredentialUseAudit(
   writer: CredentialUseAuditWriter,
   opts: { packageId?: string } = {},
 ): void {
+  // An engine with no hook seam stamps nothing this can see (the same
+  // early return `installAuditWriters` takes).
+  if (!engine || typeof engine.registerHook !== 'function') return;
   const onStamp = async (ctx: any): Promise<void> => {
     let event: CredentialUseEvent | undefined;
     try {
