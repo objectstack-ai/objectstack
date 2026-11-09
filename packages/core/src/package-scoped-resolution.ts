@@ -255,6 +255,17 @@ export function isPlatformRequestedBareName(type: PackageScopedType, name: strin
 /** The value `_packageId` carries for a row rehydrated from `sys_metadata`: not a package. */
 const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
 
+/**
+ * The package id `ObjectQL#registerObject` stamps when its caller gives none
+ * (the legacy compatibility API's default). It names no installed package, so
+ * a caller carrying it is a caller with no package: the rule reads it as one,
+ * beside the `sys_metadata` sentinel, rather than as a package whose closure
+ * is empty (which would refuse it every environment item, D3 (a)). Only the
+ * caller side: how an item stamped with it counts as a holder is unchanged.
+ * The one spelling; the compatibility API reads it from here.
+ */
+export const RUNTIME_COMPATIBILITY_PACKAGE_ID = '__runtime__';
+
 // ---------------------------------------------------------------------------
 // The answer.
 // ---------------------------------------------------------------------------
@@ -337,8 +348,9 @@ export interface PackageScopedHoldersQuery {
   readonly type: PackageScopedResolvableType;
   readonly name: string;
   /**
-   * The package the caller belongs to; omitted, `null`, `''` or the
-   * `sys_metadata` sentinel is a caller with no package.
+   * The package the caller belongs to; omitted, `null`, `''`, the
+   * `sys_metadata` sentinel or {@link RUNTIME_COMPATIBILITY_PACKAGE_ID} is a
+   * caller with no package.
    */
   readonly callerPackageId?: string | null;
 }
@@ -535,7 +547,9 @@ export function resolvePackageScopedHolders<T = unknown>(
     );
   }
   const raw = query.callerPackageId;
-  const callerPackageId = typeof raw === 'string' && raw !== '' && raw !== OVERLAY_PROVENANCE_SENTINEL ? raw : null;
+  const callerPackageId = typeof raw === 'string' && raw !== '' && raw !== OVERLAY_PROVENANCE_SENTINEL && raw !== RUNTIME_COMPATIBILITY_PACKAGE_ID
+    ? raw
+    : null;
   const holders = source.packageHolders;
 
   if (callerPackageId === null || (query.type !== ENGINE_FUNCTION_TYPE && isPlatformRequestedBareName(query.type, query.name))) {

@@ -140,6 +140,7 @@ import {
   type EngineTransactionOptions,
   Logger,
   type PackageScopedHolderSource,
+  RUNTIME_COMPATIBILITY_PACKAGE_ID,
   type RetryOptions,
   recordNotFoundError,
   resolveUserAuthzGrants,
@@ -9532,7 +9533,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerObject(
     schema: ServiceObject,
-    packageId: string = '__runtime__',
+    packageId: string = RUNTIME_COMPATIBILITY_PACKAGE_ID,
     namespace?: string
   ): string {
     // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).

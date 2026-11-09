@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ENGINE_FUNCTION_TYPE,
   OVERRIDABLE_BASELINE_PACKAGES,
+  RUNTIME_COMPATIBILITY_PACKAGE_ID,
   packageScopedHolderSource,
   resolvePackageScopedHolders,
   type PackageResolutionClosureOf,
@@ -181,5 +182,19 @@ describe('the platform\'s item — in every caller\'s reach, like `sys` (epic se
     const env = { ...withPlatform([[A, 'a']], 'host'), environmentItem: () => 'env' };
     expect(resolvePackageScopedHolders({ type: ENGINE_FUNCTION_TYPE, name: 'score' }, env, closure([]))).toMatchObject({ item: 'env', via: 'environment' });
     expect(ask([[A, 'a']], undefined, [])).toMatchObject({ item: 'a', via: 'unique-holder' });
+  });
+});
+
+describe('the compatibility API\'s default package id is a caller with no package (epic seat ruling from E6)', () => {
+  it('a `__runtime__` caller reaches an environment-only item, as a caller with no package does', () => {
+    expect(RUNTIME_COMPATIBILITY_PACKAGE_ID).toBe('__runtime__');
+    const envOnly = packageScopedHolderSource<string>([[null, 'env']]);
+    const never: PackageResolutionClosureOf = () => { throw new Error('asked'); };
+    expect(resolvePackageScopedHolders({ type: 'flow', name: 'n', callerPackageId: RUNTIME_COMPATIBILITY_PACKAGE_ID }, envOnly, never))
+      .toEqual({ status: 'resolved', item: 'env', holder: { kind: 'environment' }, via: 'environment' });
+  });
+
+  it('only the caller side: an item stamped `__runtime__` is still a package holder', () => {
+    expect(resolve([['__runtime__', 'r'], [A, 'a']], [])).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
   });
 });

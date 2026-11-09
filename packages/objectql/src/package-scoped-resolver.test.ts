@@ -797,3 +797,16 @@ describe('R2 — a bundle addition is no holder of its base\'s name for a bare r
     expect(registry.packageScopedHoldersOf('flow', 'send_email')).toEqual([A, D]);
   });
 });
+
+describe('R2 — an object registered with no package id is a caller with no package (`__runtime__`)', () => {
+  it('a `__runtime__` caller reaches an environment-only item over the registry', () => {
+    registry.registerItem('flow', body('flow', 'env_only', 'env'), 'name' as never);
+    expect(label(resolve('flow', 'env_only', core.RUNTIME_COMPATIBILITY_PACKAGE_ID))).toBe('env flow');
+  });
+
+  it('the compatibility API stamps that one spelling', () => {
+    const ql = new ObjectQL();
+    expect(ql.registerObject({ name: 'rt_probe', fields: {} } as never)).toBeDefined();
+    expect((ql.registry.getObject('rt_probe') as { _packageId?: unknown } | undefined)?._packageId).toBe(core.RUNTIME_COMPATIBILITY_PACKAGE_ID);
+  });
+});
