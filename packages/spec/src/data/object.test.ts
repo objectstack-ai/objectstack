@@ -83,13 +83,13 @@ describe('ObjectCapabilities', () => {
       expect(message).toContain('This edit left `os migrate meta` with the protocol-16.x conversions');
       expect(message).not.toContain('os migrate meta --from 16');
     }
-    // `trash` additionally points at the parked soft-delete issue — the
-    // parking spot the 2026-08-02 #3207 ruling designates (#1893, the old
-    // pointer, closed 2026-07-24).
+    // `trash` additionally points at the recycle bin that shipped after the
+    // flag was retired (ADR-0148), which has no flag to set (#31629; it used
+    // to say soft delete was parked, which the bin made untrue).
     const trash = ObjectCapabilities.safeParse({ trash: false });
     expect(trash.success).toBe(false);
     const trashMsg = trash.success ? '' : trash.error.issues.map((i) => i.message).join('\n');
-    expect(trashMsg).toContain('soft delete is parked');
+    expect(trashMsg).toContain('The recycle bin that shipped later (ADR-0148) has no flag');
     expect(trashMsg, 'the prescription carries ADR ids and the migration command, never a tracker id')
       .not.toMatch(/#\d{3,5}/);
   });
