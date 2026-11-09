@@ -24,6 +24,13 @@ import Validate from '../src/commands/validate';
 import { validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
+// Pay the first transform of the dist-resolved deps `os build` reaches through
+// dynamic `import()`s at MODULE LOAD, not inside a clocked case
+// (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/objectql/core';
+import '@objectstack/plugin-security';
+import '@objectstack/runtime';
+
 const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
 
 interface Run {
