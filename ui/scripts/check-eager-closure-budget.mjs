@@ -2258,7 +2258,28 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // is the next candidate. ⛔ Not moved: MAX_EAGER_CLOSURE_GZIP_BYTES, BASELINE,
   // REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk rows. No
   // exemption was added and no import was made lazy.
-  'i18n-locale-en': 61_000,
+  //
+  // ⚠️ RAISED by objectstack#31893 (2026-11-09), from 61,000 by 1,000 bytes,
+  // with its baseline below moved by the same amount. WHAT THE BYTES ARE —
+  // one container, one instrument: `CI=true pnpm exec vite build` in
+  // `apps/console`, reading `apps/console/dist/eager-closure.json`, twice on
+  // the same tree (`main` at `f3036900` merged into that card's branch): with
+  // the card's two new keys, `list.loadErrorUnknownColumnMessage` and
+  // `list.loadErrorUnknownFieldMessage`, this chunk reads 61,030 gzipped bytes;
+  // with those two `en` lines deleted it reads 60,963. So `main` was 37 bytes
+  // under the line and the keys cost 67. The eager closure read 2,257,258 ->
+  // 2,257,352 (+94), well inside the aggregate ceiling.
+  //
+  // WHAT THEY BUY: the 67 bytes are the list's rejected panel naming the field
+  // a `400 INVALID_FIELD` refused, and the view column that asked for it,
+  // where it showed only "This view's query was rejected". The other 933 are
+  // SHARED headroom for the next few error strings of that size, ⛔ not a
+  // budget for a new group: a whole group belongs in a lazy namespace, as
+  // `marketplace` went (objectstack#30588). ⛔ Not moved:
+  // MAX_EAGER_CLOSURE_GZIP_BYTES, BASELINE,
+  // REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk rows. No
+  // exemption was added and no import was made lazy.
+  'i18n-locale-en': 62_000,
   // Raised by the maintainer ruling of 2026-09-08, ⛔ not by a measurement here:
   // `main` had been red on this line since `f76f43628`. The bytes that put it
   // there were UNATTRIBUTED when this moved and have since been measured to
@@ -2507,7 +2528,11 @@ export const PER_CHUNK_BASELINE = Object.freeze({
   // the same +1,000 bytes (the entry on that key of PER_CHUNK_GZIP_CEILINGS),
   // which keeps the ceiling-minus-baseline gap this key carried. ⚠️ So this is
   // no longer one build's reading.
-  'i18n-locale-en': 41_415,
+  //
+  // Moved with its ceiling by objectstack#31893 (2026-11-09), from 41,415 by
+  // the same +1,000 bytes (the entry on that key of PER_CHUNK_GZIP_CEILINGS),
+  // which keeps the ceiling-minus-baseline gap this key carried.
+  'i18n-locale-en': 42_415,
   // `3f775eeb8`, its OWN console build — ⛔ not the one above it and not
   // BASELINE's. Moved with the ceiling in the same commit, per the maintainer
   // ruling of 2026-09-08 and the rule stated under "Raising one".

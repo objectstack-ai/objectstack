@@ -97,11 +97,13 @@
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
  *   objects.<name>._actions.<action>.resultDialog.title / .description / .acknowledge
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
+ *   objects.<name>._actions.<action>.preflight.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
  *                          / .disabledReason / .submitText (beside a non-empty `params`)
  *                          / .cancelText (beside `confirmText` or a non-empty `params`)
  *   globalActions.<action>.outcomeMessages.<outcome>
- *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
+ *   globalActions.<action>.params.<param>.* / .resultDialog.* / .preflight.fields.<path>
+ *                          (same shape as object actions)
  *   apps.<app>.label / .description
  *   apps.<app>.navigation.<id>.label
  *     ^ an item another package CONTRIBUTES into the app through
@@ -814,6 +816,31 @@ function pushActionResultDialog(
 }
 
 /**
+ * Emit `preflight.fields.<path>` entries under an action's translation root —
+ * one per field the action's `preflight.fields[]` declares, keyed by the
+ * LITERAL path exactly as `pushActionResultDialog` keys `resultDialog.fields`
+ * (#31885). Mirrors `ActionPreflightTranslationSchema` in @objectstack/spec and
+ * `resolveActionPreflight`, which overlays the declared fields only. A preflight
+ * has no `title` (the console draws its panel under its own heading), so the
+ * field labels are its whole translatable copy.
+ */
+function pushActionPreflight(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  kind: ExpectedEntry['source'],
+  objectName?: string,
+): void {
+  const preflight = action?.preflight;
+  if (!preflight || typeof preflight !== 'object' || !Array.isArray(preflight.fields)) return;
+  for (const field of preflight.fields) {
+    if (!field || typeof field !== 'object') continue;
+    if (typeof field.path !== 'string' || field.path.length === 0) continue;
+    pushEntry(out, [...actionRoot, 'preflight', 'fields', field.path], field.label, kind, { objectName });
+  }
+}
+
+/**
  * How deep a `conditional` chain is followed. `ValidationRuleSchema` is
  * recursive with no declared bound, and this walker is handed hand-authored
  * TypeScript — a shared branch object appearing under its own ancestor would
@@ -1492,6 +1519,7 @@ export function collectExpectedEntries(
         pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
+        pushActionPreflight(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
     }
 
@@ -1591,6 +1619,7 @@ export function collectExpectedEntries(
     pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);
+    pushActionPreflight(out, root, action, kind, objectName);
   }
 
   // ── Apps + navigation ────────────────────────────────────────────
