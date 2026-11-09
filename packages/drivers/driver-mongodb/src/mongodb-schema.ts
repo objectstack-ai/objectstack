@@ -147,6 +147,161 @@ async function rebuildLegacySparseUnique(
 }
 
 /**
+ * The most key parts {@link retireWidenedUniques} enumerates subsequences of —
+ * `2^n - 2` candidates per declared index — the same bound as driver-sql's
+ * `WIDENED_UNIQUE_MAX_KEY_PARTS`.
+ */
+const WIDENED_UNIQUE_MAX_KEY_PARTS = 8;
+
+/** Key order matters in a Mongo index key, so the comparison is ordered. */
+function sameKey(existing: Document, fields: readonly string[]): boolean {
+  const have = Object.entries((existing.key ?? {}) as Record<string, unknown>);
+  return have.length === fields.length && have.every(([k, v], i) => k === fields[i] && v === 1);
+}
+
+/** Is `filter` exactly the NULL-distinct filter this driver writes over `fields` ({@link nullDistinctUniqueOptions})? */
+function isNullDistinctFilter(filter: unknown, fields: readonly string[]): boolean {
+  if (typeof filter !== 'object' || filter === null) return false;
+  const entries = Object.entries(filter as Record<string, unknown>);
+  if (entries.length !== fields.length) return false;
+  return fields.every((f) => {
+    const types = ((filter as Record<string, any>)[f] as { $type?: unknown } | undefined)?.$type;
+    return (
+      Array.isArray(types) &&
+      types.length === NON_NULL_BSON_TYPES.length &&
+      NON_NULL_BSON_TYPES.every((t) => types.includes(t))
+    );
+  });
+}
+
+/**
+ * Is `existing` a unique index THIS DRIVER built over exactly `fields` — the
+ * NULL-distinct partial shape (#29278) or the sparse shape before it? Anything
+ * else under the same name (an operator's hand-made index) is not ours to drop.
+ */
+function isDriverBuiltUnique(existing: Document, fields: readonly string[]): boolean {
+  if (existing.unique !== true || !sameKey(existing, fields)) return false;
+  if (existing.sparse === true && existing.partialFilterExpression === undefined) return true;
+  return existing.sparse !== true && isNullDistinctFilter(existing.partialFilterExpression, fields);
+}
+
+/**
+ * Does a partial unique index on exactly `narrower` stand that keeps the rows
+ * whose every `nullable` gained column is null or missing to one per
+ * `narrower` — the guard a nullable widening needs before its narrower index
+ * may go? Its filter must test each `nullable` column for `null` (which matches
+ * a missing field too) and nothing that would exempt a row with non-null key
+ * parts beyond that: every other filter entry is a key part's non-null type list.
+ */
+function hasNullScopedGuard(indexes: readonly Document[], narrower: readonly string[], nullable: readonly string[]): boolean {
+  return indexes.some((i) => {
+    if (i.unique !== true || !sameKey(i, narrower)) return false;
+    const filter = i.partialFilterExpression as Record<string, unknown> | undefined;
+    if (!filter) return false;
+    if (!nullable.every((c) => Object.prototype.hasOwnProperty.call(filter, c) && filter[c] === null)) return false;
+    return Object.keys(filter).every(
+      (k) => nullable.includes(k) || (narrower.includes(k) && isNullDistinctFilter({ [k]: filter[k] }, [k])),
+    );
+  });
+}
+
+/**
+ * Retire the narrower unique an earlier declaration built, once the declared
+ * key that widened it stands (ADR-0150 D4: the activation ledger's
+ * `(metadata_type, name)` became `(metadata_type, package_id, name)`). The Mongo
+ * copy of driver-sql's widening arm (`widenedUniqueReplacements` in
+ * `schema-drift.ts`).
+ *
+ * Without it, a collection synced before the widening keeps the old unique
+ * beside the new one, and it refuses exactly the documents the new key admits
+ * (measured on mongod 8.0.34: every second package's row of a name, `E11000` on
+ * the old index). Widening a key is a pure relaxation, so dropping the narrower
+ * index loses no guarantee the declaration still asks for — with one exception
+ * the guard below handles.
+ *
+ * Runs AFTER the create loop, so it is create-before-drop: it drops only when
+ * every condition holds —
+ *  - the declared index is unnamed, `unique: true`/`'global'`, with 2..8 fields;
+ *  - the narrower index's fields are an in-order PROPER subsequence of them and
+ *    its name is the one this driver generates for them (`idx_<fields>_unique`);
+ *  - no current op (field-level uniques included) asks for that name;
+ *  - it is this driver's own unique shape ({@link isDriverBuiltUnique});
+ *  - the wider unique is confirmed present under its generated name, with this
+ *    driver's NULL-distinct shape;
+ *  - when a gained field is nullable (not `required`), a partial unique on
+ *    exactly the narrower fields over the rows where it is null stands
+ *    ({@link hasNullScopedGuard}). The wider key is NULL-distinct (#29278), so
+ *    such a row is constrained by it no longer, and the narrower index is the
+ *    only rule keeping those rows to one; without the guard it is KEPT. The
+ *    ledger's guard is `uniq_sys_metadata_activation_packageless`
+ *    ({@link RUNTIME_OWNED_UNIQUES}), built in the same create loop.
+ *
+ * The narrower READ index (`idx_<fields>`) is not touched: it is a plain index,
+ * refuses nothing, and still serves lookups by those fields (measured: the
+ * planner answers the ledger's `(metadata_type, name)` read with it).
+ *
+ * One `warn` line per retired index, naming the collection, the old key and
+ * the new key. A drop that finds the index already gone (`IndexNotFound`, 27 —
+ * a second process syncing at once) is ignored.
+ */
+async function retireWidenedUniques(
+  collection: Collection,
+  collectionName: string,
+  schema: ObjectDef,
+  wanted: ReadonlySet<string>,
+  logger: SchemaSyncLogger,
+): Promise<void> {
+  const declared = (schema.indexes ?? []).filter(
+    (idx) => (idx.unique === true || idx.unique === 'global') && !(typeof idx.name === 'string' && idx.name.trim()),
+  );
+  if (declared.length === 0) return;
+  const indexes = await collection.indexes();
+  const byName = new Map(indexes.map((i) => [i.name as string, i]));
+  for (const idx of declared) {
+    const listed = (idx.fields ?? []).filter((f) => typeof f === 'string' && f.length > 0);
+    if (listed.length < 2 || listed.length > WIDENED_UNIQUE_MAX_KEY_PARTS) continue;
+    const wide = byName.get(`idx_${listed.join('_')}_unique`);
+    if (!wide || !isDriverBuiltUnique(wide, listed) || wide.sparse === true) continue;
+    const full = (1 << listed.length) - 1;
+    for (let mask = 1; mask < full; mask++) {
+      const narrower = listed.filter((_, i) => (mask & (1 << i)) !== 0);
+      const legacyName = `idx_${narrower.join('_')}_unique`;
+      if (wanted.has(legacyName)) continue;
+      const legacy = byName.get(legacyName);
+      if (!legacy || !isDriverBuiltUnique(legacy, narrower)) continue;
+      const gained = listed.filter((c) => !narrower.includes(c));
+      const nullable = gained.filter((c) => schema.fields?.[c]?.required !== true);
+      if (nullable.length > 0 && !hasNullScopedGuard(indexes, narrower, nullable)) continue;
+      try {
+        await collection.dropIndex(legacyName);
+      } catch (error: any) {
+        if (error?.code !== 27 && error?.codeName !== 'IndexNotFound') throw error;
+      }
+      byName.delete(legacyName);
+      logger.warn(
+        `[driver-mongodb] ${collectionName}: retired unique index '${legacyName}' on (${narrower.join(', ')}), ` +
+          `superseded by the declared unique (${listed.join(', ')}), which adds ${gained.join(', ')} to the key. ` +
+          `Widening a unique key is a pure relaxation: the wider index was confirmed present first.` +
+          (nullable.length > 0
+            ? ` ${nullable.join(', ')} ${nullable.length === 1 ? 'is' : 'are'} nullable, and the partial unique on ` +
+              `(${narrower.join(', ')}) over rows where it is null keeps those rows to one.`
+            : ''),
+        { collection: collectionName, retired: legacyName, oldKey: narrower, newKey: listed },
+      );
+    }
+  }
+}
+
+/** Where {@link syncCollectionSchema} reports what it changed beyond creating indexes. */
+export interface SchemaSyncLogger {
+  warn: (msg: string, meta?: Record<string, unknown>) => void;
+}
+
+const CONSOLE_SCHEMA_SYNC_LOGGER: SchemaSyncLogger = {
+  warn: (msg, meta) => console.warn(msg, meta ?? ''),
+};
+
+/**
  * ObjectStack field definition (subset needed for schema sync).
  */
 interface FieldDef {
@@ -405,11 +560,14 @@ function refuseRejectedReferenceAlias(collectionName: string, fieldName: string)
  * - Creates indexes for fields marked `unique`
  * - Creates indexes on lookup (reference) fields
  * - Creates the object's DECLARED `indexes[]` (#6810)
+ * - Retires a unique an earlier declaration built whose key the declaration
+ *   has since widened, create-before-drop ({@link retireWidenedUniques})
  */
 export async function syncCollectionSchema(
   db: Db,
   collectionName: string,
   schema: ObjectDef,
+  opts: { logger?: SchemaSyncLogger } = {},
 ): Promise<void> {
   // [#13222] The door — see {@link refuseRejectedReferenceAlias}. Ahead of
   // `createCollection` and of every per-field branch, because the spec's
@@ -523,6 +681,17 @@ export async function syncCollectionSchema(
       throw error;
     }
   }
+
+  // A unique an earlier declaration built, now widened — retired only after the
+  // loop above, and only once the wider key (and, for a nullable gained field,
+  // its guard) is confirmed present. See {@link retireWidenedUniques}.
+  await retireWidenedUniques(
+    collection,
+    collectionName,
+    schema,
+    new Set(indexOps.map((o) => o.options.name as string)),
+    opts.logger ?? CONSOLE_SCHEMA_SYNC_LOGGER,
+  );
 }
 
 /**
