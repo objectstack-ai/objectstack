@@ -29,6 +29,7 @@ import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { resolveUserAuthzGrants } from './resolve-authz-context.js';
 import { makeRecordingQl } from './__tests__/resolve-authz-context.batch-equivalence.testkit.js';
 import { bindStaticSecurityCatalog } from './__tests__/security-catalog.testkit.js';
+import { bindSecurityCatalogReader, createSecurityCatalogReader } from './security-catalog.js';
 
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
@@ -266,5 +267,71 @@ describe('[ADR-0131 D3/D4] position-bound sets are the ones the position definit
     }, withEveryone);
     expect(out.permissions).toEqual([]);
     expect(out.positions).not.toContain('everyone');
+  });
+});
+
+/**
+ * [ADR-0150 D8 R1] A grant whose `permission_set_package` names its holder
+ * reads that package's set; a null column resolves with no caller (D3), so a
+ * name two packages hold confers nothing and nothing is picked.
+ */
+describe('[ADR-0150 D8 R1] a grant names its set\'s package beside its name', () => {
+  const Q = 'com.acme.q';
+  const R = 'com.acme.r';
+  /** `shared` held by Q and R (a pre-phase-1 clash), with different bodies; `solo` by Q alone. */
+  const holders: Record<string, Array<{ packageId: string; item: Record<string, unknown> }>> = {
+    shared: [
+      { packageId: Q, item: { name: 'shared', _packageId: Q, systemPermissions: ['cap_q'] } },
+      { packageId: R, item: { name: 'shared', _packageId: R, systemPermissions: ['cap_r'] } },
+    ],
+    solo: [{ packageId: Q, item: { name: 'solo', _packageId: Q, systemPermissions: ['cap_solo'] } }],
+  };
+  const scopedCatalog = () =>
+    createSecurityCatalogReader({
+      registry: {
+        // The by-name read is the first-registered holder — the pick the column must never fall back to.
+        getItem: (type: string, name: string) => (type === 'permission' ? holders[name]?.[0]?.item : undefined),
+        listItems: (type: string) => (type === 'permission' ? Object.values(holders).flatMap((h) => h.map((x) => x.item)) : []),
+        isPackageDisabled: () => false,
+        packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' ? (holders[name] ?? []).map((h) => h.packageId) : []),
+        getPackageScopedItem: (type: string, name: string, packageId: string) =>
+          type === 'permission' ? holders[name]?.find((h) => h.packageId === packageId)?.item : undefined,
+        getEnvironmentScopedItem: () => undefined,
+        getArtifactItem: () => undefined,
+        getPackage: (id: string) => ({ manifest: { id } }),
+        getAllPackages: () => [],
+      },
+      metadata: { get: () => undefined, list: () => [] },
+    });
+  async function resolveScoped(grants: Array<Record<string, unknown>>) {
+    const ql = makeRecordingQl(tables(grants.map((g) => ({ organization_id: ORG_A, ...g }))));
+    bindSecurityCatalogReader(ql, scopedCatalog());
+    return resolveUserAuthzGrants(ql, 'u1', { tenantId: ORG_A });
+  }
+
+  it('the column decides which holder\'s body the grant confers', async () => {
+    for (const [pkg, cap] of [[Q, 'cap_q'], [R, 'cap_r']] as const) {
+      const out = await resolveScoped([{ permission_set: 'shared', permission_set_package: pkg }]);
+      expect(out.permissions, pkg).toEqual(['shared']);
+      expect(out.systemPermissions, pkg).toEqual([cap]);
+    }
+  });
+
+  it('⛔ a null column on a name two packages hold confers nothing — never the first registered holder', async () => {
+    const out = await resolveScoped([{ permission_set: 'shared', permission_set_package: null }]);
+    expect(out.permissions).toEqual([]);
+    expect(out.systemPermissions).toEqual([]);
+  });
+
+  it('a column naming a package that does not hold the name confers nothing', async () => {
+    const out = await resolveScoped([{ permission_set: 'solo', permission_set_package: R }]);
+    expect(out.permissions).toEqual([]);
+  });
+
+  it('CONTROL — a name one package holds resolves byte-identically with its column or without it', async () => {
+    const bound = await resolveScoped([{ permission_set: 'solo', permission_set_package: Q }]);
+    const unbound = await resolveScoped([{ permission_set: 'solo' }]);
+    expect(bound.systemPermissions).toEqual(['cap_solo']);
+    expect(JSON.stringify(bound)).toBe(JSON.stringify(unbound));
   });
 });

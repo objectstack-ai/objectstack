@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createSecurityCatalogReader,
   resolveCatalogReference,
+  storedPermissionSetScope,
   type SecurityCatalogEntry,
   type SecurityCatalogMetadataService,
   type SecurityCatalogPackageScopedRegistry,
@@ -434,5 +435,72 @@ describe('security catalog read — permission sets by (package, name) through t
     const reader = createSecurityCatalogReader({ registry: scopedRegistry({}, { throwOnHolders: true }), metadata: metadata({}) });
     expect(isAuthzStoreUnavailableError(await rejection(reader.resolve('permission', 'x')))).toBe(true);
     expect(isAuthzStoreUnavailableError(await rejection(reader.resolve('permission', 'x', at())))).toBe(true);
+  });
+
+  // [ADR-0150 D8 R1/R3] A stored reference read by its package column.
+  describe('a stored reference read by its package column', () => {
+    const R = 'com.acme.r';
+    /** `shared` held by Q and R (a pre-phase-1 clash); `q_only` by Q alone; `env_set` by the environment. */
+    const stored = () => scopedRegistry(
+      { permission: [{ name: 'shared', _packageId: Q }, { name: 'q_only', _packageId: Q }] },
+      {
+        packages: { [P]: { deps: [Q] }, [Q]: {}, [R]: {} },
+        holders: {
+          shared: [{ packageId: Q, item: { name: 'shared', _packageId: Q, label: 'Q' } }, { packageId: R, item: { name: 'shared', _packageId: R, label: 'R' } }],
+          q_only: [{ packageId: Q, item: { name: 'q_only', _packageId: Q } }],
+          env_set: [{ packageId: null, item: { name: 'env_set' } }],
+        },
+      },
+    );
+
+    it('a column naming a holder reads that package\'s set and no other, even where the bare name is refused', async () => {
+      const reader = createSecurityCatalogReader({ registry: stored(), metadata: metadata({}) });
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope(Q)))?.definition.label).toBe('Q');
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope(R)))?.definition.label).toBe('R');
+      expect(await resolveCatalogReference(reader, 'permission', 'shared')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+    });
+
+    it('a column naming a package that does not hold the name is not-found: no other holder, environment item or metadata body stands in', async () => {
+      const reader = createSecurityCatalogReader({
+        registry: stored(),
+        metadata: metadata({ permission: [{ name: 'q_only' }, { name: 'env_set' }, { name: 'meta_only' }] }),
+      });
+      for (const name of ['q_only', 'env_set', 'meta_only', 'shared']) {
+        expect(await resolveCatalogReference(reader, 'permission', name, storedPermissionSetScope('com.acme.gone'))).toEqual({ status: 'not-found' });
+      }
+    });
+
+    it('a null column with two or more holders is refused, naming every candidate — never the first registered', async () => {
+      const r = stored();
+      const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+      expect(storedPermissionSetScope(null)).toBeUndefined();
+      expect(await reader.resolve('permission', 'shared', storedPermissionSetScope(null))).toBeUndefined();
+      const answer = await resolveCatalogReference(reader, 'permission', 'shared', storedPermissionSetScope(''));
+      expect(answer).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+      if (answer.status === 'refused') expect(answer.candidates).toEqual([expect.stringContaining(Q), expect.stringContaining(R)]);
+    });
+
+    it('a null column with one holder resolves by D3, as today; a writer\'s package is the D3 caller (R3)', async () => {
+      const r = stored();
+      const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+      expect((await reader.resolve('permission', 'q_only', storedPermissionSetScope(null)))?.packageId).toBe(Q);
+      expect((await reader.resolve('permission', 'env_set', storedPermissionSetScope(undefined)))?.definition).toEqual({ name: 'env_set' });
+      // R3: the suggesting package P reaches its declared dependency Q; R's copy of `shared` is outside P's closure.
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope(null, P)))?.definition.label).toBe('Q');
+      expect(await resolveCatalogReference(reader, 'permission', 'q_only', storedPermissionSetScope(null, R))).toMatchObject({ status: 'refused', reason: 'outside-closure' });
+      expect(r.asked).toEqual([
+        { name: 'q_only', caller: null },
+        { name: 'env_set', caller: null },
+        { name: 'shared', caller: P },
+        { name: 'q_only', caller: R },
+      ]);
+    });
+
+    it('the column names the exact holder ahead of a writer and a position', async () => {
+      const r = stored();
+      const reader = createSecurityCatalogReader({ registry: r, metadata: metadata({}) });
+      expect((await reader.resolve('permission', 'shared', { ...at(), ...storedPermissionSetScope(R, P) }))?.definition.label).toBe('R');
+      expect(r.asked).toEqual([]);
+    });
   });
 });
