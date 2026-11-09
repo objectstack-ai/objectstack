@@ -87,6 +87,7 @@
     "kernel/PackageStatusEnum",
     "kernel/PermissionAction",
     "kernel/PermissionScope",
+    "kernel/PermissionSetAddress",
     "kernel/Plugin",
     "kernel/PluginCapability",
     "kernel/PluginCapabilityManifest",

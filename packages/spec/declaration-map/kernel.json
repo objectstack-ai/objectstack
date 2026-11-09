@@ -167,6 +167,8 @@
     "PermissionActionSchema": "kernel/PermissionAction",
     "PermissionScope": "kernel/PermissionScope",
     "PermissionScopeSchema": "kernel/PermissionScope",
+    "PermissionSetAddress": "kernel/PermissionSetAddress",
+    "PermissionSetAddressSchema": "kernel/PermissionSetAddress",
     "PluginCapability": "kernel/PluginCapability",
     "PluginCapabilityManifest": "kernel/PluginCapabilityManifest",
     "PluginCapabilityManifestSchema": "kernel/PluginCapabilityManifest",

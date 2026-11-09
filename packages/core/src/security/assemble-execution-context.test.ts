@@ -473,6 +473,22 @@ describe('#6216 — the field set is CLOSED', () => {
     expect(decided).toEqual(schemaFields);
   });
 
+  it('permissionSetAddresses is decided but not yet filled: no envelope carries the key (ADR-0150 D3)', () => {
+    const base = { localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined } as const;
+    const human = assembleExecutionContext({ ...base, authz: HUMAN_FULL, oauth: undefined });
+    const agent = assembleExecutionContext({
+      ...base,
+      authz: HUMAN_FULL,
+      oauth: { userId: 'u1', scopes: ['data:read'], clientId: 'cli1', scopePermissions: ['agent_data_read'], delegatesActions: false },
+    });
+    const guest = assembleExecutionContextOrGuest({ ...base, authz: ANONYMOUS, oauth: undefined });
+    expect(ENTRY_EXECUTION_CONTEXT_FIELDS).toContain('permissionSetAddresses');
+    for (const ctx of [human, agent, guest]) {
+      expect(ctx).toBeDefined();
+      expect(Object.keys(ctx!)).not.toContain('permissionSetAddresses');
+    }
+  });
+
   it('no field is decided twice', () => {
     const decided = [...ENTRY_EXECUTION_CONTEXT_FIELDS, ...NON_ENTRY_FIELDS];
     expect(new Set(decided).size).toBe(decided.length);
