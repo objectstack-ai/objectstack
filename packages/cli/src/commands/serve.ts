@@ -20,7 +20,9 @@ import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
 import { cwdConfigJoinsBoot } from '../utils/artifact-precedence.js';
+import { declaresReplicasSharingState } from './start.js';
 import {
+  inferDriverTypeFromUrl,
   resolveDriverType,
   resolveStorageDefinition,
   loadTursoDriverFactory,
@@ -84,7 +86,7 @@ import { missingProviderMessage } from '../utils/capability-preflight.js';
 // app-declared package wins there (per commit 5a90c56d1).
 import { resolveDeploymentAppName } from '@objectstack/plugin-email';
 import { createHash } from 'node:crypto';
-import { resolveObjectStackHome, type InstalledPluginRefusal } from '@objectstack/runtime';
+import { resolveObjectStackHome, type InstalledPluginRefusal, type StandaloneStackConfig } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 // The ONE port contract — range, reader and refusal prose — shared with the two
 // commands that spawn this one (#12673). `serve`'s own door below calls it
@@ -2687,6 +2689,11 @@ export default class Serve extends Command {
     // `servedSqliteFilePath` cannot serve: on this path it is only learned by
     // probing the booted kernel. Unset for every other boot and every other kind.
     let standaloneSqlitePrimary: string | undefined;
+    // The input a composed STANDALONE stack resolved its `default` database
+    // from — set at the same two sites as `standaloneSqlitePrimary` — so the
+    // multi-replica local-database refusal before step 2 reads the runtime's
+    // own resolution of it. Unset on the legacy route.
+    let standaloneDatabaseInput: StandaloneStackConfig | undefined;
 
     // Resolve the kernel logger level up front. It decides more than the
     // logger's own threshold: it decides whether the boot-quiet window below
@@ -2911,6 +2918,7 @@ export default class Serve extends Command {
           // declares none, so the artifact rung `createDefaultHostConfig`
           // settles internally cannot answer differently.
           standaloneSqlitePrimary = await standaloneTelemetryPrimary(defaultHostInput);
+          standaloneDatabaseInput = defaultHostInput;
           // [#4002] `api` merges per key — see mergeBootConfig. A shallow spread
           // let the boot builder's two scoping keys wipe the author's whole `api`
           // block, silently dropping `requireAuth` / `enforceProjectMembership`.
@@ -2938,6 +2946,7 @@ export default class Serve extends Command {
           // by the runtime's own pre-boot resolution over the SAME input, for
           // the telemetry sibling (step 2).
           standaloneSqlitePrimary = await standaloneTelemetryPrimary(standaloneInput);
+          standaloneDatabaseInput = standaloneInput;
           // #21501 — did the standalone stack load a compiled artifact as this
           // app's bundle? Its AppPlugin over the bundle is the proof (it is
           // pushed only when the bundle loaded, and a non-host config carries
@@ -3385,6 +3394,40 @@ export default class Serve extends Command {
           printDiagnostic(chalk.dim(`  telemetry datasource: ${telemetryPath} (lifecycle-classed system data; OS_TELEMETRY_DB=0 to disable)`));
         }
       };
+
+      // Several replicas declared over the redis cluster driver (cloud#3814
+      // N3) cannot share a database that is a file on one replica's own disk:
+      // each replica would open its own copy and the data would diverge. The
+      // boot is refused here, once the primary database is resolved and before
+      // anything is connected, created or booted — so ahead of the split-brain
+      // guard too, which it does not replace. Asked only under the declaration
+      // (`declaresReplicasSharingState`, #31600's pre-boot form of
+      // `declaresMultiReplicaOnRedis`), so a single-node boot resolves nothing
+      // more than it did. The primary is the one each route resolves for
+      // itself, never a second reading of the URL: the standalone stack's
+      // `resolveStandaloneDatabase` over the input it was composed from, or
+      // this command's own `OS_DATABASE_URL` fallback below. A host config whose
+      // own plugin provides the driver declares nothing either route can read,
+      // and is not judged. A fallback selection the step below refuses anyway
+      // (an unknown driver or scheme) is left to that refusal.
+      if (await declaresReplicasSharingState(process.env)) {
+        let primaryDatabase: MultiReplicaPrimaryDatabase | undefined;
+        if (standaloneDatabaseInput !== undefined) {
+          const { resolveStandaloneDatabase } = await import('@objectstack/runtime');
+          primaryDatabase = resolveStandaloneDatabase(standaloneDatabaseInput);
+        } else if (shouldAutoRegisterStorageDriver(config, plugins)) {
+          const databaseUrl = process.env.OS_DATABASE_URL;
+          try {
+            const fallback = resolveStorageDefinition(
+              resolveDriverType(process.env.OS_DATABASE_DRIVER, databaseUrl),
+              { databaseUrl, isDev },
+            );
+            if (fallback) primaryDatabase = { driver: fallback.driverId, url: databaseUrl };
+          } catch { /* refused, fatally, by step 2 below */ }
+        }
+        const refusal = primaryDatabase && multiReplicaLocalDatabaseRefusal(primaryDatabase);
+        if (refusal) throw new Error(refusal);
+      }
 
       // 2. Auto-register storage driver
       // Priority:
@@ -8015,4 +8058,62 @@ export function collectAutomationSummary(
       .map((r) => ({ flowName: r.name, armed: r.armed, shadowedCount: r.shadowed.length })),
     draftCount: states.filter((s) => s.enabled && (s.status ?? 'draft') === 'draft').length,
   };
+}
+
+/**
+ * The primary database a boot resolved, as {@link multiReplicaLocalDatabaseRefusal}
+ * reads it: the driver id the boot will build (`resolveStandaloneDatabase`'s
+ * `driver`, or the `OS_DATABASE_URL` fallback's `driverId`) and the URL it was
+ * resolved from, when there was one.
+ */
+export interface MultiReplicaPrimaryDatabase {
+  driver: string;
+  url?: string;
+}
+
+/**
+ * The refusal a boot that declares several replicas over the redis cluster
+ * driver prints when its primary database is local to the replica — a file on
+ * its own disk, or SQLite's in-memory database — or `undefined` when it is not.
+ * Three kinds are local:
+ *
+ *   - `sqlite` — a `file:` URL, a path, `:memory:`, and the SQLite file a boot
+ *     falls back to with no URL at all;
+ *   - `sqlite-wasm` — the WASM engine over the same kinds of file;
+ *   - `turso` over a URL that is itself a SQLite file (`file:`, a path,
+ *     `:memory:`): libSQL's embedded mode. Whether it is one is the URL
+ *     classification this command already owns ({@link inferDriverTypeFromUrl}),
+ *     never a second reading of it; a URL that classification refuses is left
+ *     to the driver, which refuses it too.
+ *
+ * Every other kind — postgres, mysql, mongodb, and libSQL over a server URL
+ * (`libsql://`, a Turso `https://` host) — is one database every replica
+ * reaches, and is not refused. The text names the variable and the remedy and
+ * never the URL, which can carry a credential.
+ */
+export function multiReplicaLocalDatabaseRefusal(primary: MultiReplicaPrimaryDatabase): string | undefined {
+  const kind = localDatabaseKindOf(primary);
+  if (!kind) return undefined;
+  return (
+    `[database] Refusing to start: several replicas are declared (OS_EXPECT_MULTI_NODE / OS_CLUSTER_REPLICAS>1) ` +
+    `over the redis cluster driver, but the primary database is ${kind}, local to each replica — each ` +
+    `replica would read and write its own copy, and a record written through one would be missing from the ` +
+    `others. Fix: point every replica at one shared Postgres database, ` +
+    `e.g. OS_DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DATABASE`
+  );
+}
+
+function localDatabaseKindOf(primary: MultiReplicaPrimaryDatabase): string | undefined {
+  if (primary.driver === 'sqlite') return 'SQLite';
+  if (primary.driver === 'sqlite-wasm') return 'SQLite (sqlite-wasm)';
+  if (isTursoDriverId(primary.driver)) {
+    let urlKind: string;
+    try {
+      urlKind = inferDriverTypeFromUrl(primary.url);
+    } catch {
+      return undefined;
+    }
+    if (urlKind === 'sqlite' || urlKind === 'sqlite-wasm') return 'a libSQL file';
+  }
+  return undefined;
 }

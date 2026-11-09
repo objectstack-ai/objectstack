@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — spawns the real producer once per single-cause fixture: four `os serve` boots, one per declaration spelling and gate state; local card-container reading 29.04 s of test time (no CI reading yet), x 1.25, rounded up
+// test-budget: 58 — spawns the real producer once per single-cause fixture: eight `os serve` boots, one per declaration spelling and gate state and one per local-database kind plus its control; local card-container reading 45.86 s of test time (no CI reading yet), x 1.25, rounded up
 
 /**
  * `os serve` asks the multi-node gate about the topology the operator DECLARED,
@@ -29,9 +29,16 @@
  *   3. CONTROL, `OS_CLUSTER_REPLICAS=2` + redis + no gate → refused exactly as
  *      before the fix.
  *   4. CONTROL, `OS_EXPECT_MULTI_NODE=true` + redis + a REGISTERED gate that
- *      admits whatever it is asked → boots. The gate prints the count it was
+ *      admits whatever it is asked → no denial, and neither the guard nor the
+ *      local-database refusal stops the boot. The gate prints the count it was
  *      asked, so the case also reads the count the fix chose for "declared,
- *      count unknown" (2).
+ *      count unknown" (2). It no longer asserts a COMPLETED boot: several
+ *      replicas declared over redis now refuse a database local to each one,
+ *      so the case boots over the same shared (unreachable) database as cases
+ *      1 and 3, and with no database server behind it the boot stops later,
+ *      at the first plugin that reads data (measured: the auth plugin's start,
+ *      "No driver available for object 'sys_organization'"). This suite runs
+ *      no database server every replica could share.
  *
  * ## The fixture
  *
@@ -45,7 +52,20 @@
  * composed driver is honestly in-process, the split-brain guard refuses every
  * declared topology that reaches it; case 4 therefore sets
  * `OS_ALLOW_MEMORY_CLUSTER_MULTINODE=true` (the guard's own escape hatch) so
- * that "admitted by the gate" can be read as a completed boot.
+ * that an admitted topology is not refused by the guard either. Cases 1, 3
+ * and 4 boot over a shared (unreachable) database rather than the fixture's
+ * SQLite, so the refusal they read, or rule out, is the guard's and not the
+ * local-database one.
+ *
+ * ## Several replicas over a database local to each one (second `describe`)
+ *
+ * The same fixture and declaration, read by a second refusal: several replicas
+ * declared over redis (`declaresMultiReplicaOnRedis`) cannot each open their
+ * own SQLite or sqlite-wasm file, so `serve` refuses the boot with exit 1 and
+ * names a Postgres `OS_DATABASE_URL`, ahead of the split-brain guard. The
+ * CONTROL boots the same `file:` database with nothing declared. Which
+ * resolutions count as local (libSQL over a server URL does not) is pinned
+ * beside `serve.ts`, in `serve-multi-replica-local-database.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -68,6 +88,12 @@ const GUARD_REFUSAL = 'ClusterServicePlugin: multi-node deployment declared';
 
 /** The gate-denial line `serve` prints, by its opening words. */
 const GATE_DENIAL = '[cluster] multi-node not authorized (';
+
+/** The local-database refusal (`multiReplicaLocalDatabaseRefusal` in `serve.ts`), by its opening words. */
+const LOCAL_DATABASE_REFUSAL = '[database] Refusing to start: several replicas are declared';
+
+/** The remedy that refusal names. */
+const POSTGRES_REMEDY = 'OS_DATABASE_URL=postgres://';
 
 const CONFIG = `
 export default {
@@ -175,6 +201,23 @@ function writeApp(prefix: string, gate: boolean): string {
   return dir;
 }
 
+/**
+ * The primary database the declared cases (1, 3 and 4) boot over: one all
+ * replicas would share. Several replicas declared over redis refuse a database
+ * local to each one (SQLite, this fixture's default) before the boot reaches
+ * the split-brain guard — the second `describe` pins that refusal — so a case
+ * that reads the GUARD's refusal has to boot past it. Nothing listens on the
+ * port, so the connect fails, and the driver-connect escape hatch keeps the
+ * boot walking to the guard: these cases read the gate and the guard, never
+ * the data. `mysql://` because its client ships with the SQL driver; `pg` is
+ * an optional package.
+ */
+const SHARED_DATABASE_ENV = {
+  OS_DATABASE_URL: 'mysql://fixture@127.0.0.1:9/fixture',
+  OS_DATABASE_DRIVER: undefined,
+  OS_ALLOW_DRIVER_CONNECT_FAILURE: 'true',
+};
+
 /** Boot once; `booted` is true only when the child printed a complete banner with the port it bound. */
 async function boot(prefix: string, gate: boolean, env: Record<string, string | undefined>) {
   const dir = writeApp(prefix, gate);
@@ -187,6 +230,9 @@ async function boot(prefix: string, gate: boolean, env: Record<string, string | 
       OS_EXPECT_MULTI_NODE: undefined,
       OS_CLUSTER_REPLICAS: undefined,
       OS_ALLOW_MEMORY_CLUSTER_MULTINODE: undefined,
+      OS_DATABASE_URL: undefined,
+      OS_DATABASE_DRIVER: undefined,
+      OS_ALLOW_DRIVER_CONNECT_FAILURE: undefined,
       ...env,
     },
   });
@@ -198,7 +244,7 @@ const BOOT_TIMEOUT = 180_000;
 
 describe('os serve → multi-node gate reads both spellings of the declaration', () => {
   it('REFUSES OS_EXPECT_MULTI_NODE=true over redis when no gate is registered', async () => {
-    const { out, booted } = await boot('expect-nogate', false, { OS_EXPECT_MULTI_NODE: 'true' });
+    const { out, booted } = await boot('expect-nogate', false, { ...SHARED_DATABASE_ENV, OS_EXPECT_MULTI_NODE: 'true' });
 
     // The gate was asked about a DECLARED topology and refused it for its own
     // stated reason …
@@ -218,15 +264,16 @@ describe('os serve → multi-node gate reads both spellings of the declaration',
   }, BOOT_TIMEOUT);
 
   it('CONTROL: OS_CLUSTER_REPLICAS=2 over redis with no gate is refused, as before', async () => {
-    const { out, booted } = await boot('replicas-nogate', false, { OS_CLUSTER_REPLICAS: '2' });
+    const { out, booted } = await boot('replicas-nogate', false, { ...SHARED_DATABASE_ENV, OS_CLUSTER_REPLICAS: '2' });
 
     expect(out).toContain(`${GATE_DENIAL}${noGateReason})`);
     expect(out).toContain(GUARD_REFUSAL);
     expect(booted).toBe(false);
   }, BOOT_TIMEOUT);
 
-  it('CONTROL: a registered gate that admits the topology still boots OS_EXPECT_MULTI_NODE=true', async () => {
-    const { out, booted } = await boot('expect-gate', true, {
+  it('CONTROL: a registered gate admits OS_EXPECT_MULTI_NODE=true — asked about 2 nodes, no denial', async () => {
+    const { out } = await boot('expect-gate', true, {
+      ...SHARED_DATABASE_ENV,
       OS_EXPECT_MULTI_NODE: 'true',
       // The composed driver is in-process by construction (see the header).
       OS_ALLOW_MEMORY_CLUSTER_MULTINODE: 'true',
@@ -236,6 +283,73 @@ describe('os serve → multi-node gate reads both spellings of the declaration',
     // count was not given — and admitted.
     expect(out).toContain(`${GATE_ASKED} 2`);
     expect(out).not.toContain(GATE_DENIAL);
+    // Over a shared database the boot passes the local-database refusal and
+    // the split-brain guard (whose plugin init runs before any plugin starts).
+    // It is not asked to complete: see the header.
+    expect(out).not.toContain(LOCAL_DATABASE_REFUSAL);
+    expect(out).not.toContain(GUARD_REFUSAL);
+  }, BOOT_TIMEOUT);
+});
+
+
+/**
+ * Boot once and let the child run until it prints its banner or EXITS on its
+ * own, so a refusal's exit code is the child's and not a signal's.
+ */
+async function bootToExit(prefix: string, env: Record<string, string | undefined>) {
+  const dir = writeApp(prefix, false);
+  const run = await runServe(dir, [], {
+    waitFor: /Press Ctrl\+C to stop/,
+    timeoutMs: 150_000,
+    env: {
+      OS_CLUSTER_DRIVER: DRIVER_NAME,
+      OS_EXPECT_MULTI_NODE: undefined,
+      OS_CLUSTER_REPLICAS: undefined,
+      OS_ALLOW_MEMORY_CLUSTER_MULTINODE: undefined,
+      OS_DATABASE_URL: undefined,
+      OS_DATABASE_DRIVER: undefined,
+      DATABASE_URL: undefined,
+      TURSO_DATABASE_URL: undefined,
+      // `<app>` in a value is the fixture app's own directory.
+      ...Object.fromEntries(Object.entries(env).map(([key, value]) => [key, value?.replace('<app>', dir)])),
+    },
+  });
+  return { out: `${run.stderr}\n${run.stdout}`, booted: run.port !== undefined, exitCode: run.exitCode };
+}
+
+describe('os serve → several replicas declared over redis refuse a database local to each replica', () => {
+  it('REFUSES OS_DATABASE_URL=file:… with OS_CLUSTER_REPLICAS=2 — exit 1, naming a Postgres OS_DATABASE_URL', async () => {
+    const { out, booted, exitCode } = await bootToExit('db-file', {
+      OS_DATABASE_URL: 'file:<app>/app.db',
+      OS_CLUSTER_REPLICAS: '2',
+    });
+
+    expect(out).toContain(LOCAL_DATABASE_REFUSAL);
+    expect(out).toContain(POSTGRES_REMEDY);
+    expect(booted).toBe(false);
+    expect(exitCode).toBe(1);
+    // Refused before the boot reached the split-brain guard: the database is
+    // the cause named, the guard's own refusal is not the one printed.
+    expect(out).not.toContain(GUARD_REFUSAL);
+  }, BOOT_TIMEOUT);
+
+  it('REFUSES the SQLite default (no OS_DATABASE_URL) and sqlite-wasm the same way', async () => {
+    for (const [prefix, url] of [['db-default', undefined], ['db-wasm', 'file:<app>/app.wasm.db']] as const) {
+      const { out, booted, exitCode } = await bootToExit(prefix, {
+        ...(url ? { OS_DATABASE_URL: url } : {}),
+        OS_CLUSTER_REPLICAS: '2',
+      });
+      expect(out, prefix).toContain(LOCAL_DATABASE_REFUSAL);
+      expect(out, prefix).toContain(POSTGRES_REMEDY);
+      expect(booted, prefix).toBe(false);
+      expect(exitCode, prefix).toBe(1);
+    }
+  }, BOOT_TIMEOUT * 2);
+
+  it('CONTROL: the same file: database with nothing declared boots as before', async () => {
+    const { out, booted } = await bootToExit('db-file-single', { OS_DATABASE_URL: 'file:<app>/app.db' });
+
     expect(booted).toBe(true);
+    expect(out).not.toContain(LOCAL_DATABASE_REFUSAL);
   }, BOOT_TIMEOUT);
 });
