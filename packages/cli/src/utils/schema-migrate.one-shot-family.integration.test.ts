@@ -69,6 +69,7 @@ import '@objectstack/plugin-security';
 import '@objectstack/rest';
 import '@objectstack/metadata';
 import '@objectstack/plugin-hono-server';
+import '@objectstack/cloud-connection';
 import DbOrphans from '../commands/db/orphans.js';
 import MigrateAccountIssuer from '../commands/migrate/account-issuer.js';
 import MigrateActivityChangedFields from '../commands/migrate/activity-changed-fields.js';
