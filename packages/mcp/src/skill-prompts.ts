@@ -42,6 +42,12 @@ import {
   ListPromptsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
+import {
+  describePackageScopedHolder,
+  packageScopedHolderSource,
+  resolvePackageScopedHolders,
+} from '@objectstack/core';
+import { deriveAiFaceName } from '@objectstack/spec/ai';
 
 /**
  * Skill-metadata access seam for the MCP prompt surface.
@@ -60,6 +66,15 @@ import {
 export interface McpSkillBridge {
   /** Skill metadata records visible in this environment. */
   listSkills(): Promise<unknown[]>;
+  /**
+   * [ADR-0150 D6] The manifest namespace of an installed package, by its id:
+   * what a package-held skill's prompt name is derived from (`NS-NAME`).
+   * `undefined` for an id the host cannot place (no package record).
+   *
+   * OPTIONAL: a host without it derives every prompt name from the skill name
+   * alone, the environment item's face, as before.
+   */
+  packageNamespace?(packageId: string): string | undefined;
 }
 
 /**
@@ -68,8 +83,16 @@ export interface McpSkillBridge {
  * not projected (see {@link projectSkillPrompt}).
  */
 export interface SkillPrompt {
-  /** Prompt name — the skill's machine name, unchanged. */
+  /**
+   * [ADR-0150 D6] The prompt name a client lists and gets: the skill's AI face,
+   * `deriveAiFaceName` over its address — `NS-NAME` for a package's skill,
+   * the bare name for an environment-authored one.
+   */
+  face: string;
+  /** The skill's machine name, unchanged. */
   name: string;
+  /** The package that holds the skill (its row's `_packageId`); absent for an environment-authored skill. */
+  packageId?: string;
   /** Human title — the skill's `label`. */
   title?: string;
   /** What the skill is for — the skill's `description`. */
@@ -95,7 +118,10 @@ function readString(source: Record<string, unknown>, key: string): string | unde
  *   is no prompt to serve. The skill is still perfectly valid metadata; it just
  *   has nothing for an MCP client to fetch.
  */
-export function projectSkillPrompt(raw: unknown): SkillPrompt | null {
+export function projectSkillPrompt(
+  raw: unknown,
+  packageNamespace?: (packageId: string) => string | undefined,
+): SkillPrompt | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
 
@@ -106,7 +132,13 @@ export function projectSkillPrompt(raw: unknown): SkillPrompt | null {
   const instructions = readString(record, 'instructions');
   if (!instructions) return null;
 
-  const prompt: SkillPrompt = { name, instructions };
+  // [ADR-0150 D6] The prompt name is derived from the skill's address, never
+  // authored: its holder's namespace and its name. ONE derivation, spec's.
+  const packageId = readString(record, '_packageId');
+  const namespace = packageId ? packageNamespace?.(packageId) : undefined;
+  const face = deriveAiFaceName({ name, namespace });
+  const prompt: SkillPrompt = { face, name, instructions };
+  if (packageId) prompt.packageId = packageId;
   const title = readString(record, 'label');
   if (title) prompt.title = title;
   const description = readString(record, 'description');
@@ -116,20 +148,148 @@ export function projectSkillPrompt(raw: unknown): SkillPrompt | null {
 
 /**
  * Project every skill the bridge can see. Rows that carry no instructions half
- * are dropped; a duplicate name keeps the first row (metadata names are unique
- * per type, so this only guards a malformed store).
+ * are dropped. [ADR-0150] Two packages may each hold a skill of one name, and
+ * both are kept: each is listed under its own face ({@link skillPromptFaces}).
+ * A second row of one holder and name keeps the first (a holder holds a name
+ * once, so this only guards a malformed store).
  */
 export async function listSkillPrompts(bridge: McpSkillBridge): Promise<SkillPrompt[]> {
   const rows = (await bridge.listSkills()) ?? [];
+  const namespaceOf = typeof bridge.packageNamespace === 'function'
+    ? (packageId: string) => bridge.packageNamespace!(packageId)
+    : undefined;
   const out: SkillPrompt[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
-    const prompt = projectSkillPrompt(row);
-    if (!prompt || seen.has(prompt.name)) continue;
-    seen.add(prompt.name);
+    const prompt = projectSkillPrompt(row, namespaceOf);
+    if (!prompt) continue;
+    const holding = `${prompt.packageId ?? ''}\u0000${prompt.name}`;
+    if (seen.has(holding)) continue;
+    seen.add(holding);
     out.push(prompt);
   }
   return out;
+}
+
+/**
+ * [ADR-0150 D6, Q3] One entry of the face list: a face and the skills that
+ * derive it. One skill is a prompt; two or more are a duplicate face, which is
+ * listed once and refused at every get, naming each skill — never one of them
+ * served, never one dropped.
+ */
+export interface SkillPromptFace {
+  face: string;
+  prompts: SkillPrompt[];
+}
+
+/** The face list, in the store's order: each face once, with every skill that derives it. */
+export function skillPromptFaces(prompts: readonly SkillPrompt[]): SkillPromptFace[] {
+  const byFace = new Map<string, SkillPromptFace>();
+  for (const prompt of prompts) {
+    const entry = byFace.get(prompt.face);
+    if (entry) entry.prompts.push(prompt);
+    else byFace.set(prompt.face, { face: prompt.face, prompts: [prompt] });
+  }
+  return [...byFace.values()];
+}
+
+/** How a refusal names one skill: its name and its holder. */
+function describeSkillHolder(prompt: SkillPrompt): string {
+  return `skill "${prompt.name}" of ${describePackageScopedHolder(
+    prompt.packageId ? { kind: 'package', packageId: prompt.packageId } : { kind: 'environment' },
+  )}`;
+}
+
+/** The refusal a duplicate face answers: every skill that derives it, and the author's fix. */
+export function duplicateSkillFaceMessage(entry: SkillPromptFace): string {
+  return `The prompt name "${entry.face}" is derived for ${entry.prompts.length} skills: `
+    + `${entry.prompts.map(describeSkillHolder).join('; ')}. A prompt name names one skill, so none of them is `
+    + 'served under it: rename one of the skills so their prompt names differ.';
+}
+
+/** What {@link lookupSkillPrompt} answers for a requested prompt name. */
+export type SkillPromptLookup =
+  | { status: 'found'; prompt: SkillPrompt }
+  /** Every candidate named, nothing served: a duplicate face, or a bare name two packages hold. */
+  | { status: 'refused'; message: string; candidates: string[] }
+  | { status: 'not-found' };
+
+/**
+ * [ADR-0150 D5/D6] The skill a requested prompt name means.
+ *
+ * 1. **A face** answers its one skill; a duplicate face is refused, naming
+ *    each skill that derives it.
+ * 2. **Otherwise a bare skill name** — the name a client may have fetched the
+ *    prompt by before faces were derived — resolves by ADR-0150 D3 for a
+ *    caller with no package (R's rule, `resolvePackageScopedHolders`): the
+ *    environment's own skill, else the one package holder; two package
+ *    holders are refused, naming each and the face that gets each one.
+ *    An environment skill's face IS its bare name, so step 1 already
+ *    answered it.
+ * 3. Neither: not found.
+ */
+export function lookupSkillPrompt(prompts: readonly SkillPrompt[], wanted: string): SkillPromptLookup {
+  const faced = prompts.filter((p) => p.face === wanted);
+  if (faced.length === 1) return { status: 'found', prompt: faced[0] };
+  if (faced.length > 1) {
+    return {
+      status: 'refused',
+      message: duplicateSkillFaceMessage({ face: wanted, prompts: faced }),
+      candidates: faced.map((p) => p.face),
+    };
+  }
+  const named = prompts.filter((p) => p.name === wanted);
+  if (named.length === 0) return { status: 'not-found' };
+  const holdings: Array<readonly [string | null, SkillPrompt]> = [];
+  const held = new Set<string | null>();
+  for (const prompt of named) {
+    const holder = prompt.packageId ?? null;
+    if (held.has(holder)) continue;
+    held.add(holder);
+    holdings.push([holder, prompt]);
+  }
+  const resolution = resolvePackageScopedHolders<SkillPrompt>(
+    { type: 'skill', name: wanted, callerPackageId: null },
+    packageScopedHolderSource(holdings),
+    // A caller with no package is never asked for a closure.
+    () => new Set<string>(),
+  );
+  if (resolution.status === 'resolved') return { status: 'found', prompt: resolution.item };
+  if (resolution.status === 'refused') {
+    const faces = named.map((p) => p.face);
+    return {
+      status: 'refused',
+      message: `${resolution.message} Get one by its prompt name: ${faces.map((f) => `"${f}"`).join(', ')}.`,
+      candidates: faces,
+    };
+  }
+  return { status: 'not-found' };
+}
+
+/**
+ * The `prompts/get` error a refused lookup answers: `-32602`, with the
+ * ADR-0112 code and status of a name in conflict (ADR-0150 D5's `409`) and
+ * every candidate prompt name in its data.
+ */
+export function skillPromptRefusalError(lookup: Extract<SkillPromptLookup, { status: 'refused' }>): McpError {
+  return new McpError(ErrorCode.InvalidParams, lookup.message, {
+    code: 'RESOURCE_CONFLICT',
+    status: 409,
+    candidates: lookup.candidates,
+  });
+}
+
+/** The `prompts/list` entry of one face: a duplicate face is listed once, as the refusal it answers. */
+export function skillPromptListEntry(entry: SkillPromptFace): { name: string; title?: string; description?: string } {
+  if (entry.prompts.length > 1) {
+    return { name: entry.face, description: `Not served: ${duplicateSkillFaceMessage(entry)}` };
+  }
+  const prompt = entry.prompts[0];
+  return {
+    name: entry.face,
+    ...(prompt.title ? { title: prompt.title } : {}),
+    ...(prompt.description ? { description: prompt.description } : {}),
+  };
 }
 
 /** The MCP `prompts/get` result for one projected skill. */
@@ -167,20 +327,20 @@ export function skillPromptResult(prompt: SkillPrompt) {
  *   before calling (the SDK refuses a handler for an undeclared capability).
  */
 export function registerSkillPrompts(server: McpServer, bridge: McpSkillBridge): void {
+  // [ADR-0150 D6] Listed by face, each face once ({@link skillPromptListEntry}).
   server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-    prompts: (await listSkillPrompts(bridge)).map((prompt) => ({
-      name: prompt.name,
-      ...(prompt.title ? { title: prompt.title } : {}),
-      ...(prompt.description ? { description: prompt.description } : {}),
-    })),
+    prompts: skillPromptFaces(await listSkillPrompts(bridge)).map(skillPromptListEntry),
   }));
 
+  // [ADR-0150 D5/D6] Got by face, or by the bare skill name while one holder
+  // has it ({@link lookupSkillPrompt}); a refusal names every candidate.
   server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     const wanted = request.params.name;
-    const prompt = (await listSkillPrompts(bridge)).find((p) => p.name === wanted);
-    if (!prompt) {
+    const lookup = lookupSkillPrompt(await listSkillPrompts(bridge), wanted);
+    if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
+    if (lookup.status === 'not-found') {
       throw new McpError(ErrorCode.InvalidParams, `Prompt "${wanted}" not found`);
     }
-    return skillPromptResult(prompt);
+    return skillPromptResult(lookup.prompt);
   });
 }

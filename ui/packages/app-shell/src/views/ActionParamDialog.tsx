@@ -65,9 +65,33 @@
  * user's open work and its optional hand-over (`UserAssignedWorkPanel`). The
  * companion never gates Confirm: Confirm runs the action whatever the panel
  * is doing.
+ *
+ * ## A declared server read before submit (objectstack#31808)
+ *
+ * An action declaring `preflight` (spec `ActionSchema.preflight`) gets the
+ * declared companion in the same slot: one same-origin `GET` whose answer is
+ * drawn above the params ({@link PreflightPanel}, each field through the
+ * result dialog's own format renderer) and whose `seed` entries fill params
+ * the user does not type. The runtime contract, kept here:
+ *
+ * - The read is sent once every `${param.NAME}` hole has a value, and again
+ *   whenever a param a hole reads changes. Its URL is filled by the runner
+ *   (`interpolateRead`), so it reads the scope the action's own target reads.
+ *   A hole the runner cannot fill sends nothing and draws why.
+ * - Every change of URL clears the seeded values, and a seed is applied only
+ *   from the answer to the CURRENT URL: an answer that arrives after the URL
+ *   moved on is dropped ({@link ActionParamDialog}'s stale-answer guard), so
+ *   what is submitted is what was shown.
+ * - The stored block is re-judged with the spec's schema before anything is
+ *   sent (`judgeActionPreflight`), and the filled URL with the action door's
+ *   same-origin predicate (`isSameOriginApiTarget`).
+ * - A seeded param is drawn read-only, as a carried-over value is, and
+ *   submitted verbatim. A refused or failed read leaves it empty, so its
+ *   `required` mark is what holds Confirm. The preflight is UX, not
+ *   authorization: the action's endpoint still judges what it receives.
  */
 
-import { Suspense, useState, useEffect, useMemo } from 'react';
+import { Suspense, useState, useEffect, useMemo, useContext, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -101,13 +125,24 @@ import {
   // and never merged into the set above.
   EXPANDABLE_FIELD_TYPES,
 } from '@object-ui/core';
-import { usePredicateScope } from '@object-ui/react';
+import {
+  usePredicateScope,
+  // The page element's same-origin read (objectui#13323), reused for the
+  // preflight: one request path, one JSON-answer contract, one dotted-path
+  // selector (objectstack#31808).
+  readElementApi,
+  selectElementApiPath,
+  SchemaRendererContext,
+  type ApiFetch,
+} from '@object-ui/react';
 import { getLazyFieldWidget, fileIdOf, buildValidationRules, resolveParamWidgetType } from '@object-ui/fields';
 import { useInitialFieldFocus } from '@object-ui/plugin-form';
 import { paramToField, paramDegradesWithoutTarget } from '../utils/paramToField.js';
 import { useActionDialogReturnFocus } from './actionDialogReturnFocus.js';
-import type { ParamDialogCompanion } from './actionDialogCompanion.js';
+import type { DeclaredPreflight, ParamDialogCompanion } from './actionDialogCompanion.js';
 import { UserAssignedWorkPanel } from './UserAssignedWorkPanel.js';
+import { ResultField } from './ActionResultDialog.js';
+import { isSameOriginApiTarget } from '../utils/apiActionDoor.js';
 
 export interface ParamDialogState {
   open: boolean;
@@ -151,10 +186,12 @@ export interface ParamDialogState {
    */
   run?: Parameters<ParamCollectionHandler>[3];
   /**
-   * A host-composed panel drawn above the params — decided by the host from
-   * the platform action being run (`resolveParamDialogCompanion`), never read
-   * from authored metadata. It informs and offers an optional step of its
-   * own; Confirm stays the action and never waits on it (objectstack#30205).
+   * The panel drawn above the params, picked by `resolveParamDialogCompanion`:
+   * the host chrome of a platform action (the ban dialog's assigned-work
+   * panel, objectstack#30205), which informs and offers an optional step of
+   * its own while Confirm never waits on it, or the action's declared
+   * `preflight` read (objectstack#31808), whose seeded params hold Confirm
+   * through their own `required` mark.
    */
   companion?: ParamDialogCompanion;
 }
@@ -381,6 +418,109 @@ export function paramFormatErrorKey(param: ActionParamDef, value: unknown): stri
   return pattern.value.test(value) ? null : (pattern.messageKey ?? 'validation.pattern');
 }
 
+/** Whether a param value counts as not given — the required check's rule. */
+function isMissingValue(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (Array.isArray(value)) return value.length === 0;
+  // Boolean false is a VALID value — only treat undefined/null as missing.
+  return false;
+}
+
+/** The params a preflight URL template reads, by `${param.NAME}` hole. */
+function preflightHoleParams(template: string | undefined): string[] {
+  if (!template) return [];
+  return [...template.matchAll(/\$\{param\.(\w+)\}/g)].map((match) => match[1]);
+}
+
+/**
+ * Where the preflight read stands, as the panel draws it.
+ *
+ * - `refused`: the spec refuses the stored block, or the filled URL is not a
+ *   path on this origin; nothing was sent.
+ * - `waiting`: a param a hole reads has no value yet; nothing was sent.
+ * - `unbound`: a `${ctx.*}` hole has no value on this dispatch; nothing was sent.
+ * - `loading` / `failed` / `ready`: the read for the current URL.
+ */
+type PreflightView =
+  | { status: 'refused'; detail: string }
+  | { status: 'waiting'; params: string[] }
+  | { status: 'unbound'; detail: string }
+  | { status: 'loading' }
+  | { status: 'failed'; detail: string }
+  | { status: 'ready'; data: unknown };
+
+/** The sentence each problem draws, spelled out so a key census can see it. */
+const PREFLIGHT_PROBLEM_KEYS = {
+  refused: 'actionDialog.preflight.refused',
+  unbound: 'actionDialog.preflight.unbound',
+  failed: 'actionDialog.preflight.failed',
+} as const;
+
+/** The answer to one read, with the URL it answers. */
+type PreflightAnswer =
+  | { url: string; ok: true; data: unknown; seeded: Record<string, unknown> }
+  | { url: string; ok: false; error: string };
+
+/**
+ * The declared preflight's panel (objectstack#31808): a heading, then what the
+ * read stands at. A ready answer draws each declared field through the result
+ * dialog's own format renderer (`ResultField`), or the whole selected answer
+ * as JSON when the block declares no `fields`, as the result dialog does.
+ */
+function PreflightPanel({ preflight, view }: { preflight: DeclaredPreflight | undefined; view: PreflightView }) {
+  const { t } = useObjectTranslation();
+  const fields = useMemo(() => {
+    if (view.status !== 'ready') return [];
+    const declared = preflight?.fields && preflight.fields.length > 0
+      ? preflight.fields
+      : [{ path: '', format: 'json' as const }];
+    return declared.flatMap((field) => {
+      if (field.path === '') return [{ field, value: view.data }];
+      const selected = selectElementApiPath(view.data, field.path);
+      // A field the answer does not carry is left out, as the result dialog
+      // leaves it out: a labelled empty row tells the reader nothing.
+      return selected.found ? [{ field, value: selected.value }] : [];
+    });
+  }, [preflight, view]);
+  const problem = view.status === 'refused' || view.status === 'unbound' || view.status === 'failed';
+  return (
+    <section
+      className={cn(
+        'grid gap-2 rounded-md border p-3',
+        problem ? 'border-destructive/50 bg-destructive/10' : 'bg-muted/40',
+      )}
+      data-testid="action-preflight-panel"
+      data-status={view.status}
+      aria-busy={view.status === 'loading' || undefined}
+    >
+      <h3 className="text-sm font-medium">{t('actionDialog.preflight.heading')}</h3>
+      {view.status === 'loading' && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+          {t('actionDialog.preflight.loading')}
+        </p>
+      )}
+      {view.status === 'waiting' && (
+        <p className="text-xs text-muted-foreground">
+          {t('actionDialog.preflight.waiting', { fields: view.params.join(', ') })}
+        </p>
+      )}
+      {problem && (
+        <div role="alert" className="grid gap-1 text-xs text-destructive">
+          <p>{t(PREFLIGHT_PROBLEM_KEYS[view.status])}</p>
+          {/* The technical reason is its own node, verbatim in every locale:
+              it names a URL, a path or the spec's refusal. */}
+          <p className="font-mono break-all">{view.detail}</p>
+        </div>
+      )}
+      {view.status === 'ready' && fields.map(({ field, value }, index) => (
+        <ResultField key={`${field.path}-${index}`} field={field} value={value} />
+      ))}
+    </section>
+  );
+}
+
 function WidgetFallback() {
   return <div className="h-9 w-full animate-pulse rounded-md bg-muted" aria-hidden="true" />;
 }
@@ -506,6 +646,16 @@ function paramNeedsDependentValues(widgetType: string): boolean {
 export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProps) {
   const { t, language } = useObjectTranslation();
   const [values, setValues] = useState<Record<string, any>>({});
+  // Whether `values` belongs to this opening yet (the reset effect sets it):
+  // the preflight read waits for it, so it never reads with the last
+  // opening's values.
+  const [valuesSeeded, setValuesSeeded] = useState(false);
+  // The preflight read's last answer, with the URL it answers
+  // (objectstack#31808).
+  const [answer, setAnswer] = useState<PreflightAnswer | null>(null);
+  // The URL the dialog is reading NOW — what the stale-answer guard compares
+  // an arriving answer against.
+  const currentReadUrl = useRef<string | null>(null);
   // Each failing param's message, as an i18n key (`actionDialog.requiredError`
   // or a format rule's key), rendered with the param's label.
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -594,17 +744,118 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
       setUploading({});
       setSubmitting(false);
       setRefusal(null);
+      // The last opening's answer is not this opening's, even for one URL.
+      setAnswer(null);
     }
+    // The preflight reads from the values of THIS opening only: until the
+    // reset above has run, `values` may still hold the last opening's.
+    setValuesSeeded(state.open);
   }, [state.open, visibleParams]);
 
-  const isMissingValue = (value: unknown): boolean => {
-    if (value === undefined || value === null) return true;
-    if (typeof value === 'string') return value.trim() === '';
-    if (Array.isArray(value)) return value.length === 0;
-    // Boolean false is a VALID value — only treat undefined/null as missing.
-    if (typeof value === 'boolean') return false;
-    return false;
-  };
+  // ── The declared preflight read (objectstack#31808; see the header) ──────
+  const preflightCompanion = state.companion?.kind === 'preflight' ? state.companion : undefined;
+  const hostChrome = state.companion?.kind === 'user-assigned-work'
+    ? state.companion
+    : preflightCompanion?.hostChrome;
+  const declaredPreflight = preflightCompanion?.judged.ok ? preflightCompanion.judged.preflight : undefined;
+  const seedNames = useMemo(
+    () => new Set((declaredPreflight?.seed ?? []).map((entry) => entry.param)),
+    [declaredPreflight],
+  );
+  // A seeded param is the answer's to fill: carried as a `carryOver` value is,
+  // so it is submitted verbatim and never format-checked as typed input.
+  const dialogParams = useMemo(
+    () => (seedNames.size === 0
+      ? visibleParams
+      : visibleParams.map((p) => (seedNames.has(p.name) ? { ...p, carryOver: true } : p))),
+    [visibleParams, seedNames],
+  );
+  const template = declaredPreflight?.read.url;
+  const holeParams = useMemo(() => preflightHoleParams(template), [template]);
+  const waitingOn = holeParams.filter((name) => isMissingValue(values[name]));
+  const interpolateRead = preflightCompanion?.interpolateRead;
+  const filledUrl = useMemo(() => {
+    if (!valuesSeeded || !template || waitingOn.length > 0 || !interpolateRead) return null;
+    return interpolateRead(template, values);
+    // `waitingOn` is derived from `values` and `holeParams`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valuesSeeded, template, interpolateRead, values, holeParams]);
+  const readUrl = filledUrl !== null && isSameOriginApiTarget(filledUrl) ? filledUrl : null;
+  const doFetch: ApiFetch = useContext(SchemaRendererContext)?.apiFetch ?? fetch;
+
+  useEffect(() => {
+    currentReadUrl.current = readUrl;
+    if (!readUrl) return;
+    const path = declaredPreflight?.path;
+    const seeds = declaredPreflight?.seed ?? [];
+    const url = readUrl;
+    readElementApi(url, doFetch).then(
+      (body) => {
+        // The stale-answer guard: an answer to a URL the dialog has moved on
+        // from is dropped. Kept, it would replace the current URL's answer
+        // and take its seeds with it.
+        if (currentReadUrl.current !== url) return;
+        const selected = selectElementApiPath(body, path);
+        if (!selected.found) {
+          setAnswer({ url, ok: false, error: `preflight.path "${path}" selects nothing in the answer of GET ${url}: it has no "${selected.segment}".` });
+          return;
+        }
+        // All seeds or none: a seed whose path selects nothing makes the
+        // answer the wrong shape, and half-filled values would submit part of
+        // an answer the user was not shown as whole.
+        const seeded: Record<string, unknown> = {};
+        for (const entry of seeds) {
+          const value = selectElementApiPath(selected.value, entry.path);
+          if (!value.found) {
+            setAnswer({ url, ok: false, error: `The preflight seed for "${entry.param}" reads "${entry.path}", and the answer of GET ${url} has no "${value.segment}".` });
+            return;
+          }
+          seeded[entry.param] = value.value;
+        }
+        setAnswer({ url, ok: true, data: selected.value, seeded });
+      },
+      (error: unknown) => {
+        if (currentReadUrl.current !== url) return;
+        setAnswer({ url, ok: false, error: error instanceof Error ? error.message : `GET ${url} failed.` });
+      },
+    );
+    // Keyed on the URL (a string) and the declaration: `doFetch` is the
+    // host's one fetch, and a new identity of it is no new question.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readUrl, declaredPreflight]);
+
+  // The answer to the CURRENT URL, or none. Seeds come from it alone, so a
+  // change of URL clears them the moment it happens, and what is submitted is
+  // what the panel shows.
+  const currentAnswer = answer && answer.url === readUrl ? answer : null;
+  const formValues = useMemo(
+    () => (currentAnswer?.ok && seedNames.size > 0 ? { ...values, ...currentAnswer.seeded } : values),
+    [values, currentAnswer, seedNames],
+  );
+
+  const preflightView: PreflightView | null = (() => {
+    if (!preflightCompanion) return null;
+    if (!preflightCompanion.judged.ok) return { status: 'refused', detail: preflightCompanion.judged.refusal };
+    if (waitingOn.length > 0) {
+      const labels = waitingOn.map((name) => {
+        const param = visibleParams.find((p) => p.name === name);
+        return param ? pickLocalized(param.label, language) || name : name;
+      });
+      return { status: 'waiting', params: labels };
+    }
+    if (!valuesSeeded) return { status: 'loading' };
+    if (filledUrl === null) {
+      return {
+        status: 'unbound',
+        detail: template ?? '',
+      };
+    }
+    if (readUrl === null) return { status: 'refused', detail: filledUrl };
+    if (!currentAnswer) return { status: 'loading' };
+    return currentAnswer.ok
+      ? { status: 'ready', data: currentAnswer.data }
+      : { status: 'failed', detail: currentAnswer.error };
+  })();
 
   const handleSubmit = async () => {
     // A run is already in flight; Confirm is disabled too.
@@ -619,12 +870,12 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
     // Validate required fields, then the format of what was typed, so a
     // malformed value is marked on its field instead of refused by the server.
     const newErrors: Record<string, string> = {};
-    for (const param of visibleParams) {
-      if (param.required && isMissingValue(values[param.name])) {
+    for (const param of dialogParams) {
+      if (param.required && isMissingValue(formValues[param.name])) {
         newErrors[param.name] = 'actionDialog.requiredError';
         continue;
       }
-      const formatKey = paramFormatErrorKey(param, values[param.name]);
+      const formatKey = paramFormatErrorKey(param, formValues[param.name]);
       if (formatKey) newErrors[param.name] = formatKey;
     }
     if (Object.keys(newErrors).length > 0) {
@@ -633,7 +884,7 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
     }
     // Map upload params (file/image) from their rich widget objects to the
     // storage id(s) the API expects before resolving.
-    const collected = serializeParamValues(visibleParams, values);
+    const collected = serializeParamValues(dialogParams, formValues);
     if (state.run) {
       // Run from inside the dialog and close only on success (objectui#13161).
       // Closing first is what lost the input: the refusal landed on a dialog
@@ -647,7 +898,7 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
         setSubmitting(false);
       }
       if (!result.success) {
-        const { marks, complete } = refusalParamMarks(result, visibleParams);
+        const { marks, complete } = refusalParamMarks(result, dialogParams);
         setErrors(marks);
         setRefusal(complete ? null : refusalText(result));
         return;
@@ -718,12 +969,14 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
           className={cn('-mx-6 grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 py-4', isLongList && 'sm:grid-cols-2')}
           data-testid="action-param-body"
         >
-          {state.companion?.kind === 'user-assigned-work' && (
+          {/* The declared read first, then any host chrome (objectstack#31808). */}
+          {preflightView && <PreflightPanel preflight={declaredPreflight} view={preflightView} />}
+          {hostChrome && (
             // Keyed by the user: another user is another subject, never a
             // stale count carried over.
-            <UserAssignedWorkPanel key={state.companion.userId} userId={state.companion.userId} />
+            <UserAssignedWorkPanel key={hostChrome.userId} userId={hostChrome.userId} />
           )}
-          {visibleParams.map((rawParam) => {
+          {dialogParams.map((rawParam) => {
             const param = {
               ...rawParam,
               label: pickLocalized(rawParam.label, language),
@@ -753,6 +1006,25 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
                     <p className="font-mono">{rawParam.unresolvedField}</p>
                   </div>
                 </div>
+              );
+            }
+            // A seeded param is the preflight answer's to fill (objectstack#31808):
+            // shown read-only like a carry-over, under its own hint, its value
+            // the current answer's seed (`formValues`) and nothing else.
+            if (seedNames.has(rawParam.name)) {
+              return (
+                <CarryOverParam
+                  key={param.name}
+                  name={param.name}
+                  label={param.label}
+                  required={param.required}
+                  helpText={param.helpText}
+                  value={formValues[param.name]}
+                  hint={t('actionDialog.preflight.seededHint')}
+                  // A mark from a Confirm made before the answer came is
+                  // stale once the answer fills the value.
+                  error={isMissingValue(formValues[param.name]) ? errorText(param.name, param.label) : undefined}
+                />
               );
             }
             // A declared carry-over is shown, never collected (objectui#6246):
