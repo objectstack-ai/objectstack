@@ -245,8 +245,11 @@ describe('judgePicklistReferences — a field naming a sibling package\'s list (
       rule: PICKLIST_REFERENCE_UNVERIFIED,
       path: 'packages[1].manifest.objects[0].fields.industry.picklist',
     });
-    expect(notices[0].message).toContain('package "com.example.core"');
+    expect(notices[0].message).toContain('is held only by \'com.example.core\', not a declared dependency');
     expect(notices[0].message).toContain('\'com.acme.crm\'');
+    expect(notices[0].hint).toContain('declare a dependency on \'com.example.core\' in package \'com.example.orders\'');
+    // A notice is one verdict line of at most 200 characters (`os explain` carries the why).
+    expect(notices[0].message.length).toBeLessThanOrEqual(200);
   });
 
   it('CONTROL: the sibling declared as a dependency resolves', () => {

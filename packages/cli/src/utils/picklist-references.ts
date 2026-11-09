@@ -397,6 +397,26 @@ function refusedReferenceHint(refusal: PackageScopedRefusal, bodies: readonly Ju
 }
 
 /**
+ * The notice's verdict and fix for a reference R refused, when the declaring
+ * package also depends on a package this stack does not carry: short, because
+ * a notice is one line ({@link printPicklistReferenceNotices}).
+ */
+function refusedReferenceNotice(ref: PicklistReference, refusal: PackageScopedRefusal): { judged: string; noticeHint: string } {
+  const key = ref.site === 'field' ? 'picklist' : 'extend';
+  const holders = dependencyList(refusal.candidates.flatMap((c) => (c.kind === 'package' ? [`'${c.packageId}'`] : [])));
+  const outside = refusal.reason === 'outside-closure' && refusal.callerPackageId !== null;
+  return {
+    judged: outside
+      ? `\`${key}: '${ref.picklist}'\` is held only by ${holders}, not a declared dependency`
+      : `\`${key}: '${ref.picklist}'\` is held by each of ${holders}`,
+    noticeHint: `If one of those packages declares '${ref.picklist}', nothing is wrong. Otherwise ` +
+      (outside
+        ? `declare a dependency on ${holders} in package '${refusal.callerPackageId}'.`
+        : `keep the list in one package of ${holders}.`),
+  };
+}
+
+/**
  * Every picklist reference in this stack — a field's `picklist`, an
  * extension's `extend` — that resolves to no list from where it is written
  * (ADR-0150 D3): refused, or reported when the declaring package names
@@ -423,9 +443,9 @@ export function judgePicklistReferences(parsed: AnyRec): PicklistReferenceJudgem
         ? {
             refusal: verdict.message,
             refusalHint: refusedReferenceHint(verdict, bodies),
-            judged: verdict.message.replace(/\.$/, ''),
-            noticeHint: `If one of those packages declares '${ref.picklist}', nothing is wrong. ` +
-              `Otherwise: ${refusedReferenceHint(verdict, bodies)}`,
+            // The notice is one verdict line (`os explain` carries the why),
+            // so it names the holders, not R's whole sentence.
+            ...refusedReferenceNotice(ref, verdict),
           }
         : { refusal: unknown.consequence, refusalHint: unknown.refusalHint, judged: unknown.names, noticeHint: unknown.noticeHint };
       if (judged.outside.length === 0) {
