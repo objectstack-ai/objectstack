@@ -13,11 +13,7 @@
  * The epic's red lines are the `red line` cases. Each refusal pin was ablated
  * once (the engine's gate put back to "no refusal", the pin read red,
  * restored); the readings are in the PR body, not kept as test files.
- *
- * Red line 2's refusal of a name two packages hold is held back for the
- * maintainer's ruling on a deployment sealed with such a clash (#31677; see
- * `FLOW_NAME_REFUSALS_ACTED_ON` in the engine), so its pins land with it —
- * but never its report: the `held back` case pins the warning.
+
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -206,33 +202,46 @@ describe('red line 1 — resolution never loosens: a package caller is never ser
     });
 });
 
-describe('red line 2, held back (#31677) — the act waits for the ruling, the report does not', () => {
-    it('a name two packages hold is warned once per (name, caller), naming every candidate', async () => {
+describe('red line 2 — ambiguity is reported, never guessed', () => {
+    it('a name two packages hold is refused at registration, naming both, and nothing is armed', async () => {
+        install(A);
+        install(Q);
+        registry.registerItem('flow', { ...leaf('notify'), _packageId: A }, 'name' as never, A);
+        registry.registerItem('flow', { ...leaf('notify'), _packageId: Q }, 'name' as never, Q);
+        expect(() => engine.registerFlow('notify', leaf('notify'))).toThrow(
+            /held by 2 packages in this environment[\s\S]*com\.acme\.alpha[\s\S]*com\.acme\.stranger/,
+        );
+        expect(await engine.getFlow('notify')).toBeNull();
+    });
+
+    it('a door run of a name armed before a second package took it (a sealed clash) is refused, naming both', async () => {
+        install(A);
+        install(Q);
+        ship(A, leaf('notify'));
+        registry.registerItem('flow', { ...leaf('notify'), _packageId: Q }, 'name' as never, Q);
+        const result = await engine.execute('notify');
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/held by 2 packages in this environment[\s\S]*com\.acme\.alpha[\s\S]*com\.acme\.stranger/);
+        expect(ran).toEqual([]);
+    });
+
+    it("a package caller whose declared closure holds the name twice is refused, naming both", async () => {
         install(A);
         install(Q);
         install(P, [A, Q]);
-        registry.registerItem('flow', { ...leaf('notify'), _packageId: A }, 'name' as never, A);
+        ship(A, leaf('notify'));
         registry.registerItem('flow', { ...leaf('notify'), _packageId: Q }, 'name' as never, Q);
-        loaderSet.notify = A;
-        engine.registerFlow('notify', leaf('notify'));
         ship(P, caller('process', 'notify'));
+        const result = await engine.execute('process');
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/held by 2 packages in the declared dependency closure of package "com\.acme\.caller"/);
+        expect(ran).toEqual([]);
+    });
 
-        const heldBack = () =>
-            engineLogger.warn.mock.calls.filter((call: unknown[]) => String(call[0]).includes('#31677'));
-        expect((await engine.execute('notify')).success).toBe(true);
-        expect((await engine.execute('notify')).success).toBe(true);
-        expect((await engine.execute('process')).success).toBe(true);
-        expect((await engine.execute('process')).success).toBe(true);
-
-        const warned = heldBack();
-        expect(warned).toHaveLength(2);
-        expect(warned.map((call: unknown[]) => (call[1] as { callerPackageId: string | null }).callerPackageId))
-            .toEqual([null, P]);
-        for (const [message] of warned) {
-            expect(message).toContain('the flow precedence\'s pick still runs');
-            expect(message).toContain('com.acme.alpha');
-            expect(message).toContain('com.acme.stranger');
-        }
+    it('control: a name one package holds arms as before', async () => {
+        install(A);
+        ship(A, leaf('notify'));
+        expect(await engine.getFlow('notify')).not.toBeNull();
     });
 });
 
@@ -264,18 +273,22 @@ describe('ADR-0150 D4 — the activation ledger switches off the (package, name)
         install(A);
         install(Q);
         ship(A, leaf('notify'));
-        // Q holds a flow of the same name too (a sealed clash); the engine armed A's.
+        ship(A, caller('process', 'notify'));
+        // Q holds a flow of the same name too (a sealed clash); the engine armed A's,
+        // which A's own flow still reaches (its own item, D3 step 1).
         registry.registerItem('flow', { ...leaf('notify'), _packageId: Q }, 'name' as never, Q);
         const store = new InMemoryFlowActivationStore();
         await store.setActive({ name: 'notify', packageId: Q, active: false });
         engine.setFlowActivationStore(store);
         expect(await engine.hydrateFlowActivations()).toEqual([]);
-        expect((await engine.execute('notify')).success).toBe(true);
+        expect((await engine.execute('process')).success).toBe(true);
+        expect(ran).toEqual(['notify']);
         expect(staleWarnings()).toHaveLength(0);
 
         await store.setActive({ name: 'notify', packageId: A, active: false });
         expect(await engine.hydrateFlowActivations()).toEqual(['notify']);
-        expect(await engine.execute('notify')).toMatchObject({ success: false, code: 'FLOW_DISABLED' });
+        expect((await engine.execute('process')).success).toBe(false);
+        expect(ran).toEqual(['notify']);
     });
 
     it('a stale row — its package no longer holds the name — still switches the holder off, warned once naming both and the remedy', async () => {

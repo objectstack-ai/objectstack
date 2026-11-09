@@ -227,12 +227,7 @@ import { describeSubflowNoticeTrap, subflowNoticeTrap } from './subflow-notice-g
 // [ADR-0150 D3/D4] The one package-scoped resolver's answer, read through the
 // reader the host attaches (`setFlowNameResolver`), and the activation
 // projection keyed by `(package, name)`.
-import {
-    describePackageScopedHolder,
-    type PackageScopedRefusal,
-    type PackageScopedRefusalReason,
-    type PackageScopedResolution,
-} from '@objectstack/objectql';
+import type { PackageScopedRefusal, PackageScopedResolution } from '@objectstack/objectql';
 import { FlowActivationProjection } from './flow-activation-projection.js';
 import { describeRegionSuspendingCall, regionSuspendingCall } from './subflow-region-guard.js';
 // [#25222] The consumed-suspension restore's bodies: journaling a consumed
@@ -2589,25 +2584,6 @@ export type PackagedFlowSource = (name: string) => string | undefined;
 export type FlowNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
 
 /**
- * [ADR-0150 D3] The resolver's refusals the engine acts on: a package caller
- * whose bare name is held only outside its declared dependency closure — by
- * an environment-authored flow (D3 (a)) or by a package it does not declare
- * (D3 step 3).
- *
- * The two `ambiguous-*` refusals — a name two packages hold — are held back.
- * Phase 1 refuses a second package holder at install, so such a name reaches
- * the engine only from a deployment that held the clash before phase 1, whose
- * cold boot seals it with a warning (`BARE_NAME_COLD_BOOT_MODE = 'warn'`).
- * Whether that clash is refused is the maintainer's ruling (#31677); until
- * then this seam leaves the ACT exactly as it was before this reader existed,
- * and the ruling adds the two reasons here and the arming gate in
- * {@link AutomationEngine.registerFlow}. The REPORT is never held back: a
- * held-back refusal is warned once per `(name, caller)`, naming every
- * candidate ({@link AutomationEngine.reportHeldBackFlowRefusal}).
- */
-const FLOW_NAME_REFUSALS_ACTED_ON: ReadonlySet<PackageScopedRefusalReason> = new Set(['outside-closure']);
-
-/**
  * [#28405] The stored body of flow `name` whose content identity is
  * `checksum` ({@link SuspendedRun.flowChecksum}), as the metadata history
  * keeps it — `null` when no version with that identity is stored. A host
@@ -2840,11 +2816,6 @@ export class AutomationEngine implements IAutomationService {
      * knows, as before.
      */
     private flowNameResolver?: FlowNameResolver;
-    /**
-     * [ADR-0150 D3, #31677] The `(name, caller)` pairs whose held-back
-     * refusal has been warned — see {@link reportHeldBackFlowRefusal}.
-     */
-    private heldBackFlowRefusalsReported = new Set<string>();
     /** [#20790] The write-only flow credential channel — see {@link setFlowCredentialSource}. */
     private flowCredentialSource?: FlowCredentialSource;
     /** [#20281 stage ③] The connector sync executor — see {@link setConnectorPullSource}. */
@@ -4602,6 +4573,13 @@ export class AutomationEngine implements IAutomationService {
             if (refusal) throw new Error(refusal.message);
         }
 
+        // [ADR-0150 D3/D4, #31677 Q1] The engine arms one flow per bare name, so
+        // a name the resolver cannot answer for a caller with no package — two
+        // packages hold it — is refused here, naming every holder, before
+        // anything is armed. ⛔ Never an arming by package id or by arrival.
+        const nameRefusal = this.flowNameRefusal(name, null);
+        if (nameRefusal) throw new Error(nameRefusal.message);
+
         // Version history management
         const history = this.flowVersionHistory.get(name) ?? [];
         history.push({
@@ -5003,12 +4981,19 @@ export class AutomationEngine implements IAutomationService {
      * with a reader that asks the ObjectQL registry at question time, never at
      * boot, for {@link setPackagedFlowSource}'s reason.
      *
-     * One seam reads it: {@link execute} asks it for the caller's package —
-     * the package that ships the flow whose run names the child (a `subflow`
-     * or `map` node's `flowName`, carried on the run's context as `flowName`),
-     * or no package for a door, a trigger or any caller outside a run. A
-     * refusal the engine acts on ({@link FLOW_NAME_REFUSALS_ACTED_ON}) is the
-     * answer, naming every candidate; nothing is executed.
+     * Two seams read it, and only these two:
+     *
+     *  - {@link registerFlow} asks it for a caller with no package before it
+     *    arms a name, so a name two packages hold is refused, naming both,
+     *    instead of arming one of them — a deployment sealed at its cold boot
+     *    with a clash that predates phase 1 included (#31677 Q1, ruled A).
+     *    The engine keeps one armed slot per bare name, and nothing picks
+     *    between two holders.
+     *  - {@link execute} asks it for the caller's package: the package that
+     *    ships the flow whose run names the child (a `subflow` or `map` node's
+     *    `flowName`, carried on the run's context as `flowName`), or no
+     *    package for a door, a trigger or any caller outside a run. A refusal
+     *    is the answer, naming every candidate; nothing is executed.
      *
      * A name the registry holds nothing under (a flow registered straight into
      * the engine) has one holder, the engine's own flow map, and resolves to
@@ -5021,39 +5006,12 @@ export class AutomationEngine implements IAutomationService {
     /**
      * [ADR-0150 D3] The resolver's refusal of the bare flow name `name` for a
      * caller of package `callerPackageId` (`null`: no package), or `undefined`
-     * when the name resolves, names nothing in the registry, is refused for a
-     * reason held back ({@link FLOW_NAME_REFUSALS_ACTED_ON}), or no resolver
-     * is attached. Read-only; records nothing.
+     * when the name resolves, names nothing in the registry, or no resolver is
+     * attached. Read-only; records nothing.
      */
     private flowNameRefusal(name: string, callerPackageId: string | null): PackageScopedRefusal | undefined {
         const resolution = this.flowNameResolver?.(name, callerPackageId);
-        if (resolution?.status !== 'refused') return undefined;
-        if (FLOW_NAME_REFUSALS_ACTED_ON.has(resolution.reason)) return resolution;
-        this.reportHeldBackFlowRefusal(resolution);
-        return undefined;
-    }
-
-    /**
-     * [ADR-0150 D3, #31677] A refusal the engine does not act on yet is still
-     * reported: warned once per `(name, caller)`, with the resolver's sentence
-     * naming every candidate and the fact that the flow precedence's pick
-     * still runs until the maintainer rules (#31677 Q1). Holding back the act
-     * is the ruling's to lift; the report never waits for it.
-     */
-    private reportHeldBackFlowRefusal(refusal: PackageScopedRefusal): void {
-        const key = JSON.stringify([refusal.name, refusal.callerPackageId]);
-        if (this.heldBackFlowRefusalsReported.has(key)) return;
-        this.heldBackFlowRefusalsReported.add(key);
-        this.logger.warn(
-            `[Automation] ${refusal.message} Until the maintainer rules on #31677 (Q1), this refusal is held back `
-                + 'and the flow precedence\'s pick still runs.',
-            {
-                flow: refusal.name,
-                callerPackageId: refusal.callerPackageId,
-                reason: refusal.reason,
-                candidates: refusal.candidates.map(describePackageScopedHolder),
-            },
-        );
+        return resolution?.status === 'refused' ? resolution : undefined;
     }
 
     /**
@@ -6277,8 +6235,8 @@ export class AutomationEngine implements IAutomationService {
         const startTime = Date.now();
         // [ADR-0150 D3] The bare name resolves for the caller's package first:
         // a run of package P's flow reaches P's own flow, else the one holder
-        // in P's declared dependency closure; a name held only outside that
-        // closure is refused with every candidate named, and nothing runs. Never dispatched, so no
+        // in P's declared dependency closure; anything else is refused with
+        // every candidate named, and nothing runs. Never dispatched, so no
         // `status`, for the reason the disabled exit below states.
         const nameRefusal = this.flowNameRefusal(flowName, this.flowCallerPackage(context));
         if (nameRefusal) return { success: false, error: nameRefusal.message };
