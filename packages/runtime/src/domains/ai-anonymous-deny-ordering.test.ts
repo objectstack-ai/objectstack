@@ -381,6 +381,20 @@ describe('#31905 E — past kernel:ready, an unpublished route table answers as 
         expect(reads).toBe(2);
     });
 
+    it('CONTROL: a deps that does not carry the kernel-phase seam keeps the 503', async () => {
+        // The seam is OPTIONAL on the exported DomainHandlerDeps, so a host's
+        // own deps written before it existed still compiles; its absence must
+        // read as "not ready", never as "AI off".
+        const deps = makeDeps({ aiService: served, kernelReady: true });
+        delete (deps as { isRequestKernelReady?: unknown }).isRequestKernelReady;
+        expect('isRequestKernelReady' in deps).toBe(false);
+        for (const path of ['/ai/agents', '/ai/models']) {
+            const result: any = await dispatch(deps, authed(), path);
+            expect(result.response.status).toBe(503);
+            expect(result.response.body.error.message).toBe('AI service routes not yet initialized');
+        }
+    });
+
     it('CONTROL: a published route table is served past kernel:ready, never answered as off', async () => {
         const deps = makeDeps({
             aiService: served,
