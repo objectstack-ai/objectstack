@@ -435,8 +435,7 @@ export {
   type SecurityCatalogReader,
   // ADR-0150 D3/D4/D7 — permission sets by (package, name), the resolver handed in.
   resolveCatalogReference,
-  type SecurityCatalogPackageScope,
-  type SecurityCatalogScopedOutcome,
+  type SecurityCatalogPackageScopedRegistry,
   type SecurityCatalogReferenceScope,
   type SecurityCatalogResolution,
 } from './security-catalog.js';

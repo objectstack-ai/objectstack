@@ -47,8 +47,7 @@ import {
 import {
   isVerifiedPlatformOwnerRow,
 } from './platform-owner-wall-bypass.js';
-import { isConfiguredPlatformAdminEmail, bindSecurityCatalogReader, securityCatalogReaderOf, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
-import { createPackageScopedSecurityCatalogReader } from './security-catalog-package-scope.js';
+import { isConfiguredPlatformAdminEmail, createSecurityCatalogReader, bindSecurityCatalogReader, securityCatalogReaderOf, readPositionGrantsInForce, countPositionHolders } from '@objectstack/core';
 // [#25223 cut 1] The leaf readers (policy collection, unresolved-posture
 // probes, field masks, field-name tables); the methods of the same names below
 // hand each body the members it reads (`ObjectInputsHost`).
@@ -1885,7 +1884,7 @@ export class SecurityPlugin implements Plugin {
     // An engine with no reader bound resolves an empty catalog — no position
     // distributes a set and no set grants — so a failure here is said at once.
     try {
-      bindSecurityCatalogReader(ql, createPackageScopedSecurityCatalogReader((ql as any).registry, metadata));
+      bindSecurityCatalogReader(ql, createSecurityCatalogReader({ registry: (ql as any).registry, metadata: metadata as any }));
     } catch (e) {
       ctx.logger.warn(
         '[security] the security catalog read was NOT bound to the ObjectQL engine: '

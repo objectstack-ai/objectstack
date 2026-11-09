@@ -59,9 +59,12 @@
  * closure (plus `sys`), else a refusal naming every candidate; a caller with
  * no package resolves environment-wide (the environment's own item, else the
  * unique package holder, else the refusal). This read does not implement that
- * rule: it is `resolvePackageScopedName` in `@objectstack/objectql` (child R
- * of epic #31527), which core cannot import, so the security plugin hands it
- * in bound to the engine registry ({@link SecurityCatalogPackageScope}).
+ * rule: it calls the one rule, `resolvePackageScopedHolders` (core
+ * `package-scoped-resolution.ts`, epic #31527 children R and R2), over the
+ * engine registry's own package-scoped reads — the holder set
+ * `objectql`'s `resolvePackageScopedName` hands the same rule — and the one
+ * declared-closure walk, `packageResolutionClosure`
+ * (`@objectstack/metadata-core`). ⛔ No second rule, no second closure.
  *
  *  - **Who asks.** A stored grant (`sys_user_permission_set`) carries only the
  *    name today (its package column is ADR-0150 D8's R1), so it — and every
@@ -102,9 +105,11 @@
  *    one only the environment holds (ADR-0150 D3 (a), the declared narrowing),
  *    or one a package outside its declared closure holds.
  *
- * A registry the catalog is handed without a package scope (a test stand-in
- * holding one item per name) is read by name, as before; every reader the
- * security plugin binds to an engine carries the scope.
+ * A registry that lacks the package-scoped reads (a test stand-in holding one
+ * item per name) is read by name, as before; ObjectQL's `SchemaRegistry`
+ * carries all of them, so every catalog over an engine registry reads
+ * permission sets by `(package, name)`. A registry carrying only SOME of them
+ * is refused at construction.
  *
  * ## What this read does NOT answer
  *
@@ -142,7 +147,13 @@
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec/identity';
+import { packageResolutionClosure, type PackageClosureRegistry } from '@objectstack/metadata-core';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
+import {
+  describePackageScopedHolder,
+  resolvePackageScopedHolders,
+  type PackageScopedResolution,
+} from '../package-scoped-resolution.js';
 
 /** The three catalog types ADR-0131 D3 gives one home. */
 const SECURITY_CATALOG_TYPES = ['position', 'permission', 'capability'] as const;
@@ -182,70 +193,47 @@ export interface SecurityCatalogMetadataService {
 }
 
 /**
- * [ADR-0150 D3] How the package-scoped resolver answered for one name — the
- * shape of `resolvePackageScopedName`'s answer (`@objectstack/objectql`), as
- * the catalog reads it, with each candidate already described in the
- * resolver's own words.
+ * [ADR-0150 D3/D4] The registry's package-scoped reads — ObjectQL's
+ * `SchemaRegistry` carries every one of them. The catalog reads permission
+ * sets by `(package, name)` through them, and the closure through
+ * `getPackage`/`getAllPackages` (`PackageClosureRegistry`).
  */
-export type SecurityCatalogScopedOutcome =
-  | {
-      readonly status: 'resolved';
-      /** The holder's item: its ADR-0005 overlay when one binds to it, else its own. */
-      readonly item: unknown;
-      /** The package that holds it, or `null` for the environment's own item. */
-      readonly holderPackageId: string | null;
-    }
-  | { readonly status: 'not-found' }
-  | {
-      readonly status: 'refused';
-      /** The resolver's reason (`ambiguous-in-closure`, `ambiguous-in-environment`, `outside-closure`). */
-      readonly reason: string;
-      /** Every candidate of the step that refused, described. */
-      readonly candidates: readonly string[];
-      /** The resolver's one sentence: the item, every candidate, what to do. */
-      readonly message: string;
-    };
+export interface SecurityCatalogPackageScopedRegistry extends PackageClosureRegistry {
+  /** Every package holding `(type, name)`, each once; the caller's own bundle addition counts for it. */
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): readonly string[];
+  /** A package holder's item, with whatever binds to it (its ADR-0005 overlay). */
+  getPackageScopedItem(type: string, name: string, packageId: string): unknown;
+  /** The environment's own item of the name, bound to no package. */
+  getEnvironmentScopedItem(type: string, name: string): unknown;
+  /** The package's own shipped item, prefer-local; a bare-slot row is a different object. */
+  getArtifactItem(type: string, name: string, currentPackageId?: string): unknown;
+}
 
 /**
- * [ADR-0150 D3/D4] The package-scoped half of the catalog read, handed in by
- * whoever binds the catalog to an engine (the security plugin), because the
- * one resolver lives in `@objectstack/objectql` and core cannot import it.
- * ⛔ An implementation answers from `resolvePackageScopedName` and the
- * registry's package-scoped reads only — never a second rule.
+ * The reads that make a registry one the catalog reads by `(package, name)`:
+ * a registry carrying any of them must carry all of them. `getPackage` and
+ * `getAllPackages` (the closure walk's) stay optional, as the walk reads them:
+ * without them a package caller's closure is empty, which only refuses more.
  */
-export interface SecurityCatalogPackageScope {
-  /**
-   * The permission set `name` resolves to for a caller of package
-   * `callerPackageId` (`null`: a caller with no package) — ADR-0150 D3.
-   */
-  resolvePermissionSet(name: string, callerPackageId: string | null): SecurityCatalogScopedOutcome;
-  /**
-   * Every holder's item of the permission-set name: one per package holder
-   * (each its ADR-0005 overlay when one binds to it, else its own item), then
-   * the environment's own item when it holds one.
-   */
-  permissionSetHolders(name: string): ReadonlyArray<{ readonly packageId: string | null; readonly item: unknown }>;
-  /**
-   * Is `definition` package `packageId`'s own shipped item of `(type, name)`,
-   * rather than an environment-authored row, an ADR-0005 overlay or a paired
-   * `.custom` override that the registry serves under the same name?
-   */
-  isPackageItem(type: SecurityCatalogType, name: string, packageId: string, definition: unknown): boolean;
-}
+const PACKAGE_SCOPED_REGISTRY_MEMBERS = [
+  'packageScopedHoldersOf',
+  'getPackageScopedItem',
+  'getEnvironmentScopedItem',
+  'getArtifactItem',
+] as const;
+/** The holder reads alone — what tells a package-scoped registry from a by-name stand-in. */
+const PACKAGE_SCOPED_HOLDER_READS = ['packageScopedHoldersOf', 'getPackageScopedItem', 'getEnvironmentScopedItem'] as const;
 
 /** Where the catalog read looks. Both readers are required: neither holds the whole catalog. */
 export interface SecurityCatalogSources {
-  /** ObjectQL's `SchemaRegistry` — `engine.registry`. */
-  registry: SecurityCatalogRegistry;
+  /**
+   * ObjectQL's `SchemaRegistry` — `engine.registry`. Its package-scoped reads
+   * ({@link SecurityCatalogPackageScopedRegistry}) are what permission sets
+   * are read by `(package, name)` through (module doc).
+   */
+  registry: SecurityCatalogRegistry | (SecurityCatalogRegistry & SecurityCatalogPackageScopedRegistry);
   /** The kernel `metadata` service. */
   metadata: SecurityCatalogMetadataService;
-  /**
-   * [ADR-0150 D3/D4] Permission sets by `(package, name)` (module doc). The
-   * security plugin hands it to every reader it builds over an engine
-   * registry; without it the registry is read by name, which is only right
-   * for a stand-in that holds one item per name.
-   */
-  packageScope?: SecurityCatalogPackageScope;
 }
 
 /** One catalog definition, as the reader that answered holds it. */
@@ -385,20 +373,16 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
         + 'it holds the stack-declared positions the engine registry does not.',
     );
   }
-  const packageScope = sources.packageScope;
-  if (
-    packageScope !== undefined
-    && (
-      typeof packageScope?.resolvePermissionSet !== 'function'
-      || typeof packageScope?.permissionSetHolders !== 'function'
-      || typeof packageScope?.isPackageItem !== 'function'
-    )
-  ) {
+  const carries = (member: string) => typeof (registry as unknown as Record<string, unknown>)[member] === 'function';
+  const isScoped = PACKAGE_SCOPED_HOLDER_READS.some(carries);
+  if (isScoped && !PACKAGE_SCOPED_REGISTRY_MEMBERS.every(carries)) {
     throw new TypeError(
-      'security catalog: a package scope must carry resolvePermissionSet, permissionSetHolders and isPackageItem — '
+      `security catalog: a registry with package-scoped reads must carry all of ${PACKAGE_SCOPED_REGISTRY_MEMBERS.join(', ')} — `
         + 'a partial one would read some permission sets by (package, name) and others by name alone.',
     );
   }
+  /** [ADR-0150 D3/D4] The registry, when it is read by `(package, name)` (module doc). */
+  const scoped = isScoped ? (registry as SecurityCatalogRegistry & SecurityCatalogPackageScopedRegistry) : undefined;
 
   /** A definition the reader may serve: an object, named as asked, of an enabled package. */
   const servable = (value: unknown, name?: string): Definition | undefined => {
@@ -486,31 +470,55 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
    * environment-authored position, an overlay or `.custom` override of a
    * package's position, and the audience anchors.
    */
-  const referenceCaller = (scope: SecurityCatalogPackageScope, position: SecurityCatalogEntry | undefined): string | null => {
+  const referenceCaller = (
+    scope: SecurityCatalogPackageScopedRegistry,
+    position: SecurityCatalogEntry | undefined,
+  ): string | null => {
     if (!position) return null;
     if ((AUDIENCE_ANCHOR_POSITIONS as readonly string[]).includes(position.name)) return null;
     const owner = position.packageId;
     if (owner === undefined || owner === OVERLAY_PROVENANCE_SENTINEL) return null;
-    if (position.source === 'registry' && !scope.isPackageItem('position', position.name, owner, position.definition)) return null;
+    // The package's own shipped position is its composite slot; an
+    // environment row, an overlay or a `.custom` override served under the
+    // same name is a different object, and is the environment's reference.
+    if (position.source === 'registry' && scope.getArtifactItem('position', position.name, owner) !== position.definition) return null;
     return owner;
   };
 
-  /** A permission set by ADR-0150 D3 through the package scope (module doc). */
+  /**
+   * A permission set by ADR-0150 D3 (module doc): the one rule over the
+   * registry's holders of the name and the one closure walk — the holder set
+   * `resolvePackageScopedName` (`@objectstack/objectql`) hands the same rule.
+   */
   const resolvePermissionScoped = async (
-    scope: SecurityCatalogPackageScope,
+    scope: SecurityCatalogPackageScopedRegistry,
     name: string,
     reference: SecurityCatalogReferenceScope | undefined,
   ): Promise<SecurityCatalogResolution> => {
-    const caller = referenceCaller(scope, reference?.position);
-    let outcome: SecurityCatalogScopedOutcome;
+    let caller: string | null;
+    let outcome: PackageScopedResolution;
     try {
-      outcome = scope.resolvePermissionSet(name, caller);
+      caller = referenceCaller(scope, reference?.position);
+      outcome = resolvePackageScopedHolders(
+        { type: 'permission', name, callerPackageId: caller },
+        {
+          packageHolders: scope.packageScopedHoldersOf('permission', name, caller),
+          packageItem: (packageId) => scope.getPackageScopedItem('permission', name, packageId),
+          environmentItem: () => scope.getEnvironmentScopedItem('permission', name),
+        },
+        (callerPackageId) => packageResolutionClosure(scope, callerPackageId),
+      );
     } catch (error) {
       throw unreadable('registry', 'permission', error);
     }
     if (outcome.status === 'refused') {
       // ⛔ Never a fallback: a refusal is the answer, and it confers nothing.
-      return { status: 'refused', reason: outcome.reason, candidates: [...outcome.candidates], message: outcome.message };
+      return {
+        status: 'refused',
+        reason: outcome.reason,
+        candidates: outcome.candidates.map(describePackageScopedHolder),
+        message: outcome.message,
+      };
     }
     if (outcome.status === 'resolved') {
       const definition = servable(outcome.item, name);
@@ -530,7 +538,7 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
   ): Promise<SecurityCatalogResolution> => {
     assertCatalogType(type);
     if (typeof name !== 'string' || name === '') return { status: 'not-found' };
-    if (type === 'permission' && packageScope) return resolvePermissionScoped(packageScope, name, reference);
+    if (type === 'permission' && scoped) return resolvePermissionScoped(scoped, name, reference);
     const registered = fromRegistry(type, name);
     if (registered) return { status: 'resolved', entry: entry(type, registered, 'registry') };
     const declared = await fromMetadata(type, name);
@@ -538,16 +546,19 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
   };
 
   /** [ADR-0150 D4] Every holder's entry of a permission-set name, one per `(package, name)`. */
-  const permissionHolderEntries = (scope: SecurityCatalogPackageScope, name: string): SecurityCatalogEntry[] => {
-    let holders: ReadonlyArray<{ readonly packageId: string | null; readonly item: unknown }>;
+  const permissionHolderEntries = (scope: SecurityCatalogPackageScopedRegistry, name: string): SecurityCatalogEntry[] => {
+    const items: unknown[] = [];
     try {
-      holders = scope.permissionSetHolders(name) ?? [];
+      for (const packageId of scope.packageScopedHoldersOf('permission', name) ?? []) {
+        items.push(scope.getPackageScopedItem('permission', name, packageId));
+      }
+      items.push(scope.getEnvironmentScopedItem('permission', name));
     } catch (error) {
       throw unreadable('registry', 'permission', error);
     }
     const out: SecurityCatalogEntry[] = [];
-    for (const holder of holders) {
-      const definition = servable(holder?.item, name);
+    for (const item of items) {
+      const definition = servable(item, name);
       if (definition) out.push(entry('permission', definition, 'registry'));
     }
     return out;
@@ -590,11 +601,11 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       for (const name of names) {
         if (name === undefined || seen.has(name)) continue;
         seen.add(name);
-        if (type === 'permission' && packageScope) {
+        if (type === 'permission' && scoped) {
           // [ADR-0150 D4] One entry per (package, name) holder, never one
           // picked among them; the metadata service only where the registry
           // serves no holder of the name.
-          const held = permissionHolderEntries(packageScope, name);
+          const held = permissionHolderEntries(scoped, name);
           if (held.length > 0) {
             out.push(...held);
             continue;

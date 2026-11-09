@@ -22,10 +22,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { AuthzStoreUnavailableError, bindSecurityCatalogReader } from '@objectstack/core';
+import { AuthzStoreUnavailableError, bindSecurityCatalogReader, createSecurityCatalogReader } from '@objectstack/core';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { DelegatedAdminGate, organizationBoundaryFailure } from './delegated-admin-gate.js';
-import { createPackageScopedSecurityCatalogReader } from './security-catalog-package-scope.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 
 const EAST_SCOPE = {
@@ -186,7 +185,7 @@ describe('[ADR-0150 D3/D7] the organization boundary judges a position\'s set as
     registry.installPackage(manifest(P, pDeps), 'code');
     registry.registerItem('permission', { name: 'q_reader', objects: {} }, 'name' as never, Q);
     registry.registerItem('position', { name: 'p_pos', permissionSets: ['q_reader'] }, 'name' as never, P);
-    return createPackageScopedSecurityCatalogReader(registry, { get: () => undefined, list: () => [] });
+    return createSecurityCatalogReader({ registry: registry as never, metadata: { get: () => undefined, list: () => [] } });
   };
 
   it('a set the position\'s package cannot reach cannot be shown inside, and the reason carries the refusal naming its holder', async () => {

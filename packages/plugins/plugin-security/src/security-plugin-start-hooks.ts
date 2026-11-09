@@ -44,8 +44,7 @@
  *
  * Nothing re-exports this module, so the published surface does not move.
  */
-import { type PluginContext } from '@objectstack/core';
-import { createPackageScopedSecurityCatalogReader } from './security-catalog-package-scope.js';
+import { type PluginContext, createSecurityCatalogReader } from '@objectstack/core';
 import type { IObjectQLEngine, SeedSettlementSnapshot } from '@objectstack/spec/contracts';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { SecurityPlugin } from './security-plugin.js';
@@ -341,7 +340,7 @@ export function registerStartHooks(
     (ctx as any).hook('kernel:bootstrapped', async (): Promise<void> => {
       try {
         await reportCatalogReferences(ql as any, {
-          catalog: createPackageScopedSecurityCatalogReader((ql as any).registry, this.metadata),
+          catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
           logger: ctx.logger,
         });
       } catch (e) {
@@ -363,7 +362,7 @@ export function registerStartHooks(
         const sharingRules = optional<Partial<DeclaredSharingRuleReader>>(SHARING_RULES_SERVICE);
         const messaging = optional<Partial<AccessUpgradeNotifier>>('messaging');
         await reportAccessUpgrade(ql as any, {
-          catalog: createPackageScopedSecurityCatalogReader((ql as any).registry, this.metadata),
+          catalog: createSecurityCatalogReader({ registry: (ql as any).registry, metadata: this.metadata }),
           sharingRules: typeof sharingRules?.listDeclaredRules === 'function'
             ? (sharingRules as DeclaredSharingRuleReader) : undefined,
           messaging: typeof messaging?.emit === 'function' ? (messaging as AccessUpgradeNotifier) : undefined,

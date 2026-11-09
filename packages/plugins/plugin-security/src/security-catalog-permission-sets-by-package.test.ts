@@ -10,8 +10,10 @@
  * closure is the one the resolver reads; items registered under each
  * package's composite slot; environment rows and overlays in the package-less
  * bare slot, as `sys_metadata` hydration registers them. The catalog is the
- * one the security plugin binds (`createPackageScopedSecurityCatalogReader`),
- * and the grant path is core's own (`readPositionGrantsInForce`).
+ * one the security plugin binds (`createSecurityCatalogReader` over the engine
+ * registry, which reads permission sets through core's one rule and
+ * metadata-core's one closure walk), and the grant path is core's own
+ * (`readPositionGrantsInForce`).
  *
  * Red lines 1 and 2 (never loosens; every refusal names every candidate) are
  * the `refused` cases. Each was ablated once — the registry's first-registered
@@ -30,7 +32,6 @@ import {
   readPositionGrantsInForce,
   type SecurityCatalogReader,
 } from '@objectstack/core';
-import { createPackageScopedSecurityCatalogReader } from './security-catalog-package-scope.js';
 
 const P = 'com.acme.caller';
 const Q = 'com.acme.other';
@@ -56,9 +57,20 @@ const stored = (type: string, item: Record<string, unknown>, binding?: string) =
   registry.registerItem(type, { ...item, ...(binding ? { _packageId: binding } : {}), _provenance: 'org' }, 'name' as never);
 
 const NO_METADATA = { get: () => undefined, list: () => [] };
-const catalog = (): SecurityCatalogReader => createPackageScopedSecurityCatalogReader(registry, NO_METADATA);
-/** The by-name catalog every reader was before this card: the registry's first-registered read. */
-const byNameCatalog = (): SecurityCatalogReader => createSecurityCatalogReader({ registry: registry as never, metadata: NO_METADATA });
+const catalog = (): SecurityCatalogReader => createSecurityCatalogReader({ registry, metadata: NO_METADATA });
+/**
+ * The by-name catalog every reader was before this card: the registry's
+ * first-registered read, over the same registry with its package-scoped reads
+ * hidden.
+ */
+const byNameCatalog = (): SecurityCatalogReader => createSecurityCatalogReader({
+  registry: {
+    getItem: (type: string, name: string) => registry.getItem(type, name),
+    listItems: (type: string) => registry.listItems(type),
+    isPackageDisabled: (packageId?: string) => registry.isPackageDisabled(packageId),
+  },
+  metadata: NO_METADATA,
+});
 
 const position = async (name: string) => {
   const entry = await catalog().resolve('position', name);

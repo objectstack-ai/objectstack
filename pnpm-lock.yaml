@@ -1050,6 +1050,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../spec
@@ -1060,9 +1063,6 @@ importers:
         specifier: ^4.6.6
         version: 4.6.7
     devDependencies:
-      '@objectstack/metadata-core':
-        specifier: workspace:*
-        version: link:../metadata-core
       '@objectstack/refd-timer-testkit':
         specifier: workspace:*
         version: link:../qa/refd-timer-testkit
@@ -2175,9 +2175,6 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
-      '@objectstack/objectql':
-        specifier: workspace:*
-        version: link:../../objectql
       '@objectstack/platform-objects':
         specifier: workspace:*
         version: link:../../platform-objects
@@ -2197,6 +2194,9 @@ importers:
       '@objectstack/metadata-protocol':
         specifier: workspace:*
         version: link:../../metadata-protocol
+      '@objectstack/objectql':
+        specifier: workspace:*
+        version: link:../../objectql
       '@objectstack/plugin-audit':
         specifier: workspace:*
         version: link:../plugin-audit

@@ -46,8 +46,7 @@
  * happen is `stopped`, never "no finding".
  */
 
-import { type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
-import { createPackageScopedSecurityCatalogReader } from './security-catalog-package-scope.js';
+import { createSecurityCatalogReader, type SecurityCatalogEntry, type SecurityCatalogReader } from '@objectstack/core';
 import {
   accessUpgradeDedupKey,
   collectAccessUpgradeFindings,
@@ -254,7 +253,7 @@ export function createAccessUpgradeCheck(sources: AccessUpgradeCheckSources): Ac
       }
       let catalog: SecurityCatalogReader;
       try {
-        catalog = createPackageScopedSecurityCatalogReader(engine.registry, metadata);
+        catalog = createSecurityCatalogReader({ registry: engine.registry as never, metadata: metadata as never });
       } catch (e) {
         return { outcome: 'stopped', stop: 'catalog-unreadable', reading: 'the security catalog', error: (e as Error)?.message };
       }
