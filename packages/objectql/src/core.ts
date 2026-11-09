@@ -24,6 +24,12 @@ export {
 } from './registry.js';
 export type { ObjectContributor, SchemaRegistryOptions } from './registry.js';
 
+// [#31852, ADR-0150 D5] The refusal `SchemaRegistry#getApp` (and every other
+// package-scoped by-name read) throws: `@objectstack/core`'s one class, so a
+// lean consumer can match it by class rather than by `code` and `status`.
+// Core is already this entry's dependency, so it costs the boundary nothing.
+export { PackageScopedNameRefusedError } from './package-scoped-read.js';
+
 // [#14553] The navigation-contribution group diagnostic. Belongs on the LEAN
 // entry as well as the barrel: it is a pure derivation over authored metadata
 // with no imports of its own, so it costs this entry nothing and stays clear of

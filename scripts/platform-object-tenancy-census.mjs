@@ -50,8 +50,9 @@
  *     `registry.ts` documents it as "the single source consumed by
  *     `applySystemFields`", and it is deliberately runtime-free so author-time
  *     consumers can call it.
- *   - `resolveTenantFieldName` (`packages/objectql/src/tenancy/
- *     system-write-organization.ts`) -- the engine's own resolver, the exact
+ *   - `resolveTenantFieldName` (`packages/core/src/security/
+ *     tenant-field.ts`, which `@objectstack/objectql` re-exports as the same
+ *     binding) -- the engine's own resolver, the exact
  *     function the header's prose names.
  *
  * A transcription of either rule here would be a SECOND copy of a rule the
@@ -109,7 +110,7 @@ import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 import { transpileChecked } from './ts-parse.mjs';
@@ -126,16 +127,18 @@ export const ARTEFACT = 'scripts/platform-object-tenancy-census.json';
  * hand-written digits this artefact replaced. That ledger retired under ADR-0131
  * D13: the tenant-audit's scope became the schema predicate this census executes,
  * so the pointer now lives where that predicate is defined and documented --
- * `resolveTenantFieldName`'s own docblock. The artefact's reader moved with it:
+ * `resolveTenantFieldName`'s own docblock, which moved down to `@objectstack/core`
+ * with the function when the import runner became its second asker (the engine
+ * re-exports the same binding). The artefact's reader moved with it:
  * `reach: in` is now, by construction, "inside the system-write rule AND the
  * tenant-audit", with no per-table verdict beside it.
  */
-export const HEADER = 'packages/objectql/src/tenancy/system-write-organization.ts';
+export const HEADER = 'packages/core/src/security/tenant-field.ts';
 
 /** The two files the predicate is loaded from. Both are executed, not read. */
 export const PREDICATE_SOURCES = {
   injectedColumns: 'packages/spec/src/data/injected-system-columns.ts',
-  tenantFieldResolver: 'packages/objectql/src/tenancy/system-write-organization.ts',
+  tenantFieldResolver: 'packages/core/src/security/tenant-field.ts',
 };
 
 /**
@@ -230,9 +233,12 @@ export function createSourceLoader(root = ROOT) {
     // so an unparseable module would be evaluated as whatever survived and the
     // census would score the tree against wreckage with a clean exit. That is
     // this artefact's own failure class one layer down (`check-parse-guard`).
+    // `import.meta` has no CommonJS spelling, so a module that reads its own
+    // URL (`createRequire(import.meta.url)`) would not evaluate here at all;
+    // it is handed the module's own file URL, which is what ESM would give it.
     const js = transpileChecked(file, source, {
       compilerOptions: { module: 'commonjs', target: 'es2022' },
-    }).outputText;
+    }).outputText.replace(/\bimport\.meta\.url\b/g, '__importMetaUrl');
     const mod = { exports: {} };
     // Seeded BEFORE evaluation so an import cycle sees the partial module the
     // way CommonJS does, instead of recursing until the stack ends.
@@ -258,8 +264,8 @@ export function createSourceLoader(root = ROOT) {
     };
     // eslint-disable-next-line no-new-func -- the whole point: evaluate the
     // tree's own transpiled source rather than re-spelling what it decides.
-    new Function('require', 'module', 'exports', '__filename', '__dirname', js)(
-      req, mod, mod.exports, file, dirname(file),
+    new Function('require', 'module', 'exports', '__filename', '__dirname', '__importMetaUrl', js)(
+      req, mod, mod.exports, file, dirname(file), pathToFileURL(file).href,
     );
     return mod.exports;
   };

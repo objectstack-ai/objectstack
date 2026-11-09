@@ -22,9 +22,8 @@ metadata:
 
 ## When to Use This Skill
 
-Flows (auto-launched, screen, scheduled), state machines and approvals,
-record-change triggers, vendor integrations and their callbacks, and
-**assignment rules**.
+Flows, state machines and approvals, triggers, vendor integrations and
+their callbacks, and **assignment rules**.
 
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
 > `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL
@@ -43,7 +42,7 @@ record-change triggers, vendor integrations and their callbacks, and
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
-| `api` | Inbound **webhook** — needs a start-node `secretRef` (see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
+| `api` | Inbound **webhook** — needs a start-node `secretRef` (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
 
 **A flow an installed package ships** is read-only. To change what it does, save
 a same-named flow in the base's paired `.custom` package declaring
@@ -69,12 +68,12 @@ Flows are built from **built-in node types** (plugins register more):
 | `start` | Entry point — every flow has exactly one |
 | `end` | Exit point — can have multiple (early exit, error exit) |
 | `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config |
-| `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope (`{ dialect: 'cel', source: 'rows' }`) or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
+| `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
 | `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end — no split/join pair to mis-wire |
 | `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first. **No `finally`** — the container's ordinary out-edges are the continuation |
-| `map` | Sequential multi-instance — invoke a subflow once per item of `config.collection` (shaped as `loop`'s); each iteration may pause (batch approvals) |
+| `map` | Sequential multi-instance — invoke the `config.flowName` flow (named as `subflow`'s) per item of `config.collection` (shaped as `loop`'s); each may pause (batch approvals); a refused name fails it at the first item |
 | `wait` | Pause execution until a timer elapses or a named signal arrives |
-| `subflow` | Invoke another flow (reusable composition) |
+| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` passes and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller; an older clash, never armed) |
 | `parallel_gateway` / `join_gateway` / `boundary_event` | **Not author-facing** — BPMN-interop forms a `parallel` / `try_catch` container lowers into; author the container |
 
 #### Data Operations
@@ -96,7 +95,7 @@ Flows are built from **built-in node types** (plugins register more):
 | `notify` | Send a notification through the messaging service |
 | `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable), nothing sent; `os validate` does not judge the `inputSchema` fit yet |
 | `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
-| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused; never hand-roll a button label or step counter into `fields` |
+| `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused |
 
 #### Human Decision
 
@@ -110,8 +109,10 @@ Flows are built from **built-in node types** (plugins register more):
 error. **RAW** keys are read as written: a
 `{token}` in one is refused.
 
+<!-- os:check -->
 ```ts
-{ id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
+import type { FlowNode } from '@objectstack/spec/automation';
+const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
     recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
     // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
     // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
@@ -123,7 +124,7 @@ error. **RAW** keys are read as written: a
     sourceObject: 'task',              // link: PAIR, else dropped; none of the 3 ⇒ the
     sourceId: { dialect: 'cel', source: 'record.id' }, // trigger record (not on delete/before-create), if any
     actionUrl: '/tasks/{{ record.id }}', // overrides the pair
-} }
+} };
 ```
 
 An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
@@ -159,8 +160,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > — the step succeeds, the value never lands, the drop is named in the step's
 > warnings — so a flow maintaining one (approval stamps, SLA markers, rollups)
 > runs `runAs: 'system'`; `os validate` / `os build` fail a `runAs:'user'`
-> `update_record` writing one (`readonlyWhen`: a warning). Do **not** remove
-> `readonly` instead.
+> `update_record` writing one (`readonlyWhen`: a warning).
 
 > **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`; a
 > step that must write a `readonly` field moves into a dedicated `runAs: 'system'`
@@ -220,8 +220,7 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 
 ## Valid-but-silently-wrong (passes build, fails at runtime)
 
-Legal metadata authors get wrong; most are caught by `objectstack build` —
-write them right the first time:
+Legal metadata authors get wrong; most are caught by `objectstack build`:
 
 1. **A value slot takes a literal or a CEL envelope — never a `{…}` token.**
    In `assignments.*`, `fields.*`, `subflow` / `map` `input.*`, `script`
@@ -248,7 +247,6 @@ write them right the first time:
    'current_user.id' } }`), then write `{{ v }}`.
 
 2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
-   Reference a field explicitly.
    ❌ `fields: { ref: { dialect: 'cel', source: 'newRec' } }` → writes the whole record object
    ✅ `source: 'newRec.id'`
 
@@ -262,10 +260,9 @@ write them right the first time:
    it. Keep data effects on the flow graph (visible, governed, build-checkable):
 
    ```ts
-   // ✅ function returns values → outputVariable → update_record persists
    { id: 'ai', type: 'script', config: {
        function: 'helpdesk.aiTriageStub',     // returns { ai_category, ai_sentiment, … }
-       inputs: { ticketId: { dialect: 'cel', source: 'record.id' } }, // CEL values or literals
+       inputs: { ticketId: { dialect: 'cel', source: 'record.id' } },
        outputVariable: 'ai',
    } },
    { id: 'apply', type: 'update_record', config: {
@@ -276,7 +273,7 @@ write them right the first time:
    ```
 
    Data-lifecycle **side effects** (read/write other records) are an L2 **hook**
-   (objectstack-data) — hooks get `ctx.api`.
+   (objectstack-data).
 
    A function that writes where the platform cannot see **declares** it, so the
    run reports "cannot say" rather than `acted: 0`:
@@ -409,7 +406,7 @@ owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
 > `record-before-*` flow that throws silently blocks the write — give it a
 > user-facing message.
 
-→ [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers — scheduled per-record date sweep.
+→ [references/examples-flows.md](./references/examples-flows.md) § Time-relative triggers.
 
 ---
 
@@ -426,8 +423,7 @@ card, the app still writing none: the protocol is not HTTP; the work writes
 identity objects (users, units, positions); it processes files locally; one fixed
 action contract spans several vendors; the callback is signed in no form
 `config.signature` declares. A document the loader cannot take yet (YAML, Swagger 2.0,
-`$ref`) is a gap named against its platform card, never a
-reason to write code.
+`$ref`) is a gap named against its platform card.
 
 ---
 
@@ -447,6 +443,5 @@ os validate     # CEL/predicate validation + schema
 ## References
 
 See [references/_index.md](./references/_index.md) for pointers to the Zod
-schemas in `node_modules/@objectstack/spec/src/` — `Read` the source for exact
-field shapes; never rely on memory.
+schemas in `node_modules/@objectstack/spec/src/`.
 

@@ -71,7 +71,7 @@ import {
 } from './connector-credentials.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
-import { packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
+import { connectorNameResolver, packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
 import type { PackageScopedRefusal, PackageScopedRegistry } from '@objectstack/objectql';
 import { createConnectorRequestSigner } from './request-signing/index.js';
 import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
@@ -1798,6 +1798,11 @@ export class AutomationServicePlugin implements Plugin {
         // the ObjectQL registry, read at question time. See `flowNameResolver`.
         this.engine.setFlowNameResolver(flowNameResolver(ctx));
 
+        // [ADR-0150 D3, epic #31527 child E5] Which declared connector instance
+        // a flow's bare `connectorConfig.connectorId` means is the same
+        // resolver's answer for the flow's package. See `connectorNameResolver`.
+        this.engine.setConnectorNameResolver(connectorNameResolver(ctx));
+
         // [#28405] A waiting run resumes on the flow body it started on, read
         // back from the metadata history once the flow was republished. See
         // `flowHistoryReader`.
@@ -2244,7 +2249,7 @@ export class AutomationServicePlugin implements Plugin {
                 const def = entry.definition as { name?: string };
                 if (!def?.name) continue;
                 try {
-                    this.engine.registerFlow(entry.name, def as never);
+                    this.engine.registerFlow(entry.name, def as never, entry.contender);
                     this.syncedFlowNames.add(entry.name);
                     // The receipt, so the shadowed contender is observable at all.
                     if (entry.shadowing) this.engine.recordFlowShadowing(entry.shadowing);
@@ -5394,7 +5399,7 @@ export class AutomationServicePlugin implements Plugin {
                 continue;
             }
             try {
-                this.engine.registerFlow(entry.name, entry.definition as never);
+                this.engine.registerFlow(entry.name, entry.definition as never, entry.contender);
                 resynced++;
             } catch (err) {
                 // #5048 — see ./thrown-cause-diagnostics.ts.
@@ -5470,7 +5475,7 @@ export class AutomationServicePlugin implements Plugin {
         // re-binding the body the boot pull armed is safe.
         for (const entry of this.resolveFlowContenders(ctx, defs)) {
             try {
-                this.engine.registerFlow(entry.name, entry.definition as never);
+                this.engine.registerFlow(entry.name, entry.definition as never, entry.contender);
                 this.syncedFlowNames.add(entry.name);
                 bound++;
             } catch (err) {
@@ -5655,7 +5660,7 @@ export class AutomationServicePlugin implements Plugin {
             const held = await engine.getFlow(name);
             if (held && holdsFlowDefinition(engine, name, held, entry.definition)) continue;
             try {
-                engine.registerFlow(name, entry.definition as never);
+                engine.registerFlow(name, entry.definition as never, entry.contender);
                 this.mutationArmedFlows.set(name, stableStringify(entry.definition));
                 armed.push(name);
             } catch (err) {

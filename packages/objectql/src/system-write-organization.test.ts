@@ -55,7 +55,14 @@ import {
 // re-exports. Same reasoning, and the same shape, as the core precedent
 // `packages/core/src/service-resolution-discriminator.contract.test.ts`.
 import * as barrel from './index.js';
-import { resolveSystemWriteOrganization as coreResolveSystemWriteOrganization } from '@objectstack/core';
+import {
+  resolveSystemWriteOrganization as coreResolveSystemWriteOrganization,
+  resolveTenantFieldName as coreResolveTenantFieldName,
+  DEFAULT_TENANT_FIELD as CORE_DEFAULT_TENANT_FIELD,
+  isFederatedObject as coreIsFederatedObject,
+} from '@objectstack/core';
+import { resolveTenantFieldName, DEFAULT_TENANT_FIELD } from './tenancy/system-write-organization.js';
+import { isFederatedObject } from './federated-object.js';
 
 const ORG_ID = 'org_msokm9oaz0cal87q';
 const SECOND_ORG_ID = 'org_second';
@@ -585,5 +592,17 @@ describe('#14936 the published recognizer for the org-less system-write refusal'
     // that cannot.
     expect(resolveSystemWriteOrganization).toBe(coreResolveSystemWriteOrganization);
     expect(barrel.resolveSystemWriteOrganization).toBe(coreResolveSystemWriteOrganization);
+  });
+
+  it('re-exports the tenancy-scope predicate, its column and the federated test @objectstack/core holds, never copies', () => {
+    // The import runner's match lookup (`@objectstack/core`) scopes a read by
+    // the column the engine stamps a created row with, so it asks these same
+    // bindings one layer down. A copy here would pass every engine case and
+    // drift from the runner's reading silently: identity is the pin.
+    expect(resolveTenantFieldName).toBe(coreResolveTenantFieldName);
+    expect(barrel.resolveTenantFieldName).toBe(coreResolveTenantFieldName);
+    expect(DEFAULT_TENANT_FIELD).toBe(CORE_DEFAULT_TENANT_FIELD);
+    expect(barrel.DEFAULT_TENANT_FIELD).toBe(CORE_DEFAULT_TENANT_FIELD);
+    expect(isFederatedObject).toBe(coreIsFederatedObject);
   });
 });

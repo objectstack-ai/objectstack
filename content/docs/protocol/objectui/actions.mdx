@@ -232,6 +232,7 @@ interface Action {
   params?: ActionParam[];       // Inputs collected before execution
   submitText?: I18nLabel;       // The param dialog's submit button verb (default "Confirm")
   cancelText?: I18nLabel;       // The confirm or param dialog's dismiss button label (default "Cancel")
+  preflight?: Preflight;        // A same-origin GET the param dialog shows before submit (planned: not drawn yet)
   method?: 'POST' | 'PATCH' | 'PUT' | 'DELETE'; // for type: 'api'
 
   // UX
@@ -561,6 +562,39 @@ cancelText: Keep invitation
 - A blank string (`''` or whitespace only) is refused at parse. Omit the key to keep **Cancel**.
 - `cancelLabel` (the button's spelling on the console's `form` and `alert-dialog` renderers) is refused with a rename to `cancelText`.
 - The console draws it on the dismiss button of both dialogs, from the translation bundle first and then the authored text. Without it, the button says **Cancel**. `sys_invitation`'s **Cancel Invitation** action declares **Keep invitation**.
+
+### Showing a server read before submit: `preflight`
+
+> **Planned.** The key parses and is judged at parse today, but the console's param dialog does not send the read, draw the panel or fill a param yet. Declaring it now changes nothing an author sees until that reader lands.
+
+Some actions need the user to see what the server says before they confirm: an upgrade that lists the schema changes it will make, and that wants a confirmation token from the same answer submitted with the action. `preflight` declares that read. The param dialog sends one `GET`, shows the answer above the params, and can fill params from it.
+
+```yaml
+name: install_package
+label: Install Package
+type: api
+target: /api/v1/cloud/packages/${ctx.recordId}/install
+params:
+  - { name: environment_id, type: lookup, reference: sys_environment, required: true }
+  - { name: version, type: text, required: true }
+  - { name: confirm_schema_upgrade, label: Schema change confirmation, type: text, required: true }
+preflight:
+  read:
+    url: /api/v1/cloud/packages/${ctx.recordId}/upgrade-plan?environment_id=${param.environment_id}&version=${param.version}
+  path: data
+  fields:
+    - { path: findings, label: Schema findings, format: json }
+  seed:
+    - { param: confirm_schema_upgrade, path: verdict.findingSet }
+```
+
+- **`read.url` is a same-origin API path**, under the rule a page element's `api` data source follows: it opens with a single `/`. An absolute URL of any scheme, `//host`, a backslash read as a slash, a space or control character, and a relative path are refused at parse, and the message names which. `method` is `GET` or omitted.
+- **No credential is written.** The console reads the endpoint with its own signed-in fetch, so `headers`, `auth`, `authorization`, `token`, `credentials` and `apiKey` are refused, and so are `body` and `params` (write query parameters into the path).
+- **Holes are closed** to `${param.NAME}` (a param this action declares), `${ctx.recordId}` and `${ctx.record.FIELD}`, each value percent-encoded. `${result.*}` is refused because there is no answer before the read, and so is every other hole.
+- **`path`** selects the part of the answer to use (`data` in a `{ success, data }` envelope). **`fields`** picks what the panel shows, with the same row and formats as `resultDialog.fields`. Without `fields`, the selected answer is shown as JSON. There is no `title`: the panel has a generic heading.
+- **`seed`** writes the value at each `path` into the named param, which the dialog draws read-only and submits as shown. A seeded param is declared in `params`, is seeded once, declares no `defaultValue`, `defaultFromRow` or `carryOver`, and is read by no hole of the URL. Mark it `required` so Confirm waits for the answer.
+- **Only where a param dialog opens.** An action with no `params` (or an empty list) is refused, as `submitText` is. So is an action with `execution: 'aggregate'`, because the grid's bulk dialog has no single record to read.
+- A preflight is UX, not authorization. The action's endpoint must still check what a seeded param carries.
 
 ## AI Tool Exposure (ADR-0011)
 

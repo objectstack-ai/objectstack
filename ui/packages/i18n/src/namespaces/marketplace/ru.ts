@@ -224,6 +224,7 @@ const ru = {
       businessFunction: 'Бизнес-функция',
       industry: 'Отрасль',
       solutionType: 'Тип',
+      languages: 'Языки',
     },
     businessFunction: {
       sales: 'Продажи',
@@ -257,6 +258,11 @@ const ru = {
     },
     maturity: {
       beta: 'Бета',
+    },
+    languages: {
+      none: 'Нет сведений о языках',
+      more: 'ещё: {{extra}}',
+      default: '(по умолчанию)',
     },
     relativeTime: {
       today: "сегодня",

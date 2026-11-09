@@ -24,6 +24,12 @@ import { ruleArrayFilterError } from './filter-rule-array';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { PAGE_TYPE_DEFAULT, misplacedDefaultPageRefusal } from './default-record-page';
+import {
+  SAME_ORIGIN_API_PATH_RE as SHARED_SAME_ORIGIN_API_PATH_RE,
+  API_RESPONSE_PATH_RE,
+  API_READ_NO_CREDENTIALS,
+  sameOriginApiPathRefusal,
+} from './same-origin-api-read';
 
 /**
  * Shared history for this file (#4001).
@@ -340,86 +346,16 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
 }));
 
 /**
- * The SAME-ORIGIN API PATH an element's `api` data source reads — one string
- * the parse can judge on its own, so a URL that would leave this deployment's
- * origin is refused in front of the author and never reaches a browser.
- *
- * ## The admitted set
- *
- * A path that opens with ONE `/` (`/api/v1/cloud/home`), whose second
- * character is neither `/` nor a backslash, and that carries no space and no
- * ASCII control character anywhere. Everything else is refused, and the
- * refusal says which of five classes the value fell in:
- *
- * - `scheme` — an absolute URL of ANY scheme (`https:`, `http:`, `mailto:`,
- *   `javascript:`, `data:`, …): it names an origin of its own;
- * - `protocol-relative` — `//host`, which the browser reads as a host name;
- * - `backslash` — `/` then a backslash, or a backslash first: the URL parser
- *   reads a backslash as a slash in a special-scheme URL, so both are `//host`;
- * - `whitespace-or-control` — a tab, line feed or carriage return anywhere (the
- *   parser deletes them before it reads the URL, so `/`+tab+`/host` is
- *   `//host`), or a space or another control character, which the parser strips
- *   from either end (a space before `//host` is `//host`);
- * - `relative` — no leading `/` at all (`./home`, `../home`, `api/v1/home`,
- *   `?q`, an empty string): it resolves against the PAGE's own address, never
- *   the API.
- *
- * The first four are the browser-equivalent spellings of another origin that
- * objectui's `classifyNavigationTarget` (`@object-ui/core`, the one answer its
- * user-click navigations share) refuses for a navigation target. `./relative`,
- * which that classifier admits for a NAVIGATION, is refused HERE on a
- * measurement of the renderer, not by analogy: a read is a `fetch`, and the
- * `apiBase` promotion the console applies to a `url` action
- * (`ActionRunner.navigateTo`; read points recorded in `liveness/page.json`,
- * row `regions`) prefixes a root-relative `/api/…` path only — a `./` path
- * would resolve against the
- * console route the page is mounted on, on the SPA host, and read the wrong
- * thing in the silent direction.
- *
- * ## Why a regex and not a `superRefine`
- *
- * A `.regex()` projects into the published JSON Schema as `pattern`, exactly;
- * a refinement is dropped from it (`dropped-refinements.baseline.json`), so a
- * document a validator accepted would be refused at parse a release later.
- * The pattern IS the rule; {@link elementApiReadUrlRefusal} only names the
- * class a refused value fell in, so the author reads why.
- *
- * Whatever the class, no credential is ever written here: the console reads the
- * endpoint with its own signed-in fetch (the maintainer's ruling: "No
- * credentials in metadata; the console's authenticated fetch is reused").
+ * The same-origin rule an element's `api` data source reads under lives in
+ * `./same-origin-api-read.ts`, shared with an action's `preflight` read so the
+ * two declarations hold ONE rule: the URL regex and the class-naming refusal,
+ * the response-path regex, and the no-credentials guidance. That module's
+ * header carries the admitted set and why the rule is a regex. The names below
+ * are this file's own spellings of those constants; the accept set and every
+ * message are byte-identical to the ones declared here before the move
+ * (`same-origin-api-read.test.ts` pins both).
  */
-const SAME_ORIGIN_API_PATH_RE = /^\/(?:[^/\\\x00-\x20\x7F][^\x00-\x20\x7F]*)?$/;
-
-/** The classes {@link SAME_ORIGIN_API_PATH_RE} refuses, in the order they are asked. */
-const ELEMENT_API_URL_CLASSES: ReadonlyArray<{ test: (url: string) => boolean; why: string }> = [
-  {
-    // whitespace-or-control — asked first: a space before `//host` is `//host`.
-    test: (url) => /[\x00-\x20\x7F]/.test(url),
-    why: 'This value holds a space or an ASCII control character. The browser\'s URL parser deletes a '
-      + 'tab, line feed or carriage return wherever it stands and strips spaces and control characters '
-      + 'from both ends before it reads the URL, so what it fetches is not what was written: a slash, a '
-      + 'tab and then `/host` is read as `//host`, another origin. Percent-encode a space the path '
-      + 'really needs (`%20`).',
-  },
-  {
-    // scheme — any scheme, not only http(s).
-    test: (url) => /^[A-Za-z][A-Za-z0-9+.-]*:/.test(url),
-    why: 'This value is an absolute URL: it opens with a scheme (`https:`, `http:`, `mailto:`, '
-      + '`javascript:`, `data:`, …), so it names an origin of its own.',
-  },
-  {
-    // protocol-relative.
-    test: (url) => url.startsWith('//'),
-    why: 'This value opens with `//`, a protocol-relative URL: the browser reads what follows as a host '
-      + 'name, so it is another origin.',
-  },
-  {
-    // backslash — `/\host` and a leading backslash are both `//host` to the parser.
-    test: (url) => url.startsWith('\\') || url.startsWith('/\\'),
-    why: 'This value puts a backslash where the browser\'s URL parser reads a slash, so it is read as '
-      + '`//host`, another origin.',
-  },
-];
+const SAME_ORIGIN_API_PATH_RE = SHARED_SAME_ORIGIN_API_PATH_RE;
 
 /**
  * The refusal an `api` data source's `read.url` raises — the rule, the
@@ -427,30 +363,14 @@ const ELEMENT_API_URL_CLASSES: ReadonlyArray<{ test: (url: string) => boolean; w
  * URL an author pasted may carry a credential in its user-info or query.
  */
 function elementApiReadUrlRefusal(input: unknown): string | undefined {
-  // A non-string is the type check's to report, in zod's own words.
-  if (typeof input !== 'string') return undefined;
-  const why = ELEMENT_API_URL_CLASSES.find((c) => c.test(input))?.why
-    ?? 'This value does not open with `/`, so it is a relative path: it resolves against the page\'s '
-      + 'own address, never the API.';
-  return '`read.url` of an `api` data source must be a same-origin API path — one that '
-    + 'opens with a single `/`, such as `/api/v1/cloud/home`. ' + why + ' Write the endpoint\'s path '
-    + 'on this deployment\'s own origin. The console reads it with its own signed-in fetch, so a host, '
-    + 'a scheme or a credential is never written in metadata.';
+  return sameOriginApiPathRefusal(input, '`read.url` of an `api` data source');
 }
 
-/**
- * The dotted path an `api` data source selects from the response —
- * `data.environments` in a `{ success, data }` envelope. Segments of letters,
- * digits, `_` and `-`, joined by single dots: no brackets, no leading `$`, no
- * slashes, so a JSONPath or a URL path written here is refused rather than
- * selecting nothing.
- */
-const ELEMENT_API_RESPONSE_PATH_RE = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
+/** The dotted path an `api` data source selects from the response — `data.environments`. */
+const ELEMENT_API_RESPONSE_PATH_RE = API_RESPONSE_PATH_RE;
 
 /** What an author who reached for a credential on an `api` data source is told. */
-const ELEMENT_API_NO_CREDENTIALS =
-  'No credential is written in metadata: the console reads the endpoint with its own signed-in '
-  + 'fetch, so the request already carries the user\'s session. Delete this key.';
+const ELEMENT_API_NO_CREDENTIALS = API_READ_NO_CREDENTIALS;
 
 /**
  * Element API Data Source Schema — the second shape of a page element's

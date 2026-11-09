@@ -2241,6 +2241,14 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "dimensions.nullLabel": {
         label: "Rótulo para nulo"
       },
+      "dimensions.synonyms": {
+        label: "Sinônimos",
+        helpText: "Palavras que as pessoas usam para esta dimensão em uma pergunta (ex.: etapa, etapa de venda, stage), separadas por vírgulas; pode misturar idiomas. Comparadas pelas ferramentas de IA do conjunto de dados, nunca exibidas. No máximo 20, cada uma com no máximo 60 caracteres; uma palavra só pode corresponder a um membro deste conjunto de dados"
+      },
+      "dimensions.description": {
+        label: "Descrição",
+        helpText: "Definição de negócio em linguagem simples: uma ou duas frases sobre o que é esta dimensão e quando usá-la. Publicada com os metadados de análise e lida pelas ferramentas de IA do conjunto de dados; uma definição, nunca um prompt nem uma instrução para uma IA. No máximo 500 caracteres"
+      },
       measures: {
         label: "Medidas",
         helpText: "Cada uma: name, aggregate, field (opcional para count) e formato/moeda de exibição"
@@ -2274,6 +2282,14 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "measures.duration": {
         label: "Duração"
+      },
+      "measures.synonyms": {
+        label: "Sinônimos",
+        helpText: "Palavras que as pessoas usam para esta medida em uma pergunta (ex.: receita, vendas, revenue), separadas por vírgulas; pode misturar idiomas. Comparadas pelas ferramentas de IA do conjunto de dados, nunca exibidas. No máximo 20, cada uma com no máximo 60 caracteres; uma palavra só pode corresponder a um membro deste conjunto de dados"
+      },
+      "measures.description": {
+        label: "Descrição",
+        helpText: "Definição de negócio em linguagem simples: uma ou duas frases sobre o que é esta medida e quando usá-la. Publicada com os metadados de análise e lida pelas ferramentas de IA do conjunto de dados; uma definição, nunca um prompt nem uma instrução para uma IA. No máximo 500 caracteres"
       }
     }
   },

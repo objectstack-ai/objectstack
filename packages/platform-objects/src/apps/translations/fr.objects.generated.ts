@@ -2135,6 +2135,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             label: "Mappage : revendication nom",
             helpText: "Facultatif. Revendication associée au nom d’affichage. Par défaut : « name ».",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "Mappage : revendication groupes",
+            helpText: "Facultatif. Revendication qui contient les groupes de l’utilisateur, par ex. « groups ». Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour ne mapper aucun groupe.",
+            placeholder: "groups"
           }
         }
       },
@@ -2165,6 +2170,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
             label: "Format du NameID",
             helpText: "Facultatif. Format de NameID SAML demandé. Par défaut, le format configuré sur l’IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "Mappage : attribut groupes",
+            helpText: "Facultatif. Attribut d’assertion qui contient les groupes de l’utilisateur. Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour ne mapper aucun groupe.",
+            placeholder: "groups"
           }
         }
       },
@@ -2193,6 +2203,35 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "Modifier les options de connexion",
         successMessage: "Options de connexion enregistrées"
+      },
+      show_sso_groups_claim: {
+        label: "Afficher la revendication des groupes",
+        resultDialog: {
+          title: "Revendication des groupes",
+          description: "La revendication OIDC ou l’attribut SAML dans lequel ce fournisseur lit les groupes de l’utilisateur à chaque connexion. Vide signifie que le fournisseur ne mappe aucun groupe. Modifiez-la avec « Modifier la revendication des groupes ».",
+          acknowledge: "Terminé",
+          fields: {
+            groupsClaim: "Revendication des groupes"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "Modifier la revendication des groupes",
+        params: {
+          groupsClaim: {
+            label: "Revendication des groupes",
+            helpText: "La revendication OIDC ou l’attribut SAML qui contient les groupes de l’utilisateur. Chaque connexion accorde les ensembles d’autorisations mappés à ces groupes. Laissez vide pour la supprimer : le fournisseur ne mappe alors aucun groupe.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "Revendication des groupes enregistrée",
+          description: "La revendication des groupes que ce fournisseur lit désormais à chaque connexion. Vide signifie qu’aucun groupe n’est mappé.",
+          acknowledge: "Terminé",
+          fields: {
+            groupsClaim: "Revendication des groupes"
+          }
+        }
       }
     }
   },

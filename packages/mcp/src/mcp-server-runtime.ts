@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate, type RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import type { Logger, IMetadataService, AIToolDefinition, ToolCallPart } from '@objectstack/spec/contracts';
@@ -1264,8 +1264,8 @@ function registerToolFromDefinition(
   tool: AIToolDefinition,
   execute: (toolCall: ToolCallPart) => Promise<ToolExecutionResult>,
   logger: Logger | undefined,
-): void {
-  server.registerTool(
+): RegisteredTool {
+  return server.registerTool(
     tool.name,
     {
       description: tool.description,
@@ -1429,6 +1429,16 @@ export interface McpHttpCaller {
 }
 
 /**
+ * [#31836] The one line a skipped AI-registry tool leaves: which name, which
+ * source was not served, and which was ({@link MCPServerRuntime.yieldBridgedTool}).
+ */
+function logNativeToolServed(logger: Logger | undefined, name: string): void {
+  logger?.debug(
+    `[MCP] Tool "${name}": serving the native data tool; the ToolRegistry tool of that name is not bridged`,
+  );
+}
+
+/**
  * MCPServerRuntime — Bridges ObjectStack kernel services to the Model Context Protocol.
  *
  * Responsibilities:
@@ -1455,6 +1465,14 @@ export class MCPServerRuntime {
   private started = false;
   /** [#31605] The host-installed tool-call interceptor; single slot. */
   private toolInterceptor: McpToolInterceptor | undefined;
+  /**
+   * [#31836] The AI-registry tools {@link bridgeTools} put on the long-lived
+   * server, by name: the handle is what lets a native data tool registered
+   * later take the name over ({@link yieldBridgedTool}).
+   */
+  private readonly bridgedTools = new Map<string, RegisteredTool>();
+  /** [#31836] The names {@link bridgeDataTools} registered on the long-lived server. */
+  private readonly nativeToolNames = new Set<string>();
 
   constructor(config: MCPServerRuntimeConfig = {}) {
     this.config = {
@@ -1593,15 +1611,47 @@ export class MCPServerRuntime {
       return toolRegistry.execute(call, toolExecutionContextOf(await resolvePrincipal()));
     };
 
+    let bridged = 0;
     for (const tool of tools) {
+      // [#31836] One name, one tool: a name the native data tools already hold
+      // is theirs (see {@link yieldBridgedTool} for the rule and the other order).
+      if (this.nativeToolNames.has(tool.name)) {
+        logNativeToolServed(logger, tool.name);
+        continue;
+      }
       // The long-lived (stdio) bridge: the registry's own `execute`, with the
       // stdio principal as its context once one is bound — the registration
       // body is the one [#26464] moved out of this class so the HTTP
       // authoring bridge could share it.
-      registerToolFromDefinition(this.mcpServer, tool, execute, logger);
+      this.bridgedTools.set(tool.name, registerToolFromDefinition(this.mcpServer, tool, execute, logger));
+      bridged++;
     }
 
-    logger?.info(`[MCP] Bridged ${tools.length} tools from ToolRegistry`);
+    logger?.info(`[MCP] Bridged ${bridged} tools from ToolRegistry`);
+  }
+
+  /**
+   * [#31836] Give a name the AI tool registry bridged over to the native data
+   * tool about to register under it.
+   *
+   * The rule, for any name both sources offer on the long-lived server: the
+   * NATIVE data tool is served and the bridged one is not. It is the tool HTTP
+   * serves under that name — {@link handleHttpRequest} builds its tool set
+   * from the data bridge and never bridges the AI registry — so one name is
+   * one tool on both doors, and it is the one that carries the MCP grant and
+   * scope checks. The rule holds whichever of {@link bridgeTools} and
+   * {@link bridgeDataTools} runs first: `bridgeTools` skips a name already
+   * native, and `bridgeDataTools` removes a bridged tool before its native
+   * namesake registers. Either way the skip is one `debug` line naming the
+   * tool and its source; never a boot failure and never a second
+   * registration under the name (the SDK refuses one by throwing).
+   */
+  private yieldBridgedTool(name: string): void {
+    const bridged = this.bridgedTools.get(name);
+    if (!bridged) return;
+    bridged.remove();
+    this.bridgedTools.delete(name);
+    logNativeToolServed(this.config.logger, name);
   }
 
   /**
@@ -1635,7 +1685,22 @@ export class MCPServerRuntime {
     bridge: McpDataBridge & Partial<McpActionBridge>,
     toolOptions?: RegisterObjectToolsOptions & RegisterActionToolsOptions,
   ): string[] {
-    const registered = wireBridgeTools(this.mcpServer, bridge, toolOptions);
+    // [#31836] Each native registration first takes its name back from a tool
+    // the AI registry bridged (see {@link yieldBridgedTool}). The server's own
+    // `registerTool` is put back as it was once the composition has run.
+    const server = this.mcpServer;
+    const registerTool = server.registerTool;
+    server.registerTool = ((name: string, ...rest: unknown[]) => {
+      this.yieldBridgedTool(name);
+      return (registerTool as (...args: unknown[]) => RegisteredTool).call(server, name, ...rest);
+    }) as typeof server.registerTool;
+    let registered: string[];
+    try {
+      registered = wireBridgeTools(server, bridge, toolOptions);
+    } finally {
+      server.registerTool = registerTool;
+    }
+    for (const name of registered) this.nativeToolNames.add(name);
     this.config.logger?.info(
       `[MCP] Bridged ${registered.length} data tools (${registered.join(', ')})`,
     );

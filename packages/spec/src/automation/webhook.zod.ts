@@ -28,11 +28,13 @@ import { strictObject } from '../shared/strict-object';
  * the other direction. A webhook that wants both subscribes to both.
  *
  * Deliberately NOT triggers (#3196):
- * - `undelete` — there is no soft-delete / restore capability in the engine
- *   (`delete` is a hard delete; no `deleted_at` convention, no restore
- *   operation, no `data.record.undeleted` emit), so it had no event source.
- *   Reintroduce it only alongside a real restore subsystem that emits an
- *   undelete event.
+ * - `undelete` — it was removed when the engine had no restore at all, so it
+ *   had no event source. The recycle bin (ADR-0148) has since added one: a
+ *   restore of a business object's entry publishes `data.record.restored` per
+ *   row (a platform object, `sys_` / `cloud_` / `ai_`, has no bin, so nothing
+ *   is restored there). No webhook trigger maps that event yet; a restore
+ *   trigger is a deliberate addition with its own delivery shape, not a
+ *   revival of this bare value.
  * - `api` (manual/programmatic fire) — no manual fire path exists (the only
  *   webhook HTTP surface re-queues already-failed deliveries). Reintroduce it
  *   with a real "fire this webhook now" endpoint/service, not as a bare enum

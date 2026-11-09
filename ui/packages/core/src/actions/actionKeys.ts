@@ -321,6 +321,11 @@ export const SPEC_ACTION_KEYS = [
   'overrides',
   'params',
   'patch',
+  // Added to `ActionSchema` by objectstack#31840: the param dialog's preflight
+  // read. Listed for the reason `overrides` is — so an action carrying it is not
+  // reported as having an unknown key. `ActionDef` does NOT declare it and the
+  // runner does not read it; the console half (objectstack#31808) wires it.
+  'preflight',
   // Added to `ActionSchema` by objectstack#27946: the pressed-state predicate a
   // header button draws as `aria-pressed` for the reader ("you voted Helpful").
   // `ActionDef` declares it (derived), and the record header and the declared

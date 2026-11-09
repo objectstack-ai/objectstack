@@ -2135,6 +2135,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             label: "Zuordnung: Namens-Claim",
             helpText: "Optional. Claim, der dem Anzeigenamen zugeordnet wird. Standard ist „name“.",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "Zuordnung: Gruppen-Claim",
+            helpText: "Optional. Claim, der die Gruppen des Benutzers enthält, z. B. „groups“. Jede Anmeldung vergibt die diesen Gruppen zugeordneten Berechtigungssätze. Leer lassen, um keine Gruppen zuzuordnen.",
+            placeholder: "groups"
           }
         }
       },
@@ -2165,6 +2170,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             label: "NameID-Format",
             helpText: "Optional. Angefordertes SAML-NameID-Format. Standard ist das im IdP konfigurierte Format.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "Zuordnung: Gruppenattribut",
+            helpText: "Optional. Assertion-Attribut, das die Gruppen des Benutzers enthält. Jede Anmeldung vergibt die diesen Gruppen zugeordneten Berechtigungssätze. Leer lassen, um keine Gruppen zuzuordnen.",
+            placeholder: "groups"
           }
         }
       },
@@ -2193,6 +2203,35 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "Anmeldeoptionen bearbeiten",
         successMessage: "Anmeldeoptionen gespeichert"
+      },
+      show_sso_groups_claim: {
+        label: "Gruppen-Claim anzeigen",
+        resultDialog: {
+          title: "Gruppen-Claim",
+          description: "Der OIDC-Claim oder das SAML-Attribut, aus dem dieser Anbieter bei jeder Anmeldung die Gruppen des Benutzers liest. Leer bedeutet, dass der Anbieter keine Gruppen zuordnet. Ändern Sie ihn mit „Gruppen-Claim bearbeiten“.",
+          acknowledge: "Fertig",
+          fields: {
+            groupsClaim: "Gruppen-Claim"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "Gruppen-Claim bearbeiten",
+        params: {
+          groupsClaim: {
+            label: "Gruppen-Claim",
+            helpText: "Der OIDC-Claim oder das SAML-Attribut, das die Gruppen des Benutzers enthält. Jede Anmeldung vergibt die diesen Gruppen zugeordneten Berechtigungssätze. Leer lassen, um ihn zu entfernen: Der Anbieter ordnet dann keine Gruppen zu.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "Gruppen-Claim gespeichert",
+          description: "Der Gruppen-Claim, den dieser Anbieter jetzt bei jeder Anmeldung liest. Leer bedeutet, dass keine Gruppen zugeordnet werden.",
+          acknowledge: "Fertig",
+          fields: {
+            groupsClaim: "Gruppen-Claim"
+          }
+        }
       }
     }
   },

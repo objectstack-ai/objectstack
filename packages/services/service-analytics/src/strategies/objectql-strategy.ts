@@ -44,6 +44,7 @@ import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '
 import { resolveAnalyticsDateRangeString } from '@objectstack/core';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 import { scopedMeasureFilter } from '../scoped-measure-key.js';
+import { declaredCubeMemberKey } from '../cube-member-key.js';
 import {
   rebucketCrossObject,
   RECOMBINABLE_METHODS,
@@ -266,9 +267,9 @@ function pushGroupKey(groupBy: AggregateGroupKey[], item: AggregateGroupKey): vo
 }
 
 /**
- * The member `member` resolves to in `cube`'s `kind` bag: its own key, a
- * `<cube>.`-qualified or other dotted spelling of a key, the key with its dots
- * flattened, or (for a dotted dimension) a synthetic relation traversal.
+ * The member `member` resolves to in `cube`'s `kind` bag: the declared key it
+ * names ({@link declaredCubeMemberKey}, the one rule the door's gates read too),
+ * or (for a dotted dimension that names none) a synthetic relation traversal.
  * Module-level because it reads only the cube; `ObjectQLStrategy.lookupMember`
  * is this function.
  */
@@ -278,18 +279,9 @@ function lookupCubeMember(
   kind: 'dimension' | 'measure',
 ): { sql: string; type?: string } | undefined {
   const bag = kind === 'dimension' ? cube.dimensions : cube.measures;
-  if (bag[member]) return bag[member];
-  if (member.includes('.')) {
-    const [first, ...rest] = member.split('.');
-    const tail = rest.join('.');
-    if (first === cube.name && bag[tail]) return bag[tail];
-    if (bag[tail]) return bag[tail];
-    const flat = member.replace(/\./g, '_');
-    if (bag[flat]) return bag[flat];
-    if (kind === 'dimension') return { sql: member, type: 'string' };
-  } else if (bag[member]) {
-    return bag[member];
-  }
+  const key = declaredCubeMemberKey(cube, bag, member);
+  if (key !== undefined) return bag[key];
+  if (kind === 'dimension' && member.includes('.')) return { sql: member, type: 'string' };
   return undefined;
 }
 
@@ -307,7 +299,9 @@ export function resolveCubeFieldName(cube: Cube, member: string, kind: 'dimensio
     const measure = lookupCubeMember(cube, member, 'measure');
     if (measure) return measure.sql.replace(/^\$/, '');
   }
-  return member.includes('.') ? member.split('.')[1] : member;
+  // [#31842] Undeclared: the member itself. A dotted one is a relationship
+  // path, never its second segment read as a base column.
+  return member;
 }
 
 /** The object an aggregate over `cube` runs on; `ObjectQLStrategy.extractObjectName` is this function. */

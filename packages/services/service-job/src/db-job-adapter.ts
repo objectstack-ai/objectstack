@@ -220,7 +220,9 @@ export class DbJobAdapter implements IJobService {
     this.engine = args.engine;
     this.logger = args.logger;
     this.recordRuns = args.options?.recordRuns ?? true;
-    this.inner = new IntervalJobAdapter({ maxExecutions: args.options?.maxExecutions });
+    // The logger reaches `inner` so its skipped-tick line (#31811) is heard on
+    // the no-cron fallback, where `inner` owns the timer.
+    this.inner = new IntervalJobAdapter({ maxExecutions: args.options?.maxExecutions, logger: args.logger });
     this.cron = args.cron;
   }
 
@@ -253,6 +255,15 @@ export class DbJobAdapter implements IJobService {
    * the normal case). A replica whose clock lags past the window finds the
    * lock already released and reruns the job, and `once` is the sharpest case
    * because there is no later tick to self-correct that away.
+   *
+   * **The lock's window is also bounded by its lease** (`leaseMs`). The fire
+   * renews it while the handler runs (#31843), but a renewal that fails lets it
+   * lapse mid-run, so the lease is not what stops a job from overlapping ITSELF
+   * on one node (#31811). That is the timer adapters' own in-process
+   * latch: on whichever adapter owns the timer, a scheduled tick of a job whose
+   * previous scheduled run is still in flight on this node is skipped with one
+   * `warn`, and manual `trigger()` / `replay()` are not gated by it. No
+   * `sys_job_run` row is written for a skipped tick — no run status fits one.
    *
    * **`once` is AT-MOST-ONCE per cluster, and deliberately so** (maintainer
    * ruling 2026-09-01). Election decides *who* fires, never *that* the fire

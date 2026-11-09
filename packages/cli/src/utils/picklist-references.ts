@@ -58,6 +58,15 @@
  * registry's `picklistReferenceVerdict` makes, so the refusal here is the
  * sentence the boot warns with and the install judge refuses with.
  *
+ * Note (2026-11-09): this sibling allowance narrows to declared dependencies.
+ * ADR-0150 D3 resolves a bare reference from the referring package, then the
+ * unique holder in its declared dependency closure (ADR-0141, plus `sys`),
+ * else refuses it naming every candidate; a sibling of the same artifact is in
+ * that closure only when the referring package declares it (maintainer ruling
+ * N1, record 6729820123; ADR-0130's dated note under D1). The code below still
+ * resolves against every body's picklists until the CLI reader is wired to
+ * that rule.
+ *
  * ## A composed stack's top-level picklist that nothing names: refused
  *
  * The boot keeps a composed stack's residual picklist (a top-level one no
