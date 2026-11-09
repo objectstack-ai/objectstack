@@ -81,10 +81,10 @@ import { generatePlaceholderEmail } from './placeholder-email.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { AGENT_PRINCIPAL_KIND, isAgentAccountRow } from './service-account-identity.js';
 
-const USER_OBJECT = SystemObjectName.USER;
-const MEMBER_OBJECT = 'sys_member';
-const API_KEY_OBJECT = 'sys_api_key';
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+export const USER_OBJECT = SystemObjectName.USER;
+export const MEMBER_OBJECT = 'sys_member';
+export const API_KEY_OBJECT = 'sys_api_key';
+export const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /** The longest name a `sys_user` row holds (`sys_user.name` `maxLength`). */
 const NAME_MAX_LENGTH = 255;
@@ -117,13 +117,13 @@ export interface ServiceAccountDoorDeps {
   now?(): number;
 }
 
-const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined);
+export const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined);
 
-function fail(status: number, code: string, message: string): EndpointResult {
+export function fail(status: number, code: string, message: string): EndpointResult {
   return { status, body: { success: false, error: { code, message } } };
 }
 
-async function parseJson(
+export async function parseJson(
   request: Request,
 ): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }> {
   const reading = await readJsonRequestBody(request);
@@ -141,7 +141,7 @@ function rowsOf(found: unknown): Record<string, unknown>[] {
  * A read these doors decide authority on. One that throws is an outage, never
  * a caller without standing: `503`, through the shared outage error.
  */
-async function readRows(
+export async function readRows(
   engine: ServiceAccountDataEngine,
   object: string,
   where: Record<string, unknown>,
@@ -155,7 +155,7 @@ async function readRows(
 }
 
 /** The user's memberships that hold now, in `organizationId` or in every organization. */
-async function activeMemberships(
+export async function activeMemberships(
   engine: ServiceAccountDataEngine,
   userId: string,
   nowMs: number,
@@ -170,7 +170,7 @@ async function activeMemberships(
 }
 
 /** Is `userId` an administrator of `organizationId` now (grade admin or owner)? */
-async function isOrganizationAdministrator(
+export async function isOrganizationAdministrator(
   engine: ServiceAccountDataEngine,
   userId: string,
   organizationId: string,
@@ -181,7 +181,7 @@ async function isOrganizationAdministrator(
 }
 
 /** A refusal a write hook threw as `VALIDATION_FAILED`, passed through with its fields; else `undefined`. */
-function validationRefusal(error: unknown): EndpointResult | undefined {
+export function validationRefusal(error: unknown): EndpointResult | undefined {
   const details = validationFailureDetails(error);
   if (!details) return undefined;
   return {

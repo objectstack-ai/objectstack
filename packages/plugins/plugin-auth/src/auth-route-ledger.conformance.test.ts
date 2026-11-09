@@ -304,14 +304,20 @@ describe('auth route ledger hygiene', () => {
       'POST /api/v1/auth/admin/unlock-user',
       'POST /api/v1/auth/authorized-clients/withdraw',
       'POST /api/v1/auth/organization/add-member',
-      // [ADR-0151 D1/D4] The AI service account's registration and key mint,
-      // on this pin's own terms: `auth-plugin.ts` mounts both itself (a
-      // `rawApp.post` on the `${basePath}/service-account/create-key` and
-      // `${basePath}/service-account/register` templates, ahead of the
-      // catch-all), and the `live.has(route)` loop below holds them to the same
-      // proof — better-auth serves no service-account endpoint.
+      // [ADR-0151 D1/D4/D6] The AI service account's registration, key mint
+      // and lifecycle, on this pin's own terms: `auth-plugin.ts` mounts all
+      // eight itself (a `rawApp.post` on each `${basePath}/service-account/…`
+      // template, ahead of the catch-all), and the `live.has(route)` loop
+      // below holds them to the same proof — better-auth serves no
+      // service-account endpoint.
       'POST /api/v1/auth/service-account/create-key',
       'POST /api/v1/auth/service-account/register',
+      'POST /api/v1/auth/service-account/restore-key',
+      'POST /api/v1/auth/service-account/resume',
+      'POST /api/v1/auth/service-account/retire',
+      'POST /api/v1/auth/service-account/revoke-key',
+      'POST /api/v1/auth/service-account/set-owner',
+      'POST /api/v1/auth/service-account/suspend',
       'POST /api/v1/auth/set-initial-password',
       'POST /api/v1/auth/sys-oauth-application/register',
       // The fourteenth, on this pin's own terms: `auth-plugin.ts` mounts it
