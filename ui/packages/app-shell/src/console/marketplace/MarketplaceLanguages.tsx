@@ -25,7 +25,7 @@
 
 import { Languages } from 'lucide-react';
 import { Badge } from '@object-ui/components';
-import { resolveBuiltInLanguage, useObjectTranslation } from '@object-ui/i18n';
+import { resolveBuiltInLanguage, useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import { localeLabel } from '../../layout/LocaleSwitcher.js';
 import type { MarketplacePackageVersion } from './marketplaceApi.js';
 
@@ -88,17 +88,12 @@ export function readShippedLanguages(
 }
 
 /**
- * Format a served percent (0–100, one decimal) in the UI language — `60%`,
- * `60 %` in German — so no pack carries a format string of its own.
+ * Format a served percent (0–100, one decimal) in the display locale — `60%`,
+ * `60 %` in German — so no pack carries a format string of its own. The
+ * locale is `useDisplayLocale()`, as the page's dates are, never a tag of its own.
  */
 export function usePercentFormatter(): (percent: number) => string {
-  const { language } = useObjectTranslation();
-  let format: Intl.NumberFormat;
-  try {
-    format = new Intl.NumberFormat(language, { style: 'percent', maximumFractionDigits: 1 });
-  } catch {
-    format = new Intl.NumberFormat('en', { style: 'percent', maximumFractionDigits: 1 });
-  }
+  const format = new Intl.NumberFormat(useDisplayLocale(), { style: 'percent', maximumFractionDigits: 1 });
   return (percent) => format.format(percent / 100);
 }
 

@@ -15,6 +15,6 @@ The control plane now measures, when a version is published, which languages it 
 - **A version published before the measurement** reads "No language information", never "English only".
 - **A catalog that does not serve the keys yet** draws nothing new: the card and page look as they did.
 
-A language is named the way the header's language menu names it: a served code is read through the platform locale table first, so `zh-CN` reads 简体中文, and a code outside the table is named by the browser in its own language (`th` reads ไทย). Percents are formatted in the UI language.
+A language is named the way the header's language menu names it: a served code is read through the platform locale table first, so `zh-CN` reads 简体中文, and a code outside the table is named by the browser in its own language (`th` reads ไทย). Percents are formatted in the display locale, as the page's dates are.
 
 `@object-ui/i18n` adds four keys to every marketplace catalogue: `marketplace.facet.languages`, `marketplace.languages.none`, `marketplace.languages.more` and `marketplace.languages.default`.
