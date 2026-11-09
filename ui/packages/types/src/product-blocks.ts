@@ -9,10 +9,11 @@
 /**
  * @object-ui/types - Product-page blocks
  *
- * The TypeScript twin of `zod/product-blocks.zod.ts` (objectui#12197): the five
+ * The TypeScript twin of `zod/product-blocks.zod.ts` (objectui#12197): the
  * product-neutral blocks `@object-ui/app-shell` registers for pages a product
- * composes as metadata — `hero`, `stat`, `usage-bar`, `checklist` and
- * `tile-grid` (ADR-0060 rule 2: a generic block, named for what it draws).
+ * composes as metadata — `hero`, `stat`, `usage-bar`, `checklist`,
+ * `tile-grid` and `row-table` (ADR-0060 rule 2: a generic block, named for
+ * what it draws).
  *
  * `@objectstack/spec` has no `ComponentPropsMap` row for these blocks, so
  * nothing is read by reference: every member below is a key the block's
@@ -146,6 +147,36 @@ export interface TileGridBlockProps {
 export interface TileGridBlockSchema extends BaseSchema {
   type: 'tile-grid';
   properties: TileGridBlockProps;
+  dataSource?: ElementApiDataSource;
+  body?: never;
+  children?: never;
+}
+
+/**
+ * One `row-table` column — `resultDialog.fields`' `path` / `label` / `format`
+ * vocabulary, with `datetime` and `enum` this block's own formats.
+ */
+export interface RowTableColumn {
+  /** Dotted path into one row, e.g. `owner.name`. */
+  path: string;
+  label: I18nLabel;
+  /** `text` as written (the default), `datetime` as an instant, `enum` through `enum`. */
+  format?: 'text' | 'datetime' | 'enum';
+  /** For `format: 'enum'`: the label drawn for each value. */
+  enum?: Record<string, I18nLabel>;
+}
+
+/** `row-table`'s props bag. */
+export interface RowTableBlockProps {
+  rows: Array<Record<string, unknown>> | ProductBlockExpressionHole;
+  columns: RowTableColumn[];
+  emptyLabel?: I18nLabel;
+}
+
+/** `row-table` — the rows a bound list holds, as a table. */
+export interface RowTableBlockSchema extends BaseSchema {
+  type: 'row-table';
+  properties: RowTableBlockProps;
   dataSource?: ElementApiDataSource;
   body?: never;
   children?: never;
