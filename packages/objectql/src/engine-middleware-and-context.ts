@@ -40,7 +40,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
-import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName } from './tenancy/system-write-organization.js';
+import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName, type SystemWriteOrganizationDecision } from './tenancy/system-write-organization.js';
 import { isFederatedObject } from './federated-object.js';
 import type { EngineMiddleware, OperationContext } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
@@ -359,16 +359,7 @@ export class MiddlewareAndContextFacet {
     if (rows.every((row) => carriesOrganization(row?.[tenantField]))) return undefined;
 
     const posture = this.resolveEnginePosture();
-    // [ADR-0131 D9] Zero organizations is refused under `single` only where
-    // the composition registers the organization object; the composition that
-    // registers none keeps today's branch (`no-organization-object`). The
-    // probe itself is unchanged and answers `[]` for both — this is the one
-    // fact that tells them apart, read from the same registry the probe reads.
-    const decision = await resolveSystemWriteOrganization({
-      posture,
-      probeOrganizations: () => this.probeInstallOrganizations(),
-      organizationObjectRegistered: !!this._registry.getObject(ORGANIZATION_OBJECT),
-    });
+    const decision = await MiddlewareAndContextFacet.systemWriteOrganization.call(this, posture);
     if (decision.kind === 'derived') return decision.organizationId;
     if (decision.kind === 'no-organization-object') return undefined;
     throw new SystemWriteOrganizationRequiredError(
@@ -377,6 +368,25 @@ export class MiddlewareAndContextFacet {
       decision.reason,
       decision.organizationCount,
     );
+  }
+
+  /**
+   * The body of `ObjectQL#systemWriteOrganization`; the method's docblock there
+   * is its contract. Also the decision half of
+   * {@link resolveSystemInsertOrganization}, which hands in the posture it has
+   * already read, so the insert and the public answer are one assembly.
+   */
+  static async systemWriteOrganization(this: Pick<MiddlewareAndContextHost, '_registry' | 'probeInstallOrganizations' | 'resolveEnginePosture'>, posture = this.resolveEnginePosture()): Promise<SystemWriteOrganizationDecision> {
+    // [ADR-0131 D9] Zero organizations is refused under `single` only where
+    // the composition registers the organization object; the composition that
+    // registers none keeps today's branch (`no-organization-object`). The
+    // probe itself is unchanged and answers `[]` for both — this is the one
+    // fact that tells them apart, read from the same registry the probe reads.
+    return resolveSystemWriteOrganization({
+      posture,
+      probeOrganizations: () => this.probeInstallOrganizations(),
+      organizationObjectRegistered: !!this._registry.getObject(ORGANIZATION_OBJECT),
+    });
   }
 
   /**
