@@ -109,7 +109,7 @@ import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 import { transpileChecked } from './ts-parse.mjs';
@@ -230,9 +230,12 @@ export function createSourceLoader(root = ROOT) {
     // so an unparseable module would be evaluated as whatever survived and the
     // census would score the tree against wreckage with a clean exit. That is
     // this artefact's own failure class one layer down (`check-parse-guard`).
+    // `import.meta` has no CommonJS spelling, so a module that reads its own
+    // URL (`createRequire(import.meta.url)`) would not evaluate here at all;
+    // it is handed the module's own file URL, which is what ESM would give it.
     const js = transpileChecked(file, source, {
       compilerOptions: { module: 'commonjs', target: 'es2022' },
-    }).outputText;
+    }).outputText.replace(/\bimport\.meta\.url\b/g, '__importMetaUrl');
     const mod = { exports: {} };
     // Seeded BEFORE evaluation so an import cycle sees the partial module the
     // way CommonJS does, instead of recursing until the stack ends.
@@ -258,8 +261,8 @@ export function createSourceLoader(root = ROOT) {
     };
     // eslint-disable-next-line no-new-func -- the whole point: evaluate the
     // tree's own transpiled source rather than re-spelling what it decides.
-    new Function('require', 'module', 'exports', '__filename', '__dirname', js)(
-      req, mod, mod.exports, file, dirname(file),
+    new Function('require', 'module', 'exports', '__filename', '__dirname', '__importMetaUrl', js)(
+      req, mod, mod.exports, file, dirname(file), pathToFileURL(file).href,
     );
     return mod.exports;
   };

@@ -2135,6 +2135,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             label: "التعيين: مطالبة الاسم",
             helpText: "اختياري. المطالبة المعيَّنة إلى اسم العرض. القيمة الافتراضية \"name\".",
             placeholder: "name"
+          },
+          mapGroups: {
+            label: "التعيين: مطالبة المجموعات",
+            helpText: "اختياري. المطالبة التي تحمل مجموعات المستخدم، مثل \"groups\". يمنح كل تسجيل دخول مجموعات الأذونات المعيَّنة لتلك المجموعات. اتركه فارغًا لعدم تعيين أي مجموعات.",
+            placeholder: "groups"
           }
         }
       },
@@ -2165,6 +2170,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             label: "تنسيق NameID",
             helpText: "اختياري. تنسيق NameID المطلوب في SAML. القيمة الافتراضية هي التنسيق المُهيَّأ لدى مزوّد الهوية.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+          },
+          mapGroups: {
+            label: "التعيين: سمة المجموعات",
+            helpText: "اختياري. سمة التأكيد التي تحمل مجموعات المستخدم. يمنح كل تسجيل دخول مجموعات الأذونات المعيَّنة لتلك المجموعات. اتركه فارغًا لعدم تعيين أي مجموعات.",
+            placeholder: "groups"
           }
         }
       },
@@ -2193,6 +2203,35 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       edit_sso_sign_in_options: {
         label: "تعديل خيارات تسجيل الدخول",
         successMessage: "تم حفظ خيارات تسجيل الدخول"
+      },
+      show_sso_groups_claim: {
+        label: "عرض مطالبة المجموعات",
+        resultDialog: {
+          title: "مطالبة المجموعات",
+          description: "مطالبة OIDC أو سمة SAML التي يقرأ منها هذا الموفّر مجموعات المستخدم عند كل تسجيل دخول. القيمة الفارغة تعني أن الموفّر لا يعيّن أي مجموعات. غيّرها عبر \"تعديل مطالبة المجموعات\".",
+          acknowledge: "تم",
+          fields: {
+            groupsClaim: "مطالبة المجموعات"
+          }
+        }
+      },
+      edit_sso_groups_claim: {
+        label: "تعديل مطالبة المجموعات",
+        params: {
+          groupsClaim: {
+            label: "مطالبة المجموعات",
+            helpText: "مطالبة OIDC أو سمة SAML التي تحمل مجموعات المستخدم. يمنح كل تسجيل دخول مجموعات الأذونات المعيَّنة لتلك المجموعات. اتركه فارغًا لإزالتها: عندها لا يعيّن الموفّر أي مجموعات.",
+            placeholder: "groups"
+          }
+        },
+        resultDialog: {
+          title: "تم حفظ مطالبة المجموعات",
+          description: "مطالبة المجموعات التي يقرأها هذا الموفّر الآن عند كل تسجيل دخول. القيمة الفارغة تعني عدم تعيين أي مجموعات.",
+          acknowledge: "تم",
+          fields: {
+            groupsClaim: "مطالبة المجموعات"
+          }
+        }
       }
     }
   },
