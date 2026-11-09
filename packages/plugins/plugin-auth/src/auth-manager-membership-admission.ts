@@ -58,10 +58,12 @@ import { AuthManager } from './auth-manager.js';
 import {
   classifyCreationMethod,
   decideAudienceAdmission,
+  invitationProofFor,
   AUDIENCE_CONFIG_ERROR,
   type AudienceCreationClass,
 } from './audience-posture.js';
 import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
+import { presentedInvitationId } from './presented-invitation.js';
 import { withSystemReadContext } from './objectql-adapter.js';
 import { reconcileMembership, type ReconcileOutcome } from './reconcile-membership.js';
 import { isSsoProviderSource, readSsoProviderSignInOptions, ssoProviderIdOfSource } from './sso-sign-in-options.js';
@@ -82,6 +84,7 @@ export interface MembershipAdmissionHost {
   getAudience: AuthManager['getAudience'];
   getMembershipPolicy: AuthManager['getMembershipPolicy'];
   hasPendingInvitationFor: AuthManager['hasPendingInvitationFor'];
+  hasPresentedPendingInvitation: AuthManager['hasPresentedPendingInvitation'];
   isBootstrapCreation: AuthManager['isBootstrapCreation'];
   isOperatorProvisioning: AuthManager['isOperatorProvisioning'];
   selfRegistrationSetResolvable: AuthManager['selfRegistrationSetResolvable'];
@@ -117,7 +120,7 @@ export async function settleMembership(this: Pick<MembershipAdmissionHost, 'conf
 
 /** The body of `AuthManager#validateAudienceAdmission`; the method's docblock there is its contract. */
 export async function validateAudienceAdmission(
-  this: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'>,
+  this: Pick<MembershipAdmissionHost, 'audienceLogError' | 'config' | 'enterpriseOAuthProviderIds' | 'getAudience' | 'hasPendingInvitationFor' | 'hasPresentedPendingInvitation' | 'isBootstrapCreation' | 'isOperatorProvisioning' | 'selfRegistrationSetResolvable' | 'stageOwnerVerifiedStamp' | 'stageSelfRegistrationGrant'>,
   data: {
     user?: Record<string, unknown>;
     source?: { action?: string; method?: string; oauth?: { providerId?: string }; sso?: { providerId?: string } };
@@ -168,7 +171,22 @@ export async function validateAudienceAdmission(
     if (creationClass === 'self-serve' || (ssoProvider !== undefined && !ssoProvider.allowJit)) {
       // Only the gated creations pay for the probes.
       isBootstrap = await this.isBootstrapCreation();
-      if (!isBootstrap && email) hasPendingInvitation = await this.hasPendingInvitationFor(email);
+      if (!isBootstrap && email) {
+        // Under `invite_only` a self-serve sign-up is admitted only by the
+        // invitation it presents (`invitationProofFor`): its id, read off the
+        // same parsed body the operator ticket above is read from.
+        const proof = invitationProofFor({
+          audience,
+          creationClass,
+          method: data?.source?.method,
+          emailVerified: data?.user?.emailVerified,
+        });
+        if (proof === 'presented') {
+          hasPendingInvitation = await this.hasPresentedPendingInvitation(presentedInvitationId(ctx), email);
+        } else if (proof === 'address') {
+          hasPendingInvitation = await this.hasPendingInvitationFor(email);
+        }
+      }
     }
     const verdict = decideAudienceAdmission({
       audience,

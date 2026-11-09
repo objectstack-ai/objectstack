@@ -566,7 +566,7 @@ os start
 | `-d, --database <url>` | `OS_DATABASE_URL` | `file:…` / `:memory:` / `libsql://` / `postgres://` / `mongodb://` |
 | `--database-driver <kind>` | `OS_DATABASE_DRIVER` | Force `sqlite` \| `sqlite-wasm` \| `turso` \| `postgres` \| `mysql` \| `mongodb` when the URL is ambiguous |
 | `--database-auth-token <token>` | `OS_DATABASE_AUTH_TOKEN` | Auth token for libsql/Turso |
-| `--auth-secret <secret>` | `OS_AUTH_SECRET` / `AUTH_SECRET` | Secret for `@objectstack/plugin-auth`. If neither the flag nor the env var is set, `os start` **auto-generates one** and persists it at `<home>/auth-secret` |
+| `--auth-secret <secret>` | `OS_AUTH_SECRET` / `AUTH_SECRET` | Secret for `@objectstack/plugin-auth`. If neither the flag nor the env var is set, `os start` **auto-generates one** and persists it at `<home>/auth-secret` — except on a deployment that declares several replicas (`OS_EXPECT_MULTI_NODE=true` / `OS_CLUSTER_REPLICAS` > 1) over the redis cluster driver, where it refuses to start and names the variable |
 | `--home <dir>` | `OS_HOME` | Home directory for persistent state (default `<cwd>/.objectstack` when an `objectstack.config.ts` is present, otherwise `~/.objectstack`) |
 | `--environment-id <id>` | `OS_ENVIRONMENT_ID` | Environment identifier (default `env_local`) |
 | `-p, --port <port>` | `OS_PORT` / `PORT` | Listen port (default `3000`). **Production fails loudly if the port is busy** — see note below. |
@@ -618,7 +618,12 @@ as the project's **default** datasource it is refused at boot the same way.
 `AUTH_SECRET` env > a secret **auto-generated and persisted** at `<home>/auth-secret`
 on first run — so `/api/v1/auth/*` (login/register) and the Console's login flow work
 out of the box, without any manual secret provisioning. Set the env var (or flag)
-explicitly when you deploy across multiple nodes or want to rotate the secret.
+explicitly when you deploy across multiple nodes or want to rotate the secret: the same
+value on every replica. A start that declares several replicas
+(`OS_EXPECT_MULTI_NODE=true` / `OS_CLUSTER_REPLICAS` > 1) over the redis cluster driver
+does not generate one: without the variable it exits 1 on one line naming
+`OS_AUTH_SECRET` and how to generate it (`openssl rand -hex 32`), because each replica
+would otherwise mint its own and a session signed on one would be refused on the others.
 
 <Callout type="info">
 **`os start` vs `os serve`:** `os serve` boots from `objectstack.config.ts` (TypeScript source).

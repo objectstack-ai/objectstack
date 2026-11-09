@@ -65,6 +65,11 @@ export default defineConfig({
     // which drives the real driver's introspection; aliased so the draft is
     // judged against the introspection in the driver's source.
     alias: [
+      // The memory driver the default driver factory loads lazily: from source,
+      // so a test's verdict is about the checkout, and so a test that reaches
+      // that lazy load needs no module binding of a frozen driver (#6664's
+      // census) to satisfy `check:test-source-alias`'s source reach.
+      { find: /^@objectstack\/driver-memory$/, replacement: path.resolve(__dirname, '../../drivers/driver-memory/src/index.ts') },
       { find: /^@objectstack\/driver-odata$/, replacement: path.resolve(__dirname, '../../drivers/driver-odata/src/index.ts') },
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },

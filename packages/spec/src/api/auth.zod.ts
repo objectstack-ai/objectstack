@@ -110,6 +110,13 @@ export const RegisterRequestSchema = lazySchema(() => z.object({
   password: z.string(),
   name: z.string(),
   image: z.string().optional(),
+  invitationId: z.string().optional().describe(
+    'The id of the invitation this sign-up presents: the last path segment of its ' +
+    '/accept-invitation/ link. Under the invite_only audience posture a sign-up is admitted ' +
+    'only by the invitation it presents, pending, unexpired and addressed to this email; an ' +
+    'address alone is refused SELF_REGISTRATION_CLOSED. The first account of a new deployment ' +
+    'needs none, and the other postures do not read it.',
+  ),
 }));
 
 export const RefreshTokenRequestSchema = lazySchema(() => z.object({

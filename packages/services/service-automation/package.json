@@ -30,6 +30,7 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/plugin-auth": "workspace:*",
     "@objectstack/spec": "workspace:*",
@@ -38,7 +39,6 @@
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/metadata-core": "workspace:*",
-    "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-audit": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/plugin-sharing": "workspace:*",

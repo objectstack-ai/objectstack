@@ -47,6 +47,9 @@ import {
   // installed?" asks it, over this registry's installed manifests.
   pairsOf,
   installedManifestsOf,
+  // [ADR-0150 D3, #28802] The one closure walk: a dependent's bundle addition
+  // under a dependency's name is no holder of that name for a bare read.
+  packageDependencyClosure,
 } from '@objectstack/metadata-core';
 // [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -96,6 +99,18 @@ import {
   type BareNameHolder,
   type BareNameOneHolderType,
 } from './bare-name-one-holder.js';
+// [ADR-0150 D2, child N] Inside one namespace, a `(type, name)` of the twelve
+// uncovered bucket 2/3 types has one package holder — the one predicate the
+// package door and `os validate` both ask (module doc).
+import {
+  isNamespaceJudged,
+  namespaceNameConflictMessage,
+  namespaceNameConflicts,
+  namespacePackageOf,
+  type NamespaceNameConflict,
+  type NamespacePackage,
+  type NamespaceUniqueType,
+} from './namespace-co-owner-names.js';
 // One default record page per object per deployment — the holders and the one
 // place a manifest's default record pages are read from (module doc).
 import {
@@ -3236,6 +3251,57 @@ export class ArtifactObjectNameConflictError extends Error {
     this.existingPackageId = existingPackageId;
     this.incomingPackageId = incomingPackageId;
     this.coOwnership = coOwnership;
+  }
+}
+
+/**
+ * [ADR-0150 D2, child N] Raised when a package declares an item of one of the
+ * twelve uncovered bucket 2/3 types — sharing rule, queue, assignment rule,
+ * hook, job, app, page, dashboard, report, book, analytics cube, tool — under a
+ * name another package of its namespace already holds, at the package door
+ * (`namespace-co-owner-names.ts` states the rule, the holders and what it does
+ * not judge). `os validate` prints the same sentence for the same predicate.
+ *
+ * {@link ArtifactObjectNameConflictError}'s sibling in placement — it sits
+ * right after the ADR-0130 D3 object check, ahead of every mutation — and
+ * {@link BareNameConflictError}'s in its envelope and code: `code:
+ * 'NAMESPACE_CONFLICT'`, `status: 422`, because the condition is the one the
+ * namespace gate registers that code for, "a name in a namespace is already
+ * taken", and so is the remedy: rename, or leave one package out. No code is
+ * minted.
+ *
+ * Every conflict the install carries is listed — `conflicts` — and each names
+ * EVERY package of the namespace that already holds the name (red line 2:
+ * ambiguity is reported, never guessed). The top-level fields repeat the first.
+ */
+export class NamespaceNameConflictError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** Every `(type, name)` this install would have held twice inside its namespace, in declaration order. */
+  readonly conflicts: readonly NamespaceNameConflict[];
+  /** The namespace. */
+  readonly namespace: string;
+  /** The first conflict's type. */
+  readonly itemType: NamespaceUniqueType;
+  /** The first conflict's name. */
+  readonly itemName: string;
+  /** The package whose install this refusal stopped. */
+  readonly incomingPackageId: string;
+  /** The first conflict's existing holders, every one of them. */
+  readonly existingPackageIds: readonly string[];
+
+  constructor(conflicts: readonly NamespaceNameConflict[]) {
+    const [first] = conflicts;
+    super(namespaceNameConflictMessage(conflicts));
+    this.name = 'NamespaceNameConflictError';
+    this.conflicts = conflicts;
+    this.namespace = first.namespace;
+    this.itemType = first.type;
+    this.itemName = first.name;
+    this.incomingPackageId = first.incomingPackageId;
+    this.existingPackageIds = first.existingPackageIds;
   }
 }
 
@@ -7672,7 +7738,7 @@ export class SchemaRegistry {
 
     // One name, one package holder for the bare-name registry types (a
     // picklist, a mapping, a dataset, an API, an object-less action, a flow, a
-    // webhook, a connector, an email template, an agent, a skill) — the item seam
+    // webhook, a connector, an email template, an agent, a skill, a tool) — the item seam
     // (`bare-name-one-holder.ts`; ADR-0048 §3.4 narrowed). Once the cold boot
     // has sealed the holders, a package registering one under a name another
     // package holds — and that it does not hold itself — is refused BEFORE
@@ -8305,8 +8371,23 @@ export class SchemaRegistry {
    * Every package, overridable baselines included: the resolver ranks them
    * (`package-scoped-resolver.ts`). An object is not addressed by package
    * (ADR-0150 D1 bucket 1) and answers `[]`.
+   *
+   * [#28802, epic #31527 child R2] A bundle ADDITION holds no name: a
+   * package whose members of a bundled type's name are all members another
+   * holder in its declared dependency closure does not hold (a dependent's
+   * locale its base does not ship, which the write gate admits and which
+   * stays under the dependent) adds to that holder's bundle, so it is no
+   * second holder of the name for a bare read. The addition is still the
+   * dependent's member: {@link getPackageScopedItem} naming the dependent
+   * reads it. A package holding a member its dependency also holds is a
+   * holder (a clash, refused by the resolver, never folded away).
+   *
+   * @param callerPackageId - The package a bare read is made from. Its own
+   *   holding stays in the set even when it is an addition, so its step 1
+   *   (its own item, ADR-0150 D3) answers as before: the addition only stops
+   *   counting toward OTHER callers' ambiguity (epic seat review 6729484996).
    */
-  packageScopedHoldersOf(type: string, name: string): string[] {
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[] {
     const collection = this.metadata.get(type);
     if (!collection) return [];
     const composite = this.compositeHoldersOf(collection, name);
@@ -8316,7 +8397,42 @@ export class SchemaRegistry {
       const bound = this.overlaySlotBinding(item, name, collection, compositeSet);
       if (typeof bound === 'string') holders.add(bound);
     }
-    return [...holders];
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (!disc || holders.size < 2) return [...holders];
+    const membersOf = new Map<string, Set<string>>();
+    for (const id of holders) membersOf.set(id, this.bundleMembersHeldBy(type, collection, name, id, compositeSet, disc));
+    return [...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf));
+  }
+
+  /**
+   * [#28802] The members (discriminator values) of `name`'s bundle that
+   * `packageId` holds: its composite group's, and the bare-slot entries that
+   * bind to it ({@link overlaySlotBinding}).
+   */
+  private bundleMembersHeldBy(type: string, collection: Map<string, any>, name: string, packageId: string,
+    holders: ReadonlySet<string>, disc: { field: string; canonical: string }): Set<string> {
+    const { local } = collectBundle(collection, name, disc, packageId);
+    const bound = this.bareSlotEntriesOf(type, collection, name)
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+    return new Set([...local, ...bound].map((e) => discriminatorValue(e.item, disc.field) || disc.canonical));
+  }
+
+  /**
+   * [#28802] Whether `packageId`'s holding of a bundle's name is an addition
+   * to another holder's bundle: some other holder is in `packageId`'s declared
+   * dependency closure (the save door's walk), `packageId` is not in that
+   * holder's, and none of `packageId`'s members is one that holder holds.
+   */
+  private isBundleAddition(packageId: string, membersOf: ReadonlyMap<string, ReadonlySet<string>>): boolean {
+    const own = membersOf.get(packageId)!;
+    const reach = new Set(packageDependencyClosure(packageId, this)?.dependencies ?? []);
+    for (const [base, baseMembers] of membersOf) {
+      if (base === packageId || !reach.has(base)) continue;
+      if (packageDependencyClosure(base, this)?.dependencies.includes(packageId)) continue;
+      if ([...own].some((m) => baseMembers.has(m))) continue;
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -8861,6 +8977,14 @@ export class SchemaRegistry {
     // behind — the same disposition the namespace gate above has.
     this.refuseCoOwnedObjectNameCollision(manifest, selfId, coOwners);
 
+    // [ADR-0150 D2, child N] The object rule above, extended to the twelve
+    // bucket 2/3 types phase 1 does not cover: inside one namespace, a
+    // `(type, name)` has one package holder, so that NAMESPACE/NAME names one
+    // item (`namespace-co-owner-names.ts`). Ahead of every mutation, like the
+    // check above; at every install, boot included, like it; with no
+    // `collisionPolicy` downgrade, like the bare-name rule below.
+    this.refuseNamespaceNameConflicts(manifest);
+
     // The security catalog's one-name-one-holder rule (ADR-0048 §3.4 narrowed
     // for positions, permission sets and capabilities; maintainer ruling Q4 = A
     // on #15196) — also ahead of every mutation, for the same reason. No
@@ -9095,6 +9219,34 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0150 D2, child N] Refuse an install whose package declares an item of
+   * a covered type under a name another installed package of its namespace
+   * already holds (`namespace-co-owner-names.ts`).
+   *
+   * The sitting holders are the installed package records — their manifests,
+   * as {@link installPackage} recorded them — of the incoming package's
+   * namespace: the record is the one place every door's install lands, so an
+   * uninstall takes its names with it and nothing else is kept. The same
+   * package's own record is never a second holder (a reload, a re-install or
+   * an upgrade).
+   *
+   * @throws {NamespaceNameConflictError} ADR-0112 envelope, naming every holder.
+   */
+  private refuseNamespaceNameConflicts(manifest: ObjectStackManifest): void {
+    const incoming = namespacePackageOf(manifest);
+    if (incoming === undefined || !isNamespaceJudged(incoming.namespace) || incoming.names.length === 0) return;
+    const sitting: NamespacePackage[] = [];
+    for (const record of this.metadata.get('package')?.values() ?? []) {
+      const recorded = (record as InstalledPackage | undefined)?.manifest;
+      if (recorded?.namespace !== incoming.namespace) continue;
+      const holder = namespacePackageOf(recorded);
+      if (holder !== undefined) sitting.push(holder);
+    }
+    const conflicts = namespaceNameConflicts(incoming, sitting);
+    if (conflicts.length > 0) throw new NamespaceNameConflictError(conflicts);
+  }
+
+  /**
    * Withdraw an installed package: its objects, namespace, items, catalog
    * claims and record (each step's reason is on it below).
    *
@@ -9179,6 +9331,34 @@ export class SchemaRegistry {
 
   getPackage(id: string): InstalledPackage | undefined {
     return this.metadata.get('package')?.get(id) as InstalledPackage | undefined;
+  }
+
+  /**
+   * [ADR-0130 D4, epic #31527 R2] The dependencies each residual owner
+   * declared — the id a multi-package stack's top-level items are owned by,
+   * which has no package record. Kept beside the package records, never as
+   * one: `getPackage` / `getAllPackages` do not see it.
+   */
+  private readonly residualOwnerDependencies = new Map<string, readonly string[]>();
+
+  /**
+   * Record the dependencies residual owner `ownerId` declares on its stack's
+   * manifest, as the artifact door registers its residual. The latest record
+   * wins (a reinstall of the stack restates them).
+   */
+  recordResidualOwnerDependencies(ownerId: string, dependencies: readonly string[]): void {
+    this.residualOwnerDependencies.set(ownerId, Object.freeze([...dependencies]));
+  }
+
+  /**
+   * The dependencies residual owner `id` declared, or `undefined` for an id
+   * that is no recorded residual owner. The one closure walk
+   * (`packageDependencyClosure` in `@objectstack/metadata-core`) reads it for
+   * an id {@link getPackage} cannot produce, so a residual reaches what it
+   * declares through every reader of that walk.
+   */
+  residualOwnerDependenciesOf(id: string): readonly string[] | undefined {
+    return this.residualOwnerDependencies.get(id);
   }
 
   getAllPackages(): InstalledPackage[] {
@@ -9724,6 +9904,7 @@ export class SchemaRegistry {
     this.metadata.clear();
     this.appNavContributions.clear();
     this.picklistExtensionContributions.clear();
+    this.residualOwnerDependencies.clear();
     this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }

@@ -19,7 +19,7 @@ import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 // engine is what `metadata-protocol.validateData` returns, so letting the two
 // drift would put a translation layer between a verdict and its contract.
 import type { ValidateDataResponse } from '@objectstack/spec/api';
-import { parseAutonumberFormat, driverSupportsTransactions } from '@objectstack/spec/data';
+import { parseAutonumberFormat } from '@objectstack/spec/data';
 // [#5158] Door 2's lowering sink — the SAME pair the protocol face (Door 1)
 // runs, so `FilterArray` has exactly one lowering in the product.
 // [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared `FilterCondition →
@@ -62,8 +62,6 @@ import { publishBulkDataEvent, publishDataEvent } from './engine-realtime-publis
 // [#25522 cut 5] The secret and internal-field bodies; the methods of the same
 // names below hand each body the members it reads (`SecretInternalFieldsHost`).
 import {
-  deletedSecretColumns,
-  deletedSecretSlots,
   encryptSecretFields,
   maskSecretFields,
   omitInternalFields,
@@ -84,7 +82,7 @@ import {
 // [#30237, ADR-0148] The recycle bin's write side: the capture body, and the
 // retention seam the host hands over (`RecycleBinCaptureHost`).
 import { openRecycleBinCapture, type RecycleBinCapture } from './recycle-bin/capture.js';
-import { emptyRecycleBin, purgeRecycleBinEntry, readPermanentDelete, type RecycleBinRemovalOptions } from './recycle-bin/purge.js';
+import { emptyRecycleBin, purgeRecycleBinEntry, type RecycleBinRemovalOptions } from './recycle-bin/purge.js';
 import type { RecycleBinRetentionSettings } from './recycle-bin/retention.js';
 import { restoreRecycleBinEntry, type RecycleBinRestoreOptions, type RecycleBinRestoreResult } from './recycle-bin/restore.js';
 import { listRecycleBin, type RecycleBinDeleteObservability, type RecycleBinListOptions, type RecycleBinListResult } from './recycle-bin/list.js';
@@ -139,15 +137,15 @@ import {
   type EngineTransactionInfo,
   type EngineTransactionOptions,
   Logger,
+  type PackageScopedHolderSource,
+  RUNTIME_COMPATIBILITY_PACKAGE_ID,
   type RetryOptions,
   recordNotFoundError,
-  resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { WriteEpoch } from './write-epoch.js';
-import { SummaryRecomputeError, cascadeStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
-  withoutDeletedSelfParents,
   type SummaryDescriptor,
 } from './summary-aggregate.js';
 import { refreshSummariesExtendedBy, summaryRefreshesSettled, type SummaryEnableRefreshReport } from './summary-enable-refresh.js';
@@ -155,9 +153,7 @@ import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import {
   isUpdateResultShape,
-  isDeleteResultShape,
   UpdateHookResultNotWriteShapeError,
-  DeleteHookResultNotWriteShapeError,
 } from './verb-hook-result-shape.js';
 import {
   DriverConnectError,
@@ -196,7 +192,7 @@ import { AssignmentRuleEvaluator, type AssignmentQueueService } from './assignme
 // [#21274] …and its boundary face — nor the error that leaves the engine.
 // [#21385] It lives in `@objectstack/types` now, so `driver-sql`'s own log lines
 // call the same cut; nothing about it changed in the move.
-import { redactBoundStatement, redactPropagatedDriverFault } from '@objectstack/types';
+import { redactBoundStatement } from '@objectstack/types';
 // [#8844] The runtime half of #8686's ruling: a system-context write on a
 // tenant-scoped object resolves the install's organization the way a session
 // write does, or is refused rather than filed under the `__global__`
@@ -316,11 +312,6 @@ import { composeReadableIdsChain, findUnservableControlledByParentMasters, permi
 // [#28001] …and the object-level closure of that walk the metadata read serves.
 import { collectCascadeDeleteSet, deleteRestrictedError, recordReferenceCheckElevation, referenceProbeFilter, refuseRestrictsInsideOwnCascade } from './engine-delete-cascade.js';
 import {
-  resolveEngineDeleteDispatch,
-  ENGINE_DELETE_REJECT_MESSAGE,
-  type EngineDeleteDispatchInput,
-} from './engine-delete-dispatch.js';
-import {
   resolveEngineUpdateDispatch,
   ENGINE_UPDATE_REJECT_MESSAGE,
   // [#11142] The one reject thrower, shared with assertEngineUpdateDispatch,
@@ -345,15 +336,14 @@ import {
 } from './integrity/dangling-reference-audit.js';
 // [#29986 codemod] The top-level declarations that moved whole to `engine-top-level.ts`, as this file still reads them.
 import {
-  DISPATCHABLE_HOOK_EVENTS, ENGINE_DELETE_OPTION_KEYS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS,
-  SECURITY_SERVICE_SOURCE_SLOT, WRITE_PRECONDITION_OPTION, applyStoredExpressionsToPatch, assertDispatchableHookEvent,
+  DISPATCHABLE_HOOK_EVENTS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, SECURITY_SERVICE_SOURCE_SLOT,
+  WRITE_PRECONDITION_OPTION, applyStoredExpressionsToPatch, assertDispatchableHookEvent,
   assertValidHookExcludeObjects, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
   declaredDatetimeLowering, droppedFieldEvents, foldEngineOptionAliases, handBackWithheldInsertReadonly,
-  hydrateWriteFormulas, insertStaticReadonlySubject, lowerWhereFilterArray, masterIdOf,
-  organizationPredicateDeleteRefusal, planStoredExpressions, recomputeAutonumberReaders, rejectUnknownEngineOptions,
-  replacedStoredExpressionFields, settleBulkStoredExpressions, shouldSkipStateMachine, staticReadonlyStoredView,
-  storedExpressionsReading, stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject,
-  withholdInsertReadonlyFromHooks, writeFailureLogMeta,
+  hydrateWriteFormulas, insertStaticReadonlySubject, lowerWhereFilterArray, masterIdOf, planStoredExpressions,
+  recomputeAutonumberReaders, rejectUnknownEngineOptions, replacedStoredExpressionFields, settleBulkStoredExpressions,
+  shouldSkipStateMachine, staticReadonlyStoredView, storedExpressionsReading, stripComputedWriteFields,
+  undeclaredWriteFieldErrors, updateStaticReadonlySubject, withholdInsertReadonlyFromHooks, writeFailureLogMeta,
 } from './engine-top-level.js';
 import type {
   AdmittedValueShapeViolationTally, AutonumberReaders, CascadeDeleteSet, CascadeIssuedDelete, DatasourceDef,
@@ -384,7 +374,7 @@ export {
 // [#29986 codemod] Class head: units, hooks, functions, body runners, hook dispatch: the methods of the same names below hand the bodies what they read (`HooksAndFunctionsHost`).
 import { HooksAndFunctionsFacet } from './engine-hooks-and-functions.js';
 // [#29986 codemod] Action system and packaged-action activation: the methods of the same names below hand the bodies what they read (`ActionsHost`).
-import { ActionsFacet, type ActionHandlerEntry } from './engine-actions.js';
+import { ActionsFacet, type ActionHandlerEntry, type ExecuteActionOptions } from './engine-actions.js';
 // [#29986 codemod] Registration seams, readable-ids security, formula and default permissions: the methods of the same names below hand the bodies what they read (`SecurityResolversHost`).
 import { SecurityResolversFacet } from './engine-security-resolvers.js';
 // [#29986 codemod] Authz invalidation, middleware, session, driver options, posture, organization probe: the methods of the same names below hand the bodies what they read (`MiddlewareAndContextHost`).
@@ -623,8 +613,14 @@ export class ObjectQL implements IObjectQLEngine {
     object?: string;
   }> = [];
 
-  // Action registry: key = "objectName:actionName"
+  // Action registry: key = "objectName:actionName" — the UNQUALIFIED slot, what
+  // a call that names no package runs ([#31673] unchanged until #31697).
   private actions = new Map<string, ActionHandlerEntry>();
+
+  // [ADR-0150 D4, #31673] The action engine keyed `(package, objectName, name)`:
+  // package coordinate (`actionHandlerCoordinate`) → "objectName:actionName" →
+  // that package's handler. A call that names its package reads it.
+  private packageActions = new Map<string, Map<string, ActionHandlerEntry>>();
 
   /**
    * [ADR-0126 §8] The packaged-ACTION activation ledger's local projection —
@@ -646,6 +642,14 @@ export class ObjectQL implements IObjectQLEngine {
   // package registered. Populated by `defineStack({ functions })` via
   // `AppPlugin`, or directly via `engine.registerFunction(...)`.
   private functions = new Map<string, FunctionEntry>();
+
+  // [ADR-0150 D4, #31716] The same registrations by holder: function name →
+  // registering package (the owner read as its package id; `null` for an
+  // owner-less registration) → that package's entry. `functions` above keeps
+  // one entry per name, the last-registered; this keeps every holder, so a
+  // referrer's function can be resolved in its package
+  // (`resolvePackageScopedFunction` over `functionHoldersOf`).
+  private functionHolders = new Map<string, Map<string | null, FunctionEntry>>();
 
   // Realtime service for event publishing
   private realtimeService?: IRealtimeService;
@@ -821,6 +825,21 @@ export class ObjectQL implements IObjectQLEngine {
   resolveFunctionEntry(name: string): Readonly<FunctionEntry> | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
     return HooksAndFunctionsFacet.resolveFunctionEntry.call(hooksAndFunctionsHost.of(this), name);
+  }
+
+  /**
+   * Every holder of the function `name` (ADR-0150 D4): each package that
+   * registered one under that name, with its own entry, and an owner-less
+   * registration as the platform's item (`platformItem`: code a plugin or
+   * the host registers, in every caller's reach like `sys`) — the holder set
+   * `resolvePackageScopedFunction` resolves a flow's or an action's function
+   * over, in the referrer's package. A snapshot, taken at the call.
+   * `resolveFunction` and `resolveFunctionEntry` keep answering the one
+   * last-registered entry per name.
+   */
+  functionHoldersOf(name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
+    // [#31716] The body lives in `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
+    return HooksAndFunctionsFacet.functionHoldersOf.call(hooksAndFunctionsHost.of(this), name);
   }
 
   /** Remove all functions registered under a given `packageId`. */
@@ -1084,10 +1103,19 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * Execute a named action on an object.
+   *
+   * [ADR-0150 D4, #31673] Handlers are keyed `(package, objectName, name)`.
+   * `options.packageId` names the package coordinate the caller resolved the
+   * action's declaration to (`resolveActionByPackage`; `''` the environment's
+   * own): that package's handler runs, else the one handler registered under
+   * the key when there is exactly one, else nothing (the "not found" miss).
+   * Omitted, the call names no package and runs the handler the last
+   * registration under `objectName:actionName` left — today's answer, kept
+   * until the action backstop (#31697) decides a two-package key.
    */
-  executeAction(objectName: string, actionName: string, ctx: any): Promise<any> {
+  executeAction(objectName: string, actionName: string, ctx: any, options?: ExecuteActionOptions): Promise<any> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    return ActionsFacet.executeAction.call(actionsHost.of(this), objectName, actionName, ctx);
+    return ActionsFacet.executeAction.call(actionsHost.of(this), objectName, actionName, ctx, options);
   }
 
   /**
@@ -1100,10 +1128,16 @@ export class ObjectQL implements IObjectQLEngine {
    * boot reconciliation reads this to list handlers no declaration covers —
    * which since D3 are refused at dispatch, so having the inventory is what
    * makes that refusal a checklist instead of a support ticket.
+   *
+   * [ADR-0150 D4, #31673] With `options.packageId`, the handlers a call naming
+   * that package dispatches (`executeAction`'s package-keyed answer), one per
+   * key, each with the `coordinate` whose slot holds it, so a reader gating
+   * that call judges the handler it runs. Without it,
+   * the unqualified slot, as before.
    */
-  listRegisteredActions(): Array<{ objectName: string; actionName: string; package?: string }> {
+  listRegisteredActions(options?: ExecuteActionOptions): Array<{ objectName: string; actionName: string; package?: string; coordinate?: string }> {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
-    return ActionsFacet.listRegisteredActions.call(actionsHost.of(this));
+    return ActionsFacet.listRegisteredActions.call(actionsHost.of(this), options);
   }
 
   /**
@@ -8589,733 +8623,9 @@ export class ObjectQL implements IObjectQLEngine {
     return CascadePlanningFacet.organizationOwnedRowCounts.call(cascadePlanningHost.of(this), organizationId, options);
   }
 
-  async delete(object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
-    object = this.resolveObjectName(object);
-    // [#22782] An aborting `afterDelete` rolls this write back — see `opensAfterAbortUnit`.
-    if (this.opensAfterAbortUnit('afterDelete', object, options?.context)) {
-      return this.inAfterAbortUnit(() => this.delete(object, options));
-    }
-    this.logger.debug('Delete operation starting', { object });
-    this.assertWriteAllowed(object, 'delete');
-    // [#8844] See the insert face — deleting the install's only organization
-    // must not leave the memo answering with it.
-    if (object === ORGANIZATION_OBJECT) this.invalidateOrganizationProbe();
-    const driver = this.getDriver(object);
-    // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
-    // carve an append-only system ledger out of the transaction. Before any
-    // hook, default or validation runs, so a refusal costs nothing.
-    this.enforceTransactionOrigin(object, driver, 'delete');
-
-    // Fold the `filter` alias into `where` first — same reasoning as update()
-    // above (#4346): unfolded, a `multi: true` delete with `{ filter }` had no
-    // predicate on its AST and emptied the table.
-    options = foldEngineOptionAliases(object, 'delete', options, ENGINE_WHERE_SLOTS);
-    rejectUnknownEngineOptions(object, 'delete', options, ENGINE_DELETE_OPTION_KEYS);
-    // [#5158] Same ordering reason as update(): the dispatch decision below
-    // reads `where.id`, which an unlowered array never carries.
-    options = lowerWhereFilterArray(object, 'delete', options, this._registry.getObject(object), this.relatedSchemaOf);
-    // [ADR-0100] Same credential-column refusal as update().
-    rejectCredentialEvaluation(object, 'delete', options, options?.context, this.relatedSchemaOf);
-
-    // Expand `{filter-placeholder}` values before the id is extracted — same
-    // reasoning as update() above (#3810).
-    // [ADR-0053 D-D1, amended — #5930] …and lowered in the same stage.
-    options = await this.withResolvedWhere(object, 'delete', options, declaredDatetimeLowering(this._registry.getObject(object)));
-
-    // Extract ID logic mirroring update(): only a SCALAR `where.id` means
-    // "delete one row by primary key". An operator object ({ $in: [...] }, …)
-    // is a multi-row predicate — treating it as an id would bind the object
-    // literally (driver.delete(object, {$in:[…]})) and both skip the #2982 AST
-    // seeding below AND bypass the by-id RLS pre-image check. Leave `id`
-    // undefined so the call routes to deleteMany with the scoped AST.
-    //
-    // [#4550] The decision lives in `engine-delete-dispatch.ts` so the fake
-    // engines that stand in for this method import it instead of re-deriving
-    // it. #4434 shipped a dead REST route green because plugin-sharing's fake
-    // accepted the one shape the `reject` branch below refuses; a double that
-    // reads THIS predicate cannot be looser than this method.
-    const dispatch = resolveEngineDeleteDispatch(options as EngineDeleteDispatchInput | undefined);
-    const id: any = dispatch.kind === 'by-id' ? dispatch.id : undefined;
-    // [#30237, ADR-0148, Q3 = A] A permanent delete writes no recycle-bin entry
-    // and is authorized as `purge`, the recycle-bin manager's verb. Refused here,
-    // before any middleware or hook, unless it is a by-id delete of an object
-    // the bin takes (see `readPermanentDelete`).
-    const permanent = readPermanentDelete(object, options, dispatch.kind);
-    // [#23221] Is this the child delete a cascade issued? Decided here, once,
-    // before any middleware or hook runs, so the claim is this call's alone.
-    const referentialCascadeDelete = this.claimReferentialCascadeDelete(object, id);
-
-    const opCtx: OperationContext = {
-      object,
-      operation: permanent ? 'purge' : 'delete',
-      options,
-      context: options?.context,
-    };
-
-    // [#2982] Same seam as update: a no-single-id delete routes to
-    // `driver.deleteMany` with an AST that used to be rebuilt from
-    // `options.where` after the middleware chain, discarding any row-scoping a
-    // middleware composed onto `opCtx.ast`. Seed the caller's predicate before
-    // the chain, keyed on the SAME falsy-`id` test the multi branch dispatches
-    // on; the multi branch consumes the composed result.
-    if (!id) {
-      opCtx.ast = { object, ...(options?.where !== undefined ? { where: options.where } : {}) } as QueryAST;
-    }
-
-    await this.executeWithMiddleware(opCtx, async () => {
-      // [ADR-0139 D1] As in `update`: a leaf the middleware chain wrote into a
-      // delete's predicate is refused at the executor's entry, before the
-      // pre-image reads reach the driver.
-      collectComposableReadableIds(object, 'delete', opCtx.ast?.where, 'where');
-      const hookContext: HookContext = {
-          object,
-          event: 'beforeDelete',
-          input: { id, options: opCtx.options },
-          session: this.buildSession(opCtx.context),
-          provenance: this.buildProvenance(opCtx.context),
-          // [#23221] The declared cascade-delete marker, the delete twin of
-          // `update()`'s `referentialFieldClear` spread: conditional for the
-          // same reason, "absent unless true". Bound once on this context,
-          // which `afterDelete` reuses, so both phases carry it.
-          ...(referentialCascadeDelete ? { referentialCascadeDelete: true as const } : {}),
-          user: this.buildUser(opCtx.context),
-          api: this.buildHookApi(opCtx.context),
-          transaction: opCtx.context?.transaction,
-          ql: this
-      };
-
-      // [#5272] The pre-image of the row this delete is about to remove.
-      //
-      // `HookContext.previous` is documented — in the spec, since it was
-      // written — as "the state of the record BEFORE the operation (for
-      // update/delete)", and `update()` has bound it all along. `delete()`
-      // never did: `previous` was `undefined` in `beforeDelete` AND in
-      // `afterDelete`, so a legal, contract-shaped delete-side transition
-      // condition (`previous.status == "done"`) was unevaluable — and since
-      // #4775 unevaluable REJECTS the operation. Worse, it was reported
-      // through the generic branch, which reads as "you misspelled a key"
-      // when the key was fine and the engine simply never bound it (#5037's
-      // shape, one path over).
-      //
-      // #5038 made the asymmetry visible from the other side: a predicate
-      // bulk delete already binds each doomed row's own pre-image on its
-      // per-row `afterDelete`, so the SINGLE-record path was strictly worse
-      // than the bulk one — the exact inversion #4800/#4862 ruled against.
-      //
-      // Demand-driven, like `update()`'s `priorRecord`: read only when
-      // something on this object actually consumes it —
-      //   * a delete-side hook, EITHER phase (its `condition` may read
-      //     `previous`; its handler — plugin-audit, the record-change
-      //     trigger — reads `ctx.previous` directly);
-      //   * a roll-up summary aggregating this object, which needs the
-      //     doomed row's FK value to find the parent to recompute.
-      // Those two used to be separate reads at separate times (the summary
-      // one fetched only after `beforeDelete` had run); they are ONE read
-      // now — and a RAW driver read, which is exactly what `update()`
-      // already hands `recomputeSummaries` as its `previous` argument, so
-      // the two write paths now agree on what a pre-image is.
-      //
-      // `needsPriorRecord(schema)` is deliberately NOT part of this gate
-      // even though `update()`'s twin carries it: object validation rules
-      // are evaluated on insert/update only — `delete()` evaluates none —
-      // so including it would buy a read with no reader.
-      //
-      // Read BEFORE `beforeDelete` fires. A delete's `before` phase is the
-      // one that has nothing else to look at (its `input` carries an id and
-      // no data), and the pre-image has to be taken before the row is gone
-      // either way, so a single read serves both phases.
-      //
-      // [#5574] The same read now serves the PER-ROW `beforeDelete` dispatch on
-      // the predicate path — see the pre-phase below. `delete()` was already
-      // the right shape here; what changed is that the predicate branch grew
-      // the same discipline the by-id branch has had since #5272.
-      //
-      // [#5929] The gate's THREE terms, unchanged by that card and enumerated
-      // here because it had to enumerate them to answer it:
-      //   1. `hasHooksFor('beforeDelete', object)`
-      //   2. `hasHooksFor('afterDelete', object)`
-      //   3. `getSummaryDescriptors(object).length > 0`
-      // No validation term, deliberately — see `needsPriorRecord` above.
-      //
-      // What #5929 changed is not this expression but what term 1 MEANS. Until
-      // then, objectql's own `ObjectQLPlugin` registered a builtin
-      // `sys_fetch_previous_delete` on `beforeDelete` with `object: '*'`, so on
-      // every kernel-hosted engine term 1 was true for every object and the
-      // per-object skip this gate exists to perform could never happen. The
-      // builtin's only remaining effect WAS holding this gate open: the read
-      // below binds `previous` before `beforeDelete` dispatches, so its own
-      // `!ctx.previous` guard was already unreachable. Retiring it (plugin.ts,
-      // ADR-0049 enforce-or-remove) makes term 1 an honest question.
-      //
-      // ⚠️ Honest is not the same as usually-false, and the difference is worth
-      // knowing before anyone reads a skip into a production trace. Every
-      // delete-phase hook below registers with NO `object` — global — so each
-      // holds term 1 or term 2 open for every object on a kernel that loads it:
-      //
-      //   * `plugin-auth`   identity-write-guard  beforeDelete  (filters by
-      //                     `isManaged(ctx.object)` inside the handler)
-      //   * `plugin-sharing` record-share-cascade  before+afterDelete (filters
-      //                     by `targets(objectName)` inside the handler)
-      //   * `service-storage` file-reference-lifecycle before+afterDelete
-      //                     (filters by `activeFileFields(object)` inside)
-      //   * `plugin-audit`  writeAudit  afterDelete only — #6656 retired
-      //                     `captureBefore`, which was its `beforeDelete` half,
-      //                     so it holds term 2 open and no longer term 1;
-      //                     global MINUS `excludeObjects: AUDIT_EXCLUDED_OBJECTS`
-      //                     (#5860) — the one that narrows at the ENGINE face,
-      //                     so `hookMatchesObject` can subtract it and an
-      //                     excluded object really does skip this read.
-      //
-      // The first three are real handlers with real work, merely deciding their
-      // own applicability at dispatch time rather than at registration time;
-      // this gate answering "yes" for them is the gate WORKING, not a second
-      // instance of the #5929 defect. Narrowing any of them to the objects it
-      // actually serves — plugin-audit's `excludeObjects` face is the worked
-      // example — is what would convert them into skips, and that is each
-      // package's own card, not this one's.
-      // [#7867] ⚠️ RETIRED — the three-term `wantsPreImage` gate the paragraphs
-      // above describe is GONE, and the paragraphs are kept because what they
-      // record (which registrants hold which term open, and why an honest gate
-      // is not the same as a usually-false one) is still the reason the removal
-      // costs nothing measurable.
-      //
-      // It asked "does anything CONSUME the pre-image?" and skipped the read
-      // when nothing did. Existence is a consumer it never counted — and it is
-      // the one consumer EVERY by-id delete has, because a delete against an id
-      // that names no row must answer 404 rather than run. So the by-id branch
-      // below reads the pre-image unconditionally and gates on it; the
-      // predicate branch reads its doomed rows under its own `perRowBefore/
-      // AfterHooks` gate, which is untouched. On any kernel loading the global
-      // registrants enumerated above, term 1 or 2 was already true for every
-      // object, so this skipped nothing there anyway; the read becomes
-      // genuinely new only for a bare embedder whose object has no delete-side
-      // hook and no roll-up — and that embedder is buying a 404 it did not have.
-      //
-      // ⛔ Do not reintroduce it as a guard around the by-id read. A gate on
-      // whether to LOOK is not compatible with a rule about what to do when
-      // nothing is there. See `update()`'s twin.
-      //
-      // [#7933] The first three entries were carried here UNVERIFIED when
-      // #7707 corrected the `plugin-audit` one, which was wrong on BOTH halves
-      // — hook name and term. All three have since been read against the
-      // function that binds them — `registerIdentityWriteGuard`,
-      // `bindRecordShareCascade`, `installFileReferenceHooks` — and all three
-      // match what is claimed above: same events, same object-less
-      // registration, same in-handler filter. Nothing above needed changing.
-      // That audit is what the retirement note's "term 1 or 2 was already true
-      // for every object" stands on, so it is recorded here rather than left
-      // in a closed issue: the enumeration outlived the gate it was written
-      // for, and it is now load-bearing for a different claim than the one it
-      // was written to support.
-      const deleteSchema = this._registry.getObject(object);
-      // `buildDriverOptions` is what carries the open transaction and the
-      // tenant scope onto a raw driver read. Skipping it here would read
-      // outside this write's transaction and across the tenant boundary —
-      // `update()`'s prior read passes the same bag for the same reason.
-      // [#21613] Both pre-image reads below are shaped to the declared field
-      // set, as `update()`'s are: the pre-image is the delete's `previous`, and
-      // the audit ledger records it whole as the delete's `old_value`, so a
-      // column no metadata declares reached that served row with its value.
-      const declaredDeleteColumns = declaredColumnSet(deleteSchema);
-      const readPreImage = async (targetId: unknown): Promise<Record<string, unknown> | null> => {
-        const preAst: QueryAST = { object, where: { id: targetId }, limit: 1 };
-        const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
-        return withDeclaredColumnsOnly(
-          (await driver.findOne(object, preAst, preOpts)) as Record<string, unknown> | null,
-          declaredDeleteColumns,
-        );
-      };
-      const bindPreImage = (row: Record<string, unknown> | null): void => {
-        // Never fabricate: a row that is not there leaves `previous` UNBOUND
-        // rather than `{}`/`null`, so a condition reading it faults loudly
-        // instead of answering for a record nobody read (#4649/#4775).
-        hookContext.previous = row ? (coerceBooleanFields(deleteSchema as any, row as any) as any) : undefined;
-      };
-      let priorRecord: Record<string, unknown> | null = null;
-      // [#5038] Matched rows for the per-row `afterDelete` dispatch — see the
-      // twin in update(). A bulk delete is N record changes too, so a
-      // `record-after-delete` flow must see each deleted row rather than one
-      // context that names none of them.
-      let bulkPerRowRows: Record<string, unknown>[] | null = null;
-      // [#26950] The predicate path's matched rows as the per-row hook read
-      // below took them (`null` when no delete-side hook asked for them), and
-      // the rows whose foreign keys `recomputeSummaries` is handed after the
-      // delete (`null` when no roll-up aggregates this object).
-      let predicateMatchedRows: Record<string, unknown>[] | null = null;
-      let summaryPriorRows: Record<string, unknown>[] | null = null;
-      // [#27581] The `secret` columns this object declares, and the handles the
-      // removed rows held in them: the by-id pre-image, or the predicate
-      // path's matched rows, read before the statement takes them away.
-      const secretColumns = deletedSecretColumns(deleteSchema);
-      let deletedSecrets: SecretHandleSlot[] = [];
-
-      // [#5574] The dispatch ladder, resolved BEFORE the before phase — see
-      // update()'s twin for the full reasoning. Keyed on the SAME falsy-`id`
-      // test the #2982 AST seed above uses.
-      const isByIdDelete = Boolean(id);
-      // [#11009] Keyed on the LADDER's verdict, not on `options?.multi` — the
-      // update twin says why; for every pre-#11009 input the two spellings
-      // agree.
-      const isPredicatePath = !isByIdDelete && dispatch.kind === 'multi' && typeof driver.deleteMany === 'function';
-      // [#24948] An organization is deleted by id or not at all: plugin-auth's
-      // organization delete refuses one that still owns records and removes its
-      // auth structure per organization, which a predicate delete would skip
-      // (see `organizationPredicateDeleteRefusal`). Any delete not by id is
-      // refused here, whatever the driver offers, before any hook or write.
-      if (!isByIdDelete && object === ORGANIZATION_OBJECT) {
-        throw organizationPredicateDeleteRefusal();
-      }
-      if (!isByIdDelete && !isPredicatePath) {
-        // [#4550] The `reject` verdict of resolveEngineDeleteDispatch. It used
-        // to be re-asked after the before phase because a hook could still bind
-        // the id; with the ladder resolved first there is no such conversion.
-        //
-        // [#11009] The dispatch's OWN message — the unhonoured-predicate
-        // refusal names the dropped `where` keys; the classic shape keeps
-        // `ENGINE_DELETE_REJECT_MESSAGE`; the fallback arm is a `multi`
-        // verdict against a driver with no `deleteMany`.
-        if (dispatch.kind === 'reject') throw new Error(dispatch.message);
-        // [#27277] See update()'s twin: a floored plugin driver offers no `deleteMany`.
-        if (isExternalDriverFloor(driver)) throw externalPredicateWriteRefusal(driver.name, object, 'delete');
-        throw new Error(ENGINE_DELETE_REJECT_MESSAGE);
-      }
-
-      // [#6966] See update()'s twin — same rule, same single binding point.
-      hookContext.dispatch = {
-        mode: isPredicatePath ? 'per-row' : 'record',
-        index: 0,
-        scope: {},
-      };
-
-      if (isByIdDelete) {
-        // [#7867] Read first, then GATE — the twin of `update()`'s, and #5138's
-        // own record names `delete` as the worst of the three when the gate was
-        // missing: "the delete ran and the answer was `200 { deleted: true }`
-        // for any string in the path, so a typo'd id, an already-deleted row
-        // and a real deletion were indistinguishable" — the shape #4435 removed
-        // from `protocol.deleteData` and #5138 removed from `callData`, still
-        // live here on the path an action body's `.delete()` actually takes.
-        //
-        // The pre-image is the only honest place to ask. `IDataDriver.delete`
-        // does declare `Promise<boolean>` ("true if deleted, false if not
-        // found"), so the answer exists downstream — but downstream is AFTER
-        // `beforeDelete` has dispatched and after `cascadeDeleteRelations` has
-        // run, i.e. after handlers have fired and children have been touched
-        // for a parent that was never there. `IDataEngine.delete` also declares
-        // `Promise<any>` and passes its driver's result through the hook chain,
-        // so testing it for `=== false` here would read a signal this layer's
-        // contract does not promise — #5138's argument, unchanged.
-        priorRecord = await readPreImage(id);
-        if (!priorRecord) throw recordNotFoundError(object, id);
-        // Bound unconditionally now that the row is proven present.
-        // `bindPreImage`'s never-fabricate rule (#4649/#4775) is unchanged and
-        // still the reason the binding goes through it rather than around it.
-        bindPreImage(priorRecord);
-        await this.triggerHooks('beforeDelete', hookContext);
-        // [#6752] The retired lever, refused — the `update()` twin's check,
-        // verbatim, because the rule is now ONE rule: a by-id target is
-        // immutable in a `before*` handler.
-        //
-        // Both halves of it used to be answered separately here. CLEARING the
-        // id was already refused (ADR-0058 Amendment II.1): it worked by
-        // falling through to the predicate branch, and the ladder is now
-        // resolved before any handler runs, so there is no ladder left to
-        // re-enter. REBINDING to another id was still HONOURED, by re-reading
-        // the new target's pre-image and rebinding `previous` (#5272) so
-        // nothing stale reached `afterDelete` or the summary recompute.
-        //
-        // The 2026-08-09 ruling on #6752 retires that second half. #5272's
-        // mechanism was internally correct — that is not what was weighed. What
-        // was weighed: the measured compatibility cost is zero (no consumer in
-        // the repository repoints), one rule across both verbs beats two
-        // individually-correct rules an author has to memorize, and a hook that
-        // silently redirects WHICH ROW GETS DELETED is a top-grade footgun for
-        // authored — especially AI-authored — handlers. Correctness of the
-        // mechanism does not justify the surface.
-        //
-        // ⛔ Route 3 (growing the same re-resolution for `update()`) stays
-        // excluded by #5574's ruling: "do not silently pick re-resolution
-        // instead". The alignment goes the other way, and this is that edit.
-        //
-        // The re-read that used to sit here is GONE, not merely bypassed: its
-        // guard was `input.id !== id && input.id`, which is exactly the case
-        // this refusal now throws on, so it became unreachable. `readPreImage`
-        // survives for the pre-dispatch read above — the only read left. A
-        // handler writing back the SAME id is untouched, as on `update()`.
-        if (hookContext.input.id !== id) {
-          throw new HookTargetRebindError({
-            object, event: 'beforeDelete', path: 'by-id',
-            expectedId: id, observedId: hookContext.input.id,
-          });
-        }
-      } else {
-        // [#2982] Consume the middleware-composed AST seeded above so the
-        // injected row-scoping binds every read AND the delete. Fail CLOSED if
-        // it is absent rather than rebuilding an unscoped `{ object, where }`
-        // (AGENTS.md PD #12).
-        const ast = opCtx.ast;
-        if (!ast) {
-          throw new Error(
-            `[Security] Refusing bulk delete on '${object}': row-scoping AST was not seeded ` +
-              `(the predicate branch was reached without the AST seeded before the middleware ` +
-              `chain — the one RLS and sharing compose their row-scoping onto, so that a bulk ` +
-              `write reaches only the rows this caller may edit).`,
-          );
-        }
-        // [#9719] The unscoped-multi shape check, BEFORE the matched-row read:
-        // a `multi: true` delete carrying no caller predicate at all dispatches
-        // ONCE, whole-operation-shaped, to the registrations that declared for
-        // it — so a shape-of-the-operation refusal (#4757) fires regardless of
-        // what the predicate would match, zero rows included. Read from the
-        // caller's RAW options — the same slot the handler contract reads
-        // (`input.options.where`, hook.zod.ts's upper-bound rule) — never from
-        // the AST, which middleware may have narrowed and only ever narrows.
-        // `where: {}` is a REAL (match-all) query and stays on the per-row
-        // authorize path; only an absent or `null` predicate is unscoped.
-        // `update()`'s predicate branch carries the identical check (#9974).
-        const rawWhere = (hookContext.input.options as { where?: unknown } | undefined)?.where;
-        if (rawWhere === undefined || rawWhere === null) {
-          await this.dispatchUnscopedMultiWriteHooks('beforeDelete', object, hookContext);
-        }
-        // [#5038/#5574] Read the doomed rows ONCE, before they are gone — the
-        // only moment their pre-image exists — and serve BOTH phases from it
-        // (D7). Gated on this object actually having delete-side hooks, so a
-        // bulk delete with none pays for no read.
-        const perRowBeforeHooks = this.hasHooksFor('beforeDelete', object);
-        const perRowAfterHooks = this.hasHooksFor('afterDelete', object);
-        if (perRowBeforeHooks || perRowAfterHooks) {
-          const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
-          // [#21613] Each doomed row is its per-row `previous`: declared set.
-          const doomed = rowsWithDeclaredColumnsOnly(
-            (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [],
-            declaredDeleteColumns,
-          );
-          predicateMatchedRows = doomed;
-          // [D6] One ceiling, both phases, BEFORE the first per-row dispatch
-          // and before the driver call.
-          this.assertBulkPerRowHookBudget(
-            object, perRowBeforeHooks ? 'beforeDelete' : 'afterDelete', doomed.length,
-          );
-          if (perRowAfterHooks) bulkPerRowRows = doomed;
-          // [D1] Zero matched rows is zero dispatches.
-          if (perRowBeforeHooks && doomed.length > 0) {
-            await this.dispatchPerRowBeforeHooks(object, 'beforeDelete', doomed, hookContext);
-          }
-        }
-      }
-
-      // Every driver call below is handed `driverOptions` — the declared driver
-      // options and nothing else; `input.options` is the hooks' additive view.
-      const driverOptions = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
-      hookContext.input.options = mergeDriverOptionsIntoHookView(hookContext.input.options, driverOptions);
-
-      try {
-          let result;
-          // [#4639] See update()'s twin: recorded at the branch that chose the
-          // driver call, not inferred later from a missing id.
-          let isPredicateWrite = false;
-          if (isByIdDelete) {
-              // Honor referential delete behavior (cascade/set_null/restrict)
-              // for relations pointing at this record before removing it.
-              //
-              // [#7413] ONE UNIT OF WORK — the cascade and the parent's own row
-              // removal, or neither. These two statements used to run bare, and
-              // the cascade re-enters `this.delete()`/`this.update()` per
-              // dependent, each committing as it executed; a refusal partway
-              // (the `restrict` branch, a child's permission check, a later
-              // child's `beforeDelete` hook) stranded an arbitrary prefix of the
-              // children deleted while the caller got 409/403 and read it as
-              // "nothing happened". #4620's changeset already ruled the shape
-              // for the batch path: atomic honoured for real, or refused — a
-              // partial delete has no natural undo.
-              //
-              // The recursion COMPOSES rather than deadlocking because
-              // `transaction()` publishes its handle into the ambient `txStore`
-              // and joins an already-open one (ADR-0067 D2 / #5696): the child
-              // `delete()` calls below receive `trxContext` explicitly AND see
-              // the ambient entry, so a grandchild's own wrap JOINS with
-              // `owned: false` instead of opening a second driver transaction on
-              // a second connection.
-              //
-              // The driver options are rebuilt INSIDE the callback on purpose:
-              // the ones computed above were built before any transaction
-              // existed, so they carry no handle and the parent's own
-              // `driver.delete` would execute outside the very transaction
-              // wrapping its cascade. `buildDriverOptions` only fills keys that
-              // are still `undefined`, so re-running it adds the handle and
-              // changes nothing else.
-              //
-              // A dependent's stale-roll-up refusal stops the walk before this
-              // row is removed, so it is not this delete's answer:
-              // `cascadeStoppedRefusal` says what it is instead.
-              //
-              // [#30237, ADR-0148 D1] The recycle bin rides the same unit: the
-              // capture opens before the cascade (a retention defect refuses
-              // here, before any write), reads the collected set before the
-              // walk touches it, and writes the one entry after the walk and
-              // before this row goes. A removal that throws takes the entry
-              // with it: the transaction's rollback when one covers the bin,
-              // the capture's compensation otherwise. A caller's `multi: true`
-              // opens none, even here: the lifecycle sweep reaps by id with it.
-              // Nor does a permanent delete, which is the point of it.
-              //
-              // [#30237] The entry's id is told to the caller
-              // (`options.onRecycleBinEntry`) only once the unit has landed:
-              // after the transaction commits, never from inside it.
-              let binEntryId: string | undefined;
-              const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                const bin = this.openRecycleBinCapture(object, hookContext.input.id as string | number, writeContext, options?.multi === true || permanent);
-                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext, 0, bin?.onCollected)
-                  .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
-                const entry = await bin?.write();
-                try {
-                  const removed = await driver.delete(
-                    object,
-                    hookContext.input.id as string,
-                    this.buildDriverOptions(object, writeContext, hookContext.input.options as any),
-                  );
-                  // Told only for a row the driver says it removed: `false`
-                  // (not found) and an off-contract count of 0 (kept) name no
-                  // deletion an undo could reverse.
-                  if (removed !== false && (removed as unknown) !== 0) binEntryId = entry?.id;
-                  return removed;
-                } catch (e) {
-                  await entry?.compensate();
-                  throw e;
-                }
-              };
-              // WHEN to open one is `planCascadeAtomicity`'s call — see there.
-              // `'none'` (nothing references this object) keeps the pre-#7413
-              // path exactly, so a plain non-cascade delete opens no
-              // transaction and emits no degrade warning; `'split'` keeps it
-              // too, because a transaction on the default driver cannot cover a
-              // cross-datasource cascade and would refuse it outright.
-              const plan = this.planCascadeAtomicity(object);
-              if (plan === 'atomic') {
-                  // No `require: true` — see the changeset. `delete()` never
-                  // asked for atomicity, so it must not start REFUSING on a
-                  // runtime that cannot roll back; `transaction()`'s declared
-                  // degrade (ADR-0119 D1) already warns once per driver (#4619).
-                  result = await this.transaction(
-                    async (trxCtx: any) => await runByIdDelete(trxCtx as ExecutionContext),
-                    opCtx.context,
-                  );
-              } else {
-                  if (plan === 'split') this.warnCascadeNotAtomic(object);
-                  result = await runByIdDelete(opCtx.context);
-              }
-              if (binEntryId !== undefined && typeof options?.onRecycleBinEntry === 'function') {
-                  options.onRecycleBinEntry(binEntryId);
-              }
-              // [#27581] The handles the removed row held, off its pre-image.
-              deletedSecrets = deletedSecretSlots(deleteSchema, [priorRecord]);
-          } else {
-               // [#2982] The AST asserted present and already used for the
-               // pre-phase row read above.
-               // `deleteMany` presence is part of the ladder verdict resolved above.
-               //
-               // [#26871] A predicate delete honours `deleteBehavior` as the
-               // by-id branch does: a `restrict` refuses, a `cascade` (a
-               // `master_detail` by default) deletes the dependents, a
-               // `set_null` clears them. This arm used to go straight to
-               // `deleteMany`, so a flow's `delete_record` with `multi: true`
-               // skipped every declared rule the same delete done record by
-               // record honours.
-               //
-               // `planCascadeAtomicity` is the by-id branch's own question:
-               // `'none'` means no relation of the delete family points at
-               // this object, so the walk could write nothing and the arm keeps
-               // its single `deleteMany`, no rows read and no transaction.
-               //
-               // [#26950] A roll-up over this object needs the matched rows'
-               // foreign keys, read BEFORE the delete, to find the parents to
-               // recompute after it: the by-id branch hands `recomputeSummaries`
-               // its pre-image, and this arm hands it the matched rows. Only the
-               // descriptors' FK columns are read, through the composed AST and
-               // the write's driver options, and only once: the walk's own id
-               // read carries them below, and with no walk the per-row hook
-               // read serves when it was made. An object no roll-up aggregates
-               // reads nothing new.
-               const summaryKeyColumns = this.summaryForeignKeyColumns(object);
-               const plan = this.planCascadeAtomicity(object);
-               if (plan === 'none') {
-                 if (summaryKeyColumns.length > 0) {
-                   summaryPriorRows = predicateMatchedRows
-                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: summaryKeyColumns }, driverOptions)) ?? []) as Record<string, unknown>[]);
-                 }
-                 // [#27581] The handles the matched rows hold, read BEFORE the
-                 // statement removes them: the per-row hook read when it was
-                 // made, otherwise only `id` and the secret columns, through
-                 // this write's AST and options. No secret column, no read.
-                 if (secretColumns.length > 0) {
-                   deletedSecrets = deletedSecretSlots(deleteSchema, predicateMatchedRows
-                     ?? (((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...secretColumns] }, driverOptions)) ?? []) as Record<string, unknown>[]));
-                 }
-                 result = await driver.deleteMany!(object, opCtx.ast!, driverOptions);
-               } else {
-                 // Otherwise: resolve the matched rows through the composed,
-                 // row-scoped AST, run `cascadeDeleteRelations` once over them
-                 // as one root set (#27004), then delete exactly those rows by
-                 // id. By id, not by re-running the
-                 // predicate: the walk's own writes (a `set_null` on a
-                 // self-reference) can move a row into or out of the predicate,
-                 // and the rows deleted must be the rows walked. The ids were
-                 // read under this caller's scope inside the same unit of work,
-                 // as the by-id branch deletes its id after reading its
-                 // pre-image under that scope. The unit of work is the by-id
-                 // branch's, for the same reasons (#7413).
-                 const runPredicateDelete = async (writeContext?: ExecutionContext): Promise<unknown> => {
-                   const writeOptions = this.buildDriverOptions(object, writeContext, hookContext.input.options as any);
-                   // [#27581] The same read carries the secret columns, so the
-                   // handles released are those of the rows deleted.
-                   const matched = ((await driver.find(object, { ...opCtx.ast!, fields: ['id', ...summaryKeyColumns, ...secretColumns] }, writeOptions)) ?? []) as Array<Record<string, unknown>>;
-                   const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
-                   if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
-                   deletedSecrets = deletedSecretSlots(deleteSchema, matched);
-                   // [#27004] One walk, rooted at the whole matched set. A
-                   // dependent's stale-roll-up refusal is not this delete's
-                   // answer, as in the by-id branch.
-                   await this.cascadeDeleteRelations(object, matchedIds, writeContext)
-                     .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
-                   // The id set rides an `$in`; batched so one statement never
-                   // outgrows a driver's bind-parameter limit.
-                   const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
-                   let removed = 0;
-                   for (let i = 0; i < matchedIds.length; i += batchSize) {
-                     const batchAst: QueryAST = { object, where: { id: { $in: matchedIds.slice(i, i + batchSize) } } };
-                     const count = await driver.deleteMany!(object, batchAst, writeOptions);
-                     // A non-count answer goes back as the driver gave it, so
-                     // the `isDeleteResultShape` check below refuses it.
-                     if (typeof count !== 'number') return count;
-                     removed += count;
-                   }
-                   return removed;
-                 };
-                 if (plan === 'atomic') {
-                   result = await this.transaction(
-                     async (trxCtx: any) => await runPredicateDelete(trxCtx as ExecutionContext),
-                     opCtx.context,
-                   );
-                 } else {
-                   this.warnCascadeNotAtomic(object);
-                   result = await runPredicateDelete(opCtx.context);
-                 }
-               }
-               isPredicateWrite = true;
-          }
-
-          hookContext.event = 'afterDelete';
-          hookContext.result = result;
-          if (bulkPerRowRows) {
-            // [#5038] One dispatch per deleted row. No payload is passed, so
-            // each context carries `previous` = the deleted row and no
-            // `result`: after a delete there IS no post-state, and every
-            // consumer (hook `condition`, the record-change trigger, the audit
-            // diff) already falls back to the pre-image for `record` on a
-            // delete-shaped context.
-            for (const rowCtx of this.buildPerRowAfterContexts(
-              object, 'afterDelete', bulkPerRowRows, hookContext,
-            )) {
-              await this.triggerHooks('afterDelete', rowCtx);
-            }
-          } else {
-            await this.triggerHooks('afterDelete', hookContext);
-          }
-
-          // [#16231] The `delete()` twin, on its own declaration: whether the
-          // by-id row was there (`boolean`), or how many rows a predicate
-          // delete removed (`number`). ⚠️ `false` and `0` are the two most
-          // ordinary answers this verb gives, so `isDeleteResultShape` is a
-          // pair of `typeof` tests and never a truthiness check — a lenient
-          // guard here would refuse exactly the answers
-          // `metadata-protocol`'s `deleteData` turns into its 404.
-          if (!isDeleteResultShape(hookContext.result)) {
-            throw new DeleteHookResultNotWriteShapeError({
-              object,
-              event: 'afterDelete',
-              result: hookContext.result,
-            });
-          }
-
-          // [#27581] The delete is complete: release the handles the removed
-          // rows held, through the release a committed update uses, so each one
-          // goes only once storage confirms no row of its column still names it,
-          // inside this write's unit. After the `afterDelete` chain, so a hook
-          // can still dereference the value and a refusal that rolls the delete
-          // back never reaches here.
-          await this.releaseSecretHandles(object, deletedSecrets, opCtx.context, 'retired');
-
-          // Roll-up: recompute the parent summary now that the child is gone,
-          // from the row's FK values captured BEFORE deletion. [#5272] That
-          // capture is now the same single pre-image read `previous` rides on
-          // (it used to be its own later `findOne`), which is also what
-          // `update()` passes here. [#26950] A predicate delete passes the
-          // matched rows it read before the delete.
-          const summaryPrevious = priorRecord ?? summaryPriorRows;
-          const summaryFailures = summaryPrevious
-            ? await this.recomputeSummaries(object, null, summaryPrevious, opCtx.context)
-            : [];
-
-          // Same split as update(): per-record `data.record.deleted` (#4626),
-          // or the aggregate `data.records.deleted` when the delete was by
-          // predicate (#4639).
-          if (this.realtimeService) {
-            if (isPredicateWrite) {
-              await this.publishBulkDataEvent('deleted', object, {
-                matched: result,
-                context: opCtx.context,
-                // [#15813] Same seam as the update branch.
-                tenantLayer0Verdict: opCtx.tenantLayer0Verdict,
-              });
-            } else {
-              const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
-              await this.publishDataEvent('deleted', object, {
-                recordId: hookContext.input.id ?? resultId,
-                // [#14970] The pre-image — a delete has no post-state, and
-                // this branch is the by-id one, where `priorRecord` was read
-                // unconditionally by #7867's existence gate and proven
-                // non-null before `beforeDelete` ever fired. So the row is
-                // already in hand and NO new read is bought here.
-                organizationRow: priorRecord,
-                context: opCtx.context,
-              });
-            }
-          }
-
-          // The record IS deleted; a summary that could not recompute after
-          // retries must surface, not stay silent (framework#3147).
-          if (summaryFailures.length > 0) throw new SummaryRecomputeError(summaryFailures, hookContext.result);
-          return hookContext.result;
-      } catch (e) {
-          // [#7307] `Error.message` is now the END USER's localized sentence for
-          // a `DELETE_RESTRICTED`, and the logger serializes only `message` +
-          // `stack` — so without this the operator-facing half (API names, the
-          // `deleteBehavior:'cascade'` remedy) would reach no channel at all,
-          // and the server log of a zh-CN deployment would read in Chinese. An
-          // error that carries no `developerMessage` logs exactly as before.
-          // [#8682] Same redaction as the insert/update loggers. A DELETE's
-          // statement carries the caller's values in its `where` clause — which
-          // is how a record is addressed, so it is the same class of payload.
-          // `developerMessage` is read off the ORIGINAL error: it is written by
-          // our own throw sites (#7307), never by a driver, so it carries no
-          // statement and the redaction has no opinion about it.
-          // [#17052] The third write door, moved with its two siblings: this
-          // catch also ends in `throw e`, so the caller is told and the entry
-          // is not a degradation report. `developerMessage` keeps its place in
-          // the meta and the redaction is unchanged.
-          const devDetail = (e as any)?.developerMessage;
-          this.logger.warn(
-            'Delete operation failed',
-            writeFailureLogMeta(redactBoundStatement(e), {
-              object,
-              ...(typeof devDetail === 'string' && devDetail.length > 0 ? { developerMessage: devDetail } : {}),
-            }),
-          );
-          throw e;
-      }
-    });
-
-    return opCtx.result;
+  delete(object: string, options?: EngineDeleteOptions & RecycleBinDeleteObservability): Promise<boolean | number> {
+    // [#29986 codemod] The body moved to `engine-delete-and-aggregate.ts` (see `DeleteAndAggregateHost`).
+    return DeleteAndAggregateFacet.delete.call(deleteAndAggregateHost.of(this), object, options);
   }
 
   async count(object: string, query?: EngineCountOptions, options?: EngineReadOptions): Promise<number> {
@@ -9508,7 +8818,7 @@ export class ObjectQL implements IObjectQLEngine {
    */
   registerObject(
     schema: ServiceObject,
-    packageId: string = '__runtime__',
+    packageId: string = RUNTIME_COMPATIBILITY_PACKAGE_ID,
     namespace?: string
   ): string {
     // [#25522 cut 8] The body moved to `engine-compatibility-api.ts` (see `CompatibilityApiHost`).
@@ -9768,6 +9078,7 @@ export class ObjectQL implements IObjectQLEngine {
     actionsHost.install((engine) => ({
       get actionActivation() { return engine.actionActivation; },
       get actions() { return engine.actions; },
+      get packageActions() { return engine.packageActions; },
       get logger() { return engine.logger; },
       get registry() { return engine.registry; },
     }));
@@ -9830,16 +9141,47 @@ export class ObjectQL implements IObjectQLEngine {
     }));
     deleteAndAggregateHost.install((engine) => ({
       get _registry() { return engine._registry; },
+      assertBulkPerRowHookBudget: (...a) => engine.assertBulkPerRowHookBudget(...a),
+      assertWriteAllowed: (...a) => engine.assertWriteAllowed(...a),
       buildDriverOptions: (...a) => engine.buildDriverOptions(...a),
+      buildHookApi: (...a) => engine.buildHookApi(...a),
+      buildPerRowAfterContexts: (...a) => engine.buildPerRowAfterContexts(...a),
+      buildProvenance: (...a) => engine.buildProvenance(...a),
+      buildSession: (...a) => engine.buildSession(...a),
+      buildUser: (...a) => engine.buildUser(...a),
+      cascadeDeleteRelations: (...a) => engine.cascadeDeleteRelations(...a),
+      claimReferentialCascadeDelete: (...a) => engine.claimReferentialCascadeDelete(...a),
       composeReadableIdsAtBoundary: (...a) => engine.composeReadableIdsAtBoundary(...a),
+      delete: (...a) => engine.delete(...a),
+      dispatchPerRowBeforeHooks: (...a) => engine.dispatchPerRowBeforeHooks(...a),
+      dispatchUnscopedMultiWriteHooks: (...a) => engine.dispatchUnscopedMultiWriteHooks(...a),
+      enforceTransactionOrigin: (...a) => engine.enforceTransactionOrigin(...a),
       executeWithMiddleware: (...a) => engine.executeWithMiddleware(...a),
       expandSearchOnOptions: (...a) => engine.expandSearchOnOptions(...a),
+      facade: engine,
       getDriver: (...a) => engine.getDriver(...a),
+      getSummaryDescriptors: (...a) => engine.getSummaryDescriptors(...a),
+      hasHooksFor: (...a) => engine.hasHooksFor(...a),
+      inAfterAbortUnit: (...a) => engine.inAfterAbortUnit(...a),
+      invalidateOrganizationProbe: (...a) => engine.invalidateOrganizationProbe(...a),
       get logger() { return engine.logger; },
+      openRecycleBinCapture: (...a) => engine.openRecycleBinCapture(...a),
+      opensAfterAbortUnit: (...a) => engine.opensAfterAbortUnit(...a),
+      planCascadeAtomicity: (...a) => engine.planCascadeAtomicity(...a),
+      publishBulkDataEvent: (...a) => engine.publishBulkDataEvent(...a),
+      publishDataEvent: (...a) => engine.publishDataEvent(...a),
+      get realtimeService() { return engine.realtimeService; },
+      recomputeSummaries: (...a) => engine.recomputeSummaries(...a),
       rejectCredentialAggregation: (...a) => engine.rejectCredentialAggregation(...a),
       get relatedSchemaOf() { return engine.relatedSchemaOf; },
+      releaseSecretHandles: (...a) => engine.releaseSecretHandles(...a),
       resolveObjectName: (...a) => engine.resolveObjectName(...a),
       resolveWhereTokens: (...a) => engine.resolveWhereTokens(...a),
+      summaryForeignKeyColumns: (...a) => engine.summaryForeignKeyColumns(...a),
+      transaction: (...a) => engine.transaction(...a),
+      triggerHooks: (...a) => engine.triggerHooks(...a),
+      warnCascadeNotAtomic: (...a) => engine.warnCascadeNotAtomic(...a),
+      withResolvedWhere: (...a) => engine.withResolvedWhere(...a),
     }));
     findHost.install((engine) => ({
       get _registry() { return engine._registry; },
@@ -9884,6 +9226,7 @@ export class ObjectQL implements IObjectQLEngine {
       get drivers() { return engine.drivers; },
       facade: engine,
       get functions() { return engine.functions; },
+      get functionHolders() { return engine.functionHolders; },
       getDriver: (...a) => engine.getDriver(...a),
       get hooks() { return engine.hooks; },
       isClosedUnitHandle: (...a) => engine.isClosedUnitHandle(...a),
@@ -10432,24 +9775,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * export, so it is no nameable member of this class's published face (see
    * the symbol's docblock in `hook-run-as.ts`).
    */
-  async [SEED_USER_GRANTS](): Promise<ScopedContext> {
-    const ctx = this.executionContext;
-    if (!ctx.userId) return this;
-    const needsGrants = !Array.isArray(ctx.permissions);
-    const needsPeers = !Array.isArray(ctx.org_user_ids);
-    const needsEmail = !ctx.email;
-    if (!needsGrants && !needsPeers && !needsEmail) return this;
-    const grants = await resolveUserAuthzGrants(
-      this.engine,
-      ctx.userId,
-      ctx.tenantId ? { tenantId: ctx.tenantId } : {},
-    );
-    return this.derive({
-      ...ctx,
-      ...(needsGrants ? { positions: grants.positions, permissions: grants.permissions } : {}),
-      ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
-      ...(needsEmail && grants.email ? { email: grants.email } : {}),
-    });
+  [SEED_USER_GRANTS](): Promise<ScopedContext> {
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.seedUserGrants.call(scopedContextHost.of(this));
   }
 
   /**
@@ -10504,90 +9832,12 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * #6167 tracks, and closing that needs handle ownership to become
    * discoverable on `IDataDriver`.
    */
-  async transaction(
+  transaction(
     callback: (trxCtx: ScopedContext, info: EngineTransactionInfo) => Promise<any>,
     opts?: EngineTransactionOptions,
   ): Promise<any> {
-    const engine = this.engine as any;
-    // The engine's ambient transaction store (ADR-0034), reached the `as any`
-    // way this whole class reaches engine internals, for the D2 join below. A
-    // transaction this call opens is published by the engine's own helper.
-    const txStore = engine?.txStore as
-      | { getStore(): { transaction: unknown } | undefined }
-      | undefined;
-
-    // ADR-0067 D2 — JOIN an already-open ambient transaction instead of opening
-    // a nested driver one (#6168). Same first move, same reasons and the same
-    // shape as `ObjectQL.transaction`: a nested begin would take a second
-    // connection AND would not be covered by the outer rollback, so the outer
-    // caller would stop owning the one-and-only commit/rollback.
-    //
-    // BEFORE the driver/`require` handling on purpose, mirroring the engine:
-    // when there is an ambient transaction there IS a transaction, so
-    // `require: true` is satisfied by joining it and the degrade is not
-    // reachable.
-    const ambient = txStore?.getStore();
-    if (ambient?.transaction) {
-      // The handle is threaded EXPLICITLY into the child context, not left to
-      // the ambient store, for the same reason the engine surface threads it:
-      // `buildDriverOptions` prefers the explicit handle, and it survives async
-      // boundaries the store does not. It is identity-equal to the store's
-      // handle, so `transactionCoversDriverFor` still attributes it to the
-      // OUTER owner and the #5351 same-origin gate judges it unchanged.
-      const joinedCtx = this.derive({ ...this.executionContext, transaction: ambient.transaction });
-      // JOINED, not owned: the outer caller decides commit vs rollback (#5696).
-      return callback(joinedCtx, { owned: false });
-    }
-
-    // Find the default driver for transaction support
-    const driver = engine.defaultDriver
-      ? engine.drivers?.get(engine.defaultDriver)
-      : undefined;
-
-    // [#18063] Declaration, not bare method presence — see the engine surface's
-    // gate; one predicate serves both so they cannot answer differently.
-    if (!driverSupportsTransactions(driver)) {
-      const datasource = engine.defaultDriver ?? driver?.name;
-      if (opts?.require === true) {
-        // Same fail-closed refusal as the engine surface (#5696 point 1).
-        throw new TransactionUnsupportedError(datasource ?? '<no default datasource>');
-      }
-      // No transaction support — execute directly. Declared (ADR-0119 D1), but
-      // said out loud since #4619: the caller asked for atomicity and the
-      // callback is about to run without any.
-      engine.warnTransactionUnsupported?.(datasource, driver?.supports?.transactionsUnsupported === true);
-      return callback(this, { owned: false });
-    }
-
-    const trx = await driver.beginTransaction();
-    const trxCtx = this.derive({ ...this.executionContext, transaction: trx });
-    // Publish this transaction into the engine's ambient store so internal
-    // queries during writes reuse its connection (ADR-0034) — and so a nested
-    // `transaction()` on either surface can JOIN it. The store entry also
-    // carries WHICH driver owns the transaction (#4619) so the write path can
-    // report a write routed off it. [#22855] Through the engine's ONE unit
-    // helper, `runOpenedUnit`, the one `ObjectQL.transaction` runs its callback
-    // in, reached the same `as any` way as `txStore` itself. It closes the unit
-    // when the callback settles, so work the callback started and did not await
-    // (an `async: true` hook) no longer keeps the finished handle, neither the
-    // ambient one nor the `trxCtx` one threaded above.
-    const runIn = <R>(fn: () => Promise<R>): Promise<R> =>
-      typeof engine.runOpenedUnit === 'function' ? engine.runOpenedUnit(trx, driver, fn) : fn();
-
-    try {
-      // Reached only with no ambient transaction to join, so this call really
-      // did open one and the callback owns the outcome (#5696 / #6168).
-      const result = await runIn(() => callback(trxCtx, { owned: true }));
-      if (driver.commit) await driver.commit(trx);
-      else if (driver.commitTransaction) await driver.commitTransaction(trx);
-      return result;
-    } catch (error) {
-      if (driver.rollback) await driver.rollback(trx);
-      else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
-      // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
-      // stale-roll-up conversion included.
-      throw redactPropagatedDriverFault(rolledBackRefusal(error));
-    }
+    // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
+    return ScopedContextFacet.transaction.call(scopedContextHost.of(this), callback, opts);
   }
 
   /**
@@ -10732,6 +9982,7 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
       derive: (...a) => instance.derive(...a),
       get engine() { return instance.engine; },
       get executionContext() { return instance.executionContext; },
+      facade: instance,
       get joinedHandles() { return instance.joinedHandles; },
       releaseJoinedHandle: (...a) => instance.releaseJoinedHandle(...a),
       txDriver: (...a) => instance.txDriver(...a),

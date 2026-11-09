@@ -59,7 +59,7 @@ import { AGGREGATE_ANSWER_KIND, presentAsNumber } from '@objectstack/core';
 // [#21042] What each aggregate's operand accumulates in, the PostgreSQL
 // boolean-aggregand cast, and the one column-class predicate both read — the
 // operand rule `driver-sql`'s own `aggregate()` applies, defined once in core.
-import { aggregandColumnClass, aggregandOperandSql, type AggregandSqlDialect } from '@objectstack/core';
+import { aggregandColumnClass, aggregandOperandSql, mssqlWindow, mssqlWindowSql, type AggregandSqlDialect } from '@objectstack/core';
 import { emptyGroupValueFor, isVirtualSearchField } from '@objectstack/spec/data';
 import { explicitDateRangeWindow } from '../date-range-array-arm.js';
 
@@ -214,14 +214,13 @@ export function aggregateOfMeasure(cube: string, member: string, type: unknown):
  * this landed, the same declared skip as the `mysql` arm in
  * `text-match-sql.ts`.
  */
-const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>> = {
+const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<Exclude<AnalyticsSqlDialect, 'mssql'>, string | null>> = {
   sqlite: 'LIMIT -1',
   mysql: 'LIMIT 18446744073709551615',
   postgres: null,
   unknown: 'LIMIT 9223372036854775807',
-  // [#31394] Named for the text-match arms only; the window keeps the spelling
-  // it had while SQL Server still read as `unknown`.
-  mssql: 'LIMIT 9223372036854775807',
+  // [#31626] No `mssql` cell: SQL Server has no `LIMIT` at all, and its window
+  // is `@objectstack/core`'s `mssqlWindow` (see {@link windowClauseSql}).
 };
 
 /**
@@ -234,6 +233,16 @@ const OFFSET_ONLY_LIMIT_SQL: Readonly<Record<AnalyticsSqlDialect, string | null>
  * limit takes the dialect's no-limit spelling ({@link OFFSET_ONLY_LIMIT_SQL})
  * in front of it.
  *
+ * [#31626] SQL Server has no `LIMIT`. Its window is the one `driver-sql`'s
+ * find path runs, decided by `mssqlWindow` in `@objectstack/core` and rendered
+ * by `mssqlWindowSql` there: this clause carries the tail (`ORDER BY (SELECT
+ * NULL)` when the statement is not `ordered` and an offset applies, then
+ * `OFFSET n ROWS`, then `FETCH NEXT n ROWS ONLY`), and a lone limit is the
+ * `TOP (n)` that {@link windowTopSql} puts after `SELECT`. Before, the
+ * dialect took the `unknown` spelling, `LIMIT n`, which SQL Server does not
+ * parse — what the `/analytics/sql` echo printed for a federated SQL Server
+ * object.
+ *
  * Exported so a face that echoes a statement for the same window can render
  * it with the same bytes rather than a second spelling.
  */
@@ -241,7 +250,9 @@ export function windowClauseSql(
   limit: number | undefined,
   offset: number | undefined,
   dialect: AnalyticsSqlDialect,
+  ordered = false,
 ): string {
+  if (dialect === 'mssql') return mssqlWindowSql(mssqlWindow(limit, offset, ordered)).tail;
   let sql = '';
   if (limit != null) {
     sql += ` LIMIT ${limit}`;
@@ -251,6 +262,20 @@ export function windowClauseSql(
   }
   if (offset != null) sql += ` OFFSET ${offset}`;
   return sql;
+}
+
+/**
+ * [#31626] What a statement carries right after `SELECT` for its window:
+ * `'TOP (n) '` on SQL Server when a limit applies with no offset (see
+ * {@link windowClauseSql}), `''` on every other dialect, whose window is all
+ * in the tail.
+ */
+export function windowTopSql(
+  limit: number | undefined,
+  offset: number | undefined,
+  dialect: AnalyticsSqlDialect,
+): string {
+  return dialect === 'mssql' ? mssqlWindowSql(mssqlWindow(limit, offset, true)).top : '';
 }
 
 /**
@@ -1601,7 +1626,12 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       this.applyReadScope(join.object, alias, ctx, whereClauses, params);
     }
 
-    let sql = `SELECT ${selectClauses.join(', ')} FROM "${tableName}"`;
+    // [#21365] The dialect of the driver `execute()` hands this statement to —
+    // the base object's, the one `executeRawSql` is called with. [#25907] The
+    // order states its NULL placement in it. [#31626] SQL Server's lone limit
+    // is a `TOP (n)` after `SELECT` (`windowTopSql`).
+    const dialect = sqlDialectFor(ctx, this.extractObjectName(cube));
+    let sql = `SELECT ${windowTopSql(query.limit, query.offset, dialect)}${selectClauses.join(', ')} FROM "${tableName}"`;
     if (joins.size > 0) {
       sql += ' ' + Array.from(joins.values(), (join) => join.sql).join(' ');
     }
@@ -1611,12 +1641,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     if (groupByClauses.length > 0) {
       sql += ` GROUP BY ${groupByClauses.join(', ')}`;
     }
-    // [#21365] The dialect of the driver `execute()` hands this statement to —
-    // the base object's, the one `executeRawSql` is called with. [#25907] The
-    // order states its NULL placement in it.
-    const dialect = sqlDialectFor(ctx, this.extractObjectName(cube));
-    sql += orderClauseSql(query.order, dialect);
-    sql += windowClauseSql(query.limit, query.offset, dialect);
+    const orderSql = orderClauseSql(query.order, dialect);
+    sql += orderSql;
+    sql += windowClauseSql(query.limit, query.offset, dialect, orderSql !== '');
 
     return { sql, params };
   }

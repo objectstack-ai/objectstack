@@ -177,15 +177,15 @@ function makeManager(engine: MemoryEngine, emailService?: IEmailService): AuthMa
   } as never);
 }
 
-const signUp = (manager: AuthManager, email: string) => {
+const signUp = async (manager: AuthManager, email: string) => {
   // [#11739] default posture invite_only: fixture users beyond the first
   // enter through the invitation carve-out (see audience-gate-test-support).
-  inviteForAudienceGate(manager, email);
+  const invitationId = await inviteForAudienceGate(manager, email);
   return manager.handleRequest(
     new Request(`${AUTH}/sign-up/email`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password: PASSWORD, name: 'Change Email Subject' }),
+      body: JSON.stringify({ email, password: PASSWORD, name: 'Change Email Subject', invitationId }),
     }),
   );
 };

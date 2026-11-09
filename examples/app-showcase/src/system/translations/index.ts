@@ -232,6 +232,13 @@ export const ShowcaseTranslationBundle = {
           tax_rate: { label: 'Tax Rate (%)' },
           paid_on: { label: 'Paid On' },
           total: { label: 'Total' },
+          // Translated at birth (the multi-currency fields, ADR-0144):
+          // check-i18n-coverage ratchets this example at its untranslated count.
+          currency_code: { label: 'Currency' },
+          invoice_date: { label: 'Invoice Date' },
+          amount: { label: 'Total incl. Tax' },
+          amount_home: { label: 'Total incl. Tax (Home Currency)' },
+          amount_rate: { label: 'Exchange Rate' },
         },
         // `ui/pages/invoice-document.page.ts` `record:details` sections — the
         // invoice print page's headings.
@@ -741,6 +748,11 @@ export const ShowcaseTranslationBundle = {
           tax_rate: { label: '税率 (%)' },
           paid_on: { label: '付款日期' },
           total: { label: '合计' },
+          currency_code: { label: '币种' },
+          invoice_date: { label: '发票日期' },
+          amount: { label: '含税总额' },
+          amount_home: { label: '含税总额（本位币）' },
+          amount_rate: { label: '汇率' },
         },
         _sections: {
           invoice: { label: '发票' },

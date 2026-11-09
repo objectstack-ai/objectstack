@@ -34,7 +34,7 @@ workable default:
 | Variable | Why it must be set |
 |:---|:---|
 | `OS_DATABASE_URL` | Without it, data lands in a SQLite file under the ObjectStack home directory (`~/.objectstack`, or `<cwd>/.objectstack` next to a project config) — fine for one box, wrong for containers. Use `postgres://…`, `mysql://…`, `mongodb://…`, `libsql://…`, or a mounted `file:…` path (`postgres://…`'s driver is an **optional** package too — `npm install pg`, or the boot fails loudly rather than degrading to SQLite; `libsql://` / Turso is inferred, but its driver is an **optional** package — `npm install @objectstack/driver-turso`, or the boot fails loudly rather than degrading to SQLite; see [Drivers](/docs/data-modeling/drivers)). `mysql://…` is a supported deployment target that carries three dialect caveats — two of them integrity guarantees MySQL cannot enforce at the database — see [Drivers → MySQL dialect caveats](/docs/data-modeling/drivers#mysql-dialect-caveats) before choosing it; its driver is likewise an **optional** package — `npm install mysql2`, or the boot fails loudly rather than degrading to SQLite. `mongodb://…` is **single-tenant only**: the MongoDB driver has no row-level tenant isolation and refuses to boot unless the tenancy posture is `single` — see [Drivers → Multi-tenancy](/docs/data-modeling/drivers#multi-tenancy-not-supported). |
-| `OS_AUTH_SECRET` | Session secret for the auth plugin (`AUTH_SECRET` is the legacy alias). Without it, `os start` generates one and keeps it in `auth-secret` under the ObjectStack home directory, reused on restart: lose that file (a replaced container) and everyone is signed out. |
+| `OS_AUTH_SECRET` | Session secret for the auth plugin (`AUTH_SECRET` is the legacy alias). Without it, `os start` generates one and keeps it in `auth-secret` under the ObjectStack home directory, reused on restart: lose that file (a replaced container) and everyone is signed out. Several replicas declared over the redis cluster driver need one value set on every replica: there `os start` refuses to generate one. |
 | `OS_SECRET_KEY` | 32-byte master key encrypting every stored secret (`openssl rand -hex 32`). On a container's ephemeral filesystem the auto-minted key is **lost on restart**, making previously-encrypted secrets undecryptable. |
 | `OS_PORT` | `os start` **fails loudly** if the port is busy (it never auto-shifts like `os dev`). Pin it and keep your reverse-proxy upstream in sync. |
 
@@ -477,6 +477,24 @@ decrypt each other's secrets. All replicas must share the same
 `OS_SECRET_KEY`, `OS_AUTH_SECRET`, and database. See
 [Cluster](/docs/kernel/cluster).
 
+**`/ready` reports the cluster driver's health once replicas are declared.**
+When the deployment declares itself multi-node — `OS_EXPECT_MULTI_NODE=true` or
+`OS_CLUSTER_REPLICAS` greater than 1; `OS_CLUSTER_DRIVER` alone is not a
+declaration — and runs the redis cluster driver, `/api/v1/ready` adds a
+`cluster` entry to its 200 body. While Redis answers it reads
+`{ driver: "redis", reachable: true }` and `status` stays `"ready"`. While it
+does not, the probe still answers **200**, with `status: "degraded"` and
+`cluster: { driver: "redis", reachable: false, reason }`, where `reason` is one
+of `timeout`, `ping-failed`, `unexpected-reply` or `no-probe`; the store's
+address never appears in the body. It is not a 503 on purpose: every replica
+loses a shared Redis at the same moment, so draining on it would take every
+replica out of the load balancer while the database can still serve. Wire your
+alerting to `status: "degraded"` (or `cluster.reachable: false`) rather than to
+the status code. The check is one `PING` bounded at 500 ms and cached ~1s, like
+the data-driver check, and recovery needs no restart. A single-node deployment
+sees no change: its body and status code are exactly what they were, and its
+Redis, if any, is never probed.
+
 **Scheduled jobs' leader election has a window, not a deadline.** `cron` /
 `interval` / `once` schedules dedupe across replicas by holding a lock for
 the duration of each fire — the mutual-exclusion window is the handler's
@@ -613,12 +631,15 @@ dead end this section describes.
 
 **The recovery is out of band, and it is one row.** Write a pending invitation
 directly against the store the deployment reads, then have that person register
-through the ordinary sign-up endpoint — the invitation carve-out admits that
-one creation under every posture, so the `invite_only` default stays where it
-is. One `sys_invitation` row:
+through the ordinary sign-up endpoint, sending the row's `id` as `invitationId`
+beside the email — under `invite_only` a sign-up is admitted only by the
+invitation it presents. The invitation carve-out admits that one creation under
+every posture, so the `invite_only` default stays where it is. One
+`sys_invitation` row:
 
 | Column | Value |
 |:---|:---|
+| `id` | a long random value of your own: it is what the sign-up presents |
 | `email` | the address you intend to administer — one the directory does **not** already hold |
 | `status` | `pending` |
 | `expires_at` | any future timestamp |
@@ -699,6 +720,16 @@ a populated deployment, posting to `/api/v1/auth/sign-up/email`:
 | `invite_only` (default) | **Nothing.** A registered address and an unknown one both answer `403 SELF_REGISTRATION_CLOSED` — same body bytes, same headers. |
 | `email_domain` | **Only inside a domain you allowlisted.** Any address outside the list answers `403 EMAIL_DOMAIN_NOT_ALLOWED`, registered or not, so a caller must already hold an address on an allowlisted domain before they learn anything. |
 | `open` | **Nothing, while the mail transport is live.** A registered address gets the same answer as a new sign-up, nothing is written, and the address's holder is mailed that it already has an account. Without a live transport, or with email verification declared off and auto sign-in left on, a registered address is refused explicitly, so the answer tells a caller that the address is registered. |
+
+**Under `invite_only`, a sign-up is admitted only by the invitation it
+presents.** The sign-up sends the invitation's `id`, the last segment of its
+`/accept-invitation/` link, as `invitationId` beside the email: the Console's
+register page does this for an invitee who arrived from the link, and
+`os register --invitation` does it from a terminal. An address alone gets the
+same `403 SELF_REGISTRATION_CLOSED` as an address nobody invited. The link
+reaches the invitee in the invitation mail; on a deployment with no mail
+transport, an administrator hands it over with the invitation's **Copy Invite
+Link** action. The first account of a new deployment needs no invitation.
 
 **What decides it on `open` and `email_domain`.** A sign-up for an address that
 already has an account gets the same answer as a successful new sign-up, and

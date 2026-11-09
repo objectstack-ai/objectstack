@@ -44,11 +44,11 @@
     {
       "id": 5,
       "prompt": "Lock the `invoice` object's API down to read, list, search and export; add a `/bulk` route for imports and a `restore` operation so deleted invoices can be undeleted.",
-      "expected_output": "Authors only the primitives: `apiMethods: ['get', 'list']` — `search` and `export` derive from `list` automatically and are never declared (a declared derived verb is stripped with a warning). Explains there is no `/bulk` route (batch writes go through `POST /api/v1/data/{object}/batch`) and that `restore` / `purge` never derive: a by-id delete of a business object already keeps its rows in the recycle bin (`sys_recycle_bin`), but nothing lists or restores them over the API yet, so there is no restore operation to add and no custom soft-delete to build.",
+      "expected_output": "Authors only the primitives: `apiMethods: ['get', 'list']` — `search` and `export` derive from `list` automatically and are never declared (a declared derived verb is stripped with a warning). Explains there is no `/bulk` route (batch writes go through `POST /api/v1/data/{object}/batch`) and that `restore` is never declared either: it derives from `delete`, and a by-id delete of a business object already keeps its rows in the recycle bin (`sys_recycle_bin`). Points out the conflict: with `delete` left out, the bin's doors are closed too, so undeleting over the API needs `delete` in `apiMethods`; a caller then restores with `POST /api/v1/data/invoice/recycle-bin/:entryId/restore` (the `recycleBinEntryId` the delete answered), under `allowRestoreOwnDeleted` for its own deletes or `manageRecycleBin` for anyone's. No custom soft-delete to build.",
       "files": [],
       "assertions": {
-        "must_contain": ["apiMethods", "/batch", "sys_recycle_bin", "recycle bin"],
-        "must_not_contain": ["'search'", "'restore'"]
+        "must_contain": ["apiMethods", "/batch", "sys_recycle_bin", "recycle-bin"],
+        "must_not_contain": ["'search'", "'restore'", "nothing lists or restores"]
       }
     },
     {

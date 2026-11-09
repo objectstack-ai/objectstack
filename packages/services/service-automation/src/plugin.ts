@@ -21,7 +21,10 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import type { MetadataMutationEvent, SysMetadataEngine } from '@objectstack/metadata-protocol';
 import { SysMetadataRepository, shadowedStoredRowsOf } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
-import type { AutomationEngineOptions, FlowHistorySource, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+import type { AutomationEngineOptions, FlowHistorySource, FlowNameResolver, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+// [ADR-0150 D3] The ONE package-scoped resolver, read through its exports only
+// — never a second implementation of the rule in this package.
+import { resolvePackageScopedName } from '@objectstack/objectql';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
@@ -68,6 +71,8 @@ import {
 } from './connector-credentials.js';
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
+import { packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
+import type { PackageScopedRefusal, PackageScopedRegistry } from '@objectstack/objectql';
 import { createConnectorRequestSigner } from './request-signing/index.js';
 import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
 import {
@@ -1143,6 +1148,32 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
 }
 
 /**
+ * [ADR-0150 D3] The engine's reader over the one package-scoped resolver:
+ * `resolvePackageScopedName` from `@objectstack/objectql`, asked of the
+ * registry ObjectQL serves, for the `flow` type. See
+ * `AutomationEngine.setFlowNameResolver` for the two seams that read it.
+ *
+ * Resolved at QUESTION time, never at boot, for {@link packagedFlowReader}'s
+ * reason. A composition with no ObjectQL — or whose registry offers none of
+ * the package-scoped reads — has no registry to ask, so the answer is
+ * `undefined` and the engine's own flow map answers as before: no item is
+ * named that the engine does not hold, and nothing is guessed.
+ */
+export function flowNameResolver(ctx: Pick<PluginContext, 'getService'>): FlowNameResolver {
+    return (name, callerPackageId) => {
+        let registry: PackageScopedRegistry | undefined;
+        try {
+            // The same slice reader the connector reconcile asks (E5's `packageScopedRegistryOf`).
+            registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
+        } catch {
+            return undefined;
+        }
+        if (!registry) return undefined;
+        return resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId });
+    };
+}
+
+/**
  * [#28405, ADR-0009 §2.1] The engine's reader of a flow's stored versions by
  * content identity: the metadata repository's `getByHash` over
  * `sys_metadata_history`, which history GC never prunes for an
@@ -1727,6 +1758,7 @@ export class AutomationServicePlugin implements Plugin {
             set: (request) => this.setConnectorCredential(ctx, request),
             clear: (request) => this.clearConnectorCredential(ctx, request),
             attachClusterPubSub: (pubsub, nodeId) => this.attachCredentialClusterPubSub(ctx, pubsub, nodeId),
+            resyncFromCluster: () => this.resyncCredentialClusterPubSub(ctx),
         });
 
         // [ADR-0015 D7] The connector credential source: a datasource that
@@ -1760,6 +1792,11 @@ export class AutomationServicePlugin implements Plugin {
         // its locked-base verdict reads — never the stamps on a definition.
         // See `packagedFlowReader`.
         this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
+
+        // [ADR-0150 D3] Which item a bare flow name means, for a caller of a
+        // package or of none, is the one package-scoped resolver's answer over
+        // the ObjectQL registry, read at question time. See `flowNameResolver`.
+        this.engine.setFlowNameResolver(flowNameResolver(ctx));
 
         // [#28405] A waiting run resumes on the flow body it started on, read
         // back from the metadata history once the flow was republished. See
@@ -2587,6 +2624,31 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
+     * [ADR-0150 D3] The refusal of every enabled provider-bound declared
+     * connector name that resolves to no single holder, read over the ObjectQL
+     * registry ({@link refusedConnectorNames}). A composition with no registry
+     * has no package coordinate to resolve against, and refuses nothing here.
+     */
+    private refusedDeclaredConnectorNames(ctx: PluginContext, declared: readonly unknown[]): Map<string, PackageScopedRefusal> {
+        let registry: PackageScopedRegistry | undefined;
+        try {
+            registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
+        } catch {
+            registry = undefined; // no registry service
+        }
+        if (!registry) return new Map();
+        const names: string[] = [];
+        for (const raw of declared) {
+            const entry = raw as DeclaredConnectorItem;
+            if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
+            if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
+            if (entry.enabled === false) continue;
+            names.push(entry.name);
+        }
+        return refusedConnectorNames(registry, names);
+    }
+
+    /**
      * [#28534] The readers {@link nonHostDeclaringPackageOf} judges a
      * connector entry's origin with, off the `objectql` engine the declared
      * items are listed out of ({@link readDeclaredConnectorItems}): its package
@@ -2893,6 +2955,16 @@ export class AutomationServicePlugin implements Plugin {
             ctx.logger.error(msg, undefined, cause === undefined ? undefined : describeThrownForLog(cause));
         };
 
+        // [ADR-0150 D3, epic #31527 child E5] A declared name that resolves to
+        // no single holder (two packages declare it) is refused, naming every
+        // candidate, and never materialized: no instance is picked by list
+        // order ({@link refusedConnectorNames}).
+        const refusedNames = this.refusedDeclaredConnectorNames(ctx, declared);
+        for (const [name, refusal] of refusedNames) {
+            const stored = declared.some((raw) => (raw as DeclaredConnectorItem)?.name === name && storedEntry(raw));
+            fail(`[Automation] connector instance '${name}' is not materialized: ${refusal.message}`, undefined, stored);
+        }
+
         // Build the desired set: enabled provider-bound instances, keyed by name.
         // A descriptor (no `provider`) or an `enabled: false` instance is not
         // desired — if we materialized it before, it is torn down below.
@@ -2903,6 +2975,7 @@ export class AutomationServicePlugin implements Plugin {
             if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
             const bound = entry as DeclaredConnectorItem & { name: string; provider: string };
             if (bound.enabled === false) continue;
+            if (refusedNames.has(bound.name)) continue;
             // [#28713] Held until every plugin has started ({@link holdStoredEntries}).
             if (this.holdStoredEntries && storedEntry(bound)) {
                 this.storedEntriesHeld = true;
@@ -4763,6 +4836,22 @@ export class AutomationServicePlugin implements Plugin {
         );
         this.credentialCluster = { pubsub, nodeId, unsubscribe };
         return () => this.detachCredentialClusterPubSub();
+    }
+
+    /**
+     * The `cluster.resync` answer for the credential lane: the reconcile a
+     * peer's signal runs, once, because which references changed during the
+     * outage is what the lost signals carried. A no-op until a transport is
+     * attached. A failure is the caller's to log (the bridge does).
+     */
+    private async resyncCredentialClusterPubSub(ctx: PluginContext): Promise<void> {
+        const cluster = this.credentialCluster;
+        if (!cluster) return;
+        ctx.logger.info(
+            `[Automation] the cluster connection returned after an outage; reconciling the connectors on node '${cluster.nodeId}' `
+                + 'in case a peer wrote a connector credential meanwhile.',
+        );
+        await this.materializeDeclaredConnectors(ctx, { fatal: false });
     }
 
     /** [#27428] Tear down the credential cluster wiring. Safe to call multiple times. */

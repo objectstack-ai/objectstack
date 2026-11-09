@@ -444,6 +444,11 @@ const ru = {
     currencyHome: {
       convertedAt: 'Пересчитано по курсу {{rate}} на {{date}}',
       homeCurrency: 'В базовой валюте (курс 1)',
+      preview: '≈ {{amount}} по курсу {{rate}} на {{date}}',
+      previewSame: '≈ {{amount}} (основная валюта)',
+      awaitingRate: 'Нет курса {{currency}} на {{date}} или ранее: сохранение невозможно, пока курс не добавлен',
+      awaitingDate: 'Укажите дату документа, чтобы увидеть сумму в основной валюте',
+      rateUnreadable: 'Будет пересчитано в основную валюту при сохранении',
     },
     boolean: {
       offBadge: "{{label}} — Выкл.",

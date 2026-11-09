@@ -31,20 +31,19 @@ export const CaseViews = defineView({
 ```
 
 > **Never export a bare flat view object** (`{ name, label, type, columns }`
-> at top level): nothing registers and no view appears in the switcher. Every
-> view lives under `list` / `form` / `listViews` / `formViews`, as above.
+> at top level): nothing registers and no view appears in the switcher.
 
 ### Data Source (`data`)
 
-Every view connects to data via one of two providers:
+Bare-key blocks in this file are fragments, so `check:skill-examples` skips
+them. Every view connects to data via one of two providers:
 
 ```typescript
 data: { provider: 'object', object: 'support_case' }
 data: { provider: 'value', items: [...] }
 ```
 
-> Use `provider: 'object'` for an ObjectStack-managed object (CRUD, live
-> updates, filtering, pagination). A view never calls an API: an API read is a
+> Use `provider: 'object'` for an ObjectStack-managed object. A view never calls an API: an API read is a
 > page element's `dataSource` binding.
 
 ### Columns
@@ -137,7 +136,7 @@ Rules:
 - Every `field` MUST exist on the source object — reference diagnostics
   (`_diagnostics`) flag unknown fields; treat `valid: false` as a failed write.
 - **A list view has no `tabs` key** — it was removed (a parse error that
-  names the fix): nothing ever drew it. Each named preset is a `listViews`
+  names the fix). Each named preset is a `listViews`
   entry, rendered as a tab in the object's saved-view switcher.
 - **On an object list view (`*.view.ts` `list` / `listViews`), only
   `element: 'dropdown'` (value chips) is allowed — `tabs` is page-only**
@@ -145,7 +144,7 @@ Rules:
   `ObjectUserFiltersSchema` **rejects** `tabs` at parse (not dropped) and the
   `validate` list-view-mode lint reports it. The full
   `dropdown | tabs | toggle` range applies only to **page lists** /
-  `interfaceConfig.userFilters` (the block above).
+  `interfaceConfig.userFilters`.
 - **Omit `userFilters` when unsure — omission means a clean toolbar.** Nothing
   is auto-derived.
 - `userFilters: { element: 'dropdown' }` (no `fields`) is valid shorthand:
@@ -183,7 +182,7 @@ export const CaseViews = defineView({
 | declares `searchableFields` | **that list, verbatim** — any stored field type |
 | declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select`) + every field marked `searchable: true`, of any type except `secret` / `password` / `vector` or a virtual `formula` |
 
-`searchable: false`, the default, removes nothing the type default scans; declare `searchableFields` to choose the set.
+`searchable: false`, the default, removes nothing the type default scans.
 
 Modelling side: **objectstack-data → Search Fields**. Query side
 (`search.fields` over the API): **objectstack-query → Full-Text Search**.
@@ -256,19 +255,22 @@ grouping: { fields: [
 Board settings nest under `kanban:` (`KanbanConfigSchema`) — there is **no
 top-level `groupBy`**; the top-level `columns` stays required.
 
+<!-- os:check -->
 ```typescript
-{
+import type { ListView } from '@objectstack/spec/ui';
+
+const board: ListView = {
   type: 'kanban',
   data: { provider: 'object', object: 'project_task' },
   columns: ['title', 'assignee', 'priority'],
   kanban: {
     groupByField: 'status',                // a select field — one lane per option
-    lanes: ['todo', 'in_progress', 'review'],   // option VALUES to draw, in this order
+    lanes: ['todo', 'in_progress', 'review'],
     summarizeField: 'estimate_hours',      // optional — summed at the top of each column
     columns: ['title', 'assignee', 'priority'],   // fields shown on each card
   },
   sort: [{ field: 'priority', order: 'desc' }],
-}
+};
 ```
 
 > `lanes` chooses the lanes and their order, not the records: a record whose
@@ -290,8 +292,8 @@ says to convert or replace THAT view.
 **A board over a field added in the same change opens empty.** Adding a field
 writes nothing into existing rows, so when `kanban.groupByField` is a `select`
 created in this change every pre-existing record lands in the trailing
-`Uncategorized` lane: one empty lane per option, the populated lane last —
-past the right edge of a narrow screen — under a non-zero record count. That
+`Uncategorized` lane: one empty lane per option, the populated lane last,
+under a non-zero record count. That
 is the renderer's correct fallback, not lost data, and the hand-over says so
 instead of "the board is ready": (a) the existing records are all in the last
 `Uncategorized` lane, scroll right; (b) dragging a card out of it onto a real
@@ -309,8 +311,11 @@ just-added field.
 Timeline settings nest under `gantt:` (`GanttConfigSchema`);
 `startDateField` / `endDateField` / `titleField` are required in it.
 
+<!-- os:check -->
 ```typescript
-{
+import type { ListView } from '@objectstack/spec/ui';
+
+const timeline: ListView = {
   type: 'gantt',
   data: { provider: 'object', object: 'project_task' },
   columns: ['name', 'assigned_to', 'status'],   // left-pane tree columns
@@ -322,7 +327,7 @@ Timeline settings nest under `gantt:` (`GanttConfigSchema`);
     dependenciesField: 'depends_on',            // FS dependency arrows
     parentField: 'parent',                      // builds the summary-bar tree
   },
-}
+};
 ```
 
 Rows with children (or `type: 'summary'`) are **summary bars**: dragged as a

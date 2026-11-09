@@ -27,6 +27,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import { MetadataClusterBridgePlugin } from './metadata-cluster-bridge-plugin.js';
+import { ClusterDriverLiveness, offerClusterDriverLiveness } from './cluster-resync.js';
 
 interface HarnessOptions {
     /**
@@ -516,5 +517,78 @@ describe('[#27428] lane 4 — the automation service’s connector-credential.mu
         // Idempotent: a second shutdown does not detach twice.
         await h.fire('kernel:shutdown');
         expect(h.detachCredential).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('cluster.resync — every attached lane re-reads what an outage made it miss', () => {
+    /** The harness, with lanes 1, 3 and 4 attached and a driver liveness offered on its cluster. */
+    function resyncHarness(opts: { driver?: string; laneThrows?: boolean } = {}) {
+        const h = makeHarness({
+            driver: opts.driver ?? 'redis', metadata: 'manager', protocol: 'real',
+            datasourceAdmin: 'real', automation: 'real',
+        });
+        const svc = (name: string) => h.ctx.getService<Record<string, unknown>>(name);
+        const resyncMetadata = vi.fn();
+        const resyncDatasource = vi.fn(async () => {
+            if (opts.laneThrows) throw new Error('datasource store unreachable');
+        });
+        const resyncCredential = vi.fn(async () => {});
+        Object.assign(svc('metadata'), { resyncClusterPubSub: resyncMetadata });
+        Object.assign(svc('datasource-admin'), { resyncDatasourceMutationPubSub: resyncDatasource });
+        Object.assign(svc('automation'), { resyncConnectorCredentialPubSub: resyncCredential });
+        const liveness = new ClusterDriverLiveness({ driver: 'redis', nodeId: 'node-a', logger: { warn: vi.fn(), info: vi.fn() } });
+        offerClusterDriverLiveness(svc('cluster'), liveness);
+        const outage = async () => {
+            liveness.reportUp('command');
+            liveness.reportDown('command', new Error('ECONNREFUSED'));
+            liveness.reportUp('command');
+            await new Promise((r) => setTimeout(r, 0));
+        };
+        return { ...h, outage, resyncMetadata, resyncDatasource, resyncCredential };
+    }
+
+    it('calls each attached lane’s resync seam once per recovered outage', async () => {
+        const h = resyncHarness();
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        expect(h.resyncMetadata).not.toHaveBeenCalled();
+
+        await h.outage();
+        expect(h.resyncMetadata).toHaveBeenCalledTimes(1);
+        expect(h.resyncDatasource).toHaveBeenCalledTimes(1);
+        expect(h.resyncCredential).toHaveBeenCalledTimes(1);
+        expect(infoLines(h).some((l) => l.includes('resynced metadata.changed, datasource.mutated, connector-credential.mutated'))).toBe(true);
+
+        await h.outage();
+        expect(h.resyncMetadata).toHaveBeenCalledTimes(2);
+    });
+
+    it('one lane failing is a warning and does not stop the others', async () => {
+        const h = resyncHarness({ laneThrows: true });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.outage();
+        expect(h.resyncMetadata).toHaveBeenCalledTimes(1);
+        expect(h.resyncCredential).toHaveBeenCalledTimes(1);
+        expect(warnLines(h).filter((l) => l.includes('datasource.mutated resync after'))).toHaveLength(1);
+    });
+
+    it('after kernel:shutdown a later reconnect calls nothing', async () => {
+        const h = resyncHarness();
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:shutdown');
+        await h.outage();
+        expect(h.resyncMetadata).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — the in-process memory driver attaches no lane, so no resync is wired', async () => {
+        const h = resyncHarness({ driver: 'memory' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.outage();
+        expect(h.resyncMetadata).not.toHaveBeenCalled();
+        expect(h.resyncDatasource).not.toHaveBeenCalled();
+        expect(h.resyncCredential).not.toHaveBeenCalled();
     });
 });

@@ -6272,6 +6272,98 @@
           "ref": "#27438"
         }
       ]
+    },
+    {
+      "id": "records-forms.multi-currency-invoice",
+      "title": "A multi-currency invoice stores its home-currency amount at the rate in force on its document date, refuses a date no rate covers, and keeps a currency-less amount blank",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner; the only persona that may read Setup → Exchange Rates"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot whose home currency is USD. `os dev` / `os serve` / `os start` read examples/app-showcase/.env, which pins OS_LOCALIZATION_CURRENCY=USD; an in-process harness must set that variable itself (packages/qa/dogfood/test/showcase-boot.ts#bootShowcase does). Read the value back first with GET /api/settings/localization and confirm currency is USD before any clause",
+          "the stock seed's exchange rates (examples/app-showcase/src/data/seed/index.ts#exchangeRates): EUR 0.92 from 2025-01-01 and 0.9 from 30 days before the boot, JPY 151.5 from 2025-01-01 and 149.25 from 30 days before the boot, all source manual. No JPY or EUR rate exists before 2025-01-01, which is what the steps[3] refusal probe relies on",
+          "the stock seed's invoices carry a currency_code: INV-1004 / INV-1009 / INV-1010 are EUR, INV-1007 / INV-1008 are JPY (INV-1008 has two yen-priced lines), the rest USD",
+          "the console bundle for the browser legs (pnpm console:build)"
+        ],
+        "knownGaps": [
+          "invoice lines and the Subtotal (`total`) roll-up stay dynamic-mode currency: a child amount cannot take its parent's record currency, and a summary over a record-mode child amount is refused (packages/objectql/src/record-currency-aggregate-door.ts#RecordCurrencySummaryRefusedError). On a EUR or JPY invoice those two show the home currency's symbol while `amount` shows the record's own. That is the platform's current shape, not a failure of this item",
+          "a host with no .env reader and no other currency source has no home currency, so every coded seed invoice is refused ERR_HOME_CURRENCY_UNSET and dropped by the seeder with a warning: the invoice list is empty. That is a fixture failure (requires[0]), scored blocked(fixture), never a FAIL of these clauses"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/data/showcase_invoice?filter currency_code in EUR, JPY and read amount, currency_code, invoice_date, amount_home and amount_rate on each; GET /api/v1/data/sys_exchange_rate for the rows those dates select",
+        "POST a showcase_invoice with no currency_code (name, account, status draft) and read it back",
+        "PATCH a USD draft invoice's currency_code to EUR and read amount_home / amount_rate again",
+        "POST a showcase_invoice with currency_code JPY and invoice_date 2024-06-01 (before any JPY rate)",
+        "in the console, open a EUR invoice's detail page, then its edit form, and change currency_code and invoice_date on the form without saving"
+      ],
+      "acceptance": [
+        {
+          "clause": "a foreign-currency invoice stores `amount_rate` = the sys_exchange_rate row for its currency with the greatest effective_date on or before its invoice_date, and `amount_home` = amount ÷ that rate rounded to the home currency's 2 decimals",
+          "oracle": "api",
+          "verify": "for each EUR and JPY seed invoice, pick the governing rate row by hand from the steps[0] rate read and recompute amount ÷ rate; both stored fields must match. A rate taken from a later row, or a home amount computed as amount × rate, is a FAIL",
+          "evidence": "the invoice and rate reads, and the hand computation per invoice"
+        },
+        {
+          "clause": "a home-currency invoice stores rate 1 and amount_home = amount",
+          "oracle": "api",
+          "verify": "the USD seed invoices with a non-blank amount read amount_rate 1 and amount_home equal to amount",
+          "evidence": "the reads"
+        },
+        {
+          "clause": "an invoice with no currency_code is accepted and keeps amount, amount_home and amount_rate blank (a record-mode amount with no currency is not projected)",
+          "oracle": "api",
+          "verify": "the steps[1] POST answers 201 and its read-back has all three null",
+          "evidence": "the response and the read"
+        },
+        {
+          "clause": "changing currency_code re-projects: after the steps[2] PATCH the invoice carries the EUR rate in force on its invoice_date and the matching amount_home",
+          "oracle": "api",
+          "verify": "before and after reads of the same id; the after values match the clause-0 computation for EUR",
+          "evidence": "the two reads"
+        },
+        {
+          "clause": "a foreign invoice dated before any rate for its currency is refused ERR_EXCHANGE_RATE_MISSING, naming the currency and the date, and no row is written",
+          "oracle": "api",
+          "verify": "the steps[3] POST answers 400 with code ERR_EXCHANGE_RATE_MISSING (packages/objectql/src/home-amount-projection.ts#EXCHANGE_RATE_MISSING_CODE) and a message naming JPY and 2024-06-01; a follow-up list by that name returns nothing",
+          "evidence": "the response body and the empty list"
+        },
+        {
+          "clause": "the console shows the home amount read-only with its 'Converted at RATE on DATE' hint on a EUR invoice, and the edit form shows the live '≈ AMOUNT at RATE on DATE' preview, which follows a changed currency or date before save",
+          "oracle": "screenshot",
+          "verify": "screenshots at deviceScaleFactor 2 of the detail page and of the form before and after the steps[4] edits (ui/packages/fields/src/widgets/homeAmountPreview.tsx#HomeAmountPreview draws the preview)",
+          "evidence": "the screenshots"
+        }
+      ],
+      "negative": [
+        "a foreign invoice stored at rate 1, at a rate dated after its invoice_date, or with amount_home computed by multiplication is a FAIL; so is a currency-less invoice refused, or one stored with a home amount; so is a missing-rate write that stores a row"
+      ],
+      "traps": [
+        "seed-data-thin",
+        "clock-skew"
+      ],
+      "source": [
+        "docs/adr/0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md (record currency, home amount, rate direction)",
+        "packages/objectql/src/home-amount-projection.ts#HOME_CURRENCY_UNSET_CODE",
+        "examples/app-showcase/src/data/objects/invoice.object.ts (currency_code, invoice_date, amount, amount_home, amount_rate)",
+        "examples/app-showcase/src/automation/flows/exchange-rate-sync.flow.ts (the rates-feed template, shipped switched off)",
+        "#27197"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-09",
+          "change": "initial: the showcase invoice became the multi-currency example (#27197); verified live in the same PR, clause table in its body",
+          "ref": "#31757"
+        }
+      ]
     }
   ]
 }
