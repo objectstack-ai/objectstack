@@ -1001,7 +1001,7 @@ export class CloudConnectionPlugin implements Plugin {
                 if (!environmentId && !this.cfg.singleEnvironment) {
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
-                const serve = async (full: Parameters<typeof servedStatus>[2]) =>
+                const serve = async (full: Parameters<typeof servedStatus>[3]) =>
                     c.json({ success: true, data: await servedStatus(environmentId, c.req.raw, transportPeerAddressOf(c), full) });
                 // A single-env runtime with no env id and no credential is
                 // simply not bound yet — valid state, not an error.
@@ -1014,7 +1014,7 @@ export class CloudConnectionPlugin implements Plugin {
                 if (cloudUrl) {
                     // Built inside the `try`, served outside it: the fetch's
                     // fall-through must never swallow a fault of `servedStatus`.
-                    let fromControlPlane: Parameters<typeof servedStatus>[2] | undefined;
+                    let fromControlPlane: Parameters<typeof servedStatus>[3] | undefined;
                     try {
                         const qs = environmentId
                             ? `?environment_id=${encodeURIComponent(environmentId)}`
