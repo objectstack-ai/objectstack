@@ -121,8 +121,25 @@ const SUITE_APP = { id: 'com.acme.suite', name: 'Suite', version: '2.0.0', type:
 const SUITE_MEMBER = { id: 'com.acme.suite-crm', name: 'Suite CRM', version: '2.0.0', type: 'module', namespace: 'suitecrm', dependencies: { [SUITE_APP.id]: '^2' } };
 const SUITE_PAIR = 'com.acme.suite.custom';
 const SUITE_FLOW = 'suite_lead_route';
+/**
+ * A writable package that declares the App but not the member: not the
+ * member's pair, and outside its closure (the App does not declare its
+ * members) — an explicit target that stays refused.
+ */
+const SUITE_EXT = { id: 'com.acme.suite-ext', name: 'Suite Ext', version: '1.0.0', type: 'module', namespace: 'suiteext', dependencies: { [SUITE_APP.id]: '^2' } };
+/** A read-only package that belongs to no App (its own unit), shipping {@link SOLO_FLOW}. */
+const SOLO = { id: 'com.acme.solo', name: 'Solo', version: '1.0.0', type: 'module', namespace: 'solo' };
+const SOLO_FLOW = 'solo_digest';
 
-async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud'; clusterDriver?: string; appMember?: boolean; legacyMemberPair?: boolean } = {}) {
+async function boot(options: {
+    parse?: boolean; baseScope?: 'system' | 'cloud'; clusterDriver?: string; appMember?: boolean; legacyMemberPair?: boolean;
+    /** Installs {@link SUITE_EXT} (needs `appMember`). */
+    suiteExt?: boolean;
+    /** Installs the App's pair with a manifest that dropped its dependency on the App (needs `appMember`). */
+    pairWithoutApp?: boolean;
+    /** Installs {@link SOLO}, shipping {@link SOLO_FLOW}. */
+    solo?: boolean;
+} = {}) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -155,6 +172,16 @@ async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud'; 
             engine.registry.installPackage({ id: `${SUITE_MEMBER.id}.custom`, name: 'Legacy pair', version: '2.0.0', type: 'module', namespace: 'suitecrm_custom', dependencies: { [SUITE_MEMBER.id]: '^2' } } as any, 'authored');
         }
         engine.registry.registerItem('flow', suiteShipped as any, 'name' as any, SUITE_MEMBER.id);
+        if (options.suiteExt) engine.registry.installPackage(SUITE_EXT as any, 'code');
+        if (options.pairWithoutApp) {
+            engine.registry.installPackage({ id: SUITE_PAIR, name: 'Suite customizations', version: '2.0.0', type: 'module', namespace: 'suite_custom' } as any, 'authored');
+        }
+    }
+    const soloShipped = { ...flowOf(SOLO_FLOW), _packageId: SOLO.id, _packageVersion: SOLO.version, _provenance: 'package' };
+    if (options.solo) {
+        engine.registry.installPackage(SOLO as any, 'code');
+        (engine as unknown as { manifests: Map<string, unknown> }).manifests.set(SOLO.id, SOLO);
+        engine.registry.registerItem('flow', soloShipped as any, 'name' as any, SOLO.id);
     }
 
     const published: unknown[] = [];
@@ -163,7 +190,7 @@ async function boot(options: { parse?: boolean; baseScope?: 'system' | 'cloud'; 
     ]);
     const protocol = new ObjectStackProtocolImplementation(engine as any, () => services);
 
-    const flows = new Map<string, any>([[SOURCE, shipped], [LOCAL, flowOf(LOCAL)], ...(options.appMember ? [[SUITE_FLOW, suiteShipped] as [string, any]] : [])]);
+    const flows = new Map<string, any>([[SOURCE, shipped], [LOCAL, flowOf(LOCAL)], ...(options.appMember ? [[SUITE_FLOW, suiteShipped] as [string, any]] : []), ...(options.solo ? [[SOLO_FLOW, soloShipped] as [string, any]] : [])]);
     const registerFlow = vi.fn((name: string, definition: unknown) => {
         if (options.parse) FlowSchema.parse(definition);
         flows.set(name, definition);
@@ -611,7 +638,7 @@ describe('[cloud#3814 D1] declared replicas on the Redis driver: the pair probed
         expect(rig.published).toEqual([]);
     }, 60_000);
 
-    it('a member whose App\'s pair this replica already serves is not refused by this card: the door answers as on a single node, and nothing is created', async () => {
+    it('a member whose App\'s pair this replica already serves is not refused: 200 into the App\'s pair, as on a single node, and nothing is created', async () => {
         // The App's pair, ensured on a single node.
         const single = await boot({ clusterDriver: 'redis', appMember: true });
         await single.protocol.ensureCustomizationPackage({ basePackageId: SUITE_MEMBER.id });
@@ -624,12 +651,102 @@ describe('[cloud#3814 D1] declared replicas on the Redis driver: the pair probed
 
         const answer = await rig.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)' });
 
-        // Not this card's refusal: the same answer a single node gives (today
-        // the door's own closure refusal — the App's pair declares the App,
-        // not the member; outside this card).
-        expect(answer.code, JSON.stringify(answer.body)).not.toBe(MULTI_REPLICA_PACKAGE_CHANGE_REFUSED);
-        expect({ status: answer.status, code: answer.code }).toEqual({ status: singleAnswer.status, code: singleAnswer.code });
+        // The App's pair is the member's pair, and the target rule reads the
+        // save gate's closure, which holds the member: the copy lands, on
+        // both topologies.
+        expect(singleAnswer.status, JSON.stringify(singleAnswer.body)).toBe(200);
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(SUITE_PAIR);
         expect(rig.published.length).toBe(pairsBefore);
         expect(rig.installed().filter((id) => id === SUITE_PAIR)).toHaveLength(1);
+    }, 60_000);
+});
+
+describe('an App member\'s flow lands in its App\'s pair — the target rule reads the save gate\'s closure', () => {
+    it('default landing, single node, no pair yet: 200 into the App\'s pair, created by the ensure, the row bound there', async () => {
+        const rig = await boot({ appMember: true });
+        expect(rig.installed()).not.toContain(SUITE_PAIR);
+
+        const answer = await rig.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(SUITE_PAIR);
+        expect(rig.installed()).toContain(SUITE_PAIR);
+        expect((await rig.rows('acme_suite_route')).map((r) => r.package_id)).toEqual([SUITE_PAIR]);
+    }, 60_000);
+
+    it('default landing, the App\'s pair already installed: 200 into it, and no package is created', async () => {
+        const rig = await boot({ appMember: true });
+        await rig.protocol.ensureCustomizationPackage({ basePackageId: SUITE_MEMBER.id });
+        const before = rig.installed();
+
+        const answer = await rig.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(SUITE_PAIR);
+        expect(rig.installed()).toEqual(before);
+    }, 60_000);
+
+    it('default landing while the member\'s legacy per-package pair is installed: the copy lands in the App\'s pair (where the ensure lands it)', async () => {
+        const rig = await boot({ appMember: true, legacyMemberPair: true });
+
+        const answer = await rig.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(SUITE_PAIR);
+        expect((await rig.rows('acme_suite_route')).map((r) => r.package_id)).toEqual([SUITE_PAIR]);
+    }, 60_000);
+
+    it('an explicit `package` naming the App\'s pair lands there', async () => {
+        const rig = await boot({ appMember: true });
+        await rig.protocol.ensureCustomizationPackage({ basePackageId: SUITE_MEMBER.id });
+
+        const answer = await rig.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)', package: SUITE_PAIR });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(SUITE_PAIR);
+        expect((await rig.rows('acme_suite_route')).map((r) => r.package_id)).toEqual([SUITE_PAIR]);
+    }, 60_000);
+
+    it('CONTROL — an explicit writable package that declares the App but is not the member\'s pair stays refused 409 outside the closure, and nothing is created', async () => {
+        const rig = await boot({ appMember: true, suiteExt: true });
+        const before = rig.installed();
+
+        const answer = await rig.clone(SUITE_FLOW, { name: 'ext_suite_route', label: 'Suite route (ext)', package: SUITE_EXT.id });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(409);
+        expect(answer.code).toBe('RESOURCE_CONFLICT');
+        expect(String(answer.body?.error?.message)).toContain('[new_similar_target_outside_closure]');
+        expect(answer.body.error.details?.packageId).toBe(SUITE_EXT.id);
+        expect(rig.registerFlow).not.toHaveBeenCalled();
+        expect(await rig.rows('ext_suite_route')).toEqual([]);
+        expect(rig.installed()).toEqual(before);
+    }, 60_000);
+
+    it('judged before created — an installed App pair that dropped its App dependency is refused 409 outside the closure before the ensure is asked, and nothing is created', async () => {
+        const rig = await boot({ appMember: true, pairWithoutApp: true });
+        const before = rig.installed();
+        const ensure = vi.spyOn(rig.protocol, 'ensureCustomizationPackage');
+
+        const answer = await rig.clone(SUITE_FLOW, { name: 'acme_suite_route', label: 'Suite route (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(409);
+        expect(answer.code).toBe('RESOURCE_CONFLICT');
+        expect(String(answer.body?.error?.message)).toContain('[new_similar_target_outside_closure]');
+        expect(ensure).not.toHaveBeenCalled();
+        expect(rig.published).toEqual([]);
+        expect(await rig.rows('acme_suite_route')).toEqual([]);
+        expect(rig.flows.has('acme_suite_route')).toBe(false);
+        expect(rig.installed()).toEqual(before);
+    }, 60_000);
+
+    it('CONTROL — a standalone package\'s flow (no App) lands in its own pair, as before', async () => {
+        const rig = await boot({ solo: true });
+
+        const answer = await rig.clone(SOLO_FLOW, { name: 'solo_digest_copy', label: 'Digest copy' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(`${SOLO.id}.custom`);
+        expect((await rig.rows('solo_digest_copy')).map((r) => r.package_id)).toEqual([`${SOLO.id}.custom`]);
     }, 60_000);
 });
