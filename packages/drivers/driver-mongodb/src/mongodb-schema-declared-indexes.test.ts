@@ -243,12 +243,19 @@ describe('the field-level lookup arm, on a lane that actually runs', () => {
  *
  * `preexisting` seeds the collection as an earlier release left it.
  */
-function indexKeepingDb(preexisting: Array<{ name: string; key: Record<string, unknown> }> = []) {
+function indexKeepingDb(preexisting: Array<{ name: string; key: Record<string, unknown>; options?: Record<string, unknown> }> = []) {
   const asked: CreatedIndex[] = [];
   const built: string[] = [];
   const live = new Map<string, { key: Record<string, unknown>; options: Record<string, unknown> }>();
-  for (const p of preexisting) live.set(p.name, { key: p.key, options: { name: p.name } });
+  for (const p of preexisting) live.set(p.name, { key: p.key, options: { ...p.options, name: p.name } });
+  // Key ORDER matters inside an index key and nowhere else, so options compare
+  // with sorted keys and index keys compare as written.
+  const sorted = (v: unknown): unknown =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, sorted(x)]))
+      : v;
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const sameOptions = (a: unknown, b: unknown) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
   const conflict = (code: number, codeName: string) => Object.assign(new Error(codeName), { code, codeName });
   const db = {
     listCollections: () => ({ toArray: async () => [{ name: 'existing' }] }),
@@ -259,11 +266,11 @@ function indexKeepingDb(preexisting: Array<{ name: string; key: Record<string, u
         const name = options.name as string;
         const existing = live.get(name);
         if (existing) {
-          if (same(existing.key, key) && same(existing.options, options)) return name;
+          if (same(existing.key, key) && sameOptions(existing.options, options)) return name;
           throw conflict(86, 'IndexKeySpecsConflict');
         }
         for (const other of live.values()) {
-          if (same(other.key, key) && same(other.options.partialFilterExpression, options.partialFilterExpression)) {
+          if (same(other.key, key) && sameOptions(other.options.partialFilterExpression, options.partialFilterExpression)) {
             throw conflict(85, 'IndexOptionsConflict');
           }
         }
@@ -302,7 +309,7 @@ const timeEntry = (extra: { indexes?: Array<{ name?: string; fields?: string[]; 
 
 /** What main's sync builds for {@link timeEntry} with no declared indexes. */
 const MAIN_BUILT = [
-  { name: 'idx_id_unique', key: { id: 1 } },
+  { name: 'idx_id_unique', key: { id: 1 }, options: { unique: true } },
   { name: 'idx_created_at', key: { created_at: 1 } },
   { name: 'idx_updated_at', key: { updated_at: 1 } },
   { name: 'idx_task_lookup', key: { task: 1 } },
