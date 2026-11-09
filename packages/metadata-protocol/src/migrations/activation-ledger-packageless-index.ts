@@ -38,12 +38,22 @@
  *   is the same digest the driver's own hash shadows use for TEXT keys
  *   (`unhex(sha2(concat(…, 0x1f, …), 256))`), and it is NULL for a packaged
  *   row, which UNIQUE then exempts.
- * - MariaDB has neither partial indexes nor functional key parts, and answers
- *   the MySQL form with a syntax error: `unsupported`, reported at `error`.
- *   On a database an earlier release built, the old `(metadata_type, name)`
- *   index keeps guarding, because `driver-sql`'s widening arm offers to retire
- *   it only once this index exists (`widenedUniqueReplacements`); a database
- *   created at this release has no such guard there.
+ * - MariaDB has neither partial indexes nor functional key parts (it answers
+ *   both with a syntax error, measured on 11.8), so the index keys an INVISIBLE
+ *   generated column that carries the same digest, NULL for a packaged row:
+ *   `uniq_sys_metadata_activation_packageless__hash`, `VIRTUAL INVISIBLE`
+ *   (MariaDB 10.3+). INVISIBLE keeps it out of `SELECT *`, so no read sees it.
+ *   The `__hash` suffix is `driver-sql`'s hash-shadow naming
+ *   (`hashShadowColumnFor`), which is what makes the drift differ treat the
+ *   column as driver-owned and read the index as a partial unique on
+ *   `(metadata_type, name)` (`parseHashShadowRowScope`): never an orphan, and
+ *   the guard its widening arm asks for before it retires the old key.
+ *   MariaDB is told apart from MySQL by `SELECT VERSION()`; a version that
+ *   cannot be read takes the MySQL form. MariaDB before 10.3 refuses
+ *   `INVISIBLE` and reports `unsupported`, and there the old
+ *   `(metadata_type, name)` index keeps guarding, because the widening arm
+ *   offers to retire it only once this index exists
+ *   (`widenedUniqueReplacements`).
  * - SQL Server is federation-only (ADR-0015 §4.6): ObjectStack creates no table
  *   there, so no ledger lives there.
  * - `driver-memory` is no SQL host (`no-driver`): single-process and never
@@ -78,7 +88,7 @@ import {
     type IndexMigrationLogger,
     type PartialIndexStatus,
 } from './partial-index-probe.js';
-import { catalogFamilyOf, readTablePresence } from './read-probe.js';
+import { catalogFamilyOf, normalizeRows, readTablePresence } from './read-probe.js';
 
 /** The one table this migration touches. */
 export const ACTIVATION_LEDGER_TABLE = 'sys_metadata_activation';
@@ -98,6 +108,46 @@ export const ACTIVATION_LEDGER_PACKAGELESS_INDEX_COLUMNS = ['metadata_type', 'na
 export const ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE = 'package_id IS NULL';
 
 /**
+ * MariaDB's carrier column for the index (module doc). It must be the name
+ * `driver-sql`'s `hashShadowColumnFor` derives from the index name — the index
+ * name plus `__hash` — or the drift differ reads it as an orphan column and the
+ * index as an orphan carrier.
+ */
+export const ACTIVATION_LEDGER_PACKAGELESS_SHADOW_COLUMN = `${ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME}__hash`;
+
+/** The digest both MySQL-family forms key: the driver's own hash-shadow digest. */
+function packagelessDigest(): string {
+    return `unhex(sha2(concat(${ACTIVATION_LEDGER_PACKAGELESS_INDEX_COLUMNS.join(', 0x1f, ')}), 256))`;
+}
+
+/**
+ * The MariaDB statement (module doc): one `ALTER TABLE` adding the INVISIBLE
+ * generated carrier and the UNIQUE key over it, so the column never stands
+ * without its key. No `IF NOT EXISTS`: a second boot answers ER_DUP_FIELDNAME,
+ * which the caller follows with {@link buildActivationLedgerPackagelessMariaDbKeySql}.
+ */
+export function buildActivationLedgerPackagelessMariaDbSql(): string {
+    return (
+        `ALTER TABLE ${ACTIVATION_LEDGER_TABLE} ADD COLUMN ${ACTIVATION_LEDGER_PACKAGELESS_SHADOW_COLUMN} VARBINARY(32) ` +
+        `GENERATED ALWAYS AS (CASE WHEN ${ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE} THEN ${packagelessDigest()} END) ` +
+        `VIRTUAL INVISIBLE, ` +
+        `ADD UNIQUE KEY ${ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME} (${ACTIVATION_LEDGER_PACKAGELESS_SHADOW_COLUMN})`
+    );
+}
+
+/**
+ * The key alone, over a carrier column that already stands: what a second boot
+ * runs after ER_DUP_FIELDNAME, so a column left without its key (a key dropped
+ * by hand) gets it back, and a key already there answers ER_DUP_KEYNAME.
+ */
+export function buildActivationLedgerPackagelessMariaDbKeySql(): string {
+    return (
+        `ALTER TABLE ${ACTIVATION_LEDGER_TABLE} ADD UNIQUE KEY ${ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME} ` +
+        `(${ACTIVATION_LEDGER_PACKAGELESS_SHADOW_COLUMN})`
+    );
+}
+
+/**
  * `CREATE UNIQUE INDEX …` for the connected dialect (module doc). `client` is
  * the knex client name; anything not MySQL-family takes the partial form.
  */
@@ -106,7 +156,7 @@ export function buildActivationLedgerPackagelessIndexSql(client?: string): strin
     if (catalogFamilyOf(client) === 'mysql') {
         // No `IF NOT EXISTS` for CREATE INDEX on MySQL: an existing index
         // answers ER_DUP_KEYNAME, which the caller reads as "already there".
-        const digest = `unhex(sha2(concat(${columns.join(', 0x1f, ')}), 256))`;
+        const digest = packagelessDigest();
         return (
             `CREATE UNIQUE INDEX ${ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME} ON ${ACTIVATION_LEDGER_TABLE} ` +
             `((CASE WHEN ${ACTIVATION_LEDGER_PACKAGELESS_ROW_SCOPE} THEN ${digest} END))`
@@ -160,6 +210,39 @@ function isDuplicateKeyName(error: unknown): boolean {
     return e?.cause !== undefined && e.cause !== error && isDuplicateKeyName(e.cause);
 }
 
+/** MySQL/MariaDB's "a column of that name already exists" (ER_DUP_FIELDNAME). */
+function isDuplicateColumnName(error: unknown): boolean {
+    const e = error as { errno?: unknown; code?: unknown; message?: unknown; cause?: unknown } | undefined;
+    if (e?.errno === 1060 || e?.code === 'ER_DUP_FIELDNAME') return true;
+    if (typeof e?.message === 'string' && /duplicate column name/i.test(e.message)) return true;
+    return e?.cause !== undefined && e.cause !== error && isDuplicateColumnName(e.cause);
+}
+
+/**
+ * Is the MySQL-family server MariaDB? Read from `SELECT VERSION()`, whose
+ * answer carries `MariaDB` there and not on MySQL. Unreadable ⇒ `false`: the
+ * MySQL form is then tried, and a MariaDB that refuses it is reported
+ * `unsupported`, as before this arm existed.
+ */
+async function isMariaDb(exec: IndexExec): Promise<boolean> {
+    try {
+        const row = normalizeRows(await exec('SELECT VERSION() AS version'))[0];
+        return /mariadb/i.test(String(row?.version ?? row?.VERSION ?? ''));
+    } catch {
+        return false;
+    }
+}
+
+/** Build the MariaDB form (module doc); a second boot re-keys or finds the key in place. */
+async function buildOnMariaDb(exec: IndexExec): Promise<void> {
+    try {
+        await exec(buildActivationLedgerPackagelessMariaDbSql());
+    } catch (err: unknown) {
+        if (!isDuplicateColumnName(err)) throw err;
+        await exec(buildActivationLedgerPackagelessMariaDbKeySql());
+    }
+}
+
 /**
  * Ensure the package-less one-row index (module doc).
  *
@@ -194,7 +277,8 @@ export async function ensureActivationLedgerPackagelessIndex(
     }
 
     try {
-        await exec(buildActivationLedgerPackagelessIndexSql(opts.client));
+        if (catalogFamilyOf(opts.client) === 'mysql' && (await isMariaDb(exec))) await buildOnMariaDb(exec);
+        else await exec(buildActivationLedgerPackagelessIndexSql(opts.client));
         return { status: 'created' };
     } catch (err: unknown) {
         if (isDuplicateKeyName(err)) return { status: 'created' };
@@ -233,8 +317,8 @@ function reportDegradation(
         logProblem(
             logger,
             `[metadata-protocol] this database cannot build '${ACTIVATION_LEDGER_PACKAGELESS_INDEX_NAME}' on ` +
-                `"${ACTIVATION_LEDGER_TABLE}" — it has no partial index and no functional key part (MariaDB, or MySQL ` +
-                `before 8.0.13) — so ${key} is NOT enforced by an index of its own. A database an earlier release ` +
+                `"${ACTIVATION_LEDGER_TABLE}" — it has no partial index, no functional key part and no INVISIBLE ` +
+                `column (MySQL before 8.0.13, or MariaDB before 10.3) — so ${key} is NOT enforced by an index of its own. A database an earlier release ` +
                 'built keeps its old (metadata_type, name) index, which "os migrate plan" does not offer to retire ' +
                 `safely while this index is missing; on any other, ${consequence}. Watch for duplicates with: ` +
                 duplicateQuery,
