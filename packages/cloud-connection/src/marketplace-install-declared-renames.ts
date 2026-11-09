@@ -328,3 +328,58 @@ export async function reverseInstallDeclaredRenames(
         }
     }
 }
+
+/**
+ * [#31801, cloud#3862] The service name the install-local plugin registers the
+ * declared-rename planner under ({@link InstallRenamePlanner}): the reading a
+ * hosted install asks before it writes, so the control plane carries no copy
+ * of the rule.
+ *
+ * A service of its own, beside the install door's
+ * (`marketplace-install-local`), never a member of it: the door's service
+ * installs, and a reader that only asks what a version would carry is never
+ * handed that write.
+ */
+export const INSTALL_RENAME_PLANNER_SERVICE = 'marketplace-install-rename-planner';
+
+/** One column the install would carry, with the object whose field declares it: the door's `renamesCarried` shape. */
+export interface InstallRenamePlannedCarry extends InstallRenameCarry {
+    object: string;
+}
+
+/** What {@link InstallRenamePlanner.plan} is asked. */
+export interface InstallRenamePlanRequest {
+    /** The package id (`manifest.id`) being installed. */
+    manifestId: string;
+    /** The incoming version's body, as published: the planner converts it forward as the door does. */
+    incoming: unknown;
+    /**
+     * The installed version's body, as published (converted forward the same
+     * way): `null` when nothing is installed (a fresh install), `undefined`
+     * when the caller holds no readable body of it, in which case every
+     * declaration is taken as pending, as the door takes it.
+     */
+    installed: unknown | null | undefined;
+}
+
+/**
+ * The planner's answer: what the install-local door would carry and refuse
+ * for the same versions on this environment's tables. An empty `refusals`
+ * means the door would carry `carries` and go on; a non-empty one is the
+ * door's `422 VALIDATION_ERROR`, whose `details.refusals` is this list.
+ */
+export interface InstallRenamePlan {
+    carries: InstallRenamePlannedCarry[];
+    refusals: InstallRenameRefusal[];
+}
+
+/**
+ * The declared-rename planner ({@link INSTALL_RENAME_PLANNER_SERVICE}). It
+ * reads the tables through the data engine's driver and writes nothing: no
+ * column is renamed, no record or ledger entry is written, and nothing is
+ * held for an install. A table that cannot be read rejects the call (the
+ * door's `503`), never answered as "nothing to carry".
+ */
+export interface InstallRenamePlanner {
+    plan(request: InstallRenamePlanRequest): Promise<InstallRenamePlan>;
+}
