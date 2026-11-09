@@ -1533,7 +1533,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // not read `overrideNotice` itself — it takes the envelope so the two
   // handlers on this seam cannot drift apart from each other, and so a reader
   // added here later has the key declared rather than reaching for a cast.
-  const paramCollectionHandler = useCallback((params: ActionParamDef[], action?: ConsoleActionDispatch, interpolate?: (text: string) => string, run?: Parameters<ParamCollectionHandler>[3]) => {
+  const paramCollectionHandler = useCallback((params: ActionParamDef[], action?: ConsoleActionDispatch, interpolate?: (text: string) => string, run?: Parameters<ParamCollectionHandler>[3], interpolateRead?: Parameters<ParamCollectionHandler>[4]) => {
     return new Promise<Record<string, any> | null>((resolve) => {
       // Related-list row actions retarget a CHILD object (e.g. sys_member rows
       // on an org record page) and stash the clicked row under
@@ -1603,9 +1603,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // The runner's `run`, as `useConsoleActionRuntime` forwards it: a
         // refused run keeps what the user typed (objectui#13161).
         run,
-        // The host-composed panel above the params, picked as
-        // `useConsoleActionRuntime` picks it (objectstack#30205).
-        companion: resolveParamDialogCompanion(objForI18n, action?.name, row),
+        // The panel above the params, picked as `useConsoleActionRuntime`
+        // picks it (objectstack#30205).
+        // The action's declared `preflight` read joins the same slot
+        // (objectstack#31808): judged against the params the runner handed
+        // over, its URL filled by the runner's `interpolateRead`.
+        companion: resolveParamDialogCompanion(objForI18n, action?.name, row, {
+          preflight: action?.preflight,
+          params,
+          interpolateRead,
+        }),
       });
     });
   }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);

@@ -40,6 +40,7 @@ import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 import { backfillActionSlots } from './action-slot-backfill.js';
 import { backfillApprovalDisplayLabels } from './display-label-backfill.js';
+import { backfillProcessPackages, logProcessPackageBackfill, type FlowHolderSource } from './stored-process-package-backfill.js';
 import { APPROVAL_EMAIL_TEMPLATES } from './approval-email-templates.js';
 import { resolvePublicBaseUrl } from './public-base-url.js';
 
@@ -609,6 +610,30 @@ export class ApprovalsServicePlugin implements Plugin {
       (ctx as any).hook('kernel:ready', backfillApproverIndex);
       (ctx as any).hook('kernel:ready', backfillSlots);
       (ctx as any).hook('kernel:ready', backfillDisplayLabels);
+      // [ADR-0150 D8 row R7] Open requests gain the package that holds their
+      // flow, once the registry's bare-name holders are sealed
+      // (`kernel:bootstrapped`): before that, a package of this boot could
+      // still register and change who holds a name. The ambiguous set is
+      // reported, never bound; never fails the boot. A kernel that dispatches
+      // no boot-phase hook runs no pass. See `stored-process-package-backfill.ts`.
+      (ctx as any).hook('kernel:bootstrapped', async () => {
+        try {
+          let ql: { registry?: { bareNameHoldersAreSealed?: boolean } } | undefined;
+          let flows: Partial<FlowHolderSource> | undefined;
+          try { ql = ctx.getService<typeof ql>('objectql'); } catch { ql = undefined; }
+          try { flows = ctx.getService<Partial<FlowHolderSource>>('automation'); } catch { flows = undefined; }
+          if (ql?.registry?.bareNameHoldersAreSealed !== true) return;
+          if (!flows || typeof flows.flowHolder !== 'function') return;
+          const report = await backfillProcessPackages(slotEngine as any, flows as FlowHolderSource);
+          logProcessPackageBackfill(report, ctx.logger as any);
+        } catch (err: any) {
+          ctx.logger.warn?.(
+            '[approvals] the sys_approval_request.process_package backfill did not finish: open requests that name no '
+            + 'package keep naming none, every reader still reads the flow by name as before, and the next boot tries again.',
+            { error: err?.message ?? String(err) },
+          );
+        }
+      });
     } else {
       await wireEscalationClock();
       await mountActionPages();

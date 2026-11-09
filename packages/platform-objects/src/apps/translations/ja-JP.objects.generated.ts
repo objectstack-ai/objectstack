@@ -2990,6 +2990,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "名前",
         help: "ドット区切り snake_case 識別子（例: auth.password_reset）"
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "表示名",
         help: "Studio に表示される表示名"

@@ -601,9 +601,11 @@ export function readRadius({ rel, source, packages, prefix, walker }) {
  * @param {(rel: string) => string} dirOf  the package directory a file sits in, or `''`
  * @param {(rel: string, source: string) => Set<string> | null} [radiusOf]  a disk-reading
  *   file's read radius, `null` when unbounded; absent, every disk read is unbounded
+ * @param {Map<string, object> | null} [memo]  per-file scans to reuse and fill, from
+ *   `scanMemo`: a file met again is not re-read. Absent, every file is read.
  * @returns {Map<string, { packageNames: Set<string>, dirs: Set<string>, readsDisk: boolean, readDirs: Set<string>, files: number }>}
  */
-export function closureSummaries(root, seeds, names, dirOf, radiusOf = () => null) {
+export function closureSummaries(root, seeds, names, dirOf, radiusOf = () => null, memo = null) {
   /** @type {Map<string, { edges: string[], packageNames: Set<string>, readsDisk: boolean, readDirs: Set<string> }>} */
   const nodes = new Map();
   const resolved = new Map();
@@ -611,6 +613,12 @@ export function closureSummaries(root, seeds, names, dirOf, radiusOf = () => nul
   while (queue.length) {
     const rel = queue.pop();
     if (nodes.has(rel)) continue;
+    const known = memo?.get(rel);
+    if (known) {
+      nodes.set(rel, known);
+      for (const target of known.edges) if (!nodes.has(target)) queue.push(target);
+      continue;
+    }
     let source = '';
     try {
       source = fs.readFileSync(path.join(root, rel), 'utf8');
@@ -651,6 +659,7 @@ export function closureSummaries(root, seeds, names, dirOf, radiusOf = () => nul
       else for (const d of radius) node.readDirs.add(d);
     }
     nodes.set(rel, node);
+    memo?.set(rel, node);
   }
 
   // Tarjan, iteratively (the graph is deep enough to overflow a recursive walk).
@@ -884,14 +893,34 @@ export function readHeavyProject(configText) {
 }
 
 /**
+ * A memo of per-file import scans, for a caller asking `selectAffectedTests`
+ * about several changes to ONE unchanged tree: each scan (a file's source, its
+ * import edges, the packages it names, its disk reads) depends on the tree and
+ * the walker, never on the change, so the second verdict re-reads only files
+ * the first did not. It is valid while no file under `root` changes; the
+ * selector refuses one made for another root or walker. The command line asks
+ * once and makes none.
+ *
+ * @param {string} [root]
+ * @param {Function | null} [walker]
+ */
+export function scanMemo(root = REPO_ROOT, walker = PATH_WALKER) {
+  return { root, walker, nodes: new Map() };
+}
+
+/**
  * The verdict for one change.
  *
- * @param {{ root?: string, changed: string[], outside?: string[], tracked?: string[], walker?: Function | null }} input
+ * @param {{ root?: string, changed: string[], outside?: string[], tracked?: string[], walker?: Function | null, scans?: ReturnType<typeof scanMemo> | null }} input
  *   `changed` relative to `root`; `outside` the changed files outside the tree,
- *   relative to the workspace root (`changedOutsideTree`)
+ *   relative to the workspace root (`changedOutsideTree`); `scans` a
+ *   `scanMemo(root, walker)` shared with other verdicts on the same tree
  * @returns {{ mode: 'full', reasons: string[] } | { mode: 'affected', changedPackages: string[], affectedPackages: string[], heavyEdge: string[], alwaysOn: Array<{ file: string, why: string }>, attributed: Array<{ file: string, via: string[] }>, filters: string[], testFileCount: number, selectedTestFileCount: number }}
  */
-export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], tracked = trackedFiles(root), walker = PATH_WALKER }) {
+export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], tracked = trackedFiles(root), walker = PATH_WALKER, scans = null }) {
+  if (scans && (scans.root !== root || scans.walker !== walker)) {
+    throw new Error('selectAffectedTests: `scans` was made for another root or walker; a scan memo holds one unchanged tree read by one walker');
+  }
   const workspacePackages = listWorkspacePackages(root);
   // Item 2c: the owner directories join the graph as dependency-free packages.
   const packages = [
@@ -1005,8 +1034,13 @@ export function selectAffectedTests({ root = REPO_ROOT, changed, outside = [], t
     return owner && !affected.has(owner.name);
   });
   const prefix = nestedPrefix(root);
-  const summaries = closureSummaries(root, placed, names, dirOf, (rel, source) =>
-    readRadius({ rel, source, packages, prefix, walker }),
+  const summaries = closureSummaries(
+    root,
+    placed,
+    names,
+    dirOf,
+    (rel, source) => readRadius({ rel, source, packages, prefix, walker }),
+    scans?.nodes,
   );
   const nameOfDir = new Map(packages.map((p) => [p.dir, p.name]));
   const alwaysOn = [];

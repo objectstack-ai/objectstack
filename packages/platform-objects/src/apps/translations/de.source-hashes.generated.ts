@@ -88,6 +88,8 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_email.fields.status.label": "64a420165247654b",
   "objects.sys_email_template.fields.id.label": "00b0385c9c152888",
   "objects.sys_email_template.fields.name.label": "5274417ff1ccaf01",
+  "objects.sys_email_template.fields.package_id.help": "e1f8cc4d0105cedc",
+  "objects.sys_email_template.fields.package_id.label": "aacf5e74a8641b2b",
   "objects.sys_exchange_rate.fields.id.label": "00b0385c9c152888",
   "objects.sys_exchange_rate.fields.source.options.app": "0c4630a782d594ab",
   "objects.sys_exchange_rate.fields.source.options.import": "05c80d3a61ec3290",

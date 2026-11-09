@@ -2990,6 +2990,10 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
         label: "Имя",
         help: "Идентификатор snake_case с точками (например, auth.password_reset)"
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "Метка",
         help: "Понятное название, показываемое в Studio"

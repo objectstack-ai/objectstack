@@ -247,9 +247,6 @@ import {
     orderHydrationBatch,
     artifactPackageId,
     declaredDependencyIds,
-    // [epic cloud#3652 Q3, #30884] The platform's one collection reader: each
-    // side of the schema upgrade verdict is folded as `planUpgrade` folds it.
-    resolveStackCollection,
 } from '@objectstack/core';
 import {
     resolveTenancyPosture,
@@ -313,7 +310,6 @@ import {
     // [epic cloud#3652 Q3, #30884] The ONE comparison of two package versions —
     // the one the dry run and `os diff` read — which step 2c′'s verdict reads.
     comparePackageVersions,
-    type PackageUpgradeSide,
     // [epic cloud#3652 Q3, #30884] The ONE schema upgrade verdict and its
     // token — the rule a host's install door applies too, so both doors refuse
     // the same pair of versions with the same findings and the same token.
@@ -358,13 +354,19 @@ import { planCustomizationPairInstall, type PairInstallItem } from './marketplac
 import {
     INSTALL_RENAME_PLANNER_SERVICE,
     carryInstallDeclaredRenames,
-    planInstallDeclaredRenames,
     reverseInstallDeclaredRenames,
-    type InstallRenameEngine,
-    type InstallRenamePlanner,
     type InstallRenameRefusal,
     type InstallRenameTable,
 } from './marketplace-install-declared-renames.js';
+// [#31895] The planner's one implementation, shared with the door-less
+// MarketplaceInstallRenamePlannerPlugin. Each side of the schema upgrade
+// verdict is folded by `packageUpgradeSideOf`, as `planUpgrade` folds it.
+import {
+    convertPackageBodyForward,
+    packageUpgradeSideOf,
+    planDeclaredRenames,
+    registerInstallRenamePlanner,
+} from './marketplace-install-rename-planner.js';
 import type {
     AuthSessionApi, ConnectorCredentialRef, IAuthService, IAutomationService, IHttpServer, IMetadataService, IObjectQLEngine,
 } from '@objectstack/spec/contracts';
@@ -641,11 +643,6 @@ function ledgerRecordUnavailableVerdict(
             describe: `This runtime holds no package body of the installed "${manifestId}" (neither its install record `
                 + `nor the registry carries one), ${consequence}`,
         });
-}
-
-/** One side of the comparison, a multi-package artifact folded as `planUpgrade` folds it. */
-function packageUpgradeSideOf(artifact: unknown): PackageUpgradeSide {
-    return { objects: resolveStackCollection(artifact, 'objects'), data: resolveStackCollection(artifact, 'data') };
 }
 
 /** A finding of the access upgrade check, as this door reads it (`access-upgrade-report.ts`). */
@@ -1531,22 +1528,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // own service: what step 2c″ of the door would carry and refuse for
         // the same two versions ({@link planDeclaredRenames}, the one entry
         // both call). A service apart from the door's, so a reader is never
-        // handed the install.
-        const planner: InstallRenamePlanner = {
-            plan: async ({ manifestId, incoming, installed }) => {
-                const plan = await this.planDeclaredRenames(
-                    ctx,
-                    manifestId,
-                    this.convertPackageBodyForward(ctx, incoming),
-                    installed === null || installed === undefined ? installed : this.convertPackageBodyForward(ctx, installed),
-                );
-                return {
-                    carries: plan.tables.flatMap((t) => t.carries.map((c) => ({ object: t.object, table: c.table, from: c.from, to: c.to }))),
-                    refusals: plan.refusals,
-                };
-            },
-        };
-        ctx.registerService?.(INSTALL_RENAME_PLANNER_SERVICE, planner);
+        // handed the install. [#31895] Registered by the shared module, which
+        // MarketplaceInstallRenamePlannerPlugin registers too: whichever of the
+        // two initializes first registers it, once.
+        registerInstallRenamePlanner(ctx);
     };
 
     start = async (ctx: PluginContext): Promise<void> => {
@@ -4196,7 +4181,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     ): Promise<{ refusal?: { body: Record<string, unknown>; status: 422 | 503 }; tables: InstallRenameTable[] }> => {
         let plan: { tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] };
         try {
-            plan = await this.planDeclaredRenames(ctx, manifestId, converted, installed);
+            plan = await planDeclaredRenames(ctx, manifestId, converted, installed);
         } catch (err: any) {
             return {
                 tables: [],
@@ -4237,29 +4222,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         };
     };
 
-    /**
-     * [#30885, #31801] The declared-rename plan of `converted` over
-     * `installed` (both converted forward; `installed` `null` on a fresh
-     * install, `undefined` when none can be read): the type changes the
-     * package upgrade plan lists, judged with the tables by
-     * {@link planInstallDeclaredRenames}. The ONE entry: step 2c″ of the door
-     * ({@link evaluateDeclaredRenames}) and the read-only planner service
-     * ({@link INSTALL_RENAME_PLANNER_SERVICE}) both call it. It writes
-     * nothing; a table that cannot be read throws.
-     */
-    private planDeclaredRenames = async (
-        ctx: PluginContext,
-        manifestId: string,
-        converted: unknown,
-        installed: unknown,
-    ): Promise<{ tables: InstallRenameTable[]; refusals: InstallRenameRefusal[] }> => {
-        let engine: InstallRenameEngine | undefined;
-        try { engine = ctx.getService('objectql') as InstallRenameEngine | undefined; } catch { /* no data engine */ }
-        const typeChanges = installed === null || installed === undefined
-            ? []
-            : comparePackageVersions(packageUpgradeSideOf(installed), packageUpgradeSideOf(converted)).typeChanges;
-        return planInstallDeclaredRenames({ manifestId, incoming: converted, installed, engine, typeChanges });
-    };
 
     /**
      * [epic cloud#3652 Q3, #30884] Step 2c′ of {@link handleInstall}: the
@@ -6379,11 +6341,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         }, 200);
     };
 
-    private convertPackageBodyForward = (ctx: PluginContext, manifest: unknown): any => {
-        let ql: { convertPackageBodyForward?: (body: unknown) => unknown } | undefined;
-        try { ql = ctx.getService('objectql') as typeof ql; } catch { /* no data engine */ }
-        return typeof ql?.convertPackageBodyForward === 'function' ? ql.convertPackageBodyForward(manifest) : manifest;
-    };
+    /** [#31895] The shared conversion ({@link convertPackageBodyForward}), the one the planner converts with. */
+    private convertPackageBodyForward = (ctx: PluginContext, manifest: unknown): any => convertPackageBodyForward(ctx, manifest);
 
     /**
      * [#28039] Register, record and connect the datasources `manifest`

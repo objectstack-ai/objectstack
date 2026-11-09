@@ -122,6 +122,17 @@ import {
 } from './suspended-run-store.js';
 import { ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
 import {
+    backfillStoredReferencePackagesAtBoot,
+    storedReferenceHolderOf,
+    type StoredReferenceBackfillEngine,
+    type StoredReferenceType,
+} from './stored-reference-package-backfill.js';
+import {
+    logFlowDispatchRekey,
+    rekeyFlowDispatchesByPackage,
+    type FlowDispatchRekeyEngine,
+} from './flow-dispatch-key-package-backfill.js';
+import {
     pullConnectorSource,
     type ConnectorPullOptions,
     type ConnectorPullProtocol,
@@ -601,6 +612,84 @@ function objectqlRegistryOf(ctx: PluginContext): InstalledPackageSource | undefi
     } catch {
         return undefined;
     }
+}
+
+/**
+ * How long the dispatch ledger waits for the boot's re-key of its keys before
+ * it answers anyway (`ObjectStoreFlowDispatchStore.holdUntil`). The re-key
+ * reads one page per 500 rows of a 30-day ledger, so it finishes in seconds;
+ * the bound only keeps a re-key that never finishes from stopping every
+ * scheduled flow.
+ */
+const DISPATCH_REKEY_HOLD_MS = 120_000;
+
+/**
+ * [ADR-0150 D8 rows R8, R9, R10 and R11] At `kernel:bootstrapped`, once the
+ * registry's bare-name holders are sealed, the automation service's stored
+ * references gain the package that holds the item they name: paused runs,
+ * flow credentials and connector connections get their package column
+ * (`stored-reference-package-backfill.ts`), and dispatch keys inside
+ * retention get their scoped copy (`flow-dispatch-key-package-backfill.ts`).
+ * Each asks the one D3 rule with no caller — a flow through
+ * `AutomationEngine.flowHolder`, a connector through the same resolver the
+ * connector reader uses — so a row records WHICH item it belongs to (D4).
+ *
+ * The dispatch ledger is held from here until that run has finished, so a
+ * trigger's first claim after an upgrade reads the re-keyed rows. A kernel
+ * that dispatches no boot-phase hook runs neither pass and holds nothing:
+ * the triggers' transition read still treats a bare-shape claim as the same
+ * window's. Never fails the boot.
+ */
+function registerStoredReferenceBackfill(
+    ctx: PluginContext,
+    engine: AutomationEngine,
+    dataEngine: unknown,
+    dispatchStore: ObjectStoreFlowDispatchStore,
+): void {
+    if (!kernelDispatchesBootPhaseHooks(ctx)) return;
+    let release: () => void = () => {};
+    const rekeyed = new Promise<void>((resolve) => { release = resolve; });
+    dispatchStore.holdUntil(rekeyed, DISPATCH_REKEY_HOLD_MS, () => {
+        ctx.logger.warn(
+            `[automation] the boot's re-key of sys_flow_dispatch keys had not finished after ${DISPATCH_REKEY_HOLD_MS / 1000}s — ` +
+                'dispatch claims proceed now; a window claimed under its bare key before the upgrade is still read as claimed.',
+        );
+    });
+    const connectorHolder = connectorNameResolver(ctx);
+    const holderOf = (type: StoredReferenceType, name: string) =>
+        storedReferenceHolderOf(type === 'flow' ? engine.flowHolder(name) : connectorHolder(name, null));
+    ctx.hook('kernel:bootstrapped', async () => {
+        try {
+            const registry = objectqlRegistryOf(ctx) as { bareNameHoldersAreSealed?: boolean; getObject?(name: string): unknown } | undefined;
+            if (registry?.bareNameHoldersAreSealed !== true) return;
+            const carries = (object: string): boolean => {
+                try {
+                    return Boolean(registry.getObject?.(object));
+                } catch {
+                    return false; // a registry that cannot answer is not an answer
+                }
+            };
+            await backfillStoredReferencePackagesAtBoot(dataEngine as StoredReferenceBackfillEngine, carries, holderOf, ctx.logger);
+            if (carries('sys_flow_dispatch')) {
+                try {
+                    const report = await rekeyFlowDispatchesByPackage(dataEngine as FlowDispatchRekeyEngine, (flow) => holderOf('flow', flow));
+                    logFlowDispatchRekey(report, ctx.logger);
+                } catch (err) {
+                    ctx.logger.warn(
+                        '[automation] the sys_flow_dispatch re-key did not finish: keys claimed before the upgrade keep their bare ' +
+                            'shape, every trigger still reads them as the same window\'s claim, and the next boot tries again.',
+                        { error: err instanceof Error ? err.message : String(err) },
+                    );
+                }
+            }
+        } catch (err) {
+            ctx.logger.warn('[automation] the stored-reference package backfill did not run — it is tried again at the next boot', {
+                error: err instanceof Error ? err.message : String(err),
+            });
+        } finally {
+            release();
+        }
+    });
 }
 
 /**
@@ -1972,7 +2061,12 @@ export class AutomationServicePlugin implements Plugin {
                     // registration, so `runObjectRegistered` vouches for both
                     // tables. Without it the engine's claim() degrades to
                     // in-process dedup and says so once.
-                    this.engine.setFlowDispatchStore(new ObjectStoreFlowDispatchStore(dataEngine));
+                    const dispatchStore = new ObjectStoreFlowDispatchStore(dataEngine);
+                    // [ADR-0150 D8 rows R8–R11] The stored references gain their
+                    // package at `kernel:bootstrapped`; the ledger is held until
+                    // its keys are re-keyed. See {@link registerStoredReferenceBackfill}.
+                    registerStoredReferenceBackfill(ctx, this.engine, dataEngine, dispatchStore);
+                    this.engine.setFlowDispatchStore(dispatchStore);
                     ctx.logger.info('[Automation] Flow-dispatch idempotency ledger enabled (sys_flow_dispatch)');
                     // [ADR-0126 §4/§7.2] The packaged-flow activation ledger.
                     // Without it, `toggleFlow` degrades to an in-process flip

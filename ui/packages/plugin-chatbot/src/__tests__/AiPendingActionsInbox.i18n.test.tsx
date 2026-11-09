@@ -297,14 +297,14 @@ describe('AiPendingActionsInbox — the whole file is swept, not just the timest
 });
 
 describe('AiPendingActionsInbox — every status badge resolves from the packs', () => {
-  // All five lifecycle statuses, because objectui#7149's lesson bites exactly
+  // All six lifecycle statuses, because objectui#7149's lesson bites exactly
   // here: the labels are selected by a `switch` over literal keys, and only a
   // row carrying that status proves the branch resolves. The unknown status is
   // the negative control — it is DATA, so it must survive verbatim rather than
   // being run through `t` and coming back as its own key.
-  const statuses = ['pending', 'approved', 'executed', 'failed', 'rejected', 'archived_by_ops'];
+  const statuses = ['pending', 'approved', 'held', 'executed', 'failed', 'rejected', 'archived_by_ops'];
 
-  it('renders all five plus an unrecognised one in zh', async () => {
+  it('renders all six plus an unrecognised one in zh', async () => {
     stubList(
       statuses.map((status, i) => ({
         ...rows()[0],
@@ -316,14 +316,39 @@ describe('AiPendingActionsInbox — every status badge resolves from the packs',
     renderIn('zh');
     await firstRow(ZH.threeHours);
 
-    for (const zh of ['待审批', '已通过', '已执行', '失败', '已拒绝']) {
+    for (const zh of ['待审批', '已通过', '审批中', '已执行', '失败', '已拒绝']) {
       expect(screen.getAllByText(zh).length).toBeGreaterThan(0);
     }
     // Unknown status: verbatim, never a raw key.
     expect(screen.getByText('archived_by_ops')).toBeTruthy();
-    for (const en of ['Approved', 'Executed', 'Failed', 'Rejected']) {
+    for (const en of ['Approved', 'Waiting for approval', 'Executed', 'Failed', 'Rejected']) {
       expect(screen.queryByText(en)).toBeNull();
     }
+  });
+});
+
+describe('AiPendingActionsInbox — a held approve outcome reads as waiting, not executed or failed', () => {
+  // A host policy held the confirmed write for an approver outside the
+  // conversation: the spec's `held` approve outcome, a 200 where nothing was
+  // written. Before it had a branch the inbox read every non-`executed`
+  // outcome as a failure.
+  it('shows the held label in the outcome line', async () => {
+    const items = rows().slice(0, 1);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const body = String(url).endsWith('/approve') && init?.method === 'POST'
+          ? { status: 'held', result: { code: 'AI_WRITE_HELD' } }
+          : { items, total: items.length };
+        return { ok: true, status: 200, statusText: 'OK', json: async () => body } as unknown as Response;
+      }),
+    );
+    renderIn('zh');
+    await firstRow(ZH.approve);
+    fireEvent.click(screen.getAllByText(ZH.approve)[0]);
+    await waitFor(() => expect(screen.getByText(/审批中/)).toBeTruthy());
+    expect(screen.queryByText(/已执行/)).toBeNull();
+    expect(screen.queryByText(/失败/)).toBeNull();
   });
 });
 

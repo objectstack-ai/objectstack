@@ -35,6 +35,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ソース",
         help: "リクエストの発生元 — ノード駆動の承認では `flow:<flowName|nodeId>`"
       },
+      process_package: {
+        label: "Source Package",
+        help: "The app the flow that opened this request comes from. Filled in by the platform; empty for flows created here."
+      },
       process_label: {
         label: "フロー",
         help: "このリクエストを開いたフローのラベル（リクエストを開いた時点の値）"

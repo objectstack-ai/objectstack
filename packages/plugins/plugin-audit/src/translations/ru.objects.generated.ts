@@ -18,7 +18,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "Журнал аудита",
     pluralLabel: "Журналы аудита",
-    description: "Неизменяемый журнал аудита событий платформы",
+    description: "Журнал аудита событий платформы. Записи создаёт только платформа; через API данных и в настройках они доступны только для чтения.",
     fields: {
       created_at: {
         label: "Время"

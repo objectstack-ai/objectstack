@@ -195,6 +195,26 @@ function datasetToolsService(ctx: PluginContext): StdioDatasetToolsService | und
   return service && typeof service.datasetTools === 'function' ? (service as StdioDatasetToolsService) : undefined;
 }
 
+/**
+ * [ADR-0150 D2/D6] The manifest namespace of an installed package, by its id,
+ * read from the engine's registry at the moment a face is derived: the
+ * namespace a package-held skill's prompt name and agent's name carry
+ * (`NS-NAME`). `undefined` for an id with no package record, or a host with no
+ * engine, and the face is then the bare name.
+ */
+function installedPackageNamespace(ctx: PluginContext): (packageId: string) => string | undefined {
+  return (packageId) => {
+    let registry: { getPackage?(id: string): unknown } | undefined;
+    try {
+      registry = ctx.getService<{ registry?: { getPackage?(id: string): unknown } }>('objectql')?.registry;
+    } catch {
+      return undefined;
+    }
+    const manifest = (registry?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest;
+    return typeof manifest?.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+  };
+}
+
 /** The status the REST and dispatcher faces answer a held principal with. */
 const AUTH_GATE_REFUSAL_STATUS = 403;
 
@@ -874,7 +894,9 @@ export class MCPServerPlugin implements Plugin {
       // complete before the transport attaches below.
       // [#8328] `mergedRead` points the skill read at the overlay-aware layer
       // so a runtime `PUT /api/v1/meta/skill/<name>` reaches this surface.
-      await this.runtime.bridgePrompts(metadataService, mergedRead);
+      // [ADR-0150 D6] …and each package-held skill and agent named by its face
+      // (`NS-NAME`), its package's namespace read from the engine's registry.
+      await this.runtime.bridgePrompts(metadataService, mergedRead, installedPackageNamespace(ctx));
     }
 
     // [#8034] BEFORE `start()`, with the resources and prompts: registering a

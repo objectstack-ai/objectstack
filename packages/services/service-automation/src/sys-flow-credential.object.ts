@@ -72,6 +72,20 @@ export const SysFlowCredential = ObjectSchema.create({
       description: 'The machine name of the flow this credential belongs to.',
     }),
 
+    // [ADR-0150 D8 row R9] The package that holds the flow `flow_name` names,
+    // beside the name (ADR-0126 §4). Backfilled at boot from the flow's one
+    // package holder (`stored-reference-package-backfill.ts`); empty for an
+    // environment-authored flow and for a name no single package holds.
+    // Nothing reads it yet, no writer stamps it, and the unique key is
+    // unchanged. Width: the package-id class (`sys_metadata.package_id`).
+    flow_package: Field.text({
+      label: 'Flow Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      description: 'The app the flow this credential belongs to comes from. Filled in by the platform; empty for flows created here.',
+    }),
+
     state: Field.select(['draft', 'active'], {
       label: 'State',
       required: true,

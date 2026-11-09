@@ -93,12 +93,12 @@ function Harness({ onReady }: { onReady: (fn: any) => void }) {
   return <>{runtime.dialogs}</>;
 }
 
-async function collectParams(dispatch: Record<string, unknown>) {
+async function collectParams(dispatch: Record<string, unknown>, interpolateRead?: unknown) {
   paramDialogState = null;
   let collect: any;
   render(<Harness onReady={(fn) => { collect = fn; }} />);
   await act(async () => {
-    void collect(PARAMS, dispatch as any);
+    void collect(PARAMS, dispatch as any, undefined, undefined, interpolateRead);
     await Promise.resolve();
   });
   expect(paramDialogState).toBeTruthy();
@@ -119,5 +119,28 @@ describe('useConsoleActionRuntime — the ban dialog\'s companion (objectstack#3
   it('CONTROL: another sys_user action carries no companion', async () => {
     await collectParams({ name: 'unban_user', label: 'Unban User', objectName: 'sys_user', params: { _rowRecord: { id: 'u_lee' } } });
     expect(paramDialogState.companion).toBeUndefined();
+  });
+});
+
+describe('useConsoleActionRuntime — the declared preflight read joins the slot (objectstack#31808)', () => {
+  const PREFLIGHT = { read: { url: '/api/v1/plan?subject=${param.subject}' }, path: 'data' };
+  const fill = () => '/api/v1/plan';
+
+  it('hands the dialog the action\'s preflight, judged by the spec, with the runner\'s filler', async () => {
+    await collectParams({ name: 'send_note', label: 'Send', objectName: 'crm_note', preflight: PREFLIGHT }, fill);
+    expect(paramDialogState.companion).toMatchObject({ kind: 'preflight', judged: { ok: true } });
+    expect(paramDialogState.companion.interpolateRead).toBe(fill);
+    expect(paramDialogState.companion.hostChrome).toBeUndefined();
+  });
+
+  it('keeps the ban dialog\'s panel beside a declared read on the same action', async () => {
+    await collectParams(
+      { name: 'ban_user', label: 'Ban User', objectName: 'sys_user', preflight: PREFLIGHT, params: { _rowRecord: { id: 'u_lee' } } },
+      fill,
+    );
+    expect(paramDialogState.companion).toMatchObject({
+      kind: 'preflight',
+      hostChrome: { kind: 'user-assigned-work', userId: 'u_lee' },
+    });
   });
 });

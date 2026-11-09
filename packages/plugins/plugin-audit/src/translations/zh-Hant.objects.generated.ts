@@ -18,7 +18,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
   sys_audit_log: {
     label: "稽核日誌",
     pluralLabel: "稽核日誌",
-    description: "平台事件不可變更的稽核軌跡",
+    description: "平台事件的稽核軌跡。記錄只由平台寫入，在資料 API 和設定中唯讀。",
     fields: {
       created_at: {
         label: "時間戳記"

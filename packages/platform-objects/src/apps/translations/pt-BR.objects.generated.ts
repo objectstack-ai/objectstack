@@ -2990,6 +2990,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Nome",
         help: "Identificador snake_case com pontos (por exemplo auth.password_reset)"
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "Rótulo",
         help: "Nome legível exibido no Studio"

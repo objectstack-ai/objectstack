@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import { projectSkillPrompt } from './skill-prompts.js';
+import { lookupSkillPrompt, projectSkillPrompt } from './skill-prompts.js';
 import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
 import type { McpSkillBridge } from './skill-prompts.js';
 
@@ -174,6 +174,8 @@ describe('skill metadata → MCP prompts (HTTP transport)', () => {
 describe('projectSkillPrompt', () => {
   it('keeps the skill name, label and description', () => {
     expect(projectSkillPrompt(CASE_SKILL)).toEqual({
+      // [ADR-0150 D6] An environment skill's face is its bare name.
+      face: 'case_management',
       name: 'case_management',
       title: 'Case Management',
       description: 'Handles support case lifecycle',
@@ -192,5 +194,95 @@ describe('projectSkillPrompt', () => {
     expect(projectSkillPrompt({ ...CASE_SKILL, name: '' })).toBeNull();
     expect(projectSkillPrompt(null)).toBeNull();
     expect(projectSkillPrompt(['skill'])).toBeNull();
+  });
+});
+
+/**
+ * [ADR-0150 D5/D6] Two installed packages each ship a skill of one name. The
+ * prompt list names each by its face (`NS-NAME`, spec's `deriveAiFaceName`);
+ * `prompts/get` takes the face, and the bare name only while one holder has
+ * it; a bare name two packages hold, and a face two skills derive, are refused
+ * naming every candidate. Driven through the HTTP wire path above.
+ */
+describe('skill prompts are named by their AI face (ADR-0150 D6)', () => {
+  const NAMESPACES: Record<string, string> = { 'com.acme.crm': 'crm', 'com.acme.hr': 'hr' };
+  const packageNamespace = (packageId: string) => NAMESPACES[packageId];
+  const QUALIFY = (packageId: string, instructions: string) => ({
+    name: 'qualify_lead', label: 'Qualify', instructions, _packageId: packageId,
+  });
+  const twoHolders = (): McpDataBridge & McpSkillBridge => ({
+    ...withSkills([QUALIFY('com.acme.crm', 'CRM playbook.'), QUALIFY('com.acme.hr', 'HR playbook.')]),
+    packageNamespace,
+  });
+  const text = (json: any) => json.result?.messages?.[0]?.content?.text;
+
+  it('lists both holders, each under its NS-NAME face; neither is dropped', async () => {
+    const json = await rpc(twoHolders(), 'prompts/list');
+    expect(json.error).toBeUndefined();
+    expect(json.result.prompts.map((p: any) => p.name)).toEqual(['crm-qualify_lead', 'hr-qualify_lead']);
+  });
+
+  it('a face gets its one skill', async () => {
+    expect(text(await rpc(twoHolders(), 'prompts/get', { name: 'crm-qualify_lead' }))).toBe('CRM playbook.');
+    expect(text(await rpc(twoHolders(), 'prompts/get', { name: 'hr-qualify_lead' }))).toBe('HR playbook.');
+  });
+
+  it('the bare name two packages hold is refused, naming both packages and both faces', async () => {
+    const json = await rpc(twoHolders(), 'prompts/get', { name: 'qualify_lead' });
+    expect(json.result).toBeUndefined();
+    expect(json.error.code).toBe(-32602);
+    expect(json.error.data).toEqual({
+      code: 'RESOURCE_CONFLICT', status: 409, candidates: ['crm-qualify_lead', 'hr-qualify_lead'],
+    });
+    expect(json.error.message).toContain('"com.acme.crm"');
+    expect(json.error.message).toContain('"com.acme.hr"');
+  });
+
+  it('CONTROL: a bare name one package holds still gets that skill, as before faces were derived', async () => {
+    const bridge = { ...withSkills([QUALIFY('com.acme.crm', 'CRM playbook.')]), packageNamespace };
+    const list = await rpc(bridge, 'prompts/list');
+    expect(list.result.prompts.map((p: any) => p.name)).toEqual(['crm-qualify_lead']);
+    expect(text(await rpc(bridge, 'prompts/get', { name: 'qualify_lead' }))).toBe('CRM playbook.');
+  });
+
+  it('CONTROL: an environment skill keeps its bare name and is reached ahead of a package holder', async () => {
+    const bridge = {
+      ...withSkills([QUALIFY('com.acme.crm', 'CRM playbook.'), { name: 'qualify_lead', instructions: 'Ours.' }]),
+      packageNamespace,
+    };
+    const list = await rpc(bridge, 'prompts/list');
+    expect(list.result.prompts.map((p: any) => p.name)).toEqual(['crm-qualify_lead', 'qualify_lead']);
+    expect(text(await rpc(bridge, 'prompts/get', { name: 'qualify_lead' }))).toBe('Ours.');
+  });
+
+  it('a face two skills derive is listed ONCE, as the refusal its get answers, naming both', async () => {
+    // Two packages of a shareable namespace (ADR-0150 D2) both holding `x`.
+    const bridge = {
+      ...withSkills([
+        { name: 'x', instructions: 'one', _packageId: 'com.base.a' },
+        { name: 'x', instructions: 'two', _packageId: 'com.base.b' },
+      ]),
+      packageNamespace: () => 'base',
+    };
+    const list = await rpc(bridge, 'prompts/list');
+    expect(list.result.prompts).toHaveLength(1);
+    expect(list.result.prompts[0].name).toBe('base-x');
+    expect(list.result.prompts[0].description).toContain('"com.base.a"');
+    expect(list.result.prompts[0].description).toContain('"com.base.b"');
+    const get = await rpc(bridge, 'prompts/get', { name: 'base-x' });
+    expect(get.result).toBeUndefined();
+    expect(get.error.data).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+  });
+
+  it('a face past 64 characters is spec\'s cut form', () => {
+    const name = 'a'.repeat(70);
+    const found = lookupSkillPrompt(
+      [projectSkillPrompt({ name, instructions: 'i', _packageId: 'p' }, () => 'crm')!],
+      name,
+    );
+    expect(found.status).toBe('found');
+    const face = found.status === 'found' ? found.prompt.face : '';
+    expect(face).toHaveLength(64);
+    expect(face.startsWith(`crm-${'a'.repeat(51)}-`)).toBe(true);
   });
 });

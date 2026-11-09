@@ -31,10 +31,11 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
-import { GLOBAL_TENANT, buildIndexName, uniqueIndexesFromFields } from './schema-drift.js';
+import { GLOBAL_TENANT, buildIndexName, implicitReferenceIndexes, uniqueIndexesFromFields } from './schema-drift.js';
 import type { SqlDialectName } from './schema-drift.js';
 import type { Knex } from 'knex';
 import { uniqueProbeNotNullClause } from './sql-driver-top-level.js';
+import { invalidIndexNames } from './pg-concurrent-index.js';
 import type { IntrospectedColumn } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 
@@ -121,8 +122,22 @@ export class ManagedDriftFacet {
   }
 
   /** The body of `SqlDriver#getExistingIndexNames`; the method's docblock there is its contract. */
-  static async getExistingIndexNames(this: Pick<ManagedDriftHost, 'introspectIndexes'>, tableName: string): Promise<Set<string>> {
-    return new Set((await this.introspectIndexes(tableName, { onFailure: 'partial' })).map((i) => i.name));
+  static async getExistingIndexNames(this: Pick<ManagedDriftHost, 'introspectIndexes' | 'isPostgres' | 'knex'>, tableName: string): Promise<Set<string>> {
+    const names = new Set((await this.introspectIndexes(tableName, { onFailure: 'partial' })).map((i) => i.name));
+    if (!this.isPostgres || names.size === 0) return names;
+    // #31901: an INVALID index (`pg_index.indisvalid = false`, what a failed
+    // `CREATE INDEX CONCURRENTLY` leaves behind) is not an index the planner
+    // can use, so it does not count as existing. The sync then reaches the name
+    // again, drops it and builds it again. Best-effort like the read above: a
+    // failed read keeps every name, which only costs one skipped retry.
+    try {
+      for (const name of await invalidIndexNames((sql, bindings) => this.knex.raw(sql, (bindings ?? []) as any), tableName)) {
+        names.delete(name);
+      }
+    } catch {
+      // See the docblock on the class member: this read must not take a boot down.
+    }
+    return names;
   }
 
   /** The body of `SqlDriver#uniqueIndexesFromFields`; the method's docblock there is its contract. */
@@ -163,14 +178,20 @@ export class ManagedDriftFacet {
   }
 
   /** The body of `SqlDriver#syncTableIndexes`; the method's docblock there is its contract. */
-  static async syncTableIndexes(this: Pick<ManagedDriftHost, 'syncDeclaredIndexes' | 'uniqueIndexesFromFields'>, tableName: string, fields: Record<string, any>, declaredIndexes: any[] | undefined, tenantField: string | null, physicalColumns: Set<string>): Promise<void> {
+  static async syncTableIndexes(this: Pick<ManagedDriftHost, 'syncDeclaredIndexes' | 'uniqueIndexesFromFields'>, tableName: string, fields: Record<string, any>, declaredIndexes: any[] | undefined, tenantField: string | null, physicalColumns: Set<string>, options?: { existingTable?: boolean }): Promise<void> {
     const fromFields = this.uniqueIndexesFromFields(tableName, fields, tenantField);
     const declared = Array.isArray(declaredIndexes) ? declaredIndexes : [];
-    if (fromFields.length === 0 && declared.length === 0) return;
+    // [#31882] The implicit `(column)` index on each authored single-valued
+    // reference column, from the same composition the differ expects, so the
+    // boot sync and `os migrate plan` agree on what should exist.
+    const implicit = implicitReferenceIndexes({ table: tableName, fields, tenantField, declaredIndexes: declared }).map(
+      (i) => ({ name: i.name, fields: i.columns, unique: false as const }),
+    );
+    if (fromFields.length === 0 && declared.length === 0 && implicit.length === 0) return;
     // Pass the tenant column through rather than letting `syncDeclaredIndexes`
     // re-resolve it: every caller of this method already holds the value the
     // registration recorded, and a declared `unique: 'organization'` index
     // (ADR-0120 D1) must scope against exactly that column.
-    await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared], physicalColumns, tenantField, fields);
+    await this.syncDeclaredIndexes(tableName, [...fromFields, ...declared, ...implicit], physicalColumns, tenantField, fields, options);
   }
 }

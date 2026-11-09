@@ -29,6 +29,7 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/observability": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
+    "@objectstack/service-cluster": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*"
   },

@@ -37,7 +37,7 @@ import type { AutonumberToken } from '@objectstack/spec/data';
 import { aggregandColumnClass } from '@objectstack/core';
 import { StorageNameMapping, SystemObjectName } from '@objectstack/spec/system';
 import { ExistingTableAdoptionRefusal } from './existing-table-refusal.js';
-import { indexedKeyColumns, isUniqueScopeDeclared } from './schema-drift.js';
+import { indexedKeyColumns, isImplicitlyIndexedReference, isUniqueScopeDeclared } from './schema-drift.js';
 import {
   AUDIT_TIMESTAMP_COLUMNS, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES, declaredValueShapes,
   isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
@@ -216,6 +216,8 @@ export class RotationFacet {
         new Set(Object.keys(colInfo)),
         baseTenantField,
         obj.fields ?? {},
+        // #31901: a shard that already existed builds concurrently on PostgreSQL.
+        { existingTable: exists },
       );
     }
   }
@@ -591,7 +593,12 @@ export class RotationFacet {
       const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
         isUniqueScopeDeclared(f?.unique),
       );
-      if (uniqueFields || (Array.isArray(declaredIndexes) && declaredIndexes.length > 0)) {
+      // [#31882] An authored single-valued reference column is indexed without
+      // a declaration, so it opens this path too.
+      const referenceFields = Object.entries<any>(obj.fields ?? {}).some(([name, f]) =>
+        isImplicitlyIndexedReference(name, f, tenantField),
+      );
+      if (uniqueFields || referenceFields || (Array.isArray(declaredIndexes) && declaredIndexes.length > 0)) {
         const colInfo = await this.knex(tableName).columnInfo();
         const physicalColumns = new Set(Object.keys(colInfo));
         await this.syncTableIndexes(
@@ -600,6 +607,9 @@ export class RotationFacet {
           declaredIndexes,
           tenantField,
           physicalColumns,
+          // #31901: a table that was already there builds its missing indexes
+          // CONCURRENTLY on PostgreSQL; one this call just created stays plain.
+          { existingTable: exists },
         );
         // [cloud#3652 D3] A carried column is keyed twice now: under the index
         // name of its old key and under the one the declaration names. Drop

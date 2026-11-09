@@ -2990,6 +2990,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Nom",
         help: "Identifiant snake_case à points (par ex. auth.password_reset)"
       },
+      package_id: {
+        label: "Package",
+        help: "The app the template comes from. Filled in by the platform; empty for templates created here."
+      },
       label: {
         label: "Libellé",
         help: "Nom lisible affiché dans Studio"
