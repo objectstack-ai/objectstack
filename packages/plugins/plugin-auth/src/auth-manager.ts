@@ -4773,7 +4773,7 @@ export class AuthManager {
       this.verifiedMcpPrincipals.delete(principal);
       const client = transport && typeof transport === 'object'
         ? credentialUseClientOf({ transport: 'http', address: this.resolveClientAddress(transport) }, transport.headers)
-        : credentialUseClientOf(undefined, undefined);
+        : undefined;
       this.scheduleMcpClientLastUse(principal, verified.issuedAt, client);
     } catch {
       // Bookkeeping only: an admitted call is never refused for it.
@@ -4796,7 +4796,7 @@ export class AuthManager {
   private scheduleMcpClientLastUse(
     principal: { userId: string; clientId?: string; organizationId?: string },
     issuedAt: number | undefined,
-    client: CredentialUseClient,
+    client: CredentialUseClient | undefined,
   ): void {
     if (!principal.clientId) return;
     const stamper = (this.mcpClientLastUse ??= new McpClientLastUseStamper(
@@ -4833,7 +4833,7 @@ export class AuthManager {
       },
     ));
     runAfterResponse(
-      () => stamper.record({ ...principal, ...(issuedAt !== undefined ? { issuedAt } : {}), client }),
+      () => stamper.record({ ...principal, ...(issuedAt !== undefined ? { issuedAt } : {}), ...(client ? { client } : {}) }),
       () => {
         // `record` never rejects; its own failure report is above.
       },
