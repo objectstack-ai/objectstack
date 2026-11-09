@@ -214,10 +214,12 @@ export const Invoice = ObjectSchema.create({
     // write from the Subtotal roll-up (the roll-up's recompute is itself a
     // write, so adding a line moves it). It stays blank until a currency is
     // chosen: an amount of money with no currency is not an amount the engine
-    // will store or convert.
+    // will store or convert. Rounded to two decimals, so the stored total is
+    // the one the invoice states (the seeded yen lines are whole yen, so a yen
+    // total stays whole).
     amount: Field.currency({
       label: 'Total incl. Tax',
-      expression: cel`record.currency_code == null || record.currency_code == '' ? null : (record.total == null ? 0 : record.total) * (1 + (record.tax_rate == null ? 0 : record.tax_rate) / 100)`,
+      expression: cel`record.currency_code == null || record.currency_code == '' ? null : double(round((record.total == null ? 0 : record.total) * (1 + (record.tax_rate == null ? 0 : record.tax_rate) / 100) * 100)) / 100`,
       currencyConfig: {
         currencyMode: 'record',
         currencyField: 'currency_code',
