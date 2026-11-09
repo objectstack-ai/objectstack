@@ -30,6 +30,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a clocked case: `AppPlugin` (imported below)
+// loads `@objectstack/metadata` dynamically (check:test-source-alias).
+import '@objectstack/metadata';
 import type { PluginContext } from '@objectstack/core';
 import { scheduleAppArtifactJobs, collectJobsWithoutBody, PACKAGE_JOBS_UNINSTALL_CLEANUP } from './app-artifact-handlers.js';
 import { jobBodyRunnerFactory } from './sandbox/body-runner.js';
