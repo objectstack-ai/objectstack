@@ -40,7 +40,8 @@ const LOCK_WAIT_REFUSAL = Symbol.for('objectstack.driver-sql.deferredDdlLockWait
 const objectOf = (name: string, indexes: any[] = []) => ({
   name,
   tenancy: { enabled: false },
-  fields: { code: { type: 'text' }, stage: { type: 'text' } },
+  // A bounded `maxLength`, so a column MySQL is asked to key is stored as varchar.
+  fields: { code: { type: 'text', maxLength: 100 }, stage: { type: 'text', maxLength: 100 } },
   indexes,
 });
 
@@ -288,7 +289,12 @@ function declarePlainDialectControl(cell: DialectCell): void {
     });
 
     it('builds the missing index with the plain statement', async () => {
-      await driver.initObjects([objectOf(JOB) as any]);
+      // The table an earlier release built without this index. Created WITH it
+      // and the index dropped, so MySQL has already chosen a keyable column type.
+      await driver.initObjects([objectOf(JOB, [BY_STAGE]) as any]);
+      await driver.execute(
+        cell.id === 'mysql' ? `drop index ${nameOf(JOB, BY_STAGE)} on ${JOB}` : `drop index ${nameOf(JOB, BY_STAGE)}`,
+      );
       ddl.length = 0;
       await driver.initObjects([objectOf(JOB, [BY_STAGE]) as any]);
       expect(ddl).toEqual([CONTROL_DDL[cell.id as 'sqlite' | 'mysql']]);
