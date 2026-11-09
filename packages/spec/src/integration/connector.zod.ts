@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
@@ -970,7 +971,7 @@ const connectorBaseShape = (authored = false) => ({
   /**
    * Machine name (snake_case)
    */
-  name: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Unique connector identifier'),
+  name: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).describe('Unique connector identifier'),
   
   /**
    * Human-readable label

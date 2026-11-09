@@ -555,7 +555,7 @@ object whose `remoteName` is `OWNER.TABLE`.
 | `DATE` | `datetime` | An Oracle `DATE` carries a time of day. A `date` field over it is judged lossy: the time is dropped. |
 | `TIMESTAMP WITH TIME ZONE` | `datetime` | Compared and returned as UTC instants. |
 | `CLOB` | `textarea` | |
-| `RAW(16)` | `text` | Read as a lower-case UUID string. Every field pairing over it is judged lossy, so a draft marks it for review: it cannot be filtered or written by that string yet (see below). |
+| `RAW(16)` | `text` | Read as a lower-case UUID string, and filtered and written by that string (see below). A `lookup`, `master_detail` or `user` field over it is exact. A `text` field is judged lossy, so a draft marks it for review: `$contains` and the other pattern operators do not match it as the string it reads. |
 
 The driver pins every session to UTC. Thin mode decodes `DATE` and `TIMESTAMP`
 values with the server process's local clock, and the driver repairs that on read.
@@ -573,11 +573,20 @@ the process's own time zone. Run the server with `TZ=UTC` and there is no such h
   `MERGE`. Use create and update.
 - **JSON-array membership** (`$contains` on a multi-value field) is refused. There is
   no Oracle construct modelled for it.
-- **Filtering or writing a `RAW(16)` column by its UUID string is not supported.**
-  The driver presents the value as a string on read, but it does not convert the
-  string back to `RAW` for a comparison or a write. This includes a `lookup` keyed
-  by a `SYS_GUID()` column. Binding through `HEXTORAW` is tracked in
-  [#31390](https://github.com/objectstack-ai/objectstack/issues/31390).
+- **A `RAW(16)` column is filtered and written by its UUID string.** The driver
+  reads which of an object's columns are `RAW(16)` from the catalog, and binds a
+  comparison value (`=`, `$ne`, `$in`, the range operators), a written value and a
+  record's key for those columns as `HEXTORAW(?)`. That covers a `SYS_GUID()` key and
+  a `lookup` keyed by one. A UUID is accepted with hyphens (the form a read returns)
+  or as its 32 hex digits, in either case. Any other value is refused before the
+  statement is sent: in a filter with `INVALID_FILTER`, in a write with
+  `VALIDATION_ERROR`. So is a create that gives no id on an object keyed by such a
+  column, because the id the driver would mint is not a UUID. A `VARCHAR2` column
+  that holds UUIDs is still compared as text.
+- **Pattern operators on a `RAW(16)` column** (`$contains`, `$startsWith`, `$like`
+  and the rest) are sent as text patterns. Oracle compares them with the column's
+  hex text: 32 upper-case digits, no hyphens. A fragment of the UUID as it reads
+  back matches only when it has no hyphen and the operator ignores case.
 - A `NUMBER` beyond 2^53 is read as a JavaScript number and loses precision.
 - **Paged reads are stable when the object's `columnMap` maps a column to `id`.**
   That column breaks ties after the caller's own sort. Without a mapped key, a paged

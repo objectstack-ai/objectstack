@@ -88,6 +88,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "AI 访问权限",
         help: "该用户是否占用一个 AI 席位。席位授予 `ai_seat` 能力，可使用应用内的 AI 助手（build 和 ask）。可占用席位的用户数受许可证所含席位数限制。"
       },
+      principal_kind: {
+        label: "主体类型",
+        help: "该用户是人员还是 AI 服务账号。AI 服务账号从不登录，只通过它自己的 API 密钥操作。在创建用户时设定，之后不会改变。",
+        options: {
+          human: "人员",
+          agent: "AI 服务账号"
+        }
+      },
+      accountable_user_id: {
+        label: "负责人",
+        help: "对于 AI 服务账号，指对它负责的人员。人员的此项为空。负责人自己的权限不会传给该账号。"
+      },
       image: {
         label: "头像"
       },

@@ -60,7 +60,7 @@ import { DetailsColumnCapContext, framelessSectionColumns, useDefaultRecordPage 
 import { hasCellValue } from './emptiness';
 import {
   enrichDetailField,
-  isComputedFieldType,
+  isComputedDetailField,
   isInlineExcludedDetailFieldType,
   isMaskedDetailFieldType,
 } from './fieldEnrichment';
@@ -492,8 +492,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // the UNION of the two, so an authored display `type` (which still drives
     // renderer/editor selection through `enrichedField.type`) can narrow
     // editability but never widen it (objectui#3355). Shared with
-    // HeaderHighlight via `isComputedFieldType` so the two can't drift.
-    const isComputedField = isComputedFieldType(field.type, objectDefField?.type);
+    // HeaderHighlight via `isComputedDetailField` so the two can't drift.
+    // A stored field carrying an `expression` is computed too (objectstack#31759).
+    const isComputedField = isComputedDetailField(field.type, objectDefField);
     // Honor the OBJECT metadata's read-only flag too — the enrichment above
     // intentionally doesn't copy `readonly` into enrichedField, so read it
     // straight off objectDefField (covers formula / non-updateable fields the

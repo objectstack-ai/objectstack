@@ -1010,8 +1010,15 @@ export class SharingServicePlugin implements Plugin {
             // it: this one IS an access-control surface.
             bindBusinessUnitTreeRecompute(engine, this.ruleService, ctx.logger as any, async (rule) => {
               // [ADR-0142 D2] A queue recipient reads the BU tree exactly when
-              // its queue has a business-unit member.
-              const queue = await this.queues?.resolveQueue(rule.recipient_id, rule.organization_id ?? null);
+              // its queue has a business-unit member — the queue the rule's
+              // grants are read from, so a declared rule's from its package
+              // (ADR-0150 D3).
+              const callerPackageId = await this.ruleService?.queueRecipientPackageOf(rule);
+              const queue = await this.queues?.resolveQueue(
+                rule.recipient_id,
+                rule.organization_id ?? null,
+                callerPackageId ? { callerPackageId } : undefined,
+              );
               return queue ? specsReadBusinessUnits(queue.members) : false;
             });
 

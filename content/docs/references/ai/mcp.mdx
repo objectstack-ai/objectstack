@@ -32,8 +32,8 @@ at runtime and does not need a metadata representation.
 ## TypeScript Usage
 
 ```typescript
-import { MCPApprovalPolicySchema, MCPServerRefSchema, MCPToolBindingSchema, MCPTransportSchema } from '@objectstack/spec/ai';
-import type { MCPApprovalPolicy, MCPServerRef, MCPToolBinding, MCPTransport } from '@objectstack/spec/ai';
+import { MCPApprovalPolicySchema, MCPServerRefSchema, MCPToolBindingSchema, MCPTransportSchema, McpActionNamespaceSchema, McpListedActionAddressSchema } from '@objectstack/spec/ai';
+import type { MCPApprovalPolicy, MCPServerRef, MCPToolBinding, MCPTransport, McpActionNamespace, McpListedActionAddress } from '@objectstack/spec/ai';
 
 // Validate data
 const result = MCPApprovalPolicySchema.parse(data);
@@ -89,6 +89,30 @@ const result = MCPApprovalPolicySchema.parse(data);
 * `stdio`
 * `http`
 * `websocket`
+
+
+---
+
+## McpActionNamespace
+
+Manifest namespace of the package that holds the action; absent for an environment-authored action
+
+**Type:** `string`
+
+
+---
+
+## McpListedActionAddress
+
+The address of one action a `list_actions` row lists
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Action name, passed back to `run_action` as `actionName` |
+| **objectName** | `string` | optional | The object the action is bound to; absent for an object-less action |
+| **namespace** | `string` | optional | Manifest namespace of the package that holds the action; absent for an environment-authored action |
 
 
 ---

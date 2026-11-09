@@ -49,6 +49,7 @@
 
 import { keysetWalk } from '@objectstack/types';
 import { authSystemWriteContext } from './auth-actor-attribution.js';
+import { isAgentAccountRow, isAgentAccountUser } from './service-account-identity.js';
 
 /**
  * The closed vocabulary of deployment membership policies (ADR-0093 D1).
@@ -88,7 +89,14 @@ export type ReconcileOutcome =
   /** An error occurred and was swallowed (never fails user creation). */
   | 'failed'
   /** Preconditions unmet (no engine / no user id). */
-  | 'skipped';
+  | 'skipped'
+  /**
+   * [ADR-0151 D1, closing the exemption ADR-0093 D7 deferred] The user is an
+   * AI service account (`sys_user.principal_kind = 'agent'`). Its one
+   * membership is written by the act that registers it, and the reconciler
+   * never binds it anywhere.
+   */
+  | 'agent-account';
 
 export interface ReconcileMembershipDeps {
   /**
@@ -229,6 +237,12 @@ export async function reconcileMembership(
     return { outcome: 'policy-skip' };
   }
   try {
+    // [ADR-0151 D1] An AI service account is never bound by the reconciler:
+    // the act that registers it writes its one membership. Asked before any
+    // membership read, so an account with none (a retired one) stays unbound.
+    if (await isAgentAccountUser(engine, userId)) {
+      return { outcome: 'agent-account' };
+    }
     // Yield to ANY existing membership (a host hook may have just bound the
     // user; a retry may have already run). This is what makes host composition
     // safe by construction — no ordering negotiation beyond "host first".
@@ -364,7 +378,9 @@ export async function backfillMemberships(
     const uid = String(user?.id ?? '');
     if (!uid) continue;
     summary.scanned += 1;
-    if (membered.has(uid)) {
+    // [ADR-0151 D1] An AI service account is never bound by the backfill
+    // either: a retired account keeps no membership.
+    if (membered.has(uid) || isAgentAccountRow(user)) {
       summary.skipped += 1;
       continue;
     }

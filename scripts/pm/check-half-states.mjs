@@ -930,10 +930,10 @@
  *
  * The repo-scoped stage is an OPTIONAL observation on the pure classifier, not a
  * required one: `classifyTransportProbe` handed no `repo` reading classifies the
- * account-scoped evidence alone, exactly as it always did. That keeps the other
- * importer of this classifier (`scripts/pm/ci-failure.mjs`, which reads the
- * Actions API and gathers its own account-scoped observations) behaving
- * identically. The guarantee that THIS script never green-lights on stage 1
+ * account-scoped evidence alone, exactly as it always did. That keeps every
+ * first-stage call identical: this script's probe and the other importer of
+ * this classifier (`scripts/pm/check-handover.mjs`) both classify account-scoped
+ * readings before any `repo` one. The guarantee that THIS script never green-lights on stage 1
  * alone therefore lives in `probeTransport` / `needsRepoProbe`, which is where
  * the gathering policy belongs — and it is pinned in the self-test.
  *
@@ -1026,8 +1026,8 @@ export const SWEEP_REPO_SHAPE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
  * A malformed value is REFUSED rather than silently replaced by the default:
  * substituting a different board for the one the caller named is how a report
  * about the wrong repo gets written, which is the disease above. The refusal
- * happens at the CLI so that importers of this module (`ci-failure.mjs` takes
- * the transport classifier) are unaffected by a variable they never read.
+ * happens at the CLI so that importers of this module that never call it
+ * (`fleet-write/dispatch.mjs`) are unaffected by a variable they never read.
  *
  * @param {Record<string, string|undefined>} [env]
  * @returns {{ repo: string, source: string, valid: boolean }}
@@ -20803,9 +20803,9 @@ function classifyRepoRead(tok, primary, repo) {
  *
  *   `transport` is the OPTIONAL `describeTransportRoute` reading for the route
  *   the observations were taken on (#13544). Absent, no note is folded in, no
- *   sentence changes, and every verdict is byte-identical to what it was — which
- *   is what keeps the other importer (`scripts/pm/ci-failure.mjs`, which passes
- *   no such field) unchanged.
+ *   sentence changes, and every verdict is byte-identical to what it was. Every
+ *   live caller hands one in today; the identity is what lets the self-test's
+ *   bare-observation fixtures read the classification alone, and it is pinned there.
  * @returns {{ kind: string, headline: string, detail: string[], fix: string[] } | null}
  */
 export function classifyTransportProbe(obs) {
@@ -30489,8 +30489,8 @@ async function selfTest() {
     kind({ token: 'prox_placeholder', authed: { status: 403, rateLimitRemaining: 59 }, anon: { status: 403, rateLimitRemaining: 59 } }),
     'host-unreachable',
   );
-  // #10156: the shared classifier is imported by ci-failure.mjs (#9966), a
-  // caller that runs no "sweep" and reads no "board" — so `host-unreachable`'s
+  // #10156: the shared classifier is also imported by check-handover.mjs, a
+  // caller that runs no "sweep" of its own — so `host-unreachable`'s
   // fix text must not name either, in EITHER branch that returns this kind
   // (network error, and the 403-in-both-directions case pinned just above).
   t(
@@ -30537,9 +30537,9 @@ async function selfTest() {
   t('…and it does NOT prescribe the token-less re-run', class3.fix.join(' ').includes('GITHUB_TOKEN= GH_TOKEN='), false);
   t('…and it names a real credential as the remedy', class3.fix[0].includes('a real GitHub token'), true);
   // #10443: bad-credential and bad-credential-anon-reachable are shared with
-  // ci-failure.mjs (#9966), same as repo-scope-refused/host-unreachable/
-  // repo-not-visible above — a caller that runs no "sweep" and reads no
-  // "board". Cover both branches (anon-reachable and not).
+  // check-handover.mjs, same as repo-scope-refused/host-unreachable/
+  // repo-not-visible above — a caller that runs no "sweep" of its own, so
+  // the prose names the CONTAINER. Cover both branches (anon-reachable and not).
   {
     const anonReachable = classifyTransportProbe({
       token: 'prox_abcdefghi',
@@ -30593,8 +30593,8 @@ async function selfTest() {
     classifyTransportProbe(class4).detail.join(' ').includes('contradict'),
     true,
   );
-  // #10156: repo-scope-refused is shared with ci-failure.mjs (#9966), a caller
-  // that runs no "sweep" and reads no "board" — its headline/detail/fix must
+  // #10156: repo-scope-refused is shared with check-handover.mjs, a caller
+  // that runs no "sweep" of its own — its headline/detail/fix must
   // describe what the CONTAINER cannot do, not what a caller-specific "sweep"
   // or "board read" cannot do.
   t(
@@ -30648,9 +30648,9 @@ async function selfTest() {
     classifyTransportProbe({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } }).fix[0].includes('PM_SWEEP_REPO'),
     true,
   );
-  // #10443: repo-not-visible is shared with ci-failure.mjs (#9966) exactly like
-  // repo-scope-refused above — a caller that runs no "sweep" and reads no
-  // "board", so its headline/detail/fix must describe what the CONTAINER
+  // #10443: repo-not-visible is shared with check-handover.mjs exactly like
+  // repo-scope-refused above — a caller that runs no "sweep" of its own, so
+  // its headline/detail/fix must describe what the CONTAINER
   // cannot do, never what a caller-specific "sweep" would have found.
   {
     const notVisible404 = classifyTransportProbe({ ...class4, repo: { status: 404, rateLimitRemaining: 4999 } });
@@ -36751,7 +36751,7 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   // measured 2026-08-31) — the pair that proves the refusal was about the route.
   const bypassedObs = { token: 'proxy-injected', authed: { status: 401, rateLimitRemaining: null }, anon: { status: 200, rateLimitRemaining: 0 } };
   t('#13544 bypassed route: still classified as a bad credential', classifyTransportProbe(bypassedObs).kind, 'bad-credential');
-  t('#13544 bypassed route: with no transport handed in, the old remedy is byte-identical (ci-failure.mjs)', classifyTransportProbe(bypassedObs).fix[0], 'export GITHUB_TOKEN=<a real GitHub token> and re-run (see the anonymous reading above).');
+  t('#13544 bypassed route: with no transport handed in, the old remedy is byte-identical', classifyTransportProbe(bypassedObs).fix[0], 'export GITHUB_TOKEN=<a real GitHub token> and re-run (see the anonymous reading above).');
   t('#13544 bypassed route: with the transport handed in, the remedy is the route', classifyTransportProbe({ ...bypassedObs, transport: describeTransportRoute({ env: { HTTPS_PROXY: 'http://x' } }) }).fix[0].includes(PROXY_FLAG), true);
   // The same container, same token, routed through the proxy: all three stages
   // answer as GitHub, including the repo-scoped one. This is the reading the

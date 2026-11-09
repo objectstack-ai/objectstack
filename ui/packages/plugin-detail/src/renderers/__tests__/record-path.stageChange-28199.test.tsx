@@ -430,3 +430,20 @@ describe('#30075 the press offers only the moves the field\'s state machine admi
     }
   });
 });
+
+describe('record:path allowStageChange — a status field carrying an expression (objectstack#31759)', () => {
+  const noButtons = (container: HTMLElement) => {
+    for (const row of rows(container)) {
+      expect(within(row).queryAllByRole('button')).toHaveLength(0);
+    }
+  };
+
+  it('is never pressable: the engine computes it on every write, so a pressed stage would not stand', () => {
+    noButtons(
+      mount({
+        allowStageChange: true,
+        objectSchema: { name: 'crm_quote', fields: { status: { type: 'select', expression: "record.amount > 0 ? 'sent' : 'draft'" } } },
+      }).container,
+    );
+  });
+});
