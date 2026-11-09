@@ -98,6 +98,21 @@ describe('[ADR-0151 D3] resolveUserAuthzGrants — an AI service account', () =>
     expect(await hasPlatformAdminStanding(makeQl(), 'u_bot', { nowMs: NOW })).toBe(false);
   });
 
+  it('an organization administrator set confers no organization standing on it, while a person holding it rises', async () => {
+    const t = tables();
+    t.sys_user_permission_set = [
+      { user_id: 'u_bot', permission_set: 'organization_admin', organization_id: 'org_a' },
+      { user_id: 'u_mia', permission_set: 'organization_admin', organization_id: 'org_a' },
+    ];
+    t.sys_permission_set.push({ id: 'ps_org_admin', name: 'organization_admin' });
+    const account = await resolveUserAuthzGrants(makeQl(t), 'u_bot', { tenantId: 'org_a', nowMs: NOW });
+    const person = await resolveUserAuthzGrants(makeQl(t), 'u_mia', { tenantId: 'org_a', nowMs: NOW });
+    expect(account.permissions).toContain('organization_admin');
+    expect(account.posture).toBe('MEMBER');
+    expect(person.posture).not.toBe('MEMBER');
+    expect(person.posture).not.toBe('PLATFORM_ADMIN');
+  });
+
   it('a seeded caller cannot skip the kind: the row is read whatever is seeded', async () => {
     const grants = await resolveUserAuthzGrants(makeQl(), 'u_bot', {
       tenantId: 'org_a', nowMs: NOW, seedEmail: 'seeded@corp.example', seedPermissions: ['ai_seat'],
