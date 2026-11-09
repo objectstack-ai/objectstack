@@ -16,6 +16,14 @@ import {
 } from '@objectstack/core';
 // [#22773] The inbound-hook door, handed the one route the floor admits.
 import { handleInboundHookRequest } from './automation-hooks.js';
+import {
+    admitAutomationAddress,
+    automationAddressRegistryOf,
+    bareNameRefusal,
+    readAutomationAddress,
+    type AutomationAddressRefusal,
+    type AutomationAddressRegistry,
+} from './automation-address.js';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
 // the posture rule and the measurement behind it (commit 02b41232d).
@@ -42,7 +50,7 @@ import {
     validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
 } from '../validation-failure.js';
 import { ExecutionStatus } from '@objectstack/spec/automation';
-import { ListRunsRequestSchema } from '@objectstack/spec/api';
+import { ListRunsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
@@ -1203,6 +1211,68 @@ async function respondToConnectorConnectionDoor(
         if (refusal) return refusal;
         throw err;
     }
+}
+
+/**
+ * [ADR-0150 D5, child G1] The ObjectQL registry the address is read and judged
+ * against, or `undefined` on a host with none: every path then reads bare, as
+ * before.
+ */
+async function automationRegistryOf(deps: DomainHandlerDeps, context: HttpProtocolContext): Promise<AutomationAddressRegistry | undefined> {
+    if (typeof deps.getObjectQL !== 'function') return undefined;
+    try {
+        return automationAddressRegistryOf(await deps.getObjectQL(context));
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * [ADR-0150 D5, child G1] The item a BARE by-name run or read names, for the
+ * bare name's `409` (`bareNameRefusal`): the flow of the trigger, toggle, read
+ * and run doors, and the connector instance of the connection door. The
+ * definition writes (`PUT` / `DELETE /:name`, the clone) are absent: they
+ * answer their own `409` with its remedy (`flowWriteRefusal`).
+ */
+function bareByNameItem(parts: readonly string[], method: string): { type: 'flow' | 'connector'; name: string } | undefined {
+    if (parts.length === 0) return undefined;
+    if (parts[0] === 'trigger') return method === 'POST' && parts[1] ? { type: 'flow', name: parts[1] } : undefined;
+    if (parts[0] === 'connectors') {
+        if (!isConnectorConnectionDoor([...parts], method) || parts[1] === CONNECTOR_OAUTH_SEGMENT) return undefined;
+        try {
+            return { type: 'connector', name: decodeURIComponent(parts[1]) };
+        } catch {
+            return undefined;
+        }
+    }
+    if (parts.length === 1) return method === 'GET' ? { type: 'flow', name: parts[0] } : undefined;
+    if ((parts[1] === 'trigger' || parts[1] === 'toggle') && method === 'POST') return { type: 'flow', name: parts[0] };
+    if (parts[1] === 'runs') return { type: 'flow', name: parts[0] };
+    return undefined;
+}
+
+/** [ADR-0150 D5, child G1] A bare by-name door's `409`, when the resolver refuses its name. */
+function bareByNameRefusal(
+    registry: AutomationAddressRegistry | undefined,
+    parts: readonly string[],
+    method: string,
+): AutomationAddressRefusal | undefined {
+    const item = bareByNameItem(parts, method);
+    const refusal = item ? bareNameRefusal(registry, item.type, item.name) : undefined;
+    return refusal ? { status: 409, refusal } : undefined;
+}
+
+/**
+ * [ADR-0150 D5, child G1] An address refusal on the wire: `404` naming where
+ * nothing holds the name, or `409 RESOURCE_CONFLICT` with every candidate —
+ * the answer the `/actions` door gives a refused declaration.
+ */
+function automationAddressRefusalResponse(deps: DomainHandlerDeps, refusal: AutomationAddressRefusal): HttpDispatcherResult['response'] {
+    if (refusal.status === 404) return deps.error(refusal.message, 404, { code: standardErrorCodeForHttpStatus(404) });
+    return deps.error(refusal.refusal.message, 409, {
+        code: standardErrorCodeForHttpStatus(409),
+        candidates: refusal.refusal.candidates,
+    });
 }
 
 /** [#13953] The path segment naming the cancel door (ADR-0044's operator verb). */
@@ -3402,7 +3472,18 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // reads a parsed body.
     body = readDispatchedBody(body);
     const m = method.toUpperCase();
-    const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+    // [ADR-0150 D5, epic child G1] THE ADDRESS, read once, before every gate
+    // below: each reads `parts[]` by position, so an addressed path
+    // (`/automation/:ns/:name…`, `/automation/_env/:name…`,
+    // `/automation/trigger/:ns/:name`, `/automation/connectors/:ns/:name/connection`)
+    // is handed on as its bare path, and every gate judges the shape it judged
+    // before (seat ruling Q3 = A). The qualifier is judged after the gates and
+    // the service probe (`admitAutomationAddress` below), so a refused caller
+    // learns nothing about it. See `./automation-address.ts`.
+    const rawParts = path.replace(/^\/+/, '').split('/').filter(Boolean);
+    const addressRegistry = rawParts.length >= 1 ? await automationRegistryOf(deps, context) : undefined;
+    const address = readAutomationAddress(rawParts, addressRegistry);
+    const parts = address.parts;
 
     // [#7900] RUN-STATE READ GATE — the maintainer ruling of 2026-08-12: the
     // `/automation` read surface requires the same permission the
@@ -3523,6 +3604,22 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // mounted, so the dispatcher's ROUTE_NOT_FOUND exit ("No handler matched
     // this request") described neither half truthfully. See ./unavailable.ts.
     if (!isServiceServeable(automationService)) return capabilityUnavailable(deps, 'automation');
+
+    // [ADR-0150 D5, epic child G1] THE ADDRESS, judged: an addressed path is
+    // served only when its qualifier names the one holder the bare name
+    // resolves to — then it is exactly its bare path below — and is refused
+    // otherwise (`404` when nothing there holds the name, else `409` naming
+    // every candidate). A bare by-name run or read whose name the resolver
+    // refuses (two packages hold it) is answered `409` naming every candidate,
+    // the same answer (D5). The definition writes (`PUT` / `DELETE /:name`,
+    // the clone) are left to their own `409` and its remedy
+    // (`flowWriteRefusal`), unchanged.
+    {
+        const refusal = address.qualifier && address.item
+            ? admitAutomationAddress(addressRegistry, address.qualifier, address.item)
+            : bareByNameRefusal(addressRegistry, parts, m);
+        if (refusal) return { handled: true, response: automationAddressRefusalResponse(deps, refusal) };
+    }
 
     // Legacy: POST /automation/trigger/:name — the shape
     // `client.automation.trigger()` calls. Same handling as
