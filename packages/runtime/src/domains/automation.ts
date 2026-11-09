@@ -2557,8 +2557,9 @@ type CloneLanding = { packageId: string } | { refused: HttpDispatcherResult };
  * exists, with no second copy of that check here. A pair that is already
  * installed is judged by the target rule before the ensure is asked, so a
  * landing the rule refuses creates no pair; a pair the ensure creates is one
- * the rule admits (an App member's included — the rule reads the save gate's
- * closure, which holds every package the pair pairs). A refusal that can only
+ * the rule admits (an App member's included — the rule is membership in the
+ * save gate's closure, `packageDependencyClosure`, which holds the App's
+ * members once the pair declares its App). A refusal that can only
  * come later — the save refused — leaves the pair in place: that is the
  * pair's ordinary state (ensure is idempotent and an empty pair is a valid
  * one) and the next clone reuses it.
@@ -2620,9 +2621,11 @@ async function resolveCloneTarget(
             // when it is already installed, is judged BEFORE the ensure, so a
             // refused landing creates nothing and its "Nothing was written"
             // is literal. An absent pair is created by the ensure writable and
-            // declaring its App, whose closure (the save gate's,
-            // `newSimilarTargetRefusal`) holds every package it pairs — so a
-            // pair the ensure creates is never refused below.
+            // declaring its App; the rule is membership in the save gate's
+            // closure (`packageDependencyClosure`, see
+            // `newSimilarTargetRefusal`), which for such a pair holds the
+            // App's members, `owner` among them — so a pair the ensure creates
+            // is never refused below.
             const registry = ((await deps.getObjectQL(context)) as { registry?: InstalledPackageSource } | null | undefined)?.registry;
             const derived = pairOf(owner, installedManifestsOf(registry));
             if (derived.ok && registry?.getPackage?.(derived.value)) {

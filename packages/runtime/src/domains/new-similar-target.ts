@@ -35,20 +35,30 @@
  *
  * ## The closure
  *
- * `packageDependencyClosure` (`@objectstack/metadata-protocol`, ADR-0150 D3:
- * one declared closure for every reader), the closure the save door's write
- * scope (`resolveWritePackageScope`) judges the copy's save against, over the
- * same registry: the shared walk (`resolvePackageClosure`,
- * `@objectstack/lint/runtime`) with an App's pair widened by the App's members
- * (ADR-0146 D3, ruling record 6691022506: a member's pair IS its App's pair,
- * and that pair declares only the App). ⛔ Never the bare walk here: the door
- * that hands an App member's copy to the App's pair would then refuse the
- * pair the save gate accepts — the pair it created a moment before. The
- * widening reaches only a pair that declares its App, and only the packages
- * whose pair it is (`pairOf`), so a target that is not that pair is judged
- * exactly by its own declared dependencies. A source with no package (an item
- * authored in the deployment) asks no closure question here: its references
- * are judged by the save into the target, as every save into a package is.
+ * The rule is membership in `packageDependencyClosure(target)`
+ * (`@objectstack/metadata-protocol`, ADR-0150 D3: one declared closure for
+ * every reader) — the save gate's write scope (`resolveWritePackageScope`), the
+ * closure the copy's own save into the target is judged against, over the same
+ * registry. The source's package, and each object's owner, must be in it. ⛔
+ * Never the bare declared walk here: the door that hands an App member's copy
+ * to the App's pair would then refuse the pair the save gate accepts — the
+ * pair it created a moment before. Beyond the bare walk of the target's
+ * declared dependencies, that closure holds:
+ *
+ *  - for an App's pair that declares its App, every member of the App (each
+ *    package whose pair it is, `pairOf`; ADR-0146 D3, ruling record
+ *    6691022506: a member's pair IS its App's pair, which declares only the
+ *    App) and each member's own declared dependencies, transitively;
+ *  - so for the objects check below, the objects those packages own;
+ *  - for a target that declares a residual owner (ADR-0130 D4: a stack's
+ *    top-level owner with no package record), that owner's declared
+ *    dependencies, walked through.
+ *
+ * Nothing outside the save gate's closure is accepted: every landing this
+ * rule admits is one the save into the target would itself admit. A source
+ * with no package (an item authored in the deployment) asks no closure
+ * question here: its references are judged by the save into the target, as
+ * every save into a package is.
  *
  * ## The objects a copy names — when the door can read them off the item
  *

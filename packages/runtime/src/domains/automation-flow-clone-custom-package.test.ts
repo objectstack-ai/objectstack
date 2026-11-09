@@ -130,6 +130,13 @@ const SUITE_EXT = { id: 'com.acme.suite-ext', name: 'Suite Ext', version: '1.0.0
 /** A read-only package that belongs to no App (its own unit), shipping {@link SOLO_FLOW}. */
 const SOLO = { id: 'com.acme.solo', name: 'Solo', version: '1.0.0', type: 'module', namespace: 'solo' };
 const SOLO_FLOW = 'solo_digest';
+/**
+ * A read-only package the member declares (`memberDep`), neither the App nor
+ * a member of it (its own unit), shipping {@link SUITE_DEP_FLOW}: inside the
+ * App's pair's save-gate closure through the member's declared dependencies.
+ */
+const SUITE_DEP = { id: 'com.acme.geo', name: 'Geo', version: '1.0.0', type: 'module', namespace: 'geo' };
+const SUITE_DEP_FLOW = 'geo_region_sync';
 
 async function boot(options: {
     parse?: boolean; baseScope?: 'system' | 'cloud'; clusterDriver?: string; appMember?: boolean; legacyMemberPair?: boolean;
@@ -139,6 +146,8 @@ async function boot(options: {
     pairWithoutApp?: boolean;
     /** Installs {@link SOLO}, shipping {@link SOLO_FLOW}. */
     solo?: boolean;
+    /** Installs {@link SUITE_DEP}, shipping {@link SUITE_DEP_FLOW}, and has the member declare it (needs `appMember`). */
+    memberDep?: boolean;
 } = {}) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
@@ -163,8 +172,15 @@ async function boot(options: {
     const shipped = { ...flowOf(SOURCE), _packageId: BASE.id, _packageVersion: BASE.version, _provenance: 'package' };
     engine.registry.registerItem('flow', shipped as any, 'name' as any, BASE.id);
     const suiteShipped = { ...flowOf(SUITE_FLOW), _packageId: SUITE_MEMBER.id, _packageVersion: SUITE_MEMBER.version, _provenance: 'package' };
+    const depShipped = { ...flowOf(SUITE_DEP_FLOW), _packageId: SUITE_DEP.id, _packageVersion: SUITE_DEP.version, _provenance: 'package' };
     if (options.appMember) {
-        for (const m of [SUITE_APP, SUITE_MEMBER]) {
+        const member = options.memberDep ? { ...SUITE_MEMBER, dependencies: { ...SUITE_MEMBER.dependencies, [SUITE_DEP.id]: '^1' } } : SUITE_MEMBER;
+        if (options.memberDep) {
+            engine.registry.installPackage(SUITE_DEP as any, 'code');
+            (engine as unknown as { manifests: Map<string, unknown> }).manifests.set(SUITE_DEP.id, SUITE_DEP);
+            engine.registry.registerItem('flow', depShipped as any, 'name' as any, SUITE_DEP.id);
+        }
+        for (const m of [SUITE_APP, member]) {
             engine.registry.installPackage(m as any, 'code');
             (engine as unknown as { manifests: Map<string, unknown> }).manifests.set(m.id, m);
         }
@@ -190,7 +206,7 @@ async function boot(options: {
     ]);
     const protocol = new ObjectStackProtocolImplementation(engine as any, () => services);
 
-    const flows = new Map<string, any>([[SOURCE, shipped], [LOCAL, flowOf(LOCAL)], ...(options.appMember ? [[SUITE_FLOW, suiteShipped] as [string, any]] : []), ...(options.solo ? [[SOLO_FLOW, soloShipped] as [string, any]] : [])]);
+    const flows = new Map<string, any>([[SOURCE, shipped], [LOCAL, flowOf(LOCAL)], ...(options.appMember ? [[SUITE_FLOW, suiteShipped] as [string, any]] : []), ...(options.solo ? [[SOLO_FLOW, soloShipped] as [string, any]] : []), ...(options.memberDep ? [[SUITE_DEP_FLOW, depShipped] as [string, any]] : [])]);
     const registerFlow = vi.fn((name: string, definition: unknown) => {
         if (options.parse) FlowSchema.parse(definition);
         flows.set(name, definition);
@@ -706,6 +722,19 @@ describe('an App member\'s flow lands in its App\'s pair — the target rule rea
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(answer.data.packageId).toBe(SUITE_PAIR);
         expect((await rig.rows('acme_suite_route')).map((r) => r.package_id)).toEqual([SUITE_PAIR]);
+    }, 60_000);
+
+    it('the save gate\'s closure, not only the pair\'s members: a flow of a package a member declares (neither the App nor a member) lands in an explicitly named App pair', async () => {
+        const rig = await boot({ appMember: true, memberDep: true });
+        await rig.protocol.ensureCustomizationPackage({ basePackageId: SUITE_MEMBER.id });
+        // Not that package's own pair: the copy lands there only because it is named.
+        expect(rig.protocol.packagedArtifactOwner({ type: 'flow', name: SUITE_DEP_FLOW })).toBe(SUITE_DEP.id);
+
+        const answer = await rig.clone(SUITE_DEP_FLOW, { name: 'acme_region_sync', label: 'Region sync (ACME)', package: SUITE_PAIR });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(SUITE_PAIR);
+        expect((await rig.rows('acme_region_sync')).map((r) => r.package_id)).toEqual([SUITE_PAIR]);
     }, 60_000);
 
     it('CONTROL — an explicit writable package that declares the App but is not the member\'s pair stays refused 409 outside the closure, and nothing is created', async () => {
