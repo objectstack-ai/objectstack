@@ -2931,6 +2931,12 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
     devDependencies:
+      '@objectstack/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@objectstack/service-job':
+        specifier: workspace:*
+        version: link:../service-job
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
