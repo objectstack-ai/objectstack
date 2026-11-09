@@ -383,6 +383,13 @@ export type BindOutcome =
   | { readonly outcome: 'bound'; readonly d8: StoredPackageReference['d8']; readonly table: string; readonly id: string; readonly packageColumn: string; readonly name: string; readonly packageId: string }
   | { readonly outcome: 'refused'; readonly reason: BindRefusal; readonly message: string; readonly candidates?: readonly ReferenceCandidate[] };
 
+/** The rows a guarded multi-row update wrote: the engine answers a count (or the rows). */
+function rowsWritten(answer: unknown): number {
+  if (typeof answer === 'number') return answer;
+  if (Array.isArray(answer)) return answer.length;
+  return answer && typeof answer === 'object' ? 1 : 0;
+}
+
 const refuse = (reason: BindRefusal, message: string, candidates?: readonly ReferenceCandidate[]): BindOutcome => ({
   outcome: 'refused', reason, message, ...(candidates ? { candidates } : {}),
 });
@@ -451,6 +458,20 @@ export async function bindStoredPackageReference(
     return refuse('not-a-candidate', `"${request.packageId}" is not one of the holders the rule names for "${name}" now `
       + '(the report may be stale). Re-run the report and choose one of the candidates. Nothing written.', candidates);
   }
-  await engine.update(reference.table, { id: row.id, [packageColumn]: request.packageId }, { context: SYSTEM_CTX });
+  // The write is guarded on the column still being null, so a write that
+  // landed between the re-ask above and this one (another bind, a boot's
+  // backfill) wins: this one updates 0 rows and refuses, naming what is stored.
+  // A bound row is never moved, concurrency included.
+  const written = await engine.update(reference.table, { [packageColumn]: request.packageId }, {
+    where: { id: { $eq: row.id }, [packageColumn]: { $null: true } },
+    multi: true,
+    context: SYSTEM_CTX,
+  });
+  if (rowsWritten(written) === 0) {
+    const now = await engine.find(reference.table, { where: { id: request.id }, limit: 1, fields: ['id', packageColumn], context: SYSTEM_CTX });
+    const stored = Array.isArray(now) ? (now[0] as Row | undefined)?.[packageColumn] : undefined;
+    return refuse('already-bound', `${reference.table} "${request.id}" was bound to package "${String(stored)}" in `
+      + `${packageColumn} after this run read it; a bound row is never moved. Nothing written.`);
+  }
   return { outcome: 'bound', d8: reference.d8, table: reference.table, id: String(row.id), packageColumn, name, packageId: request.packageId };
 }

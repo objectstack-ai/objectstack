@@ -45,6 +45,7 @@ import { isExitSignal } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import MigrateStoredReferences from './stored-references/index.js';
 import MigrateStoredReferencesBind from './stored-references/bind.js';
+import { bindStoredPackageReference, type StoredReferenceEngine } from '../../utils/stored-package-references.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
 // MODULE LOAD: the commands reach them through dynamic `import()`s inside
@@ -347,6 +348,33 @@ describe('os migrate stored-references bind', () => {
     expect(unconfirmed.exitCode).toBe(1);
     expect((await shareRow(db)).package_id ?? null).toBeNull();
     expect((await suggestionRow(db)).permission_set_package ?? null).toBeNull();
+  }, CASE_TIMEOUT_MS);
+
+  it('a write that lands between the re-ask and the update wins: the bind writes 0 rows and names the stored value', async () => {
+    const db = caseDb();
+    const share = await shareRow(db);
+    const stack = await bootSchemaStack({
+      jsonOutput: true, databaseUrl: `file:${db}`, projectRoot: dir,
+      composeHostStack: true, composeServedPlatform: true, composeAuthGatedSecurity: true,
+    });
+    try {
+      const engine = stack.kernel.getService('objectql') as StoredReferenceEngine & { registry: any };
+      // The race, simulated: a concurrent bind of A lands after this run's re-ask
+      // (which still saw null, A and B both candidates) and before its own write.
+      const racing: StoredReferenceEngine = {
+        find: (object, options) => engine.find(object, options),
+        update: async (object, data, options) => {
+          await engine.update(object, { id: share.id, package_id: A }, { context: { isSystem: true, positions: [], permissions: [] } });
+          return engine.update(object, data, options);
+        },
+      };
+      const outcome = await bindStoredPackageReference(racing, engine.registry, { table: 'sys_sharing_rule', id: String(share.id), packageId: B });
+      expect(outcome).toMatchObject({ outcome: 'refused', reason: 'already-bound' });
+      expect((outcome as { message: string }).message).toContain(`"${A}"`);
+    } finally {
+      await stack.shutdown();
+    }
+    expect((await shareRow(db)).package_id).toBe(A);
   }, CASE_TIMEOUT_MS);
 
   it('CONTROL: a database of one package has nothing to bind', async () => {
