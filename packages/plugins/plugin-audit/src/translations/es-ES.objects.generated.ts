@@ -42,7 +42,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           action_invocation: "Invocación de acción",
           package_uninstall: "Desinstalación de paquete",
           package_unmanaged_import: "Package Unmanaged Import",
-          credential_use: "Credential Use"
+          credential_use: "Credential Use",
+          scim_refused: "SCIM Refused"
         }
       },
       user_id: {

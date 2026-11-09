@@ -316,3 +316,52 @@ describe('ChatbotEnhanced — the record-write card (cloud#3565)', () => {
     expect(decision).toHaveTextContent('status (not editable)');
   });
 });
+
+/*
+ * A confirmed write a host policy holds for an approver outside the
+ * conversation: the spec's `held` approve outcome, nothing written yet. Both
+ * approval cards say "waiting for approval" and never success wording.
+ */
+describe('ChatbotEnhanced — a held decision reads as waiting for approval', () => {
+  const held: Record<string, ToolDecisionState> = {
+    c1: { state: 'held', decision: 'approved', result: { code: 'AI_WRITE_HELD' } },
+  };
+
+  it('the record-write card shows the held state, not 已写入', () => {
+    render(
+      <ChatbotEnhanced
+        messages={transcript(CREATE)}
+        onSendMessage={vi.fn()}
+        onToolApprove={vi.fn()}
+        onOpenRecord={vi.fn()}
+        toolDecisions={held}
+        {...LABELS}
+      />,
+    );
+    const decision = screen.getByTestId('record-write-decision');
+    expect(decision).toHaveAttribute('data-state', 'held');
+    expect(decision).toHaveTextContent('Waiting for approval');
+    expect(decision).not.toHaveTextContent('已写入');
+    expect(screen.queryByTestId('record-write-open-written')).not.toBeInTheDocument();
+    // The decision is made: the buttons are gone.
+    expect(screen.queryByTestId('record-write-confirm')).not.toBeInTheDocument();
+  });
+
+  it('the generic approval strip shows the held state, not the executed line', () => {
+    render(
+      <ChatbotEnhanced
+        messages={transcript({ status: 'pending_approval', pendingActionId: 'pa_9' }, 'action_delete_task')}
+        onSendMessage={vi.fn()}
+        onToolApprove={vi.fn()}
+        toolDecisions={held}
+        {...LABELS}
+      />,
+    );
+    const decision = screen.getByTestId('tool-decision');
+    expect(decision).toHaveAttribute('data-state', 'held');
+    expect(decision).toHaveTextContent('Waiting for approval');
+    expect(decision).not.toHaveTextContent('Action approved and executed.');
+    expect(decision).not.toHaveTextContent('OK');
+    expect(screen.queryByText('Approve and execute')).not.toBeInTheDocument();
+  });
+});

@@ -1235,7 +1235,15 @@ export const CEILINGS = new Map([
   // main-red resume card (#29445, filing gate ③, a task the maintainer set
   // directly), maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」
   // Measured delta +1 (101 → 102); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 102],
+  // Raised 102 → 107 by the merge-queue jump rule — an ORDINARY raise on the
+  // same destination, recorded under that entry's `ruledRaises` below, ⛔ not a
+  // second move. The text is when a seat may ring the relay's `pr_enqueue_front`
+  // ((a)(b)(c), audit comment first, one jumper per repository, FAILED handling).
+  // Ruling of record: the jump card (#31403, filing gate ③, a task on the
+  // maintainer's word), maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;
+  // letter 「A」 recorded as comment 6729640900. Measured delta +5 (102 → 107);
+  // landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 107],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
   // rolls to production, which the landing window (ends at MERGED) never
   // covered: post-roll placement/latency reading with the waker-bias re-draw
@@ -2385,6 +2393,16 @@ export const CROSS_FILE_MOVES = new Map([
             + ' maintainer verbatim and untranslated: 「这个应该立卡写入 skills：如果到时候发现有哪个 PR 确实因为这次红被挡住（比如有车道把 PR 停下来等 main 绿），我会敲对应车道的邮箱，让它继续推进。」',
           date: '2026-11-03',
           delta: 1,
+        },
+        {
+          // Quoted beside this entry's ceiling above. Copied from there, not paraphrased.
+          ruling:
+            'the merge-queue jump rule on `.claude/skills/pm-dispatch/references/landing-operations.md`'
+            + ' — the jump card (#31403, filing gate ③, a task on the maintainer\'s word),'
+            + ' maintainer verbatim and untranslated: 「已经把 #3686 插到队首了,插队做不到,你应该立卡改进skills」;'
+            + ' letter 「A」 recorded as comment 6729640900',
+          date: '2026-11-09',
+          delta: 5,
         },
       ],
     },

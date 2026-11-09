@@ -592,6 +592,19 @@ export async function syncCollectionSchema(
     { spec: { updated_at: 1 }, options: { name: 'idx_updated_at' } },
   ];
 
+  // Fields some declaration already gives a plain read index LEADING with them:
+  // a declared `indexes[]` entry (a unique one included — `nullDistinctUniqueOps`
+  // pairs it with a plain read index over the same keys) or a field-level
+  // `unique` (same pairing). The master_detail arm below adds nothing for these.
+  const leadingDeclared = new Set<string>();
+  for (const idx of schema.indexes ?? []) {
+    const fields = (idx.fields ?? []).filter((f) => typeof f === 'string' && f.length > 0);
+    if (fields.length > 0) leadingDeclared.add(fields[0]);
+  }
+  for (const [fieldName, field] of Object.entries(schema.fields ?? {})) {
+    if (field.unique) leadingDeclared.add(fieldName);
+  }
+
   // Field-level indexes
   if (schema.fields) {
     for (const [fieldName, field] of Object.entries(schema.fields)) {
@@ -620,6 +633,29 @@ export async function syncCollectionSchema(
         indexOps.push({
           spec: { [fieldName]: 1 },
           options: { name: `idx_${fieldName}_lookup` },
+        });
+      }
+
+      // [#31900] A single-valued master_detail gets a plain read index too: a
+      // detail is read by its parent (`controlled_by_parent` filters every
+      // permission-checked read that way), and with no index on the field that
+      // read scans the whole collection. Gated on `reference` like the lookup
+      // arm above. Unlike that arm:
+      // - a multi-valued field is skipped (`FieldSchema` refuses `multiple` on a
+      //   master_detail, but `syncSchema(object, schema: unknown)` forwards
+      //   metadata around Zod);
+      // - a field some declaration already leads with gets nothing more;
+      // - the name is `idx_FIELD`, the name a declared `{ fields: [FIELD] }`
+      //   gets, so an author who declares it later converges on this index
+      //   (the same rule #31882 set for driver-sql).
+      // The lookup/user arm above is deliberately left as it was.
+      if (
+        field.type === 'master_detail' && field.reference && !field.multiple &&
+        !leadingDeclared.has(fieldName)
+      ) {
+        indexOps.push({
+          spec: { [fieldName]: 1 },
+          options: { name: `idx_${fieldName}` },
         });
       }
     }
