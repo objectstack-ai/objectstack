@@ -7,7 +7,8 @@
  * - PostgreSQL builds the partial form; a second package-less row of one
  *   `(metadata_type, name)` is refused, two packages are admitted.
  * - MySQL (8.0.13+) builds the functional key part over the digest; same
- *   answers. MariaDB answers `unsupported` and builds nothing.
+ *   answers. MariaDB builds a UNIQUE key over an INVISIBLE generated column
+ *   carrying that digest; same answers, and the column stays out of `SELECT *`.
  *
  * The columns are TEXT, as `SqlDriver` creates the ledger's `text` fields on
  * MySQL, because TEXT is why the plain partial and CASE forms are refused there.
@@ -159,15 +160,17 @@ describe.skipIf(!MYSQL_URL)('activation ledger package-less index on a LIVE MySQ
         );
     });
 
-    it('MySQL builds the functional key part (second package-less row refused, two packages admitted); MariaDB answers unsupported', async () => {
+    it('MySQL builds the functional key part, MariaDB the INVISIBLE carrier (second package-less row refused, two packages admitted)', async () => {
         const log = quietLogger();
         const result = await ensureActivationLedgerPackagelessIndex(exec, log, { client: 'mysql2' });
-        if (mariadb) {
-            expect(result.status).toBe('unsupported');
-            expect(log.error).toHaveBeenCalledTimes(1);
-            return;
-        }
         expect(result).toEqual({ status: 'created' });
+        if (mariadb) {
+            // The carrier never reaches `SELECT *` (INVISIBLE).
+            await insert('a0', null);
+            const [rows] = await conn.query(`SELECT * FROM ${ACTIVATION_LEDGER_TABLE}`);
+            expect(Object.keys((rows as Array<Record<string, unknown>>)[0] ?? {})).toEqual(['id', 'metadata_type', 'name', 'package_id']);
+            await conn.query(`DELETE FROM ${ACTIVATION_LEDGER_TABLE}`);
+        }
         expect(await insert('a', null)).toBe(true);
         expect(await insert('b', null)).toBe(false);
         expect(await insert('p1', 'com.acme.alpha')).toBe(true);

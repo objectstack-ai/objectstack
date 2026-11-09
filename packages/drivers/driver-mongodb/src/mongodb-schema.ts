@@ -251,15 +251,16 @@ async function retireWidenedUniques(
   wanted: ReadonlySet<string>,
   logger: SchemaSyncLogger,
 ): Promise<void> {
-  const declared = (schema.indexes ?? []).filter(
-    (idx) => (idx.unique === true || idx.unique === 'global') && !(typeof idx.name === 'string' && idx.name.trim()),
-  );
+  // Only a composite key can have widened, so a collection declaring none is
+  // never read here (no `indexes()` round trip on an ordinary sync).
+  const declared = (schema.indexes ?? [])
+    .filter((idx) => (idx.unique === true || idx.unique === 'global') && !(typeof idx.name === 'string' && idx.name.trim()))
+    .map((idx) => (idx.fields ?? []).filter((f) => typeof f === 'string' && f.length > 0))
+    .filter((listed) => listed.length >= 2 && listed.length <= WIDENED_UNIQUE_MAX_KEY_PARTS);
   if (declared.length === 0) return;
   const indexes = await collection.indexes();
   const byName = new Map(indexes.map((i) => [i.name as string, i]));
-  for (const idx of declared) {
-    const listed = (idx.fields ?? []).filter((f) => typeof f === 'string' && f.length > 0);
-    if (listed.length < 2 || listed.length > WIDENED_UNIQUE_MAX_KEY_PARTS) continue;
+  for (const listed of declared) {
     const wide = byName.get(`idx_${listed.join('_')}_unique`);
     if (!wide || !isDriverBuiltUnique(wide, listed) || wide.sparse === true) continue;
     const full = (1 << listed.length) - 1;
