@@ -37,7 +37,7 @@ import {
 } from "react";
 import { useSafeTranslate } from "@object-ui/i18n";
 import { Streamdown } from "streamdown";
-import { RecordLinkContext, withRecordLinks } from "../recordLink";
+import { ListLinkContext, RecordLinkContext, withRecordLinks } from "../recordLink";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -413,10 +413,13 @@ const MessageResponseImpl = ({
   // objectui#13037 — a record link (`/record/OBJECT/ID`) opens the record in
   // the console through the host's opener; every other link keeps the
   // caller's (by default streamdown's) link safety. See `../recordLink`.
+  // objectstack#31869 — a list link (`/list/OBJECT`) opens the list through
+  // the host's list opener, the same way.
   const openRecordLink = useContext(RecordLinkContext);
+  const openListLink = useContext(ListLinkContext);
   const answerLinkSafety = useMemo(
-    () => withRecordLinks(linkSafety, openRecordLink),
-    [linkSafety, openRecordLink]
+    () => withRecordLinks(linkSafety, openRecordLink, openListLink),
+    [linkSafety, openRecordLink, openListLink]
   );
   const showFullLabel = tt("chatbot.answer.showFull", "Show full answer");
   const collapseLabel = tt("chatbot.answer.collapse", "Collapse");

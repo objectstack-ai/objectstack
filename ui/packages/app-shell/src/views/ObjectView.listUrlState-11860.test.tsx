@@ -98,6 +98,7 @@ import { buildListFilterKey } from './listFilterStorage';
 import { LIST_FILTER_PARAM, LIST_GROUP_PARAM, LIST_SEARCH_PARAM, LIST_SORT_PARAM, withoutListStateParams } from './userFilterUrlState';
 import { localListStateKey } from '../context/ListPreferencesProvider';
 import { acceptStoredFilters, acceptStoredSort } from './objectViewListUrlState';
+import { toast } from 'sonner';
 
 const OBJ = 'url_task';
 const VIEW = `/apps/demo/${OBJ}/view`;
@@ -357,7 +358,10 @@ describe('a malformed or stale param is dropped — the list opens and nothing t
     expect(params.get('keep')).toBe('1');
   });
 
-  it('a field the object no longer declares and an operator the spec does not know', async () => {
+  // objectstack#31869 — a link's filter is judged WHOLE: one condition the
+  // checks drop refuses all of it, with a notice (the old pin here kept the
+  // surviving `priority` condition, a different question than the link asked).
+  it('a field the object no longer declares and an operator the spec does not know refuse the link\'s whole filter, with a notice', async () => {
     const host = await mountHost([
       link(`${VIEW}/all`, {
         filter: {
@@ -371,22 +375,64 @@ describe('a malformed or stale param is dropped — the list opens and nothing t
         sort: [{ field: 'ghost', order: 'asc' }],
       }),
     ]);
-    const q = lastQuery();
-    expect(filterOf(q)).toContain('"priority","=","urgent"');
-    expect(filterOf(q)).not.toContain('ghost');
-    expect(filterOf(q)).not.toContain('status');
-    expect(q.$orderby).toBeUndefined();
+    expect(listQueries.length).toBeGreaterThan(0);
+    // Not one request carried any of the link's conditions: the view's own
+    // (empty) filter is what the server was asked.
+    for (const q of listQueries) {
+      expect(q.$filter).toBeUndefined();
+      expect(filterOf(q)).not.toContain('ghost');
+      expect(filterOf(q)).not.toContain('status');
+      expect(filterOf(q)).not.toContain('priority');
+    }
+    expect(lastQuery().$orderby).toBeUndefined();
     const params = new URLSearchParams(host.search());
-    expect(JSON.parse(params.get(LIST_FILTER_PARAM)!).conditions).toEqual([
-      { field: 'priority', operator: 'equals', value: 'urgent' },
-    ]);
+    expect(params.has(LIST_FILTER_PARAM)).toBe(false);
     expect(params.has(LIST_SORT_PARAM)).toBe(false);
+    expect(toast.warning).toHaveBeenCalledTimes(1);
   });
 
-  it('a field this user cannot read is dropped once permissions are loaded', async () => {
+  it('a field this user cannot read, with permissions loaded at seed time, refuses the link\'s whole filter, with a notice', async () => {
     perms.isLoaded = true;
     perms.checkField = (_object, field) => field !== 'priority';
-    await mountHost([
+    const host = await mountHost([
+      link(`${VIEW}/all`, {
+        filter: {
+          logic: 'and',
+          conditions: [
+            { field: 'priority', operator: 'equals', value: 'urgent' },
+            { field: 'status', operator: 'equals', value: 'open' },
+          ],
+        },
+        search: 'acme',
+      }),
+    ]);
+    expect(listQueries.length).toBeGreaterThan(0);
+    // The hidden field never reaches the server, and neither does the readable
+    // condition beside it: the list is the view's, not a wider AND.
+    for (const q of listQueries) {
+      expect(filterOf(q)).not.toContain('priority');
+      expect(filterOf(q)).not.toContain('"status","=","open"');
+    }
+    // The rest of the link still applies.
+    expect(lastQuery().$search).toBe('acme');
+    const params = new URLSearchParams(host.search());
+    expect(params.has(LIST_FILTER_PARAM)).toBe(false);
+    expect(params.get(LIST_SEARCH_PARAM)).toBe('acme');
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/link.s filter was not applied/i));
+  });
+});
+
+/** This user's stored state for one view (objectui#12418's per-browser cache, the shape the server row has). */
+function storeViewPreference(viewId: string, pref: { sort?: unknown; filters?: unknown }) {
+  localStorage.setItem(localListStateKey('u1', OBJ), JSON.stringify({ perView: { [viewId]: pref } }));
+}
+
+describe('a link\'s filter is judged whole (objectstack#31869)', () => {
+  it('CONTROL: a link whose every condition passes applies them all, with no notice', async () => {
+    perms.isLoaded = true;
+    perms.checkField = () => true;
+    const host = await mountHost([
       link(`${VIEW}/all`, {
         filter: {
           logic: 'and',
@@ -398,15 +444,51 @@ describe('a malformed or stale param is dropped — the list opens and nothing t
       }),
     ]);
     const q = lastQuery();
+    expect(filterOf(q)).toContain('"priority","=","urgent"');
+    expect(filterOf(q)).toContain('"status","=","open"');
+    expect(JSON.parse(new URLSearchParams(host.search()).get(LIST_FILTER_PARAM)!).conditions).toHaveLength(2);
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('an OR filter is refused whole too: dropping one branch would narrow the list instead', async () => {
+    perms.isLoaded = true;
+    perms.checkField = (_object, field) => field !== 'priority';
+    await mountHost([
+      link(`${VIEW}/all`, {
+        filter: {
+          logic: 'or',
+          conditions: [
+            { field: 'priority', operator: 'equals', value: 'urgent' },
+            { field: 'status', operator: 'equals', value: 'open' },
+          ],
+        },
+      }),
+    ]);
+    expect(listQueries.length).toBeGreaterThan(0);
+    for (const q of listQueries) expect(q.$filter).toBeUndefined();
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+  });
+
+  it('CONTROL: the reader\'s own stored filter keeps its per-entry drop, with no notice', async () => {
+    perms.isLoaded = true;
+    perms.checkField = (_object, field) => field !== 'priority';
+    storeViewPreference('all', {
+      filters: {
+        id: 'root',
+        logic: 'and',
+        conditions: [
+          { id: 'p', field: 'priority', operator: 'equals', value: 'urgent' },
+          { id: 's', field: 'status', operator: 'equals', value: 'open' },
+        ],
+      },
+    });
+    await mountHost([`${VIEW}/all`]);
+    const q = lastQuery();
     expect(filterOf(q)).not.toContain('priority');
     expect(filterOf(q)).toContain('"status","=","open"');
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 });
-
-/** This user's stored state for one view (objectui#12418's per-browser cache, the shape the server row has). */
-function storeViewPreference(viewId: string, pref: { sort?: unknown; filters?: unknown }) {
-  localStorage.setItem(localListStateKey('u1', OBJ), JSON.stringify({ perView: { [viewId]: pref } }));
-}
 
 describe('a stored sort or filter naming a stale field is dropped too (objectstack#28949)', () => {
   const group = (...conditions: unknown[]) => ({ id: 'root', logic: 'and', conditions });
