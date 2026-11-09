@@ -593,6 +593,23 @@ describe('[#31722] cluster.resync — the peer re-converges what a lost hint wou
         expect(peer.registeredLabels.at(-1)).toBe('One');
     });
 
+    it('a local write on the peer is re-read too, so a peer’s lost revert of it converges', async () => {
+        const { writer, peer, outage } = makeLossyCluster();
+        await save(writer, 'gadget', 'One');
+        await vi.waitFor(() => expect(peer.registeredLabels).toEqual(['One']));
+        await peer.protocol.resyncMetadataMutationPubSub();
+        // The peer's own save: its registry holds 'Two' from its own door.
+        await save(peer, 'gadget', 'Two');
+        expect(peer.registeredLabels.at(-1)).toBe('Two');
+
+        outage.down = true;
+        await save(writer, 'gadget', 'One');
+        outage.down = false;
+
+        await peer.protocol.resyncMetadataMutationPubSub();
+        expect(peer.registeredLabels.at(-1)).toBe('One');
+    });
+
     it('a failed active-row read rejects and keeps every entry; the next resync converges', async () => {
         const { writer, peer, outage } = makeLossyCluster();
         await save(writer, 'gadget');

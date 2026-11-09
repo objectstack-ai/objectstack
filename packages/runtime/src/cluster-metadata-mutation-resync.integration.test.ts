@@ -145,7 +145,7 @@ describe('[#31722] lane 2 on cluster.resync — two kernels, one database', () =
         outage.down = true;
         const saved = await a.protocol.saveMetaItem({ type: 'object', name: 'gadget', item: gadget, mode: 'publish' });
         expect(saved.success).toBe(true);
-        await a.engine.insert('gadget', { title: 'first' }, { context: { isSystem: true } } as never);
+        await a.engine.insert('gadget', { title: 'first', organization_id: 'org_1' }, { context: { isSystem: true } } as never);
         outage.down = false;
 
         // The loss: A serves the object, B does not know it.

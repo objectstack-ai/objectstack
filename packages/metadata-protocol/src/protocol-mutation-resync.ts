@@ -197,7 +197,6 @@ export class MetadataMutationResyncLedger {
                 throw new Error(
                     `the metadata.mutated resync could not read sys_metadata (${describe(err)}); every registry `
                     + 'entry is kept as this replica holds it, and the next cluster resync re-reads.',
-                    { cause: err },
                 );
             }
 
