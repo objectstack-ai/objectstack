@@ -1,0 +1,18 @@
+---
+'@objectstack/service-analytics': patch
+---
+
+fix(service-analytics)!: a dotted member such as `vendor.region` no longer names a declared member by its tail alone, so a filter on a related field never silently filters the base field of the same name
+
+Clause-②: no (narrowing) — a dotted analytics member (a `where` / `runtimeFilter` leaf, a dimension, a time dimension, an `order` key) whose first segment is neither the cube's name nor the object it reads, and which no member declares verbatim, is no longer resolved to the declared member named by its last segment. It is a relationship path: through a compiled dataset the `include` gate refuses an undeclared path, and the related-column gate refuses a column the related object lacks, both `INVALID_FIELD` / 400 as before; a declared path filters the related column. An underscore-flattened key (`vendor_region`) answers `vendor.region` only when its own `sql` is that same relationship path. Nothing is widened: no export of the package root, public member, error code or status is added.
+Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package root changes: a query member that read the wrong column is answered as the relationship path it spells, with error codes and statuses already on the wire. There is nothing for a migration to rewrite and no tombstone. -->
+
+**BREAKING** accept-set narrowing on the analytics query doors (`@objectstack/service-analytics`), for a dotted member whose last segment names a declared member while its first segment names neither the cube nor its object.
+
+- **Before.** Measured on `main` `31ae944b` with a real `SqlDriver`: a dataset over a deal that declares its own `region`, with a `vendor` lookup to an object that has no `region`, answered `runtimeFilter: { 'vendor.region': 'emea' }` with the deals whose OWN region is EMEA, on the native-SQL and the engine-aggregate strategies alike (`WHERE region = ?`), with or without `vendor` in the dataset's `include`. A `supplier.region` filter over a supplier that does have `region` filtered the deal's own `region` too, and so did `vendor.region` beside a dataset dimension `vendor_region` over the base `region`. A hand-authored cube answered the same way through `AnalyticsService.query`.
+- **Now.** Without `vendor` in the `include`, `vendor.region` is refused `INVALID_FIELD` / 400 ("traverses relationship path 'vendor', which the dataset does not declare in its `include`"). With it, a related object that lacks `region` is refused `INVALID_FIELD` / 400 naming the related object, and one that has it is filtered on the joined column (the engine-aggregate strategy keeps refusing any related filter, as it does for every other one). On a hand-authored cube, which has no `include` gate, the native strategy joins the lookup as it does for any other related member: `supplier.region` filters the supplier's column, and a related object that lacks the column answers the database's refusal (`DATABASE_ERROR` / 500), the same answer `vendor.anything_missing` gets today. `<cube>.region` and `<object>.region` still name the declared `region`.
+- **Who moves.** A query, dashboard filter or tool call that wrote `<lookup>.<field>` to mean the base object's own `<field>`: spell it `<cube>.<field>` or `<field>`. No first-party metadata in `content/`, `examples/`, `skills/` or the dogfood apps spells one.
+
+**FROM → TO.** `'vendor.region'` meaning the base field → `'<cube>.region'` or `'region'`.
