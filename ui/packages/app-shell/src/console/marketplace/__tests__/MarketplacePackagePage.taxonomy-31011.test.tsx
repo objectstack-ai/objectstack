@@ -194,6 +194,30 @@ describe('Details — the languages an app ships (objectstack#31462)', () => {
     expect(screen.getByTestId('marketplace-detail-language-zh-CN')).toHaveAttribute('title', 'zh-CN');
   });
 
+  it('marks the default by default_locale, not by position, and lists it first', async () => {
+    // The measurement lists the locales in bundle order when the app declares
+    // none, so the default need not be the first served.
+    await renderDetail(version({
+      supported_locales: ['en', 'de', 'zh-CN'],
+      locale_coverage: {
+        default_locale: 'zh-CN',
+        expected_keys: 20,
+        locales: [
+          { locale: 'en', translated: 18, coverage_percent: 90 },
+          { locale: 'de', translated: 5, coverage_percent: 25 },
+          { locale: 'zh-CN', translated: 20, coverage_percent: 100 },
+        ],
+      },
+    }));
+
+    const group = screen.getByRole('group', { name: L.facet.languages });
+    expect(within(group).getAllByTestId(/^marketplace-detail-language-/).map((b) => b.textContent)).toEqual([
+      `简体中文 100%${L.languages.default}`,
+      'English 90%',
+      'Deutsch 25%',
+    ]);
+  });
+
   it('a version published before the measurement reads "No language information", never "English only"', async () => {
     await renderDetail(version({ supported_locales: null, locale_coverage: null }));
 
