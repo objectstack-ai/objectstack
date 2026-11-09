@@ -247,6 +247,8 @@ import {
     orderHydrationBatch,
     artifactPackageId,
     declaredDependencyIds,
+    credentialUseClientFor,
+    transportPeerAddressOf,
 } from '@objectstack/core';
 import {
     resolveTenancyPosture,
@@ -7259,6 +7261,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 userAuthGates: userAuthGateSourceOf(authService),
                 // [#23367] The API-key lifecycle policy, from the same service.
                 apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
+                // [#31898] Where the request came from, for the `credential_use` row an
+                // admitted API key writes; the auth service applies the trust rule.
+                client: credentialUseClientFor(authService, { headers, remoteAddress: transportPeerAddressOf(c) }),
             });
             if (!authz.userId) return null;
             // ADR-0069: the ONE consult of the authentication-policy gate for

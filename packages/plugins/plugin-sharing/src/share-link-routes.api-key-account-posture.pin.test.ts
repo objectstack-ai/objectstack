@@ -25,7 +25,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { ObjectKernel, hashApiKey } from '@objectstack/core';
+import { ObjectKernel, currentCredentialUseClient, hashApiKey } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { SharingServicePlugin } from './sharing-plugin.js';
@@ -56,7 +56,13 @@ class MockHttp implements IHttpServer {
   getInstance() { return null; }
 }
 
-async function bootPlugin(postures: Record<string, Array<{ code: string; message: string }>>) {
+/** [#31898] What the key's use stamp ran with, and what the trust rule was handed. */
+interface ClientProbe {
+  establish: (transport: { headers?: Record<string, unknown>; remoteAddress?: string }) => string | undefined;
+  stamps: unknown[];
+}
+
+async function bootPlugin(postures: Record<string, Array<{ code: string; message: string }>>, probe?: ClientProbe) {
   const http = new MockHttp();
   const keyHash = hashApiKey(KEY);
   const engine = {
@@ -70,12 +76,15 @@ async function bootPlugin(postures: Record<string, Array<{ code: string; message
     },
     async insert(_o: string, row: any) { return row; },
     getSchema(object: string) { return { name: object }; },
+    // [#31898] The key's use stamp: what plugin-audit's hook reads, read here.
+    ...(probe ? { update: async () => { probe.stamps.push(currentCredentialUseClient() ?? null); return {}; } } : {}),
   };
   const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as any);
   const hooks: Record<string, Array<() => Promise<void> | void>> = {};
   const auth = {
     api: { getSession: async () => undefined },
     resolveUserAuthGates: async (userId: string) => postures[userId] ?? [],
+    ...(probe ? { resolveClientAddress: probe.establish } : {}),
   };
   const ctx = {
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -95,7 +104,7 @@ async function bootPlugin(postures: Record<string, Array<{ code: string; message
   return http;
 }
 
-async function listWithKey(http: MockHttp) {
+async function listWithKey(http: MockHttp, request: { headers?: Record<string, string>; remoteAddress?: string } = {}) {
   const handler = http.routes.get(`GET ${BASE}`);
   if (!handler) throw new Error(`no handler for GET ${BASE}`);
   const captured: { status: number; body: any } = { status: 200, body: undefined };
@@ -105,7 +114,14 @@ async function listWithKey(http: MockHttp) {
     status: vi.fn((code: number) => { captured.status = code; return res; }) as any,
     header: vi.fn(() => res) as any,
   };
-  const req = { params: {}, query: {}, headers: { 'x-api-key': KEY }, method: 'GET', path: BASE } as unknown as IHttpRequest;
+  const req = {
+    params: {},
+    query: {},
+    headers: { ...request.headers, 'x-api-key': KEY },
+    ...(request.remoteAddress ? { remoteAddress: request.remoteAddress } : {}),
+    method: 'GET',
+    path: BASE,
+  } as unknown as IHttpRequest;
   await handler(req, res);
   return captured;
 }
@@ -130,5 +146,33 @@ describe('share-link family — a key answers as its owner\'s session does (#232
     expect((await listWithKey(http)).status).toBe(403);
     postures[OWNER] = [];
     expect((await listWithKey(http)).status).toBe(200);
+  });
+});
+
+/**
+ * [#31898] The sharing routes' resolver hands where the request came from to
+ * the key's use stamp: the transport's peer and the headers go to the auth
+ * service's trust rule, and the address it establishes is what the
+ * `credential_use` row records, with the user agent. The door reads no
+ * forwarded header itself.
+ */
+describe('[#31898] the sharing routes hand their client facts to the key\'s use stamp', () => {
+  it('the stamp runs with the address the trust rule established from the peer, and the user agent', async () => {
+    const handed: Array<{ headers?: Record<string, unknown>; remoteAddress?: string }> = [];
+    const probe: ClientProbe = {
+      establish: (transport) => {
+        handed.push(transport);
+        return '203.0.113.7';
+      },
+      stamps: [],
+    };
+    await listWithKey(await bootPlugin({}, probe), {
+      headers: { 'user-agent': 'ci-agent/3.1', 'x-forwarded-for': '198.51.100.9' },
+      remoteAddress: '10.0.0.5',
+    });
+    expect(handed).toHaveLength(1);
+    expect(handed[0].remoteAddress).toBe('10.0.0.5');
+    expect(handed[0].headers?.['x-forwarded-for'], 'handed over raw: the auth service decides whether it counts').toBe('198.51.100.9');
+    expect(probe.stamps).toEqual([{ ipAddress: '203.0.113.7', userAgent: 'ci-agent/3.1' }]);
   });
 });

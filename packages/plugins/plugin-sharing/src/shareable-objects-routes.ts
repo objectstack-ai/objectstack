@@ -195,5 +195,8 @@ async function resolveCaller(req: IHttpRequest, deps: ShareableObjectsRoutesDeps
     accessToken: 'withhold',
     oauth: undefined,
     onAdmission: undefined,
+    // [#31898] The transport's own peer address, for the `credential_use` row
+    // an admitted API key writes; the auth service applies the trust rule.
+    transport: { remoteAddress: req.remoteAddress || undefined },
   });
 }

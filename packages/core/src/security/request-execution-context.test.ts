@@ -122,6 +122,9 @@ function input(over: Partial<RequestExecutionContextInput> & { headers?: Headers
     accessToken: 'withhold',
     oauth: undefined,
     onAdmission: undefined,
+    // [#31898] Required since every key door hands it; these cases judge the
+    // composition's choices, not the client facts, so none is handed.
+    transport: undefined,
     ...over,
   };
 }

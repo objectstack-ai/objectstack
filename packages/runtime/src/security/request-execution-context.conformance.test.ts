@@ -437,6 +437,9 @@ const RUNTIME_ROW: DoorRow = {
     accessToken: 'carry',
     oauth: undefined,
     onAdmission: undefined,
+    // [#31898] The context does not depend on it; the client facts are held by each
+    // door's own pin and the core door census.
+    transport: undefined,
   }),
 };
 
@@ -459,6 +462,9 @@ const REST_ROW: DoorRow = {
     // (`__admittedBy`, asserted in `driveRest`); it shapes no field of the
     // context itself, so the function is asked without one here.
     onAdmission: undefined,
+    // [#31898] The context does not depend on it; the client facts are held by each
+    // door's own pin and the core door census.
+    transport: undefined,
   }),
 };
 
@@ -477,6 +483,9 @@ const SETTINGS_ROW: DoorRow<SettingsContext> = {
     accessToken: 'withhold',
     oauth: undefined,
     onAdmission: undefined,
+    // [#31898] The context does not depend on it; the client facts are held by each
+    // door's own pin and the core door census.
+    transport: undefined,
   }),
   project: projectSettings,
   identity: ['userId', 'tenantId', 'permissions'],
@@ -562,6 +571,9 @@ const STORAGE_ROW: DoorRow = {
     accessToken: 'carry',
     oauth: undefined,
     onAdmission: undefined,
+    // [#31898] The context does not depend on it; the client facts are held by each
+    // door's own pin and the core door census.
+    transport: undefined,
   }),
   answeredBeforeComposition: (request) => {
     if (!request.auth) return 'a host with no auth service binds no download authorizer, so the download is served unasked';
@@ -627,6 +639,9 @@ const HONO_ROW: DoorRow = {
     accessToken: 'withhold',
     oauth: undefined,
     onAdmission: undefined,
+    // [#31898] The context does not depend on it; the client facts are held by each
+    // door's own pin and the core door census.
+    transport: undefined,
   }),
 };
 
