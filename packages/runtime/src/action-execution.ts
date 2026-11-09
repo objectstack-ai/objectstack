@@ -4906,10 +4906,14 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
      * declarations answer; a namespace no installed package has is refused
      * by name. Omitted, the bare name resolves as below.
      */
-    qualifier?: { namespace: string; namespaceOwners: (namespace: string) => readonly string[] },
+    qualifier?: ActionAddressQualifier,
 ): Promise<{ action: any; objectName: string; obj: any; packageId?: string } | null> {
     const decls = await collectActionDeclarations(deps, meta, objects, actions);
-    if (qualifier) return resolveQualifiedActionDeclaration(decls, name, objectName, qualifier);
+    if (qualifier) {
+        return 'environment' in qualifier
+            ? resolveEnvironmentActionDeclaration(decls, name, objectName)
+            : resolveQualifiedActionDeclaration(decls, name, objectName, qualifier);
+    }
     if (objectName) {
         const hits = decls.filter((d) => d.objectName === objectName && d.action?.name === name);
         if (hits.length === 0) return null;
@@ -4934,6 +4938,17 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
 }
 
 type ActionDeclarationRow = Awaited<ReturnType<typeof collectActionDeclarations>>[number];
+
+/**
+ * [ADR-0150 D5] The exact qualifier of a by-name action call: an installed
+ * namespace, mapped to its packages by `namespaceOwners` (the registry's
+ * `getNamespaceOwners`), or the environment (`_env`), whose own declarations
+ * alone answer. The MCP `run_action` bridge passes the first; the REST
+ * `/actions` door passes either ({@link resolveAddressedRouteActionDeclaration}).
+ */
+export type ActionAddressQualifier =
+    | { namespace: string; namespaceOwners: (namespace: string) => readonly string[] }
+    | { environment: true };
 
 /**
  * [ADR-0150 D3] One declaration among same-named declarations of ONE owner key
@@ -4998,30 +5013,64 @@ function resolveQualifiedActionDeclaration(
         );
     }
     const inNamespace = decls.filter((d) => d.action?.name === name && d.packageId !== undefined && owners.has(d.packageId));
+    return pickActionHolder(addressedActionHits(inNamespace, name, objectName, `namespace '${namespace}'`), name, true);
+}
+
+/**
+ * [ADR-0150 D5, child G1] `name` among the environment's own declarations
+ * (`_env`): no package's declaration is a candidate, in the same order as a
+ * namespace ({@link addressedActionHits}). Refused by name, `404`, when the
+ * environment declares none.
+ */
+function resolveEnvironmentActionDeclaration(
+    decls: readonly ActionDeclarationRow[],
+    name: string,
+    objectName: string | undefined,
+): { action: any; objectName: string; obj: any; packageId?: string } {
+    const own = decls.filter((d) => d.action?.name === name && d.packageId === undefined);
+    return pickActionHolder(addressedActionHits(own, name, objectName, 'the environment'), name, false);
+}
+
+/**
+ * [ADR-0150 D5] The declarations an addressed call reaches among `inScope`
+ * (one namespace's, or the environment's): bound to `objectName` first and
+ * object-less after — the order the engine reaches a handler in
+ * (`actionHandlerObjectKeys`) and the REST door's bare read admits a
+ * declaration in (`resolveRouteActionDeclaration`), so a qualified call
+ * reaches exactly what the bare call reaches, narrowed to its holder.
+ * Refused by name, `404`, when none answers; with no `objectName`, a name
+ * bound to several objects asks for one.
+ */
+function addressedActionHits(
+    inScope: readonly ActionDeclarationRow[],
+    name: string,
+    objectName: string | undefined,
+    where: string,
+): ActionDeclarationRow[] {
     let hits: ActionDeclarationRow[];
     if (objectName && !isObjectLessActionKey(objectName)) {
-        const bound = inNamespace.filter((d) => d.objectName === objectName);
-        hits = bound.length > 0 ? bound : inNamespace.filter((d) => isObjectLessActionKey(d.objectName));
+        const bound = inScope.filter((d) => d.objectName === objectName);
+        hits = bound.length > 0 ? bound : inScope.filter((d) => isObjectLessActionKey(d.objectName));
     } else if (objectName) {
-        hits = inNamespace.filter((d) => isObjectLessActionKey(d.objectName));
+        hits = inScope.filter((d) => isObjectLessActionKey(d.objectName));
     } else {
-        hits = inNamespace;
-        const where = [...new Set(hits.map((d) => d.objectName))];
-        if (where.length > 1) {
+        hits = [...inScope];
+        const objects = [...new Set(hits.map((d) => d.objectName))];
+        if (objects.length > 1) {
             throw new Error(
-                `Action '${name}' exists on multiple objects in namespace '${namespace}' (${where.join(', ')}); pass objectName to disambiguate`,
+                `Action '${name}' exists on multiple objects in ${where} (${objects.join(', ')}); pass objectName to disambiguate`,
             );
         }
     }
     if (hits.length === 0) {
         throw Object.assign(
             new Error(objectName
-                ? `Action '${name}' not found on object '${objectName}' in namespace '${namespace}'`
-                : `Action '${name}' not found in namespace '${namespace}'`),
+                ? `Action '${name}' not found on object '${objectName}' in ${where}`
+                : `Action '${name}' not found in ${where}`),
             { code: standardErrorCodeForHttpStatus(404), status: 404 },
         );
     }
-    return pickActionHolder(hits, name, true);
+    return hits;
 }
 
 /**
@@ -5824,6 +5873,62 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     }
 
     return { action: undefined, obj, degraded, reason };
+}
+
+/** One type's merged listing, as `GET /meta/:type` serves it; `undefined` on a host with no list verb. */
+async function readMergedListing(protocol: any, type: 'object' | 'action'): Promise<readonly any[] | undefined> {
+    if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
+    const answer: any = await protocol.getMetaItems({ type });
+    return Array.isArray(answer) ? answer : Array.isArray(answer?.items) ? answer.items : [];
+}
+
+/**
+ * [ADR-0150 D5, child G1] Resolve the declaration behind an ADDRESSED
+ * `/actions` route — `/actions/:ns/:object/:action` or
+ * `/actions/_env/:object/:action` — through the same resolution the MCP
+ * `run_action` bridge's qualified call reads ({@link resolveActionByName}
+ * with its qualifier), over the same declarations: the protocol's merged
+ * object and action listings, which withhold a disabled package's
+ * (#25139, #25297), or the metadata service's on a host with none.
+ *
+ * Answers like {@link resolveRouteActionDeclaration}: the declaration and the
+ * holder's package coordinate; a `refusal` naming every holder (a shareable
+ * namespace's co-owners, ADR-0150 D2); `degraded` when the metadata plane
+ * could not answer (ADR-0110 D3). A namespace no installed package has, and a
+ * name its holder does not declare, are thrown `404` by name.
+ */
+export async function resolveAddressedRouteActionDeclaration(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: { ql: any; objectName: string; actionName: string; envId?: string; qualifier: ActionAddressQualifier },
+): Promise<RouteActionDeclaration> {
+    const { ql, objectName, actionName, envId, qualifier } = args;
+    let obj: any;
+    try {
+        obj =
+            (typeof ql?.getSchema === 'function' ? ql.getSchema(objectName) : undefined) ??
+            ql?.registry?.getObject?.(objectName);
+    } catch {
+        obj = undefined; // schema unresolved → handler-only action
+    }
+    try {
+        const protocol = await deps.resolveService(requestContext, 'protocol', envId);
+        const objects = await readMergedListing(protocol, 'object');
+        const actions = await readMergedListing(protocol, 'action');
+        const meta = objects !== undefined && actions !== undefined
+            ? undefined
+            : await deps.resolveService(requestContext, 'metadata', envId);
+        const resolved = await resolveActionByName(deps, meta, actionName, objectName, objects, actions, qualifier);
+        if (!resolved) return { action: undefined, obj };
+        return {
+            action: resolved.action,
+            obj: obj ?? resolved.obj,
+            ...(resolved.packageId !== undefined ? { packageId: resolved.packageId } : {}),
+        };
+    } catch (err: any) {
+        if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
+        if (err?.status === 404) throw err;
+        return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+    }
 }
 
 /**

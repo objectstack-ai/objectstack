@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 127 rows.
+ * CENSUS (generated): this list holds 130 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -745,6 +745,16 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // what was wrong was that no ledger said it existed.
   { route: 'POST /actions//:action', domain: '/actions', disposition: 'sdk', client: 'actions.invokeGlobal',
     note: 'the object-less spelling of the global-action call, routed rather than refused — same handler and same `global` key as the row above, reached without naming an object' },
+  // [ADR-0150 D5] The addressed calls: an installed namespace, or `_env`, in the
+  // namespace position. Read once at the top of `handleActionsRequest`.
+  { route: 'POST /actions/:ns/:object/:action', domain: '/actions', disposition: 'server-only',
+    servedBy: '/api/v1/actions/:object/:action/:recordId',
+    note: '[ADR-0150 D5] The addressed action call: `:ns` is an installed namespace (the call resolves among that namespace\'s packages only, by the resolution the MCP `run_action` qualified call reads, and runs the holder\'s handler; a namespace two packages co-own answers 409 `RESOURCE_CONFLICT` naming both) or `_env` (the environment\'s own declaration only). On an object, the holder\'s declaration bound to it first and its object-less one after, as the bare call. A first segment that is a literal or no installed namespace reads as the bare grammar, unchanged. `servedBy`: the 3-segment `:recordId` mount, whose rebuilt path is byte-identical. server-only: the SDK names no namespace yet.' },
+  { route: 'POST /actions/:ns/global/:action', domain: '/actions', disposition: 'server-only',
+    servedBy: '/api/v1/actions/:object/:action/:recordId',
+    note: '[ADR-0150 D5] The addressed object-less call, as the row above: the namespace\'s (or `_env`\'s) object-less declaration. `servedBy` as above.' },
+  { route: 'POST /actions/:ns/:object/:action/:recordId', domain: '/actions', disposition: 'server-only',
+    note: '[ADR-0150 D5] The addressed record-scoped call, as the `/actions/:ns/:object/:action` row with the record id in the path; mounted in `dispatcher-plugin.ts`. An addressed `_activation` path has no form and answers 404.' },
   { route: 'POST /actions/_activation/:object/:action', domain: '/actions', disposition: 'server-only',
     servedBy: '/api/v1/actions/:object/:action/:recordId',
     note: 'ADR-0126 §8 item 2 — enable/disable ONE packaged action, the only non-invocation shape this domain serves. '

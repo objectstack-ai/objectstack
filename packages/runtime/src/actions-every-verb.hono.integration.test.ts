@@ -51,7 +51,8 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
 const SESSION_HEADER = 'x-test-session';
 const PREFIXES = ['/api/v1', '/api/v1/environments/env_actions_verb'] as const;
-const SHAPES = ['/actions//close_all', '/actions/task/close', '/actions/task/close/rec_1'] as const;
+// [ADR-0150 D5] The fourth: the addressed record-scoped call's own mount.
+const SHAPES = ['/actions//close_all', '/actions/task/close', '/actions/task/close/rec_1', '/actions/crm/task/close/rec_1'] as const;
 /** Verbs that carry a JSON body on the wire; the rest are sent bodiless. */
 const BODY_VERBS = new Set(['PUT', 'PATCH']);
 /** Every verb but `POST` and the two whose answer differs in shape (below). */
@@ -205,8 +206,10 @@ describe('every /api/v1/actions verb reaches the actions domain (integration, #2
     }
 
     // ── the claim is narrow: a path no `/actions` route serves stays the transport's 404 ──
-    it('a four-segment /actions path no route serves → the transport\'s 404, not the domain', async () => {
-        const { status, body } = await call('GET', '/api/v1/actions/task/close/rec_1/extra', false);
+    // [ADR-0150 D5] Four segments are the addressed record-scoped call
+    // (`/actions/:ns/:object/:action/:recordId`) since G1; five are served by none.
+    it('a five-segment /actions path no route serves → the transport\'s 404, not the domain', async () => {
+        const { status, body } = await call('GET', '/api/v1/actions/crm/task/close/rec_1/extra', false);
 
         expect(status).toBe(404);
         expect(body?.error?.code).toBe('ENDPOINT_NOT_FOUND');
