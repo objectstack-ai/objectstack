@@ -696,6 +696,27 @@ describe('select-affected-tests — the live tree', () => {
     expect(filters.every((f) => fs.existsSync(path.join(repoRoot, f)))).toBe(true);
   });
 
+  it('--lane-out writes the verdict\'s own always-on files, each one also selected by --out (objectstack#31914)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'select-affected-lane-'));
+    tmpRoots.push(dir);
+    const [out, lane] = [path.join(dir, 'filters.txt'), path.join(dir, 'lane.txt')];
+    const run = spawnSync(process.execPath, ['scripts/select-affected-tests.mjs', '--base', 'HEAD', '--out', out, '--lane-out', lane, '--explain'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout.trim().split('\n').pop()).toBe('mode=affected');
+    const always = fs.readFileSync(lane, 'utf8').split('\n').filter(Boolean);
+    const explained = /^always-on test files \(the package graph cannot place them\): (\d+)$/m.exec(run.stdout);
+    expect(always.length).toBe(Number(explained?.[1]));
+    expect(always.length).toBeGreaterThan(0);
+    for (const file of always) expect(run.stdout).toContain(`  - ${file}: `);
+    const filters = fs.readFileSync(out, 'utf8').trim().split('\n');
+    expect(always.every((file) => filters.some((f) => file.toLowerCase().includes(f.toLowerCase())))).toBe(true);
+    const bare = spawnSync(process.execPath, ['scripts/select-affected-tests.mjs', '--base', 'HEAD', '--out', out, '--lane-out'], { cwd: repoRoot, encoding: 'utf8' });
+    expect(bare.status).toBe(2);
+  });
+
   it('answers "could not decide" with a non-zero exit, never a verdict', () => {
     const run = spawnSync(process.execPath, ['scripts/select-affected-tests.mjs', '--base', 'no-such-ref-12214', '--explain'], {
       cwd: repoRoot,

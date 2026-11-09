@@ -55,7 +55,8 @@ import { UI_JOBS } from './helpers/root-ci';
  * `/M` below with it.
  *
  *   affected  a `pull_request` and a `merge_group` event plan the selected
- *             files into N slots, and the N legs run them, each file once.
+ *             files into N slots, and the N legs run them, each file once;
+ *             slot 1 is the selector's always-on lane (its `--lane-out`).
  *   full      a `push` event, a pull request with no base ref and one whose
  *             merge base cannot be computed (the fail-open paths) plan all M
  *             slots, each leg running `--shard=k/M` of the whole suite.
@@ -277,7 +278,7 @@ const BASE_REF = 'main';
 let gitBin = '';
 let mergeBaseArgv = '';
 /** The real selector's answer on this checkout, taken through the real select step. */
-let real: Ran & { filters: string[]; temp: string } = { outputs: {}, log: '', status: 0, err: '', filters: [], temp: '' };
+let real: Ran & { filters: string[]; lane: string[]; temp: string } = { outputs: {}, log: '', status: 0, err: '', filters: [], lane: [], temp: '' };
 /** A `node` that replays `real` for the select step, so each leg does not re-walk the tree. */
 let replay = '';
 /** A `pnpm` whose `vitest list` serves one collection; any other call fails the step. */
@@ -310,14 +311,17 @@ beforeAll(() => {
   const temp = freshTemp('real');
   // The select step itself names these two files under `$RUNNER_TEMP`.
   const filters = path.join(temp, 'affected-tests.txt');
+  const lane = path.join(temp, 'always-on-tests.txt');
   const stdout = path.join(temp, 'select.out');
-  real = { ...runSelect({ name: 'pull_request', base: BASE_REF }, temp), filters: [], temp };
+  real = { ...runSelect({ name: 'pull_request', base: BASE_REF }, temp), filters: [], lane: [], temp };
   real.filters = fs.readFileSync(filters, 'utf8').split('\n').filter(Boolean);
+  real.lane = fs.readFileSync(lane, 'utf8').split('\n').filter(Boolean);
   replay = standIn(
     'node',
     [
       'while [ "$#" -gt 0 ]; do',
       `  if [ "$1" = '--out' ]; then cp ${JSON.stringify(filters)} "$2"; fi`,
+      `  if [ "$1" = '--lane-out' ]; then cp ${JSON.stringify(lane)} "$2"; fi`,
       '  shift',
       'done',
       `cat ${JSON.stringify(stdout)}`,
@@ -419,6 +423,11 @@ describe('the steps, as ci.yml writes them (objectui#13350, objectstack#31914)',
     expect(shards.length).toBeGreaterThan(0);
     expect(shards.length).toBeLessThanOrEqual(SHARDS);
     expect(shards).toEqual(shards.map((_, i) => i + 1));
+    // Slot 1 is the always-on lane: the selector's `--lane-out`, every one of them collected here.
+    expect(real.lane.length).toBeGreaterThan(0);
+    expect(real.lane.every((file) => selectedPaths.includes(file))).toBe(true);
+    expect([...filesOf(legs[0].run.argv)].sort()).toEqual([...real.lane].sort());
+    expect(legs[0].slot.log).toContain('the always-on lane');
     const ran: string[] = [];
     for (const { shard, slot, run } of legs) {
       expect(slot.outputs).toEqual({ mode: 'affected' });
