@@ -99,6 +99,18 @@ import {
   type BareNameHolder,
   type BareNameOneHolderType,
 } from './bare-name-one-holder.js';
+// [ADR-0150 D2, child N] Inside one namespace, a `(type, name)` of the twelve
+// uncovered bucket 2/3 types has one package holder — the one predicate the
+// package door and `os validate` both ask (module doc).
+import {
+  isNamespaceJudged,
+  namespaceNameConflictMessage,
+  namespaceNameConflicts,
+  namespacePackageOf,
+  type NamespaceNameConflict,
+  type NamespacePackage,
+  type NamespaceUniqueType,
+} from './namespace-co-owner-names.js';
 // One default record page per object per deployment — the holders and the one
 // place a manifest's default record pages are read from (module doc).
 import {
@@ -3239,6 +3251,57 @@ export class ArtifactObjectNameConflictError extends Error {
     this.existingPackageId = existingPackageId;
     this.incomingPackageId = incomingPackageId;
     this.coOwnership = coOwnership;
+  }
+}
+
+/**
+ * [ADR-0150 D2, child N] Raised when a package declares an item of one of the
+ * twelve uncovered bucket 2/3 types — sharing rule, queue, assignment rule,
+ * hook, job, app, page, dashboard, report, book, analytics cube, tool — under a
+ * name another package of its namespace already holds, at the package door
+ * (`namespace-co-owner-names.ts` states the rule, the holders and what it does
+ * not judge). `os validate` prints the same sentence for the same predicate.
+ *
+ * {@link ArtifactObjectNameConflictError}'s sibling in placement — it sits
+ * right after the ADR-0130 D3 object check, ahead of every mutation — and
+ * {@link BareNameConflictError}'s in its envelope and code: `code:
+ * 'NAMESPACE_CONFLICT'`, `status: 422`, because the condition is the one the
+ * namespace gate registers that code for, "a name in a namespace is already
+ * taken", and so is the remedy: rename, or leave one package out. No code is
+ * minted.
+ *
+ * Every conflict the install carries is listed — `conflicts` — and each names
+ * EVERY package of the namespace that already holds the name (red line 2:
+ * ambiguity is reported, never guessed). The top-level fields repeat the first.
+ */
+export class NamespaceNameConflictError extends Error {
+  readonly code = NAMESPACE_CONFLICT_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads. */
+  readonly httpStatus = 422;
+  /** Every `(type, name)` this install would have held twice inside its namespace, in declaration order. */
+  readonly conflicts: readonly NamespaceNameConflict[];
+  /** The namespace. */
+  readonly namespace: string;
+  /** The first conflict's type. */
+  readonly itemType: NamespaceUniqueType;
+  /** The first conflict's name. */
+  readonly itemName: string;
+  /** The package whose install this refusal stopped. */
+  readonly incomingPackageId: string;
+  /** The first conflict's existing holders, every one of them. */
+  readonly existingPackageIds: readonly string[];
+
+  constructor(conflicts: readonly NamespaceNameConflict[]) {
+    const [first] = conflicts;
+    super(namespaceNameConflictMessage(conflicts));
+    this.name = 'NamespaceNameConflictError';
+    this.conflicts = conflicts;
+    this.namespace = first.namespace;
+    this.itemType = first.type;
+    this.itemName = first.name;
+    this.incomingPackageId = first.incomingPackageId;
+    this.existingPackageIds = first.existingPackageIds;
   }
 }
 
@@ -8914,6 +8977,14 @@ export class SchemaRegistry {
     // behind — the same disposition the namespace gate above has.
     this.refuseCoOwnedObjectNameCollision(manifest, selfId, coOwners);
 
+    // [ADR-0150 D2, child N] The object rule above, extended to the twelve
+    // bucket 2/3 types phase 1 does not cover: inside one namespace, a
+    // `(type, name)` has one package holder, so that NAMESPACE/NAME names one
+    // item (`namespace-co-owner-names.ts`). Ahead of every mutation, like the
+    // check above; at every install, boot included, like it; with no
+    // `collisionPolicy` downgrade, like the bare-name rule below.
+    this.refuseNamespaceNameConflicts(manifest);
+
     // The security catalog's one-name-one-holder rule (ADR-0048 §3.4 narrowed
     // for positions, permission sets and capabilities; maintainer ruling Q4 = A
     // on #15196) — also ahead of every mutation, for the same reason. No
@@ -9145,6 +9216,34 @@ export class SchemaRegistry {
       if (isTenantAuthored(owner.definition)) continue;
       throw new ArtifactObjectNameConflictError(fqn, ownerId, selfId ?? manifest.id, coOwners.get(ownerId));
     }
+  }
+
+  /**
+   * [ADR-0150 D2, child N] Refuse an install whose package declares an item of
+   * a covered type under a name another installed package of its namespace
+   * already holds (`namespace-co-owner-names.ts`).
+   *
+   * The sitting holders are the installed package records — their manifests,
+   * as {@link installPackage} recorded them — of the incoming package's
+   * namespace: the record is the one place every door's install lands, so an
+   * uninstall takes its names with it and nothing else is kept. The same
+   * package's own record is never a second holder (a reload, a re-install or
+   * an upgrade).
+   *
+   * @throws {NamespaceNameConflictError} ADR-0112 envelope, naming every holder.
+   */
+  private refuseNamespaceNameConflicts(manifest: ObjectStackManifest): void {
+    const incoming = namespacePackageOf(manifest);
+    if (incoming === undefined || !isNamespaceJudged(incoming.namespace) || incoming.names.length === 0) return;
+    const sitting: NamespacePackage[] = [];
+    for (const record of this.metadata.get('package')?.values() ?? []) {
+      const recorded = (record as InstalledPackage | undefined)?.manifest;
+      if (recorded?.namespace !== incoming.namespace) continue;
+      const holder = namespacePackageOf(recorded);
+      if (holder !== undefined) sitting.push(holder);
+    }
+    const conflicts = namespaceNameConflicts(incoming, sitting);
+    if (conflicts.length > 0) throw new NamespaceNameConflictError(conflicts);
   }
 
   /**

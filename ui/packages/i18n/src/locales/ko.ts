@@ -435,6 +435,11 @@ const ko = {
     currencyHome: {
       convertedAt: '{{date}} 환율 {{rate}}(으)로 환산',
       homeCurrency: '기준 통화(환율 1)',
+      preview: '≈ {{amount}} (환율 {{rate}}, {{date}})',
+      previewSame: '≈ {{amount}} (기준 통화)',
+      awaitingRate: '{{date}} 이전의 {{currency}} 환율이 없습니다. 환율을 추가할 때까지 저장할 수 없습니다',
+      awaitingDate: '전표 날짜를 입력하면 기준 통화 금액이 표시됩니다',
+      rateUnreadable: '저장할 때 기준 통화로 환산됩니다',
     },
     boolean: {
       offBadge: "{{label}} — 꺼짐",

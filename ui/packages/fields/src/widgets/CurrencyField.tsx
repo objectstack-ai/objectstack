@@ -9,8 +9,9 @@ import { resolveFieldCurrency, currencySymbol } from '../currency.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
 import { formatCurrency, currencyDisplayWidth } from './number-format.js';
+import { HomeAmountPreview } from './homeAmountPreview.js';
 
-export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, ...props }: FieldWidgetComponentProps<number>) {
+export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, dataSource, ...props }: FieldWidgetComponentProps<number>) {
   const currencyField = field as any;
   // Shared precedence: field currency → currencyConfig → tenant default (ADR-0053).
   // A `record`-mode amount (ADR-0144 D2) reads the code its record holds —
@@ -218,6 +219,8 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
         />
       </div>
       <BadInputMessage refusal={refusal} />
+      {/* A record-mode amount declaring `homeAmount` (ADR-0144 D5): what the save will store. */}
+      <HomeAmountPreview field={currencyField} amount={value} record={dependentValues} dataSource={dataSource} />
     </div>
   );
 }

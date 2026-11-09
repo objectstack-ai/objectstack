@@ -74,6 +74,10 @@ import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-s
 // over the parsed stack the way the load path registers it. The verdict is
 // `@objectstack/objectql`'s; see the module header.
 import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
+// [ADR-0150 D2, child N] Inside one namespace, an item of the twelve uncovered
+// bucket 2/3 types has one package holder: the package door's predicate and
+// sentence, walked over the artifact's packages in boot order.
+import { findNamespaceNameRefusals } from '../utils/namespace-co-owner-names.js';
 // [ADR-0146 D2, #28410] The override write gate's author-time half: the publish
 // door's own judge, walked over the artifact's packages.
 import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
@@ -501,6 +505,40 @@ export default class Validate extends Command {
         printBulletList(
           containerNameRefusals.map((r) => r.message),
           { noun: 'view-container refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 2c-bis. [ADR-0150 D2, child N] A package of this artifact declaring a
+      //     sharing rule, queue, assignment rule, hook, job, app, page,
+      //     dashboard, report, book, analytics cube or tool under a name
+      //     another package of its namespace already declares is REFUSED,
+      //     naming every holder — the package door
+      //     (`SchemaRegistry.installPackage`) refuses that install at boot.
+      //
+      //     One judge: the predicate and the sentence are
+      //     `@objectstack/objectql`'s; the helper owns only the walk (the
+      //     artifact's packages, in the order the boot installs them). Right
+      //     after the parse, beside 2c and for its reason: the runtime's own
+      //     accept set. `os build` makes the same call.
+      const namespaceNameRefusals = findNamespaceNameRefusals(result.data as Record<string, unknown>);
+      if (namespaceNameRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: namespaceNameRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = namespaceNameRefusals.length;
+        console.log('');
+        printError(`The server would refuse this stack at boot (${n} package${n > 1 ? 's' : ''} holding a name another package of its namespace holds)`);
+        printBulletList(
+          namespaceNameRefusals.map((r) => r.message),
+          { noun: 'namespace name refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }

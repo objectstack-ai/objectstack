@@ -438,6 +438,11 @@ const pt = {
     currencyHome: {
       convertedAt: 'Convertido à taxa {{rate}} em {{date}}',
       homeCurrency: 'Na moeda base (taxa 1)',
+      preview: '≈ {{amount}} à taxa {{rate}} em {{date}}',
+      previewSame: '≈ {{amount}} (moeda principal)',
+      awaitingRate: 'Não há taxa de {{currency}} em ou antes de {{date}}: não é possível salvar até que uma seja adicionada',
+      awaitingDate: 'Informe a data do documento para ver o valor na moeda principal',
+      rateUnreadable: 'Convertido para a moeda principal ao salvar',
     },
     boolean: {
       offBadge: "{{label}} — Desativado",

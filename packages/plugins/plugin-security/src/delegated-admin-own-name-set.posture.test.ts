@@ -875,21 +875,34 @@ describe("[ADR-0090 D12] a delegated answer about a user the caller cannot read 
         }
       });
 
-      it(`the ${STATES.length} states get, at every door, the answer the id naming no user gets`, async () => {
-        const answers = [];
-        for (const state of STATES) answers.push(await answersFor(posture, state));
-        for (const [i, answer] of answers.entries()) expect(answer, STATES[i]).toEqual(answers[0]);
-        // The one answer: the write gate's scope violation, and each explain door's refusal of a user the caller may not describe.
-        const [none] = answers;
-        for (const [door, answer] of Object.entries(none)) {
-          const expected = door.startsWith('security/explain') || door.startsWith("the subject's effective")
-            ? [403, 'PERMISSION_DENIED', 'PermissionDeniedError']
-            : [403, 'DELEGATION_SCOPE_VIOLATION', 'DelegationScopeViolationError'];
-          expect([answer.status, (answer as any).code, (answer as any).class], door).toEqual(expected);
-        }
-        expect((none['security/explain for the subject'] as any).details)
-          .toEqual({ object: 'sys_business_unit', operation: 'read', targetUserId: SUBJECT });
-        expect((none["the subject's effective access"] as any).details).toBeUndefined();
+      // Every state boots a rig of its own, so each state is an `it` of its own: its own
+      // time budget and its own failure line. Asked in one `it`, the states shared the
+      // default 5 s budget, which a loaded CI shard used up. The reference, the id
+      // naming no user, is asked once, and every other state is compared to it.
+      describe(`the ${STATES.length} states get, at every door, the answer the id naming no user gets`, () => {
+        let reference: Awaited<ReturnType<typeof answersFor>> | undefined;
+        beforeAll(async () => {
+          reference = await answersFor(posture, STATES[0]);
+        });
+
+        it(`${STATES[0]}: the write gate's scope violation, and each explain door's refusal of a user the caller may not describe`, () => {
+          expect(reference).toBeDefined();
+          const none = reference!;
+          for (const [door, answer] of Object.entries(none)) {
+            const expected = door.startsWith('security/explain') || door.startsWith("the subject's effective")
+              ? [403, 'PERMISSION_DENIED', 'PermissionDeniedError']
+              : [403, 'DELEGATION_SCOPE_VIOLATION', 'DelegationScopeViolationError'];
+            expect([answer.status, (answer as any).code, (answer as any).class], door).toEqual(expected);
+          }
+          expect((none['security/explain for the subject'] as any).details)
+            .toEqual({ object: 'sys_business_unit', operation: 'read', targetUserId: SUBJECT });
+          expect((none["the subject's effective access"] as any).details).toBeUndefined();
+        });
+
+        it.each(STATES.slice(1))(`%s: every door answers exactly what ${STATES[0]} gets`, async (state) => {
+          expect(reference).toBeDefined();
+          expect(await answersFor(posture, state), state).toEqual(reference);
+        });
       });
 
       it('CONTROL: the same subject with a business unit inside the scope, read by the delegate, is served at every door', async () => {
