@@ -6,6 +6,7 @@ import type {
   AIRequestOptions,
   AIConversation,
   IAIConversationService,
+  PendingActionStatus,
 } from './ai-service';
 import type {
   ModelMessage,
@@ -415,5 +416,32 @@ describe('AI Service Contract', () => {
 
       expect(conv.metadata).toEqual({ source: 'web', tags: ['support'] });
     });
+  });
+});
+
+/** Type-level identity: true iff A and B are the same type. */
+type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+/** Compile error when the argument is not `true`. */
+type Assert<T extends true> = T;
+
+type ApproveOutcomeStatus = Awaited<ReturnType<NonNullable<IAIService['approvePendingAction']>>>['status'];
+
+// Exported deliberately: an unread alias is TS6196, and a pin no program compiles is no pin.
+
+/** `held` is a lifecycle status, and the approve outcome may be `held`. */
+export type PendingActionStatusHasHeld = Assert<Eq<Extract<PendingActionStatus, 'held'>, 'held'>>;
+export type ApproveOutcomeIsExecutedHeldOrFailed = Assert<Eq<ApproveOutcomeStatus, 'executed' | 'held' | 'failed'>>;
+
+describe('approvePendingAction held outcome', () => {
+  it('lets an implementation answer held, with the hold as its result', async () => {
+    const service: IAIService = {
+      chat: async () => ({ content: '' }),
+      complete: async () => ({ content: '' }),
+      approvePendingAction: async () => ({ status: 'held', result: { code: 'AI_WRITE_HELD' } }),
+    };
+    const outcome = await service.approvePendingAction!('pa_1', 'user_1');
+    expect(outcome.status).toBe('held');
+    const status: PendingActionStatus = outcome.status;
+    expect(status).toBe('held');
   });
 });

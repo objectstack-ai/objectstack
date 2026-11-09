@@ -467,11 +467,19 @@ export interface IAIService {
      * via the same handler that would have run had approval not been
      * required. Updates the row to `executed` (or `failed`) and returns
      * the outcome.
+     *
+     * `held` is the third outcome: the confirmation was accepted, and the
+     * write waits on an approval outside the conversation, because a host
+     * policy held it for a human approver. Nothing has been written yet,
+     * so the row is `held`, never `executed`; `result` carries whatever the
+     * host returned about the hold. The host that held the action moves it
+     * on: when that approval resolves, it writes the row's final state
+     * (`executed`, `rejected` or `failed`). This service does not.
      */
     approvePendingAction?(
         id: string,
         actorId: string,
-    ): Promise<{ status: 'executed' | 'failed'; result?: unknown; error?: string }>;
+    ): Promise<{ status: 'executed' | 'held' | 'failed'; result?: unknown; error?: string }>;
 
     /**
      * Reject a pending action. The row transitions to `rejected` and the
@@ -508,8 +516,15 @@ export interface IAIService {
     ): Promise<PendingActionRow[]>;
 }
 
-/** Lifecycle of a pending action proposal. */
-export type PendingActionStatus = 'pending' | 'approved' | 'executed' | 'failed' | 'rejected';
+/**
+ * Lifecycle of a pending action proposal.
+ *
+ * `held`: the confirmation was accepted, and the write waits on an approval
+ * outside the conversation. It is not a final state; the host that held it
+ * writes `executed`, `rejected` or `failed` when that approval resolves
+ * (see {@link IAIService.approvePendingAction}).
+ */
+export type PendingActionStatus = 'pending' | 'approved' | 'held' | 'executed' | 'failed' | 'rejected';
 
 /** Input for {@link IAIService.proposePendingAction}. */
 export interface ProposePendingActionInput {
