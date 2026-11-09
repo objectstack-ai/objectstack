@@ -20,6 +20,9 @@ import { cleanup, render, screen } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
+// Paid at collection, not inside a clocked case: the registration reaches
+// `celAuthoring.ts`, which loads the linter on first use.
+import '@objectstack/lint';
 // Side effect: the production registration, imported the way `index.ts` does.
 import '../../services/builtinComponents.js';
 import { componentRefToUrlSegments, getAppComponent } from '../../services/componentRegistry.js';
