@@ -24,7 +24,7 @@ import { AutomationEngine } from './engine.js';
 import type { AutomationEngineOptions, FlowHistorySource, FlowNameResolver, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
 // [ADR-0150 D3] The ONE package-scoped resolver, read through its exports only
 // — never a second implementation of the rule in this package.
-import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
+import { resolvePackageScopedName } from '@objectstack/objectql';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
@@ -1147,15 +1147,6 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
     };
 }
 
-/** The registry members the package-scoped resolver reads ({@link PackageScopedRegistry}). */
-const PACKAGE_SCOPED_REGISTRY_MEMBERS = [
-    'getPackage',
-    'getAllPackages',
-    'packageScopedHoldersOf',
-    'getPackageScopedItem',
-    'getEnvironmentScopedItem',
-] as const;
-
 /**
  * [ADR-0150 D3] The engine's reader over the one package-scoped resolver:
  * `resolvePackageScopedName` from `@objectstack/objectql`, asked of the
@@ -1170,16 +1161,15 @@ const PACKAGE_SCOPED_REGISTRY_MEMBERS = [
  */
 export function flowNameResolver(ctx: Pick<PluginContext, 'getService'>): FlowNameResolver {
     return (name, callerPackageId) => {
-        let registry: Partial<Record<(typeof PACKAGE_SCOPED_REGISTRY_MEMBERS)[number], unknown>> | undefined;
+        let registry: PackageScopedRegistry | undefined;
         try {
-            registry = ctx.getService<{ registry?: typeof registry }>('objectql')?.registry;
+            // The same slice reader the connector reconcile asks (E5's `packageScopedRegistryOf`).
+            registry = packageScopedRegistryOf(ctx.getService<{ registry?: unknown }>('objectql')?.registry);
         } catch {
             return undefined;
         }
-        if (!registry || PACKAGE_SCOPED_REGISTRY_MEMBERS.some((member) => typeof registry![member] !== 'function')) {
-            return undefined;
-        }
-        return resolvePackageScopedName(registry as unknown as PackageScopedRegistry, { type: 'flow', name, callerPackageId });
+        if (!registry) return undefined;
+        return resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId });
     };
 }
 
