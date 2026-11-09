@@ -1710,12 +1710,13 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/eval.md', 45],
   // repo:cloud lane charter: the cloud seats keep first-touch triage of the
   // cloud repo, run the first-touch sweep before they claim, set grade and
-  // state when they file, and triage's daily reconciliation is the backstop.
-  // Ruling of record: comment 6739409918, the maintainer's letter A, whose
-  // workload names `lanes/cloud.md`. A NEW file, so this is an added row and
-  // no other row moves; set at the landed line count (headroom 0, same
-  // convention as every lane charter above).
-  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 24],
+  // state when they file, and triage's daily reconciliation is the backstop;
+  // the cloud seats' own standing commitments come from the companion card
+  // #31918. Ruling of record: comment 6739409918, the maintainer's letter A,
+  // whose workload names `lanes/cloud.md`. A NEW file, so this is an added
+  // row and no other row moves; set at the landed line count (headroom 0,
+  // same convention as every lane charter above).
+  ['.claude/skills/pm-dispatch/references/lanes/cloud.md', 28],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
