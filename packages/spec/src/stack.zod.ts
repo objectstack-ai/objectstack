@@ -41,7 +41,7 @@ import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
-import { InlineGridColumnSchema } from './data/field.zod';
+import { InlineGridColumnSchema, summaryFunctionReadsField, VALUE_DOMAIN_FIELD_TYPES } from './data/field.zod';
 import { AUDIT_FIELD_DEFS } from './data/injected-system-column-provenance';
 import { pageComponentSlotPositions } from './ui/component.zod';
 import { SeedSchema } from './data/seed.zod';
@@ -4458,6 +4458,155 @@ function collectLookupAutofillErrors(config: ObjectStackDefinition): string[] {
   return errors;
 }
 
+/** A record-mode `currencyField` path `PARENT_FIELD.CODE_FIELD`, split; `undefined` for any other pointer. */
+function recordCurrencyPathOf(field: unknown): { via: string; code: string } | undefined {
+  if (!isRecord(field) || !isRecord(field.currencyConfig)) return undefined;
+  const { currencyMode, currencyField } = field.currencyConfig;
+  if (currencyMode !== 'record' || typeof currencyField !== 'string') return undefined;
+  const segments = currencyField.split('.');
+  if (segments.length !== 2 || segments.some((s) => !/^[a-z_][a-z0-9_]*$/.test(s))) return undefined;
+  return { via: segments[0]!, code: segments[1]! };
+}
+
+/**
+ * [ADR-0144 D2 and D6, amended 2026-11-09 by #31743, ruling A recorded in
+ * 6739066323] The two halves of a child that follows its parent's currency
+ * that need both objects, judged where the stack holds both — the
+ * {@link collectLookupAutofillErrors} stance, for the same reason.
+ *
+ * (a) A record-mode amount whose `currencyField` is the path
+ * `PARENT_FIELD.CODE_FIELD` names, as its second segment, a field of the
+ * object `PARENT_FIELD` references that holds an ISO 4217 code: a
+ * `VALUE_DOMAIN_FIELD_TYPES` field declaring
+ * `valueDomain: 'iso_4217_currency'` (the amended D2 note: "its second names,
+ * on that field's target object, a code field of the kind the first bullet
+ * requires"). A field that is not there, or holds no code, would leave the
+ * amount with a currency no write checks. The first segment is the amount's
+ * own object's to judge (`refuseDishonestRecordCurrencyField`,
+ * `data/object.zod.ts`), which has passed by the time this pass runs.
+ *
+ * (b) A `summary` that rolls up (`sum`, `min`, `max`, `avg`) such a
+ * following child amount through the very `master_detail` the amount's path
+ * starts with is in the parent's currency (D6, amended: "single-currency by
+ * construction, and is admitted in the parent's currency"), and says so the
+ * way an amount does: `currencyConfig: { currencyMode: 'record',
+ * currencyField: CODE_FIELD }`, naming the parent's own code field, the one
+ * the children follow. A roll-up without that declaration would show the
+ * parent's money as a bare number; one naming another code field would show
+ * it in the wrong currency.
+ *
+ * Judged only where the declaration is new: (b) asks about roll-ups over a
+ * child amount that follows through a path, a shape no stack could carry
+ * before this amendment, so nothing that resolved before is refused here. A
+ * roll-up through any OTHER relation over such a child, and every roll-up
+ * over a child amount with its own code field, keep D6's first bullet, which
+ * the registry enforces at runtime registration; this pass does not repeat
+ * it.
+ *
+ * Resolution is against the stack's own `objects`, merged with its
+ * `objectExtensions` by name; an object this stack does not declare is not
+ * judged, nor is a parent it knows only through an extension (whose owner's
+ * fields live elsewhere), and neither is a roll-up whose relationship field
+ * is neither written nor the child's one relation back to the parent.
+ */
+function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const fieldsByObject = new Map<string, Record<string, unknown>>();
+  // The objects this stack DECLARES. A parent known only through an
+  // `objectExtensions` entry has its owner's fields elsewhere, so its merged
+  // map holds the extension's fields alone: judging a code field or a roll-up
+  // against it would refuse what the owner declares. Such a parent is skipped.
+  const declared = new Set<string>();
+  for (const obj of config.objects ?? []) {
+    if (!isRecord(obj) || !isRecord(obj.fields)) continue;
+    declared.add(obj.name);
+    fieldsByObject.set(obj.name, { ...fieldsByObject.get(obj.name), ...obj.fields });
+  }
+  for (const ext of (config as { objectExtensions?: unknown }).objectExtensions as unknown[] ?? []) {
+    if (!isRecord(ext) || typeof ext.extend !== 'string' || !isRecord(ext.fields)) continue;
+    fieldsByObject.set(ext.extend, { ...fieldsByObject.get(ext.extend), ...ext.fields });
+  }
+  const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
+  const isCodeField = (f: unknown): boolean =>
+    isRecord(f) && typeof f.type === 'string' && VALUE_DOMAIN_FIELD_TYPES.has(f.type) && f.valueDomain === 'iso_4217_currency';
+  const codeFieldsOf = (fields: Record<string, unknown>): string =>
+    ((names) => (names.length > 0
+      ? `candidates: ${names.map((n) => `'${n}'`).join(', ')}`
+      : 'it has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`'))(
+      Object.keys(fields).filter((k) => isCodeField(fields[k])));
+
+  for (const [objectName, fields] of fieldsByObject) {
+    for (const [fieldName, field] of Object.entries(fields)) {
+      // (a) The parent holds the code the path names.
+      const followed = recordCurrencyPathOf(field);
+      if (followed !== undefined) {
+        const via = hasOwnKey(fields, followed.via) ? fields[followed.via] : undefined;
+        const parentName = isRecord(via) && via.type === 'master_detail' && typeof via.reference === 'string' ? via.reference : undefined;
+        const parent = parentName === undefined || !declared.has(parentName) ? undefined : fieldsByObject.get(parentName);
+        if (parentName !== undefined && parent !== undefined) {
+          const where = `Object '${objectName}' field '${fieldName}' currencyConfig.currencyField`;
+          const code = hasOwnKey(parent, followed.code) ? parent[followed.code] : undefined;
+          if (!isRecord(code)) {
+            errors.push(
+              `${where}: '${followed.via}.${followed.code}' follows '${parentName}', the object the master_detail `
+                + `'${followed.via}' references, and '${parentName}' declares no field '${followed.code}', so the amount `
+                + `has no code to follow. Name the field of '${parentName}' that holds its ISO 4217 code — `
+                + `${codeFieldsOf(parent)}.`,
+            );
+          } else if (!isCodeField(code)) {
+            errors.push(
+              `${where}: '${followed.via}.${followed.code}' follows '${parentName}.${followed.code}', a `
+                + `'${String(code.type)}' field that does not hold an ISO 4217 code, so a write could store any value as `
+                + `the currency. A followed code field is a ${codeTypes} field declaring \`valueDomain: 'iso_4217_currency'\` `
+                + `on '${parentName}' — ${codeFieldsOf(parent)}.`,
+            );
+          }
+        }
+      }
+
+      // (b) A roll-up through that very master_detail says it is in the parent's currency.
+      if (!isRecord(field) || field.type !== 'summary' || !isRecord(field.summaryOperations)) continue;
+      if (!declared.has(objectName)) continue;
+      const ops = field.summaryOperations;
+      if (typeof ops.object !== 'string' || typeof ops.field !== 'string' || typeof ops.function !== 'string' || !summaryFunctionReadsField(ops.function)) continue;
+      const child = fieldsByObject.get(ops.object);
+      if (child === undefined) continue;
+      const amount = recordCurrencyPathOf(hasOwnKey(child, ops.field) ? child[ops.field] : undefined);
+      if (amount === undefined) continue;
+      const amountVia = child[amount.via];
+      if (!isRecord(amountVia) || amountVia.type !== 'master_detail' || amountVia.reference !== objectName) continue;
+      const backRelations = Object.keys(child).filter((k) => {
+        const f = child[k];
+        return isRecord(f) && (f.type === 'lookup' || f.type === 'master_detail') && f.reference === objectName;
+      });
+      const relation = typeof ops.relationshipField === 'string'
+        ? ops.relationshipField
+        : backRelations.length === 1 ? backRelations[0] : undefined;
+      if (relation !== amount.via) continue;
+      // A path whose code the parent does not hold is (a)'s finding, told once at the amount.
+      if (!isCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
+      const summaryCurrency = isRecord(field.currencyConfig) ? field.currencyConfig : undefined;
+      if (summaryCurrency?.currencyMode === 'record' && summaryCurrency.currencyField === amount.code) continue;
+      const spelling = `\`currencyConfig: { currencyMode: 'record', currencyField: '${amount.code}' }\``;
+      errors.push(
+        `Object '${objectName}' field '${fieldName}' currencyConfig: the summary rolls up ${String(ops.function)}`
+          + `(${ops.object}.${ops.field}) through the master_detail '${amount.via}', and '${ops.object}.${ops.field}' `
+          + `follows this record's currency ('${amount.via}.${amount.code}'), so the total is in the currency `
+          + `'${objectName}.${amount.code}' holds. `
+          + (summaryCurrency?.currencyMode === 'record' && typeof summaryCurrency.currencyField === 'string'
+            ? `It names '${String(summaryCurrency.currencyField)}' instead, and would show in another currency. `
+            : summaryCurrency?.currencyMode === 'fixed'
+              ? `It declares \`currencyMode: 'fixed'\`, and would show in that one currency whatever the parent's is. `
+              : summaryCurrency !== undefined
+                ? 'It declares `currencyMode: \'dynamic\'`, and would show in the tenant default currency whatever the parent\'s is. '
+                : 'It does not say so, and would show as a bare number. ')
+          + `Declare ${spelling} on '${fieldName}'.`,
+      );
+    }
+  }
+  return errors;
+}
+
 /**
  * [#24190] The child object a `record:line_items` block lists, resolved the
  * way objectui resolves it before `LineItemsPanel` hydrates its columns from
@@ -5217,6 +5366,11 @@ function validateCrossReferences(
   // Validate each lookup-pick autofill source against the referenced object
   // (#27945) — the half the object's own parse cannot see.
   errors.push(...collectLookupAutofillErrors(config));
+
+  // Validate a record-mode `currencyField` path and the roll-ups over it
+  // against the parent object (ADR-0144 D2 and D6, amended) — the halves the
+  // object's own parse cannot see.
+  errors.push(...collectRecordCurrencyPathErrors(config));
 
   // Validate seed data → object references. ARTIFACT-SCOPED (#18202).
   errors.push(...collectSeedDataObjectErrors(config, artifactScope));
