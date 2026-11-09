@@ -291,3 +291,40 @@ describe('[#20445] the `where` face on SQLite — native execute, and the Object
     });
   });
 });
+
+/**
+ * [#31626] SQL Server is a named dialect (#31394) with no JSON empty-list
+ * construct here, and the `/analytics/sql` echo reaches this refusal on a
+ * federated SQL Server object (whose dashboards run the engine aggregate, so
+ * the echo is the face that compiles the `where`). The refusal used to say the
+ * dialect "is not known"; it names the dialect instead. Envelope unchanged.
+ */
+describe('[#31626] a multi-value `$empty` on SQL Server: refused naming the dialect, on both SQL faces', () => {
+  const mssqlCtx = (nativeSql: boolean): StrategyContext =>
+    ({
+      getCube: (name: string) => (name === 'empties' ? CUBE : undefined),
+      declaredValueShape: (object: string, field: string) => (object === TABLE ? SHAPES[field] : undefined),
+      sqlDialect: () => 'mssql',
+      queryCapabilities: () => ({ nativeSql, objectqlAggregate: !nativeSql, inMemory: false }),
+      executeRawSql: async () => [],
+    }) as unknown as StrategyContext;
+
+  it('the ObjectQL echo: INVALID_FILTER / 400, and the reason names "mssql"', async () => {
+    const err = await refusalOf(() => new ObjectQLStrategy().generateSql(query({ owners: { $empty: true } }), mssqlCtx(false)));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('"mssql"');
+  });
+
+  it('the native statement: the same envelope and the same named dialect', async () => {
+    const err = await refusalOf(() => new NativeSQLStrategy().generateSql(query({ owners: { $empty: false } }), mssqlCtx(true)));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('"mssql"');
+  });
+
+  it('CONTROL: the scalar rows still compile on SQL Server', async () => {
+    const { sql } = await new ObjectQLStrategy().generateSql(query({ name: { $empty: true }, amount: { $empty: false } }), mssqlCtx(false));
+    expect(sql).toContain('WHERE');
+  });
+});

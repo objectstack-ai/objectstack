@@ -15,11 +15,14 @@
 //     `AppPlugin` packages, `alpha` and `beta`, shipping one flow, one webhook,
 //     one connector and one email template under the same names — boots, and
 //     logs ONE bare-name warning line naming all four, both packages and the
-//     rename for every name; the automation engine's own flow precedence
-//     keeps arming one of the two flows, as before;
+//     rename for every name; the automation engine arms NEITHER of the two
+//     flows and logs the refusal naming both, and the declared webhook's
+//     by-name read refuses the held name naming both packages (ADR-0150 D3,
+//     #31677 Q1 ruled A: a clash held from before phase 1 is refused like any
+//     other two-holder name, not first-picked);
 //   - `POST /marketplace/install-local` of a third package declaring the held
 //     flow name is 422 PLUGIN_REGISTER_FAILED naming both holders and the
-//     rename, installs nothing, and the engine keeps serving the armed flow;
+//     rename, installs nothing, and the engine still arms neither flow;
 //   - the same door refusing a package that declares the held webhook name and
 //     the showcase's own flow and email template names, naming the showcase;
 //   - CONTROL: a package declaring fresh names installs — and so does one
@@ -145,10 +148,36 @@ describe('one package holder per flow, webhook, connector and email template nam
     return (await automation.getFlow(name))?.label;
   };
 
-  /** The declared webhook the dispatcher's reader serves for `name`. */
-  const declaredWebhookPackage = async (name: string): Promise<string | undefined> => {
+  /**
+   * What the dispatcher's by-name reader answers for a webhook name two packages
+   * hold: ADR-0150 D3 for a caller with no package refuses it (409
+   * RESOURCE_CONFLICT, every holder named) — no holder is served by list order
+   * (#31677, Q1 ruled A 6729831159). `undefined` when the read did not throw.
+   */
+  const declaredWebhookRefusal = async (name: string): Promise<{ code?: string; status?: number; message: string; candidates: string[] } | undefined> => {
     const declared = (stack.kernel as any).getService('declaredWebhooks');
-    return (await declared.declaredWebhookNamed(name))?.packageId;
+    try {
+      await declared.declaredWebhookNamed(name);
+      return undefined;
+    } catch (err) {
+      const e = err as { code?: string; status?: number; message?: string; candidates?: Array<{ kind: string; packageId?: string }> };
+      return {
+        code: e.code,
+        status: e.status,
+        message: String(e.message ?? ''),
+        candidates: (e.candidates ?? []).map((c) => c.packageId ?? c.kind).sort(),
+      };
+    }
+  };
+
+  /** The refusal every by-name read of the held webhook answers on this boot. */
+  const expectHeldWebhookRefused = async (): Promise<void> => {
+    const refusal = await declaredWebhookRefusal(HOOK);
+    expect(refusal, 'the by-name read of the held webhook throws').toBeDefined();
+    expect([refusal!.code, refusal!.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+    expect(refusal!.candidates).toEqual(['com.qa.bare.alpha', 'com.qa.bare.beta']);
+    expect(refusal!.message).toContain('com.qa.bare.alpha');
+    expect(refusal!.message).toContain('com.qa.bare.beta');
   };
 
   /** The package the email plugin registered the built-in `auth.password_reset` bundle under, read from the registry. */
@@ -196,13 +225,18 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect(line).not.toContain(BUILT_IN_TPL);
     expect(line).not.toContain(baseline!);
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
-    // Unchanged by the rule: the automation engine's precedence still arms one flow, naming both.
-    expect(bootLines.some((l) => l.includes(`Flow name collision: '${FLOW}'`) && l.includes('com.qa.bare.alpha') && l.includes('com.qa.bare.beta'))).toBe(true);
-    expect(await armedFlowLabel(FLOW)).toBe('alpha flow');
-    expect(await declaredWebhookPackage(HOOK)).toBe('com.qa.bare.alpha');
+    // [ADR-0150 D3, #31677 Q1] The automation engine arms neither flow: the arming is refused, naming both.
+    expect(bootLines.some((l) =>
+      l.includes('failed to register flow') && l.includes(`"${FLOW}"`) && l.includes('held by 2 packages')
+      && l.includes('com.qa.bare.alpha') && l.includes('com.qa.bare.beta'))).toBe(true);
+    expect(await armedFlowLabel(FLOW)).toBeUndefined();
+    // ADR-0150 D3 (#31677, Q1 ruled A): the webhook the clash held before phase 1
+    // is no longer served by first registration — the by-name read refuses it,
+    // naming both packages.
+    await expectHeldWebhookRefused();
   });
 
-  it('install-local of a third package declaring a held flow name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed, the armed flow is untouched', async () => {
+  it('install-local of a third package declaring a held flow name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed, and neither flow is armed', async () => {
     const before = await packageIds();
     const { status, body } = await installLocal(inline('gamma', { flows: [flow('gamma')] }));
     expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
@@ -212,7 +246,7 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect(message).toContain('com.qa.bare.beta');
     expect(message).toContain(`"gamma_${FLOW}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-    expect(await armedFlowLabel(FLOW)).toBe('alpha flow');
+    expect(await armedFlowLabel(FLOW)).toBeUndefined();
   });
 
   it('install-local of a package declaring the held webhook name and the showcase\'s own flow and email template names is refused, naming the showcase', async () => {
@@ -231,7 +265,7 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect(message).toContain('com.qa.bare.alpha');
     expect(message).toContain(`"delta_${HOOK}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-    expect(await declaredWebhookPackage(HOOK)).toBe('com.qa.bare.alpha');
+    await expectHeldWebhookRefused();
   });
 
   it('CONTROL — install-local of a package declaring fresh names, and overriding the built-in password-reset template, installs; the send renders the app\'s template', async () => {

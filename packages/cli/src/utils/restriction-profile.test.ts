@@ -9,6 +9,8 @@
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -25,6 +27,7 @@ import { RestrictionProfileNodeType } from '@objectstack/spec/system';
 import {
   judgeRestrictionProfile,
   loadRestrictionProfile,
+  RESTRICTION_PROFILE_ROUTE,
   restrictionProfileVersionDrift,
   type ParsedRestrictionProfile,
 } from './restriction-profile.js';
@@ -344,29 +347,121 @@ describe('loadRestrictionProfile', () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('parses a valid profile file with the spec schema', () => {
+  it('parses a valid profile file with the spec schema', async () => {
     writeFileSync(join(dir, 'ok.json'), JSON.stringify(OPEN));
-    expect(loadRestrictionProfile('ok.json', dir).profile).toEqual(OPEN);
+    expect((await loadRestrictionProfile('ok.json', dir)).profile).toEqual(OPEN);
   });
 
-  it('refuses an invalid profile, naming the schema issue', () => {
+  it('refuses an invalid profile, naming the schema issue', async () => {
     writeFileSync(join(dir, 'bad.json'), JSON.stringify({ ...OPEN, allowedFlowNodeTypes: ['acme_sign'] }));
-    expect(() => loadRestrictionProfile('bad.json', dir)).toThrow(/not a valid restriction profile.*allowedFlowNodeTypes\.0/);
+    await expect(loadRestrictionProfile('bad.json', dir)).rejects.toThrow(/not a valid restriction profile.*allowedFlowNodeTypes\.0/);
   });
 
-  it('refuses {} — an absent dimension is not "no restriction"', () => {
+  it('refuses {} — an absent dimension is not "no restriction"', async () => {
     writeFileSync(join(dir, 'empty.json'), '{}');
-    expect(() => loadRestrictionProfile('empty.json', dir)).toThrow(/allowCode/);
+    await expect(loadRestrictionProfile('empty.json', dir)).rejects.toThrow(/allowCode/);
   });
 
-  it('refuses a file that is not JSON, and a missing file', () => {
+  it('refuses a file that is not JSON, and a missing file', async () => {
     writeFileSync(join(dir, 'garbled.json'), 'allowCode: false');
-    expect(() => loadRestrictionProfile('garbled.json', dir)).toThrow(/is not JSON/);
-    expect(() => loadRestrictionProfile('missing.json', dir)).toThrow(/no restriction profile file/);
+    await expect(loadRestrictionProfile('garbled.json', dir)).rejects.toThrow(/is not JSON/);
+    await expect(loadRestrictionProfile('missing.json', dir)).rejects.toThrow(/no restriction profile file/);
+  });
+});
+
+/**
+ * The URL form, against a local stub environment (never a real one). The stub
+ * answers whatever the current case sets and records every request it gets.
+ */
+describe('loadRestrictionProfile — an environment URL', () => {
+  let dir = '';
+  let server: Server;
+  let origin = '';
+  let answer: { status: number; type: string; body: string } = { status: 200, type: 'application/json', body: '' };
+  const requests: Array<{ method?: string; url?: string }> = [];
+  const serve = (status: number, body: unknown, type = 'application/json') => {
+    answer = { status, type, body: typeof body === 'string' ? body : JSON.stringify(body) };
+  };
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'os-restriction-profile-url-'));
+    server = createServer((req, res) => {
+      requests.push({ method: req.method, url: req.url });
+      res.writeHead(answer.status, { 'content-type': answer.type });
+      res.end(answer.body);
+    });
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => {
+    await new Promise<void>((done) => server.close(() => done()));
+    if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('refuses a URL rather than fetching from a guessed route', () => {
-    expect(() => loadRestrictionProfile('https://env.example.com', dir)).toThrow(/does not publish its restriction profile at a defined/);
+  const route = () => `${origin}${RESTRICTION_PROFILE_ROUTE}`;
+
+  it('fetches GET RESTRICTION_PROFILE_ROUTE at the URL\'s origin and parses it exactly as a file of the same content', async () => {
+    const team = profile({ allowCode: false, allowScheduledAutomation: false, allowedFlowNodeTypes: ['approval', 'update_record'] });
+    writeFileSync(join(dir, 'team.json'), JSON.stringify(team));
+    serve(200, { success: true, data: team });
+    requests.length = 0;
+    const fetched = await loadRestrictionProfile(`${origin}/some/console/path?tab=1`, dir);
+    expect(requests).toEqual([{ method: 'GET', url: '/api/v1/discovery/restriction-profile' }]);
+    expect(fetched.source).toBe(route());
+    expect(fetched.profile).toEqual((await loadRestrictionProfile('team.json', dir)).profile);
+    // ...and judges the same stack identically.
+    expect(judgeRestrictionProfile(STACK, fetched.profile)).toEqual(judgeRestrictionProfile(STACK, team));
+  });
+
+  it('refuses a 404 RESOURCE_NOT_FOUND (the host names no environment), naming the URL', async () => {
+    serve(404, { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'No environment' } });
+    await expect(loadRestrictionProfile(origin, dir)).rejects.toThrow(
+      `${route()} answered HTTP 404 RESOURCE_NOT_FOUND — no environment is served at this host.`,
+    );
+  });
+
+  it('refuses a 503, naming the URL', async () => {
+    serve(503, 'upstream unavailable', 'text/plain');
+    await expect(loadRestrictionProfile(origin, dir)).rejects.toThrow(`${route()} answered HTTP 503.`);
+  });
+
+  it('refuses a 200 that is not JSON, naming the URL', async () => {
+    serve(200, '<html>console</html>', 'text/html');
+    await expect(loadRestrictionProfile(origin, dir)).rejects.toThrow(`${route()} did not answer JSON (content-type text/html).`);
+  });
+
+  it('refuses JSON outside the { success: true, data } envelope, naming the URL', async () => {
+    serve(200, OPEN);
+    await expect(loadRestrictionProfile(origin, dir)).rejects.toThrow(`${route()} did not answer the { success: true, data } envelope`);
+    serve(200, { success: false, data: OPEN });
+    await expect(loadRestrictionProfile(origin, dir)).rejects.toThrow(`${route()} did not answer the { success: true, data } envelope`);
+  });
+
+  it('refuses a schema-invalid profile, naming the URL and the issue under data', async () => {
+    serve(200, { success: true, data: { ...OPEN, allowCode: 'no' } });
+    await expect(loadRestrictionProfile(origin, dir)).rejects.toThrow(
+      new RegExp(`${route().replace(/[.?]/g, '\\$&')} answered an invalid restriction profile .* data\\.allowCode:`),
+    );
+    serve(200, { success: true, data: {} });
+    await expect(loadRestrictionProfile(origin, dir)).rejects.toThrow(/data\.allowCode:/);
+  });
+
+  it('refuses an environment it cannot reach, naming the URL', async () => {
+    const closed = createServer();
+    await new Promise<void>((done) => closed.listen(0, '127.0.0.1', done));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise<void>((done) => closed.close(() => done()));
+    await expect(loadRestrictionProfile(`http://127.0.0.1:${port}`, dir)).rejects.toThrow(
+      `http://127.0.0.1:${port}${RESTRICTION_PROFILE_ROUTE} could not be reached (ECONNREFUSED).`,
+    );
+  });
+
+  it('refuses a scheme other than http(s) without fetching, naming the file form', async () => {
+    requests.length = 0;
+    await expect(loadRestrictionProfile('file:///etc/profile.json', dir)).rejects.toThrow(
+      /only an http:\/\/ or https:\/\/ environment URL can be fetched.*os validate --target \.\/restriction-profile\.json/,
+    );
+    expect(requests).toEqual([]);
   });
 });
 

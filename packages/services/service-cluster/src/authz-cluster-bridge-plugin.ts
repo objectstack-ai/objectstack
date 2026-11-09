@@ -9,6 +9,7 @@ import {
 } from '@objectstack/core';
 import type { IClusterService } from '@objectstack/spec/contracts';
 import { isInProcessClusterDriver } from './split-brain-guard.js';
+import { onClusterResync } from './cluster-resync.js';
 
 /**
  * ── `authz.invalidated` bridge + the boot-time posture statement (#11968) ────
@@ -46,6 +47,16 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
  * publishes no message and logs no posture line. That is the substrate's
  * acceptance criterion: with no cache consumers, runtime behaviour is
  * unchanged.
+ *
+ * ## Resync after an outage
+ *
+ * An `authz.invalidated` hint published while the shared store is unreachable
+ * is lost, and without this the peer kept its grants until the TTL lapsed. So
+ * while bridged, this plugin also listens for the driver's local
+ * `cluster.resync` event (`onClusterResync`, emitted once when the connection
+ * returns after an outage) and answers it the way the bridge answers a peer's
+ * hint: it advances the engine's write epoch with reason `remote` (so the bump
+ * is not echoed onto the bus), and every consumer retires what it holds.
  */
 export class AuthzClusterBridgePlugin implements Plugin {
     name = 'com.objectstack.service.authz-cluster-bridge';
@@ -53,6 +64,7 @@ export class AuthzClusterBridgePlugin implements Plugin {
     type = 'standard' as const;
 
     private detach?: () => void;
+    private detachResync?: () => void;
 
     async init(ctx: PluginContext): Promise<void> {
         ctx.hook('kernel:ready', async () => {
@@ -88,6 +100,13 @@ export class AuthzClusterBridgePlugin implements Plugin {
                             cluster.nodeId,
                         );
                         bus = 'bridged';
+                        this.detachResync = onClusterResync(cluster, (event) => {
+                            const epoch = engine.bumpWriteEpoch();
+                            ctx.logger.info(
+                                `AuthzClusterBridgePlugin: retired cached grants after a ${event.outageMs} ms ` +
+                                    `cluster outage (node=${event.nodeId}, epoch=${String(epoch)})`,
+                            );
+                        });
                     } catch (err) {
                         ctx.logger.error(
                             'AuthzClusterBridgePlugin: attach failed',
@@ -120,6 +139,8 @@ export class AuthzClusterBridgePlugin implements Plugin {
                 );
             }
             this.detach = undefined;
+            this.detachResync?.();
+            this.detachResync = undefined;
         });
     }
 
@@ -145,6 +166,12 @@ export class AuthzClusterBridgePlugin implements Plugin {
                   pubsub: IClusterService['pubsub'],
                   nodeId: string,
               ) => () => void;
+              /**
+               * Advance the engine's write epoch as a peer's hint does
+               * (reason `remote`, never echoed); `undefined` when the engine
+               * carries no epoch seam.
+               */
+              bumpWriteEpoch: () => number | undefined;
           }
         | undefined {
         let svc: unknown;
@@ -163,6 +190,13 @@ export class AuthzClusterBridgePlugin implements Plugin {
                     pubsub,
                     nodeId,
                 ),
+            bumpWriteEpoch: () => {
+                const epoch = (svc as { writeEpoch?: unknown }).writeEpoch as
+                    | { bump?: unknown }
+                    | undefined;
+                if (!epoch || typeof epoch.bump !== 'function') return undefined;
+                return (epoch.bump as (reason: string) => number).call(epoch, 'remote');
+            },
         };
     }
 }

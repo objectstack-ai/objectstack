@@ -473,8 +473,9 @@
  *   H by DIFF (C2) — an added or changed `permissions:`; a `secrets` or
  *      job-token line (`github.token` in any case, any `github[…]` index,
  *      `toJSON(github)`) added, changed or moved;
- *      `pull_request_target`; a `uses:` (or image) not already used at the
- *      base; a deleted job, a changed literal check-run name or a changed
+ *      `pull_request_target`; a `uses:` (or image) no workflow uses at the
+ *      base (`.github/actions/**` vouches for nothing: no register row
+ *      governs it); a deleted job, a changed literal check-run name or a changed
  *      `needs:`; a new `continue-on-error`; an `if:` the base does not hold for
  *      the same owner with the same text, unless its job is new on the head.
  *   S otherwise — a contract-review PASS on the current head, every check
@@ -495,7 +496,13 @@
  *
  * Known limit, S by the ruling: the TEXT of a `run:` or `shell:` edit is not
  * judged beyond a dropped gate token or an added risky pattern, so
- * `echo "pnpm check:x"`, `|| :` or `shell: bash {0}` read S. The contract
+ * `echo "pnpm check:x"`, `|| :` or `shell: bash {0}` read S. A gate token is
+ * one `WORKFLOW_INVOCATIONS` spelling: `check:*`, a `scripts/` path, vitest,
+ * eslint, tsc, playwright, lychee, `turbo run X`, `pnpm X`, `git diff
+ * --exit-code` / `--quiet` with its arguments, `npx X`, or `node` / `bash` /
+ * `sh` on a file path. A gate spelled any other way (`python3 -c`,
+ * `/bin/bash x.sh`, an inline `test` / `[`, a bin `pnpm exec` names) is not
+ * tracked per job, so moving it out of its job reads S. The contract
  * review of record is the control there.
  *
  * `readWorkflowDiff` is the one reader; the queue guard calls it per queued
@@ -1079,13 +1086,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ #17003: the list is DERIVED three-dot, or refused': 43,
   '⭐ #18055: the INCOMPLETE banner is BUILT, never thrown away': 11,
   '⭐ the SIZE predicate: over the human-merge line threshold, whatever the paths': 44,
-  '⭐ #18989: the guard is the CALLER\'s name, and the mirror is pinned to its owner': 18,
+  '⭐ #18989: the guard is the CALLER\'s name, and the mirror is pinned to its owner': 16,
   '⭐ #19036: the sweep lists an OVERSIZED landing beside the governed ones': 20,
   '⭐ the FORK predicate: head repo ≠ base repo is a proposal, never a delivery': 6,
   '⭐ the argv is CLOSED: a flag the mode does not read, or a second repository beside a bare --pr, is refused': 22,
   'the per-row repository scope (ruled B2, 2026-10-13)': 20,
   'the nested `ui/` workspace rows, on the register (#25712)': 16,
-  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 66,
+  '⭐ the workflows split: Tier H by path or by C2 trigger, else Tier S (ruling record 6722205630)': 75,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1633,13 +1640,20 @@ export const WORKFLOW_TIER_H_FILES = Object.freeze([
 const WORKFLOW_RISKY_LINE = /\|\|\s*true\b|\bset\s+\+e\b|\bexit\s+0\b|\bOS_(?:SKIP|DISABLE|ALLOW)_[A-Z0-9_]+/;
 /** `secrets`, or the job's token: `github.token` in any case, any `github[…]` index, or `toJSON(github)` whole. */
 const WORKFLOW_CREDENTIAL = /\bsecrets\b|\bgithub\s*(?:\.\s*token\b|\[)|\btojson\s*\(\s*github\s*\)/i;
-/** The gate invocations a run block carries, each as a token; one dropped from a file is Tier H (biased: a removed check). */
+/**
+ * The gate invocations a run block carries, each as a token; one dropped from a file is Tier H (biased: a removed check).
+ * `git diff --exit-code` / `--quiet` keeps its arguments (a narrowed pathspec is a narrowed gate); `npx` drops the
+ * package's `@version` (a bump is not a lost gate); `node` / `bash` / `sh` take the first file path after them.
+ */
 const WORKFLOW_INVOCATIONS = Object.freeze([
   [/check:[A-Za-z0-9:._-]+/g, (m) => m[0]],
   [/scripts\/[A-Za-z0-9._/-]+\.(?:mjs|cjs|js|mts|ts|sh|py)/g, (m) => m[0]],
   [/\b(vitest|eslint|tsc|playwright|lychee)\b/g, (m) => m[1]],
   [/\bturbo\s+run\s+([A-Za-z0-9:._-]+)/g, (m) => `turbo run ${m[1]}`],
   [/\bpnpm(?:\s+--?[A-Za-z][\w-]*(?:[= ](?!-)\S+)?)*\s+(?:run\s+)?([A-Za-z][\w:.-]*)/g, (m) => `pnpm ${m[1]}`],
+  [/\bgit\s+diff\b(?=[^;&|)\n]*\s--(?:exit-code|quiet)\b)[^;&|)\n]*/g, (m) => m[0].replace(/\s+/g, ' ').trim()],
+  [/\bnpx(?:\s+--?[A-Za-z][\w-]*(?:=\S+)?)*\s+["']?(@?[A-Za-z0-9][\w.-]*(?:\/[\w.-]+)?)/g, (m) => `npx ${m[1]}`],
+  [/(?<![\w./-])(node|bash|sh)\s[^;&|\n]*?["']?(?:\.\/)?((?:[\w.@-]+\/)*[\w@-][\w.@-]*\.(?:mjs|cjs|js|mts|ts|sh|py))\b/g, (m) => `${m[1]} ${m[2]}`],
 ]);
 
 const unquote = (value) => {
@@ -1930,8 +1944,9 @@ export function workflowFacts(text) {
 }
 
 /**
- * What a base tree already uses and names, across every workflow and local
- * action: the `uses:` / image identities a head may use without Tier H, and
+ * What a base tree already uses and names, across every workflow (the files
+ * `readWorkflowDiff` hands in, never `.github/actions/**`, which is no register
+ * row): the `uses:` / image identities a head may use without Tier H, and
  * the job names a NEW job may not take (two jobs, one check-run name). An
  * unparseable file still contributes its `uses:` lines, read by pattern.
  */
@@ -2071,7 +2086,9 @@ export function readWorkflowDiff({ paths, base, head, inventoryBase = base, git,
     const show = (rev, path) => git(['show', `${rev}:${path}`]);
     let inventory = cache?.get(inventoryBase) ?? null;
     if (inventory === null) {
-      const files = listAt(inventoryBase, '.github/workflows', '.github/actions').filter((p) => /\.ya?ml$/.test(p));
+      // Workflows only: `.github/actions/**` is no register row, so an action used there alone vouches for
+      // nothing. The listing argv is unchanged (the queue guard pins it read once per run); the filter drops them.
+      const files = listAt(inventoryBase, '.github/workflows', '.github/actions').filter((p) => p.startsWith(WORKFLOWS_PREFIX) && /\.ya?ml$/.test(p));
       inventory = workflowInventory(files.map((p) => ({ path: p, text: show(inventoryBase, p) })));
       cache?.set(inventoryBase, inventory);
     }
@@ -3653,8 +3670,8 @@ export const PROXY_REARM_GUARD = 'OS_GOVERNED_MERGES_PROXY_REARMED';
  *
  * ## The guard is a NAME, and it belongs to the CALLER (#18939, #18989)
  *
- * This plan is imported by `ci-failure.mjs` as well as called here, and each of
- * those two tools sets its OWN variable on the child it re-execs. While the
+ * This plan was also imported by a second PM tool (since deleted), and each of
+ * those two tools set its OWN variable on the child it re-execs. While the
  * guard was read from one hard-coded name — this file's — either tool's
  * variable, once inherited by the other, answered "already re-armed" for a run
  * that had never re-armed; the suppressed run then took the bypassed route and
@@ -5284,6 +5301,24 @@ async function selfTest() {
     }
     const addedNeeds = tierOf(edit('    needs: [build]', '    needs: [build, opt-in]'));
     assert('⛔ S1-a-needs-added-on-an-existing-job-is-H', isH(addedNeeds, /`needs:` changed: `shards` \[build\] → \[build, opt-in\]/), show(addedNeeds));
+    // The review nits N5: gate spellings WORKFLOW_INVOCATIONS did not see — each moved out of its job is H.
+    const GATE_LINE = '          node scripts/check-required-contexts.mjs\n';
+    for (const [spelling, token] of [
+      ['git diff --exit-code -- packages/spec/json-schema', 'git diff --exit-code -- packages/spec/json-schema'],
+      ['if ! git diff --quiet -- sdui.manifest.json; then exit 1; fi', 'git diff --quiet -- sdui.manifest.json'],
+      ['npx --yes publint@0.3.2 --strict', 'npx publint'],
+      ['npx -y "@arethetypeswrong/cli@0.17.0" --pack .', 'npx @arethetypeswrong/cli'],
+      ['node ui/e2e/check-gate.mjs --strict', 'node ui/e2e/check-gate.mjs'],
+      ['bash ./tools/verify.sh "$RUNNER_TEMP"', 'bash tools/verify.sh'],
+    ]) {
+      const base = edit(GATE_LINE, `${GATE_LINE}          ${spelling}\n`);
+      const moved = tierOf(`${base.replace(`          ${spelling}\n`, '')}  gate2:\n    if: false\n    runs-on: ubuntu-latest\n    steps:\n      - run: ${spelling}\n`, { base });
+      const re = new RegExp(`an existing job no longer holds \`${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\`: \`build\``);
+      assert(`⛔ N5-a-gate-spelled-${token}-moved-out-of-its-job-is-H`, isH(moved, re), show(moved));
+    }
+    const npxBase = edit(GATE_LINE, `${GATE_LINE}          npx --yes publint@0.3.2 --strict\n          node ./tools/gate.mjs\n`);
+    const npxBumped = tierOf(npxBase.replace('publint@0.3.2', 'publint@0.3.3').replace('node ./tools/gate.mjs', 'node tools/gate.mjs'), { base: npxBase });
+    assert('N5-near-miss-an-npx-version-bump-and-a-dropped-dot-slash-are-S', isS(npxBumped), show(npxBumped));
 
     // The near-misses: each is Tier S.
     const BUILD_RUN = '        run: pnpm turbo run build --filter=@objectstack/spec';
@@ -5313,7 +5348,8 @@ async function selfTest() {
     assert('closed-a-new-a-deleted-and-a-non-yaml-file-are-H', isH(tierOf(BASE_WF, { base: null }), /new workflow file/) && isH(tierOf(null), /deleted workflow file/) && isH(tierOf('x', { path: `${WORKFLOWS_PREFIX}notes.md` }), /not a `.yml`/));
     assert('closed-no-inventory-is-H', isH(tierOf(edit('timeout-minutes: 20', 'timeout-minutes: 30'), { inventory: null }), /no inventory/));
     const fakeGit = (tree) => (argv) => {
-      if (argv[0] === 'ls-tree') return Object.keys(tree[argv[3]] ?? (() => { throw new Error(`unknown revision ${argv[3]}`); })()).join('\n');
+      // ls-tree honours its pathspecs (argv after `--`), as git does: the inventory's directory list is under test.
+      if (argv[0] === 'ls-tree') return Object.keys(tree[argv[3]] ?? (() => { throw new Error(`unknown revision ${argv[3]}`); })()).filter((p) => argv.slice(5).some((d) => p.startsWith(d.endsWith('/') ? d : `${d}/`))).join('\n');
       const [rev, path] = argv[1].split(':');
       if (tree[rev]?.[path] === undefined) throw new Error(`fatal: path '${path}' does not exist in '${rev}'`);
       return tree[rev][path];
@@ -5322,6 +5358,15 @@ async function selfTest() {
     const readS = readWorkflowDiff({ paths: [WF, 'README.md'], base: 'b', head: 'h', git: fakeGit(TREES) });
     const readH = readWorkflowDiff({ paths: [WF], base: 'b', head: 'x', git: fakeGit(TREES) });
     assert('readWorkflowDiff-classifies-only-the-workflow-paths-it-read', readS.measured === true && readS.files.length === 1 && readS.files[0].tier === GOVERNED_TIER_S && readH.files[0].tier === GOVERNED_TIER_H, JSON.stringify(readS));
+    // The review nit N3: an action used only under `.github/actions/**` (no register row) vouches for nothing.
+    const ACTION = '.github/actions/setup/action.yml';
+    const ACTION_TEXT = "name: setup\nruns:\n  using: composite\n  steps:\n    - uses: someone/composite-only@v1\n";
+    const ADOPT = (u) => edit('      - uses: actions/checkout@v7\n', `      - uses: actions/checkout@v7\n      - uses: ${u}\n`);
+    const ADOPTING = { b: { [WF]: BASE_WF, [ACTION]: ACTION_TEXT }, n: { [WF]: ADOPT('someone/composite-only@v1'), [ACTION]: ACTION_TEXT }, c: { [WF]: ADOPT('actions/cache@v4'), [ACTION]: ACTION_TEXT } };
+    const adopted = readWorkflowDiff({ paths: [WF], base: 'b', head: 'n', git: fakeGit(ADOPTING) });
+    assert('⛔ N3-a-workflow-adopting-an-action-used-only-under-github-actions-on-the-base-is-H', adopted.measured === true && isH(adopted.files[0], /not used anywhere on the base tree: `someone\/composite-only`/), JSON.stringify(adopted.files));
+    const reused = readWorkflowDiff({ paths: [WF], base: 'b', head: 'c', git: fakeGit(ADOPTING) });
+    assert('N3-control-an-action-a-base-workflow-already-uses-is-S', reused.measured === true && isS(reused.files[0]), JSON.stringify(reused.files));
     const noBase = readWorkflowDiff({ paths: [WF], base: null, head: 'h', git: fakeGit(TREES) });
     const badRev = readWorkflowDiff({ paths: [WF], base: 'gone', head: 'h', git: fakeGit(TREES) });
     assert('closed-a-missing-base-or-a-git-failure-is-UNMEASURED', noBase.measured === false && /no base commit/.test(noBase.reason) && badRev.measured === false && /unknown revision gone/.test(badRev.reason), JSON.stringify([noBase.reason, badRev.reason]));
@@ -6252,15 +6297,14 @@ async function selfTest() {
     proxyRearmPlan({ env: { [PROXY_REARM_GUARD]: '1' } }).rearm === false && proxyRearmPlan({ env: { [PROXY_REARM_GUARD]: '1' } }).hint === false);
   assert('and-an-already-flagged-run-is-answered-by-the-FLAG-not-by-the-guard',
     Boolean(proxyRearmPlan({ env: { ...guardProxy, [PROXY_REARM_GUARD]: '1' }, execArgv: [PROXY_FLAG] }).guarded) === false);
-  // Structural: the DEFAULT is not the contract, because this plan is imported.
+  // Structural: the DEFAULT is not the contract, because `guard` is a parameter.
   // Both live call sites hand it this file's own name.
   const ownPlanSource = readFileSync(scriptPath, 'utf8');
   assert('structural-both-live-call-sites-hand-the-plan-THIS-files-guard',
     (ownPlanSource.match(/^\s+guard: PROXY_REARM_GUARD,$/gm) ?? []).length === 2,
     String((ownPlanSource.match(/^\s+guard: PROXY_REARM_GUARD,$/gm) ?? []).length));
-  // ⭐ The other half of the pair, read from ITS source rather than typed from
-  // memory: `ci-failure.mjs` imports this plan and sets its OWN variable on the
-  // child it re-execs, so a rename on either side reds here.
+  // ⭐ The owner's half, read from ITS source rather than typed from memory, so
+  // a rename on either side reds here.
   const guardSpellingIn = (rel, decl) => {
     try {
       const source = readFileSync(join(repoRoot, rel), 'utf8');
@@ -6269,14 +6313,9 @@ async function selfTest() {
       return { source: null, guard: null, error: String(error?.message ?? error).split('\n')[0] };
     }
   };
-  const consumer = guardSpellingIn('scripts/pm/ci-failure.mjs', 'const');
   const patrol = guardSpellingIn('scripts/pm/check-half-states.mjs', 'export const');
-  assert('both-sibling-files-are-readable-so-these-mirrors-can-be-pinned-at-all',
-    typeof consumer.source === 'string' && typeof patrol.source === 'string', `${consumer.error ?? 'ok'} / ${patrol.error ?? 'ok'}`);
-  assert('the-importer-names-its-OWN-guard-so-the-pair-no-longer-shares-one',
-    typeof consumer.guard === 'string' && consumer.guard !== PROXY_REARM_GUARD, String(consumer.guard));
-  assert('and-the-importers-inherited-guard-does-NOT-suppress-THIS-files-re-exec',
-    consumer.guard !== null && proxyRearmPlan({ env: { ...guardProxy, [consumer.guard]: '1' } }).rearm === true, String(consumer.guard));
+  assert('the-patrol-file-is-readable-so-the-mirror-can-be-pinned-at-all',
+    typeof patrol.source === 'string', `${patrol.error ?? 'ok'}`);
   // ⭐ The MIRROR: the patrol OWNS this decision. Its spelling and its `guard`
   // contract are read off disk — a constant asserting against itself proves
   // nothing — and its name must not silence this file either.
@@ -7992,7 +8031,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled line, 3,000 since the maintainer's 2026-10-09 word, declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and neither the importer's name nor the patrol's silences this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the importer's own guard, the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set. — and the #30718 rename-aware size: --branch and the sweep count a moved file by its \`-M\` numstat, as GitHub does (a 400-line move with one edit reads +1 / -1 over one file, a \`diff.renames=false\` config notwithstanding), while both PATH lists keep \`--no-renames\` and so still carry both paths.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled line, 3,000 since the maintainer's 2026-10-09 word, declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and the patrol's name does not silence this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set. — and the #30718 rename-aware size: --branch and the sweep count a moved file by its \`-M\` numstat, as GitHub does (a 400-line move with one edit reads +1 / -1 over one file, a \`diff.renames=false\` config notwithstanding), while both PATH lists keep \`--no-renames\` and so still carry both paths.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }
@@ -8005,7 +8044,7 @@ function runTestModeExitFor(paths, repo, size = null, approval = null) {
 
 // `invokedDirectly` for the same reason the main-invocation guard above
 // carries it: this module is imported for its exported predicates
-// (`proxyRearmPlan` — see scripts/pm/ci-failure.mjs), and an unguarded
+// (`GOVERNED_REPOS`, `governedPathsIn` and more), and an unguarded
 // trigger ran this file's whole self-test inside the importer's own
 // `--self-test`, printing a second summary and putting an unrelated file's
 // failures on the importer's exit code. The suite was 77 assertions at PR

@@ -29,6 +29,7 @@ import {
     type CredentialResolver,
 } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
+import { SchemaRegistry } from '@objectstack/objectql';
 import { computeAliyunAcs3Signature } from './request-signing/aliyun-acs3-hmac-sha256.js';
 import { computeAlipayV3Signature, readAlipayPrivateKey } from './request-signing/alipay-v3.js';
 
@@ -109,6 +110,11 @@ interface BootOptions {
     registered?: unknown[];
     /** Collects every `logger.error` record the boot writes (#28594: the soft path's record). */
     logged?: Array<{ msg: string; meta?: unknown }>;
+    /**
+     * A real `SchemaRegistry` to serve as the objectql registry instead of the
+     * double over `declared` (ADR-0150 E5: the package-scoped resolver reads it).
+     */
+    schemaRegistry?: SchemaRegistry;
 }
 
 /** `SchemaRegistry.getArtifactItem('connector', name, packageId)` over `registered` (#28594). */
@@ -136,7 +142,7 @@ async function boot(declared: unknown[], opts: BootOptions = {}): Promise<LiteKe
         dependencies: ['com.objectstack.service-automation'],
         async init(ctx: any) {
             ctx.registerService('objectql', {
-                registry: {
+                registry: opts.schemaRegistry ?? {
                     listItems: (type: string) => (type === 'connector' ? declared : []),
                     getPackage: (id: string) => opts.packages?.[id],
                     getArtifactItem: artifactReader(opts.registered),
@@ -415,6 +421,40 @@ describe('ADR-0097 — declarative connector materialization', () => {
         await expect(
             boot([providerConnector('dup'), providerConnector('dup')], { providerFactory: factory }),
         ).rejects.toThrow(/duplicate declarative connector instance name 'dup'/);
+    });
+});
+
+describe('ADR-0150 D3 — a declared connector name resolves by (package, name) (epic #31527 child E5)', () => {
+    const A = 'com.acme.billing_a';
+    const B = 'com.acme.billing_b';
+    /** A real registry: each id installed as a code package, each shipping `billing` in its own composite slot. */
+    function registryShipping(...packageIds: string[]): SchemaRegistry {
+        const registry = new SchemaRegistry();
+        registry.logLevel = 'silent';
+        for (const id of packageIds) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop() } as never, 'code');
+            registry.registerItem('connector', providerConnector('billing', { label: `billing from ${id}` }), 'name' as never, id);
+        }
+        return registry;
+    }
+
+    it('one package holder: the instance materializes, as before', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const kernel = await boot([], { providerFactory: factory, schemaRegistry: registryShipping(A) });
+        expect(automationOf(kernel).getRegisteredConnectors()).toContain('billing');
+        expect(calls.map((c) => c.label)).toEqual([`billing from ${A}`]);
+    });
+
+    it('two package holders: the boot refuses, naming both — no instance is picked by list order', async () => {
+        const { factory, calls } = makeFakeProvider();
+        const err = await boot([], { providerFactory: factory, schemaRegistry: registryShipping(A, B) }).then(
+            () => undefined,
+            (e: Error) => e,
+        );
+        expect(err?.message).toContain(`connector instance 'billing' is not materialized`);
+        expect(err?.message).toContain(`"${A}"`);
+        expect(err?.message).toContain(`"${B}"`);
+        expect(calls).toEqual([]);
     });
 });
 

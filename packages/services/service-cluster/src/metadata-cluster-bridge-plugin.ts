@@ -3,6 +3,25 @@
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { IClusterService } from '@objectstack/spec/contracts';
 import { isInProcessClusterDriver } from './split-brain-guard.js';
+import { onClusterResync, type ClusterResyncEvent } from './cluster-resync.js';
+
+/**
+ * One attached lane's resync seam: the state owner's own "flush or re-read
+ * what a lost hint would have told you" entry, called on `cluster.resync`.
+ */
+interface LaneResync {
+    readonly lane: string;
+    readonly run: () => unknown;
+}
+
+/**
+ * The owner's resync seam named `method`, bound to it, or `undefined` when the
+ * owner predates the seam (it then converges on its next reload, as before).
+ */
+function resyncSeamOf(owner: unknown, method: string): (() => unknown) | undefined {
+    const fn = (owner as Record<string, unknown> | undefined)?.[method];
+    return typeof fn === 'function' ? () => (fn as () => unknown).call(owner) : undefined;
+}
 
 /**
  * Bridges the cluster pub/sub bus to the metadata state owners so that
@@ -67,6 +86,24 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
  * `connector-credential.mutated` — payload shape defined by
  * `ClusterConnectorCredentialMutationPayload` in `@objectstack/service-automation`.
  *
+ * ## Resync after an outage
+ *
+ * Every lane above is at-most-once: a hint published while the shared store
+ * is unreachable is lost. So each lane that attached also registers its
+ * owner's resync seam, and on the driver's local `cluster.resync` event
+ * (`onClusterResync`, emitted once when the connection returns after an
+ * outage) this plugin calls each one, so a write whose hint was lost
+ * converges without a restart:
+ *
+ *  1. metadata service — `resyncClusterPubSub()`;
+ *  3. datasource admin service — `resyncDatasourceMutationPubSub()`;
+ *  4. automation service — `resyncConnectorCredentialPubSub()`.
+ *
+ * Lane 2 has no resync seam yet: its convergence is a per-item registry
+ * write-through, and a full re-convergence of the registry is its own change.
+ * The in-process driver never emits the event, so the single-node path is
+ * unchanged.
+ *
  * See `content/docs/kernel/cluster.mdx` §6.2.
  */
 export class MetadataClusterBridgePlugin implements Plugin {
@@ -78,6 +115,8 @@ export class MetadataClusterBridgePlugin implements Plugin {
     private detachMutation?: () => void;
     private detachDatasource?: () => void;
     private detachConnectorCredential?: () => void;
+    private detachResync?: () => void;
+    private readonly laneResyncs: LaneResync[] = [];
 
     async init(ctx: PluginContext): Promise<void> {
         ctx.hook('kernel:ready', async () => {
@@ -94,6 +133,9 @@ export class MetadataClusterBridgePlugin implements Plugin {
             this.attachProtocolLane(ctx, cluster);
             this.attachDatasourceLane(ctx, cluster);
             this.attachConnectorCredentialLane(ctx, cluster);
+            if (this.laneResyncs.length > 0) {
+                this.detachResync = onClusterResync(cluster, (event) => this.resyncLanes(ctx, event));
+            }
         });
 
         ctx.hook('kernel:shutdown', async () => {
@@ -133,7 +175,42 @@ export class MetadataClusterBridgePlugin implements Plugin {
                 );
             }
             this.detachConnectorCredential = undefined;
+            this.detachResync?.();
+            this.detachResync = undefined;
+            this.laneResyncs.length = 0;
         });
+    }
+
+    /**
+     * `cluster.resync`: call every attached lane's resync seam. Each lane is
+     * isolated — one owner failing to re-read never stops the others — and a
+     * failure is a warning, because that owner keeps serving what it held until
+     * its next reload, exactly as it did before the seam existed.
+     */
+    private async resyncLanes(ctx: PluginContext, event: ClusterResyncEvent): Promise<void> {
+        await Promise.all(
+            this.laneResyncs.map(async ({ lane, run }) => {
+                try {
+                    await run();
+                } catch (err) {
+                    ctx.logger.warn(
+                        `MetadataClusterBridgePlugin: ${lane} resync after a ${event.outageMs} ms cluster outage failed; ` +
+                            'it converges on its next reload or restart',
+                        err as Error,
+                    );
+                }
+            }),
+        );
+        ctx.logger.info(
+            `MetadataClusterBridgePlugin: resynced ${this.laneResyncs.map((l) => l.lane).join(', ')} after a ` +
+                `${event.outageMs} ms cluster outage (node=${event.nodeId})`,
+        );
+    }
+
+    /** Register `owner`'s resync seam `method` for `lane`, when the owner has one. */
+    private registerLaneResync(lane: string, owner: unknown, method: string): void {
+        const run = resyncSeamOf(owner, method);
+        if (run) this.laneResyncs.push({ lane, run });
     }
 
     /**
@@ -199,6 +276,7 @@ export class MetadataClusterBridgePlugin implements Plugin {
                 pubsub: IClusterService['pubsub'],
                 nodeId: string,
             ) => () => void).call(md, cluster.pubsub, cluster.nodeId);
+            this.registerLaneResync('metadata.changed', md, 'resyncClusterPubSub');
             ctx.logger.info(
                 `MetadataClusterBridgePlugin: bridged metadata.changed → cluster.pubsub (node=${cluster.nodeId})`,
             );
@@ -310,6 +388,7 @@ export class MetadataClusterBridgePlugin implements Plugin {
                 pubsub: IClusterService['pubsub'],
                 nodeId: string,
             ) => () => void).call(admin, cluster.pubsub, cluster.nodeId);
+            this.registerLaneResync('datasource.mutated', admin, 'resyncDatasourceMutationPubSub');
             ctx.logger.info(
                 `MetadataClusterBridgePlugin: bridged datasource.mutated → cluster.pubsub (node=${cluster.nodeId})`,
             );
@@ -367,6 +446,7 @@ export class MetadataClusterBridgePlugin implements Plugin {
                 pubsub: IClusterService['pubsub'],
                 nodeId: string,
             ) => () => void).call(automation, cluster.pubsub, cluster.nodeId);
+            this.registerLaneResync('connector-credential.mutated', automation, 'resyncConnectorCredentialPubSub');
             ctx.logger.info(
                 `MetadataClusterBridgePlugin: bridged connector-credential.mutated → cluster.pubsub (node=${cluster.nodeId})`,
             );

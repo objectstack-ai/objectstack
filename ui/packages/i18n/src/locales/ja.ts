@@ -435,6 +435,11 @@ const ja = {
     currencyHome: {
       convertedAt: '{{date}} のレート {{rate}} で換算',
       homeCurrency: '基準通貨（レート 1）',
+      preview: '≈ {{amount}}（レート {{rate}}、{{date}}）',
+      previewSame: '≈ {{amount}}（基軸通貨）',
+      awaitingRate: '{{date}} 以前の {{currency}} のレートがありません。レートを追加するまで保存できません',
+      awaitingDate: '伝票日付を入力すると基軸通貨の金額が表示されます',
+      rateUnreadable: '保存時に基軸通貨へ換算されます',
     },
     boolean: {
       offBadge: "{{label}} — オフ",

@@ -54,7 +54,7 @@ export const RevenuePulseDashboard: Dashboard = {
     // ── KPI row ──────────────────────────────────────────────────────────
     // Default bindings: dateRange → issued_on, region → region (invoice side).
     { id: 'kpi_invoices', type: 'metric', title: 'Invoices', dataset: invoiceDs, values: ['invoice_count'], colorVariant: 'blue', layout: { x: 0, y: 0, w: 3, h: 2 } },
-    { id: 'kpi_invoice_subtotal', type: 'metric', title: 'Invoiced Subtotal', dataset: invoiceDs, values: ['subtotal_sum'], colorVariant: 'success', layout: { x: 3, y: 0, w: 3, h: 2 } },
+    { id: 'kpi_invoice_total_home', type: 'metric', title: 'Invoiced (Home Currency)', dataset: invoiceDs, values: ['total_home_sum'], colorVariant: 'success', layout: { x: 3, y: 0, w: 3, h: 2 } },
     // Account side: both filters re-mapped to this object's own fields.
     { id: 'kpi_new_accounts', type: 'metric', title: 'Accounts Signed', dataset: accountDs, values: ['account_count'], colorVariant: 'teal', filterBindings: { dateRange: 'signed_on', region: 'sales_region' }, layout: { x: 6, y: 0, w: 3, h: 2 } },
     // Fixed reference: opted out of BOTH dashboard filters.
