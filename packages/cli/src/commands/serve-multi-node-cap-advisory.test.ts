@@ -21,6 +21,20 @@
 import { describe, it, expect } from 'vitest';
 import { formatMultiNodeCapAdvisory, type MultiNodeGateVerdict } from './serve.js';
 
+// Pay the first load of what `serve.ts` reaches through dynamic `import()`s at
+// MODULE LOAD, outside any clocked case (`pnpm check:test-source-alias`).
+import '@objectstack/metadata-protocol';
+import '@objectstack/metadata';
+import '@objectstack/objectql';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/rest';
+import '@objectstack/service-settings';
+import '@objectstack/service-datasource';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+
 /**
  * The four verdicts the producer can hand this consumer, spelled the way
  * `checkMultiNodeAllowed` builds them (`multi-node-gate.ts`). The pin test
