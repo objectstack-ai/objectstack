@@ -23,6 +23,15 @@
  * the first one left. The third run is the control: uncontended, it prints
  * no wait line and finds the schema in sync.
  *
+ * ## Server boots take the same lock (#31715)
+ *
+ * The second describe stages three `os serve` boots with
+ * `OS_MIGRATE_AND_EXIT=1` the same way: the engine's boot schema sync
+ * (`ObjectQLPlugin.start()`) takes this lock. Measured before it, with three
+ * such boots held together at their first database round trip: one table
+ * created twice, a `pg_type` collision, `Schema sync FAILED` in the losing
+ * boot's output, and every boot still exiting 0.
+ *
  * ## The driver axis
  *
  * Postgres only, and only when `OS_TEST_POSTGRES_URL` is set, in a database
@@ -37,6 +46,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -261,6 +271,159 @@ if (!PG_URL) {
       expect(control.code).toBe(0);
       expect(control.stderr.match(WAIT_LINE)).toBeNull();
       expect((JSON.parse(control.stdout) as ApplyPayload).message).toBe('in_sync');
+    });
+  });
+}
+
+/** A port nothing listens on right now, for one `os serve` child. */
+function freePort(): Promise<number> {
+  return new Promise((resolvePort, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolvePort(port));
+    });
+  });
+}
+
+/**
+ * [#31715] One `os serve` boot with `OS_MIGRATE_AND_EXIT=1` against this file's
+ * database: the kernel bootstrap — its schema sync included — then an exit. A
+ * home of its own, so the boot persists nothing into the runner's.
+ */
+async function migrateAndExit(cwd: string, home: string): Promise<Run> {
+  const port = await freePort();
+  return new Promise((resolvePromise) => {
+    execFile(
+      process.execPath,
+      [CLI, 'serve', '--port', String(port), '--no-ui'],
+      {
+        cwd,
+        maxBuffer: 64 * 1024 * 1024,
+        env: {
+          ...childEnv(),
+          NODE_ENV: 'production',
+          OS_DATABASE_URL: liveUrl(),
+          OS_HOME: home,
+          OS_MIGRATE_AND_EXIT: '1',
+          OS_AUTH_SECRET: 'a1b2'.repeat(16),
+        },
+      },
+      (err, stdout, stderr) => {
+        resolvePromise({
+          code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,
+          stdout: String(stdout),
+          stderr: String(stderr),
+        });
+      },
+    );
+  });
+}
+
+/**
+ * Every `CREATE TABLE` that succeeds on this file's database, recorded by an
+ * event trigger in a schema of its own (an event trigger needs a superuser,
+ * as this cell's `CREATE DATABASE` needs `CREATEDB`). A statement that fails —
+ * the collision this cell is about — rolls its row back with it; that half is
+ * read from the boots' own output, `Schema sync FAILED`.
+ */
+const DDL_AUDIT = [
+  'create schema os_ddl_audit',
+  'create table os_ddl_audit.created (identity text not null)',
+  'create function os_ddl_audit.record() returns event_trigger language plpgsql as $$ '
+    + 'declare r record; begin '
+    + "for r in select * from pg_event_trigger_ddl_commands() where command_tag = 'CREATE TABLE' and schema_name = 'public' loop "
+    + 'insert into os_ddl_audit.created values (r.object_identity); end loop; end $$',
+  "create event trigger os_ddl_audit on ddl_command_end when tag in ('CREATE TABLE') execute function os_ddl_audit.record()",
+];
+
+const SYNC_FAILED = /Schema sync FAILED/;
+const BOOT_WAIT_LINE = /^.*Another schema migration is running on the default datasource's database.*$/gm;
+
+if (PG_URL) {
+  describe('server boots (OS_MIGRATE_AND_EXIT=1) serialize on the same lock (#31715, live postgres)', () => {
+    const BOOTS = 3;
+    let dir: string;
+    let runs: Run[] = [];
+    let control: Run;
+    let queuedBehindHolder = 0;
+    let created: string[] = [];
+    let createdByControl = -1;
+
+    beforeAll(async () => {
+      await adminExecute(`DROP DATABASE IF EXISTS "${LIVE_DATABASE}" WITH (FORCE)`);
+      await adminExecute(`CREATE DATABASE "${LIVE_DATABASE}"`);
+      dir = mkdtempSync(join(tmpdir(), 'os-boot-migration-lock-'));
+      writeFileSync(join(dir, 'objectstack.config.ts'), CONFIG);
+
+      const holder = new SqlDriver({ client: 'pg', connection: liveUrl() });
+      const knex = holder.getKnex();
+      for (const statement of DDL_AUDIT) await knex.raw(statement);
+      const session = await knex.client.acquireRawConnection();
+      try {
+        // The holder first, as the apply cell above stages it: every boot then
+        // waits by construction, and each one after the first reads the
+        // database the one before it left.
+        await knex.raw('select pg_advisory_lock(?::bigint)', [SCHEMA_MIGRATION_PG_LOCK_KEY]).connection(session);
+        const pending = Array.from({ length: BOOTS }, (_, i) => migrateAndExit(dir, join(dir, `home-${i}`)));
+        const deadline = Date.now() + CELL_TIMEOUT_MS / 2;
+        while (Date.now() < deadline) {
+          const r = await knex.raw(
+            "select count(*)::int as n from pg_locks l join pg_database d on d.oid = l.database "
+              + "where l.locktype = 'advisory' and not l.granted and d.datname = ?",
+            [LIVE_DATABASE],
+          ).connection(session) as { rows: Array<{ n: number }> };
+          queuedBehindHolder = r.rows[0].n;
+          if (queuedBehindHolder >= BOOTS) break;
+          await new Promise((r2) => setTimeout(r2, 250));
+        }
+        await knex.raw('select pg_advisory_unlock(?::bigint)', [SCHEMA_MIGRATION_PG_LOCK_KEY]).connection(session);
+        runs = await Promise.all(pending);
+      } finally {
+        await knex.client.destroyRawConnection(session);
+      }
+      const audit = async (): Promise<string[]> => {
+        const r = await knex.raw('select identity from os_ddl_audit.created order by identity') as { rows: Array<{ identity: string }> };
+        return r.rows.map((row) => row.identity);
+      };
+      try {
+        created = await audit();
+        control = await migrateAndExit(dir, join(dir, 'home-control'));
+        createdByControl = (await audit()).length - created.length;
+      } finally {
+        await holder.disconnect();
+      }
+    }, CELL_TIMEOUT_MS);
+
+    afterAll(async () => {
+      if (dir) rmSync(dir, { recursive: true, force: true });
+      await adminExecute(`DROP DATABASE IF EXISTS "${LIVE_DATABASE}" WITH (FORCE)`);
+    }, CELL_TIMEOUT_MS);
+
+    it('all three boots queued behind the held lock — the contention is staged, not a race that happened to miss', () => {
+      expect(queuedBehindHolder).toBe(BOOTS);
+    });
+
+    it('each boot exits 0 and says ONCE that it waited; none logs a failed schema sync', () => {
+      for (const run of runs) {
+        expect(run.code).toBe(0);
+        expect(`${run.stdout}${run.stderr}`.match(BOOT_WAIT_LINE)).toHaveLength(1);
+        expect(`${run.stdout}${run.stderr}`).not.toMatch(SYNC_FAILED);
+      }
+    });
+
+    it('⭐ each table is created ONCE across the three boots', () => {
+      expect(created.length).toBeGreaterThan(0);
+      expect(created).toContain('public.ml_ticket');
+      expect(new Set(created).size).toBe(created.length);
+    });
+
+    it('control — an uncontended boot prints no wait line, creates nothing, and exits 0', () => {
+      expect(control.code).toBe(0);
+      expect(createdByControl).toBe(0);
+      expect(`${control.stdout}${control.stderr}`.match(BOOT_WAIT_LINE)).toBeNull();
+      expect(`${control.stdout}${control.stderr}`).not.toMatch(SYNC_FAILED);
     });
   });
 }

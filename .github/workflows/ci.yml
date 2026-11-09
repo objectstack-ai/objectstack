@@ -1041,8 +1041,24 @@ jobs:
     # simply never created. The literal after `||` is the full roster, read
     # when the plan job published nothing (it died or timed out), and the gate
     # reads this same expression, so the two cannot count different rosters.
+    #
+    # ⭐ FAIL-FAST IN THE MERGE QUEUE ONLY (#31517, ruling record 6730013883).
+    # On a `merge_group` run the first shard to go red cancels its siblings,
+    # so `Test Core` reads red when that shard ends instead of when the
+    # slowest shard ends, and the queue ejects the entry and rebuilds the
+    # entries behind it that much sooner. On every other event the
+    # expression is false and every shard runs to its end: the pull_request
+    # run is where an author reads every red shard in one round (#23177
+    # ruling B, item A1, comment 6139629628), and push and schedule runs stay
+    # complete. The queue is the exception because its job is a fast
+    # mergeable-or-not answer, and the PR run of the same diff already
+    # showed every red. It is the matrix's own `fail-fast`, ⛔ never a
+    # run-level cancel: a real red dominates the matrix result (`failure`,
+    # never `cancelled`, measured on run 30271824408, a fail-fast matrix),
+    # and `Test Core` reads `failure` as a veto, whereas a matrix cancelled
+    # with zero attestations passes its aggregate (#3668).
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         shard: ${{ fromJSON(needs.test-plan.outputs.shards || '[1, 2, 3, 4, 5, 6, 7, 8]') }}
 
@@ -1580,6 +1596,11 @@ jobs:
           # non-zero exit, and the step exits with it, so the shard is red
           # exactly when it was before — and now names every red package of the
           # shard in one run instead of the first one turbo reached.
+          # A1 holds inside a shard on every event. Across shards the merge
+          # queue is the exception (#31517, ruling record 6730013883): there
+          # the matrix is fail-fast, so the first red shard cancels the
+          # others, and the queue run names that shard's reds only. The
+          # pull_request run of the same diff names every shard's.
           #
           # Measured before this was written: a three-package probe (turbo
           # 2.11.5, `a#test` exits 1, `c` depends on `a`) ran `b` and `c` to
@@ -2716,8 +2737,13 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # Fail-fast on `merge_group` only, as on Test Core (#31517, ruling record
+    # 6730013883; the reasons are on the `test` job's strategy). Push and
+    # schedule, the other events this matrix runs on, run all three shards to
+    # their end. A red shard dominates the matrix result over the siblings it
+    # cancels, and `Dogfood Regression Gate` reads `failure` as a veto.
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         shard: [1, 2, 3]
 
@@ -3083,7 +3109,11 @@ jobs:
     # 30271824408, a fail-fast matrix with one real failure + one cancelled
     # sibling): a real shard failure DOMINATES the aggregate — it reads
     # "failure", never "cancelled" — so passing `cancelled` masks no
-    # regression. That dominance is what does NOT hold for `abandoned`, which
+    # regression. That run is the merge queue's own shape since #31517: the
+    # dogfood matrix is fail-fast on `merge_group`, and the sibling a red
+    # shard cancels records "The strategy configuration was canceled
+    # because …" on its check run, which the cause read classifies as no
+    # supersession: a partially attested matrix it cut short reads red. That dominance is what does NOT hold for `abandoned`, which
     # is why `abandoned` gets counting rather than a place in a word list.
     name: Dogfood Regression Gate
     needs: [dogfood, dogfood-verify, filter, queue-verdict]
@@ -4147,8 +4177,15 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # Fail-fast on `merge_group` only, as on Test Core (#31517, ruling record
+    # 6730013883; the reasons are on the `test` job's strategy). Every other
+    # event runs all sixteen shards to their end. The `Test UI` aggregate
+    # passes only `success` or a skip `filter` explains, so the matrix of a
+    # red shard and the siblings it cancelled reads red there. A fail-fast queue run is red, so a push never
+    # borrows it: `queue-verdict` takes only a `success` queue run, and
+    # `ui_full_green` counts only shards that concluded `success`.
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
@@ -4373,7 +4410,9 @@ jobs:
     # That is #4928's skipped-only-when-filter-succeeded guard, and it makes a
     # queue build or PR that touches no ui path read green here the way Lint
     # UI and Build & E2E UI read `skipped` there. Everything else is red:
-    # `failure`; `cancelled`, which is also what a shard killed by its own
+    # `failure`, which is also what the matrix reads when a red shard on a
+    # `merge_group` run cancelled its siblings by fail-fast (#31517);
+    # `cancelled`, which is also what a shard killed by its own
     # `timeout-minutes` reads (on a superseded push this paints the OLD sha
     # red, which no required check reads); a `skipped` that `filter` does not
     # explain; and any lifecycle value such as the `abandoned` test-gate met
